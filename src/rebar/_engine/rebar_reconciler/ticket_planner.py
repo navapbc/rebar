@@ -44,6 +44,148 @@ _ticket_plan_mod = lazy_load("rebar_reconciler.ticket_plan", "ticket_plan.py")
 build_observation = _observation_mod.build_observation
 TicketPlan = _ticket_plan_mod.TicketPlan
 PlanDisposition = _ticket_plan_mod.PlanDisposition
+IntentKind = _ticket_plan_mod.IntentKind
+DeferReason = _ticket_plan_mod.DeferReason
+LifecycleIntent = _ticket_plan_mod.LifecycleIntent
+
+# Selection kinds that scope the pass to an explicit id set (kind ``all``/``None`` do not).
+_SCOPE_KINDS: frozenset[str] = frozenset({"ids", "subset", "local_ids"})
+# Canonical skip causes that turn a plan into a ``skipped`` no-op (granular cause kept in
+# diagnostics). ANY truthy ``payload['skip']`` triggers the skip classification — an
+# unrecognized/mistyped value is recorded verbatim rather than silently falling through to
+# ``mutate`` — so this set is documentation of the expected vocabulary, not a gate.
+_SKIP_CAUSES: frozenset[str] = frozenset(
+    {"tombstone", "index_lag", "moved_key", "impossible_link", "partial_snapshot"}
+)
+# Default action → lifecycle intent kind mapping (probe/conflict map to no kind).
+_ACTION_TO_KIND: Mapping[str, str] = {
+    "create": "bind",
+    "update": "confirm",
+    "delete": "retire",
+    "repair_property": "baseline",
+    "clean_label": "comment_identity",
+}
+_INTENT_KIND_VALUES: frozenset[str] = frozenset(k.value for k in IntentKind)
+
+
+def _collect_dependencies(muts: Sequence[Any]) -> tuple[str, ...]:
+    """Structural prerequisite identities declared by a target's mutation payloads via
+    ``requires_create`` / ``requires_parent`` (each a single id or a list), sorted+deduped."""
+    deps: set[str] = set()
+    for m in muts:
+        for key in ("requires_create", "requires_parent"):
+            value = m.payload.get(key)
+            if isinstance(value, str):
+                deps.add(value)
+            elif isinstance(value, (list, tuple)):
+                deps.update(v for v in value if isinstance(v, str))
+    return tuple(sorted(deps))
+
+
+def _skip_causes(muts: Sequence[Any]) -> tuple[str, ...]:
+    """The granular skip cause of every mutation carrying a truthy ``payload['skip']``, in
+    ``muts`` order (empty when none). Any non-empty value classifies the plan as ``skipped``
+    — an unrecognized/mistyped cause is recorded verbatim rather than silently ignored."""
+    return tuple(str(m.payload["skip"]) for m in muts if m.payload.get("skip"))
+
+
+def _scope_excluded(target: str, selection: Mapping[str, Any]) -> bool:
+    """True when ``selection`` scopes to an explicit id set and ``target`` is not in it."""
+    if selection.get("kind") in _SCOPE_KINDS:
+        return target not in set(selection.get("ids") or [])
+    return False
+
+
+def _mode_capped(muts: Sequence[Any], mode: str) -> bool:
+    """True when a non-``live`` mode must abort a target carrying any outbound mutation."""
+    return mode != "live" and any(m.direction.value == "outbound" for m in muts)
+
+
+def _classify_early(
+    target: str, muts: Sequence[Any], selection: Mapping[str, Any], mode: str
+) -> tuple[Any, Any, tuple[str, ...]] | None:
+    """Rules 1–3 (scope / skip / mode-cap) in precedence order. Returns
+    ``(disposition, defer_reason, extra_diagnostics)`` or ``None`` when the target is
+    eligible for the later limit/dependency stages."""
+    if _scope_excluded(target, selection):
+        return (PlanDisposition.defer, DeferReason.scope_deferred, ())
+    causes = _skip_causes(muts)
+    if causes:
+        return (PlanDisposition.noop, DeferReason.skipped, tuple(f"skip:{c}" for c in causes))
+    if _mode_capped(muts, mode):
+        return (PlanDisposition.defer, DeferReason.safety_aborted, ())
+    return None
+
+
+def _limit_excluded(eligible: Sequence[str], max_changes: Any) -> set[str]:
+    """Rule 4: eligible targets (ascending) at position ``>= max_changes`` are limit-capped;
+    an absent/``None`` limit excludes nothing."""
+    if max_changes is None:
+        return set()
+    return {t for i, t in enumerate(sorted(eligible)) if i >= max_changes}
+
+
+def _existing_identities(
+    binding_view: Mapping[str, Any],
+    local_snapshot: Mapping[str, Any],
+    remote_snapshot: Mapping[str, Any],
+) -> set[str]:
+    """Identities that already exist (so can satisfy a prerequisite without a fresh create)."""
+    return set(binding_view) | set(local_snapshot) | set(remote_snapshot)
+
+
+def _effective_create_providers(
+    create_targets: set[str],
+    base_excluded: set[str],
+    deps_by_target: Mapping[str, Sequence[str]],
+    existing: set[str],
+) -> set[str]:
+    """The create targets that will ACTUALLY be created this pass — i.e. can satisfy a
+    dependent's ``requires_create`` / ``requires_parent``. A create target excluded before
+    the dependency stage (scope / skip / mode-cap / limit) cannot provide its identity, and
+    a create target that is itself dependency-blocked cannot either; the latter cascades, so
+    providers are shrunk to a fixpoint (monotonically, hence terminating)."""
+    providers = {t for t in create_targets if t not in base_excluded}
+    changed = True
+    while changed:
+        changed = False
+        available = existing | providers
+        for candidate in tuple(providers):
+            deps = deps_by_target.get(candidate, ())
+            if deps and any(r not in available for r in deps):
+                providers.discard(candidate)
+                changed = True
+    return providers
+
+
+def _dependency_blocked(deps: Sequence[str], available: set[str]) -> bool:
+    """True when the target declares prerequisites and at least one is not ``available``
+    (neither already-existing nor an effective create provider this pass)."""
+    return bool(deps) and any(r not in available for r in deps)
+
+
+def _intent_kind(m: Any) -> Any:
+    """The lifecycle intent kind for a mutation: an explicit ``payload['lifecycle']``
+    override (one of the 6 IntentKind values) wins, else the action mapping (probe /
+    conflict → ``None``)."""
+    override = m.payload.get("lifecycle")
+    if isinstance(override, str) and override in _INTENT_KIND_VALUES:
+        return IntentKind(override)
+    mapped = _ACTION_TO_KIND.get(m.action.value)
+    return IntentKind(mapped) if mapped is not None else None
+
+
+def _derive_intents(muts: Sequence[Any], target: str, version: Any) -> tuple[Any, ...]:
+    """One LifecycleIntent per mutation that maps to a kind, in ``muts`` order."""
+    intents = []
+    for m in muts:
+        kind = _intent_kind(m)
+        if kind is None:
+            continue
+        intents.append(
+            LifecycleIntent(kind=kind, target=target, version=version, payload=m.payload)
+        )
+    return tuple(intents)
 
 
 def _mutation_sort_key(m: Any) -> tuple[str, str, str]:
@@ -111,18 +253,83 @@ def plan_pass(
     for mutation in mutations:
         grouped[mutation.target].append(mutation)
 
+    version = observation.version
+    sorted_targets = sorted(grouped)
+    muts_by_target = {
+        target: tuple(sorted(grouped[target], key=_mutation_sort_key)) for target in sorted_targets
+    }
+    deps_by_target = {
+        target: _collect_dependencies(muts_by_target[target]) for target in sorted_targets
+    }
+    create_targets = {
+        target
+        for target, muts in muts_by_target.items()
+        if any(m.action.value == "create" for m in muts)
+    }
+
+    # Stage 1 (rules 1–3): scope / skip / mode-cap exclusions; the rest are "eligible".
+    early = {
+        target: _classify_early(target, muts_by_target[target], selection, mode)
+        for target in sorted_targets
+    }
+    eligible = [target for target in sorted_targets if early[target] is None]
+    # Stage 2 (rule 4): global change limit over eligible targets in ascending order.
+    limited = _limit_excluded(eligible, limits.get("max_changes"))
+    # Stage 3 pre-work: a prerequisite is satisfiable only by an already-existing identity or
+    # by a create target that will ACTUALLY be created — one excluded by scope/skip/mode-cap
+    # (``early``) or the limit cannot provide its identity, so it must not satisfy dependents.
+    base_excluded = {t for t in sorted_targets if early[t] is not None} | limited
+    existing = _existing_identities(binding_view, local_snapshot, remote_snapshot)
+    providers = _effective_create_providers(create_targets, base_excluded, deps_by_target, existing)
+    available = existing | providers
+
     plans: list[Any] = []
-    for target in sorted(grouped):
-        target_mutations = tuple(sorted(grouped[target], key=_mutation_sort_key))
+    for target in sorted_targets:
+        muts = muts_by_target[target]
+        deps = deps_by_target[target]
+        disposition, defer_reason, extra, final_muts, intents = _decide_plan(
+            target,
+            muts,
+            deps,
+            early[target],
+            limited,
+            version,
+            available,
+        )
         plans.append(
             TicketPlan(
                 identity=target,
-                mutations=target_mutations,
-                diagnostics=tuple(diagnostics_by_target.get(target, ())),
-                disposition=PlanDisposition.mutate,
-                observation_version=observation.version,
+                mutations=final_muts,
+                diagnostics=tuple(diagnostics_by_target.get(target, ())) + extra,
+                disposition=disposition,
+                observation_version=version,
                 payload=plan_payload_by_target.get(target, {}),
+                intents=intents,
+                dependencies=deps,
+                defer_reason=defer_reason,
             )
         )
 
     return observation, tuple(plans)
+
+
+def _decide_plan(
+    target: str,
+    muts: tuple[Any, ...],
+    deps: tuple[str, ...],
+    early: tuple[Any, Any, tuple[str, ...]] | None,
+    limited: set[str],
+    version: Any,
+    available: set[str],
+) -> tuple[Any, Any, tuple[str, ...], tuple[Any, ...], tuple[Any, ...]]:
+    """Resolve one target's final ``(disposition, defer_reason, extra_diagnostics,
+    mutations, intents)`` following the rule precedence. Only rule 5 empties mutations;
+    only rule 6 (mutate) derives intents."""
+    if early is not None:
+        disposition, defer_reason, extra = early
+        return disposition, defer_reason, extra, muts, ()
+    if target in limited:
+        return PlanDisposition.defer, DeferReason.safety_aborted, (), muts, ()
+    if _dependency_blocked(deps, available):
+        return PlanDisposition.defer, DeferReason.dependency_deferred, (), (), ()
+    return PlanDisposition.mutate, None, (), muts, _derive_intents(muts, target, version)
