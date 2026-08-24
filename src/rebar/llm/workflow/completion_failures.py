@@ -175,6 +175,35 @@ def _bounded_diagnostic(
     return diagnostic
 
 
+def _reconstructed_outcome(failure_diagnostic: dict[str, Any] | None) -> Any:
+    """Rebuild the ``LLMOutcome`` a retryable disposition rode in on, or ``None``.
+
+    ``failure_diagnostic`` carries a disposition only when a caught error's outcome was
+    stamped onto it via ``failure.resolution_fields`` (the ``resolution_class`` / ``retryable``
+    / ``diagnostic`` shape — e.g. the mid-run ``LLMUnavailableError`` path in
+    ``CompletionAgentStep.run``). When no disposition is present (or the diagnostic is
+    ``None``), return ``None`` so the raised error stays outcome-less and the close gate stays
+    fail-closed (exit 1) — never invent a disposition here."""
+
+    if not failure_diagnostic:
+        return None
+    resolution_class = failure_diagnostic.get("resolution_class")
+    if not isinstance(resolution_class, str) or "retryable" not in failure_diagnostic:
+        return None
+    from rebar.llm.failure import LLMOutcome, ResolutionClass
+
+    try:
+        rc = ResolutionClass(resolution_class)
+    except ValueError:
+        return None
+    diag = failure_diagnostic.get("diagnostic")
+    return LLMOutcome(
+        rc,
+        diag if isinstance(diag, dict) else {},
+        bool(failure_diagnostic["retryable"]),
+    )
+
+
 def raise_completion_workflow_failure(
     ticket_id: str,
     result: _ex.RunResult,
@@ -187,6 +216,10 @@ def raise_completion_workflow_failure(
     diagnostic = dict(failure_diagnostic or {})
     diagnostic.setdefault("workflow_steps_recorded", workflow_steps_recorded)
     diagnostic.setdefault("workflow_status", result.status)
+    # A retryable disposition (stamped onto failure_diagnostic upstream) must ride onto the
+    # RAISED error as ``.outcome`` so ``failure.outcome_of`` recovers it and the close gate maps
+    # the outage → exit 11. Absent a disposition this is None — the error stays outcome-less.
+    outcome = _reconstructed_outcome(failure_diagnostic)
     if failure_diagnostic:
         from rebar.llm import usage_log
         from rebar.llm.gate_error_sidecar import emit_gate_error
@@ -224,11 +257,17 @@ def raise_completion_workflow_failure(
             if repetition.get("distinct_ratio_window") is None:
                 repetition["distinct_ratio_window"] = "n/a(<window)"
             message = f"{message}\n{usage_log.format_repetition(repetition)}"
-        raise CompletionRecoveryError(
+        recovery_err = CompletionRecoveryError(
             message,
             diagnostic=diagnostic,
         )
-    raise LLMError(
+        if outcome is not None:
+            recovery_err.outcome = outcome  # type: ignore[attr-defined]
+        raise recovery_err
+    verdictless_err = LLMError(
         "completion verification workflow did not produce a verdict: "
         f"{result.error or 'LLM tier failed'}"
     )
+    if outcome is not None:
+        verdictless_err.outcome = outcome  # type: ignore[attr-defined]
+    raise verdictless_err

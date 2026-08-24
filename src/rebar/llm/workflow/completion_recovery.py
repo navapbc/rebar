@@ -24,6 +24,7 @@ import json
 import logging
 from typing import Any
 
+from rebar.llm import failure as _failure
 from rebar.llm.completion_tool_policy import make_completion_record_tool
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import (
@@ -31,6 +32,7 @@ from rebar.llm.errors import (
     LLMBudgetExhaustedError,
     LLMError,
     LLMRunnerError,
+    LLMUnavailableError,
     RunawayToolLoopError,
     UnretryableOutputError,
 )
@@ -111,6 +113,20 @@ class CompletionAgentStep(_ex.AgentStepRunner):
             if not _is_token_exhaustion(primary_exc):
                 raise
             return self._recover(ctx, primary_exc, bank)
+        except LLMUnavailableError as primary_exc:
+            # A retryable provider outage mid-run cannot be recovered here (there is no
+            # exhaustion bank to finalize), but its disposition must ride forward so the close
+            # gate maps a retryable outage → exit 11 instead of a fail-closed exit 1. Mirror
+            # the plan-review degrade precedent: read the disposition off the caught error and
+            # stamp it onto failure_diagnostic, then re-raise the SAME error unchanged so the
+            # workflow still fails closed. Only stamp when a real disposition is present.
+            outcome = _failure.outcome_of(primary_exc)
+            if outcome is not None:
+                self.failure_diagnostic = {
+                    **(self.failure_diagnostic or {}),
+                    **_failure.resolution_fields(outcome),
+                }
+            raise
         # Primary SUCCESS: the structured output is authoritative; the bank is discarded unread.
         bank.discard()
         # Stamp the provenance keys the reconcile step wires unconditionally (referencing a
