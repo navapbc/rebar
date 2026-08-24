@@ -259,6 +259,43 @@ def run_differs(ctx: Any) -> None:
 
     ctx.mutations = mutations
 
+    # Shadow layer (RP-03 S2 T1): attach a deterministic, PURE ticket plan derived
+    # solely from the finalized ``ctx.mutations`` and the pass inputs — without
+    # disturbing ``ctx.mutations`` (still authoritative). ``ctx.observation`` /
+    # ``ctx.ticket_plans`` are not declared on _PassContext; the plain dataclass
+    # accepts the attribute assignment. Every ctx field is read via getattr with a
+    # default so a partial SimpleNamespace test ctx is tolerated, and no I/O is
+    # performed (no binding_store method calls).
+    ticket_planner = _load("rebar_reconciler.ticket_planner", "ticket_planner.py")
+    prev_snapshot = getattr(ctx, "prev_snapshot", {}) or {}
+    # ``ctx.target_mode`` is a ``Mode(str, Enum)`` member in production; ``str(Mode.LIVE)``
+    # renders ``'Mode.LIVE'`` on 3.11+, so extract the canonical ``.value`` (mirroring
+    # reconcile.py's ``target_mode.value if target_mode else "live"``). Duck-typed so a
+    # plain-string test ctx (no ``.value``) still passes through unchanged.
+    _target_mode = getattr(ctx, "target_mode", None)
+    mode = str(getattr(_target_mode, "value", _target_mode) or "")
+    # ``ctx.mutations`` may mix typed ``Mutation`` instances with legacy plain-dict
+    # mutations (documented dual shape — see ``_run_differs_report_schema_drift``). The
+    # typed planner groups by ``Mutation.target``, so restrict it to the typed items
+    # (duck-typed on the ``.target`` attribute, mirroring the ``getattr(_m, "action")``
+    # discriminator used above; ``isinstance`` is unreliable across by-path module
+    # loads). Legacy dicts carry no ``.target`` attribute and are not part of the typed
+    # planning surface.
+    typed_mutations = [m for m in ctx.mutations if getattr(m, "target", None) is not None]
+    ctx.observation, ctx.ticket_plans = ticket_planner.plan_pass(
+        pass_id=getattr(ctx, "pass_id", ""),
+        local_snapshot=prev_snapshot,
+        remote_snapshot=getattr(ctx, "curr_snapshot", {}) or {},
+        binding_view={},
+        mode=mode,
+        selection={
+            "kind": getattr(ctx, "selection_kind", None),
+            "ids": sorted(getattr(ctx, "selection_ids", None) or []),
+        },
+        limits={"max_changes": getattr(ctx, "max_changes", None)},
+        mutations=typed_mutations,
+    )
+
 
 def _run_differs_invariants(ctx: Any) -> tuple[bool, set[str], list]:
     """Invariant phase: at-most-one-local-id filing + dual-identity round-trip.
