@@ -188,7 +188,17 @@ if ! bash "${REPO_ROOT}/infra/scripts/materialize-opcert-guard.sh"; then
   echo "compose-up: WARN — op-cert guard materialization failed; /opcert/ stays fail-closed (403) until fixed" >&2
 fi
 
+# rebar MCP upstream (ADR deft-evolutive-mosasaur / story esok): install the committed MCP
+# upstream seed into the HOST-nginx include dir + reload nginx, BEFORE `docker compose up`
+# (the materialize precedent ordering). The named `upstream rebar_mcp` glob-includes this
+# file and needs >= 1 backend or `nginx -t` fails; the installer copies the seed only-if-absent
+# so a blue-green flip is never clobbered. NON-FATAL: a failure here must not block the whole
+# stack — /mcp just serves 502 until fixed.
+if ! bash "${REPO_ROOT}/infra/scripts/materialize-mcp-upstream.sh"; then
+  echo "compose-up: WARN — MCP upstream materialization failed; /mcp returns 502 until fixed" >&2
+fi
+
 # --- 4. Bring the stack up (build the review-bot image, pull Gerrit) -------
 docker compose -f "${COMPOSE_FILE}" up -d --build
 
-echo "compose-up: stack is up (gerrit + review-bot + opcert). nginx/certbot are host services." >&2
+echo "compose-up: stack is up (gerrit + review-bot + opcert + mcp). nginx/certbot are host services." >&2

@@ -305,6 +305,77 @@ services:
     logging:
       driver: journald
 
+  # --- rebar MCP HTTP transport service (ADR deft-evolutive-mosasaur / story esok) ---
+  # The FastMCP Streamable-HTTP server (infra/compose/Dockerfile.mcp / rebar-mcp). Reached
+  # ONLY through the HOST nginx /mcp location (TLS-terminated edge; ADR 0104) -> this
+  # container's loopback-published port. TLS terminates at nginx, so the app speaks plain
+  # HTTP behind it (REBAR_MCP_HTTP_TLS_AT_EDGE=true acknowledges that). Fail-closed posture:
+  # a non-loopback bind (0.0.0.0) REQUIRES both the allowlists AND the TLS ack, or
+  # build_server raises McpStartupError (ADR-0050 gates).
+  #
+  # MCP_PATHS (autodeploy change-detector, consumed by panicky-sylphish-foxterrier — NOT by
+  # compose): the paths whose change should trigger an mcp blue-green redeploy.
+  #   MCP_PATHS="src/rebar infra/compose/Dockerfile.mcp infra/compose/docker-compose.yml uv.lock pyproject.toml"
+  mcp:
+    build:
+      # Build context is the REPO ROOT so the locked install sees the whole package.
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.mcp
+    restart: always
+    # Cover the app's bounded SIGTERM grace (_mcp_health.DEFAULT_SHUTDOWN_GRACE_SECONDS =
+    # 1200s: a retiring container waits for an in-flight certified op to finish) plus margin
+    # so Docker never escalates SIGTERM->SIGKILL mid-op. MUST stay >= that constant;
+    # tests/interfaces/facades/test_mcp_http_transport.py asserts the relationship.
+    stop_grace_period: 1260s
+    # ANTHROPIC_API_KEY / the LLM provider creds (the certified tools) come from .env.
+    env_file:
+      - .env
+    environment:
+      # HTTP transport posture (ADR 0104). Bind non-loopback inside the container so the
+      # loopback-published host port reaches it; nginx is the only client.
+      REBAR_MCP_TRANSPORT: "http"
+      REBAR_MCP_HTTP_HOST: "0.0.0.0"
+      REBAR_MCP_HTTP_PORT: "8091"
+      # TLS terminates at the nginx edge; acknowledge it so the non-loopback gate passes.
+      REBAR_MCP_HTTP_TLS_AT_EDGE: "true"
+      # The DNS-rebinding guard checks the forwarded Host/Origin: name the public edge.
+      REBAR_MCP_HTTP_ALLOWED_HOSTS: "${REBAR_MCP_HTTP_ALLOWED_HOSTS:-rebar.solutions.navateam.com}"
+      REBAR_MCP_HTTP_ALLOWED_ORIGINS: "${REBAR_MCP_HTTP_ALLOWED_ORIGINS:-https://rebar.solutions.navateam.com}"
+      # Auth ON at /mcp (static bearer). /health stays unauthenticated (custom route).
+      REBAR_MCP_AUTH_ENABLED: "1"
+      REBAR_MCP_AUTH_STRATEGIES: "static"
+      REBAR_MCP_AUTH_RESOURCE_SERVER_URL: "${REBAR_MCP_AUTH_RESOURCE_SERVER_URL:-https://rebar.solutions.navateam.com/mcp}"
+      # The static bearer digests file, materialized OUTSIDE the app (avians' fetch-secrets
+      # slice) and bind-mounted read-only below.
+      REBAR_MCP_AUTH_STATIC_TOKENS_FILE: "/run/secrets/mcp-static-tokens.json"
+      # Let the certified LLM tools run (the box drives review_plan/verify_completion/… ).
+      REBAR_MCP_ALLOW_LLM: "1"
+      # Op-cert signing identity (mirrors opcert): the env id + Ed25519 key the certified
+      # tools sign under, materialized outside the app and bind-mounted below.
+      REBAR_OPCERT_ENV_ID: "${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}"
+      REBAR_IDENTITY_SIGNING_KEY: "/run/secrets/opcert-ed25519-key"
+    ports:
+      # Publish on host loopback for the HOST nginx /mcp proxy. Host port 8091 (Gerrit owns
+      # 8080, review-bot REVIEW_BOT_PORT, opcert 8090); container port is fixed 8091.
+      - "127.0.0.1:8091:8091"
+    volumes:
+      # Secrets materialized by fetch-secrets.sh next to this compose file (avians' slice;
+      # the opcert-ed25519-key precedent). Read-only; paths MUST match the env above.
+      # fetch-secrets.sh ALWAYS creates these files (empty when the slot is blank) so a
+      # missing bind-mount source can't make docker create a DIRECTORY here (bug beb1).
+      - ./mcp-static-tokens.json:/run/secrets/mcp-static-tokens.json:ro
+      - ./opcert-ed25519-key:/run/secrets/opcert-ed25519-key:ro
+    # Liveness: the container HEALTHCHECK in Dockerfile.mcp hits loopback /health; declare
+    # it here too so `docker compose ps` reflects health and a redeploy waits on it.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: journald
+
 # External named volumes for the stateful Gerrit site subdirs. Declared external:true
 # so `docker compose down -v` does NOT destroy them. compose-up.sh creates each one
 # (idempotently) as a local `bind` volume onto /var/gerrit/site/<subdir> on the EBS

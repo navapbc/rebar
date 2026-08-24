@@ -1,0 +1,208 @@
+"""Health, in-flight instrumentation, and bounded graceful shutdown for the rebar
+MCP HTTP transport (ADR deft-evolutive-mosasaur / docs/adr/0104-mcp-on-box.md).
+
+``mcp_server.py`` sits at its 800-LOC module cap, so the box-facing concerns the ADR
+adds — a ``/health`` endpoint exposing an ``in_flight`` gauge, instrumentation of the
+certified LLM tools that feeds it, and a bounded SIGTERM grace window so a retiring
+container lets an in-flight op finish — live here and are wired in from
+``build_server``/``main`` via :func:`wire_health` and :func:`run_mcp`.
+
+Design notes:
+
+* The gauge counts ONLY the certified, long-running LLM tools
+  (:data:`CERTIFIED_TOOLS`) — ``review_plan``/``verify_completion``/``review_code``/
+  ``scan_spec`` — never trivial reads, so the autodeploy retire check
+  (panicky-sylphish-foxterrier) waits on billable work rather than idle traffic.
+* ``/health`` is a FastMCP ``custom_route`` — a Starlette route on the app OUTSIDE the
+  SDK ``RequireAuthMiddleware`` and the DNS-rebinding transport-security guard — so an
+  unauthenticated container HEALTHCHECK/probe still gets 200 even when auth is enabled.
+* The grace window is a MODULE constant (:data:`DEFAULT_SHUTDOWN_GRACE_SECONDS`), the
+  ``review_bot/config.py`` budget precedent, deliberately NOT a rebar config key so it
+  does not ripple into ``MCP_ENV_VARS`` / ``server.json`` / the env-var docs generators.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import threading
+import time
+from collections.abc import Callable, Iterator
+from typing import Any
+
+CERTIFIED_TOOLS = frozenset({"review_plan", "verify_completion", "review_code", "scan_spec"})
+"""The certified, long-running LLM tools (``register_llm_tools`` in ``_mcp_llm.py``).
+Only these move the in-flight gauge; ``sign_review`` is excluded (it runs no LLM)."""
+
+DEFAULT_SHUTDOWN_GRACE_SECONDS = 1200
+"""Upper bound (seconds) a retiring process waits for the gauge to drain before it
+exits. compose ``stop_grace_period`` must be >= this so Docker never SIGKILLs mid-op."""
+
+_GAUGE_ATTR = "_rebar_in_flight_gauge"
+
+
+class InFlightGauge:
+    """Thread-safe counter of in-flight certified tool calls.
+
+    Sync MCP tools run on worker threads (``anyio.to_thread``), so the counter is
+    guarded by a lock. :meth:`track` only counts a call whose tool name is in
+    :data:`CERTIFIED_TOOLS`; any other name is a no-op context so instrumentation can
+    be applied uniformly.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._value = 0
+
+    @property
+    def value(self) -> int:
+        with self._lock:
+            return self._value
+
+    def _increment(self) -> None:
+        with self._lock:
+            self._value += 1
+
+    def _decrement(self) -> None:
+        with self._lock:
+            self._value -= 1
+
+    @contextlib.contextmanager
+    def track(self, tool_name: str) -> Iterator[None]:
+        if tool_name not in CERTIFIED_TOOLS:
+            yield
+            return
+        self._increment()
+        try:
+            yield
+        finally:
+            self._decrement()
+
+
+def _wrap_tool_fn(fn: Callable[..., Any], gauge: InFlightGauge, name: str):
+    """Wrap a tool's ``fn`` so the gauge tracks the call. Preserves sync/async by
+    matching the original; the FastMCP tool manager calls ``fn`` via
+    ``call_fn_with_arg_validation`` and honours the replaced attribute."""
+
+    def _sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        with gauge.track(name):
+            return fn(*args, **kwargs)
+
+    return _sync_wrapper
+
+
+def instrument_certified_tools(mcp: Any, gauge: InFlightGauge) -> None:
+    """Replace each certified tool's ``fn`` with a gauge-tracking wrapper.
+
+    All four certified tools are sync ``def`` functions; if one is missing (a build
+    that did not register the LLM tools) it is skipped. An already-async tool is left
+    untouched rather than mis-wrapped."""
+
+    manager = getattr(mcp, "_tool_manager", None)
+    if manager is None:
+        return
+    for name in CERTIFIED_TOOLS:
+        tool = manager.get_tool(name)
+        if tool is None or getattr(tool, "is_async", False):
+            continue
+        tool.fn = _wrap_tool_fn(tool.fn, gauge, name)
+
+
+def register_health_route(mcp: Any, gauge: InFlightGauge) -> None:
+    """Register ``GET /health`` returning JSON ``{"in_flight": <int>}``.
+
+    Uses FastMCP's ``custom_route`` so the route lives on the Starlette app OUTSIDE the
+    auth and transport-security middleware — an unauthenticated probe gets 200."""
+
+    from starlette.responses import JSONResponse
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def _health(_request: Any) -> Any:  # pragma: no cover - thin adapter
+        return JSONResponse({"in_flight": gauge.value})
+
+
+def wire_health(mcp: Any, gauge: InFlightGauge | None = None) -> InFlightGauge:
+    """Instrument the certified tools, register ``/health``, and stash the gauge on the
+    server so :func:`run_mcp` can drain it on SIGTERM. Returns the gauge."""
+
+    gauge = gauge or InFlightGauge()
+    instrument_certified_tools(mcp, gauge)
+    register_health_route(mcp, gauge)
+    setattr(mcp, _GAUGE_ATTR, gauge)
+    return gauge
+
+
+def drain_then_exit(
+    gauge: InFlightGauge,
+    *,
+    grace_seconds: float,
+    exit_fn: Callable[[], None],
+    poll_interval: float = 0.5,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> None:
+    """Wait (bounded by ``grace_seconds``) for the gauge to reach 0, then call
+    ``exit_fn``. The clock/sleep are injectable so the bound is unit-testable without
+    real time. Returns immediately when the gauge is already idle."""
+
+    deadline = monotonic() + grace_seconds
+    while gauge.value > 0 and monotonic() < deadline:
+        sleep(poll_interval)
+    exit_fn()
+
+
+def run_http_with_grace(
+    mcp: Any,
+    gauge: InFlightGauge,
+    *,
+    grace_seconds: float = DEFAULT_SHUTDOWN_GRACE_SECONDS,
+    poll_interval: float = 0.5,
+) -> None:
+    """Serve the Streamable-HTTP app with an owned, bounded SIGTERM grace.
+
+    uvicorn only installs its own signal handlers on the main thread, so we run the
+    server on a background thread (it therefore installs none) and own the SIGTERM
+    handler on the main thread: on SIGTERM we drain the gauge (bounded by
+    ``grace_seconds``) BEFORE asking uvicorn to stop, so an in-flight certified op
+    finishes first. ``timeout_graceful_shutdown`` bounds uvicorn's own drain as a
+    backstop. The main thread joins with a timeout so it stays responsive to the
+    signal (a bare ``join()`` would defer handler delivery)."""
+
+    import signal
+
+    import uvicorn
+
+    app = mcp.streamable_http_app()
+    config = uvicorn.Config(
+        app,
+        host=mcp.settings.host,
+        port=mcp.settings.port,
+        log_level=mcp.settings.log_level.lower(),
+        timeout_graceful_shutdown=int(grace_seconds),
+    )
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, name="rebar-mcp-http")
+    thread.start()
+
+    def _on_sigterm(_signum: int, _frame: Any) -> None:
+        drain_then_exit(
+            gauge,
+            grace_seconds=grace_seconds,
+            poll_interval=poll_interval,
+            exit_fn=lambda: setattr(server, "should_exit", True),
+        )
+
+    signal.signal(signal.SIGTERM, _on_sigterm)
+
+    while thread.is_alive():
+        thread.join(timeout=0.2)
+
+
+def run_mcp(server: Any, mcp_cfg: Any) -> None:
+    """Run ``server`` for the configured transport. HTTP uses the bounded-grace runner
+    above; stdio delegates to FastMCP's own run loop (no HTTP surface to drain)."""
+
+    if mcp_cfg.transport == "http":
+        gauge = getattr(server, _GAUGE_ATTR, None) or InFlightGauge()
+        run_http_with_grace(server, gauge)
+    else:
+        server.run(transport="stdio")
