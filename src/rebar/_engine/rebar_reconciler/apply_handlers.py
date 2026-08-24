@@ -50,6 +50,10 @@ from rebar_reconciler.pass_io import (
     _load_conflict_resolver,
     _persist_field_provenance,
 )
+from rebar_reconciler.summary_route import (
+    apply_summary_outcome,
+    is_exact_summary_update,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,13 @@ class BatchApplyContext:
     repo_root: Path
     pass_id: str
     binding_store: Any = None
+    # RP-03 S1 T4: an optional, constructor-injected, provider-neutral executor
+    # ``(client, jira_key, new_summary) -> OperationOutcome``. DEFAULTS TO None — the
+    # production wiring passes nothing, so every outbound update stays on the legacy
+    # ``update_one`` path (no config key, no environment key gates it: selection is pure
+    # constructor state). When injected, an update whose fields are EXACTLY
+    # ``{"summary": <str>}`` routes through it instead of the generic path.
+    summary_executor: Any = None
     deferred_creates: list[dict] = field(default_factory=list)
     events_list: list[dict] = field(default_factory=list)
     rest_calls: int = 0
@@ -318,10 +329,39 @@ def _make_link_confirm(mutation: dict, ctx: BatchApplyContext):
     return _confirm
 
 
+def _route_summary_via_executor(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
+    """RP-03 S1 T4: dispatch an exact-``{"summary"}`` update through the injected
+    ``ctx.summary_executor`` and map its ``OperationOutcome`` onto the manifest.
+
+    The executor is called DIRECTLY — NOT through ``_call_with_retry`` — since it
+    owns its own retry budget (ADR 0103). A CONFIRMED outcome preserves the legacy
+    success result and advances the ADR-0026 baseline with the summary that landed;
+    a terminal disposition records a single redacted per-mutation error, advances no
+    baseline, persists no provenance, and RETURNS normally so the batch continues.
+    """
+    outcome = dict(mutation)
+    jira_key = mutation["key"]
+    new_summary = mutation["fields"]["summary"]
+    op_outcome = ctx.summary_executor(ctx.client, jira_key, new_summary)
+    landed = apply_summary_outcome(outcome, op_outcome, jira_key)
+    if landed:
+        local_id = mutation.get("local_id")
+        if local_id:
+            ctx.synced_fields.setdefault(str(local_id), {}).update({"summary": new_summary})
+    return HandlerResult(outcome)
+
+
 def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     """Dispatch an outbound UPDATE via ``update_one``, applying the per-mutation
     soft-fail, sub-op telemetry, silent-no-op canary, and provenance contracts.
     """
+    # RP-03 S1 T4: when a summary_executor is injected AND this update's fields are
+    # EXACTLY ``{"summary": <str>}``, route through the executor instead of the legacy
+    # generic path. The executor owns its own retry budget (ADR 0103), so this route
+    # NEVER touches ``_call_with_retry``. Every other update (default None executor,
+    # mixed fields, non-summary) falls through to the byte-for-byte-unchanged legacy path.
+    if ctx.summary_executor is not None and is_exact_summary_update(mutation.get("fields")):
+        return _route_summary_via_executor(mutation, ctx)
     outcome = dict(mutation)
     # Bug 17b5-dda4-6662-4616: AssigneeNotFoundError (raised by
     # client.update_issue's Phase A pre-validation when the local assignee

@@ -89,3 +89,20 @@ migration and no persisted schema change. Rollback is reverting the two modules 
 ADR (and its index row); no data conversion is required, because outcomes are computed,
 not stored under a new schema. This ADR is **provisional** and may be superseded once the
 observe step is validated against live Data Center non-idempotency behaviour.
+
+## S1 lifecycle boundary — S3 owns production cutover
+
+RP-03 S1 lands the outbound-summary seam as a *dormant* capability: `handle_update`
+routes an exact-`{"summary"}` update through a constructor-injected `summary_executor`,
+maps its `OperationOutcome` back to the manifest, and tags a terminal disposition with a
+single redacted per-mutation error and any `retry_not_before`. In S1 that executor
+DEFAULTS TO `None`, so production keeps taking the legacy generic path unchanged — S1
+carries no config or environment gate and performs no production cutover.
+
+**S3 is the SOLE owner of the production cutover** and of everything the terminal tags
+feed: S3 (not S1, not S2) flips the seam live, owns the **fuse** and durable-deferral
+consumer that reads the `retry_not_before`/disposition tags this stage only records, and
+owns the **retirement** of the compatibility bridge — S3 is where the legacy
+`dispatch_one.update_one` summary path is finally **retired** once the executor route is
+proven. Until that S3 retirement the two paths coexist; S1 deliberately persists no
+durable deferral and retires nothing.
