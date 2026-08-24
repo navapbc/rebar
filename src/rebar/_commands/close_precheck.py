@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Mapping
 
 from rebar import config
@@ -162,8 +163,40 @@ def _ensure_duplicate_close_is_linked(
     )
 
 
+def _resolved_completion_scope(
+    ticket_id: str,
+    tracker: str,
+    *,
+    metrics: dict[str, int] | None = None,
+) -> tuple[str, set[str]]:
+    """Resolve the ticket and its transitive descendants to unique canonical ids."""
+    from rebar._engine_support.descendants import list_descendants
+    from rebar._engine_support.resolver import resolve_ticket_id
+
+    if metrics is not None:
+        started_ns = time.monotonic_ns()
+    resolved_id = resolve_ticket_id(ticket_id, tracker) or ticket_id
+    accepted_ids = {resolved_id}
+    descendants = list_descendants(ticket_id, tracker)
+    for bucket in ("epics", "stories", "tasks", "bugs"):
+        for desc_id in descendants.get(bucket, []):
+            desc_resolved = resolve_ticket_id(desc_id, tracker)
+            if desc_resolved is not None:
+                accepted_ids.add(desc_resolved)
+    if metrics is not None:
+        metrics["descendant_ids"] = len(accepted_ids) - 1
+        metrics["descendant_scope_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
+    return resolved_id, accepted_ids
+
+
 def _check_work_landed(
-    ticket_id: str, resolved_id: str, accepted_ids: set[str], tracker: str, code_root: str
+    ticket_id: str,
+    resolved_id: str,
+    accepted_ids: set[str],
+    tracker: str,
+    code_root: str,
+    *,
+    metrics: dict[str, int] | None = None,
 ) -> None:
     """The two DET landing checks, kept out of ``_completion_precheck`` so that function
     stays within its complexity ceiling: (1) a ticket recording ``file_impact`` must have a
@@ -171,9 +204,14 @@ def _check_work_landed(
     declared impact."""
     from rebar._engine_support import field_reads
 
+    if metrics is not None:
+        started_ns = time.monotonic_ns()
     if not _union_file_impact(accepted_ids, tracker):
+        if metrics is not None:
+            metrics["landing_check_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
         return
-    referencing = _referencing_commits(accepted_ids, tracker, code_root)
+    metrics_kw = {"metrics": metrics} if metrics is not None else {}
+    referencing = _referencing_commits(accepted_ids, tracker, code_root, **metrics_kw)
     if field_reads.file_impact(ticket_id, tracker) and not referencing:
         raise CommandError(
             f"Error: cannot close {ticket_id}: it records file_impact (a code change) but no "
@@ -183,7 +221,9 @@ def _check_work_landed(
             "Completion verification cannot confirm the work landed without a referencing commit.",
             returncode=1,
         )
-    _check_file_impact_vs_diff(accepted_ids, referencing, tracker, code_root)
+    _check_file_impact_vs_diff(accepted_ids, referencing, tracker, code_root, **metrics_kw)
+    if metrics is not None:
+        metrics["landing_check_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
 
 
 def _attached_commit_shas(accepted_ids: set[str], tracker: str) -> list[str]:
@@ -224,7 +264,12 @@ def _union_file_impact(accepted_ids: set[str], tracker: str) -> list[str]:
 
 
 def _check_file_impact_vs_diff(
-    accepted_ids: set[str], referencing: list[str], tracker: str, code_root: str
+    accepted_ids: set[str],
+    referencing: list[str],
+    tracker: str,
+    code_root: str,
+    *,
+    metrics: dict[str, int] | None = None,
 ) -> None:
     """DET close check: every changed path of a linked commit must be declared or exempt.
 
@@ -237,8 +282,12 @@ def _check_file_impact_vs_diff(
     """
     from rebar._engine_support import commit_impact
 
+    if metrics is not None:
+        started_ns = time.monotonic_ns()
     impact = _union_file_impact(accepted_ids, tracker)
     if not impact:
+        if metrics is not None:
+            metrics["diff_validation_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
         return  # nothing declared anywhere in scope — out of scope for this check
 
     for sha in _attached_commit_shas(accepted_ids, tracker) + list(referencing):
@@ -267,9 +316,13 @@ def _check_file_impact_vs_diff(
                 'the close will succeed (or override with --force="<reason>").',
                 returncode=1,
             )
+    if metrics is not None:
+        metrics["diff_validation_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
 
 
-def _referencing_commits(accepted_ids: set[str], tracker: str, repo_root) -> list[str]:
+def _referencing_commits(
+    accepted_ids: set[str], tracker: str, repo_root, metrics: dict[str, int] | None = None
+) -> list[str]:
     """SHAs of commits referencing ANY of ``accepted_ids``, newest first.
 
     A thin delegate over the ONE implementation of the scan
@@ -281,7 +334,13 @@ def _referencing_commits(accepted_ids: set[str], tracker: str, repo_root) -> lis
     """
     from rebar._engine_support import commit_impact
 
-    return commit_impact.referencing_commits(accepted_ids, tracker, str(repo_root)) or []
+    commits = (
+        commit_impact.referencing_commits(accepted_ids, tracker, str(repo_root), metrics=metrics)
+        or []
+    )
+    if metrics is not None:
+        metrics["referencing_commits_found"] = len(commits)
+    return commits
 
 
 def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) -> bool:
@@ -477,6 +536,40 @@ def _gate_skip_expectation(ticket_id: str, code_root: str, force_close: str) -> 
     return None
 
 
+def _verify_with_duration_metrics(
+    ticket_id: str,
+    *,
+    ref: str | None,
+    code_root: str,
+    metrics: dict[str, int] | None = None,
+) -> dict:
+    """Run completion verification once and merge optional direct metrics."""
+    from rebar._commands import close_autoresume
+
+    if metrics is None:
+        return close_autoresume.verify_with_auto_resume(
+            ticket_id, ref=ref, repo_root=code_root, cfg_root=code_root
+        )
+    verifier_started_ns = time.monotonic_ns()
+    pre_verifier_started_ns = metrics.pop("_pre_verifier_started_ns", verifier_started_ns)
+    metrics["pre_verifier_total_ms"] = (verifier_started_ns - pre_verifier_started_ns) // 1_000_000
+    result = close_autoresume.verify_with_auto_resume(
+        ticket_id, ref=ref, repo_root=code_root, cfg_root=code_root
+    )
+    metrics["verifier_call_ms"] = (time.monotonic_ns() - verifier_started_ns) // 1_000_000
+    result_metrics = result.get("metrics")
+    if isinstance(result_metrics, dict):
+        result_metrics.update(metrics)
+    return result
+
+
+def _optional_metrics_kwargs(
+    metrics: dict[str, int] | None,
+) -> dict[str, dict[str, int]]:
+    """Omit the optional collector keyword entirely for legacy call compatibility."""
+    return {} if metrics is None else {"metrics": metrics}
+
+
 def _completion_precheck(
     ticket_id: str,
     ticket_type: str,
@@ -487,6 +580,7 @@ def _completion_precheck(
     force_close: str,
     close_class: str = "",
     ref: str | None = None,
+    metrics: dict[str, int] | None = None,
 ):
     """The completion-verification close gate's PRE-close half (runs outside the write lock).
 
@@ -588,21 +682,12 @@ def _completion_precheck(
     # a ticket that records file_impact claims a concrete code change, so there MUST be a commit
     # that references it (a `rebar-ticket: <id>` trailer). If none exists, the implementation has
     # not landed and completion cannot be confirmed — fail fast (no LLM call).
-    from rebar._engine_support.descendants import list_descendants
-    from rebar._engine_support.resolver import resolve_ticket_id
-
-    resolved_id = resolve_ticket_id(ticket_id, tracker) or ticket_id
     # Credit the ticket's ENTIRE descendant subtree: a parent (epic/story) whose code was
     # delivered by its children carries no commit referencing its OWN id, only the child ids.
     # Accept a referencing commit for the ticket or any of its descendants (transitive).
-    accepted_ids = {resolved_id}
-    descendants = list_descendants(ticket_id, tracker)
-    for bucket in ("epics", "stories", "tasks", "bugs"):
-        for desc_id in descendants.get(bucket, []):
-            desc_resolved = resolve_ticket_id(desc_id, tracker)
-            if desc_resolved is not None:
-                accepted_ids.add(desc_resolved)
-    _check_work_landed(ticket_id, resolved_id, accepted_ids, tracker, code_root)
+    metrics_kwargs = _optional_metrics_kwargs(metrics)
+    resolved_id, accepted_ids = _resolved_completion_scope(ticket_id, tracker, **metrics_kwargs)
+    _check_work_landed(ticket_id, resolved_id, accepted_ids, tracker, code_root, **metrics_kwargs)
 
     try:
         # The billable verifier run, wrapped in the bounded auto-resume loop (ticket b5f8):
@@ -613,10 +698,8 @@ def _completion_precheck(
         # rationale is documented on the helper, which imports `rebar.llm` LAZILY so the
         # optionality contract holds. Extracted along this call seam so this function stays
         # at its frozen complexity ceiling.
-        from rebar._commands import close_autoresume
-
-        result = close_autoresume.verify_with_auto_resume(
-            ticket_id, ref=ref, repo_root=code_root, cfg_root=code_root
+        result = _verify_with_duration_metrics(
+            ticket_id, ref=ref, code_root=code_root, **metrics_kwargs
         )
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
         from rebar.llm import failure as _failure

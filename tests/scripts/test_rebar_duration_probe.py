@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -185,32 +187,86 @@ def test_cohort_requires_positive_llm_calls_and_requested_provider() -> None:
 
 
 def test_close_phase_values_label_direct_metrics_and_residuals() -> None:
-    invocation = _invocation(llm_calls=1)
-    invocation.start = 0
-    invocation.end = 200
-    invocation.event = {
+    direct = _invocation(llm_calls=1)
+    direct.start = 0
+    direct.end = 200
+    direct.event = {
         "timestamp": 160,
         "total_ms": 100_000,
         "det_ms": 20_000,
         "llm_ms": 70_000,
         "status_at": 170,
         "signature_at": 180,
+        "pre_verifier_total_ms": 120_000,
+        "structural_scan_ms": 2_000,
+        "material_policy_ms": 3_000,
+        "descendant_scope_ms": 4_000,
+        "landing_check_ms": 50_000,
+        "verifier_call_ms": 110_000,
+        "git_history_read_ms": 7_000,
+        "alias_index_build_ms": 8_000,
+        "ticket_ref_resolution_ms": 9_000,
+        "diff_validation_ms": 10_000,
+        "commits_inspected": 111,
+        "distinct_references": 112,
+        "descendant_ids": 113,
+        "referencing_commits_found": 114,
     }
+    legacy = _invocation(llm_calls=1)
+    legacy.start = -200
+    legacy.end = 20
+    legacy.event = {"timestamp": -100, "total_ms": 0, "signature_at": 0}
 
-    assert probe.close_phase_values(invocation) == {
-        "pre_verifier_residual": pytest.approx(60),
-        "deterministic_verifier": pytest.approx(20),
-        "llm_verifier": pytest.approx(70),
-        "verifier_overhead": pytest.approx(10),
-        "verdict_to_status": pytest.approx(10),
-        "status_to_signature": pytest.approx(10),
-        "post_write_tail": pytest.approx(20),
+    assert {
+        "direct_phases": probe.close_phase_values(direct),
+        "direct_workload": probe.close_workload_values(direct),
+        "legacy_phases": probe.close_phase_values(legacy),
+    } == {
+        "direct_phases": {
+            "pre_verifier_total": pytest.approx(120),
+            "structural_scan": pytest.approx(2),
+            "material_policy": pytest.approx(3),
+            "descendant_scope": pytest.approx(4),
+            "landing_check": pytest.approx(50),
+            "verifier_call": pytest.approx(110),
+            "git_history_read": pytest.approx(7),
+            "alias_index_build": pytest.approx(8),
+            "ticket_ref_resolution": pytest.approx(9),
+            "diff_validation": pytest.approx(10),
+            "legacy_uninstrumented": None,
+            "deterministic_verifier": pytest.approx(20),
+            "llm_verifier": pytest.approx(70),
+            "verifier_overhead": pytest.approx(10),
+            "verdict_to_status": pytest.approx(10),
+            "status_to_signature": pytest.approx(10),
+            "post_write_tail": pytest.approx(20),
+        },
+        "direct_workload": {
+            "commits_inspected": 111,
+            "distinct_references": 112,
+            "descendant_ids": 113,
+            "referencing_commits_found": 114,
+        },
+        "legacy_phases": {
+            "pre_verifier_total": None,
+            "structural_scan": None,
+            "material_policy": None,
+            "descendant_scope": None,
+            "landing_check": None,
+            "verifier_call": None,
+            "git_history_read": None,
+            "alias_index_build": None,
+            "ticket_ref_resolution": None,
+            "diff_validation": None,
+            "legacy_uninstrumented": pytest.approx(100),
+            "deterministic_verifier": None,
+            "llm_verifier": None,
+            "verifier_overhead": None,
+            "verdict_to_status": None,
+            "status_to_signature": None,
+            "post_write_tail": pytest.approx(20),
+        },
     }
-
-    invocation.start = -200
-    invocation.end = 20
-    invocation.event = {"timestamp": -100, "total_ms": 0, "signature_at": 0}
-    assert probe.close_phase_values(invocation)["post_write_tail"] == pytest.approx(20)
 
 
 def test_kaplan_meier_quantiles_account_for_tied_censoring() -> None:
@@ -356,6 +412,177 @@ def test_unbounded_tracker_load_keeps_late_completion_events(tmp_path: Path) -> 
     assert aliases["sample-ticket"] == ticket_id
     assert events[0]["status_at"] == pytest.approx(20_000)
     assert events[0]["signature_at"] == pytest.approx(21_000)
+
+
+def test_load_tracker_preserves_direct_timing_and_workload_metrics(tmp_path: Path) -> None:
+    ticket_id = "1111-2222-3333-4444"
+    ticket_dir = tmp_path / ticket_id
+    ticket_dir.mkdir()
+    direct_metrics = {
+        "pre_verifier_total_ms": 101,
+        "structural_scan_ms": 102,
+        "material_policy_ms": 103,
+        "descendant_scope_ms": 104,
+        "landing_check_ms": 105,
+        "verifier_call_ms": 106,
+        "git_history_read_ms": 107,
+        "alias_index_build_ms": 108,
+        "ticket_ref_resolution_ms": 109,
+        "diff_validation_ms": 110,
+        "commits_inspected": 111,
+        "distinct_references": 112,
+        "descendant_ids": 113,
+        "referencing_commits_found": 114,
+    }
+    (ticket_dir / "verdict-COMPLETION_VERDICT.json").write_text(
+        json.dumps(
+            {
+                "timestamp": 100_000_000_000,
+                "event_type": "COMPLETION_VERDICT",
+                "data": {
+                    "ticket_id": ticket_id,
+                    "metrics": direct_metrics,
+                },
+            }
+        )
+    )
+
+    _aliases, events, _audit = probe.support.load_tracker(
+        probe.ProbeConfig(log_roots=(), tracker=tmp_path)
+    )
+
+    assert {key: events[0].get(key) for key in direct_metrics} == direct_metrics
+
+
+def test_summary_reports_direct_timings_workload_and_legacy_residual(
+    tmp_path: Path,
+) -> None:
+    ticket_id = "1111-2222-3333-4444"
+    log_root = tmp_path / "logs"
+    log_root.mkdir()
+    tracker = tmp_path / "tracker"
+    ticket_dir = tracker / ticket_id
+    ticket_dir.mkdir(parents=True)
+    source = (
+        "const r = await tools.exec_command({cmd:`rtk rebar transition "
+        "sample-ticket in_progress closed`, workdir:`/tmp`}); text(JSON.stringify(r));"
+    )
+    _write_jsonl(
+        log_root / "rollout.jsonl",
+        [
+            {
+                "timestamp": _iso(100),
+                "payload": {
+                    "type": "custom_tool_call",
+                    "name": "exec",
+                    "call_id": "close",
+                    "input": source,
+                },
+            },
+            {
+                "timestamp": _iso(130),
+                "payload": {
+                    "type": "custom_tool_call_output",
+                    "call_id": "close",
+                    "output": json.dumps({"wall_time_seconds": 30, "exit_code": 0}),
+                },
+            },
+        ],
+    )
+    (ticket_dir / ".cache.json").write_text(
+        json.dumps({"state": {"ticket_id": ticket_id, "alias": "sample-ticket"}})
+    )
+    direct_timings = {
+        "pre_verifier_total": ("pre_verifier_total_ms", 12_000),
+        "structural_scan": ("structural_scan_ms", 1_000),
+        "material_policy": ("material_policy_ms", 500),
+        "descendant_scope": ("descendant_scope_ms", 250),
+        "landing_check": ("landing_check_ms", 4_000),
+        "verifier_call": ("verifier_call_ms", 6_000),
+        "git_history_read": ("git_history_read_ms", 2_000),
+        "alias_index_build": ("alias_index_build_ms", 500),
+        "ticket_ref_resolution": ("ticket_ref_resolution_ms", 750),
+        "diff_validation": ("diff_validation_ms", 250),
+    }
+    workload_counts = {
+        "commits_inspected": 9,
+        "distinct_references": 8,
+        "descendant_ids": 7,
+        "referencing_commits_found": 6,
+    }
+    legacy_metrics = {
+        "llm_calls": 1,
+        "total_ms": 5_000,
+        "det_ms": 1_000,
+        "llm_ms": 3_000,
+    }
+    sidecar_path = ticket_dir / "verdict-COMPLETION_VERDICT.json"
+
+    def write_sidecar(metrics: dict[str, int]) -> None:
+        sidecar_path.write_text(
+            json.dumps(
+                {
+                    "timestamp": 120_000_000_000,
+                    "event_type": "COMPLETION_VERDICT",
+                    "data": {
+                        "ticket_id": ticket_id,
+                        "verdict": "PASS",
+                        "metrics": metrics,
+                        "provider_provenance": {"ran_model": "bedrock:test-model"},
+                    },
+                }
+            )
+        )
+
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve().parents[2] / "scripts" / "rebar_duration_probe.py"),
+        "summary",
+        "--log-root",
+        str(log_root),
+        "--tracker",
+        str(tracker),
+    ]
+    write_sidecar(
+        legacy_metrics
+        | {field: value for field, value in direct_timings.values()}
+        | workload_counts
+    )
+    direct = subprocess.run(command, check=True, capture_output=True, text=True)
+    write_sidecar(legacy_metrics)
+    legacy = subprocess.run(command, check=True, capture_output=True, text=True)
+
+    expected_direct_lines = {
+        f"{phase}\tsource=direct-sidecar-metric({field})\tn=1\t"
+        f"p50/p90/p99={milliseconds / 1000:.3f}/{milliseconds / 1000:.3f}/"
+        f"{milliseconds / 1000:.3f}"
+        for phase, (field, milliseconds) in direct_timings.items()
+    } | {
+        f"{field}\tsource=direct-sidecar-count({field})\tn=1\t"
+        f"p50/p90/p99={value:.3f}/{value:.3f}/{value:.3f}"
+        for field, value in workload_counts.items()
+    }
+    expected_legacy_line = (
+        "legacy_uninstrumented\t"
+        "source=unexplained-legacy-residual(no-causal-attribution)\t"
+        "n=1\tp50/p90/p99=15.000/15.000/15.000"
+    )
+    direct_lines = set(direct.stdout.splitlines())
+    legacy_lines = set(legacy.stdout.splitlines())
+
+    assert {
+        "missing_direct_lines": expected_direct_lines - direct_lines,
+        "direct_has_legacy_residual": any(
+            line.startswith("legacy_uninstrumented\t") for line in direct_lines
+        ),
+        "missing_legacy_lines": {expected_legacy_line} - legacy_lines,
+        "old_residual_label_present": "pre_verifier_residual" in direct.stdout + legacy.stdout,
+    } == {
+        "missing_direct_lines": set(),
+        "direct_has_legacy_residual": False,
+        "missing_legacy_lines": set(),
+        "old_residual_label_present": False,
+    }
 
 
 def test_default_paths_are_repository_neutral() -> None:

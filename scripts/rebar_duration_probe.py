@@ -47,8 +47,22 @@ percentile = support.percentile
 cohort = support.cohort
 _completion_phase_timestamps = support._completion_phase_timestamps
 
+DIRECT_PHASE_FIELDS = {
+    "pre_verifier_total": "pre_verifier_total_ms",
+    "structural_scan": "structural_scan_ms",
+    "material_policy": "material_policy_ms",
+    "descendant_scope": "descendant_scope_ms",
+    "landing_check": "landing_check_ms",
+    "verifier_call": "verifier_call_ms",
+    "git_history_read": "git_history_read_ms",
+    "alias_index_build": "alias_index_build_ms",
+    "ticket_ref_resolution": "ticket_ref_resolution_ms",
+    "diff_validation": "diff_validation_ms",
+}
+
 PHASE_SOURCES = {
-    "pre_verifier_residual": "inferred-residual(command, verdict, total_ms)",
+    **{phase: f"direct-sidecar-metric({field})" for phase, field in DIRECT_PHASE_FIELDS.items()},
+    "legacy_uninstrumented": "unexplained-legacy-residual(no-causal-attribution)",
     "deterministic_verifier": "direct-sidecar-metric(det_ms)",
     "llm_verifier": "direct-sidecar-metric(llm_ms)",
     "verifier_overhead": "inferred-residual(total_ms-det_ms-llm_ms)",
@@ -57,10 +71,31 @@ PHASE_SOURCES = {
     "post_write_tail": "inferred-residual(last-event-to-command-result)",
 }
 
+CLOSE_WORKLOAD_FIELDS = (
+    "commits_inspected",
+    "distinct_references",
+    "descendant_ids",
+    "referencing_commits_found",
+)
+
+
+def close_workload_values(invocation: Invocation) -> dict[str, int | float | None]:
+    """Return directly measured close-workload counts."""
+    event = invocation.event or {}
+    return {
+        field: value if isinstance(value := event.get(field), (int, float)) else None
+        for field in CLOSE_WORKLOAD_FIELDS
+    }
+
 
 def close_phase_values(invocation: Invocation) -> dict[str, float | None]:
     """Return directly measured and residual close-phase durations in seconds."""
     event = invocation.event or {}
+    direct_phases = {
+        phase: value / 1000 if isinstance(value := event.get(field), (int, float)) else None
+        for phase, field in DIRECT_PHASE_FIELDS.items()
+    }
+    directly_instrumented = all(value is not None for value in direct_phases.values())
     total_ms = event.get("total_ms")
     det_ms = event.get("det_ms")
     llm_ms = event.get("llm_ms")
@@ -71,9 +106,9 @@ def close_phase_values(invocation: Invocation) -> dict[str, float | None]:
     det = det_ms / 1000 if isinstance(det_ms, (int, float)) else None
     llm = llm_ms / 1000 if isinstance(llm_ms, (int, float)) else None
 
-    pre = None
-    if total is not None and isinstance(verdict_at, (int, float)):
-        pre = verdict_at - total - invocation.start
+    legacy_uninstrumented = None
+    if not directly_instrumented and total is not None and isinstance(verdict_at, (int, float)):
+        legacy_uninstrumented = verdict_at - total - invocation.start
     overhead = None
     if total is not None and det is not None and llm is not None:
         overhead = total - det - llm
@@ -97,7 +132,8 @@ def close_phase_values(invocation: Invocation) -> dict[str, float | None]:
         else None
     )
     return {
-        "pre_verifier_residual": pre,
+        **direct_phases,
+        "legacy_uninstrumented": legacy_uninstrumented,
         "deterministic_verifier": det,
         "llm_verifier": llm,
         "verifier_overhead": overhead,
@@ -121,14 +157,25 @@ def _matched_event(item: Invocation) -> dict[str, Any]:
 def print_phase_summary(items: list[Invocation], label: str) -> None:
     print(f"phase_breakdown_seconds cohort={label} n={len(items)}")
     values_by_phase: dict[str, list[float]] = defaultdict(list)
+    values_by_workload: dict[str, list[float]] = defaultdict(list)
     for item in items:
         for phase, value in close_phase_values(item).items():
             if value is not None and value >= 0:
                 values_by_phase[phase].append(value)
+        for field, value in close_workload_values(item).items():
+            if value is not None and value >= 0:
+                values_by_workload[field].append(value)
     for phase, source in PHASE_SOURCES.items():
         values = values_by_phase[phase]
         if values:
             print(f"{phase}\tsource={source}\tn={len(values)}\tp50/p90/p99={_quantiles(values)}")
+    for field in CLOSE_WORKLOAD_FIELDS:
+        values = values_by_workload[field]
+        if values:
+            print(
+                f"{field}\tsource=direct-sidecar-count({field})\t"
+                f"n={len(values)}\tp50/p90/p99={_quantiles(values)}"
+            )
 
 
 def _classification(candidates: list[Invocation], config: ProbeConfig) -> Counter[str]:
@@ -379,7 +426,7 @@ def _print_table(selected: list[Invocation]) -> None:
         "pre_s\tdet_s\tllm_s\tverdict_status_s\tstatus_signature_s\tpost_s\tworkdir"
     )
     phase_names = (
-        "pre_verifier_residual",
+        "pre_verifier_total",
         "deterministic_verifier",
         "llm_verifier",
         "verdict_to_status",
