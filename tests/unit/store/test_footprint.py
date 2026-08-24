@@ -111,6 +111,7 @@ def test_measure_tracker_reports_exact_standalone_layers(tmp_path: Path) -> None
         "logical_bytes": expected_pack,
         "file_count": len(list((tracker / ".git/objects/pack").glob("*.pack"))),
         "scope": "standalone",
+        "complete": True,
     }
     assert git_directory["logical_bytes"] == git_logical
     assert git_directory["file_count"] == git_files
@@ -191,6 +192,8 @@ def test_linked_worktree_labels_shared_object_database(tmp_path: Path) -> None:
     assert isinstance(layers, dict)
     assert layers["pack"]["scope"] == "shared"  # type: ignore[index]
     assert layers["whole_clone"]["scope"] == "shared"  # type: ignore[index]
+    # A linked worktree measures the real common-dir pack, so it stays complete.
+    assert layers["pack"]["complete"] is True  # type: ignore[index]
 
 
 def test_alternates_label_the_object_database_as_shared(tmp_path: Path) -> None:
@@ -212,6 +215,45 @@ def test_alternates_label_the_object_database_as_shared(tmp_path: Path) -> None:
     assert isinstance(layers, dict)
     assert layers["pack"]["scope"] == "shared"  # type: ignore[index]
     assert layers["whole_clone"]["scope"] == "shared"  # type: ignore[index]
+    # Objects live in the borrowed alternate object database, so the primary-only pack
+    # measurement is explicitly non-exclusive and must not be read as the whole object store.
+    assert layers["pack"]["complete"] is False  # type: ignore[index]
+
+
+def test_allocated_bytes_reflect_injected_block_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Allocation is a deterministic function of injected st_blocks, not the host FS policy."""
+
+    tracker = _standalone_tracker(tmp_path)
+    for index in range(8):
+        (tracker / f"small-{index:02d}").write_bytes(b"x")
+
+    real_lstat = footprint._lstat
+    fixed_blocks = 8  # 8 * 512 == 4096 allocated bytes regardless of logical size
+
+    def lstat_fixed_blocks(path: Path) -> SimpleNamespace:
+        info = real_lstat(path)
+        return SimpleNamespace(
+            st_mode=info.st_mode,
+            st_size=info.st_size,
+            st_dev=info.st_dev,
+            st_ino=info.st_ino,
+            st_blocks=fixed_blocks,
+        )
+
+    monkeypatch.setattr(footprint, "_lstat", lstat_fixed_blocks)
+
+    report = footprint.measure_tracker(tracker, remote="origin", branch="tickets")
+    checkout = report["layers"]["checkout"]  # type: ignore[index]
+    assert isinstance(checkout, dict)
+
+    logical = checkout["logical_bytes"]
+    allocated = _availability_value(checkout["allocated_bytes"])
+    assert isinstance(logical, int)
+    assert allocated == checkout["file_count"] * fixed_blocks * 512
+    assert _availability_value(checkout["allocation_overhead_bytes"]) == allocated - logical
+    assert allocated > logical
 
 
 def test_hardlinked_inode_is_charged_once_for_allocated_bytes(tmp_path: Path) -> None:
