@@ -34,8 +34,8 @@ referenced ADR; they justify every decision below.
  │   │           │ ◀───────────────────────────│  kernel; POSTs LLM-Review vote│     │
  │   └─────┬─────┘   REST: cast LLM-Review      └──────────────────────────────┘     │
  │         │                                                                         │
- │         │ submit-requirement: LLM-Review=MAX AND -has:unresolved                  │
- │         │ (a change is submittable ONLY when the bot votes +1)                    │
+ │         │ submit requirements: LLM-Review=MAX, Verified=MAX, no unresolved        │
+ │         │ comments. Both votes must reach +1 before Submit.                       │
  │         ▼                                                                         │
  │   submit → Gerrit `replication` plugin ── one-way, NON-force, deploy-key ──┐      │
  └────────────────────────────────────────────────────────────────────────── │ ─────┘
@@ -44,13 +44,9 @@ referenced ADR; they justify every decision below.
                                                           repo ruleset: only the deploy key may write main)
 ```
 
-The integrity property: **submit is fail-closed.** A change is submittable only when
-the deterministic `LLM-Review` vote is at its MAX value and there are no unresolved
-comments (ADR-0013). A missed webhook, a dropped vote, an LLM outage, or a crashed
-receiver can only ever **delay** review (the change stays unsubmittable) — none of
-them can let an unreviewed change merge. GitHub can never diverge because replication
-is **non-force** and the repo is locked to the replication deploy key (ADR-0010,
-ADR-0011).
+The diagram isolates the AWS-hosted review path. The `Verified` vote arrives from GitHub Actions through gerrit-to-platform and an SSH vote into Gerrit.
+
+The submit gate fails closed. A change is submittable only when `LLM-Review` and `Verified` each reach MAX and no unresolved comments remain. A missed webhook, a dropped vote, an LLM outage, a CI failure, or a receiver failure can delay submission. None of these conditions authorizes a merge. GitHub cannot diverge because replication is non-force and the repository is locked to the replication deploy key. See ADR 0010, ADR 0011, and the enforced [`project.config`](../infra/gerrit/project.config).
 
 This is a **proof-of-concept-grade** deployment: single EC2 host, default VPC, the
 Gerrit dev-login auth mode. A production hardening pass (private subnets + load
@@ -252,11 +248,9 @@ Key properties:
 
 ---
 
-## 6. Step 3 — Gerrit project + `LLM-Review` label + submit requirement
+## 6. Step 3. Gerrit project and two-vote submit gate
 
-> Owns: the `rebar` project, the two-vote gate, and the feature-branch flow (§6a). See
-> ADR-0013, ADR-0020, ADR-0025; files `infra/gerrit/project.config`,
-> `infra/gerrit/setup-project.sh`.
+> This step owns the `rebar` project, the two-vote gate, and the feature-branch flow in Section 6a. See ADR 0013, ADR 0020, ADR 0025, [ADR 0047](adr/0047-retire-autolander-rebase-if-necessary.md), and [ADR 0091](adr/0091-llm-review-carry-trivial-rebase.md). The maintained files are `infra/gerrit/project.config` and `infra/gerrit/setup-project.sh`.
 
 ```bash
 # From a workstation holding the Gerrit admin SSH key:
@@ -265,52 +259,24 @@ GERRIT_HOST=<your-domain> GERRIT_ADMIN_SSH_KEY=~/.ssh/gerrit_admin \
 # DRY_RUN=1 prints the project.config diff vs live without pushing.
 ```
 
-This creates the project if absent and pushes the fully declarative
-`project.config` to `refs/meta/config`. The **gate design** (ADR-0013, extended to
-two votes by ADR-0020 / epic 1fa8):
+This creates the project if absent and pushes the declarative `project.config` to `refs/meta/config`. The active gate follows these rules.
 
-- **Two independent votes gate submit:** `LLM-Review` (`-1..+1`, the review bot) AND
-  `Verified` (`-1..+1`, CI via gerrit-to-platform → GitHub Actions, epic 1fa8). Each
-  label has exactly one authorized (bot/CI) voter; there is no human `Code-Review` vote.
-- The label is **advisory** (`function = NoBlock` — Gerrit 3.14.1 *rejects* a
-  blocking label function); **a submit requirement does the blocking**:
-  `submittableIf = label:LLM-Review=MAX AND -has:unresolved`. The inherited
-  `Code-Review` submit requirement is disabled on this project (`applicableIf =
-  is:false`) so `LLM-Review` is the sole gate.
-- **Only `Service Users` + `Administrators` may cast `LLM-Review`** — a developer can
-  push a change but cannot self-approve the gate.
-- **`copyCondition = changekind:NO_CODE_CHANGE`** — the vote carries across a true
-  no-op re-upload (commit-message-only amend) but **not** a `TRIVIAL_REBASE` (whose
-  diff is byte-identical against a *moved* base). A real rebase drops the vote and
-  forces a fresh review — the safe default for a correctness gate.
-- **`change.submitWholeTopic = true`** is set server-level in `gerrit.config`
-  `[change]` (a global key, ignored in project.config) so a reviewed multi-change
-  feature lands atomically; adopt a `<feature>` topic naming convention.
-- **CI `Verified` rollout (epic 1fa8, ADR-0020):** the `Verified` label + its
-  submit-requirement are authored in `project.config`, but the requirement ships
-  **inactive** (`applicableIf = is:false`) so the label records CI votes without
-  blocking submit until the voter exists. Story S6 **activates** it (deletes the
-  `applicableIf` line) once the gerrit-to-platform CI voter is proven end-to-end; the
-  effective gate then becomes
-  `label:LLM-Review=MAX AND label:Verified=MAX AND -has:unresolved`. `Verified` uses
-  the same strict `copyCondition = changekind:NO_CODE_CHANGE` reset as `LLM-Review`.
+- **Two independent votes gate submit.** `LLM-Review` records the review-bot decision. `Verified` records CI from GitHub Actions through gerrit-to-platform. Both labels range from `-1` to `+1` and must reach MAX.
+- **Both labels use `function = NoBlock`.** Gerrit 3.14.1 rejects a blocking label function. The `LLM-Review` submit requirement requires MAX and rejects unresolved comments. The `Verified` submit requirement requires MAX. Both requirements apply.
+- **Vote permissions are restricted.** Only `Service Users` and `Administrators` may cast either gate vote. A developer may propose a change but cannot approve either gate.
+- **Vote carry follows the maintained configuration.** `LLM-Review` carries across `NO_CODE_CHANGE`, `MERGE_FIRST_PARENT_UPDATE`, and `TRIVIAL_REBASE`. ADR 0091 records the `TRIVIAL_REBASE` decision. `Verified` carries across `NO_CODE_CHANGE` and `TRIVIAL_REBASE` under ADR 0047. It does not carry across `MERGE_FIRST_PARENT_UPDATE` because a feature-branch re-merge produces a different integrated tree.
+- **The inherited `Code-Review` requirement is disabled.** Its `applicableIf = is:false` setting removes the human review vote from this project. The two project requirements remain active.
+- **Plain Gerrit Submit completes the flow.** The project sets `action = rebase if necessary`. After both votes reach MAX and no unresolved comments remain, an authorized contributor selects Submit. Gerrit fast-forwards the change or rebases it server-side. A textual conflict returns the change to the author. ADR 0047 records this decision and the accepted integration risk.
+- **Whole-topic submit remains enabled.** `change.submitWholeTopic = true` is a server setting in `gerrit.config`. It is ignored in `project.config`.
 
-### 6a. Feature-branch flow (epic 88ab / S1 — ADR-0025)
+### 6a. Feature-branch flow from epic 88ab and ADR 0025
 
 For multi-story features that accumulate off `main` and land via one reviewed merge
 change, `setup-project.sh` also provisions the feature-branch machinery (declarative +
 idempotent, same script):
 
-- **Merge-carry copyCondition (LLM-Review only):**
-  `copyCondition = changekind:NO_CODE_CHANGE OR changekind:MERGE_FIRST_PARENT_UPDATE`.
-  A re-merge after `main` advances is a `MERGE_FIRST_PARENT_UPDATE` (first parent moves,
-  feature tip unchanged) — the reviewed auto-merge delta is identical, so the LLM vote
-  **carries**. **`Verified` is deliberately NOT given this token** — a re-merge is a new
-  merge tree, so CI must **re-run** (GerriScary-safe). Net: on a re-merge **LLM-Review
-  carries, Verified re-runs**.
-- **Submit type pinned:** `[submit] action = merge if necessary` + `mergeContent = true`
-  pins the current effective inherited behaviour (`MERGE_IF_NECESSARY` + content merge)
-  so the atomic `--no-ff` merge-back can't be broken by an All-Projects default change.
+- **Merge carry applies only to `LLM-Review`.** Its copy condition includes `MERGE_FIRST_PARENT_UPDATE`, so the reviewed merge delta retains the vote when only the first parent moves. `Verified` does not include that change kind because the integrated tree changes. The result is an LLM vote that carries and a CI vote that reruns.
+- **The project-wide submit action remains Rebase If Necessary.** The feature-branch flow does not replace the `[submit]` block established by ADR 0047. The interaction between this submit action and a feature-branch merge change requires human review, as noted by ADR 0091 and the contributor guidance.
 - **`feature-branch-drivers` group + three ACL permission types:** Create Reference +
   Delete Reference on `refs/heads/feature/*`, and Push Merge Commit on both
   `refs/for/refs/heads/main` and `refs/for/refs/heads/feature/*`. Ordinary (non-merge)
@@ -335,12 +301,7 @@ idempotent, same script):
   are refused natively by Gerrit and recorded in Gerrit's sshd/httpd audit log — the
   review-bot is not in that path (see `infra/runbooks/review-bot-ops.md` "signals to
   watch").
-- **Back-out:** delete the `[submit]` block to restore INHERIT; revoke the three ACL
-  grants + delete/empty the group to retire the flow (the copyCondition token is inert
-  absent merge changes and may be left or reverted). See ADR-0025. To retire the
-  **landing-authorization** gate specifically, delete the `submit` ACL lines from
-  `[access "refs/heads/*"]` (restores inherited submit to all Registered Users) and
-  optionally remove the `Contributors` group.
+- **Back-out.** Revoke the three feature-branch ACL grants and remove the driver group to retire this flow. The `MERGE_FIRST_PARENT_UPDATE` copy token is inert when merge changes are absent and may remain. Preserve the `[submit] action = rebase if necessary` block because it belongs to ADR 0047. To retire the landing authorization gate, delete the `submit` ACL lines from `[access "refs/heads/*"]` and optionally remove the `Contributors` group.
 
 ---
 
@@ -537,10 +498,7 @@ How the lock works (ADR-0011 + the runbook):
   "DeployKey"`, `bypass_mode: "always"`, no `actor_id`). The GitHub UI omits the
   DeployKey actor from the bypass picker, hence the `gh api` path; the native
   Terraform path works on provider `>= 6.8.0`.
-- This **replaces** the prior human-PR protection model. The pre-existing ruleset is
-  snapshotted at `infra/github/main-protection.snapshot.json` for **< 15-min
-  rollback**: set the mirror-lock ruleset `enforcement=disabled` (or delete it),
-  recreate the old protection from the snapshot, re-enable PRs/Issues/Actions.
+- This **replaces** the prior human pull request protection model. The previous ruleset is snapshotted at `infra/github/main-protection.snapshot.json` for rollback. Disable or delete the mirror-lock ruleset, then recreate the prior protection from the snapshot. Keep GitHub Actions enabled. Keep GitHub Issues disabled until the planned integration is available.
 - **Accepted PoC risk:** on a GitHub **free org**, only *repo-level* rulesets are
   available, so an active deploy-key-only ruleset rejects even an admin push, but a
   **trusted repo admin can deliberately edit/disable the rule**. This is documented,
