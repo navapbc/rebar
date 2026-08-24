@@ -2,7 +2,8 @@
 
 A ``rebar review-plan`` that computes a signable PASS but whose SIGN step fails (recorded
 as ``signature.signed=False`` + ``error``) leaves the expensive verdict WITHOUT the durable
-product the claim gate consumes — the HMAC attestation. Re-running the full multi-pass LLM
+product the claim gate consumes — the asymmetric op-cert (plan-review) attestation. Re-running
+the full multi-pass LLM
 review to recover it is ~10 minutes of billable work for a result already computed and
 persisted in the ``REVIEW_RESULT`` sidecar.
 
@@ -169,8 +170,9 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
       the review (stale — run a full ``rebar review-plan``). NEVER signs a non-PASS / degraded /
       local-source / stale verdict.
 
-    NO LLM and NO network — a sidecar read, a light fingerprint recompute, and a local HMAC
-    sign inside an attested gate session resolved from the LOCAL object DB (``fetch=False``),
+    NO LLM and NO network — a sidecar read, a light fingerprint recompute, and a local op-cert
+    (asymmetric SSHSIG/Ed25519) sign inside an attested gate session resolved from the LOCAL
+    object DB (``fetch=False``),
     so the recovered attestation binds a committed ``verified-at-sha`` like any other.
     """
     payload = sidecar.latest_review_result(ticket_id, repo_root=repo_root)

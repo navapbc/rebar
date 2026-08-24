@@ -146,7 +146,7 @@ Enforcement is **project-opt-in** via `identity.require_authenticated` (default 
   The user-facing display groups these as **verified** / **unverified**
   (`bad-signature` | `key_not_valid_at_era` | `unknown-author`) / **unsigned**. (This
   is the `verify-authorship` gate's own vocabulary; it is distinct from the separate
-  `verify-signature` HMAC-attestation verdict set.) The gate exits non-zero (blocking
+  `verify-signature` manifest-attestation verdict set.) The gate exits non-zero (blocking
   the change) only when `require_authenticated` is on and any in-scope event is not
   verified; advisory (exit 0) when off. CI runs it as the merge gate. Gate-exempt
   types (`identity`/`session_log`/`code_review`) are skipped.
@@ -192,8 +192,8 @@ Every human or agent clone writes non-exempt tickets, so each needs its **own** 
 **Verify a signed write:** after setup, make any write (e.g. `rebar comment <id> "hi"`) and
 run `rebar show <id>` — the new event shows `authorship: {signed: ≥1}`; `rebar
 verify-authorship` emits a `verified` verdict for it. (Note: this is the SSH-authorship flow —
-distinct from `rebar verify-signature`, which certifies HMAC *manifest* attestations from the
-`rebar sign` command, not event authorship.)
+distinct from `rebar verify-signature`, which certifies the *manifest* attestations produced by
+the `rebar sign` command — asymmetric operation certificates (DSSE/SSHSIG), not event authorship.)
 
 ## The CI merge-gate: `verify-identity.yml` (story cc0b)
 
