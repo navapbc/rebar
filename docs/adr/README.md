@@ -62,6 +62,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0094 — Reconciler last-pass two-witness status](0094-reconciler-last-pass-two-witness-status.md)
 - [0096 — Complete Pandoc corpus replay belongs in external integration](0096-pandoc-corpus-verification-boundary.md)
 - [0099 — Binding-store internal ownership behind one unchanged facade](0099-binding-store-internal-ownership.md)
+- [0103 — Reconciler logical-operation coordination (single retry budget + observe-before-replay)](0103-reconciler-operation-coordination.md)
 
 ## LLM framework
 
