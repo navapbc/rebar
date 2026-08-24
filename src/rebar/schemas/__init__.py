@@ -79,6 +79,7 @@ __all__ = [
     # name constants
     "TICKET_STATE",
     "TICKET_STATE_LLM",
+    "TRACKER_FOOTPRINT",
     "TRANSITION_RESULT",
     "VALIDATE_REPORT",
     "VERIFY_COMMANDS",
@@ -135,6 +136,7 @@ REVIEW_RESULT = "review_result"
 COMPLETION_VERDICT = "completion_verdict"
 AUDIT_TRAIL = "audit_trail"
 METRICS = "metrics"
+TRACKER_FOOTPRINT = "tracker_footprint"
 # `rebar verify-identity --format json` report entry (epic gnu-whale-ichor / AC7, bff8).
 # verify-identity is an INTERCEPT command (not in the CLI help-arm system), so the --output
 # coverage guard never drives it live; registered in OUTPUT_SCHEMAS below under a synthetic
@@ -344,6 +346,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "summary": SUMMARY,
     "audit": AUDIT_TRAIL,
     "metrics": METRICS,
+    "tracker_footprint": TRACKER_FOOTPRINT,
     "config": CONFIG_RESULT,
     "fsck": FSCK,
     "doctor": DOCTOR,

@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/tracker_footprint.schema.json",
+  "title": "Tracker footprint",
+  "description": "Layered, descriptive result of `rebar tracker-footprint --output json`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "source", "object_database", "layers", "definitions"],
+  "properties": {
+    "mode": { "enum": ["mounted", "fresh-clone"] },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["remote", "branch", "requested_ref", "measured_ref", "tip"],
+      "properties": {
+        "remote": { "type": "string", "minLength": 1 },
+        "branch": { "type": "string", "minLength": 1 },
+        "requested_ref": { "type": "string", "minLength": 1 },
+        "measured_ref": { "type": "string", "minLength": 1 },
+        "tip": { "type": "string", "minLength": 1 }
+      }
+    },
+    "object_database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "shared_reasons"],
+      "properties": {
+        "scope": { "enum": ["standalone", "shared"] },
+        "shared_reasons": {
+          "type": "array",
+          "items": { "enum": ["linked-worktree", "alternates"] },
+          "uniqueItems": true
+        }
+      }
+    },
+    "layers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pack", "checkout", "git_directory", "whole_clone"],
+      "properties": {
+        "pack": { "$ref": "#/$defs/pack_layer" },
+        "checkout": { "$ref": "#/$defs/filesystem_layer" },
+        "git_directory": { "$ref": "#/$defs/filesystem_layer" },
+        "whole_clone": { "$ref": "#/$defs/scoped_filesystem_layer" }
+      }
+    },
+    "definitions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "logical_bytes",
+        "allocated_bytes",
+        "allocation_overhead_bytes",
+        "pack",
+        "whole_clone"
+      ],
+      "properties": {
+        "logical_bytes": { "type": "string", "minLength": 1 },
+        "allocated_bytes": { "type": "string", "minLength": 1 },
+        "allocation_overhead_bytes": { "type": "string", "minLength": 1 },
+        "pack": { "type": "string", "minLength": 1 },
+        "whole_clone": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "unavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unavailable"],
+      "properties": {
+        "unavailable": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason"],
+          "properties": {
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "nonnegative_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value"],
+      "properties": {
+        "value": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "signed_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value"],
+      "properties": {
+        "value": { "type": "integer" }
+      }
+    },
+    "filesystem_layer": {
+      "allOf": [
+        { "$ref": "#/$defs/filesystem_fields" }
+      ],
+      "unevaluatedProperties": false
+    },
+    "filesystem_fields": {
+      "type": "object",
+      "required": [
+        "logical_bytes",
+        "file_count",
+        "allocated_bytes",
+        "allocation_overhead_bytes"
+      ],
+      "properties": {
+        "logical_bytes": { "type": "integer", "minimum": 0 },
+        "file_count": { "type": "integer", "minimum": 0 },
+        "allocated_bytes": {
+          "oneOf": [
+            { "$ref": "#/$defs/nonnegative_value" },
+            { "$ref": "#/$defs/unavailable" }
+          ]
+        },
+        "allocation_overhead_bytes": {
+          "oneOf": [
+            { "$ref": "#/$defs/signed_value" },
+            { "$ref": "#/$defs/unavailable" }
+          ]
+        }
+      }
+    },
+    "scoped_filesystem_layer": {
+      "allOf": [
+        { "$ref": "#/$defs/filesystem_fields" },
+        {
+          "type": "object",
+          "required": ["scope"],
+          "properties": {
+            "scope": { "enum": ["standalone", "shared"] }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "pack_layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_bytes", "file_count", "scope"],
+      "properties": {
+        "logical_bytes": { "type": "integer", "minimum": 0 },
+        "file_count": { "type": "integer", "minimum": 0 },
+        "scope": { "enum": ["standalone", "shared"] }
+      }
+    }
+  }
+}

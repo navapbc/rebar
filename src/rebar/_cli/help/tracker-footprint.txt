@@ -1,0 +1,9 @@
+Usage: rebar tracker-footprint [-h] [--fresh-clone] [--output {text,json}]
+
+Measure Git, checkout, allocation, and whole-clone tracker footprint.
+
+options:
+  -h, --help            show this help message and exit
+  --fresh-clone         measure a temporary unfiltered clone of the configured
+                        tickets ref
+  --output {text,json}  output format (default: text)

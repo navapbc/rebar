@@ -115,6 +115,7 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "delete": lambda s: ["delete", s["doomed"], "--user-approved"],
     "audit": lambda s: ["audit", "show", s["task"]],
     "metrics": lambda s: ["metrics", "--since", "2026-01-01", "--until", "2026-07-01"],
+    "tracker-footprint": lambda s: ["tracker-footprint"],
     "config": lambda s: ["config", "--root", s["repo"]],
     "sign-review": lambda s: ["sign-review", s["task"]],
 }

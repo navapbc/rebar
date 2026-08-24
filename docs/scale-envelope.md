@@ -69,6 +69,21 @@ So a low-thousands-of-tickets store is a few MiB of git objects. Growth is rough
 linear in total *events* (not just live tickets), since history is append-only —
 edits, transitions, comments, and links each add an event.
 
+Pack bytes are only one storage layer. They do not include the checked-out event/snapshot
+tree, filesystem allocation slack from many small files, Git indexes and other metadata, or
+the combined clone. Measure those layers explicitly when evaluating a real store:
+
+```sh
+rebar tracker-footprint --fresh-clone --output json
+```
+
+The report separates `.pack` logical bytes, checkout logical/allocated bytes and file count,
+the Git-directory union, and whole-clone logical/allocated bytes. Mounted linked worktrees and
+alternates are labeled `shared`; `--fresh-clone` disables local hardlinks and provides the
+standalone comparison. There is deliberately no built-in ceiling or pass/fail verdict: event
+payload and retention policy vary by project, so operators trend the reported layers and make
+capacity decisions in their own environment.
+
 ## Git maintenance & gc
 
 rebar keeps **stock `git gc`** enabled on the tickets worktree — it does **not** force
@@ -130,7 +145,9 @@ t = time.perf_counter(); rebar.list_tickets(); print(f"list: {(time.perf_counter
 t = time.perf_counter(); rebar.search("bench 42"); print(f"search: {(time.perf_counter()-t)*1000:.0f}ms")
 ```
 
-Git object growth: `git count-objects -vH` inside the `.tickets-tracker/` worktree.
+Git object growth in the historical table used `git count-objects -vH` inside the
+`.tickets-tracker/` worktree. That command describes Git objects only; use
+`rebar tracker-footprint --fresh-clone` for the current layered clone measurement.
 
 ## Related
 

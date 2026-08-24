@@ -475,6 +475,18 @@ def _intercepts() -> tuple[Route, ...]:
     )
     routes.append(
         Route(
+            "tracker-footprint",
+            group="static_read",
+            intercept=True,
+            no_auto_mount=True,
+            parser_factory=f"{_P}.tracker_footprint:build",
+            handler="rebar._commands.tracker_footprint:tracker_footprint_cli",
+            adapter="argv",
+            init="none",
+        )
+    )
+    routes.append(
+        Route(
             "audit",
             group="static_read",
             intercept=True,

@@ -77,7 +77,7 @@ The golden record of the normalization: what each verb printed before the confir
 
 ## Command syntax
 
-One section per visible command that is not retired (75 in total), in registry order. Every section embeds its committed package help bytes.
+One section per visible command that is not retired (76 in total), in registry order. Every section embeds its committed package help bytes.
 
 ### `show`
 
@@ -1296,6 +1296,20 @@ options:
   --since DATE          inclusive start date (default: 30d ago)
   --until DATE          inclusive end date (default: today)
   --output {json,text}  output format (default: json)
+```
+
+### `tracker-footprint`
+
+```
+Usage: rebar tracker-footprint [-h] [--fresh-clone] [--output {text,json}]
+
+Measure Git, checkout, allocation, and whole-clone tracker footprint.
+
+options:
+  -h, --help            show this help message and exit
+  --fresh-clone         measure a temporary unfiltered clone of the configured
+                        tickets ref
+  --output {text,json}  output format (default: text)
 ```
 
 ### `audit`

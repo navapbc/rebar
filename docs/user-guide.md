@@ -337,6 +337,42 @@ rebar validate
 rebar validate --output json
 ```
 
+## Tracker footprint — pack size is not clone size
+
+`rebar tracker-footprint [--fresh-clone] [--output text|json]` reports the store's
+physical layers without applying a budget or changing the store. The default measures the
+configured mounted tracker exactly as found. Because a mounted tracker may be a linked
+worktree or use Git alternates, the report labels its object database `shared` and names the
+reason instead of presenting shared Git bytes as a standalone-clone cost.
+
+`--fresh-clone` resolves the configured `sync.remote` and `tracker.branch`, makes an
+unfiltered single-branch/no-tags clone in a command-owned temporary directory, disables
+Git's local hardlink optimization, measures it, and removes the temporary directory. It is
+the reproducible choice when comparing independent clone residence:
+
+```sh
+rebar tracker-footprint --fresh-clone
+rebar tracker-footprint --fresh-clone --output json
+```
+
+The layers are intentionally distinct:
+
+- `pack` is the exact logical-byte sum of `.pack` files in the primary common Git object
+  database; it excludes indexes and every checked-out file.
+- `checkout.logical_bytes` sums `lstat().st_size` once per non-directory pathname outside
+  the tracker's root `.git`; `checkout.file_count` counts those pathnames.
+- `checkout.allocated_bytes` uses `st_blocks * 512`, charging hard-linked storage once per
+  `(st_dev, st_ino)`. `allocation_overhead_bytes` is allocated minus logical and may be
+  negative. Platforms without `st_blocks` return a structured `unavailable`, never zero.
+- `git_directory` measures the unique union of Git's worktree-specific and common
+  directories, without nested-root or inode double counting.
+- `whole_clone` combines checkout and Git-directory pathnames and inode-deduplicates
+  allocation across both. Its `scope` says whether those Git bytes are standalone or shared.
+
+The source block records the configured remote/branch, requested ref, measured ref, and tip.
+Large values remain descriptive: size alone never changes the command's exit status and the
+command is not run by writes, reconciliation, gates, ordinary metrics, or CI.
+
 ## Metrics — how the agent-driven loop is trending
 
 `rebar metrics [--since <date>] [--until <date>] [--output json|text]` renders every metric

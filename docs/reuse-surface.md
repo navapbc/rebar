@@ -502,6 +502,35 @@ The prerequisites are deliberately split:
 Neither `scc` nor `jscpd` is a pip dependency of rebar. Their adapters resolve executables
 from `PATH`; a missing or failing tool is reported as `Unavailable`, never as fabricated zero.
 
+## Tracker-footprint measurement — `rebar._store.footprint`
+
+Footprint accounting is reusable below the CLI without becoming a top-level `rebar.*`
+facade or an ordinary metric:
+
+```python
+from rebar._store.footprint import FootprintError, measure_fresh_clone, measure_tracker
+
+measure_tracker(tracker, *, remote: str, branch: str,
+                mode: Literal["mounted", "fresh-clone"] = "mounted") -> dict[str, object]
+measure_fresh_clone(repo_root) -> dict[str, object]
+```
+
+`measure_tracker` is a read-only filesystem/Git inspection of one already-materialized
+tracker. It uses `StorePaths` to resolve Git's worktree-specific and common directories,
+labels linked-worktree/alternates object databases as shared, and returns separate pack,
+checkout, Git-directory, and whole-clone layers. Logical bytes count pathnames via `lstat`;
+allocated bytes use `st_blocks * 512` with inode deduplication and become a structured
+`unavailable` when the platform lacks that field.
+
+`measure_fresh_clone` is the explicit network-capable wrapper. It resolves the configured
+remote and branch, obtains the URL without returning or printing it, clones into a
+`TemporaryDirectory` with local hardlink optimization disabled, delegates to
+`measure_tracker`, and cleans up on success or failure. It raises a concise `FootprintError`
+that names only the configured remote/branch on clone failures. Neither function initializes,
+reconciles, writes, schedules, or applies a threshold. The JSON contract is
+`schemas.TRACKER_FOOTPRINT`; it is intentionally omitted from generated `rebar.types` because
+there is no top-level facade return.
+
 ## 6. Operation-scoped configuration
 
 `rebar._operation_config`, re-exported from `rebar.config`, provides the supported composition seam implemented by RP-04 under ticket `vibrant-legal-hind` and established by [ADR 0098](adr/0098-operation-scoped-config-and-provider-composition.md). It composes one immutable, serializable, non-secret `OperationSnapshot` for an operation.

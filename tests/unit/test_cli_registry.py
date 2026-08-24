@@ -105,6 +105,17 @@ def test_shipped_route_table_validates_clean() -> None:
     assert tuple(_registry.validate()) == ()
 
 
+def test_tracker_footprint_is_an_unmounted_read_only_intercept() -> None:
+    route = _registry.route_for("tracker-footprint")
+
+    assert route is not None
+    assert route.group == "static_read"
+    assert route.intercept is True
+    assert route.no_auto_mount is True
+    assert route.init == "none"
+    assert route.capabilities == ()
+
+
 def test_routes_are_immutable() -> None:
     route = _registry.route_for("show")
     assert route is not None

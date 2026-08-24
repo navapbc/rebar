@@ -66,6 +66,7 @@ Subcommands:
   identity              Create identities, select the active identity, and manage identity keys.
   config                Show the resolved rebar configuration and the precedence layer (cli > env > project > user > default) each value came from.
   metrics               Render the full metric registry over a date range.
+  tracker-footprint     Measure Git, checkout, allocation, and whole-clone tracker footprint.
   audit                 Show a ticket audit trail (plan-review history + completion + code reviews).
   bridge                Synchronize rebar tickets with Jira.
   init                  Initialize the ticket system.
