@@ -120,6 +120,25 @@ def test_resign_routes_through_pin_collecting_sign_path(monkeypatch) -> None:
         relation_snapshot=_snapshot(ticket_id),
     )
     monkeypatch.setattr("rebar.llm.plan_review.generation.collect", lambda *a, **k: generation)
+
+    # Sandbox the attested gate session. resign signs inside gate_source.gate_read_root
+    # after gate_source.resolve_gate_handle (bug 5128-0856), which in attested mode (the
+    # suite default) materializes the real HEAD code tree AND the ~121k-file tickets branch
+    # into the gate cache — 1.1 GB / 125k files whose later recursive deletion costs minutes
+    # of unlinkat/rmdir at session cleanup (anatomical-continuous-akitainu). This is a unit
+    # test of routing, so stub the seam exactly as the sibling public-resign tests do; the
+    # spy below asserts resign still routes signing through it.
+    from rebar.llm import gate_source
+
+    gate_handle_calls: list[tuple] = []
+
+    def _fake_resolve(*args, **kwargs):
+        gate_handle_calls.append((args, kwargs))
+        return object()
+
+    monkeypatch.setattr(gate_source, "resolve_gate_handle", _fake_resolve)
+    monkeypatch.setattr(gate_source, "gate_read_root", lambda *a, **k: contextlib.nullcontext())
+
     seen = {}
 
     def fake_sign(verdict, **kwargs):
@@ -131,6 +150,7 @@ def test_resign_routes_through_pin_collecting_sign_path(monkeypatch) -> None:
     result = resign.resign_plan_review(ticket_id)
     assert result["ok"] is True
     assert seen == {"ticket_id": ticket_id, "generation": generation}
+    assert gate_handle_calls, "resign must route signing through the attested gate seam"
 
 
 @pytest.mark.parametrize("snapshot_kind", ["missing", "mismatched-child"])
