@@ -1,136 +1,95 @@
-# Maintenance / code-health audit runbook
+# Maintenance audit runbook
 
-A repeatable recipe for the periodic "principal-engineer maintenance audit" of
-rebar: detect code debt, smells, architectural decay, separation-of-concerns
-violations, doc drift, and unit/directory size growth. This documents the tools,
-the commands, and the **multi-perspective subagent** method so the next run is a
-re-run, not a re-invention.
+This runbook adapts the packaged rebar janitor workflow to this repository. It does not define another audit method. The packaged skill owns the audit phases, evidence schema, verification method, remediation process, approval process, and ticketization process.
 
-> **Method.** Run the deterministic scans below ONCE into a scratch dir, then
-> fan out one subagent per *perspective* (size, duplication, architecture,
-> complexity, docs, dead-code, tests) — each reads the shared scan artifacts and
-> digs into its lane only. Interpretation (essential vs accidental complexity,
-> parallel-by-design vs real duplication) is the subagents' job; the scans are
-> just signal. Finally, spot-verify every High/Critical finding first-hand before
-> relaying it — subagents occasionally over-claim.
+## Ownership
 
-## Tools used (all confirmed available 2026-06-18)
+Start with [`examples/agent-skills/rebar-janitor/SKILL.md`](../examples/agent-skills/rebar-janitor/SKILL.md). Follow its phase files in order and read each phase file when that phase begins.
 
-| Tool | Version | Install | What it surfaces |
-|------|---------|---------|------------------|
-| `ruff` | 0.15.6 | (project dev dep) | Lint + the **extended advisory ruleset** below (complexity, magic values, boolean traps, dead args, suppressible excepts) |
-| `radon` | 6.0.1 | `.venv/bin/pip install radon` | Cyclomatic complexity (`cc`) + maintainability index (`mi`) |
-| `vulture` | 2.16 | `.venv/bin/pip install vulture` | Dead code (unused vars/functions/imports) |
-| `ast-grep` (`sg`) | 0.43.0 | preinstalled | Structural pattern search (duplication shapes, mutable defaults, broad excepts) |
-| `semgrep` | 1.165 | preinstalled | Generic structural patterns (fallback for ast-grep) |
-| `jscpd` | via `npx` | `npx jscpd` | Token-level copy-paste clone detection |
-| Serena MCP | — | project-configured | LSP-backed `find_referencing_symbols` — authoritative "is this symbol used?" (beats grep for dead-code confirmation) |
+This page owns the rebar-specific preparation, durable records, and repository checks that supplement the packaged workflow. Tool versions, machine state, measurements, and findings belong to the audit execution record. They do not belong in this maintained procedure.
 
-`mypy`/`pyright` are NOT installed locally (mypy is a declared dev dep but absent
-from `.venv`); the project gates a scoped mypy run in CI only. Type-coverage was
-not audited this run — add `mypy` to the venv if a type-health pass is wanted.
+## Start and record the audit
 
-## The deterministic baseline scans
+Search for an audit ticket before starting. Create one when no existing ticket covers the work. Record the scope, plan, acceptance criteria, file impact, and verification commands on that ticket. Complete plan review and claim the ticket before running audit commands.
 
-Run from repo root. Dump everything into a scratch dir so the subagents share it.
+Start a session log related to the audit ticket.
 
-```bash
-OUT=/tmp/rebar-audit   # or $CLAUDE_JOB_DIR/tmp in a job
-mkdir -p "$OUT"
-
-# 1. LOC per file (the module-size policy metric — matches the CI size report's `wc -l`)
-find src -name '*.py' -exec wc -l {} + | sort -rn > "$OUT/loc.txt"
-# over the 800 soft cap:
-find src -name '*.py' -exec wc -l {} + | awk '$1 > 800 && $2 != "total"' | sort -rn
-
-# 2. files per directory (junk-drawer detector)
-find src -type d | while read d; do n=$(find "$d" -maxdepth 1 -name '*.py' | wc -l); echo "$n  $d"; done | sort -rn
-
-# 3. cyclomatic complexity (C+ blocks) and the worst (D/E/F) ranked
-.venv/bin/radon cc src/rebar -s -n C --total-average > "$OUT/radon_cc.txt"
-grep -E ' - [DEF] \(' "$OUT/radon_cc.txt" | sort -t'(' -k2 -rn   # worst first
-
-# 4. maintainability index (anything below A)
-.venv/bin/radon mi src/rebar -s | grep -vE ' - A '
-
-# 5. dead code
-.venv/bin/vulture src/rebar --min-confidence 80 > "$OUT/vulture.txt"   # high-confidence
-.venv/bin/vulture src/rebar --min-confidence 60                        # wider, more FPs
-
-# 6. extended advisory lint (NOT the project gate — interpret, don't enforce)
-ruff check src --select C90,SIM,PERF,RUF,PLR,PLW,TRY,TID,ARG,N,A,DTZ,RET,PTH,FBT --statistics > "$OUT/ruff_extended.txt"
-ruff check src --select C901 2>&1 | grep -oE 'src/[^:]+' | sort | uniq -c | sort -rn   # complexity by file
-
-# 6b. C901 function-complexity ratchet (story c9f7) — the ENFORCED production gate.
-# Resolve the project's pinned Ruff first (do not assume a version); threshold 15 and
-# production scope src/rebar are the gate contract, not the advisory scan above.
-ruff --version                                                                    # project-resolved Ruff
-ruff check --select C901 --config 'lint.mccabe.max-complexity=15' --statistics src/rebar   # raw census (exits 1)
-python scripts/check_complexity_baseline.py --check                               # the gate verdict (exit 0 = no new/increased debt)
-
-# 7. duplication (token clones)
-npx jscpd src/rebar --min-tokens 50 --min-lines 8 --format python --reporters json --output "$OUT/jscpd"
-
-# 8. tech-debt markers, broad excepts, churn hotspots
-grep -rnE '# *(todo|fixme|xxx|hack|workaround)' -i src --include='*.py'
-grep -rn 'except Exception' src --include='*.py' | wc -l
-git log --pretty=format: --name-only -200 | grep -E '^src/.*\.py$' | sort | uniq -c | sort -rn | head -20
+```sh
+rebar session-log start --summary "Maintenance audit" --relates-to <audit-ticket-alias>
 ```
 
-### Useful ast-grep / semgrep patterns
+The audit ticket preserves the scope, decisions, verification, and final disposition. The session log preserves verbose progress, command inputs, tool versions, observations, and intermediate decisions. Append progress after every phase so another developer or agent can resume the audit.
 
-```bash
-ast-grep -l python -p 'except Exception:' src                  # broad excepts (then classify pass/log/raise)
-ast-grep -l python -p 'def $F($$$ =[]$$$)' src                 # mutable default args (was 0 — keep clean)
-ast-grep -l python -p 'urllib.request.Request($$$)' src/rebar/_engine/rebar_reconciler/   # repeated transport shape
-grep -rn 'def _rebar_env\|def _env_int\|_SEVERITY_RANK = {' src/rebar/   # known copy-paste helpers
+During phases 1 through 4, record candidate findings and their dispositions in the session log. During phase 5, create tickets only for approved work and link each new ticket to the audit ticket with `discovered_from`. If an approved recommendation establishes an architectural invariant, record that decision in an ADR and use the ticket for its implementation history.
+
+## Run the packaged workflow
+
+Execute the five phases defined by the packaged janitor skill. Use one concern per discovery agent, keep discovery findings free of severity, verify findings independently, compare remediation proposals against community practice and the project record, obtain item-level approval, and ticket only approved work.
+
+The packaged workflow owns its concern list and phase contracts. Do not copy them into this runbook. Read `AGENTS.md`, `CONTRIBUTING.md`, and [`documentation-policy.md`](documentation-policy.md) when the workflow asks for project guidance.
+
+## Rebar project inputs
+
+Run the following commands from the repository root with the worktree virtual environment first on `PATH`. Record the commit, command, parameters, and result in the session log. These commands inspect maintained state without rewriting maintained files.
+
+### Module size
+
+The module limit is an absolute CI gate. The gate reads its positive integer from `.github/module-size-limit.txt` and fails when any `src/rebar/**/*.py` file exceeds that value. `tests/unit/test_module_size_contract.py` reads the same file and provides the repository mirror.
+
+```sh
+python -m pytest tests/unit/test_module_size_contract.py -q
 ```
 
-## Caveats learned this run (don't repeat these mistakes)
+[ADR 0058](adr/0058-the-module-size-limit-file-is-the-only-loc-ceiling.md) records why `.github/module-size-limit.txt` is the single authoritative upper limit. The target range and anti-fragmentation guidance remain in `AGENTS.md`. Do not convert either guideline into another numeric gate.
 
-- **`RUF100` (unused-noqa) is an artifact** when you run a *narrower* `--select`
-  than the project's gate (`E,F,W,I,UP,B`). 122 showed up and were all false —
-  ignore RUF100 unless running the project's exact select set.
-- **The project tree is clean for its own gate** (`ruff check src tests` passes
-  for `E,F,W,I,UP,B`). The extended ruleset above is *advisory* — findings are
-  smells to weigh, not violations.
-- **`vulture` flags MCP/config getattr-dispatched fields as dead** (e.g.
-  `McpConfig.readonly` read via `getattr` in `_mcp_gate`). Confirm with Serena
-  `find_referencing_symbols` + grep over `src/` AND `tests/` before believing any
-  dead-code claim. Properties and `@register_step`-decorated functions are common
-  false positives.
-- **Many `except Exception` are best-effort by design** (push, capability shims)
-  and commented as such. Classify by disposition (pass/continue vs log vs raise);
-  only `pass`/`continue` that mask *wrong answers* (not degraded ones) are bugs.
-- **PLR0913 (too-many-args) is mostly false** here — the wide signatures are
-  keyword-only filter façades mirroring the CLI surface. Look for *mutable
-  accumulator out-params* instead (the real arg smell).
-- **Run an adversarial validation pass before publishing.** A second set of
-  subagents that try to *refute* each finding (read the cited lines, check the
-  failure trigger actually fires) is high-value: in the 2026-06-18 run it held
-  the *structural* findings (graph reimplements the write path; optionality tests
-  always skip; the duplication clusters) but corrected several *interpretation*
-  findings. The pattern: claims of the form "this `except` produces a WRONG (not
-  merely degraded) answer" or "this global RACES under the MCP server" are the
-  ones most often overstated — verify the exact trigger (does `ready_to_work`
-  even traverse cycles? is `set_cli_overrides` ever called from `mcp_server.py`?
-  — both were "no", collapsing two findings). Severity-correct: doc-only drift is
-  Medium, not High, unless it breaks installs/behavior.
+### Function complexity
 
-## Baseline numbers (2026-06-18, for drift comparison next run)
+Resolve the project Ruff version, collect the raw C901 census, and run the repository gate.
 
-- 150 `.py` files in `src/`, ~40,879 LOC; 327 test files, ~67,772 LOC (1.66:1).
-- **8 files over the 800 soft cap** (docs table documented only 4 — see audit).
-- Worst complexity: `reconcile_once` F(82), `compute_mutations` F(61),
-  `next_batch.compute` F(55), `_apply_inbound_update` F(52), `fsck_recover_cli`
-  F(44). 102 `C901` hits. These are **dated observations, not the gate contract**:
-  the enforced C901 ratchet reads the live census from the project-resolved Ruff
-  (`ruff --version`) at threshold 15 over `src/rebar` and is verified by
-  `python scripts/check_complexity_baseline.py --check`; historical counts here are
-  only for drift comparison.
-- Dead code: only 2 vulture-100% items; ~10 genuinely-unreferenced functions
-  (mostly `bridge_fsck.enumerate_*` dead parallel impl + reconciler stubs).
-- `except Exception`: 135 sites, 0 real bare `except:`, 0 mutable default args.
-- Default test suite collects 2,483 tests; coverage floor 50% vs ~61% measured.
-</content>
-</invoke>
+```sh
+ruff --version
+ruff check --select C901 --config 'lint.mccabe.max-complexity=15' --exit-zero --statistics src/rebar
+python scripts/check_complexity_baseline.py --check
+```
+
+The raw census is an audit input. `--exit-zero` allows the command to report baselined findings without making those findings the command verdict. The wrapper is the gate. It rejects new or increased production complexity and permits reductions that make baseline entries stale. Ticket `unafraid-homey-umbrette` records the introduction of this shrink-only ratchet.
+
+### Historical metrics
+
+Use rebar metrics for trends over the interval selected for the audit.
+
+```sh
+rebar metrics --since <YYYY-MM-DD> --until <YYYY-MM-DD> --output json
+```
+
+Record the selected interval. A metric reported as `unavailable` has no accumulated data for that dimension and must not be interpreted as zero. The packaged discovery phase defines how metrics supplement the one-shot analysis tools.
+
+### Documentation and skill checks
+
+Confirm that maintained documentation links resolve and that the packaged skills retain valid frontmatter.
+
+```sh
+python scripts/check_docs_index.py --check
+python scripts/check_skill_frontmatter.py
+```
+
+These checks cover the maintained adapter and packaged skill metadata. They do not replace the verification commands recorded on remediation tickets.
+
+## Historical context
+
+Use tickets and ADRs when an earlier decision or finding explains maintained guidance. Ticket `unafraid-homey-umbrette` provides the history of the function-complexity ratchet. Ticket `scabby-slur-junk` provides an example of an earlier audit finding that was verified, approved, implemented, and closed. ADR 0058 provides the design rationale for the module-size invariant.
+
+Do not copy dated counts, machine state, severity labels, or incident narratives from those records into this runbook. Cite the record and describe only the current mechanism that a future audit must use.
+
+## Close the audit
+
+Before closing the audit ticket, complete these steps:
+
+- Run every verification command recorded on the audit ticket.
+- Confirm that every approved recommendation has a ticket and a `discovered_from` link to the audit ticket.
+- Record rejected recommendations and their reasons in the audit ticket or session log.
+- Append the final outcome and all residual gaps to the session log.
+- Check each acceptance criterion only after its evidence exists.
+- Transition the audit ticket through the normal completion gate after all required changes reach `origin/main`.
+
+Do not use a force option to bypass plan review, completion verification, or ticket publication.
