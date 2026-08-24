@@ -36,15 +36,16 @@ def build_opcert(*, prog: str) -> argparse.ArgumentParser:
         prog=prog,
         usage=OPCERT_USAGE,
         description=(
-            "Verify the required-environment operation certificate of the store's CLOSED tickets "
-            "(the op-cert merge-gate). Walks the merged log, groups by ticket, and for each "
-            "in-scope closed ticket verifies that verify.require_environment (or "
-            "--require-environment) "
-            "produced a valid completion-verifier op-cert against its OUT-OF-BAND-PINNED key "
-            "(.rebar/trusted_environments.yaml). Advisory unless a required environment is set, in "
-            "which case any ENFORCED closed ticket without a valid cert fails the gate (non-zero "
-            "exit). Tickets whose close commit predates --since / verify.opcert_enforce_since are "
-            "grandfathered: reported but never fail the gate."
+            "Verify the required-environment operation certificate of the store's closed "
+            "tickets, which is the op-cert merge-gate. It walks the merged log, groups events "
+            "by ticket, and for each in-scope closed ticket verifies that "
+            "verify.require_environment (or --require-environment) produced a valid "
+            "completion-verifier op-cert against its out-of-band-pinned key in "
+            ".rebar/trusted_environments.yaml. It is advisory unless a required environment is "
+            "set, in which case any enforced closed ticket without a valid cert fails the gate "
+            "with a non-zero exit. Tickets whose close commit predates --since or "
+            "verify.opcert_enforce_since are grandfathered, which means they are reported but "
+            "never fail the gate."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -55,7 +56,7 @@ def build_opcert(*, prog: str) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--since",
-        help="grandfather boundary: only enforce tickets closed at/descending this ref "
+        help="grandfather boundary. Only enforce tickets closed at or descending this ref "
         "(default: verify.opcert_enforce_since)",
     )
     parser.add_argument(
@@ -64,7 +65,7 @@ def build_opcert(*, prog: str) -> argparse.ArgumentParser:
         default="text",
         help="output format (default: text). json prints only a report array to stdout",
     )
-    parser.add_argument("--root", help="repo root (default: cwd); resolves the ticket store")
+    parser.add_argument("--root", help="repo root that resolves the ticket store (default: cwd)")
     return parser
 
 
@@ -85,7 +86,7 @@ def build_commit_ticket(*, prog: str) -> argparse.ArgumentParser:
     src.add_argument("--rev", help="git revision to read the message from (default: HEAD)")
     src.add_argument("--message-file", help="read the commit message from this file")
     src.add_argument("--message", help="the commit message text (inline)")
-    parser.add_argument("--root", help="repo root (default: cwd); resolves the ticket store")
+    parser.add_argument("--root", help="repo root that resolves the ticket store (default: cwd)")
     return parser
 
 
@@ -96,12 +97,12 @@ def build_identity(*, prog: str) -> argparse.ArgumentParser:
         usage=IDENTITY_USAGE,
         description=(
             "Verify authenticated authorship of the store's mutating events against each "
-            "author identity's epoch-scoped keyring (the authorship merge-gate; also available "
-            "under the back-compat alias `rebar verify-authorship`). Advisory unless "
-            "identity.require_authenticated (or --require-authenticated) is on, in which case "
-            "any ENFORCED event that is not `verified` fails the gate (non-zero exit). Events "
-            "whose introducing commit predates --since / identity.enforce_since are "
-            "grandfathered: reported but never fail the gate."
+            "author identity's epoch-scoped keyring. This is the authorship merge-gate, also "
+            "available under the back-compat alias `rebar verify-authorship`. It is advisory "
+            "unless identity.require_authenticated (or --require-authenticated) is on, in which "
+            "case any enforced event that is not `verified` fails the gate with a non-zero "
+            "exit. Events whose introducing commit predates --since or identity.enforce_since "
+            "are grandfathered, which means they are reported but never fail the gate."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -111,11 +112,11 @@ def build_identity(*, prog: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--require-authenticated",
         action="store_true",
-        help="force enforcement on regardless of identity.require_authenticated config",
+        help="force enforcement on, regardless of the identity.require_authenticated config",
     )
     parser.add_argument(
         "--since",
-        help="grandfather boundary: only enforce events at/descending this ref "
+        help="grandfather boundary. Only enforce events at or descending this ref "
         "(default: identity.enforce_since)",
     )
     parser.add_argument(
@@ -124,5 +125,5 @@ def build_identity(*, prog: str) -> argparse.ArgumentParser:
         default="text",
         help="output format (default: text). json prints only a report array to stdout",
     )
-    parser.add_argument("--root", help="repo root (default: cwd); resolves the ticket store")
+    parser.add_argument("--root", help="repo root that resolves the ticket store (default: cwd)")
     return parser

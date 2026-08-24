@@ -1,15 +1,15 @@
 Usage: rebar verify-opcert [--require-environment <env_id>] [--since <ref>] [--format {text,json}] [--root <path>]
 
-Verify the required-environment operation certificate of the store's CLOSED tickets (the op-cert merge-gate). Walks the merged log, groups by ticket, and for each in-scope closed ticket verifies that verify.require_environment (or --require-environment) produced a valid completion-verifier op-cert against its OUT-OF-BAND-PINNED key (.rebar/trusted_environments.yaml). Advisory unless a required environment is set, in which case any ENFORCED closed ticket without a valid cert fails the gate (non-zero exit). Tickets whose close commit predates --since / verify.opcert_enforce_since are grandfathered: reported but never fail the gate.
+Verify the required-environment operation certificate of the store's closed tickets, which is the op-cert merge-gate. It walks the merged log, groups events by ticket, and for each in-scope closed ticket verifies that verify.require_environment (or --require-environment) produced a valid completion-verifier op-cert against its out-of-band-pinned key in .rebar/trusted_environments.yaml. It is advisory unless a required environment is set, in which case any enforced closed ticket without a valid cert fails the gate with a non-zero exit. Tickets whose close commit predates --since or verify.opcert_enforce_since are grandfathered, which means they are reported but never fail the gate.
 
 options:
   -h, --help            show this help message and exit
   --require-environment ENV_ID
                         environment that must sign (default:
                         verify.require_environment)
-  --since SINCE         grandfather boundary: only enforce tickets closed
-                        at/descending this ref (default:
+  --since SINCE         grandfather boundary. Only enforce tickets closed at or
+                        descending this ref (default:
                         verify.opcert_enforce_since)
   --format {text,json}  output format (default: text). json prints only a report
                         array to stdout
-  --root ROOT           repo root (default: cwd); resolves the ticket store
+  --root ROOT           repo root that resolves the ticket store (default: cwd)

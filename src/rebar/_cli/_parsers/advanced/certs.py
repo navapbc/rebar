@@ -32,8 +32,8 @@ def build_trusted_env(*, prog: str) -> argparse.ArgumentParser:
     )
     parser.add_argument("verb", choices=("add", "revoke"))
     parser.add_argument("env_id")
-    parser.add_argument("target", help="<public_key> for add; <public_key-or-index> for revoke")
-    parser.add_argument("--root", help="repo root (default: cwd); resolves the ticket store")
+    parser.add_argument("target", help="<public_key> for add, or <public_key-or-index> for revoke")
+    parser.add_argument("--root", help="repo root that resolves the ticket store (default: cwd)")
     return parser
 
 

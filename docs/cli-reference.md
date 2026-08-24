@@ -818,8 +818,8 @@ options:
 ```
 Usage: rebar review-code [-h] [--base BASE] [--head HEAD] [--diff-file DIFF_FILE] [--reviewer REVIEWERS] [--output {json,text}] [--ref REF] [--source {attested,local}]
 
-Run an LLM code review of a change (git range or diff file) and emit aggregated
-structured findings. Needs the 'agents' extra + an API key.
+Run an LLM code review of a change (a git range or a diff file) and emit
+aggregated structured findings. Requires the 'agents' extra and an API key.
 
 options:
   -h, --help            show this help message and exit
@@ -827,15 +827,16 @@ options:
   --head HEAD           head git ref (default HEAD)
   --diff-file DIFF_FILE
                         review this unified-diff file instead of a git range
-  --reviewer REVIEWERS  reviewer id (repeatable; default: deterministic
+  --reviewer REVIEWERS  reviewer id, repeatable (default: deterministic
                         selection)
   --output, -o {json,text}
-  --ref REF             branch | tag | SHA to verify against (default: the
-                        reviewed --head)
+  --ref REF             a branch, tag, or commit SHA to verify against (default:
+                        the reviewed --head)
   --source {attested,local}
-                        attested (default): verify a snapshot pinned at --ref
-                        (signs, records verified_at_sha); local: read the in-
-                        place checkout (dirty allowed, never signs)
+                        attested (default) verifies a snapshot pinned at --ref,
+                        signs the result, and records verified_at_sha. local
+                        reads the in-place checkout, allows a dirty tree, and
+                        never signs
 ```
 
 ### `scan-spec`
@@ -844,7 +845,7 @@ options:
 Usage: rebar scan-spec [-h] --spec-file SPEC_FILE [--batch-size BATCH_SIZE] [--epic EPICS] [--output {json,text}] [--ref REF] [--source {attested,local}]
 
 Batch-scan open epics against a specification and emit structured findings
-(gaps/conflicts/overlaps). Needs the 'agents' extra.
+(gaps, conflicts, and overlaps). Requires the 'agents' extra.
 
 options:
   -h, --help            show this help message and exit
@@ -852,21 +853,22 @@ options:
                         path to the specification text
   --batch-size BATCH_SIZE
                         epics per batch (default 5)
-  --epic EPICS          restrict to these epic ids (repeatable; default: all
+  --epic EPICS          restrict to these epic ids, repeatable (default: all
                         open epics)
   --output, -o {json,text}
-  --ref REF             branch | tag | SHA to verify against (default:
-                        origin/main; configurable via REBAR_GATE_REF /
-                        [snapshot].ref) — pass --ref HEAD when the review
-                        depends on code you have committed locally but not yet
-                        landed on the default ref (a stacked change or feature
-                        branch): the default ref reads a snapshot predating that
-                        code, so symbols it adds read as 'does not exist' false
-                        findings
+  --ref REF             a branch, tag, or commit SHA to verify against (default:
+                        origin/main, configurable through REBAR_GATE_REF or
+                        [snapshot].ref). Pass --ref HEAD when the review depends
+                        on code you have committed locally but have not yet
+                        landed on the default ref, such as a stacked change or
+                        feature branch. The default ref reads a snapshot that
+                        predates that code, so symbols it adds report as 'does
+                        not exist' false findings
   --source {attested,local}
-                        attested (default): verify a snapshot pinned at --ref
-                        (signs, records verified_at_sha); local: read the in-
-                        place checkout (dirty allowed, never signs)
+                        attested (default) verifies a snapshot pinned at --ref,
+                        signs the result, and records verified_at_sha. local
+                        reads the in-place checkout, allows a dirty tree, and
+                        never signs
 ```
 
 ### `verify-completion`
@@ -874,43 +876,45 @@ options:
 ```
 Usage: rebar verify-completion [-h] [--graph | --no-graph] [--output {json,text}] [--check] [--no-sign] [--ref REF] [--source {attested,local}] [ticket_id]
 
-Run the completion-verifier agent on a ticket and emit a PASS/FAIL verdict that
-its completion requirements (acceptance/success/close criteria, definitions of
-done; for bugs, that the bug is resolved) are demonstrably met by the
-implementation. Needs the 'agents' extra + a model API key; see `rebar verify-
-completion --check`.
+Run the completion-verifier agent on a ticket and emit a PASS or FAIL verdict
+for whether its completion requirements are demonstrably met by the
+implementation. Completion requirements are the acceptance, success, and close
+criteria and the definitions of done, and for a bug, that the bug is resolved.
+Requires the 'agents' extra and a model API key. Run `rebar verify-completion
+--check` to confirm availability.
 
 positional arguments:
   ticket_id             ticket id, short id, or alias
 
 options:
   -h, --help            show this help message and exit
-  --graph, --no-graph   include the ticket's descendants; use --no-graph to
-                        force own-criteria verification (default: auto — on for
-                        epics, off otherwise)
+  --graph, --no-graph   include the ticket's descendants. Use --no-graph to
+                        force own-criteria verification (default: auto, on for
+                        epics and off otherwise)
   --output, -o {json,text}
   --check               print backend/credential availability and exit
-  --no-sign             run the verifier but do NOT SIGN a reusable completion-
-                        verifier attestation. By default an attested
-                        (source=attested) PASS SIGNS that attestation — what a
-                        later same-ref `rebar transition ... closed` REUSES to
-                        skip a duplicate (billable) verifier run — so this flag
-                        is the explicit opt-out. The COMPLETION_VERDICT sidecar
-                        is STILL emitted for both PASS and FAIL (only the
-                        signature is skipped). A local (--source local) verdict
-                        is never signed regardless
-  --ref REF             branch | tag | SHA to verify against (default:
-                        origin/main; configurable via REBAR_GATE_REF /
-                        [snapshot].ref) — pass --ref HEAD when the review
-                        depends on code you have committed locally but not yet
-                        landed on the default ref (a stacked change or feature
-                        branch): the default ref reads a snapshot predating that
-                        code, so symbols it adds read as 'does not exist' false
-                        findings
+  --no-sign             run the verifier but do not sign a reusable completion-
+                        verifier attestation. By default an attested PASS
+                        (source=attested) signs that attestation, which a later
+                        same-ref `rebar transition ... closed` reuses to skip a
+                        duplicate billable verifier run, so this flag is the
+                        explicit opt-out. The COMPLETION_VERDICT sidecar is
+                        still emitted for both PASS and FAIL, and only the
+                        signature is skipped. A local verdict (--source local)
+                        is never signed
+  --ref REF             a branch, tag, or commit SHA to verify against (default:
+                        origin/main, configurable through REBAR_GATE_REF or
+                        [snapshot].ref). Pass --ref HEAD when the review depends
+                        on code you have committed locally but have not yet
+                        landed on the default ref, such as a stacked change or
+                        feature branch. The default ref reads a snapshot that
+                        predates that code, so symbols it adds report as 'does
+                        not exist' false findings
   --source {attested,local}
-                        attested (default): verify a snapshot pinned at --ref
-                        (signs, records verified_at_sha); local: read the in-
-                        place checkout (dirty allowed, never signs)
+                        attested (default) verifies a snapshot pinned at --ref,
+                        signs the result, and records verified_at_sha. local
+                        reads the in-place checkout, allows a dirty tree, and
+                        never signs
 ```
 
 ### `review-plan`
@@ -918,9 +922,10 @@ options:
 ```
 Usage: rebar review-plan [-h] [--output {json,text}] [--no-sign] [--force] [--check] [--status] [--retry] [--ref REF] [--source {attested,local}] [ticket_id]
 
-Run the plan-review gate on a ticket: a deterministic Layer-1 floor + a four-
-pass (find → verify → decide → coach) review of the plan, then sign a plan-
-review attestation on a non-blocking PASS. The inverse of verify-completion.
+Run the plan-review gate on a ticket. The gate applies a deterministic Layer-1
+floor and a four-pass review of the plan (find, verify, decide, then coach),
+then signs a plan-review attestation on a non-blocking PASS. It is the inverse
+of verify-completion.
 
 positional arguments:
   ticket_id             ticket id, short id, or alias
@@ -928,58 +933,61 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --output, -o {json,text}
-  --no-sign             run the review but do NOT sign an attestation. By
-                        default a non-blocking PASS SIGNS one — that attestation
-                        is the review's durable product, and it is what the
-                        claim gate consumes — so this flag is the explicit opt-
-                        out, not the way to get a signature. An unsigned PASS
-                        leaves the claim gate unsatisfied; recover a lost
-                        signature cheaply (no LLM) with `rebar sign-review <id>`
-  --force               re-run the review even if a current attestation exists
-                        (bypass the idempotence short-circuit); also reviews a
-                        ticket that is not yet claimable (closed/idea/blocked
-                        status, or blocked by an unclosed dependency), which is
-                        otherwise fast-failed without running the LLM
-  --check               print backend/credential availability and exit; does NOT
-                        inspect a ticket's attestation status (for that, use
-                        --status)
-  --status              read-only: report whether the ticket's plan-review
-                        attestation is CURRENT right now (no model call, no
-                        network, no re-sign); prints the verdict + bound
-                        verified-at-sha. Exit 0 when current, 12 when
-                        stale/absent
-  --retry               resume ONLY the exact latest eligible INDETERMINATE
-                        review: reuse the checkpointed findings of its already-
-                        successful units and issue model calls only for the
-                        missing units, under a FRESH per-invocation attempt
-                        budget. Eligible only when the latest retained
+  --no-sign             run the review but do not sign an attestation. By
+                        default a non-blocking PASS signs one. That attestation
+                        is the durable product of the review, and it is what the
+                        claim gate consumes, so this flag is the explicit opt-
+                        out rather than the way to get a signature. An unsigned
+                        PASS leaves the claim gate unsatisfied. Recover a lost
+                        signature cheaply, with no LLM call, using `rebar sign-
+                        review <id>`
+  --force               re-run the review even if a current attestation exists,
+                        bypassing the idempotence short-circuit. It also reviews
+                        a ticket that is not yet claimable (closed, idea, or
+                        blocked status, or blocked by an unclosed dependency),
+                        which is otherwise fast-failed without running the LLM
+  --check               print backend and credential availability and exit. This
+                        does not inspect a ticket's attestation status. Use
+                        --status for that
+  --status              report read-only whether the ticket's plan-review
+                        attestation is current right now, with no model call, no
+                        network, and no re-sign. Prints the verdict and the
+                        bound verified-at-sha. Exit 0 when current and 12 when
+                        stale or absent
+  --retry               resume only the exact latest eligible INDETERMINATE
+                        review. It reuses the checkpointed findings of the
+                        already-successful units and issues model calls only for
+                        the missing units, under a fresh per-invocation attempt
+                        budget. It is eligible only when the latest retained
                         REVIEW_RESULT is INDETERMINATE with a versioned
                         discovery journal and at least one retryable missing
-                        unit; a PASS/BLOCK, a non-retryable indeterminate, or a
-                        missing/legacy/corrupt/stale/digest-mismatched journal
-                        is REFUSED before any model call (exit 2) with the
-                        normal full-review remedy. Cumulative retry lineage is
-                        recorded as audit telemetry and never enforced as a cap.
-                        Mutually exclusive with --force, --status, and --check;
+                        unit. A PASS or BLOCK verdict, a non-retryable
+                        indeterminate, or a missing, legacy, corrupt, stale, or
+                        digest-mismatched journal is refused before any model
+                        call (exit 2) with the normal full-review remedy.
+                        Cumulative retry lineage is recorded as audit telemetry
+                        and is never enforced as a cap. This flag is mutually
+                        exclusive with --force, --status, and --check, and is
                         compatible with --no-sign. The retry response stays a
-                        narrow end-result view — the per-unit journal is never
-                        printed
-  --ref REF             branch | tag | SHA to verify against (default:
-                        origin/main; configurable via REBAR_GATE_REF /
-                        [snapshot].ref) — pass --ref HEAD when the review
-                        depends on code you have committed locally but not yet
-                        landed on the default ref (a stacked change or feature
-                        branch): the default ref reads a snapshot predating that
-                        code, so symbols it adds read as 'does not exist' false
-                        findings
+                        narrow end-result view, and the per-unit journal is
+                        never printed
+  --ref REF             a branch, tag, or commit SHA to verify against (default:
+                        origin/main, configurable through REBAR_GATE_REF or
+                        [snapshot].ref). Pass --ref HEAD when the review depends
+                        on code you have committed locally but have not yet
+                        landed on the default ref, such as a stacked change or
+                        feature branch. The default ref reads a snapshot that
+                        predates that code, so symbols it adds report as 'does
+                        not exist' false findings
   --source {attested,local}
-                        attested (default): verify a snapshot pinned at --ref
-                        (signs, records verified_at_sha); local: read the in-
-                        place checkout (dirty allowed, never signs)
+                        attested (default) verifies a snapshot pinned at --ref,
+                        signs the result, and records verified_at_sha. local
+                        reads the in-place checkout, allows a dirty tree, and
+                        never signs
 
-Coaching deep-links + `rebar explain <criterion-id>` reference the criteria
+Coaching deep-links and `rebar explain <criterion-id>` reference the criteria
 authoring guide at https://github.com/navapbc/rebar/blob/main/docs/plan-review-
-criteria-guide.md (anchor `#<criterion-id lower-cased>`; override the base with
+criteria-guide.md (anchor `#<criterion-id lower-cased>`, override the base with
 REBAR_DOCS_URL).
 ```
 
@@ -988,12 +996,12 @@ REBAR_DOCS_URL).
 ```
 Usage: rebar sign-review [-h] [--output {json,text}] [ticket_id]
 
-Cheaply (re)persist the plan-review attestation for an already-computed, still-
-valid PASS verdict from the latest REVIEW_RESULT sidecar — WITHOUT re-running
-the multi-pass LLM review. Use it to recover a signature that a `rebar review-
-plan` computed but failed to persist (e.g. a transient git index.lock). Refuses
-to sign a non-PASS or a verdict that is stale because the plan changed since the
-review.
+Persist the plan-review attestation again, cheaply, for an already-computed and
+still-valid PASS verdict from the latest REVIEW_RESULT sidecar, without re-
+running the multi-pass LLM review. Use it to recover a signature that `rebar
+review-plan` computed but failed to persist, for example after a transient git
+index.lock. It refuses to sign a non-PASS verdict or a verdict that is stale
+because the plan changed since the review.
 
 positional arguments:
   ticket_id             ticket id, short id, or alias
@@ -1011,7 +1019,7 @@ Usage: rebar enrich [-h] [--drain] [--once] [{status}]
 Inspect or drain the ticket enrichment queue.
 
 positional arguments:
-  {status}    'status' prints the queue buckets as JSON; omit to drain
+  {status}    'status' prints the queue buckets as JSON. Omit to drain
 
 options:
   -h, --help  show this help message and exit
@@ -1024,14 +1032,14 @@ options:
 ```
 Usage: rebar explain [-h] [topic]
 
-Print a plan-review criterion's authoring-guide section (e.g. `rebar explain
-F1`), or an author-facing prose guide (commit-trailer, plan, review) — e.g.
-`rebar explain plan` for how to write a plan that passes the plan-review gate.
-One shared lookup with the MCP explain_criterion tool.
+Print a plan-review criterion's authoring-guide section (for example `rebar
+explain F1`), or an author-facing prose guide (commit-trailer, plan, review).
+For example, `rebar explain plan` explains how to write a plan that passes the
+plan-review gate. One shared lookup with the MCP explain_criterion tool.
 
 positional arguments:
-  topic       a plan-review criterion id (e.g. F1, G3) or a guide (commit-
-              trailer, plan, review)
+  topic       a plan-review criterion id (for example F1 or G3) or a guide
+              (commit-trailer, plan, review)
 
 options:
   -h, --help  show this help message and exit
@@ -1063,7 +1071,7 @@ options:
   --message-file MESSAGE_FILE
                         read the commit message from this file
   --message MESSAGE     the commit message text (inline)
-  --root ROOT           repo root (default: cwd); resolves the ticket store
+  --root ROOT           repo root that resolves the ticket store (default: cwd)
 ```
 
 ### `verify-identity`
@@ -1071,7 +1079,7 @@ options:
 ```
 Usage: rebar verify-identity [--all | --base <ref>] [--require-authenticated] [--since <ref>] [--format {text,json}] [--root <path>]
 
-Verify authenticated authorship of the store's mutating events against each author identity's epoch-scoped keyring (the authorship merge-gate; also available under the back-compat alias `rebar verify-authorship`). Advisory unless identity.require_authenticated (or --require-authenticated) is on, in which case any ENFORCED event that is not `verified` fails the gate (non-zero exit). Events whose introducing commit predates --since / identity.enforce_since are grandfathered: reported but never fail the gate.
+Verify authenticated authorship of the store's mutating events against each author identity's epoch-scoped keyring. This is the authorship merge-gate, also available under the back-compat alias `rebar verify-authorship`. It is advisory unless identity.require_authenticated (or --require-authenticated) is on, in which case any enforced event that is not `verified` fails the gate with a non-zero exit. Events whose introducing commit predates --since or identity.enforce_since are grandfathered, which means they are reported but never fail the gate.
 
 options:
   -h, --help            show this help message and exit
@@ -1079,13 +1087,13 @@ options:
   --base BASE           only events changed in <base>..HEAD on the tracker
                         branch
   --require-authenticated
-                        force enforcement on regardless of
+                        force enforcement on, regardless of the
                         identity.require_authenticated config
-  --since SINCE         grandfather boundary: only enforce events at/descending
-                        this ref (default: identity.enforce_since)
+  --since SINCE         grandfather boundary. Only enforce events at or
+                        descending this ref (default: identity.enforce_since)
   --format {text,json}  output format (default: text). json prints only a report
                         array to stdout
-  --root ROOT           repo root (default: cwd); resolves the ticket store
+  --root ROOT           repo root that resolves the ticket store (default: cwd)
 ```
 
 ### `verify-authorship`
@@ -1093,7 +1101,7 @@ options:
 ```
 Usage: rebar verify-identity [--all | --base <ref>] [--require-authenticated] [--since <ref>] [--format {text,json}] [--root <path>]
 
-Verify authenticated authorship of the store's mutating events against each author identity's epoch-scoped keyring (the authorship merge-gate; also available under the back-compat alias `rebar verify-authorship`). Advisory unless identity.require_authenticated (or --require-authenticated) is on, in which case any ENFORCED event that is not `verified` fails the gate (non-zero exit). Events whose introducing commit predates --since / identity.enforce_since are grandfathered: reported but never fail the gate.
+Verify authenticated authorship of the store's mutating events against each author identity's epoch-scoped keyring. This is the authorship merge-gate, also available under the back-compat alias `rebar verify-authorship`. It is advisory unless identity.require_authenticated (or --require-authenticated) is on, in which case any enforced event that is not `verified` fails the gate with a non-zero exit. Events whose introducing commit predates --since or identity.enforce_since are grandfathered, which means they are reported but never fail the gate.
 
 options:
   -h, --help            show this help message and exit
@@ -1101,13 +1109,13 @@ options:
   --base BASE           only events changed in <base>..HEAD on the tracker
                         branch
   --require-authenticated
-                        force enforcement on regardless of
+                        force enforcement on, regardless of the
                         identity.require_authenticated config
-  --since SINCE         grandfather boundary: only enforce events at/descending
-                        this ref (default: identity.enforce_since)
+  --since SINCE         grandfather boundary. Only enforce events at or
+                        descending this ref (default: identity.enforce_since)
   --format {text,json}  output format (default: text). json prints only a report
                         array to stdout
-  --root ROOT           repo root (default: cwd); resolves the ticket store
+  --root ROOT           repo root that resolves the ticket store (default: cwd)
 ```
 
 ### `verify-opcert`
@@ -1115,19 +1123,19 @@ options:
 ```
 Usage: rebar verify-opcert [--require-environment <env_id>] [--since <ref>] [--format {text,json}] [--root <path>]
 
-Verify the required-environment operation certificate of the store's CLOSED tickets (the op-cert merge-gate). Walks the merged log, groups by ticket, and for each in-scope closed ticket verifies that verify.require_environment (or --require-environment) produced a valid completion-verifier op-cert against its OUT-OF-BAND-PINNED key (.rebar/trusted_environments.yaml). Advisory unless a required environment is set, in which case any ENFORCED closed ticket without a valid cert fails the gate (non-zero exit). Tickets whose close commit predates --since / verify.opcert_enforce_since are grandfathered: reported but never fail the gate.
+Verify the required-environment operation certificate of the store's closed tickets, which is the op-cert merge-gate. It walks the merged log, groups events by ticket, and for each in-scope closed ticket verifies that verify.require_environment (or --require-environment) produced a valid completion-verifier op-cert against its out-of-band-pinned key in .rebar/trusted_environments.yaml. It is advisory unless a required environment is set, in which case any enforced closed ticket without a valid cert fails the gate with a non-zero exit. Tickets whose close commit predates --since or verify.opcert_enforce_since are grandfathered, which means they are reported but never fail the gate.
 
 options:
   -h, --help            show this help message and exit
   --require-environment ENV_ID
                         environment that must sign (default:
                         verify.require_environment)
-  --since SINCE         grandfather boundary: only enforce tickets closed
-                        at/descending this ref (default:
+  --since SINCE         grandfather boundary. Only enforce tickets closed at or
+                        descending this ref (default:
                         verify.opcert_enforce_since)
   --format {text,json}  output format (default: text). json prints only a report
                         array to stdout
-  --root ROOT           repo root (default: cwd); resolves the ticket store
+  --root ROOT           repo root that resolves the ticket store (default: cwd)
 ```
 
 ### `trusted-env`
@@ -1141,10 +1149,10 @@ Add or revoke trusted environment keys with ticket log position anchors.
 positional arguments:
   {add,revoke}
   env_id
-  target        <public_key> for add; <public_key-or-index> for revoke
+  target        <public_key> for add, or <public_key-or-index> for revoke
 
 options:
-  --root ROOT   repo root (default: cwd); resolves the ticket store
+  --root ROOT   repo root that resolves the ticket store (default: cwd)
 ```
 
 ### `remote-cert`
@@ -1152,17 +1160,19 @@ options:
 ```
 Usage: rebar remote-cert <ticket-id> {completion-verifier|plan-review} [--root <path>]
 
-``rebar remote-cert <ticket-id> <kind>`` — request a trusted-environment op-cert
-(story ee0b). Routes a gate run to the trusted op-cert service at
-``verify.opcert_remote_url``: SigV4-signs the request with ambient AWS
-credentials, submits the async job, polls to a terminal status, and on a
-``PASS`` verdict PERSISTS the returned envelope + its bound fields as a
-``SIGNATURE`` event (the SAME record shape ``signing.sign_opcert_manifest``
-appends; auto-pushed with the tickets branch). This is safe because the envelope
-is self-authenticating — tampering with a bound value breaks the signature the
-merge gate (``rebar verify-opcert``) verifies. A non-PASS / error verdict exits
-non-zero. The remote path is entirely opt-in: unset ``verify.opcert_remote_url``
-→ a clear error, and NO local op-cert sign/verify path ever depends on it.
+Request a trusted-environment op-cert with `rebar remote-cert <ticket-id>
+<kind>`. Routes a gate run to the trusted op-cert service at
+`verify.opcert_remote_url`. It signs the request with SigV4 using ambient AWS
+credentials, submits the asynchronous job, polls until a terminal status, and on
+a `PASS` verdict persists the returned envelope and its bound fields as a
+`SIGNATURE` event. That event uses the same record shape that
+`signing.sign_opcert_manifest` appends, and it auto-pushes with the tickets
+branch. The result is safe because the envelope is self-authenticating, so
+tampering with a bound value breaks the signature that the merge gate `rebar
+verify-opcert` verifies. A non-PASS or error verdict exits non-zero. The remote
+path is entirely opt-in. When `verify.opcert_remote_url` is unset the command
+reports a clear error, and no local op-cert sign or verify path ever depends on
+it.
 
 positional arguments:
   ticket_id             the ticket to certify

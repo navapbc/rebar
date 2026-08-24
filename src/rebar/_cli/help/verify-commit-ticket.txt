@@ -21,4 +21,4 @@ options:
   --message-file MESSAGE_FILE
                         read the commit message from this file
   --message MESSAGE     the commit message text (inline)
-  --root ROOT           repo root (default: cwd); resolves the ticket store
+  --root ROOT           repo root that resolves the ticket store (default: cwd)

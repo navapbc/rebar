@@ -1,16 +1,18 @@
 Usage: rebar remote-cert <ticket-id> {completion-verifier|plan-review} [--root <path>]
 
-``rebar remote-cert <ticket-id> <kind>`` — request a trusted-environment op-cert
-(story ee0b). Routes a gate run to the trusted op-cert service at
-``verify.opcert_remote_url``: SigV4-signs the request with ambient AWS
-credentials, submits the async job, polls to a terminal status, and on a
-``PASS`` verdict PERSISTS the returned envelope + its bound fields as a
-``SIGNATURE`` event (the SAME record shape ``signing.sign_opcert_manifest``
-appends; auto-pushed with the tickets branch). This is safe because the envelope
-is self-authenticating — tampering with a bound value breaks the signature the
-merge gate (``rebar verify-opcert``) verifies. A non-PASS / error verdict exits
-non-zero. The remote path is entirely opt-in: unset ``verify.opcert_remote_url``
-→ a clear error, and NO local op-cert sign/verify path ever depends on it.
+Request a trusted-environment op-cert with `rebar remote-cert <ticket-id>
+<kind>`. Routes a gate run to the trusted op-cert service at
+`verify.opcert_remote_url`. It signs the request with SigV4 using ambient AWS
+credentials, submits the asynchronous job, polls until a terminal status, and on
+a `PASS` verdict persists the returned envelope and its bound fields as a
+`SIGNATURE` event. That event uses the same record shape that
+`signing.sign_opcert_manifest` appends, and it auto-pushes with the tickets
+branch. The result is safe because the envelope is self-authenticating, so
+tampering with a bound value breaks the signature that the merge gate `rebar
+verify-opcert` verifies. A non-PASS or error verdict exits non-zero. The remote
+path is entirely opt-in. When `verify.opcert_remote_url` is unset the command
+reports a clear error, and no local op-cert sign or verify path ever depends on
+it.
 
 positional arguments:
   ticket_id             the ticket to certify

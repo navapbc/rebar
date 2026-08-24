@@ -31,22 +31,25 @@ def _add_ref_source(
     ``[snapshot]`` > built-in default). ``ref_configurable=False`` (review-code, whose ref
     defaults to the reviewed ``head``, not the cross-gate ``origin/main``) drops the
     config-override note so the help text matches the actual resolution."""
-    ref_help = f"branch | tag | SHA to verify against (default: {ref_default}"
-    ref_help += "; configurable via REBAR_GATE_REF / [snapshot].ref)" if ref_configurable else ")"
     if ref_configurable:
-        ref_help += (
-            " — pass --ref HEAD when the review depends on code you have committed "
-            "locally but not yet landed on the default ref (a stacked change or feature "
-            "branch): the default ref reads a snapshot predating that code, so symbols it "
-            "adds read as 'does not exist' false findings"
+        ref_help = (
+            f"a branch, tag, or commit SHA to verify against (default: {ref_default}, "
+            "configurable through REBAR_GATE_REF or [snapshot].ref). Pass --ref HEAD when "
+            "the review depends on code you have committed locally but have not yet landed "
+            "on the default ref, such as a stacked change or feature branch. The default "
+            "ref reads a snapshot that predates that code, so symbols it adds report as "
+            "'does not exist' false findings"
         )
+    else:
+        ref_help = f"a branch, tag, or commit SHA to verify against (default: {ref_default})"
     parser.add_argument("--ref", default=None, help=ref_help)
     parser.add_argument(
         "--source",
         choices=["attested", "local"],
         default=None,
-        help="attested (default): verify a snapshot pinned at --ref (signs, records "
-        "verified_at_sha); local: read the in-place checkout (dirty allowed, never signs)",
+        help="attested (default) verifies a snapshot pinned at --ref, signs the result, "
+        "and records verified_at_sha. local reads the in-place checkout, allows a dirty "
+        "tree, and never signs",
     )
 
 
@@ -54,8 +57,8 @@ def build_review_code(*, prog: str) -> argparse.ArgumentParser:
     """Build the ``rebar review-code`` parser bound to ``prog``."""
     parser = build_argument_parser(
         prog=prog,
-        description="Run an LLM code review of a change (git range or diff file) and "
-        "emit aggregated structured findings. Needs the 'agents' extra + an API key.",
+        description="Run an LLM code review of a change (a git range or a diff file) and "
+        "emit aggregated structured findings. Requires the 'agents' extra and an API key.",
         formatter_class=argparse.HelpFormatter,
     )
     parser.add_argument("--base", default="HEAD~1", help="base git ref (default HEAD~1)")
@@ -65,7 +68,7 @@ def build_review_code(*, prog: str) -> argparse.ArgumentParser:
         "--reviewer",
         action="append",
         dest="reviewers",
-        help="reviewer id (repeatable; default: deterministic selection)",
+        help="reviewer id, repeatable (default: deterministic selection)",
     )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
     _add_ref_source(parser, ref_default="the reviewed --head", ref_configurable=False)
@@ -77,7 +80,7 @@ def build_scan_spec(*, prog: str) -> argparse.ArgumentParser:
     parser = build_argument_parser(
         prog=prog,
         description="Batch-scan open epics against a specification and emit "
-        "structured findings (gaps/conflicts/overlaps). Needs the 'agents' extra.",
+        "structured findings (gaps, conflicts, and overlaps). Requires the 'agents' extra.",
         formatter_class=argparse.HelpFormatter,
     )
     parser.add_argument("--spec-file", required=True, help="path to the specification text")
@@ -86,7 +89,7 @@ def build_scan_spec(*, prog: str) -> argparse.ArgumentParser:
         "--epic",
         action="append",
         dest="epics",
-        help="restrict to these epic ids (repeatable; default: all open epics)",
+        help="restrict to these epic ids, repeatable (default: all open epics)",
     )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
     _add_ref_source(parser)
@@ -97,10 +100,12 @@ def build_verify_completion(*, prog: str) -> argparse.ArgumentParser:
     """Build the ``rebar verify-completion`` parser bound to ``prog``."""
     parser = build_argument_parser(
         prog=prog,
-        description="Run the completion-verifier agent on a ticket and emit a PASS/FAIL verdict "
-        "that its completion requirements (acceptance/success/close criteria, definitions of "
-        "done; for bugs, that the bug is resolved) are demonstrably met by the implementation. "
-        "Needs the 'agents' extra + a model API key; see `rebar verify-completion --check`.",
+        description="Run the completion-verifier agent on a ticket and emit a PASS or FAIL "
+        "verdict for whether its completion requirements are demonstrably met by the "
+        "implementation. Completion requirements are the acceptance, success, and close "
+        "criteria and the definitions of done, and for a bug, that the bug is resolved. "
+        "Requires the 'agents' extra and a model API key. Run `rebar verify-completion "
+        "--check` to confirm availability.",
         formatter_class=argparse.HelpFormatter,
     )
     parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
@@ -108,8 +113,8 @@ def build_verify_completion(*, prog: str) -> argparse.ArgumentParser:
         "--graph",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="include the ticket's descendants; use --no-graph to force own-criteria "
-        "verification (default: auto — on for epics, off otherwise)",
+        help="include the ticket's descendants. Use --no-graph to force own-criteria "
+        "verification (default: auto, on for epics and off otherwise)",
     )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
     parser.add_argument(
@@ -118,12 +123,12 @@ def build_verify_completion(*, prog: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-sign",
         action="store_true",
-        help="run the verifier but do NOT SIGN a reusable completion-verifier attestation. By "
-        "default an attested (source=attested) PASS SIGNS that attestation — what a later "
-        "same-ref `rebar transition ... closed` REUSES to skip a duplicate (billable) verifier "
-        "run — so this flag is the explicit opt-out. The COMPLETION_VERDICT sidecar is STILL "
-        "emitted for both PASS and FAIL (only the signature is skipped). A local (--source "
-        "local) verdict is never signed regardless",
+        help="run the verifier but do not sign a reusable completion-verifier attestation. "
+        "By default an attested PASS (source=attested) signs that attestation, which a later "
+        "same-ref `rebar transition ... closed` reuses to skip a duplicate billable verifier "
+        "run, so this flag is the explicit opt-out. The COMPLETION_VERDICT sidecar is still "
+        "emitted for both PASS and FAIL, and only the signature is skipped. A local verdict "
+        "(--source local) is never signed",
     )
     _add_ref_source(parser)
     return parser
@@ -136,14 +141,16 @@ def build_explain(*, prog: str) -> argparse.ArgumentParser:
     guides = ", ".join(sorted(registry.AUTHOR_GUIDES))
     parser = build_argument_parser(
         prog=prog,
-        description="Print a plan-review criterion's authoring-guide section (e.g. `rebar explain "
-        f"F1`), or an author-facing prose guide ({guides}) — e.g. `rebar explain plan` for how to "
-        "write a plan that passes the plan-review gate. One shared lookup with the MCP "
-        "explain_criterion tool.",
+        description="Print a plan-review criterion's authoring-guide section (for example "
+        f"`rebar explain F1`), or an author-facing prose guide ({guides}). For example, "
+        "`rebar explain plan` explains how to write a plan that passes the plan-review gate. "
+        "One shared lookup with the MCP explain_criterion tool.",
         formatter_class=argparse.HelpFormatter,
     )
     parser.add_argument(
-        "topic", nargs="?", help=f"a plan-review criterion id (e.g. F1, G3) or a guide ({guides})"
+        "topic",
+        nargs="?",
+        help=f"a plan-review criterion id (for example F1 or G3) or a guide ({guides})",
     )
     return parser
 
@@ -154,13 +161,14 @@ def build_review_plan(*, prog: str) -> argparse.ArgumentParser:
 
     parser = build_argument_parser(
         prog=prog,
-        description="Run the plan-review gate on a ticket: a deterministic Layer-1 floor + a "
-        "four-pass (find → verify → decide → coach) review of the plan, then sign a "
-        "plan-review attestation on a non-blocking PASS. The inverse of verify-completion.",
+        description="Run the plan-review gate on a ticket. The gate applies a deterministic "
+        "Layer-1 floor and a four-pass review of the plan (find, verify, decide, then coach), "
+        "then signs a plan-review attestation on a non-blocking PASS. It is the inverse of "
+        "verify-completion.",
         epilog=(
-            "Coaching deep-links + `rebar explain <criterion-id>` reference the criteria "
+            "Coaching deep-links and `rebar explain <criterion-id>` reference the criteria "
             f"authoring guide at {config.plan_review_docs_url()} "
-            "(anchor `#<criterion-id lower-cased>`; override the base with REBAR_DOCS_URL)."
+            "(anchor `#<criterion-id lower-cased>`, override the base with REBAR_DOCS_URL)."
         ),
         formatter_class=argparse.HelpFormatter,
     )
@@ -169,46 +177,47 @@ def build_review_plan(*, prog: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-sign",
         action="store_true",
-        help="run the review but do NOT sign an attestation. By default a non-blocking PASS "
-        "SIGNS one — that attestation is the review's durable product, and it is what the "
-        "claim gate consumes — so this flag is the explicit opt-out, not the way to get a "
-        "signature. An unsigned PASS leaves the claim gate unsatisfied; recover a lost "
-        "signature cheaply (no LLM) with `rebar sign-review <id>`",
+        help="run the review but do not sign an attestation. By default a non-blocking PASS "
+        "signs one. That attestation is the durable product of the review, and it is what the "
+        "claim gate consumes, so this flag is the explicit opt-out rather than the way to get "
+        "a signature. An unsigned PASS leaves the claim gate unsatisfied. Recover a lost "
+        "signature cheaply, with no LLM call, using `rebar sign-review <id>`",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="re-run the review even if a current attestation exists "
-        "(bypass the idempotence short-circuit); also reviews a ticket that is not "
-        "yet claimable (closed/idea/blocked status, or blocked by an unclosed "
-        "dependency), which is otherwise fast-failed without running the LLM",
+        help="re-run the review even if a current attestation exists, bypassing the "
+        "idempotence short-circuit. It also reviews a ticket that is not yet claimable "
+        "(closed, idea, or blocked status, or blocked by an unclosed dependency), which is "
+        "otherwise fast-failed without running the LLM",
     )
     parser.add_argument(
         "--check",
         action="store_true",
-        help="print backend/credential availability and exit; does NOT inspect a ticket's "
-        "attestation status (for that, use --status)",
+        help="print backend and credential availability and exit. This does not inspect a "
+        "ticket's attestation status. Use --status for that",
     )
     parser.add_argument(
         "--status",
         action="store_true",
-        help="read-only: report whether the ticket's plan-review attestation is CURRENT right "
-        "now (no model call, no network, no re-sign); prints the verdict + bound verified-at-sha. "
-        "Exit 0 when current, 12 when stale/absent",
+        help="report read-only whether the ticket's plan-review attestation is current right "
+        "now, with no model call, no network, and no re-sign. Prints the verdict and the bound "
+        "verified-at-sha. Exit 0 when current and 12 when stale or absent",
     )
     parser.add_argument(
         "--retry",
         action="store_true",
-        help="resume ONLY the exact latest eligible INDETERMINATE review: reuse the "
-        "checkpointed findings of its already-successful units and issue model calls only "
-        "for the missing units, under a FRESH per-invocation attempt budget. Eligible only "
-        "when the latest retained REVIEW_RESULT is INDETERMINATE with a versioned discovery "
-        "journal and at least one retryable missing unit; a PASS/BLOCK, a non-retryable "
-        "indeterminate, or a missing/legacy/corrupt/stale/digest-mismatched journal is "
-        "REFUSED before any model call (exit 2) with the normal full-review remedy. Cumulative "
-        "retry lineage is recorded as audit telemetry and never enforced as a cap. Mutually "
-        "exclusive with --force, --status, and --check; compatible with --no-sign. The retry "
-        "response stays a narrow end-result view — the per-unit journal is never printed",
+        help="resume only the exact latest eligible INDETERMINATE review. It reuses the "
+        "checkpointed findings of the already-successful units and issues model calls only "
+        "for the missing units, under a fresh per-invocation attempt budget. It is eligible "
+        "only when the latest retained REVIEW_RESULT is INDETERMINATE with a versioned "
+        "discovery journal and at least one retryable missing unit. A PASS or BLOCK verdict, a "
+        "non-retryable indeterminate, or a missing, legacy, corrupt, stale, or "
+        "digest-mismatched journal is refused before any model call (exit 2) with the normal "
+        "full-review remedy. Cumulative retry lineage is recorded as audit telemetry and is "
+        "never enforced as a cap. This flag is mutually exclusive with --force, --status, and "
+        "--check, and is compatible with --no-sign. The retry response stays a narrow "
+        "end-result view, and the per-unit journal is never printed",
     )
     _add_ref_source(parser)
     return parser
@@ -218,11 +227,12 @@ def build_sign_review(*, prog: str) -> argparse.ArgumentParser:
     """Build the ``rebar sign-review`` parser bound to ``prog``."""
     parser = build_argument_parser(
         prog=prog,
-        description="Cheaply (re)persist the plan-review attestation for an already-computed, "
-        "still-valid PASS verdict from the latest REVIEW_RESULT sidecar — WITHOUT re-running the "
-        "multi-pass LLM review. Use it to recover a signature that a `rebar review-plan` computed "
-        "but failed to persist (e.g. a transient git index.lock). Refuses to sign a non-PASS or a "
-        "verdict that is stale because the plan changed since the review.",
+        description="Persist the plan-review attestation again, cheaply, for an "
+        "already-computed and still-valid PASS verdict from the latest REVIEW_RESULT sidecar, "
+        "without re-running the multi-pass LLM review. Use it to recover a signature that "
+        "`rebar review-plan` computed but failed to persist, for example after a transient "
+        "git index.lock. It refuses to sign a non-PASS verdict or a verdict that is stale "
+        "because the plan changed since the review.",
         formatter_class=argparse.HelpFormatter,
     )
     parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")

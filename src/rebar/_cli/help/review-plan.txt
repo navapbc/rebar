@@ -1,8 +1,9 @@
 Usage: rebar review-plan [-h] [--output {json,text}] [--no-sign] [--force] [--check] [--status] [--retry] [--ref REF] [--source {attested,local}] [ticket_id]
 
-Run the plan-review gate on a ticket: a deterministic Layer-1 floor + a four-
-pass (find → verify → decide → coach) review of the plan, then sign a plan-
-review attestation on a non-blocking PASS. The inverse of verify-completion.
+Run the plan-review gate on a ticket. The gate applies a deterministic Layer-1
+floor and a four-pass review of the plan (find, verify, decide, then coach),
+then signs a plan-review attestation on a non-blocking PASS. It is the inverse
+of verify-completion.
 
 positional arguments:
   ticket_id             ticket id, short id, or alias
@@ -10,56 +11,59 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --output, -o {json,text}
-  --no-sign             run the review but do NOT sign an attestation. By
-                        default a non-blocking PASS SIGNS one — that attestation
-                        is the review's durable product, and it is what the
-                        claim gate consumes — so this flag is the explicit opt-
-                        out, not the way to get a signature. An unsigned PASS
-                        leaves the claim gate unsatisfied; recover a lost
-                        signature cheaply (no LLM) with `rebar sign-review <id>`
-  --force               re-run the review even if a current attestation exists
-                        (bypass the idempotence short-circuit); also reviews a
-                        ticket that is not yet claimable (closed/idea/blocked
-                        status, or blocked by an unclosed dependency), which is
-                        otherwise fast-failed without running the LLM
-  --check               print backend/credential availability and exit; does NOT
-                        inspect a ticket's attestation status (for that, use
-                        --status)
-  --status              read-only: report whether the ticket's plan-review
-                        attestation is CURRENT right now (no model call, no
-                        network, no re-sign); prints the verdict + bound
-                        verified-at-sha. Exit 0 when current, 12 when
-                        stale/absent
-  --retry               resume ONLY the exact latest eligible INDETERMINATE
-                        review: reuse the checkpointed findings of its already-
-                        successful units and issue model calls only for the
-                        missing units, under a FRESH per-invocation attempt
-                        budget. Eligible only when the latest retained
+  --no-sign             run the review but do not sign an attestation. By
+                        default a non-blocking PASS signs one. That attestation
+                        is the durable product of the review, and it is what the
+                        claim gate consumes, so this flag is the explicit opt-
+                        out rather than the way to get a signature. An unsigned
+                        PASS leaves the claim gate unsatisfied. Recover a lost
+                        signature cheaply, with no LLM call, using `rebar sign-
+                        review <id>`
+  --force               re-run the review even if a current attestation exists,
+                        bypassing the idempotence short-circuit. It also reviews
+                        a ticket that is not yet claimable (closed, idea, or
+                        blocked status, or blocked by an unclosed dependency),
+                        which is otherwise fast-failed without running the LLM
+  --check               print backend and credential availability and exit. This
+                        does not inspect a ticket's attestation status. Use
+                        --status for that
+  --status              report read-only whether the ticket's plan-review
+                        attestation is current right now, with no model call, no
+                        network, and no re-sign. Prints the verdict and the
+                        bound verified-at-sha. Exit 0 when current and 12 when
+                        stale or absent
+  --retry               resume only the exact latest eligible INDETERMINATE
+                        review. It reuses the checkpointed findings of the
+                        already-successful units and issues model calls only for
+                        the missing units, under a fresh per-invocation attempt
+                        budget. It is eligible only when the latest retained
                         REVIEW_RESULT is INDETERMINATE with a versioned
                         discovery journal and at least one retryable missing
-                        unit; a PASS/BLOCK, a non-retryable indeterminate, or a
-                        missing/legacy/corrupt/stale/digest-mismatched journal
-                        is REFUSED before any model call (exit 2) with the
-                        normal full-review remedy. Cumulative retry lineage is
-                        recorded as audit telemetry and never enforced as a cap.
-                        Mutually exclusive with --force, --status, and --check;
+                        unit. A PASS or BLOCK verdict, a non-retryable
+                        indeterminate, or a missing, legacy, corrupt, stale, or
+                        digest-mismatched journal is refused before any model
+                        call (exit 2) with the normal full-review remedy.
+                        Cumulative retry lineage is recorded as audit telemetry
+                        and is never enforced as a cap. This flag is mutually
+                        exclusive with --force, --status, and --check, and is
                         compatible with --no-sign. The retry response stays a
-                        narrow end-result view — the per-unit journal is never
-                        printed
-  --ref REF             branch | tag | SHA to verify against (default:
-                        origin/main; configurable via REBAR_GATE_REF /
-                        [snapshot].ref) — pass --ref HEAD when the review
-                        depends on code you have committed locally but not yet
-                        landed on the default ref (a stacked change or feature
-                        branch): the default ref reads a snapshot predating that
-                        code, so symbols it adds read as 'does not exist' false
-                        findings
+                        narrow end-result view, and the per-unit journal is
+                        never printed
+  --ref REF             a branch, tag, or commit SHA to verify against (default:
+                        origin/main, configurable through REBAR_GATE_REF or
+                        [snapshot].ref). Pass --ref HEAD when the review depends
+                        on code you have committed locally but have not yet
+                        landed on the default ref, such as a stacked change or
+                        feature branch. The default ref reads a snapshot that
+                        predates that code, so symbols it adds report as 'does
+                        not exist' false findings
   --source {attested,local}
-                        attested (default): verify a snapshot pinned at --ref
-                        (signs, records verified_at_sha); local: read the in-
-                        place checkout (dirty allowed, never signs)
+                        attested (default) verifies a snapshot pinned at --ref,
+                        signs the result, and records verified_at_sha. local
+                        reads the in-place checkout, allows a dirty tree, and
+                        never signs
 
-Coaching deep-links + `rebar explain <criterion-id>` reference the criteria
+Coaching deep-links and `rebar explain <criterion-id>` reference the criteria
 authoring guide at https://github.com/navapbc/rebar/blob/main/docs/plan-review-
-criteria-guide.md (anchor `#<criterion-id lower-cased>`; override the base with
+criteria-guide.md (anchor `#<criterion-id lower-cased>`, override the base with
 REBAR_DOCS_URL).

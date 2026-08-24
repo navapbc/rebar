@@ -1,7 +1,7 @@
 Usage: rebar review-code [-h] [--base BASE] [--head HEAD] [--diff-file DIFF_FILE] [--reviewer REVIEWERS] [--output {json,text}] [--ref REF] [--source {attested,local}]
 
-Run an LLM code review of a change (git range or diff file) and emit aggregated
-structured findings. Needs the 'agents' extra + an API key.
+Run an LLM code review of a change (a git range or a diff file) and emit
+aggregated structured findings. Requires the 'agents' extra and an API key.
 
 options:
   -h, --help            show this help message and exit
@@ -9,12 +9,13 @@ options:
   --head HEAD           head git ref (default HEAD)
   --diff-file DIFF_FILE
                         review this unified-diff file instead of a git range
-  --reviewer REVIEWERS  reviewer id (repeatable; default: deterministic
+  --reviewer REVIEWERS  reviewer id, repeatable (default: deterministic
                         selection)
   --output, -o {json,text}
-  --ref REF             branch | tag | SHA to verify against (default: the
-                        reviewed --head)
+  --ref REF             a branch, tag, or commit SHA to verify against (default:
+                        the reviewed --head)
   --source {attested,local}
-                        attested (default): verify a snapshot pinned at --ref
-                        (signs, records verified_at_sha); local: read the in-
-                        place checkout (dirty allowed, never signs)
+                        attested (default) verifies a snapshot pinned at --ref,
+                        signs the result, and records verified_at_sha. local
+                        reads the in-place checkout, allows a dirty tree, and
+                        never signs

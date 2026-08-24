@@ -129,7 +129,7 @@ def test_review_plan_retry_flag_is_derived_from_canonical_help():
     committed = _help.subcommand_help("review-plan")
     assert committed is not None
     assert "--retry" in committed
-    assert "resume ONLY the exact latest eligible INDETERMINATE" in committed
+    assert "resume only the exact latest eligible INDETERMINATE" in committed
     assert _intercept_section(gen.render(), "review-plan").strip("\n") == committed.rstrip("\n")
 
 
