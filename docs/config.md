@@ -341,7 +341,7 @@ id_guard_bypass_unsafe = false # TEMPORARY bypass of the rebar-id write guard �
 [tool.rebar.jira]   # Atlassian-standard, UNPREFIXED env names
 url            = ""      # env JIRA_URL  (must be https unless allow_insecure=true)
 user           = ""      # env JIRA_USER
-project        = ""      # env JIRA_PROJECT  (the reconciler substitutes "DIG" when empty on CREATE)
+project        = ""      # env JIRA_PROJECT  (unset remains empty)
 allow_insecure = false   # env REBAR_JIRA_ALLOW_INSECURE — allow a cleartext http:// url
 ```
 
@@ -354,21 +354,7 @@ not persist a cleartext url.
 
 The SECRET `JIRA_API_TOKEN` stays env-only — never a config key (see Secrets).
 
-**`jira.project` is the seed default, not the only project a store syncs.** A store
-records its full set of tracker projects in a committed mapping —
-`.bridge_state/projects.json` on the tickets branch — that is a property of the **store**,
-not of any one repo (see [ADR 0097](adr/0097-many-to-many-tracker-projects.md)). Manage it
-with `rebar bridge projects {list,set,remove}` (see the [user guide](user-guide.md#jira)).
-The mapping's shape is `{"version": 1, "legacy_default": "REB", "projects": {"REB":
-{"repos": ["rebar"]}}}`; its `projects` key set IS the sync list, and `legacy_default` is
-the project that pre-mapping tickets (those with no `bridge_project` field) resolve to. On a
-store initialized before the mapping existed, the `projects-seed` ensure unit seeds a mapping
-whose `legacy_default` is `jira.project` (or `DIG` when unset) and whose `projects` set is
-**empty** at the next `init`/`fsck --repair` (see [migrations.md](migrations.md)); the sync
-list stays empty until an operator adds a project with `rebar bridge projects set`.
-`jira.project` therefore configures the legacy default, while the projects a store actively
-syncs are added through the mapping rather than through config.
-Each project's `repos` entry records which repositories that project's tickets belong to.
+**`jira.project` is the seed default, not the only project a store syncs.** A store records its full set of tracker projects in the committed `.bridge_state/projects.json` mapping on the tickets branch. The mapping belongs to the store rather than to one repository. See [ADR 0097](adr/0097-many-to-many-tracker-projects.md). Manage it with `rebar bridge projects {list,set,remove}`. See the [user guide](user-guide.md#jira). The mapping has the shape `{"version": 1, "legacy_default": "REB", "projects": {"REB": {"repos": ["rebar"]}}}`. Its `projects` key set is the sync list. Its `legacy_default` field identifies the project for pre-mapping tickets that do not have a `bridge_project` field. On a store initialized before the mapping existed, the `projects-seed` ensure unit seeds a mapping whose `legacy_default` is the configured `jira.project` and whose `projects` set is empty at the next `init` or `fsck --repair`. See [migrations.md](migrations.md). An unset `jira.project` remains empty. Synchronization requires explicit project configuration. The sync list stays empty until an operator adds a project with `rebar bridge projects set`. Each project's `repos` entry records which repositories that project's tickets belong to.
 
 **Env-only reconciler flag — silent-no-op canary** (not a config-file key; epic
 f89d, story 2359). `REBAR_RECONCILER_FAIL_SILENT_NOOP` (default off ⇒ **warn-first**):

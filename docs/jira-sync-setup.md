@@ -142,7 +142,7 @@ gh secret set JIRA_API_TOKEN   # paste the token when prompted
 |------|------|----------|---------|---------|
 | `JIRA_URL` | Variable | ✅ | — | both (acli auth, reconcile) |
 | `JIRA_USER` | Variable | ✅ | — | both (acli auth, reconcile) |
-| `JIRA_PROJECT` | Variable | ✅ | reconciler falls back to `DIG` on create | reconcile |
+| `JIRA_PROJECT` | Variable | ✅ | none, configure explicitly | reconcile |
 | `JIRA_API_TOKEN` | **Secret** | ✅ | — | both (acli auth) |
 | `ACLI_VERSION` | Variable | ✅ | — (must pin) | both |
 | `ACLI_SHA256` | Variable | ⚠️ strongly recommended | warns if unset | both |
@@ -296,10 +296,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 
 ### Intentionally omitted (and why)
 
-- **The `scripts/jira-pressure-test/` e2e probes** (`e2e_validation_probe.sh`, …) are
-  explicitly **manual, live-mutating** tooling (their README says *do not wire into
-  CI*). For automated validation use `mode = reconcile-check` or `rebar bridge check-access`
-  instead.
+- **The `scripts/jira-pressure-test/` probes** are maintained connected checks that create, edit, and delete Jira issues and local tickets. Run them manually outside CI with an explicit `JIRA_PROJECT`. The general probe requires `REBAR_E2E_VALIDATION_PROBE=1`, while the field probe requires `REBAR_FIELD_VALIDATION_PROBE=1`. Both use `.venv/bin/python` and `.venv/bin/rebar` from the checkout unless the documented engine or ticket command override applies. Use `mode = reconcile-check` or `rebar bridge check-access` for automated validation.
 - **A `BRIDGE_ENV_ID` input** (DSO required one). rebar doesn't: the reconciler stamps
   events with `REBAR_ENV_ID` (default `"reconciler"`) — it's an author label, not a
   required identity. Set it only if you want a distinct sync-bot author in the log.
@@ -492,20 +489,7 @@ The producer↔consumer sync contract (epic f89d) is guarded at two tiers:
   convergent fixed point with no spurious mutation). These run on every PR and never
   touch Jira, so they cannot flake on network/credentials.
 
-- **Live (opt-in / scheduled, OFF the default suite).** Two variants exercise the
-  same contract against REAL Jira and must never run in the default CI lane:
-  - `tests/external/test_verified_fake_contract_live.py` — the verified-fake shape
-    contract against the live `AcliClient`; gated by `REBAR_RUN_EXTERNAL=1` + Jira
-    creds (the `external` marker). Run it (or schedule it) to detect a Jira REST
-    shape drift → the signal to **re-capture** the fixtures.
-  - `scripts/jira-pressure-test/e2e_field_validation_probe.sh` — the full field
-    CRUD + round-trip probe against a live project; opt-in via
-    `REBAR_FIELD_VALIDATION_PROBE=1`. Its assertions are positive (a fix is
-    detected, a regression fails) — no assertion encodes a current gap as
-    "expected" (epic f89d de-encoded the historical inbound-comment guard).
-
-  A natural home for the live variants is a **scheduled** workflow (e.g. weekly
-  `cron`) against a throwaway project, kept separate from the per-PR lane.
+- **Connected checks.** `tests/external/test_verified_fake_contract_live.py` checks the verified-fake shape against the Jira client when `REBAR_RUN_EXTERNAL=1` and Jira credentials are available. The maintained scripts in `scripts/jira-pressure-test/` exercise the full sync and field contracts through manual execution outside CI. Both scripts require an explicit `JIRA_PROJECT`, use checkout-owned Python and rebar executables, and validate their preflight before mutations. `e2e_validation_probe.sh` requires `REBAR_E2E_VALIDATION_PROBE=1`. `e2e_field_validation_probe.sh` requires `REBAR_FIELD_VALIDATION_PROBE=1`. Their assertions detect regressions without encoding known gaps as expected outcomes.
 
 ## Multi-project rehearsal against the ephemeral Jira DC harness
 
