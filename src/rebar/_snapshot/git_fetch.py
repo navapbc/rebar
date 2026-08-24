@@ -129,7 +129,32 @@ def fetch_lock_for(repo_root: str) -> threading.Lock:
 # materialization fetch here is UNFILTERED and transfers every blob of a whole tree in one
 # RPC — legitimately minutes on a cold clone. A timeout surfaces as a failed
 # CompletedProcess (returncode 124), never a hang.
+#
+# _GIT_TIMEOUT bounds the QUICK LOCAL git ops on this path (rev-parse, cat-file, remote —
+# all O(1) against the local object store). The NETWORK materialization fetch has its own,
+# far more generous ceiling: see _FETCH_TIMEOUT_SECONDS / fetch_timeout() below.
 _GIT_TIMEOUT = 300
+
+# Wall-clock backstop for the NETWORK materialization fetch (fetch_origin here and the
+# --refetch in repo_snapshot). Deliberately generous, and NOT the guard against a wedged
+# remote: the throughput-keyed stall-abort (stall_abort_args / is_stall_abort) trips a dead
+# connection in seconds regardless of this value, so this ceiling only backstops a hang the
+# low-speed check cannot see (a pre-transport wedge moving zero bytes). A fixed 300s cap
+# fails an HONEST large/cold-store transfer closed even while data keeps flowing above the
+# floor (bug curly-open-swan); an hour is far above any real cold-clone wall time yet still
+# bounds a truly parked child. Tunable per deployment via
+# REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS (resolved live per call by fetch_timeout()).
+_FETCH_TIMEOUT_SECONDS = 3600
+
+
+def fetch_timeout() -> int:
+    """The materialization-fetch wall-clock backstop, resolved live (env over default).
+
+    See :data:`_FETCH_TIMEOUT_SECONDS` for why this is a generous backstop, not the primary
+    stall guard. Read per call so an operator/test override applies without a reimport."""
+    from rebar import config
+
+    return config.resolve_fetch_timeout(_FETCH_TIMEOUT_SECONDS)
 
 
 # raw-git-ok: generic command runner, argv supplied by caller
@@ -326,6 +351,7 @@ def fetch_origin(
     from rebar import config
 
     attempts = config.resolve_stall_attempts(_STALL_ATTEMPTS)
+    timeout_s = fetch_timeout()
     for attempt in range(1, attempts + 1):
         # Re-acquire both locks PER ATTEMPT rather than holding them across the whole retry
         # budget: a peer that is waiting to fetch the same repo gets a turn between our
@@ -338,7 +364,7 @@ def fetch_origin(
                     capture_output=True,
                     text=True,
                     env=env,
-                    timeout=_GIT_TIMEOUT,
+                    timeout=timeout_s,
                     check=False,
                 )
             except subprocess.TimeoutExpired as exc:
@@ -347,7 +373,7 @@ def fetch_origin(
                 # transport at all). Fail closed with a description (this function's
                 # contract) — never leave the caller, or the long-lived server, blocked.
                 raise SnapshotFetchError(
-                    f"git fetch from '{remote}' timed out after {_GIT_TIMEOUT}s (attested "
+                    f"git fetch from '{remote}' timed out after {timeout_s}s (attested "
                     "mode fails closed) — the remote may be unreachable or the transfer "
                     "too large."
                 ) from exc

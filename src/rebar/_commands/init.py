@@ -39,6 +39,7 @@ from rebar._commands._init_ensures import (  # noqa: F401  (re-export)
     _merge_ours_unit,
     _store_compat_unit,
 )
+from rebar._snapshot.git_fetch import fetch_timeout as _fetch_timeout
 from rebar._store.ensures import EnsureOutcome, run_ensures
 from rebar._store.env_identity import mint_env_id_guarded
 from rebar._store.gitutil import run_git, run_git_write
@@ -62,18 +63,18 @@ def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
 # A cold first fetch of the tickets branch into a freshly-initialised store can
 # legitimately take MINUTES (the shared branch is a large event-sourced history —
 # tens of thousands of commits — and may travel over an agent proxy). Bound it with the
-# COLD-materialize precedent (repo_snapshot._GIT_TIMEOUT = 300, bug 747f), NOT the 30s
-# _store incremental-op bound (push.py/sync.py). A timeout surfaces as a synthetic failed
-# CompletedProcess(124) naming the op + bound (never a bare TimeoutExpired, never a hang),
-# mirroring _store/push.py._git.
-_FETCH_TIMEOUT = 300
-
-
+# shared COLD-materialize precedent: the generous, tunable
+# ``rebar._snapshot.git_fetch.fetch_timeout`` backstop (bug curly-open-swan) — NOT the 30s
+# _store incremental-op bound (push.py/sync.py), and no longer a FIXED 300s cap that failed
+# an honest large/cold fetch closed. The throughput-keyed stall-abort remains the guard
+# against a wedged remote. A timeout surfaces as a synthetic failed CompletedProcess(124)
+# naming the op + bound (never a bare TimeoutExpired, never a hang), mirroring
+# _store/push.py._git.
 def _git_fetch(cwd: str, *args: str) -> subprocess.CompletedProcess:
     return _init_probe.run_bounded_git(
         cwd,
         *args,
-        timeout=_FETCH_TIMEOUT,
+        timeout=_fetch_timeout(),
         run_git_fn=run_git,
     )
 
