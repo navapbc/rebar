@@ -115,6 +115,16 @@ def build_verify_completion(*, prog: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--check", action="store_true", help="print backend/credential availability and exit"
     )
+    parser.add_argument(
+        "--no-sign",
+        action="store_true",
+        help="run the verifier but do NOT SIGN a reusable completion-verifier attestation. By "
+        "default an attested (source=attested) PASS SIGNS that attestation — what a later "
+        "same-ref `rebar transition ... closed` REUSES to skip a duplicate (billable) verifier "
+        "run — so this flag is the explicit opt-out. The COMPLETION_VERDICT sidecar is STILL "
+        "emitted for both PASS and FAIL (only the signature is skipped). A local (--source "
+        "local) verdict is never signed regardless",
+    )
     _add_ref_source(parser)
     return parser
 

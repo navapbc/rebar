@@ -51,6 +51,31 @@ def _with_attestation(result, classify) -> dict:
     return result
 
 
+def _record_verify_completion(result, ticket_id: str, *, readonly: bool):
+    """Record a standalone MCP ``verify_completion`` run on the ticket — or NOTHING in
+    read-only mode. Symmetric with ``review_plan``'s read-only behaviour.
+
+    A read-only server must not mutate the store, so recording (which emits the
+    ``COMPLETION_VERDICT`` sidecar, itself an ``append_event``) is SKIPPED ENTIRELY rather than
+    merely left unsigned — a ``READ_ONLY_OPEN_WORLD`` tool performs no writes. A writable server
+    records via the shared producer: an attested PASS signs the reusable attestation and the
+    sidecar captures PASS/FAIL. The recording outcome rides on the result's ``record`` field."""
+    if not isinstance(result, dict):
+        return result
+    if readonly:
+        result["record"] = {
+            "signed": False,
+            "cause": "read_only",
+            "sidecar_written": False,
+            "error": "",
+        }
+        return result
+    from rebar._commands.transition_close import record_completion_verdict
+
+    result["record"] = record_completion_verdict(result, ticket_id)
+    return result
+
+
 def register_llm_tools(mcp, ctx) -> None:
     """Register the LLM/agent tools on ``mcp`` (see module docstring)."""
     _allow_llm = ctx.allow_llm
@@ -134,7 +159,8 @@ def register_llm_tools(mcp, ctx) -> None:
         trace_id, source, verified_at_sha, signable}. Checks every acceptance/success/close
         criterion + definition of done (for bugs, that the bug is resolved) against the
         implementation; on FAIL, each finding carries the failing criterion, an explanation,
-        and a source-code citation. Read-only.
+        and a source-code citation. In READONLY mode this runs a pure read (no sign, no
+        sidecar); a writable server records (see below).
 
         ``graph`` is a tri-state: unspecified (``None``) uses the ticket-type default
         (an epic verifies its whole subtree; other types verify only their own criteria),
@@ -146,6 +172,13 @@ def register_llm_tools(mcp, ctx) -> None:
         ``source=local`` verifies the in-place checkout (never signed). ``REBAR_ROOT`` only
         locates the object DB. (The CLI close gate verifies attested HEAD; this tool defaults
         to origin/main for distributed verification of merged code.)
+
+        RECORDS ITS RESULT ON THE TICKET unless the server is read-only: an attested,
+        certifiable PASS SIGNS a completion-verifier attestation (which a later same-``ref``
+        close REUSES to skip a duplicate, billable verifier run), and both PASS and FAIL emit
+        the COMPLETION_VERDICT sidecar. Recording is best-effort — its outcome rides on the
+        result's ``record`` field (``{signed, cause, sidecar_written, error}``) and never
+        changes the verdict. A ``local`` verdict is never signed.
 
         DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes a live, billable LLM call and reaches
         the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
@@ -160,9 +193,13 @@ def register_llm_tools(mcp, ctx) -> None:
         import rebar.llm
 
         try:
-            return rebar.llm.verify_completion(ticket_id, graph=graph, ref=ref, source=source)
+            result = rebar.llm.verify_completion(ticket_id, graph=graph, ref=ref, source=source)
         except rebar.llm.LLMError as exc:
             return _structured_llm_failure(exc)
+        # Symmetric with review_plan: record the run on the ticket unless read-only. A
+        # read-only server writes NOTHING (no sidecar, no signature); the branch lives in the
+        # module-level helper so this closure stays under the complexity ceiling.
+        return _record_verify_completion(result, ticket_id, readonly=_readonly())
 
     @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def review_plan(

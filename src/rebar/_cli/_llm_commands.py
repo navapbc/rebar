@@ -42,6 +42,32 @@ def _render_source_line(result: dict) -> None:
     sys.stdout.write(f"source: {src}{tail}\n")
 
 
+def _render_record_line(record: dict) -> None:
+    """Surface what a standalone ``verify-completion`` recorded on the ticket (story
+    reuse-standalone-completion): whether the completion-verifier attestation was signed (so a
+    later same-ref close reuses it) and whether the COMPLETION_VERDICT sidecar was written."""
+    if not record:
+        return
+    if record.get("signed"):
+        sys.stdout.write(
+            "recorded: signed a completion-verifier attestation "
+            "(a later same-ref close will reuse it)\n"
+        )
+        return
+    cause = str(record.get("cause"))
+    reasons = {
+        "not_pass": "not signed (verdict is not PASS)",
+        "sign_disabled": "not signed (--no-sign)",
+        "local_source": "not signed (--source local is never certifiable)",
+        "not_certifiable": "not signed (verdict is not certifiable)",
+        "no_verified_sha": "not signed (no verified-at-sha to bind)",
+        "sign_failed": f"attestation signing FAILED: {record.get('error', '')}",
+    }
+    detail = reasons.get(cause, f"not signed ({cause})")
+    sidecar = "sidecar recorded" if record.get("sidecar_written") else "sidecar NOT recorded"
+    sys.stdout.write(f"recorded: {detail}; {sidecar}\n")
+
+
 def _llm_error_exit_code(exc: Exception) -> int:
     """Exit code for a RAISED ``LLMError`` (story blackbear): a retryable disposition attached by
     the classifier (`.outcome.retryable`) → exit 11 ("transient — retry"); else 1 (fail-closed).
@@ -231,11 +257,18 @@ def _verify_completion(argv: list[str]) -> int:
     except _gate_source_error() as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
+    # Record the run ON THE TICKET (story reuse-standalone-completion): an attested PASS signs a
+    # completion-verifier attestation a later same-ref close REUSES; PASS and FAIL emit the
+    # COMPLETION_VERDICT sidecar. --no-sign / a --source local verdict record only the sidecar.
+    from rebar._commands.transition_close import record_completion_verdict
+
+    result["record"] = record_completion_verdict(result, args.ticket_id, sign=not args.no_sign)
     if args.output == "json":
         sys.stdout.write(_json.dumps(result) + "\n")
     else:
         _render_verdict_text(result)
         _render_source_line(result)
+        _render_record_line(result["record"])
     # A verifier FAULT ("no verdict obtainable", bug 2a6f) is retryable, not a completion
     # judgement — exit 11 like every other transient degrade, so a caller scripting this verb
     # can retry instead of treating it as "criteria unmet". Same disposition the close gate
