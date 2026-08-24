@@ -125,7 +125,7 @@ def test_relation_scoped_key_does_not_confirm_a_sibling_relation(peer_confirmati
     pair-scoped record would silently license removing the wrong one.
     """
     store = peer_confirmations.PeerConfirmationStore(str(tracker))
-    store.record("A", "B", "blocks", link_id="1", pass_id="p1")
+    store.record("A", "B", "blocks", link_id="1")
 
     assert store.is_confirmed("A", "B", "blocks") is True
     assert store.is_confirmed("A", "B", "relates_to") is False
@@ -151,7 +151,7 @@ def test_absent_store_is_empty_and_does_not_raise(peer_confirmations, tmp_path):
 
 def test_records_round_trip_through_the_file(peer_confirmations, tracker):
     store = peer_confirmations.PeerConfirmationStore(str(tracker))
-    store.record("A", "B", "blocks", link_id="77", pass_id="p9")
+    store.record("A", "B", "blocks", link_id="77")
     store.save()
 
     reopened = peer_confirmations.PeerConfirmationStore(str(tracker))
@@ -159,7 +159,7 @@ def test_records_round_trip_through_the_file(peer_confirmations, tracker):
 
     assert record is not None
     assert record["link_id"] == "77"
-    assert record["confirmed_pass"] == "p9"
+    assert "confirmed_pass" not in record  # bug 266c: per-pass telemetry removed
     assert reopened.is_confirmed("A", "B", "blocks") is True
 
 
@@ -191,7 +191,7 @@ def test_store_survives_snapshot_compaction_of_the_ticket_log(peer_confirmations
         rebar.link(a, b, "blocks", repo_root=repo)
 
         store = peer_confirmations.open_store(repo)
-        store.record(a, b, "blocks", link_id="55", pass_id="p1")
+        store.record(a, b, "blocks", link_id="55")
         store.save()
 
         subprocess.run(
@@ -395,7 +395,7 @@ def test_handle_update_callback_writes_a_local_id_keyed_record(tmp_path, peer_co
     assert record is not None
     assert record["direction"] == peer_confirmations.DIRECTION_OUTBOUND
     assert record["source"] == peer_confirmations.SOURCE_PUSH
-    assert record["confirmed_pass"] == "pass-77"
+    assert "confirmed_pass" not in record  # bug 266c: per-pass telemetry removed
     assert record["link_id"] == "10042"
 
 
@@ -429,7 +429,7 @@ def test_handle_update_callback_is_none_without_a_local_id(tmp_path):
 
 def test_store_file_is_json_with_a_schema_version(tmp_path, peer_confirmations):
     store = peer_confirmations.open_store(tmp_path)
-    store.record("A", "B", "blocks", pass_id="p1")
+    store.record("A", "B", "blocks")
     store.save()
 
     payload = json.loads(

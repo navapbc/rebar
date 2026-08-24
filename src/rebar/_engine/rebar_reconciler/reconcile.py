@@ -571,7 +571,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
     ctx.apply_tally = apply_tally
 
 
-def _confirm_peer_links(ctx: _PassContext, pass_id: str) -> int:
+def _confirm_peer_links(ctx: _PassContext) -> int:
     """Record peer-confirmation evidence from this pass's snapshot (epic a4bd).
 
     Kept as a named seam rather than inlined so the persist phase reads as a list of
@@ -597,8 +597,8 @@ def _confirm_peer_links(ctx: _PassContext, pass_id: str) -> int:
     )
 
     store = open_store(ctx.repo_root)
-    written = backfill_from_managed_refs(store, ctx.local_tickets, ctx.binding_store, pass_id)
-    written += confirm_from_snapshot(store, ctx.curr_snapshot, ctx.binding_store, pass_id)
+    written = backfill_from_managed_refs(store, ctx.local_tickets, ctx.binding_store)
+    written += confirm_from_snapshot(store, ctx.curr_snapshot, ctx.binding_store)
     if written:
         store.save()
     return written
@@ -649,7 +649,7 @@ def _persist_and_log(ctx: _PassContext) -> dict:
         # save() for the same reason. Fail-open: losing evidence costs safety on a
         # later removal, whereas raising would break a sync pass that succeeded.
         try:
-            _confirm_peer_links(ctx, pass_id)
+            _confirm_peer_links(ctx)
         except Exception as exc:  # noqa: BLE001 — evidence is best-effort; never break sync
             print(
                 f"reconcile: peer-link confirmation failed ({exc})",

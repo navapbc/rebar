@@ -311,7 +311,6 @@ def _make_link_confirm(mutation: dict, ctx: BatchApplyContext):
             str(relation),
             link_id=link_id,
             direction=DIRECTION_OUTBOUND,
-            pass_id=ctx.pass_id,
             source_kind=SOURCE_PUSH,
         )
         store.save()

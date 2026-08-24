@@ -96,7 +96,7 @@ def test_confirmed_link_still_converges(apply_records, pc, store):
     """AC2. With evidence, e39f's relation-scoped removal still works."""
     repo, a, b = store
     confirm = pc.open_store(repo)
-    confirm.record(a, b, "blocks", link_id="10042", pass_id="pass-1")
+    confirm.record(a, b, "blocks", link_id="10042")
     confirm.save()
 
     applied = apply_records._inbound_update_apply_links(_remove_payload(b), a, repo)
@@ -114,7 +114,7 @@ def test_confirmation_is_relation_scoped_not_pair_scoped(apply_records, pc, stor
     """
     repo, a, b = store
     confirm = pc.open_store(repo)
-    confirm.record(a, b, "relates_to", pass_id="pass-1")
+    confirm.record(a, b, "relates_to")
     confirm.save()
 
     applied = apply_records._inbound_update_apply_links(_remove_payload(b), a, repo)
@@ -134,7 +134,6 @@ def test_backfilled_confirmation_permits_removal(apply_records, pc, store):
         "blocks",
         link_id=None,
         direction=pc.DIRECTION_BACKFILL,
-        pass_id="pass-1",
         source_kind=pc.SOURCE_BACKFILL,
     )
     confirm.save()
@@ -211,7 +210,7 @@ def test_removal_of_an_absent_relation_is_still_a_logged_no_op(apply_records, pc
     """
     repo, a, b = store
     confirm = pc.open_store(repo)
-    confirm.record(a, b, "relates_to", pass_id="pass-1")
+    confirm.record(a, b, "relates_to")
     confirm.save()
 
     with caplog.at_level(logging.INFO):
