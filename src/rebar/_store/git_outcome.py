@@ -94,13 +94,22 @@ TRANSIENT_HEAD_MARKERS: tuple[str, ...] = ("could not parse head",)
 # The name in the message carries no information, so the marker matches the fault.
 # Deliberately does NOT cover git's CORRUPT-object signatures, which are real damage.
 TRANSIENT_OBJECT_MARKERS: tuple[str, ...] = ("bad object",)
-# The WRITE-side member of the same family: the loose-object temp create under
-# ``.git/objects/`` intermittently fails (ENOENT on Linux, EINVAL on macOS). A
-# filesystem hiccup, NOT a data fault (bugs vocal-dip-robin / brainy-floral-globefish).
+# The WRITE-side members of the same family, all transient runner-FS hiccups (NOT data
+# faults): the loose-object temp create under ``.git/objects/`` intermittently fails (ENOENT
+# on Linux, EINVAL on macOS) — bugs vocal-dip-robin / brainy-floral-globefish — and git's
+# lockfile-commit of the INDEX itself (``read-cache.c`` ``write_locked_index`` via
+# ``commit_lock_file``, emitted by ``git add`` / ``git write-tree`` / a commit's
+# pre-ref-update index prep) intermittently fails with ``unable to write new index file``,
+# which a production ``rebar create`` surfaced as a hard write requiring an operator retry
+# (bug scary-fiscal-grunion). The pre-ref-update marker is deliberately the ONLY index-write
+# phrase here: git's POST-ref-update failure is the DISTINCT ``repository has been updated,
+# but unable to write new_index file`` (underscore), which this substring cannot match — so a
+# match provably means HEAD had not moved and retrying cannot duplicate a committed event.
 TRANSIENT_WRITE_MARKERS: tuple[str, ...] = (
     "unable to create temporary file",
     "failed to insert into database",
     "unable to index file",
+    "unable to write new index file",
 )
 
 # Bug 2a76: the bare token ``rejected`` in the non-FF pattern is NOT specific to a
