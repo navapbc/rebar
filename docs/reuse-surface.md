@@ -4,7 +4,13 @@ This reference documents the subsystem contracts that another rebar capability c
 
 The plan-review gate demonstrates the operation-certificate, LLM runtime, prompt, and output-schema surfaces. See [the plan-review guide](plan-review-gate.md) and `src/rebar/llm/plan_review/`.
 
-> Audience: Human developers and LLM agents. `tests/unit/test_reuse_surface_doc.py` checks selected callable signatures against the source. Use `inspect.signature(...)` for additional inspection.
+> Audience: Human developers and LLM agents. The portable public-API surface drift gate
+> `tests/unit/test_api_surface_gate.py` (generator `scripts/gen_api_surface.py`, committed
+> baseline `tests/unit/api_surface_baseline.json`) snapshots this whole public surface —
+> the `rebar` facade plus the reuse subsystems below — and fails under `make test` on any
+> removed/renamed symbol or changed signature; run `python scripts/gen_api_surface.py --update`
+> to refresh the baseline after an intentional change. Use `inspect.signature(...)` for
+> additional inspection.
 
 ## Public bridge operations — `rebar.*`
 
