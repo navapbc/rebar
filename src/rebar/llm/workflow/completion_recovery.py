@@ -114,18 +114,27 @@ class CompletionAgentStep(_ex.AgentStepRunner):
                 raise
             return self._recover(ctx, primary_exc, bank)
         except LLMUnavailableError as primary_exc:
-            # A retryable provider outage mid-run cannot be recovered here (there is no
-            # exhaustion bank to finalize), but its disposition must ride forward so the close
-            # gate maps a retryable outage → exit 11 instead of a fail-closed exit 1. Mirror
-            # the plan-review degrade precedent: read the disposition off the caught error and
-            # stamp it onto failure_diagnostic, then re-raise the SAME error unchanged so the
-            # workflow still fails closed. Only stamp when a real disposition is present.
+            # A retryable provider outage mid-run cannot RESUME here (successor/finalizer LLM
+            # calls would only re-fail under the same outage). Its disposition must ride
+            # forward so the close gate maps a retryable outage → exit 11 instead of a
+            # fail-closed exit 1. Mirror the plan-review degrade precedent: read the
+            # disposition off the caught error and stamp it onto failure_diagnostic. Only
+            # stamp when a real disposition is present.
             outcome = _failure.outcome_of(primary_exc)
             if outcome is not None:
                 self.failure_diagnostic = {
                     **(self.failure_diagnostic or {}),
                     **_failure.resolution_fields(outcome),
                 }
+            # Bank-only degrade (ticket b39a): if the primary already banked an
+            # operator-actionable BLOCK (a genuine refutation on an evaluated criterion),
+            # finalize a deterministic BLOCK from the bank with NO further LLM calls, so the
+            # operator gets the available feedback rather than a verdict-less "could not run".
+            # An empty bank — or one holding only PASSes / insufficiency placeholders — has
+            # nothing actionable, so it re-raises and keeps the retryable exit-11 posture.
+            degraded = self._degrade_from_actionable_bank(ctx, ticket_id, bank)
+            if degraded is not None:
+                return degraded
             raise
         # Primary SUCCESS: the structured output is authoritative; the bank is discarded unread.
         bank.discard()
@@ -138,6 +147,73 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         return result
 
     # ── successor recovery ────────────────────────────────────────────────────────────
+    def _degrade_from_actionable_bank(
+        self, ctx: _ex.StepContext, ticket_id: str, bank: _bank.CriterionBank
+    ) -> _ex.StepResult | None:
+        """Finalize a deterministic BLOCK from the bank on a provider outage, or None.
+
+        Returns a ``StepResult`` carrying a full-coverage deterministic verdict (assembled with
+        NO further LLM calls) ONLY when the bank already holds an operator-actionable BLOCK — a
+        genuine banked refutation on an evaluated criterion. That verdict is ``verdict=FAIL``,
+        ``finalizer=deterministic_fallback``, ``certifiable=False``: it flows to the close
+        gate's non-PASS branch, which does NOT close the ticket and surfaces the banked
+        findings (an operator decision). Returns None when there is nothing actionable to
+        surface (empty bank, or only PASSes / insufficiency placeholders) — the caller then
+        re-raises the outage, preserving the retryable exit-11 posture.
+
+        The whole decision is guarded: any fault (a bank read error, an unreadable ticket)
+        logs at WARN and returns None so the caller re-raises the outage — the degrade is an
+        enhancement, never a new failure mode on the outage path.
+        """
+        try:
+            entries = bank.all()
+            if not _bank.bank_has_actionable_block(entries):
+                return None
+            expected, id_by_text = self._expected_criteria(ctx, ticket_id)
+            if not expected:
+                return None
+            verdict = _bank.assemble_deterministic_verdict(
+                ticket_id,
+                expected,
+                entries,
+                id_by_text=id_by_text,
+                runner=getattr(self._runner_override, "name", None) or "deterministic_fallback",
+                model=self._config.model,
+            )
+            logger.warning(
+                "completion gate degraded to a deterministic BLOCK from the bank under a "
+                "provider outage: %d of %d criteria banked, verdict=%s certifiable=%s "
+                "(operator decision required — not auto-closed)",
+                len(entries),
+                len(expected),
+                verdict.get("verdict"),
+                verdict.get("certifiable"),
+            )
+            bank.discard()
+            return _ex.StepResult(outputs=verdict)
+        except Exception:  # best-effort: any fault falls through to the caller's re-raise (exit-11)
+            logger.warning(
+                "completion gate degrade attempt was suppressed by an internal fault; "
+                "falling through to the retryable outage path (exit 11)",
+                exc_info=True,
+            )
+            return None
+
+    def _expected_criteria(
+        self, ctx: _ex.StepContext, ticket_id: str
+    ) -> tuple[list[str], dict[str, str]]:
+        """The ticket's expected completion criteria and their id map (a repo read, no LLM).
+
+        Empty ``([], {})`` when the ticket has no explicit criteria or the read fails — the
+        caller then declines to degrade."""
+        from rebar import _reads
+
+        ticket = _reads.show_ticket(ticket_id, repo_root=ctx.repo_root)
+        expected = explicit_completion_criteria(ticket)
+        if not expected:
+            return [], {}
+        return expected, _bank.criterion_id_map(expected)
+
     def _primary_manifest(self, ctx: _ex.StepContext, ticket_id: str) -> str:
         """The primary run's criterion-id manifest, or "" (fail-open).
 

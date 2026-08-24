@@ -41,6 +41,29 @@ def _entry_insufficient(entry: dict[str, Any] | None) -> bool:
     return entry is not None and entry.get("evidence_sufficient") is False
 
 
+def _entry_actionable_block(entry: dict[str, Any] | None) -> bool:
+    """True when a bank entry is an operator-actionable BLOCK — a GENUINE banked refutation.
+
+    A ``met=false`` entry that is NOT the bounded fallback's insufficiency record
+    (``evidence_sufficient is False``): the criterion was evaluated and positively refuted, so
+    the operator has real, actionable feedback. A ``met=true`` PASS or an insufficiency
+    placeholder is not actionable.
+    """
+    return entry is not None and entry.get("met") is False and not _entry_insufficient(entry)
+
+
+def bank_has_actionable_block(bank_entries: dict[str, dict[str, Any]]) -> bool:
+    """True when the bank already holds at least one operator-actionable BLOCK.
+
+    The trigger for the completion gate's no-LLM degrade (ticket b39a): when a provider outage
+    interrupts a run whose bank already holds a genuine banked refutation, a deterministic
+    BLOCK verdict assembled from the bank gives the operator the available feedback rather than
+    dying verdict-less. An EMPTY bank — or one holding only PASSes / insufficiency
+    placeholders — has nothing actionable and stays on the retryable exit-11 path.
+    """
+    return any(_entry_actionable_block(entry) for entry in bank_entries.values())
+
+
 def assemble_deterministic_verdict(
     ticket_id: str,
     criteria: list[str],
@@ -278,6 +301,7 @@ __all__ = [
     "INSUFFICIENT_BANKED_DETAIL",
     "INSUFFICIENT_UNVERIFIED_DETAIL",
     "assemble_deterministic_verdict",
+    "bank_has_actionable_block",
     "merge_finalizer_with_bank",
     "ticket_id_of",
 ]
