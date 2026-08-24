@@ -70,11 +70,7 @@ because it lists events by the `*.json` glob / `.endswith(".json")` filter and a
 `*.json.retired` name matches neither.
 
 ### I2 — Globally-unique event filenames
-Every new event is `${timestamp}-${uuid}-${TYPE}.json`
-(`ticket-lib.sh:85`, `ticket-lib.sh:647`), where `${timestamp}` is a high-resolution
-(nanosecond) clock prefix and `${uuid}` is a fresh UUID. Two independent clients
-writing concurrently therefore **never collide on a filename**; git merges the two
-new files as a union with no conflict. **New event kinds MUST use this scheme.**
+Every new event is `${timestamp}-${uuid}-${TYPE}.json`. `rebar._store.event_prepare.event_filename` assembles the filename. The shared command writer, `rebar._commands._seam.append_event`, obtains the high-resolution timestamp from `rebar._store.hlc.next_tick` and generates a fresh UUID. The transaction writers in `rebar._commands.txn.transition_core` and `rebar._commands.txn.claim_core` follow the same contract. Two independent clients writing concurrently therefore use distinct filenames, and git merges the two new files as a union without conflict. **New event kinds MUST use this scheme.**
 
 ### I3 — Reads are side-effect-free except local, rebuildable caches
 The only read-side write is the per-ticket `.cache.json`
@@ -87,12 +83,7 @@ cross-client merge conflicts.
   path. (See WS5a for the search-index case.)
 
 ### I4 — State-dependent mutations use optimistic concurrency
-Any op whose correctness depends on current state (status `transition`, and any
-compound op such as `claim`) MUST re-read the relevant state **under the write
-lock** and reject on mismatch with **exit 10**, surfaced uniformly as
-`ConcurrencyError` across library/CLI/MCP
-(`ticket-transition.sh:397` `sys.exit(10)` / `:558` `exit 10`;
-`src/rebar/__init__.py:110` maps `returncode == 10` → `ConcurrencyError`).
+Any op whose correctness depends on current state, including status `transition` and compound operations such as `claim`, MUST re-read the relevant state **under the write lock** and reject a mismatch with **exit 10**. The library, CLI, and MCP surfaces expose the mismatch as `ConcurrencyError`. The locked checks live in `rebar._commands.txn.transition_core` and `rebar._commands.txn.claim_core`, which raise `ConcurrencyMismatch` with exit code 10. `rebar._lib_writes.transition` and `rebar._lib_writes.claim` translate that result to the public `ConcurrencyError`. The CLI preserves exit code 10 through `transition_cli` and `claim_cli`, and the MCP tools use the library surface.
 
 ### I4a — Parent-first claim/transition/reopen cascade
 On a **cascading edge** the parent sitting in that edge's eligible status is moved
@@ -270,13 +261,7 @@ Regression coverage: `tests/integration/test_concurrency_regression.py`
 (`…parent_cascade_same_tracker_race…`, `…parent_cascade_two_clone_offline_race…`).
 
 ### I5 — Single locked write path
-All writes go through the lock-guarded append+commit path: atomic
-tmp-then-rename + `git add <event>` + `git commit`, all under the tickets-tracker
-write lock held by `rebar._store.lock` (`write_lock` / `acquire`). No side-channel
-writes. The reconciler's event-file write shares this lock via the `event_append`
-module (`write_lock` / `append_event`) rather than writing unserialized. (The
-former bash `_flock_stage_commit` write core has been retired; only this Python
-lock remains.)
+All writes go through the lock-guarded append and commit path. The atomic tmp-then-rename, `git add <event>`, and `git commit` operations run under the tickets tracker write lock held by `rebar._store.lock.write_lock` or `rebar._store.lock.acquire`. No side-channel writes are allowed. The reconciler event writer shares this lock through `rebar_reconciler.inbound_translate._write_event_file`, which uses `rebar._store.lock.write_lock` and the shared `rebar._store.event_append.event_filename` contract. The former Bash `_flock_stage_commit` write core has been retired. This Python lock remains.
 
 **The dual-window lock (permanent contract).** By default the lock takes BOTH a
 `fcntl.flock(LOCK_EX)` on `.ticket-write.lock` AND an atomic `mkdir` lock at
@@ -512,21 +497,7 @@ compaction `*.retired` renames conflict under rebase where merge unions cleanly)
 > own repository does exactly this, and pins it with a test that enumerates every
 > workflow file so a newly added one cannot reintroduce the trigger.
 
-**Every** rebar write (`create`/`edit`/`transition`/`claim`/`link`/…) auto-commits
-its event and then auto-pushes — so local ticket activity (including test/scratch
-tickets) propagates to the shared `origin/tickets` **immediately**, with no
-separate push step. `_push_tickets_branch` (`ticket-lib.sh:482`) pushes
-`HEAD:tickets` whenever an `origin` remote exists (no remote → it is a no-op and
-nothing is shared). On a non-fast-forward rejection it **fetches + merges**
-`origin/tickets` (union) and retries (bounded). It refuses to merge through a
-rebase/merge recovery state (`_check_no_rebase_in_progress`, `ticket-lib.sh:217`).
-Push is **best-effort by default**: a failed push (no network, unresolvable
-non-fast-forward, recovery state) never fails existing callers — it warns, leaves
-local commits intact, and the branch stays diverged. `rebar fsck` surfaces that
-divergence as a `PUSH_PENDING` notice (`ticket-fsck.sh`, Check 4.5) so it is not
-silent. Existing callers inherit five push-first recovery cycles and, after a
-clean fifth merge, one final push; they otherwise keep their prior warning/return
-behavior.
+**Every** rebar write (`create`/`edit`/`transition`/`claim`/`link`/…) auto-commits its event and then auto-pushes, so local ticket activity, including test and scratch tickets, propagates to the shared tickets branch immediately without a separate push step. `rebar._store.push.push_tickets_branch` pushes `HEAD` to the configured tickets branch when the configured remote exists. A missing remote makes the operation a no-op and leaves the commit local. On a non-fast-forward rejection, `push_tickets_branch` calls its `_recover_non_fast_forward` shim, which delegates to `rebar._store.push_recovery._recover_non_fast_forward`. That implementation fetches and merges the remote tickets branch as a union before a bounded retry. Its locked merge checks `rebar._store.lock.check_no_rebase_in_progress` and refuses to merge through a rebase or merge recovery state. Push is best-effort by default. A failed push caused by network loss, unresolved non-fast-forward state, or a recovery state does not fail existing callers. It warns and preserves local commits. `rebar._commands.fsck_tracker_health._tracker_sync_status` reports a local-ahead backlog as `PUSH_PENDING` and incompatible divergence as `DIVERGED`. Existing callers inherit five push-first recovery cycles and one final push after a clean fifth merge. Other outcomes retain their prior warning and return behavior.
 
 `push_tickets_branch(..., strict=True)` is the opt-in delivery contract. It raises
 `PushDeliveryError` rather than writing process output, with a stable `reason`,
@@ -573,9 +544,7 @@ This is a SIGNAL, never an exception: the best-effort contract above is unchange
 marker that cannot be written (an unwritable tracker) degrades to "no status" rather than
 failing the write.
 
-**Push policy — `REBAR_SYNC_PUSH`** (read at the `_push_tickets_branch` chokepoint, so
-CLI / library / MCP honour it uniformly; case/space-insensitive; default
-`always`):
+**Push policy.** `REBAR_SYNC_PUSH` is resolved by `rebar._store.push.push_tickets_branch`, so CLI, library, and MCP callers honor it uniformly. Values are insensitive to case and surrounding spaces. The default is `always`.
 
 | value    | behaviour |
 |----------|-----------|
@@ -595,9 +564,7 @@ commit + one lock cycle per event (no batch primitive yet). See
 the pre-compact guidance.
 
 ### Inbound — background sync (periodic, on reads/commands)
-`_reconverge_tickets` (`ticket-sync.sh`) runs at most once per minute per clone.
-It runs **under the write lock** (`.ticket-write.lock`) so it cannot race a
-concurrent local appender's `git add`/`commit`. The policy:
+On read paths, `rebar._engine_support.reads.ensure_fresh` invokes `rebar._store.sync.reconverge` at most once per minute per clone. `reconverge` fetches outside the ticket write lock, then performs reset or merge operations through `rebar._store.sync._do_reconverge` under `rebar._store.lock.write_lock`. This prevents the state-changing phase from racing a concurrent local appender's `git add` or `git commit`. The policy:
 
 ```
 if tracker is in a rebase/merge recovery state:        # I9 / bug 637b
@@ -722,18 +689,7 @@ Coordination is two composed mechanisms, applied at **both** fetch entry points:
 
 ### Read-freshness policy (uniform across CLI, library, and MCP)
 
-Every **read** — `show` / `list` / `ready` / `search` / `deps` — runs the same
-throttled (≤1/min) best-effort fetch + reconverge **before** replaying, so the
-result reflects collaborators' pushes within at most one minute. This is a single
-contract shared by all three interfaces: the CLI dispatcher's read arms, the
-library functions (`rebar.show_ticket`, `rebar.list_tickets`, …), **and** the MCP
-read tools all funnel through one implementation — `reads` in the engine-support
-layer (`src/rebar/_engine_support/reads.py`), with `rebar/_reads.py` as the
-library/MCP facade. `reads.ensure_fresh()` reuses the exact mechanism above:
-the `/tmp/.ticket-sync-<md5>` throttle marker **and** the `_reconverge_tickets`
-function in `ticket-sync.sh` (one fetch/merge implementation, no reinvention). The
-CLI and in-process reads share the same marker, so they never double-fetch within
-a minute.
+Every **read** through `show`, `list`, `ready`, `search`, or `deps` runs the same throttled best-effort fetch and reconvergence before replaying. The throttle permits one attempt per minute, so the result reflects collaborator pushes within at most one minute. The CLI dispatcher, the library functions such as `rebar.show_ticket` and `rebar.list_tickets`, and the MCP read tools all use `rebar._engine_support.reads.ensure_fresh`, with `rebar._reads` as the library and MCP facade. `ensure_fresh` shares the `/tmp/.ticket-sync-<md5>` throttle marker across CLI and in-process reads and delegates synchronization to `rebar._store.sync.reconverge`. This provides one fetch and merge implementation and prevents duplicate fetches within the throttle window.
 
 Previously this fetch lived only in the bash dispatcher's `_ensure_initialized`,
 so CLI reads synced but library/MCP reads did **not** — making MCP (the primary

@@ -1,6 +1,6 @@
 """The shared ``map_fields_to_remote`` implementation (story J3, epic e369).
 
-The Jira-family backends (Cloud, and a future Data Center) all map a CANONICAL
+The Jira-family backends, Cloud and Data Center, map a CANONICAL
 changed-fields dict (local field names -> local values) to the same shape of
 vendor mutation fields — field-name reconciliation (local ``title`` -> Jira
 ``summary``), value mapping (``status``/``priority`` -> the Jira name), and

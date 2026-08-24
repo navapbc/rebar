@@ -2,15 +2,15 @@
 
 **Status:** Accepted
 **Date:** 2026-07-13
-**Supersedes:** the lander portions of **ADR 0040** (`main` Fast-Forward-Only submit type)
-and **ADR 0042** (serial auto-lander). Relaxes ADR 0040's requirement **R5** (pre-merge
-"impossible to land a stale/untested tree"). ADR 0041 (LLM-Review carries `TRIVIAL_REBASE`)
+**Supersedes:** the lander portions of **ADR 0090** (`main` Fast-Forward-Only submit type)
+and **ADR 0042** (serial auto-lander). Relaxes ADR 0090's requirement **R5** (pre-merge
+"impossible to land a stale/untested tree"). ADR 0091 (LLM-Review carries `TRIVIAL_REBASE`)
 becomes moot for landing once there is no client-side rebase step.
 **Epic:** `d4de-7d65-2a96-48be` (`fleshy-kimberlite-crayfish`).
 
 ## Context
 
-ADR 0040 made `main` **Fast-Forward-Only (FFO)** to guarantee that the CI-tested tree is
+ADR 0090 made `main` **Fast-Forward-Only (FFO)** to guarantee that the CI-tested tree is
 byte-for-byte the tree that lands (R5), motivated by a real semantic-conflict incident (two
 individually-green changes disagreeing about the `IDEA` Jira status produced a red `main`).
 FFO's accepted cost (R4) was a **rebase-treadmill**: when `main` advances, every in-review
@@ -43,7 +43,7 @@ The bridge's bugs clustered into recognizable anti-patterns that mature systems 
   and cannot use GitHub Actions as its runner; adopting it means a ZooKeeper + SQL + scheduler
   + executor + Nodepool control plane — **~3× our monthly hosting cost, unacceptable for a
   POC** ([Zuul gating](https://zuul-ci.org/docs/zuul/latest/gating.html)). Already rejected in
-  ADR 0040.
+  ADR 0090.
 - **Chromium LUCI CV / Commit Queue** — label-triggered, **batches** CLs to amortize CI, but
   it is a horizontally-scaled App-Engine service whose batching only pays off far above our
   ~26 merges/day
@@ -130,7 +130,7 @@ mid-flight; landing is a manual Gerrit Submit throughout:
    param, CloudWatch alarm, volumes.
 4. **Rewrite the docs** (`5e7a`) — a repo-wide sweep of every `autosubmit` / auto-lander / FFO
    / `land-contract` reference to the Submit-when-green model; supersession banners on ADR
-   0040/0042.
+   0090/0042.
 5. **Document the post-merge safety net + manual-revert runbook** (`f542`).
 6. **Gerrit cutover** (`03c6`) — flip the submit type on `refs/meta/config` and retire the
    `Autosubmit` label + rebase ACL, applied by an admin in an announced quiet window (**done

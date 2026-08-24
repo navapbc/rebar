@@ -4,8 +4,8 @@
 
 **Status:** Accepted
 **Date:** 2026-07-12
-**Builds on:** ADR 0040 (Fast Forward Only submit type — the R5 backstop this lander sits on),
-ADR 0041 (LLM-Review carries `TRIVIAL_REBASE` — a conflict-free rebase re-runs *only* CI, not
+**Builds on:** [ADR 0090](0090-main-fast-forward-only-submit.md) (Fast Forward Only submit type — the R5 backstop this lander sits on),
+[ADR 0091](0091-llm-review-carry-trivial-rebase.md) (LLM-Review carries `TRIVIAL_REBASE` — a conflict-free rebase re-runs *only* CI, not
 the LLM review), ADR 0020 (two-vote CI gate), ADR 0025 (feature-branch merge-carry).
 
 This ADR is the durable *rationale* record for the serial auto-lander (epic `f1fa-57d8-07cb-44af`,
@@ -16,11 +16,11 @@ and the auto-lander itself, were removed by ADR 0047.)
 
 ## Context
 
-ADR 0040 made `main` **Fast Forward Only**: a change is submittable only when it sits directly on
+[ADR 0090](0090-main-fast-forward-only-submit.md) made `main` **Fast Forward Only**: a change is submittable only when it sits directly on
 the current `main` tip, and when `main` advances under an in-review change that change goes
 **non-submittable** until it is rebased (or re-merged) onto the new tip. That rebase mints a new
 patch set that drops `Verified` and re-runs CI on the exact tree that will land — the mechanism
-that makes it *impossible to land a stale or untested tree* (ADR 0040's requirement R5).
+that makes it *impossible to land a stale or untested tree* (ADR 0090's requirement R5).
 
 FFO delivered R5 but left R4 (graceful parallel landing) as an explicit accepted cost: **a manual
 rebase-treadmill.** In practice, parallel agent sessions race to land on `main`; the loser of each
@@ -45,9 +45,9 @@ conflict/TOCTOU race occurs.
 We want agents to set an opt-in intent and **walk away**: changes land autonomously in the common
 case, or are handed back with **one typed, actionable outcome** — without ever weakening the
 two-vote gate. A full speculative merge queue (Zuul) is the throughput-preserving answer but was
-rejected in ADR 0040 as cost-disproportionate at ~26 merges/day (it cannot use GitHub Actions as
+rejected in ADR 0090 as cost-disproportionate at ~26 merges/day (it cannot use GitHub Actions as
 its runner; it demands a ZooKeeper + SQL + scheduler + executor + Nodepool control plane). This ADR
-takes the lightweight-bot path ADR 0040 anticipated ("a lightweight Gerrit commit-queue bot before
+takes the lightweight-bot path ADR 0090 anticipated ("a lightweight Gerrit commit-queue bot before
 Zuul").
 
 ## Decision
@@ -60,8 +60,8 @@ core loop:
    approval date; `infra/autolander/loop.py::select_front_candidate`).
 2. **Rebase to the current tip** preserving the uploader
    (`POST /changes/{id}/rebase` or `/rebase:chain`, `RebaseInput.rebase_on_behalf_of_uploader=true`).
-   The rebase drops `Verified` (copyCondition `NO_CODE_CHANGE` only, ADR 0040) so CI re-runs on the
-   integrated tree; on a conflict-free rebase `LLM-Review` carries (ADR 0041).
+   The rebase drops `Verified` (copyCondition `NO_CODE_CHANGE` only, ADR 0090) so CI re-runs on the
+   integrated tree; on a conflict-free rebase `LLM-Review` carries (ADR 0091).
 3. **Await a fresh `Verified +1` on every rebased member** (`await_fresh_verified`), recording each
    member's CI-tested SHA.
 4. **Ancestor-atomic submit** the exact tested SHAs with one `POST /changes/{tip}/submit`
@@ -93,7 +93,7 @@ from one bot-state read plus live Gerrit reads.
 R5 (nothing lands whose to-be-merged tree wasn't CI-tested) is the load-bearing guarantee, and the
 lander is built so that automation **cannot** weaken it. Each mechanism that preserves it:
 
-- **FFO backstop (ADR 0040).** Submit is refused unless the change is a descendant of the current
+- **FFO backstop (ADR 0090).** Submit is refused unless the change is a descendant of the current
   `main` tip. Even if every other guard failed, Gerrit itself will not fast-forward a stale tree.
 - **Fresh `Verified` per rebased member on its own SHA.** After the rebase drops `Verified`, the
   lander awaits a *new* `+1`; because the vote was dropped and re-cast, a present `Verified +1` is
@@ -120,7 +120,7 @@ but the thing that merges is always a tree that CI verified in the state it will
 ## The eight key design decisions (with prior-art grounding)
 
 Every decision emulates a proven, actively-maintained OSS workflow rather than inventing one
-(ADR 0040's R6). Prior art: **Zuul**, **LUCI CV / Chromium CQ**, **Gerrit REST primitives**,
+(ADR 0090's R6). Prior art: **Zuul**, **LUCI CV / Chromium CQ**, **Gerrit REST primitives**,
 **Prow / Tide**.
 
 1. **Intent = an `Autosubmit` Gerrit label, requester-votable by `Contributors`.** An agent sets
@@ -233,7 +233,7 @@ The single instance is an **accepted SPOF for Phase 1.** The tradeoff is deliber
 outage does not corrupt anything — it degrades to the *manual status quo*. When the bot's heartbeat
 is stale (> 90 s) or its status endpoint is unreachable, `land` fails **fast** to `lander_down`
 (exit 6) rather than hanging, and the sanctioned degraded path is the **manual FFO rebase + submit**
-(CONTRIBUTING §2e, ADR 0040). So an outage is surfaced immediately and actionably, and a human/agent
+(CONTRIBUTING §2e, ADR 0090). So an outage is surfaced immediately and actionably, and a human/agent
 can always land by hand. HA (an externalized queue/lock replacing the single instance +
 in-memory `wipChain`) is a deferred promotion, below.
 
@@ -275,6 +275,6 @@ Both idea ids resolve in the store and this ADR is anchored to them.
 - **New operational surface.** A new deployed service + the autoheal sidecar + a Docker-socket mount
   + a state volume + a status endpoint — reviewed as deploy/observability items under epic `f1fa`'s
   S5 tasks.
-- **Gate substrate unchanged.** FFO (ADR 0040) remains the R5 backstop; the strict `Verified`
-  `copyCondition` (drops on rebase) and the ADR 0041 `LLM-Review` `TRIVIAL_REBASE` carry are
+- **Gate substrate unchanged.** FFO (ADR 0090) remains the R5 backstop; the strict `Verified`
+  `copyCondition` (drops on rebase) and the ADR 0091 `LLM-Review` `TRIVIAL_REBASE` carry are
   preserved exactly — the lander sits *on* that substrate and never edits it.
