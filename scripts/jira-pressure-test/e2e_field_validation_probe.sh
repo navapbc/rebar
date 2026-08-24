@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# E2E Field Validation Probe — systematically tests bidirectional CRUD for
-# every field across 10 test tickets against live Jira.
+# E2E field validation probe
+# Exercises bidirectional field operations across ten tickets in a connected Jira instance.
 #
-# REFERENCE / MANUAL PRESSURE-TEST TOOLING — see scripts/jira-pressure-test/README.md.
-# This script is NOT part of the automated test suite and is NOT shipped in the
-# published wheel. It hits LIVE Jira and is run by hand to harden / pressure-test
-# the reconciler's Jira field sync. Do not wire it into CI.
+# MAINTAINED MANUAL PRESSURE-TEST TOOLING. See scripts/jira-pressure-test/README.md.
+# This script is excluded from the automated test suite and published wheel.
+# Run it manually when validating field synchronization changes. Do not add it to CI.
 #
 # Phases:
 #   0. Pre-flight (env check, get_myself, save snapshot)
@@ -18,31 +17,22 @@
 #   7. Reconciliation check — verify 0 discrepancies for probe keys
 #   8. Cleanup — delete all Jira issues + local tickets, restore snapshot
 #
-# Usage: run manually from the repo root.
-# Requires: JIRA_URL, JIRA_USER, JIRA_API_TOKEN env vars.
-# Requires: REBAR_FIELD_VALIDATION_PROBE=1 to opt in (prevents accidental
-#           inclusion in generic test-discovery sweeps).
-# Working directory: repo root.
+# Run this probe manually from the repository root. It requires
+# REBAR_FIELD_VALIDATION_PROBE=1 and explicit Jira connection variables.
 
 set -euo pipefail
 
-# Explicit opt-in gate — prevents accidental invocation by find/glob test
-# discovery. The probe creates real Jira issues against the configured
-# instance, so it must only run when the caller explicitly intends to.
+# The explicit opt-in prevents accidental invocation by test discovery.
 if [ "${REBAR_FIELD_VALIDATION_PROBE:-0}" != "1" ]; then
-    echo "SKIP: e2e_field_validation_probe.sh requires REBAR_FIELD_VALIDATION_PROBE=1" >&2
-    echo "      (this probe creates real Jira issues against the configured instance)" >&2
-    exit 0
+    echo "FATAL: e2e_field_validation_probe.sh requires REBAR_FIELD_VALIDATION_PROBE=1" >&2
+    echo "The probe creates Jira issues in the selected project." >&2
+    exit 2
 fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-# This reference probe lives under scripts/jira-pressure-test/, so the rebar
-# engine (dispatcher, reconciler package, rebar_reconciler/acli.py) is anchored at
-# the repo's src/rebar/_engine tree rather than a sibling of this script.
-_SCRIPTS_DIR="${REBAR_ENGINE_DIR:-${REPO_ROOT}/src/rebar/_engine}"
-TICKET_CLI="${REBAR_TICKET_CLI:-${_SCRIPTS_DIR}/rebar}"
-RECONCILER_DIR="$_SCRIPTS_DIR"
-JIRA_PROJECT="${JIRA_PROJECT:-DIG}"
+RECONCILER_DIR="${REBAR_ENGINE_DIR:-${REPO_ROOT}/src/rebar/_engine}"
+PYTHON_BIN="${REPO_ROOT}/.venv/bin/python"
+TICKET_CLI="${REBAR_TICKET_CLI:-${REPO_ROOT}/.venv/bin/rebar}"
 PROBE_TS="$(date +%s)"
 PROBE_TAG="field-probe-${PROBE_TS}"
 
@@ -132,7 +122,7 @@ run_reconciler() {
     # The XXXXXX run MUST be trailing: BSD/macOS mkstemp fails on a ".log" suffix
     # after the X's (GNU tolerates it, BSD does not), so omit the suffix.
     LAST_RECONCILER_LOG=$(mktemp "/tmp/recon-probe.XXXXXX")
-    output=$(cd "$RECONCILER_DIR" && python -m rebar_reconciler "$@" 2>&1) || true
+    output=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -m rebar_reconciler "$@" 2>&1) || true
     printf '%s\n' "$output" > "$LAST_RECONCILER_LOG"
     echo "$output"
 }
@@ -147,16 +137,17 @@ get_jira_field() {
     local key="$1"
     local field="$2"
     cd "$RECONCILER_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, sys, json, os
-from rebar_reconciler import acli as mod
-adf_spec = importlib.util.spec_from_file_location('adf', '${_SCRIPTS_DIR}/rebar_reconciler/adf.py')
+from rebar_reconciler.adapters.jira import acli as mod
+adf_spec = importlib.util.spec_from_file_location('adf', '${RECONCILER_DIR}/rebar_reconciler/adf.py')
 adf_mod = importlib.util.module_from_spec(adf_spec)
 adf_spec.loader.exec_module(adf_mod)
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 issue = client.get_issue_by_rest('${key}')
 fields = issue.get('fields', issue)
@@ -184,13 +175,14 @@ get_jira_labels() {
 get_jira_comments() {
     local key="$1"
     cd "$RECONCILER_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, json, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 comments = client.get_comments('${key}')
 for c in comments:
@@ -202,7 +194,7 @@ for c in comments:
 get_local_field() {
     local ticket_id="$1"
     local field="$2"
-    "$TICKET_CLI" show "$ticket_id" 2>/dev/null | python3 -c "
+    "$TICKET_CLI" show "$ticket_id" 2>/dev/null | "$PYTHON_BIN" -c "
 import sys, json
 data = json.load(sys.stdin)
 val = data.get('${field}', '')
@@ -220,7 +212,7 @@ check_binding() {
         echo "no-bindings-file"
         return
     fi
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import json, sys
 data = json.load(open('${bindings_file}'))
 local_id = sys.argv[1]
@@ -251,13 +243,13 @@ is_valid_ticket_id() {
 # in a partially-merged / truncated state).
 restore_bindings_if_corrupt() {
     local bindings_file="${TRACKER_DIR}/.bridge_state/bindings.json"
-    if python3 -c "import json; json.load(open('${bindings_file}'))" 2>/dev/null; then
+    if "$PYTHON_BIN" -c "import json; json.load(open('${bindings_file}'))" 2>/dev/null; then
         return 0  # healthy — nothing to do
     fi
     echo "restore_bindings_if_corrupt: bindings.json unparseable — restoring from tickets branch..." >&2
     if git -C "$REPO_ROOT" show "tickets:.bridge_state/bindings.json" \
             > "${bindings_file}.probe-restore.tmp" 2>/dev/null; then  # tickets-boundary-ok
-        if python3 -c "import json; json.load(open('${bindings_file}.probe-restore.tmp'))" 2>/dev/null; then
+        if "$PYTHON_BIN" -c "import json; json.load(open('${bindings_file}.probe-restore.tmp'))" 2>/dev/null; then
             mv "${bindings_file}.probe-restore.tmp" "${bindings_file}"
             echo "restore_bindings_if_corrupt: restored successfully." >&2
             return 0
@@ -281,12 +273,12 @@ restore_bindings_if_corrupt() {
 # follow a git-push failure that can leave prev_snapshot.json in a
 # partially-written / conflict-marker state.
 restore_prev_snapshot_if_corrupt() {
-    if python3 -c "import json; json.load(open('${PREV_SNAPSHOT}'))" 2>/dev/null; then
+    if "$PYTHON_BIN" -c "import json; json.load(open('${PREV_SNAPSHOT}'))" 2>/dev/null; then
         return 0  # healthy — nothing to do
     fi
     echo "restore_prev_snapshot_if_corrupt: prev_snapshot.json unparseable — attempting restore..." >&2
     if [ -n "$PREV_SNAPSHOT_BACKUP" ] && [ -f "$PREV_SNAPSHOT_BACKUP" ]; then
-        if python3 -c "import json; json.load(open('${PREV_SNAPSHOT_BACKUP}'))" 2>/dev/null; then
+        if "$PYTHON_BIN" -c "import json; json.load(open('${PREV_SNAPSHOT_BACKUP}'))" 2>/dev/null; then
             cp "$PREV_SNAPSHOT_BACKUP" "$PREV_SNAPSHOT"
             echo "restore_prev_snapshot_if_corrupt: restored from probe startup backup." >&2
             return 0
@@ -313,7 +305,7 @@ jira_update_issue() {
     shift
     cd "$RECONCILER_DIR"
     local kwargs_json
-    kwargs_json=$(python3 -c "
+    kwargs_json=$("$PYTHON_BIN" -c "
 import json, sys
 kwargs = {}
 for arg in sys.argv[1:]:
@@ -321,9 +313,9 @@ for arg in sys.argv[1:]:
     kwargs[k] = v
 print(json.dumps(kwargs))
 " "$@")
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, os, json, sys
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 kwargs = json.loads(sys.argv[1])
 mod.update_issue('${key}', **kwargs)
 " "$kwargs_json"
@@ -333,9 +325,9 @@ jira_update_priority() {
     local key="$1"
     local priority_name="$2"
     cd "$RECONCILER_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 mod.update_priority('${key}', '${priority_name}')"
 }
 
@@ -343,13 +335,14 @@ jira_update_issuetype() {
     local key="$1"
     local type_name="$2"
     cd "$RECONCILER_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 client.update_issuetype('${key}', '${type_name}')"
 }
@@ -358,9 +351,9 @@ jira_transition() {
     local key="$1"
     local status_name="$2"
     cd "$RECONCILER_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 mod.transition_issue('${key}', '${status_name}')"
 }
 
@@ -368,13 +361,14 @@ jira_add_label() {
     local key="$1"
     local label="$2"
     cd "$RECONCILER_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 client.add_label('${key}', '${label}')"
 }
@@ -383,13 +377,14 @@ jira_remove_label() {
     local key="$1"
     local label="$2"
     cd "$RECONCILER_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 client.remove_label('${key}', '${label}')"
 }
@@ -398,22 +393,23 @@ jira_add_comment() {
     local key="$1"
     local body="$2"
     cd "$RECONCILER_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 mod.add_comment('${key}', '${body}')"
 }
 
 jira_delete_issue() {
     local key="$1"
     cd "$RECONCILER_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 client.delete_issue('${key}')" 2>&1 || true
 }
@@ -433,13 +429,14 @@ build_filter_ids() {
 fallback_cleanup() {
     echo "Running fallback cleanup — searching Jira for label ${PROBE_TAG}..."
     cd "$RECONCILER_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import importlib.util, os, json
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 results = client.search_issues('project = ${JIRA_PROJECT} AND labels = \"${PROBE_TAG}\"')
 issues = results if isinstance(results, list) else results.get('issues', [])
@@ -469,23 +466,40 @@ echo ""
 echo "=== PHASE 0: Pre-flight ==="
 echo ""
 
-# Env check
-for var in JIRA_URL JIRA_USER JIRA_API_TOKEN; do
-    if [ -z "${!var:-}" ]; then
-        echo "FATAL: ${var} is not set."
+# Validate configuration and local executables before any Jira or ticket access.
+for variable in JIRA_URL JIRA_USER JIRA_API_TOKEN JIRA_PROJECT; do
+    if [ -z "${!variable:-}" ]; then
+        echo "FATAL: ${variable} is not set." >&2
         exit 2
     fi
 done
+if [ ! -x "$PYTHON_BIN" ]; then
+    echo "FATAL: checkout Python is not executable at ${PYTHON_BIN}." >&2
+    exit 2
+fi
+if [ ! -x "$TICKET_CLI" ]; then
+    echo "FATAL: ticket CLI is not executable at ${TICKET_CLI}." >&2
+    exit 2
+fi
+if [ ! -d "$RECONCILER_DIR" ]; then
+    echo "FATAL: rebar engine directory does not exist at ${RECONCILER_DIR}." >&2
+    exit 2
+fi
+if ! (cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "from rebar_reconciler.adapters.jira import acli"); then
+    echo "FATAL: checkout Python cannot import rebar_reconciler from ${RECONCILER_DIR}." >&2
+    exit 2
+fi
 pass_test "Phase0.env-vars"
 
-# Probe get_myself for assignee testing
-PROBE_USER=$(cd "$RECONCILER_DIR" && python3 -c "
+# Read the Jira identity after local preflight succeeds.
+PROBE_USER=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
 import importlib.util, os, json
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 myself = client.get_myself()
 name = myself.get('displayName', '')
@@ -1127,13 +1141,14 @@ fi
 
 # Verify child's Jira parent == epic Jira key via get_parent_map
 if [ -n "$CHILD_JIRA_KEY" ] && [ -n "$EPIC_JIRA_KEY" ]; then
-    child_parent_key=$(cd "$RECONCILER_DIR" && python3 -c "
+    child_parent_key=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
 import importlib.util, os, json
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 parent_map = client.get_parent_map('${JIRA_PROJECT}', jql='key = ${CHILD_JIRA_KEY}')
 print(parent_map.get('${CHILD_JIRA_KEY}') or '')
@@ -1197,13 +1212,14 @@ if [ -n "$CHILD_LOCAL_ID" ] && [ -n "$EPIC2_LOCAL_ID" ]; then
     echo "$reconciler_output" | grep -E "^(FILTERED|filter:|OK:|ERROR:)" || true
 
     if [ -n "$CHILD_JIRA_KEY" ] && [ -n "$EPIC2_JIRA_KEY" ]; then
-        new_parent_key=$(cd "$RECONCILER_DIR" && python3 -c "
+        new_parent_key=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 parent_map = client.get_parent_map('${JIRA_PROJECT}', jql='key = ${CHILD_JIRA_KEY}')
 print(parent_map.get('${CHILD_JIRA_KEY}') or '')
@@ -1222,13 +1238,14 @@ fi
 # Set Jira parent on THIRD ticket to the epic's Jira key via REST set_parent.
 # After reconcile inbound, assert local parent_id == EPIC_LOCAL_ID.
 if [ -n "$THIRD_JIRA_KEY" ] && [ -n "$EPIC_JIRA_KEY" ]; then
-    cd "$RECONCILER_DIR" && python3 -c "
+    cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 client.set_parent('${THIRD_JIRA_KEY}', '${EPIC_JIRA_KEY}')
 " 2>&1 || true
@@ -1295,7 +1312,7 @@ for i in $(seq 0 9); do
     # The rebar-id label takes the form "rebar-id-<short-id>" or "rebar-id-<full-id>".
     # Search by the exact rebar-id label present on the known Jira key.
     jira_labels_raw=$(get_jira_labels "${JIRA_KEYS[$i]}" 2>/dev/null) || true
-    rebar_id_label=$(python3 -c "
+    rebar_id_label=$("$PYTHON_BIN" -c "
 import json, sys
 labels = json.loads(sys.argv[1]) if sys.argv[1].startswith('[') else []
 match = [l for l in labels if l.startswith('rebar-id')]
@@ -1307,13 +1324,14 @@ print(match[0] if match else '')
         continue
     fi
 
-    dup_count=$(cd "$RECONCILER_DIR" && python3 -c "
+    dup_count=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
 import importlib.util, os, json
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 results = client.search_issues('project = ${JIRA_PROJECT} AND labels = \"${rebar_id_label}\"')
 print(len(results))
@@ -1340,7 +1358,7 @@ for i in $(seq 0 9); do
     [ -z "${JIRA_KEYS[$i]}" ] && continue
     jira_key="${JIRA_KEYS[$i]}"
     # Count how many local IDs map to this Jira key in the bindings store
-    binding_count=$(python3 -c "
+    binding_count=$("$PYTHON_BIN" -c "
 import json, sys
 try:
     data = json.load(open(sys.argv[1]))
@@ -1534,7 +1552,7 @@ fi
 # INVERTED — it FAILED when comments synced and PASSED on the gap (matrix
 # NOT-SYNCED), locking the bug in as "expected". De-encoded here so the fix is
 # detected and a regression FAILS the probe (story 822a).
-local_comments=$("$TICKET_CLI" show "${LOCAL_IDS[7]}" 2>/dev/null | python3 -c "
+local_comments=$("$TICKET_CLI" show "${LOCAL_IDS[7]}" 2>/dev/null | "$PYTHON_BIN" -c "
 import sys, json
 data = json.load(sys.stdin)
 comments = data.get('comments', [])
@@ -1808,8 +1826,6 @@ echo ""
 echo "=== PHASE 8: Cleanup ==="
 echo ""
 
-cleanup_failed=false
-
 # Delete all 10 Jira issues
 for i in $(seq 0 9); do
     if [ -n "${JIRA_KEYS[$i]}" ]; then
@@ -1817,7 +1833,6 @@ for i in $(seq 0 9); do
             pass_test "Phase8.delete-jira-${i} (${JIRA_KEYS[$i]})"
         else
             fail_test "Phase8.delete-jira-${i}" "${JIRA_KEYS[$i]}"
-            cleanup_failed=true
         fi
     fi
 done
@@ -1832,7 +1847,6 @@ for parity_pair in "child:${CHILD_JIRA_KEY}" "third:${THIRD_JIRA_KEY}" "epic2:${
             pass_test "Phase8.delete-jira-${parity_label} (${parity_key})"
         else
             fail_test "Phase8.delete-jira-${parity_label}" "${parity_key}"
-            cleanup_failed=true
         fi
     fi
 done
@@ -1843,7 +1857,6 @@ for i in $(seq 0 8); do
         pass_test "Phase8.delete-local-${i} (${LOCAL_IDS[$i]})"
     else
         fail_test "Phase8.delete-local-${i}" "${LOCAL_IDS[$i]}"
-        cleanup_failed=true
     fi
 done
 
@@ -1857,7 +1870,6 @@ for parity_pair in "child:${CHILD_LOCAL_ID}" "third:${THIRD_LOCAL_ID}" "epic2:${
             pass_test "Phase8.delete-local-${parity_label} (${parity_id})"
         else
             fail_test "Phase8.delete-local-${parity_label}" "${parity_id}"
-            cleanup_failed=true
         fi
     fi
 done

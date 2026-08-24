@@ -1,38 +1,39 @@
-# Jira pressure-test probes (reference / manual)
+# Jira pressure-test probes
 
-Live-Jira end-to-end probes kept as **reference tooling** for hardening and
-pressure-testing rebar's Jira sync (the reconciler bridge). They were used to
-validate bidirectional CRUD across every field and to shake out sync bugs when
-making bridge changes.
+These maintained end-to-end probes exercise the Jira reconciler against a connected Jira instance. Use them when validating bridge changes that need evidence beyond the hermetic contract suite.
 
-**These are not part of the automated test suite and are not shipped in the
-published wheel.** They live under `scripts/` (outside `src/rebar/`, so they are
-excluded from the wheel's `packages = ["src/rebar"]`) and outside `tests/`, so
-`pytest` never collects them. Do not wire them into CI — they hit live Jira,
-create/edit/delete real issues, and are meant to be run by hand.
+The probes are not part of the automated test suite and are not included in the published wheel. Run them manually outside CI because they create, edit, and delete Jira issues and local tickets.
 
 ## Scripts
 
-- `e2e_validation_probe.sh` — exercises the full bidirectional sync pipeline
-  (create → outbound → inbound → idempotency → reconcile-check → cleanup) for a
-  single ticket.
-- `e2e_field_validation_probe.sh` — systematically tests bidirectional CRUD for
-  every field across 10 test tickets (requires `REBAR_FIELD_VALIDATION_PROBE=1`
-  to opt in).
+- `e2e_validation_probe.sh` exercises the bidirectional sync pipeline for one ticket. It requires `REBAR_E2E_VALIDATION_PROBE=1`.
+- `e2e_field_validation_probe.sh` exercises bidirectional field operations across ten tickets. It requires `REBAR_FIELD_VALIDATION_PROBE=1`.
 
-## Running
+Each probe exits with a nonzero status when its opt-in is absent. The separate variables prevent one probe authorization from enabling the other.
 
-Run manually from the repo root with live Jira credentials in the environment:
+## Preflight
+
+Each probe validates the following requirements before it invokes the ticket CLI, runs the reconciler, or mutates Jira:
+
+- `JIRA_URL`, `JIRA_USER`, `JIRA_API_TOKEN`, and `JIRA_PROJECT` are set. No project is selected by default.
+- The checkout Python at `.venv/bin/python` is executable.
+- The checkout ticket command at `.venv/bin/rebar` is executable unless `REBAR_TICKET_CLI` selects another executable.
+- The engine directory at `src/rebar/_engine` exists unless `REBAR_ENGINE_DIR` selects another directory.
+- The checkout Python can import `rebar_reconciler` from the selected engine directory.
+
+## Run the probes
+
+Run these commands manually from the repository root after provisioning the checkout with `make install`:
 
 ```bash
 export JIRA_URL=... JIRA_USER=... JIRA_API_TOKEN=...
-# optional: JIRA_PROJECT (default in-script), REBAR_ENGINE_DIR, REBAR_TICKET_CLI
-bash scripts/jira-pressure-test/e2e_validation_probe.sh
+export JIRA_PROJECT=REB
+
+REBAR_E2E_VALIDATION_PROBE=1 \
+  bash scripts/jira-pressure-test/e2e_validation_probe.sh
 
 REBAR_FIELD_VALIDATION_PROBE=1 \
   bash scripts/jira-pressure-test/e2e_field_validation_probe.sh
 ```
 
-By default the probes anchor the rebar engine at `src/rebar/_engine` in the
-current repo checkout; override with `REBAR_ENGINE_DIR` / `REBAR_TICKET_CLI` to
-point at an installed build instead.
+Set `REBAR_ENGINE_DIR` or `REBAR_TICKET_CLI` only when the probe must exercise a different engine tree or ticket executable. Python remains anchored to the current checkout so every embedded probe runs with the same installed dependencies.

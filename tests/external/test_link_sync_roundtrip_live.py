@@ -20,10 +20,10 @@ reconciler differ/apply semantics against REAL Jira:
 
 Gating (mirrors the client-primitive probe): auto-marked ``external`` by the
 root conftest hook, made inert unless ``REBAR_RUN_EXTERNAL=1`` by
-tests/external/conftest.py, and skipped here unless live Jira credentials AND
-the ``acli`` binary are present. It makes REAL Jira mutations and MUST be run
-SERIALLY, once, never concurrently (story 25ae operational hazard note:
-concurrent runs collide on rate-limit backoff and orphan probe issues).
+tests/external/conftest.py, and skipped here unless Jira connection configuration
+including ``JIRA_PROJECT`` and the ``acli`` binary are present. The test mutates
+Jira and must run serially because concurrent runs collide on rate-limit backoff
+and orphan probe issues.
 
 Cleanup (try/finally) deletes EVERY Jira artifact this test creates — issue
 links first (get_issue_links → delete_issue_link by id), then issues A and B —
@@ -31,9 +31,9 @@ and is robust to partial setup (A created but B failed, link created but an
 assertion failed, etc.). The live issuelink JSON shape is printed once for the
 record.
 
-Run locally with credentials::
+Run locally with configuration::
 
-    REBAR_RUN_EXTERNAL=1 JIRA_URL=… JIRA_USER=… JIRA_API_TOKEN=… \
+    REBAR_RUN_EXTERNAL=1 JIRA_URL=… JIRA_USER=… JIRA_API_TOKEN=… JIRA_PROJECT=… \
         pytest -m external tests/external/test_link_sync_roundtrip_live.py -s
 """
 
@@ -63,11 +63,15 @@ RECONCILER_DIR = ENGINE_DIR / "rebar_reconciler"
 
 
 def _live_jira_ready() -> bool:
-    creds = all(os.environ.get(k) for k in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN"))
-    return creds and shutil.which("acli") is not None
+    configured = all(
+        os.environ.get(k) for k in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN", "JIRA_PROJECT")
+    )
+    return configured and shutil.which("acli") is not None
 
 
-_skip = pytest.mark.skipif(not _live_jira_ready(), reason="no live Jira creds / acli binary")
+_skip = pytest.mark.skipif(
+    not _live_jira_ready(), reason="missing Jira connection configuration or acli binary"
+)
 
 
 def _ensure_engine_on_path() -> None:
@@ -92,7 +96,7 @@ def _build_client():
         jira_url=os.environ["JIRA_URL"],
         user=os.environ["JIRA_USER"],
         api_token=os.environ["JIRA_API_TOKEN"],
-        jira_project=os.environ.get("JIRA_PROJECT", "DIG"),
+        jira_project=os.environ["JIRA_PROJECT"],
     )
 
 
