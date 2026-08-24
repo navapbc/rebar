@@ -54,6 +54,18 @@ locals {
     # single-line tokens). The same private key is also stored as the GitHub Actions secret
     # REBAR_BOT_SIGNING_KEY for the reconcile-bridge + canary workflows. Operator populates the value.
     "/rebar/prod/rebar-bot-signing-key",
+    # Per-client MCP bearer PATs (epic jira-reb-3527 "Enable MCP on AWS" / ADR 0104 §1). One
+    # SecureString per client (copilot/codex/claude): the bearer token each client presents to
+    # the nginx `/mcp/` TLS edge, which the `static` verifier authenticates. OPTIONAL at the
+    # container boundary — fetch-secrets.sh reads them via get_param_optional and OMITS a blank
+    # slot from the materialized tokens file (so the verifier never fails on an empty token_env).
+    # Materialized on-box each boot (the .env is rsync-EXCLUDED, gotcha f600): the raw value lands
+    # in the 0600 .env as MCP_CLIENT_PAT_*, and mcp-static-tokens.json references it via token_env.
+    # Rotation is operator-driven (re-materialize + restart rebar-mcp; a value-only rotation does
+    # NOT advance main so autodeploy no-ops) — see infra/runbooks/mcp-client-pats.md.
+    "/rebar/prod/mcp-client-pat-copilot",
+    "/rebar/prod/mcp-client-pat-codex",
+    "/rebar/prod/mcp-client-pat-claude",
   ]
 }
 
