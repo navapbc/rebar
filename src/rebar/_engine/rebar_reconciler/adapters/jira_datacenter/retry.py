@@ -182,7 +182,13 @@ def _rate_limit_delay(retry_after: float) -> float:
     return min(MAX_BACKOFF_S, retry_after * (1.0 + random.random() * _RETRY_AFTER_JITTER))
 
 
-def _with_connection_retry(fn: Any, *, rate_limit_retry: bool = False) -> Any:
+def _with_connection_retry(
+    fn: Any,
+    *,
+    rate_limit_retry: bool = False,
+    attempts: int = 3,
+    backoffs: tuple[int, ...] = (2, 5),
+) -> Any:
     """Run ``fn()`` with the transport's retry policy.
 
     ``rate_limit_retry`` OPTS THIS CALL IN to retrying HTTP 429, and it **defaults to False**.
@@ -212,9 +218,8 @@ def _with_connection_retry(fn: Any, *, rate_limit_retry: bool = False) -> Any:
     """
     retryable = _connection_retry_exceptions()
     http_errors = _jira_http_error_types()
-    backoffs = (2, 5)
     last_exc: BaseException | None = None
-    for attempt in range(3):
+    for attempt in range(attempts):
         try:
             return fn()
         except http_errors as exc:
@@ -224,7 +229,7 @@ def _with_connection_retry(fn: Any, *, rate_limit_retry: bool = False) -> Any:
             if (
                 rate_limit_retry
                 and getattr(exc, "status_code", None) == 429
-                and attempt < 2
+                and attempt < attempts - 1
                 and (retry_after := _retry_after_seconds(exc)) is not None
             ):
                 delay = _rate_limit_delay(retry_after)
@@ -243,7 +248,7 @@ def _with_connection_retry(fn: Any, *, rate_limit_retry: bool = False) -> Any:
             if tls_error is not None:
                 raise tls_error from exc
             last_exc = exc
-        if attempt < 2:
+        if attempt < attempts - 1:
             delay = backoffs[attempt]
             print(
                 f"[jira-dc-retry] attempt {attempt + 1} failed ({last_exc!r}); "
