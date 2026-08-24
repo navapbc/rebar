@@ -157,6 +157,7 @@ Old spellings still honored (with a runtime warning) that resolve to a canonical
 
 | Deprecated key | Replacement | Status |
 |----------------|-------------|--------|
+| `the hosted-OpenAI 'openai-chat:' provider prefix` | `'openai-responses:'` | deprecated (removal in v1.0.0) |
 | `verify.overlap_enabled` | `verify.suggest_duplicate_tickets` | permanent alias |
 
 ## Removed configuration keys

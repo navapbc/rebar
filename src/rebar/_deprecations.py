@@ -100,6 +100,16 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # `force="(no reason given)"`.
     _scheduled("lib", "rebar.transition(force_close=...)", 'rebar.transition(force="<reason>")'),
     _scheduled("lib", "rebar.transition(force=True)", 'rebar.transition(force="<reason>")'),
+    # ── provider prefix: the hosted-OpenAI Chat-Completions fallback (story 155c) ─
+    # The Responses-API cutover (ticket upbeat-illadvised-springtail) makes hosted
+    # OpenAI resolve to `openai-responses:` by default. The explicit `openai-chat:`
+    # qualifier (and `provider = "openai-chat"`) remains a SUPPORTED per-provider
+    # fallback to the Chat Completions wire contract during the compatibility window,
+    # but it is TEMPORARY: it is scheduled for removal before v1. Only HOSTED
+    # openai-chat warns (the runner emits this once per run); Chat forced by a custom
+    # OpenAI-compatible `base_url`/`endpoint` is a construction constraint, not a
+    # deprecated opt-in, and has no `openai-responses:` alternative, so it does NOT warn.
+    _scheduled("cfg", "the hosted-OpenAI 'openai-chat:' provider prefix", "'openai-responses:'"),
     # ── removed scheduled surfaces (historical record) ─────────────────────────
     # NOTE (DE7): the first pre-1.0 breaking removal dropped the scheduled env
     # aliases REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE, the

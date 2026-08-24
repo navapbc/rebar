@@ -208,6 +208,29 @@ def test_provider_session_exposes_a_pydantic_ai_compatible_factory(seam):
     assert all(c.is_closed for c in opened), "the session did not close what its builders opened"
 
 
+def test_openai_responses_is_resolvable_without_a_rebar_builder():
+    """The ``openai-responses`` provider must resolve so the ticket-155c default-flipped
+    ``openai-responses:<model>`` string is a live target, not a config error.
+
+    This pins the SOLE purpose of the ``_EXTRA_KNOWN_PROVIDERS`` union in providers.py: rebar
+    registers NO builder for ``openai-responses`` (its OpenAI builder answers only under
+    ``openai``/``openai-chat``, and only when a ``base_url`` is set), so with no custom endpoint
+    the name is resolvable purely because it is folded into ``_pydantic_ai_known_providers`` —
+    handed to pydantic-ai's own resolution exactly like ``openai-chat``. Checked WITHOUT
+    constructing anything (no OpenAI credentials required)."""
+    from rebar.llm.providers import ProviderSession
+
+    cfg = _cfg()  # no base_url → the OpenAI builder is NOT registered
+    with ProviderSession(cfg) as session:
+        assert session.is_resolvable("openai-responses") is True
+        assert session.supports("openai-responses") is False, (
+            "rebar must register no builder for openai-responses; it resolves via pydantic-ai"
+        )
+        # parity with the deprecated Chat fallback, which is resolvable the same way
+        assert session.is_resolvable("openai-chat") is True
+        assert session.supports("openai-chat") is False
+
+
 def test_provider_session_factory_rejects_an_unknown_provider_by_name():
     """An unregistered name is a typed rebar config error naming what IS registered — the
     registry lookup must not surface a bare ``KeyError``."""

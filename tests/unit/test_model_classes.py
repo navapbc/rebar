@@ -67,10 +67,20 @@ def test_defaults_are_bare_ids_so_no_default_pins_a_provider() -> None:
         assert mc.resolve_class(name, slots).startswith("anthropic:")
 
 
-def test_omitted_openai_provider_is_inferred_as_explicit_chat_completions() -> None:
-    """A slot naming only an OpenAI model freezes the existing Chat Completions semantics."""
+def test_omitted_openai_provider_defaults_to_responses_api() -> None:
+    """A slot naming only a hosted OpenAI model defaults to the Responses API (ticket 155c)."""
     mc = _mc()
     slots = mc.parse_class_slots({"frontier": {"model": "gpt-4o"}})
+    assert mc.resolve_class("frontier", slots) == "openai-responses:gpt-4o"
+
+
+def test_a_slot_with_a_custom_endpoint_keeps_openai_on_chat() -> None:
+    """A custom OpenAI-compatible slot endpoint cannot use the Responses API in rebar, so the
+    default flip must not apply when a slot ``endpoint`` is configured (ticket 155c)."""
+    mc = _mc()
+    slots = mc.parse_class_slots(
+        {"frontier": {"model": "gpt-4o", "endpoint": "http://localhost:1234/v1"}}
+    )
     assert mc.resolve_class("frontier", slots) == "openai-chat:gpt-4o"
 
 
@@ -167,7 +177,7 @@ def test_a_fallback_entry_omitting_provider_infers_it_like_a_slot_does() -> None
     slots = mc.parse_class_slots(
         {"frontier": {"model": "claude-opus-4-8", "fallback": [{"model": "gpt-4o"}]}}
     )
-    assert mc.resolve_fallback_chain("frontier", slots) == ["openai-chat:gpt-4o"]
+    assert mc.resolve_fallback_chain("frontier", slots) == ["openai-responses:gpt-4o"]
 
 
 def test_empty_fallback_and_absent_fallback_are_the_same_thing() -> None:

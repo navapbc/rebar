@@ -61,7 +61,8 @@ def _cfg(**kw):
 
 def test_model_string_provider_inference():
     assert _pai_model(_cfg(model="claude-opus-4-8")) == "anthropic:claude-opus-4-8"
-    assert _pai_model(_cfg(model="gpt-4o")) == "openai-chat:gpt-4o"
+    # Hosted OpenAI now defaults to the Responses API (ticket 155c cutover).
+    assert _pai_model(_cfg(model="gpt-4o")) == "openai-responses:gpt-4o"
     # an explicit provider-qualified string is used verbatim
     assert _pai_model(_cfg(model="anthropic:claude-sonnet-4-6")) == "anthropic:claude-sonnet-4-6"
     assert _pai_model(_cfg(model="google-gla:gemini-2.5-flash")) == "google-gla:gemini-2.5-flash"
@@ -71,8 +72,9 @@ def test_model_string_provider_inference():
     ("model", "provider"),
     [("gpt-4o", "openai"), ("openai:gpt-4o", None)],
 )
-def test_openai_targets_preserve_chat_completions_without_deprecation(model, provider):
-    """Inferred and legacy-explicit OpenAI inputs keep the current Chat Completions API."""
+def test_openai_targets_keep_chat_completions_for_a_custom_endpoint(model, provider):
+    """A custom OpenAI-compatible ``base_url`` keeps inferred/legacy OpenAI inputs on the Chat
+    Completions API (ticket 155c: rebar can only build a custom endpoint as Chat)."""
     import warnings
 
     from pydantic_ai._warnings import PydanticAIDeprecationWarning
@@ -98,12 +100,16 @@ def test_openai_targets_preserve_chat_completions_without_deprecation(model, pro
     assert str(resolved.provider.base_url).startswith("http://localhost:1234/v1")
 
 
-def test_model_class_openai_target_uses_explicit_chat_completions_prefix():
-    """Model-class and fallback composition share the unambiguous Chat target."""
+def test_model_class_openai_target_defaults_to_responses_but_endpoint_stays_chat():
+    """Model-class and fallback composition default hosted OpenAI to the Responses API, while a
+    custom endpoint keeps it on Chat Completions (ticket 155c)."""
     from rebar.llm.model_classes import _resolve_target
 
-    assert _resolve_target("gpt-4o", "openai") == "openai-chat:gpt-4o"
-    assert _resolve_target("openai:gpt-4o", None) == "openai-chat:gpt-4o"
+    assert _resolve_target("gpt-4o", "openai") == "openai-responses:gpt-4o"
+    assert _resolve_target("openai:gpt-4o", None) == "openai-responses:gpt-4o"
+    # explicit fallback + custom endpoint both stay on Chat
+    assert _resolve_target("openai-chat:gpt-4o", None) == "openai-chat:gpt-4o"
+    assert _resolve_target("gpt-4o", "openai", endpoint="http://local/v1") == "openai-chat:gpt-4o"
 
 
 # ── Runner selection ───────────────────────────────────────────────────────────
