@@ -417,6 +417,7 @@ _PROFILE_RESOLVERS = {
     "anthropic": _resolve_anthropic,
     "openai": _resolve_openai,
     "openai-chat": _resolve_openai,
+    "openai-responses": _resolve_openai,
     "google-gla": _resolve_google,
     "google-vertex": _resolve_google,
     "vertexai": _resolve_google,

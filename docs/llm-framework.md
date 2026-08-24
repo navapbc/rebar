@@ -146,6 +146,33 @@ Bedrock id such as `anthropic.claude-haiku-4-5-20251001-v1:0` (whose colon belon
 suffix) from being mistaken for a `provider:model` split. An explicitly configured provider that
 is not a member is rejected outright, naming the valid set.
 
+### Hosted OpenAI defaults to the Responses API
+
+The hosted OpenAI family is named with two provider prefixes that select the **wire protocol**:
+
+| Prefix | Wire protocol | When it is used |
+|---|---|---|
+| `openai-responses:` | OpenAI **Responses** API (`/v1/responses`) | the **default** for hosted OpenAI — a bare `openai:` qualifier, an inferred OpenAI model (`gpt-4o`), or `REBAR_LLM_MODEL_PROVIDER=openai`, all with **no** custom `base_url` |
+| `openai-chat:` | OpenAI **Chat Completions** API (`/v1/chat/completions`) | the **deprecated fallback** — selected only by an **explicit** `openai-chat:` qualifier / `provider = "openai-chat"`, or forced automatically whenever a custom OpenAI-compatible `base_url`/slot `endpoint` is set |
+
+So `model = "gpt-4o"`, `model = "openai:gpt-4o"`, and `model_provider = "openai"` now all resolve
+to `openai-responses:gpt-4o`. The two prefixes are capability-equivalent (same `ModelProfile`, same
+`native_structured_output`); only the request/response wire shape differs.
+
+**Custom endpoints stay on Chat Completions.** rebar's own OpenAI builder registers only under
+`openai`/`openai-chat`, and vendor support for `/v1/responses` behind an arbitrary OpenAI-compatible
+`base_url` (LMStudio / Ollama / vLLM / a LiteLLM proxy) is not guaranteed. Whenever a top-level
+`REBAR_LLM_BASE_URL`/`base_url` or a per-slot/per-fallback `endpoint` is configured, the hosted
+default flip is suppressed and the OpenAI family stays on `openai-chat:` — no deprecation notice is
+emitted for that endpoint-forced path.
+
+**`openai-chat:` is a deprecated pre-v1 fallback.** Explicitly selecting hosted `openai-chat:`
+(with no custom `base_url`) still works but logs a one-time deprecation notice per run pointing at
+`openai-responses:`; it is **scheduled for removal in v1.0.0** (registered in
+`rebar._deprecations`). To keep exercising Chat Completions during the deprecation window, set the
+model/provider to the explicit `openai-chat:` prefix, or point at a custom endpoint. After v1.0.0
+the hosted OpenAI family will be Responses-only.
+
 ### Provider support tiers
 
 Every provider resolves into one of two tiers, and the tier is **stamped into the gate verdict's

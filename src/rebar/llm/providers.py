@@ -31,6 +31,17 @@ logger = logging.getLogger(__name__)
 # explicitly so they are not misreported as unknown by `_pydantic_ai_recognizes`.
 _DEPRECATED_PROVIDER_ALIASES = frozenset({"google-gla", "google-vertex", "vertexai"})
 
+# Provider names pydantic-ai's OWN `infer_model`/`infer_provider` accept but
+# `known_model_names()` does NOT enumerate, so they too are absent from the derived
+# set below. `openai-responses` is the Responses-API prefix: `infer_model` constructs
+# `OpenAIResponsesModel` for it and `infer_provider("openai-responses")` resolves the
+# OpenAI provider, yet no `openai-responses:` entry exists in the `KnownModelName`
+# literal (verified against pinned pydantic-ai 1.107.2). Listed here so
+# `is_resolvable("openai-responses")` is True and rebar leaves it a lazy model STRING
+# for pydantic-ai to build — rebar registers no builder for it (the custom-`base_url`
+# `_build_openai` path stays Chat-only; see story 155c / the capability matrix).
+_EXTRA_KNOWN_PROVIDERS = frozenset({"openai-responses"})
+
 
 @lru_cache(maxsize=1)
 def _pydantic_ai_known_providers() -> frozenset[str]:
@@ -50,7 +61,7 @@ def _pydantic_ai_known_providers() -> frozenset[str]:
     provider_names = {
         name.split(":", 1)[0] for name in pai_models.known_model_names() if ":" in name
     }
-    return frozenset(provider_names) | _DEPRECATED_PROVIDER_ALIASES
+    return frozenset(provider_names) | _DEPRECATED_PROVIDER_ALIASES | _EXTRA_KNOWN_PROVIDERS
 
 
 class ProviderSession:
