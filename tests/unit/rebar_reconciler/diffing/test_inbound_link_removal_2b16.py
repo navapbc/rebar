@@ -534,7 +534,7 @@ def _confirm_local_deps(repo: Path, source_id: str) -> None:
     for dep in rebar.show_ticket(source_id, repo_root=repo).get("deps") or []:
         target, relation = dep.get("target_id"), dep.get("relation")
         if target and relation:
-            store.record(source_id, target, relation, pass_id="test-a4bd")
+            store.record(source_id, target, relation)
     store.save()
 
 

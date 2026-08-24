@@ -147,7 +147,6 @@ class PeerConfirmationStore:
         *,
         link_id: str | None = None,
         direction: str = DIRECTION_OUTBOUND,
-        pass_id: str | None = None,
         source_kind: str = SOURCE_PUSH,
     ) -> None:
         """Record that the peer carries this link, with the evidence that proves it.
@@ -155,21 +154,32 @@ class PeerConfirmationStore:
         ``link_id`` is the vendor's stable link id when the transport supplies
         one. Backends may legitimately return none; a missing id is stored as
         ``None`` and is NOT a failure — the record still proves synchronization.
+
+        CHANGE-GATED, NEVER A PER-PASS TIMESTAMP (bug 266c, epic 0303 churn
+        discipline — see ``peer_state.note_rich_emit``). The record carries only
+        MATERIAL evidence: the identity/decision fields plus ``first_confirmed_at``
+        (set once, then preserved). Re-recording byte-identical evidence — which
+        snapshot reconfirmation does for every observed link on every pass — leaves
+        the record untouched and does NOT set ``_dirty``, so a converged pass
+        rewrites the full sidecar zero times. Deliberately dropped: the former
+        ``confirmed_pass`` / ``confirmed_at`` per-pass fields, which had no
+        production reader (only tests asserted them) and refreshed every pass,
+        rewriting the whole file over unchanged link evidence.
         """
         key = record_key(source_id, target_id, relation)
-        now = time.time_ns()
         previous = self._records.get(key) or {}
-        self._records[key] = {
+        candidate = {
             "source_id": source_id,
             "target_id": target_id,
             "relation": relation,
             "link_id": link_id,
             "direction": direction,
             "source": source_kind,
-            "confirmed_pass": pass_id,
-            "confirmed_at": now,
-            "first_confirmed_at": previous.get("first_confirmed_at", now),
+            "first_confirmed_at": previous.get("first_confirmed_at", time.time_ns()),
         }
+        if candidate == previous:
+            return  # unchanged evidence: no rewrite (0303 churn discipline)
+        self._records[key] = candidate
         self._dirty = True
 
     def save(self) -> None:
@@ -193,7 +203,6 @@ def confirm_from_snapshot(
     store: PeerConfirmationStore,
     curr_snapshot: Any,
     binding_store: Any,
-    pass_id: str | None = None,
 ) -> int:
     """Confirm links OBSERVED in an authoritative fetched snapshot. Returns the count.
 
@@ -247,7 +256,6 @@ def confirm_from_snapshot(
                 str(relation),
                 link_id=link.get("id"),
                 direction=DIRECTION_SNAPSHOT,
-                pass_id=pass_id,
                 source_kind=SOURCE_SNAPSHOT,
             )
             written += 1
@@ -258,7 +266,6 @@ def backfill_from_managed_refs(
     store: PeerConfirmationStore,
     local_tickets: Any,
     binding_store: Any,
-    pass_id: str | None = None,
 ) -> int:
     """Grandfather pre-upgrade managed links as confirmed. Returns the count written.
 
@@ -307,7 +314,6 @@ def backfill_from_managed_refs(
                 str(kind),
                 link_id=None,
                 direction=DIRECTION_BACKFILL,
-                pass_id=pass_id,
                 source_kind=SOURCE_BACKFILL,
             )
             written += 1

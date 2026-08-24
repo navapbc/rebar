@@ -63,22 +63,20 @@ def test_fresh_upgrade_backfills_every_bound_managed_ref(pc, tracker):
     store = pc.open_store(tracker)
     assert store.was_absent is True
 
-    written = pc.backfill_from_managed_refs(
-        store, [_ticket()], _Bindings({"dst-local": "PROJ-9"}), "pass-1"
-    )
+    written = pc.backfill_from_managed_refs(store, [_ticket()], _Bindings({"dst-local": "PROJ-9"}))
 
     assert written == 1
     record = store.get("src-local", "dst-local", "blocks")
     assert record["source"] == pc.SOURCE_BACKFILL
     assert record["direction"] == pc.DIRECTION_BACKFILL
     assert record["link_id"] is None
-    assert record["confirmed_pass"] == "pass-1"
+    assert "confirmed_pass" not in record  # bug 266c: per-pass telemetry removed
     assert store.is_confirmed("src-local", "dst-local", "blocks") is True
 
 
 def test_unbound_target_is_not_backfilled(pc, tracker):
     store = pc.open_store(tracker)
-    written = pc.backfill_from_managed_refs(store, [_ticket()], _Bindings({}), "pass-1")
+    written = pc.backfill_from_managed_refs(store, [_ticket()], _Bindings({}))
     assert written == 0
     assert len(store) == 0
 
@@ -91,9 +89,7 @@ def test_existing_but_empty_store_is_not_backfilled(pc, tracker):
     store = pc.open_store(tracker)
     assert store.was_absent is False
 
-    written = pc.backfill_from_managed_refs(
-        store, [_ticket()], _Bindings({"dst-local": "PROJ-9"}), "pass-1"
-    )
+    written = pc.backfill_from_managed_refs(store, [_ticket()], _Bindings({"dst-local": "PROJ-9"}))
 
     assert written == 0
     assert len(store) == 0
@@ -102,12 +98,12 @@ def test_existing_but_empty_store_is_not_backfilled(pc, tracker):
 def test_second_pass_adds_no_backfill_records(pc, tracker):
     bindings = _Bindings({"dst-local": "PROJ-9"})
     first = pc.open_store(tracker)
-    assert pc.backfill_from_managed_refs(first, [_ticket()], bindings, "pass-1") == 1
+    assert pc.backfill_from_managed_refs(first, [_ticket()], bindings) == 1
     first.save()
 
     second = pc.open_store(tracker)
     assert second.was_absent is False
-    assert pc.backfill_from_managed_refs(second, [_ticket()], bindings, "pass-2") == 0
+    assert pc.backfill_from_managed_refs(second, [_ticket()], bindings) == 0
     assert len(second) == 1
 
 
@@ -122,7 +118,7 @@ def test_non_managed_kinds_and_malformed_tickets_are_ignored(pc, tracker):
     ]
 
     bindings = _Bindings({"dst-local": "PROJ-9"})
-    assert pc.backfill_from_managed_refs(store, tickets, bindings, "p") == 0
+    assert pc.backfill_from_managed_refs(store, tickets, bindings) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -145,13 +141,10 @@ def test_backfill_never_overwrites_proven_evidence(pc, tracker, existing):
         "blocks",
         link_id="10042",
         direction=pc.DIRECTION_OUTBOUND,
-        pass_id="pass-0",
         source_kind=existing,
     )
 
-    written = pc.backfill_from_managed_refs(
-        store, [_ticket()], _Bindings({"dst-local": "PROJ-9"}), "pass-1"
-    )
+    written = pc.backfill_from_managed_refs(store, [_ticket()], _Bindings({"dst-local": "PROJ-9"}))
 
     assert written == 0
     record = store.get("src-local", "dst-local", "blocks")
@@ -163,7 +156,7 @@ def test_snapshot_confirmation_upgrades_a_backfilled_record(pc, tracker):
     """AC5, upgrade half — needs no new code, only the shared instance."""
     store = pc.open_store(tracker)
     bindings = _Bindings({"src-local": "PROJ-1", "dst-local": "PROJ-9"})
-    pc.backfill_from_managed_refs(store, [_ticket()], bindings, "pass-1")
+    pc.backfill_from_managed_refs(store, [_ticket()], bindings)
     assert store.get("src-local", "dst-local", "blocks")["source"] == pc.SOURCE_BACKFILL
 
     snapshot = {
@@ -173,7 +166,7 @@ def test_snapshot_confirmation_upgrades_a_backfilled_record(pc, tracker):
             ]
         }
     }
-    pc.confirm_from_snapshot(store, snapshot, bindings, "pass-1")
+    pc.confirm_from_snapshot(store, snapshot, bindings)
 
     record = store.get("src-local", "dst-local", "blocks")
     assert record["source"] == pc.SOURCE_SNAPSHOT
@@ -183,7 +176,7 @@ def test_snapshot_confirmation_upgrades_a_backfilled_record(pc, tracker):
 def test_backfilled_record_counts_as_confirmed(pc, tracker):
     """Deliberately NOT weaker at the decision point — that would re-open the blind spot."""
     store = pc.open_store(tracker)
-    pc.backfill_from_managed_refs(store, [_ticket()], _Bindings({"dst-local": "PROJ-9"}), "p")
+    pc.backfill_from_managed_refs(store, [_ticket()], _Bindings({"dst-local": "PROJ-9"}))
     assert store.is_confirmed("src-local", "dst-local", "blocks") is True
 
 
@@ -215,7 +208,7 @@ def test_ordering_backfill_runs_before_snapshot_confirmation(tracker, pc):
         }
     }
 
-    reconcile._confirm_peer_links(ctx, "pass-5")
+    reconcile._confirm_peer_links(ctx)
 
     record = pc.open_store(tracker).get("src-local", "dst-local", "blocks")
     assert record is not None
@@ -244,7 +237,7 @@ def test_lost_update_backfill_and_snapshot_records_both_survive(tracker, pc):
         }
     }
 
-    reconcile._confirm_peer_links(ctx, "pass-5")
+    reconcile._confirm_peer_links(ctx)
 
     reopened = pc.open_store(tracker)
     assert reopened.is_confirmed("src-local", "dst-local", "blocks"), "backfill record was lost"
@@ -256,9 +249,7 @@ def test_lost_update_backfill_and_snapshot_records_both_survive(tracker, pc):
 def test_no_write_mode_backfills_nothing(tracker, monkeypatch):
     reconcile = importlib.import_module("rebar_reconciler.reconcile")
     calls: list[str] = []
-    monkeypatch.setattr(
-        reconcile, "_confirm_peer_links", lambda _ctx, pass_id: calls.append(pass_id) or 0
-    )
+    monkeypatch.setattr(reconcile, "_confirm_peer_links", lambda _ctx: calls.append("called") or 0)
 
     ctx = reconcile._PassContext(repo_root=tracker, pass_id="pass-5")
     ctx.persist = False
@@ -276,7 +267,7 @@ def test_no_write_mode_backfills_nothing(tracker, monkeypatch):
 def test_fail_open_backfill_failure_does_not_break_the_pass(tracker, monkeypatch, capsys):
     reconcile = importlib.import_module("rebar_reconciler.reconcile")
 
-    def _boom(_ctx, _pass_id):
+    def _boom(_ctx):
         raise RuntimeError("backfill exploded")
 
     monkeypatch.setattr(reconcile, "_confirm_peer_links", _boom)

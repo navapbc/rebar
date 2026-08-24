@@ -27,6 +27,7 @@ asserted, not assumed.
 from __future__ import annotations
 
 import importlib
+import time
 
 import pytest
 
@@ -81,14 +82,14 @@ def test_observed_links_are_confirmed_with_snapshot_provenance(pc, store):
     snapshot = {"PROJ-1": {"issuelinks": [_outward()]}}
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
 
-    written = pc.confirm_from_snapshot(store, snapshot, bindings, "pass-3")
+    written = pc.confirm_from_snapshot(store, snapshot, bindings)
 
     assert written == 1
     record = store.get("src-local", "dst-local", "blocks")
     assert record is not None
     assert record["direction"] == pc.DIRECTION_SNAPSHOT
     assert record["source"] == pc.SOURCE_SNAPSHOT
-    assert record["confirmed_pass"] == "pass-3"
+    assert "confirmed_pass" not in record  # bug 266c: per-pass telemetry removed
     assert record["link_id"] == "500"
 
 
@@ -102,7 +103,7 @@ def test_unobserved_issue_confirms_nothing(pc, store):
     snapshot = {"PROJ-1": {"summary": "no links were read for this issue"}}
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
 
-    written = pc.confirm_from_snapshot(store, snapshot, bindings, "pass-3")
+    written = pc.confirm_from_snapshot(store, snapshot, bindings)
 
     assert written == 0
     assert len(store) == 0
@@ -116,11 +117,11 @@ def test_authoritative_empty_confirms_nothing_and_unconfirms_nothing(pc, store):
     would have to be argued on its own terms; inferring it from an empty list here
     would resurrect absence-as-evidence.
     """
-    store.record("src-local", "dst-local", "blocks", link_id="500", pass_id="pass-1")
+    store.record("src-local", "dst-local", "blocks", link_id="500")
     snapshot = {"PROJ-1": {"issuelinks": []}}
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
 
-    written = pc.confirm_from_snapshot(store, snapshot, bindings, "pass-3")
+    written = pc.confirm_from_snapshot(store, snapshot, bindings)
 
     assert written == 0
     assert store.is_confirmed("src-local", "dst-local", "blocks") is True
@@ -134,12 +135,9 @@ def test_get_or_empty_idiom_would_break_the_trichotomy(pc, store):
     neither shape persists a file while the observed shape does.
     """
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
-    assert pc.confirm_from_snapshot(store, {"PROJ-1": {}}, bindings, "p") == 0
-    assert pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": []}}, bindings, "p") == 0
-    assert (
-        pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": [_outward()]}}, bindings, "p")
-        == 1
-    )
+    assert pc.confirm_from_snapshot(store, {"PROJ-1": {}}, bindings) == 0
+    assert pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": []}}, bindings) == 0
+    assert pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": [_outward()]}}, bindings) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +156,7 @@ def test_inward_blocks_is_recorded_as_depends_on(pc, store):
     snapshot = {"PROJ-1": {"issuelinks": [_inward()]}}
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
 
-    pc.confirm_from_snapshot(store, snapshot, bindings, "pass-3")
+    pc.confirm_from_snapshot(store, snapshot, bindings)
 
     assert store.is_confirmed("src-local", "dst-local", "depends_on") is True
     assert store.is_confirmed("src-local", "dst-local", "blocks") is False
@@ -166,16 +164,10 @@ def test_inward_blocks_is_recorded_as_depends_on(pc, store):
 
 def test_unbound_source_or_target_is_skipped(pc, store):
     bindings = _Bindings({"PROJ-1": "src-local"})  # PROJ-9 unbound
-    assert (
-        pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": [_outward()]}}, bindings, "p")
-        == 0
-    )
+    assert pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": [_outward()]}}, bindings) == 0
 
     bindings2 = _Bindings({"PROJ-9": "dst-local"})  # PROJ-1 unbound
-    assert (
-        pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": [_outward()]}}, bindings2, "p")
-        == 0
-    )
+    assert pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": [_outward()]}}, bindings2) == 0
     assert len(store) == 0
 
 
@@ -192,31 +184,40 @@ def test_unmapped_link_type_and_malformed_entries_are_skipped(pc, store):
         }
     }
 
-    assert pc.confirm_from_snapshot(store, snapshot, bindings, "p") == 0
+    assert pc.confirm_from_snapshot(store, snapshot, bindings) == 0
 
 
 def test_non_list_issuelinks_is_treated_as_unobserved(pc, store):
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
-    assert pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": "nope"}}, bindings, "p") == 0
+    assert pc.confirm_from_snapshot(store, {"PROJ-1": {"issuelinks": "nope"}}, bindings) == 0
 
 
 def test_empty_or_missing_snapshot_is_safe(pc, store):
     bindings = _Bindings({})
-    assert pc.confirm_from_snapshot(store, {}, bindings, "p") == 0
-    assert pc.confirm_from_snapshot(store, None, bindings, "p") == 0
+    assert pc.confirm_from_snapshot(store, {}, bindings) == 0
+    assert pc.confirm_from_snapshot(store, None, bindings) == 0
 
 
-def test_reconfirmation_is_idempotent_and_refreshes_the_pass(pc, store):
+def test_reconfirmation_is_idempotent_and_does_not_rewrite(pc, store):
+    """Bug 266c. Re-observing an unchanged link is idempotent AND change-gated: the
+    record set stays at one entry, ``first_confirmed_at`` is preserved from the first
+    observation, and the second observation leaves the store not dirty (no rewrite).
+    """
     snapshot = {"PROJ-1": {"issuelinks": [_outward()]}}
     bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
 
-    pc.confirm_from_snapshot(store, snapshot, bindings, "pass-1")
-    pc.confirm_from_snapshot(store, snapshot, bindings, "pass-2")
+    pc.confirm_from_snapshot(store, snapshot, bindings)
+    first_seen = store.get("src-local", "dst-local", "blocks")["first_confirmed_at"]
+    store.save()
+    assert store._dirty is False
+
+    pc.confirm_from_snapshot(store, snapshot, bindings)
 
     assert len(store) == 1
     record = store.get("src-local", "dst-local", "blocks")
-    assert record["confirmed_pass"] == "pass-2"
-    assert record["first_confirmed_at"] <= record["confirmed_at"]
+    assert record["first_confirmed_at"] == first_seen  # provenance preserved
+    assert "confirmed_pass" not in record and "confirmed_at" not in record
+    assert store._dirty is False  # unchanged evidence never re-dirties the store
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +234,7 @@ def test_persist_seam_writes_and_saves(tmp_path, pc):
     ctx.curr_snapshot = {"PROJ-1": {"issuelinks": [_outward()]}}
     ctx.binding_store = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
 
-    written = reconcile._confirm_peer_links(ctx, "pass-9")
+    written = reconcile._confirm_peer_links(ctx)
 
     assert written == 1
     assert (tmp_path / ".tickets-tracker" / ".bridge_state" / "peer_confirmations.json").exists()
@@ -249,7 +250,7 @@ def test_confirmation_failure_does_not_break_the_pass(tmp_path, monkeypatch, cap
     """
     reconcile = importlib.import_module("rebar_reconciler.reconcile")
 
-    def _boom(_ctx, _pass_id):
+    def _boom(_ctx):
         raise RuntimeError("snapshot confirmation exploded")
 
     monkeypatch.setattr(reconcile, "_confirm_peer_links", _boom)
@@ -279,9 +280,7 @@ def test_no_write_mode_confirms_nothing(tmp_path, monkeypatch):
     """AC7. A no-write pass writes no evidence, just as it writes no bindings."""
     reconcile = importlib.import_module("rebar_reconciler.reconcile")
     calls: list[str] = []
-    monkeypatch.setattr(
-        reconcile, "_confirm_peer_links", lambda _ctx, pass_id: calls.append(pass_id) or 0
-    )
+    monkeypatch.setattr(reconcile, "_confirm_peer_links", lambda _ctx: calls.append("called") or 0)
 
     ctx = reconcile._PassContext(repo_root=tmp_path, pass_id="pass-9")
     ctx.persist = False
@@ -304,7 +303,53 @@ def test_persist_seam_writes_no_file_when_nothing_is_confirmed(tmp_path):
     ctx.curr_snapshot = {"PROJ-1": {"summary": "unobserved"}}
     ctx.binding_store = _Bindings({"PROJ-1": "src-local"})
 
-    assert reconcile._confirm_peer_links(ctx, "pass-9") == 0
+    assert reconcile._confirm_peer_links(ctx) == 0
     assert not (
         tmp_path / ".tickets-tracker" / ".bridge_state" / "peer_confirmations.json"
     ).exists()
+
+
+def test_two_passes_over_unchanged_snapshot_do_not_rewrite_the_sidecar(pc, tmp_path):
+    """AC1/AC4 (bug 266c). Two COMPLETE persistence passes over an IDENTICAL
+    authoritative snapshot must not produce a second on-disk content change: an
+    unchanged link must not be re-persisted merely because the pass/time advanced.
+
+    This pins epic 0303's churn discipline for the peer-confirmation sidecar —
+    bridge-state records are change-gated, never a per-pass timestamp — the exact
+    property whose absence made ``.bridge_state/peer_confirmations.json`` rewrite
+    the full file every reconcile pass.
+    """
+    (tmp_path / ".tickets-tracker" / ".bridge_state").mkdir(parents=True)
+    tracker = str(tmp_path / ".tickets-tracker")
+    snapshot = {"PROJ-1": {"issuelinks": [_outward()]}}
+    bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
+
+    def one_pass():
+        s = pc.PeerConfirmationStore(tracker)
+        pc.confirm_from_snapshot(s, snapshot, bindings)
+        s.save()
+        with open(s.path, "rb") as handle:
+            return handle.read()
+
+    first = one_pass()
+    time.sleep(0.01)  # guarantee a distinct wall clock so any per-pass timestamp diverges
+    second = one_pass()
+
+    assert first == second, "unchanged link evidence re-persisted the full sidecar"
+
+
+def test_reconfirming_unchanged_link_leaves_the_store_not_dirty(pc, store):
+    """AC1 (bug 266c). Re-``record()``-ing byte-identical evidence is a no-op: the
+    store stays clean so ``save()`` writes nothing on a converged pass.
+    """
+    snapshot = {"PROJ-1": {"issuelinks": [_outward()]}}
+    bindings = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
+
+    assert pc.confirm_from_snapshot(store, snapshot, bindings) == 1
+    assert store._dirty is True  # first observation is genuinely new
+    store.save()
+    assert store._dirty is False
+
+    # Second identical observation must not re-dirty the store.
+    assert pc.confirm_from_snapshot(store, snapshot, bindings) == 1
+    assert store._dirty is False
