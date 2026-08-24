@@ -623,13 +623,33 @@ def _build_routes() -> tuple[Route, ...]:
 
 ROUTES: tuple[Route, ...] = _build_routes()
 
-_BY_NAME: dict[str, Route] = {route.name: route for route in ROUTES}
+
+def _index(routes: tuple[Route, ...]) -> tuple[dict[str, Route], dict[str, Route]]:
+    """Build ``(by_name, by_alias)`` lookup tables for ``routes``.
+
+    ``by_alias`` maps each alias to its owning route for LIVE (non-retired) routes
+    only: a retired spelling is unrouted, so its aliases must not resolve either
+    (mirrors :func:`derive_policy_sets`' live-only filter).
+    """
+    by_name = {route.name: route for route in routes}
+    by_alias = {alias: route for route in routes if not route.retired for alias in route.aliases}
+    return by_name, by_alias
 
 
-def route_for(spelling: str) -> Route | None:
-    """Return the :class:`Route` for a canonical ``spelling`` (or ``None``)."""
+_BY_NAME, _BY_ALIAS = _index(ROUTES)
 
-    return _BY_NAME.get(spelling)
+
+def route_for(spelling: str, routes: tuple[Route, ...] = ROUTES) -> Route | None:
+    """Return the :class:`Route` for a canonical name or alias ``spelling`` (or ``None``).
+
+    Canonical names take precedence over aliases: a canonical spelling always wins,
+    and an alias resolves only when no route claims it as a canonical name.
+    (Validation forbids an alias colliding with a live canonical name, so this
+    precedence is defensive; it also never resolves to a retired route.) Pass
+    ``routes`` to resolve against a table other than the shipped ``ROUTES``.
+    """
+    by_name, by_alias = (_BY_NAME, _BY_ALIAS) if routes is ROUTES else _index(routes)
+    return by_name.get(spelling) or by_alias.get(spelling)
 
 
 def derive_policy_sets(routes: tuple[Route, ...] = ROUTES) -> dict[str, frozenset[str]]:
