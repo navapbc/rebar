@@ -51,7 +51,8 @@ def run_bounded_git(
     ``timeout`` bounds ELAPSED TIME, which is the wrong axis for a *stalled* transfer: a
     remote that opens the socket and then moves no bytes is indistinguishable from a slow
     cold clone, so it holds the caller for the whole budget (task 851e). A ``fetch`` — the
-    long-budget command routed here, via ``init._git_fetch`` at 300s — therefore also gets
+    long-budget command routed here, via ``init._git_fetch`` at the shared
+    ``git_fetch.fetch_timeout`` cold-materialize backstop — therefore also gets
     the throughput-keyed abort from :func:`rebar._snapshot.git_fetch.stall_abort_args`,
     spliced ahead of the subcommand where git requires ``-c``. The ref-advertisement probe
     is left alone: its own 10s bound is already tighter than any low-speed window. The

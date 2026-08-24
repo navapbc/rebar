@@ -70,6 +70,7 @@ from rebar._config_sources import (
 from rebar._config_sources import resolve_dc_comment_max_chars as resolve_dc_comment_max_chars
 from rebar._config_sources import resolve_dc_connection as resolve_dc_connection
 from rebar._config_sources import resolve_detected_by as resolve_detected_by
+from rebar._config_sources import resolve_fetch_timeout as resolve_fetch_timeout
 from rebar._config_sources import resolve_gate_ref as resolve_gate_ref
 from rebar._config_sources import resolve_gate_source as resolve_gate_source
 from rebar._config_sources import resolve_gate_tmpdir as resolve_gate_tmpdir

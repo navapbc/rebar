@@ -83,6 +83,21 @@ def resolve_stall_attempts(default: int) -> int:
     return _positive_int(os.environ.get("REBAR_SNAPSHOT_STALL_ATTEMPTS"), default)
 
 
+def resolve_fetch_timeout(default: int) -> int:
+    """Materialization-fetch wall-clock backstop:
+    ``REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS`` over the module default (live per call).
+
+    This ceiling is NOT the guard against a wedged remote — the throughput-keyed
+    stall-abort (:func:`resolve_stall_abort_limits`) is, and it trips a dead connection in
+    seconds regardless of this value. The wall clock only backstops a hang the low-speed
+    check cannot see (a pre-transport wedge that moves zero bytes, e.g. a stuck credential
+    helper). So it is deliberately GENEROUS and TUNABLE: a large/cold store whose HONEST
+    ``--no-filter`` transfer legitimately runs minutes must not be cut off purely because a
+    fixed 300s wall clock elapsed (bug curly-open-swan). A malformed/non-positive knob falls
+    back to ``default`` rather than disarming the backstop."""
+    return _positive_int(os.environ.get("REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS"), default)
+
+
 def resolve_gate_tmpdir() -> str:
     """Snapshot-store base override ``REBAR_GATE_TMPDIR``, or ``""`` when unset (the
     caller then falls back to ``tempfile.gettempdir()``)."""

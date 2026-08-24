@@ -150,6 +150,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_RECONCILER_WRITE_FACADE` | `src/rebar/_engine/rebar_reconciler/reconcile_helpers.py` |  |
 | `REBAR_ROOT` | `src/rebar/_config_resolvers.py`, `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
 | `REBAR_SIGNING_KEY` | `src/rebar/_signing_hmac.py` |  |
+| `REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_config_resolvers.py` |  |
@@ -176,20 +177,20 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_164 variables._
+_165 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
 These reads pass a non-literal name argument, so the concrete variable name is not statically resolvable:
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
-- `src/rebar/_config_resolvers.py:305` — `os.environ.get(<non-literal>)`
+- `src/rebar/_config_resolvers.py:320` — `os.environ.get(<non-literal>)`
 - `src/rebar/_operation_config.py:54` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:305` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:318` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:322` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:329` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:600` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:306` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:319` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:323` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:330` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:601` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:78` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:328` — `os.environ.get(<non-literal>)`
