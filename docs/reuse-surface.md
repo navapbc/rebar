@@ -1,10 +1,10 @@
 # Reusable machinery for developers
 
-This reference documents the subsystem contracts that another rebar capability can reuse. It covers operation-certificate signing, generic HMAC primitives, the LLM workflow runtime, the prompt and contract model, and the output-schema seam. Related guides explain the [LLM framework](llm-framework.md), the [`SIGNATURE` event](event-schema.md), and [workflow authoring](workflow-authoring-v2.md).
+This reference documents the subsystem contracts that another rebar capability can reuse. It covers public bridge and ticket mutation functions, operation-certificate signing, generic HMAC primitives, the LLM workflow runtime, the prompt and contract model, and the output-schema seam. Related guides explain the [LLM framework](llm-framework.md), the [`SIGNATURE` event](event-schema.md), and [workflow authoring](workflow-authoring-v2.md).
 
 The plan-review gate demonstrates the operation-certificate, LLM runtime, prompt, and output-schema surfaces. See [the plan-review guide](plan-review-gate.md) and `src/rebar/llm/plan_review/`.
 
-> Audience: Human developers and LLM agents. `tests/unit/test_reuse_surface_doc.py` checks the documented callable signatures against the source. Use `inspect.signature(...)` for additional inspection.
+> Audience: Human developers and LLM agents. `tests/unit/test_reuse_surface_doc.py` checks selected callable signatures against the source. Use `inspect.signature(...)` for additional inspection.
 
 ## Public bridge operations — `rebar.*`
 
@@ -39,6 +39,38 @@ remains supported with its subprocess-visible return and exception contract. MCP
 mirrors both sets of names; mutating bridge operations and mutating reconcile modes
 require `REBAR_MCP_ALLOW_JIRA_SYNC`, and read-only mode blocks mutations. Setup is
 interactive and intentionally has no library or MCP operation.
+
+## Public ticket mutation operations in `rebar.*`
+
+The package facade exposes these ticket and store mutations:
+
+```python
+unlink(id1: str, id2: str, relation: str | None = None, *, repo_root=None) -> None
+tag(ticket_id: str, tag: str, *, repo_root=None) -> None
+untag(ticket_id: str, tag: str, *, repo_root=None) -> None
+archive(ticket_id: str, *, repo_root=None) -> None
+compact(ticket_id: str | None = None, *, repo_root=None) -> None
+```
+
+All five functions pass `repo_root` through standard repository and tracker resolution. An explicit value selects that repository and its configured tracker. Omitting it uses normal repository discovery. Successful calls return `None`. Expected ticket, validation, state, compaction, and store failures raise `RebarError`. The exception carries the command return code and stderr when the command supplied them. A missing optional delivery helper can raise `OptionalDependencyError` after the local commit.
+
+Event writes use the locked tracker write path. They commit locally and then follow `sync.push` when publishing to `sync.remote`. The `always` mode attempts publication before return, `async` starts detached publication, and `off` leaves commits local. An ordinary delivery failure preserves the local commit and is visible through `rebar.push_status()` or `rebar fsck`.
+
+### `unlink`
+
+`unlink` resolves both ticket identifiers. When `relation` names one of the canonical relations, it removes that active relation from `id1` to `id2`. When `relation` is `None`, it removes the most recently created active link for the ordered pair. The operation writes an `UNLINK` event that cites the removed `LINK` event. A `relates_to` removal also writes the reciprocal `UNLINK` when the reciprocal link exists. Each direction is a separate commit and publication operation. A failure in the second direction does not undo the first. A missing reciprocal link produces a warning after the requested side is removed. Missing tickets, an invalid relation, or the absence of a matching active link raise `RebarError`.
+
+### `tag` and `untag`
+
+`tag` and `untag` trim and validate the tag name. `tag` appends a `TAG_DELTA` add event unless the tag is present. `untag` appends a `TAG_DELTA` remove event unless the tag is absent. Both no-op cases succeed without an event, commit, or publication attempt. Missing tickets, empty tags, whitespace-only tags, control characters, and store failures raise `RebarError`.
+
+### `archive`
+
+`archive` accepts only an open ticket. Before appending `ARCHIVED`, it folds eligible events into a `SNAPSHOT` with the terminal fold policy. It then writes the derived `.archived` marker. The fold and archive event are committed locally. The publication operation after the archive event includes both commits when delivery is enabled. A failed archive append does not undo a completed fold. An existing archive marker or event is an idempotent success. When only the event exists, the function repairs the local marker without another event. Missing tickets, non-open status, failed compaction, and store failures raise `RebarError`.
+
+### `compact`
+
+`compact` resolves one ticket and reads the selected repository's compaction threshold, horizon, and sync policy. It performs the configured freshness check before deciding whether to fold. A qualifying fold writes a `SNAPSHOT`, renames absorbed event files with the retired suffix, commits those storage changes atomically, invalidates the reducer cache, and invokes configured publication. A ticket below the threshold or with a snapshot after the freshness check is unchanged. The wrapper captures command output and raises `RebarError` for a nonzero result. The `ticket_id` annotation permits `None`, but omitting the identifier produces the command's usage failure.
 
 ---
 
