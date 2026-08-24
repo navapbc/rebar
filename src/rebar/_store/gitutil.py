@@ -374,6 +374,127 @@ def _store_git_op_lock(tracker: str) -> Iterator[None]:
             pass
 
 
+# Cross-process fetch coordination keyed on the Git COMMON directory (bug
+# agrologic-oval-bobolink). Remote-tracking refs (``refs/remotes/<remote>/<branch>``) live
+# in the common dir, SHARED by every linked worktree and by the symlinked tickets clone. Two
+# uncoordinated ref-updating fetches against one common dir race git's ref compare-and-swap,
+# and the loser fails ``cannot lock ref '<ref>': is at <new> but expected <old>`` — the
+# snapshot fetch aborts an attested op, the sync fetch silently drops a freshness round.
+# The per-worktree advisory git-op lock above does NOT cover this: its identity is the
+# per-worktree git dir (correct for the per-worktree ``index.lock``), while the racing refs
+# are shared, and the sync/snapshot fetch legs run OUTSIDE it anyway. So ref-updating
+# fetches take ONE exclusive flock keyed on the canonical common dir, which serializes
+# every rebar fetcher sharing those refs regardless of which worktree or operation drives
+# it. It is a dedicated FETCH lock, never the ticket write lock, so a slow network fetch
+# serializes only other fetches — never a local ticket writer. Acquisition is BOUNDED and
+# then degrades to unlocked (like the advisory git-op lock): a wedged peer fetch must not
+# pin the long-lived MCP server behind it, and the caller's bounded compare-and-swap retry
+# stays the correctness net once we proceed unlocked.
+_FETCH_COORD_LOCK_NAME = "rebar-fetch.lock"
+# Bound how long to wait for a peer's fetch before proceeding unlocked. Comfortably longer
+# than a healthy tickets fetch (a few tiny event files) yet far short of the snapshot
+# fetch's 300s ceiling, so one wedged holder degrades to the CAS-retry net rather than
+# stalling the server for minutes.
+_FETCH_COORD_WAIT_S = 30.0
+_FETCH_COORD_POLL_S = 0.05
+
+
+def _resolve_common_git_dir(repo_root: str) -> str | None:
+    """The canonical Git COMMON directory of *repo_root* — the one every linked worktree
+    shares and where remote-tracking refs live — symlink-resolved to an absolute path, or
+    ``None`` when *repo_root* is not a git repo.
+
+    A linked worktree's per-worktree git dir carries a ``commondir`` pointer to it; a main
+    checkout's git dir IS the common dir. Pure filesystem (no git subprocess), matching this
+    module's other git-dir resolution, and ``realpath`` collapses the ``.tickets-tracker``
+    symlink so two worktrees of one store resolve to the SAME identity."""
+    git_dir = _resolve_tracker_git_dir(repo_root)
+    if not git_dir:
+        return None
+    commondir_marker = os.path.join(git_dir, "commondir")
+    if os.path.isfile(commondir_marker):
+        try:
+            with open(commondir_marker, encoding="utf-8") as f:
+                common = f.read().strip()
+        except OSError:
+            common = ""
+        if common:
+            if not os.path.isabs(common):
+                common = os.path.join(git_dir, common)
+            git_dir = common
+    return os.path.realpath(git_dir)
+
+
+def _acquire_fetch_coord_flock(fd: int) -> bool:
+    """Take the common-dir fetch flock, BOUNDED. Fast path is a single non-blocking
+    ``LOCK_EX`` — zero added latency when uncontended. When a peer holds it, poll with short
+    jittered sleeps up to ``_FETCH_COORD_WAIT_S`` and then give up, returning ``False`` so
+    the caller proceeds UNLOCKED (the bounded CAS retry is the net). A blocking wait with no
+    ceiling could pin the long-lived MCP server behind a wedged peer fetch, so it is
+    deliberately avoided here."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        pass
+    deadline = time.monotonic() + _FETCH_COORD_WAIT_S
+    while time.monotonic() < deadline:
+        _backoff_sleep(_jitter(_FETCH_COORD_POLL_S))
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+@contextmanager
+def fetch_coordination_lock(repo_root: str) -> Iterator[None]:
+    """Hold the exclusive cross-process fetch lock for *repo_root*'s Git COMMON dir.
+
+    A ref-updating fetch WAITS (bounded) for a peer fetch on the same common dir rather than
+    race it, because the loser of git's ref compare-and-swap gets no in-band recovery beyond
+    the caller's retry. Keyed on the canonical (symlink/worktree-resolved) common dir so
+    linked worktrees and the symlinked tickets clone share ONE lock.
+
+    Best-effort throughout: if the common dir cannot be resolved (not a git repo), the lock
+    file cannot be opened, or a wedged peer holds it past ``_FETCH_COORD_WAIT_S``, the block
+    proceeds UNLOCKED — the caller's bounded compare-and-swap retry stays the correctness
+    net, and that retry is also what covers a NON-rebar git peer, which never takes this lock
+    at all."""
+    common = _resolve_common_git_dir(repo_root)
+    if common is None:
+        yield
+        return
+    lock_path = os.path.join(common, _FETCH_COORD_LOCK_NAME)
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError:
+        yield
+        return
+    acquired = False
+    try:
+        acquired = _acquire_fetch_coord_flock(fd)
+        if not acquired:
+            logger.warning(
+                "fetch coordination lock %s still held after %.0fs; proceeding without "
+                "serialization (the bounded ref-CAS retry still governs)",
+                lock_path,
+                _FETCH_COORD_WAIT_S,
+            )
+        yield
+    finally:
+        try:
+            if acquired:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 # Test seam: a no-arg callable (default ``None`` = disabled) invoked inside
 # ``_reclaim_if_stale_index_lock`` at the TOCTOU window — after the lock is judged stale and
 # before the guarded unlink — so a test can deterministically inject a peer replacing the
