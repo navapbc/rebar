@@ -236,6 +236,10 @@ def test_materialize_tree_disables_interactive_credential_prompt(tmp_path, monke
 
 def test_snapshot_git_calls_are_time_bounded():
     """A stuck remote must not hang the long-lived MCP server: the snapshot path carries a
-    timeout, matching the ``_store/push.py`` / ``_store/sync.py`` precedent."""
-    assert isinstance(rs._GIT_TIMEOUT, (int, float))
-    assert rs._GIT_TIMEOUT > 0
+    timeout, matching the ``_store/push.py`` / ``_store/sync.py`` precedent.
+
+    The network materialization fetch is bounded by the generous, tunable
+    ``fetch_timeout()`` backstop (bug curly-open-swan), and the quick LOCAL git ops by
+    ``git_fetch._GIT_TIMEOUT`` — both positive, so no call site is unbounded."""
+    assert isinstance(rs.fetch_timeout(), (int, float))
+    assert rs.fetch_timeout() > 0
