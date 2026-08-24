@@ -504,3 +504,320 @@ def test_run_differs_shadow_plan_tolerates_legacy_dict_mutations(monkeypatch, mu
     for plan in ctx.ticket_plans:
         for m in plan.mutations:
             assert hasattr(m, "target") and not isinstance(m, dict)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# RP-03 S2 T2 — lifecycle intents, inter-ticket dependencies, pre-effect exclusion.
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture(scope="module")
+def operation_outcome_mod():
+    return _load("operation_outcome_ticket_plan_test", "operation_outcome.py")
+
+
+def _mk(mutation_mod, direction, action, target, payload=None, provenance=None):
+    d = mutation_mod.MutationDirection
+    a = mutation_mod.MutationAction
+    return mutation_mod.Mutation(
+        direction=getattr(d, direction),
+        action=getattr(a, action),
+        target=target,
+        payload=payload or {},
+        provenance=provenance or {"src": direction},
+    )
+
+
+# ── T2 HAPPY PATH — minimal executable spec of the new surface. ──────────────────
+
+
+def test_ticket_plan_t1_construction_still_defaults(ticket_plan_mod, observation_mod):
+    """A TicketPlan built the T1 way (no intents/dependencies/defer_reason kwargs) still
+    constructs, and the new fields default to empty tuple / empty tuple / None."""
+    version = observation_mod.ObservationVersion(pass_id="p", fingerprint="f")
+    plan = ticket_plan_mod.TicketPlan(
+        identity="REB-1",
+        mutations=(),
+        diagnostics=(),
+        disposition=ticket_plan_mod.PlanDisposition.mutate,
+        observation_version=version,
+        payload={},
+    )
+    assert plan.intents == ()
+    assert plan.dependencies == ()
+    assert plan.defer_reason is None
+
+
+def test_lifecycle_intent_kinds_derived_from_actions(planner_mod, mutation_mod, ticket_plan_mod):
+    """Each mutating action maps to a provider-neutral lifecycle intent kind on a mutate
+    plan: create→bind, update→confirm, delete→retire, repair_property→baseline,
+    clean_label→comment_identity."""
+    muts = [
+        _mk(mutation_mod, "outbound", "create", "REB-c"),
+        _mk(mutation_mod, "outbound", "update", "REB-u"),
+        _mk(mutation_mod, "outbound", "delete", "REB-d"),
+        _mk(mutation_mod, "inbound", "repair_property", "REB-r"),
+        _mk(mutation_mod, "inbound", "clean_label", "REB-l"),
+    ]
+    _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=muts)
+    kinds = {p.identity: tuple(i.kind.value for i in p.intents) for p in plans}
+    assert kinds["REB-c"] == ("bind",)
+    assert kinds["REB-u"] == ("confirm",)
+    assert kinds["REB-d"] == ("retire",)
+    assert kinds["REB-r"] == ("baseline",)
+    assert kinds["REB-l"] == ("comment_identity",)
+
+
+def test_dependency_edges_recorded_when_prereq_created_in_pass(planner_mod, mutation_mod):
+    """A plan whose mutation declares ``requires_create=[X]`` records X as an explicit
+    dependency; when X is created in the same pass the dependent plan stays ``mutate``."""
+    muts = [
+        _mk(mutation_mod, "outbound", "create", "REB-new"),
+        _mk(
+            mutation_mod, "outbound", "update", "REB-link", payload={"requires_create": ["REB-new"]}
+        ),
+    ]
+    _obs, plans = _plan_pass(
+        planner_mod,
+        mutation_mod,
+        mutations=muts,
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+    )
+    by = {p.identity: p for p in plans}
+    assert by["REB-link"].dependencies == ("REB-new",)
+    assert by["REB-link"].disposition.value == "mutate"
+    assert by["REB-new"].dependencies == ()
+
+
+def test_selection_ids_excludes_out_of_scope_target(planner_mod, mutation_mod):
+    """With ``selection={"kind": "ids", "ids": [...]}`` a target outside the id set is a
+    ``defer`` plan tagged ``scope_deferred`` — a pre-effect exclusion."""
+    muts = [
+        _mk(mutation_mod, "outbound", "update", "REB-in"),
+        _mk(mutation_mod, "outbound", "update", "REB-out"),
+    ]
+    _obs, plans = _plan_pass(
+        planner_mod,
+        mutation_mod,
+        mutations=muts,
+        selection={"kind": "ids", "ids": ["REB-in"]},
+    )
+    by = {p.identity: p for p in plans}
+    assert by["REB-in"].disposition.value == "mutate"
+    assert by["REB-out"].disposition.value == "defer"
+    assert by["REB-out"].defer_reason.value == "scope_deferred"
+
+
+# ── T2 HELD OUT — edge/contract/E2E cases withheld from the implementer. ─────────
+# HELDOUT-START
+
+
+def test_defer_reason_aligns_with_operation_outcome_disposition(
+    ticket_plan_mod, operation_outcome_mod
+):
+    """The plan-layer ``DeferReason`` vocabulary is drawn from the apply-layer
+    ``operation_outcome.Disposition`` names: every DeferReason name+value exists there."""
+    disp = operation_outcome_mod.Disposition
+    for member in ticket_plan_mod.DeferReason:
+        assert member.name in disp.__members__
+        assert disp[member.name].value == member.value
+    assert {m.value for m in ticket_plan_mod.DeferReason} == {
+        "dependency_deferred",
+        "scope_deferred",
+        "safety_aborted",
+        "skipped",
+    }
+
+
+def test_intent_version_equals_observation_version_exactly(planner_mod, mutation_mod):
+    """Every lifecycle intent's ``version`` IS the enclosing ``Observation.version``
+    identity (ObservationVersion), not an independent counter — including an explicit
+    ``rekey`` intent requested via a mutation payload ``lifecycle`` override."""
+    muts = [
+        _mk(mutation_mod, "outbound", "create", "REB-a"),
+        _mk(mutation_mod, "outbound", "update", "REB-b", payload={"lifecycle": "rekey"}),
+    ]
+    obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=muts)
+    all_intents = [i for p in plans for i in p.intents]
+    assert all_intents  # intents were produced
+    for intent in all_intents:
+        assert intent.version == obs.version
+        assert intent.version is obs.version or intent.version == obs.version
+    kinds = {p.identity: tuple(i.kind.value for i in p.intents) for p in plans}
+    assert kinds["REB-b"] == ("rekey",)
+
+
+def test_blocked_create_before_link_defers_with_no_mutation(planner_mod, mutation_mod):
+    """A create-before-link prerequisite that is NOT satisfiable this pass blocks the
+    dependent plan: disposition ``defer``, reason ``dependency_deferred``, the dependency
+    edge is still recorded, and NO out-of-order mutation is emitted (mutations empty)."""
+    muts = [
+        _mk(
+            mutation_mod,
+            "outbound",
+            "update",
+            "REB-link",
+            payload={"requires_create": ["REB-absent"]},
+        ),
+    ]
+    _obs, plans = _plan_pass(
+        planner_mod,
+        mutation_mod,
+        mutations=muts,
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+    )
+    by = {p.identity: p for p in plans}
+    link = by["REB-link"]
+    assert link.disposition.value == "defer"
+    assert link.defer_reason.value == "dependency_deferred"
+    assert link.dependencies == ("REB-absent",)
+    assert link.mutations == ()
+    assert link.intents == ()
+
+
+def test_parent_before_child_dependency(planner_mod, mutation_mod):
+    """``requires_parent`` is an explicit parent-before-child dependency edge. Satisfied
+    when the parent already exists (binding_view/snapshot); blocked otherwise →
+    ``dependency_deferred``."""
+    child_ok = [
+        _mk(
+            mutation_mod,
+            "outbound",
+            "update",
+            "REB-child",
+            payload={"requires_parent": "REB-parent"},
+        ),
+    ]
+    _obs, plans_ok = _plan_pass(
+        planner_mod,
+        mutation_mod,
+        mutations=child_ok,
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={"REB-parent": "local-7"},
+    )
+    ok = {p.identity: p for p in plans_ok}["REB-child"]
+    assert ok.dependencies == ("REB-parent",)
+    assert ok.disposition.value == "mutate"
+
+    _obs2, plans_blocked = _plan_pass(
+        planner_mod,
+        mutation_mod,
+        mutations=child_ok,
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+    )
+    blocked = {p.identity: p for p in plans_blocked}["REB-child"]
+    assert blocked.disposition.value == "defer"
+    assert blocked.defer_reason.value == "dependency_deferred"
+    assert blocked.mutations == ()
+
+
+def test_mode_cap_excludes_outbound_with_safety_aborted(planner_mod, mutation_mod):
+    """A non-live ``mode`` caps outbound effects: an outbound-bearing plan is excluded with
+    ``safety_aborted`` before any effect is eligible, while an inbound-only plan survives."""
+    muts = [
+        _mk(mutation_mod, "outbound", "update", "REB-out"),
+        _mk(mutation_mod, "inbound", "clean_label", "REB-inb"),
+    ]
+    _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=muts, mode="check")
+    by = {p.identity: p for p in plans}
+    assert by["REB-out"].disposition.value == "defer"
+    assert by["REB-out"].defer_reason.value == "safety_aborted"
+    assert by["REB-inb"].disposition.value == "mutate"
+
+
+def test_global_limit_excludes_overflow_with_safety_aborted(planner_mod, mutation_mod):
+    """The global ``limits['max_changes']`` cap excludes overflow plans (deterministically by
+    sorted identity) with ``safety_aborted``; each limit is independently variable."""
+    muts = [
+        _mk(mutation_mod, "outbound", "update", "REB-1"),
+        _mk(mutation_mod, "outbound", "update", "REB-2"),
+        _mk(mutation_mod, "outbound", "update", "REB-3"),
+    ]
+    _obs, plans = _plan_pass(
+        planner_mod,
+        mutation_mod,
+        mutations=muts,
+        limits={"max_changes": 1},
+        binding_view={},
+    )
+    by = {p.identity: p for p in plans}
+    assert by["REB-1"].disposition.value == "mutate"
+    assert by["REB-2"].defer_reason.value == "safety_aborted"
+    assert by["REB-3"].defer_reason.value == "safety_aborted"
+
+    # Raising the cap to 3 admits all three (limit varied independently).
+    _obs2, plans2 = _plan_pass(
+        planner_mod,
+        mutation_mod,
+        mutations=muts,
+        limits={"max_changes": 3},
+        binding_view={},
+    )
+    assert all(p.disposition.value == "mutate" for p in plans2)
+
+
+def test_skipped_data_conditions_are_deterministic(planner_mod, mutation_mod):
+    """Tombstone, index-lag, moved-key, impossible-link, and partial-snapshot data
+    conditions each produce a deterministic ``noop`` plan tagged ``skipped`` — each family
+    separately assertable (the specific cause is recorded in diagnostics)."""
+    for cause in (
+        "tombstone",
+        "index_lag",
+        "moved_key",
+        "impossible_link",
+        "partial_snapshot",
+    ):
+        muts = [_mk(mutation_mod, "outbound", "update", "REB-x", payload={"skip": cause})]
+        _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=muts, binding_view={})
+        plan = plans[0]
+        assert plan.disposition.value == "noop"
+        assert plan.defer_reason.value == "skipped"
+        assert any(cause in d for d in plan.diagnostics)
+
+
+def test_excluded_plans_carry_no_lifecycle_intents(planner_mod, mutation_mod):
+    """A pre-effect-excluded plan (here scope) is not intent-eligible: its ``intents`` are
+    empty, while a co-resident mutate plan still derives its intents."""
+    muts = [
+        _mk(mutation_mod, "outbound", "create", "REB-in"),
+        _mk(mutation_mod, "outbound", "create", "REB-out"),
+    ]
+    _obs, plans = _plan_pass(
+        planner_mod,
+        mutation_mod,
+        mutations=muts,
+        selection={"kind": "ids", "ids": ["REB-in"]},
+    )
+    by = {p.identity: p for p in plans}
+    assert by["REB-out"].intents == ()
+    assert tuple(i.kind.value for i in by["REB-in"].intents) == ("bind",)
+
+
+def test_run_differs_shadow_plan_applies_scope_exclusion(monkeypatch, mutation_mod):
+    """E2E through the real ``run_differs``: an ``ids`` selection narrows the shadow plan so
+    out-of-scope targets are deferred with ``scope_deferred`` while the in-scope target is a
+    mutate plan — driven at ``Mode.LIVE`` with the pre-effect exclusion still applied."""
+    run_differs_mod = _load("run_differs_shadow_scope_e2e", "run_differs.py")
+    seed = _mutations(mutation_mod)
+
+    ctx = _drive_run_differs(run_differs_mod, monkeypatch, seed_mutations=seed)
+    # Re-drive with a narrowed selection by mutating ctx knobs the shadow site reads.
+    ctx.selection_kind = "ids"
+    ctx.selection_ids = ["REB-200"]
+    run_differs_mod.run_differs(ctx)
+
+    by = {p.identity: p for p in ctx.ticket_plans}
+    assert by["REB-200"].disposition.value == "mutate"
+    assert by["local-9"].disposition.value == "defer"
+    assert by["local-9"].defer_reason.value == "scope_deferred"
+    assert by["REB-300"].defer_reason.value == "scope_deferred"
+
+
+# HELDOUT-END
