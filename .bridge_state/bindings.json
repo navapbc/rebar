@@ -1237,6 +1237,34 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:21Z"
     },
+    "0654-547c-02b6-4522": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nWhile validating the duration-probe change for similar-operose-alligator, an unchanged-tree full-suite rerun completed all 16,691 tests but produced two teardown errors. In both cases the autouse repository-isolation guard reached tests/conftest.py::_no_repo_commits after the test body passed, then tests/_isolation.py::head timed out its read-only git -C <worktree> rev-parse HEAD child at the fixed five-second watchdog. The failing nodes were test_snapshot_cache_by_sha and one test_registry_lane_transient_failures parameter. A prior unchanged-tree run passed completely.\n\nClosed bug callous-amused-hart introduced the five-second watchdog after measuring 100 unloaded probes at median 0.0143s, p95 0.0164s, max 0.0610s. That calibration did not measure the guard under the full-suite concurrent workload. The present root cause is not yet known: live candidates include host/process-spawn saturation, Git/object-store contention, inherited test state, or an incorrectly calibrated watchdog.\n\n## Plan\n- Reproduce and quantify head() probe latency sequentially and under controlled concurrency matching the suite worker/process load.\n- Capture runtime process/stack state for a slow probe and distinguish Git execution, process creation/waiting, shared-repository contention, and test-state contamination.\n- Compare the reported-against tree (2e890ab37f7e, base fcc740dba9b) with current origin/main and inspect history since the watchdog landed.\n- Confirm or reject each falsifiable hypothesis before proposing any repair. If a product defect is proven, follow held-out RED-to-GREEN repair and reproduce the original full-suite scenario.\n\n## Acceptance Criteria\n- [ ] The failure rate and latency distribution are quantified under stated sequential and concurrent conditions.\n- [ ] Runtime evidence identifies the exact stage that consumes the five-second budget.\n- [ ] A discriminating experiment proves one root cause and rules out viable alternatives.\n- [ ] The ticket records defect legitimacy and origin, or an evidence-backed environment/config classification.\n- [ ] Any repair is proven RED then GREEN and the original full-suite scenario no longer reproduces.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Repo-isolation HEAD watchdog false-fails under full-suite load"
+      },
+      "created_at": "2026-08-24T19:40:44Z",
+      "jira_key": "REB-3583",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:44Z"
+    },
     "065b-5892-7955-439c": {
       "baseline": {
         "assignee": {
@@ -1947,10 +1975,24 @@
     },
     "0ad4-9f1c-09f6-4760": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\nPlanning currently mixes snapshot reads, binding decisions, mode limits, and later handler assumptions. Retry recovery cannot be stable until all decisions derive from one frozen observation.\n\n## Outcome\nDefine immutable `Observation` and `TicketPlan` values and a pure planner that preserves the existing `Mutation` vocabulary/serialization. This task covers deterministic value construction only, not lifecycle dependency logic or preview output.\n\n## Plan\n1. Add frozen provider-neutral observation/version and per-ticket plan types with open payloads.\n2. Build pure planner inputs from local snapshot, remote snapshot, binding read view, mode, selection/filter, and limits.\n3. Refactor existing differ decisions into plan mutation values without filesystem, provider, subprocess, or clock I/O.\n4. Preserve existing mutation serialization and canonical hashes exactly.\n\n## Testing\nFeed frozen fixtures twice and compare immutable plans, hashes, diagnostics, and version identity. Poison all I/O seams.\n\n## Acceptance Criteria\n- [ ] Identical frozen inputs produce equal immutable observations and ticket plans.\n- [ ] Plans carry existing mutations, diagnostics, disposition, and observation/version identity.\n- [ ] Existing mutation serialization and canonical hashes remain byte-identical.\n- [ ] Planner construction performs zero repository saves, ticket writes, Jira calls, subprocess launches, or ambient clock reads.\n- [ ] Provider-specific payload extensions remain open without weakening the provider-neutral core fields.\n\n## Out of scope\nLifecycle intents, inter-ticket dependencies, caps ordering, preview rendering, and shadow cutover.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "RP-03 S2 T1 \u2014 Build immutable observations and pure ticket plans"
       },
       "created_at": "2026-08-18T05:38:25Z",
@@ -3690,6 +3732,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T05:38:16Z"
     },
+    "14f5-ca81-b70d-4550": {
+      "created_at": "2026-08-24T19:40:44Z",
+      "jira_id": "4590044",
+      "jira_key": "REB-3598",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:49Z"
+    },
     "1503-a8eb-aac7-469f": {
       "baseline": {
         "assignee": {
@@ -4894,9 +4943,17 @@
       "updated_at": "2026-08-18T23:36:56Z"
     },
     "1b8b-fa85-b280-42ee": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nF47 is approved as research. The legacy ticket wordlist is byte-stable but lacks an established upstream revision or license. The import commit names Digital Service Orchestra without recording a source or terms.\n\n## Plan\n\n- Record the current digest, line count, byte size, and introduction commit for src/rebar/_engine/resources/ticket-wordlist.txt.\n- Examine primary-source history and upstream candidates.\n- Record the canonical location, retrieval date, source revision, comparison method, and result for every source examined.\n- Classify provenance evidence as proven, disproven, or unresolved.\n- Classify license evidence as proven, disproven, or unresolved.\n- Record supported repository corrections in a separate proposal that requires approval before implementation.\n- Do not edit repository files.\n- Do not make an attribution or license claim without primary-source proof.\n\n## Acceptance Criteria\n\n- [ ] The ticket records the SHA-256 digest of the legacy wordlist.\n- [ ] The ticket records the line count of the legacy wordlist.\n- [ ] The ticket records the byte size of the legacy wordlist.\n- [ ] The ticket records the introduction commit of the legacy wordlist.\n- [ ] Every primary source examined has a canonical location.\n- [ ] Every primary source examined has a retrieval date.\n- [ ] Every primary source examined identifies a source revision when one exists.\n- [ ] Every primary source examined records its comparison method.\n- [ ] Every primary source examined records its comparison result.\n- [ ] The conclusion classifies provenance evidence.\n- [ ] The conclusion classifies license evidence.\n- [ ] No attribution claim is made without primary-source proof.\n- [ ] No license claim is made without primary-source proof.\n- [ ] Any repository correction is proposed separately for approval.\n- [ ] The repository worktree remains unchanged.\n\n## Verification\n\n- `shasum -a 256 src/rebar/_engine/resources/ticket-wordlist.txt`\n- `wc -l -c src/rebar/_engine/resources/ticket-wordlist.txt`\n- `git log --follow --format=\"%H %aI %s\" -- src/rebar/_engine/resources/ticket-wordlist.txt`\n- `git diff --exit-code`\n- Inspect each recorded primary source for its canonical location, retrieval date, source revision when available, comparison method, and comparison result.\n- Inspect the conclusion to confirm that unresolved evidence remains unresolved.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Research legacy wordlist provenance without attribution claims"
+      },
       "created_at": "2026-08-24T17:38:08Z",
       "jira_id": "4590014",
       "jira_key": "REB-3574",
+      "peer_parent": "REB-3575",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:11Z"
     },
@@ -8409,9 +8466,17 @@
       "updated_at": "2026-08-23T23:35:47Z"
     },
     "2bce-d81d-0eed-42e5": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nImplement the documentation, metadata, comment, and provenance recommendations approved after the F21 through F49 survey and independent filtering. F21 requires explicit Jira project selection with no default or fallback project. F28A records that GitHub Actions is active, GitHub Issues is disabled, and Issues integration is planned. F24 remains pending and is not part of this epic.\n\n## Plan\n\n- Execute taut-uncanny-koi for F21, F22A, and F22B.\n- Execute xenophobic-allpurpose-serval for F25 and F27.\n- Execute shapable-decayed-nematode for F32, F33, F34A, and F37.\n- Execute bleached-unadvised-anhinga for F43A, F43B, and F44.\n- Execute irritable-junior-fairyfly for F28A and F45.\n- Execute pedagogish-certain-butterfly for F46, F49A, and F49B.\n- Execute interested-bluecoated-illadopsis for F48.\n- Execute tracker-only research story cuddlesome-amoral-oyster for F47.\n- Run file-disjoint repository children in parallel worktrees. Each child owns its complete file set, and pedagogish-certain-butterfly is the sole pyproject.toml owner in this epic.\n- Send every repository change through Gerrit.\n- Preserve historical ADR decisions while correcting inaccurate cross references and operational examples.\n- Add no mechanical prose, punctuation, vocabulary, character, or comment enforcement.\n\n## Acceptance Criteria\n\n- [ ] Every approved recommendation in the eight child stories is implemented or recorded with its stated evidence.\n- [ ] Every child story is closed without force after its own acceptance criteria pass.\n- [ ] [operator-attested] Each of the seven repository children is merged to main.\n- [ ] [operator-attested] Each repository merge has LLM-Review +1 and Verified +1.\n- [ ] [operator-attested] Each repository merge has no unresolved comments at submission.\n- [ ] The research child records its conclusion without modifying repository files.\n- [ ] The Markdown-only GitHub and Gerrit runbook child skips the full local test suite and passes its focused documentation checks.\n- [ ] No child introduces mechanical writing or character enforcement.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Correct approved documentation, metadata, and provenance findings"
+      },
       "created_at": "2026-08-24T17:38:13Z",
       "jira_id": "4590015",
       "jira_key": "REB-3575",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:15Z"
     },
@@ -10864,8 +10929,16 @@
       "updated_at": "2026-08-15T14:56:10Z"
     },
     "363b-c844-9abe-452c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## What\nPort get-file-impact + get-verify-commands (sibling field reads) to in-process Python.\n\n## Acceptance Criteria\n- [ ] Both dispatch in-process via rebar._cli (_FIELD_READS set, full auto-init)\n- [ ] Library get_file_impact/get_verify_commands rewired off _run to in-process\n- [ ] Dual-run parity python==bash (success/miss/arity/empty; both --output modes)\n- [ ] No bash deleted (parity-pinned second impl until E7/E8)",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "E2.1: port get-file-impact + get-verify-commands in-process"
+      },
       "created_at": "2026-08-15T14:56:11Z",
       "jira_key": "REB-82",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:11Z"
     },
@@ -11389,9 +11462,17 @@
       "updated_at": "2026-08-15T14:56:29Z"
     },
     "38f8-9409-ac3b-4408": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nF28A and F45 are approved with the operator correction. GitHub Actions is active and supplies Verified. GitHub Issues is disabled. The operator confirmed that a future integration is planned. No dedicated implementation record was found in the tracker during this survey, so this story does not add an unsupported ticket citation. Current runbooks also describe inactive Verified enforcement, obsolete vote carry, and prior submit behavior. The committed desired state is `infra/gerrit/project.config`.\n\n## Plan\n\n- Update `infra/runbooks/github-mirror-lock.md` with the current GitHub Actions and GitHub Issues posture.\n- State that future GitHub Issues integration is planned without presenting it as available or citing an unidentified record.\n- Update `docs/gerrit-aws-setup.md` and `infra/runbooks/two-vote-gate-rollback.md` from `infra/gerrit/project.config`.\n- Document that `LLM-Review` must reach MAX and carries across `NO_CODE_CHANGE`, `MERGE_FIRST_PARENT_UPDATE`, and `TRIVIAL_REBASE`.\n- Document that `Verified` must reach MAX and carries across `NO_CODE_CHANGE` and `TRIVIAL_REBASE`, but not `MERGE_FIRST_PARENT_UPDATE`.\n- Document that both label functions use `NoBlock` while submit requirements enforce both votes. The `LLM-Review` requirement also rejects unresolved comments.\n- Document `rebase if necessary` as the submit action.\n- Preserve Gerrit-only merging and rollback procedures.\n- Make no service setting changes.\n\n## Acceptance Criteria\n\n- [ ] `infra/runbooks/github-mirror-lock.md` states that GitHub Actions remains enabled and supplies Verified.\n- [ ] `infra/runbooks/github-mirror-lock.md` states that GitHub Issues is disabled and that future integration is planned but unavailable.\n- [ ] Runbook descriptions of both labels and their submit requirements match `infra/gerrit/project.config`.\n- [ ] Runbook descriptions of each label copy condition match `infra/gerrit/project.config`.\n- [ ] Submit guidance reflects the `rebase if necessary` action in `infra/gerrit/project.config`.\n- [ ] Gerrit-only merging and rollback procedures remain intact.\n- [ ] Only `infra/runbooks/github-mirror-lock.md`, `docs/gerrit-aws-setup.md`, and `infra/runbooks/two-vote-gate-rollback.md` change.\n- [ ] Focused documentation, ADR, link, and whitespace checks pass. The full local test suite is skipped.\n\n## Verification\n\n- Compare the edited guidance with the `LLM-Review`, `Verified`, submit-requirement, and submit sections of `infra/gerrit/project.config`.\n- Run the focused documentation, ADR, link, and whitespace checks used by the repository.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Align GitHub mirror and Gerrit gate runbooks"
+      },
       "created_at": "2026-08-24T17:38:18Z",
       "jira_id": "4590016",
       "jira_key": "REB-3576",
+      "peer_parent": "REB-3575",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:20Z"
     },
@@ -11467,8 +11548,16 @@
       "updated_at": "2026-08-15T14:56:31Z"
     },
     "399d-29dc-a443-4c32": {
+      "baseline": {
+        "assignee": null,
+        "description": "## What\nPort validate (validate-issues.sh ~945 LOC, 10 python3 heredocs + 11 check_* bash functions) to Python behind REBAR_COMPUTE, the second/last real port of Tier C (next-batch done in sure-beech-taunt). validate is repo-wide tracker health (takes NO ticket id), exit code score-encoded (exit == 5 - score). Unlike next-batch it is genuinely bash (per-check shell functions assembling finding buckets), so a heavier literal translation reusing rebar.reducer/rebar.graph.\n\n## Scope\n- New module(s) under rebar._engine_support (e.g. validate.py) reusing reduce_all_tickets/build_dep_graph; route ticket-reads.py validate + dispatcher arm via _compute_python (helper already added); library rebar.validate() + MCP in-process under the switch.\n- Parity surface = finding bucketing + severity/ordering determinism (critical/major/minor/warning order, per-check emission order) and the score calculation + exit-code mapping. Pin with a byte-exact golden matrix (sorted ordering; no bash sort/set nondeterminism).\n- Keep test files <1000 LOC; obey module-size policy (split heredoc clusters on real seams).\n\n## Acceptance Criteria\n- [ ] validate ported to rebar._engine_support, reusing reducer/graph (no re-implemented reducer)\n- [ ] dispatcher + ticket-reads.py + library/MCP routed via REBAR_COMPUTE; default bash until flip+soak\n- [ ] dual-run byte-identical (stdout/stderr + score-encoded exit) across bash|python for the golden matrix\n- [ ] each check_* finding bucket + severity order pinned deterministically\n- [ ] bash suite test-ticket-validate.sh passes under both switch values; new pytest gate added\n- [ ] default stays bash pending flip+soak; validate-issues.sh retires with the tier",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Tier C: port validate (validate-issues.sh ~945 LOC) to Python behind REBAR_COMPUTE"
+      },
       "created_at": "2026-08-15T14:56:32Z",
       "jira_key": "REB-88",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:32Z"
     },
@@ -16461,6 +16550,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:23Z"
     },
+    "51a7-5d9b-95cb-4903": {
+      "baseline": {
+        "assignee": null,
+        "description": "The actual sweep that removes eligible .retired tombstones + folded companions, honoring the S1 eligibility check and the S3 override invariant. Portable (operation/test-linked, not CI-specific). Independently verifiable: only eligible tombstones removed; I1-I9 preserved on a reconvergence fixture. degradable-appalling-cavy's retired-sidecar reclaim rides on this.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Branch-wide GC sweep of eligible .retired events (portable)"
+      },
+      "created_at": "2026-08-24T19:40:49Z",
+      "jira_key": "REB-3585",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:49Z"
+    },
     "51c1-22cf-0908-44e6": {
       "baseline": {
         "assignee": {
@@ -16789,7 +16892,7 @@
         "description": "## Why\nCompaction now preserves folded event sources as `*.retired` (invariant I1, epic adept-hedge-stain / b306) instead of deleting them. Retention is currently **permanent** (accepted storage tradeoff); the tombstones accumulate on the tickets branch over time.\n\n## What\nAdd a branch-wide GC sweep that removes `*.retired` files provably past **causal stability** \u2014 no clone can still be mid-reconvergence against the pre-compaction events. Must honor the concurrency doctrine (I1-I9): never remove a `.retired` whose companion `.json` could still be reintroduced by an in-flight rebase/merge.\n\n## Scope\n- A `compact-gc` (or `compact --gc`) path listing `*.retired` under the tracker, removing only those past a configurable causal-stability horizon.\n- docs/concurrency.md I1: promote the 'follow-up' note to implemented behavior.\n\n## Acceptance Criteria\n- [ ] GC removes only `*.retired` past the causal-stability horizon; recent ones kept.\n- [ ] Two-clone test: a not-yet-observed compaction's `.retired` files are NOT GC'd (no resurrection window).\n- [ ] fsck + replay remain clean after a GC sweep.\n- [ ] docs/concurrency.md I1 updated from 'follow-up' to 'implemented'.",
         "priority": "Medium",
         "status": "To Do",
-        "summary": "Branch-wide *.retired garbage-collection sweep (past causal stability)"
+        "summary": "Remote-anchored retired-event GC + stale-clone override (N-day horizon)"
       },
       "created_at": "2026-08-15T14:59:32Z",
       "jira_key": "REB-804",
@@ -18680,9 +18783,17 @@
       "updated_at": "2026-08-15T15:00:20Z"
     },
     "5cda-6f1e-533f-4e0b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nF43A, F43B, and F44 are approved. MCP authentication documentation calls four implemented strategies unavailable. An SSO module links to a missing runbook. S3 guidance and ADR 0093 prescribe a rejected config command form.\n\n## Plan\n\n- Describe static, JWT, introspection, proxy, and custom MCP authentication strategies as implemented.\n- Correct AuthConfigError documentation without changing fail-closed behavior.\n- Link the approved SSO module reference to infra/runbooks/sso-auth-host.md.\n- Replace rebar config -c with persistent sync.remote configuration in rebar.toml.\n- Preserve ADR 0093 decision substance and status.\n\n## Acceptance Criteria\n\n- [ ] MCP authentication module documentation describes all five implemented strategies.\n- [ ] AuthConfigError documentation matches the implemented error contract.\n- [ ] The approved missing runbook reference resolves to infra/runbooks/sso-auth-host.md.\n- [ ] S3 setup examples use supported persistent project configuration.\n- [ ] S3 back-out examples use supported persistent project configuration.\n- [ ] Authentication behavior remains unchanged.\n- [ ] S3 behavior remains unchanged.\n- [ ] ADR 0093 decision substance remains unchanged.\n- [ ] ADR 0093 status remains unchanged.\n- [ ] The commands in Verification pass.\n- [ ] The separate auth/RUNBOOK.md reference remains outside this approved scope.\n\n## Verification\n\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/interfaces/facades/test_mcp_auth.py tests/interfaces/facades/test_mcp_auth_introspection.py tests/interfaces/facades/test_mcp_auth_custom.py tests/interfaces/facades/test_mcp_auth_jwks.py tests/interfaces/facades/test_mcp_auth_proxy.py tests/unit/test_sync_remote_config.py`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n- `git diff --check`\n- Inspect the S3 examples against the sync.remote configuration model.\n- Inspect the authentication documentation against the implemented verifier classes and AuthConfigError call sites.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Correct MCP authentication and S3 configuration guidance"
+      },
       "created_at": "2026-08-24T17:38:23Z",
       "jira_id": "4590017",
       "jira_key": "REB-3577",
+      "peer_parent": "REB-3575",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:26Z"
     },
@@ -20914,6 +21025,20 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:29Z"
+    },
+    "6964-40bb-46c9-48a7": {
+      "baseline": {
+        "assignee": null,
+        "description": "Add an mcp autodeploy target to infra/scripts/autodeploy.sh + the timer, per the ADR 0079 amendment: MCP build-context/path change detection, an MCP /health in-flight-equivalent drain signal so a redeploy never kills an in-flight MCP op (esp. certified plan/code/completion ops), preserving the never-touch-gerrit + bounded-blast-radius + rollback guarantees. Independently verifiable: a source change to MCP triggers only an mcp rebuild; the drain gate blocks redeploy while in_flight>0.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Extend autodeploy (ADR 0079) to an mcp target with its own in-flight drain gate"
+      },
+      "created_at": "2026-08-24T19:40:50Z",
+      "jira_key": "REB-3586",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:50Z"
     },
     "696a-82a4-47c5-4e54": {
       "baseline": {
@@ -24869,7 +24994,7 @@
         "assignee": null,
         "description": "## Summary\nThe outbound description differ never reaches a fixed point for any description with more than one block (heading+body, multiple paragraphs, lists). The reconciler re-emits changed['description'] to Jira on EVERY reconcile pass for such tickets \u2014 permanent, content-neutral write churn.\n\n## Root cause (runtime-confirmed)\n- Outbound send/normalize uses AdfCodec (adapters/jira/rich_text_codec.py): normalize_outbound(fit_outbound(x)) inserts a BLANK LINE between ADF blocks (e.g. '## Context\\n\\nBody'). Its own inverse decode_inbound preserves the blank line, so decode_inbound(to_wire(fitted))==fitted (the codec law ticket 3388-96e8 relies on holds for the codec).\n- The differ's InboundMapper (adapters/jira/backend.py::_JiraInbound.map_remote_to_local -> inbound_fields._map_jira_to_local_fields -> _normalize_jira_body -> normalize_rich_text -> adapters/jira/adf.py::adf_to_text) decodes ADF with SINGLE '\\n' between blocks ('## Context\\nBody'). adf_to_text is NOT the inverse of normalize_outbound.\n- outbound_field_diff.diff_canonical_fields compares fitted (blank-line) against canonical_remote['description'] (adf_to_text, single-\\n) and against baseline (also adf_to_text, single-\\n) via _baseline_form_matches. For a locally-authored blank-line body, neither raw_local nor fitted equals the single-\\n baseline, so the description is emitted every pass.\n- Proof: decode_inbound satisfies decode(encode(x))==x = True; the differ InboundMapper (adf_to_text) satisfies it = False. Two-pass diff_canonical_fields simulation: blank-line body -> 'description' in changed every pass; single-\\n body -> no churn.\n\n## Severity\n2603 of 5412 local tickets are stored in blank-line form (raw!=baseline and fitted!=baseline) => churn-eligible. Corroborated by tabled epic e594-e1d0 ('writes a scattered delta every pass ~987 versions ~= ~987 passes').\n\n## Fix options (need a decision \u2014 sensitive reconciler-CORE)\nA. Canonicalize the differ's remote/baseline description via the codec's own decode_inbound (the documented inverse) instead of adf_to_text, restoring 3388's law. Blast radius: normalize_rich_text/adf_to_text also feeds local storage + comment decode (a32a-4549, 17c3, e339) \u2014 must scope to the description compare only. B. Route BOTH sides through the outbound port (symmetric compare) in diff_canonical_fields + reconcile_check; validated to cut reconcile-check's 1080 phantom description diffs to 3 real ones. Changes what the reconciler pushes (stops normalizing Jira block-spacing).\n\nBoth change bridge convergence semantics; epic e594-e1d0 tabled sensitive reconciler-core churn work 'by decision'. Escalated from jira-reb-3526.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Reconciler re-emits multi-block descriptions on every pass (AdfCodec.normalize_outbound blank-lines vs adf_to_text single-\\n asymmetry breaks 3388's decode(encode(x))==x law)"
       },
       "created_at": "2026-08-24T11:38:56Z",
@@ -26310,6 +26435,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:29Z"
     },
+    "866f-440c-3686-42df": {
+      "baseline": {
+        "assignee": null,
+        "description": "Amend/supersede docs/concurrency.md \u00a7I1 'permanent retention' (epic b306). Define: the horizon config key (default 30d, portable); the remote-reachability computation (a compaction commit reachable from the sync remote's tickets ref for >= N days); the stale-clone detection + FORCED remote-override protocol on reconnect (a clone whose last convergence is older than N days overrides local with remote instead of reintroducing pre-compaction events by rebase); and a proof that I1-I9 hold under it. State the accepted residual: a >N-day-drifted clone's divergent local work is discarded. Blocks S1-S3.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "ADR: remote-anchored retired-event GC + stale-clone override (N-day horizon)"
+      },
+      "created_at": "2026-08-24T19:40:51Z",
+      "jira_key": "REB-3587",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:51Z"
+    },
     "86a5-9221-0037-4e38": {
       "baseline": {
         "assignee": {
@@ -26343,6 +26482,20 @@
       "jira_key": "REB-1342",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:31Z"
+    },
+    "86c0-2e93-93c7-4704": {
+      "baseline": {
+        "assignee": null,
+        "description": "Implement the NEW code-review attestation once its ADR (refutable-meaningful-borzoi) is accepted. review-code RECORDS/SIGNS a reusable code-review op-cert bound to the ADR-defined diff/ref material fingerprint and ticket binding; the merge gate CONSUMES it per the ADR's trust-boundary ruling (whether/where a reused attestation may satisfy LLM-Review +1). Reuses the shared seam from citreous-arboreous-coral. BLOCKED until the ADR lands \u2014 the op-cert kind, material fingerprint, ticket binding, and merge-vote policy are all ADR outputs. Independently verifiable: sign a review, reuse it on an unchanged ref (accept), mutate the ref (reject).",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Code-review op-cert: producer (review-code signs) + consumer (merge-gate reuse)"
+      },
+      "created_at": "2026-08-24T19:40:51Z",
+      "jira_key": "REB-3588",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:51Z"
     },
     "86c8-4b91-5257-4cca": {
       "baseline": {
@@ -26570,9 +26723,17 @@
       "updated_at": "2026-08-15T15:04:36Z"
     },
     "881f-2df2-f3bc-4f95": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nF25 and F27 are approved. Exit-code guidance omits the completion path marked verdict_obtainable=false. Five public mutation wrappers lack client-facing documentation following the library write-surface split.\n\n## Plan\n\n- Document retryable raised LLMError failures and results marked verdict_obtainable=false as exit 11.\n- Distinguish those paths from ordinary completion failure and nonretryable indeterminate outcomes.\n- Document unlink, tag, untag, archive, and compact signatures, effects, errors, repository selection, event or storage effects, and publication behavior.\n- Remove stale shell-history narration where it obscures current compact behavior.\n- Compare each documentation statement with its named code path or public signature.\n- Change no public behavior.\n\n## Acceptance Criteria\n\n- [ ] docs/exit-codes.md documents exit 11 for a retryable LLMError raised during completion verification.\n- [ ] docs/exit-codes.md documents exit 11 when bounded completion recovery returns verdict_obtainable=false.\n- [ ] Ordinary completion failure and nonretryable indeterminate outcomes remain distinct.\n- [ ] Public docstrings in src/rebar/_lib_mutations.py cover each named mutation wrapper.\n- [ ] docs/reuse-surface.md covers each named mutation wrapper.\n- [ ] Reviewer inspection confirms that the documentation matches the named code paths and signatures.\n- [ ] The commands in Verification pass.\n- [ ] No public behavior changes.\n\n## Verification\n\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/interfaces/lifecycle/test_exit_codes.py tests/interfaces/facades/test_leaf_writes_parity.py`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n- Review docs/exit-codes.md against `src/rebar/_cli/_llm_commands.py::_verify_completion` and `src/rebar/_commands/close_precheck.py::_completion_precheck`.\n- Review docs/reuse-surface.md and each public docstring against the corresponding signature in src/rebar/_lib_mutations.py.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Document completion retry outcomes and public mutation functions"
+      },
       "created_at": "2026-08-24T17:38:29Z",
       "jira_id": "4590018",
       "jira_key": "REB-3578",
+      "peer_parent": "REB-3575",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:31Z"
     },
@@ -27459,6 +27620,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:03Z"
     },
+    "8bcf-b6c1-1811-44e5": {
+      "baseline": {
+        "assignee": null,
+        "description": "Completion-side attestation reuse is ALREADY identity-scoped by construction: _reusable_attested_pass reuses only a cert where verify_signature(kind=completion-verifier) returns verified+opcert, and verify_opcert_record certifies only when record.principal == own_principal AND the DSSE signature verifies under this environment's own key (a foreign/local-dev cert is rejected). So this slice is (1) explicit TEST COVERAGE pinning that identity-scoping invariant (a local-dev cert is rejected by the AWS bot and vice-versa), (2) documentation of the guarantee, and (3) the shared reuse SEAM (vaquita AC#3) factored so the future code-review reuse can share it. Does NOT change the trust model. If the ADR (refutable-meaningful-borzoi) picks a different identity notion than env_id/principal, fold that in. Independently verifiable: tests + docs only.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Completion-verifier attestation reuse: identity-scoping test coverage + shared reuse seam"
+      },
+      "created_at": "2026-08-24T19:40:52Z",
+      "jira_key": "REB-3589",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:52Z"
+    },
     "8c2f-8377-5044-4650": {
       "baseline": {
         "assignee": {
@@ -28308,6 +28483,20 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T23:36:47Z"
+    },
+    "9015-739e-e72c-4fe5": {
+      "baseline": {
+        "assignee": null,
+        "description": "Provide the repo-root local-only credential config the ticket asks for, treated like existing secrets: SSM-sourced, gitignored, never committed. Decide which credentials, where sourced, and the file format/name per the ADR's auth mode. Independently verifiable: template + gitignore present; a committed-secret guard/test; no real secret in the tree.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "MCP client credential handling: SSM-sourced local-only config template + gitignore"
+      },
+      "created_at": "2026-08-24T19:40:52Z",
+      "jira_key": "REB-3590",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:52Z"
     },
     "901b-676a-01c9-45fd": {
       "baseline": {
@@ -29952,6 +30141,20 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:24Z"
+    },
+    "987c-67d0-258e-4069": {
+      "baseline": {
+        "assignee": null,
+        "description": "Settle the unsettled trust-model decisions the vaquita escalation surfaced, before any code-review-reuse implementation. Decide: (a) the identity notion for reuse (confirm env_id/principal-under-own-key, or switch to key-fingerprint / pinned trusted-environment identity); (b) the NEW code-review op-cert kind slot + its policy entry (only plan-review and completion-verifier exist today); (c) the authenticated diff/ref MATERIAL fingerprint a code-review attestation binds (e.g. {ticket_id, base..head range, diff content hash, merged_log_commit}) \u2014 none exists today; (d) how diff-oriented review-code binds to a ticket (via the change's rebar-ticket: trailer?) and composes with the ADR 0088 unsigned session:<id> convergence artifact; (e) whether a REUSED code-review attestation may satisfy the Gerrit LLM-Review +1 merge vote and across which environments (ADR 0013/0020 trust boundary). Output: an accepted ADR. Blocks the code-review producer/consumer story.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "ADR: attestation reuse \u2014 identity scope + code-review op-cert kind + merge-vote trust boundary"
+      },
+      "created_at": "2026-08-24T19:40:53Z",
+      "jira_key": "REB-3591",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:53Z"
     },
     "9895-aa2c-8907-4db6": {
       "baseline": {
@@ -32338,9 +32541,9 @@
       "baseline": {
         "assignee": null,
         "description": "Before acting on this ticket, validate whether we already do this.\n\n## What\n\nParking-lot (status `idea`) for the two lower-value interface inventories the audit\nalso proposed: a generated **Python public-API inventory** and a generated\n**config-key inventory**. These are deliberately NOT committed as active work yet \u2014\nthe CLI and MCP references (sibling tickets) carry most of the client value, and the\nenv-var registry is already generated. Promote this to `open` only if there is\ndemonstrated reader demand or drift pain.\n\n## Rationale for parking (not shipping now)\n- `docs/config.md` is primarily a hand-authored design-of-record; a generated key\n  table would complement, not replace it \u2014 lower leverage than CLI/MCP.\n- The Python public API is comparatively stable and already described by\n  `docs/api-stability.md` / `docs/reuse-surface.md`.\n\n## Acceptance Criteria (if promoted)\n- [ ] A generator emits `docs/config-reference.md` (config keys) and/or\n      `docs/python-api-reference.md`, each marked generated, with a CI drift gate.\n- [ ] Output derives from the config schema / public `__all__` respectively.\n\nFiles (if promoted): `scripts/gen_config_reference.py` (new),\n`scripts/gen_api_reference.py` (new), `docs/config-reference.md` (new),\n`docs/python-api-reference.md` (new), `.github/workflows/test.yml`.",
-        "priority": "Lowest",
+        "priority": "Low",
         "status": "To Do",
-        "summary": "idea: Generate Python public-API + config-key inventories (parking lot)"
+        "summary": "Portable Python public-API surface drift gate (griffe-check-style, test-linked)"
       },
       "created_at": "2026-08-15T15:07:49Z",
       "jira_key": "REB-1012",
@@ -32376,6 +32579,20 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-22T23:35:28Z"
+    },
+    "a45f-bd45-513a-49cb": {
+      "baseline": {
+        "assignee": null,
+        "description": "Settle the design ADR 0050 deferred. Decide: (1) EXPOSURE/AUTH \u2014 reuse the opcert pattern (API-Gateway SigV4 -> nginx guard -> loopback-bound rebar-mcp HTTP, proxy verifier) vs a public TLS route + external OAuth AS; which ADR-0050 verifier mode (static/jwt/introspection/proxy/custom); include the required non-loopback-bind + TLS-at-edge acknowledgements. (2) AUTODEPLOY \u2014 how to extend ADR 0079 (review-bot-only by construction) to an mcp target: MCP build-context change detection + an MCP /health in-flight drain signal so a redeploy never kills in-flight certified ops, preserving never-touch-gerrit/bounded-blast-radius/rollback. (3) CERTIFIED-OP ROUTING \u2014 reconcile 'plan/code/completion certification through the MCP server' with the existing opcert trust gate (ADR 0018/0024/0050). Output: accepted ADR (+ an ADR 0079 amendment). Blocks the infra, autodeploy, and guidance slices.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "ADR: MCP-on-box exposure + auth + autodeploy drain + certified-op routing"
+      },
+      "created_at": "2026-08-24T19:40:54Z",
+      "jira_key": "REB-3592",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:54Z"
     },
     "a492-3e46-ca44-40a5": {
       "created_at": "2026-08-15T15:07:50Z",
@@ -33365,6 +33582,20 @@
       "peer_parent": "REB-3532",
       "state": "confirmed",
       "updated_at": "2026-08-23T19:34:37Z"
+    },
+    "aa0b-92f6-c132-4c23": {
+      "baseline": {
+        "assignee": null,
+        "description": "Update AGENTS.md + docs (items 6-7): require using the MCP server for all rebar ops EXCEPT local-code ops (testing/investigation/debugging/validation), and document that certified plan-review, code-review, and completion-verifier ops must be certified through the MCP server. Safe docs change once the endpoint + auth + certified-op routing are decided in the ADR. Independently verifiable: docs updated + any doc-policy/anti-drift test passes.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Guidance: require the MCP server for rebar ops (except local-code ops); document certified-op routing"
+      },
+      "created_at": "2026-08-24T19:40:54Z",
+      "jira_key": "REB-3593",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:54Z"
     },
     "aa5a-ffc1-344a-4921": {
       "baseline": {
@@ -34695,6 +34926,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:59Z"
     },
+    "aff9-1252-ad21-4695": {
+      "baseline": {
+        "assignee": null,
+        "description": "Detect a clone whose last convergence with the remote exceeds the N-day horizon and force it to override local state with remote on reconnect (rather than reintroducing pre-compaction events by rebase). This converts the remote-anchored horizon from probabilistic to enforced (closes the I1 hole). Accepted cost: discards the stale clone's divergent local work. Independently verifiable: a simulated >N-day-stale clone is overridden, not merged.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Stale-clone detection + forced remote-override on reconnect"
+      },
+      "created_at": "2026-08-24T19:40:55Z",
+      "jira_key": "REB-3594",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:55Z"
+    },
     "affe-2b42-4ee4-4e12": {
       "baseline": {
         "assignee": null,
@@ -34974,6 +35219,13 @@
       "jira_key": "REB-277",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:06Z"
+    },
+    "b173-e50a-4b93-455f": {
+      "created_at": "2026-08-24T19:40:55Z",
+      "jira_id": "4590045",
+      "jira_key": "REB-3599",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:58Z"
     },
     "b19b-d5df-2700-4c95": {
       "baseline": {
@@ -35353,10 +35605,10 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Residual resilience gap (Step-7 follow-up, discovered_from bug 8c8a)\n\nBug 8c8a fixed the DISPOSITION-DROP defect: a retryable provider outage mid-run in the completion gate now surfaces as exit 11 (\"transient \u2014 retry\") instead of a verdict-less exit-1 hard fault. That is the correct behavior for a TRANSIENT outage.\n\nIt does NOT address a separate, deeper resilience gap that the 8c8a investigation surfaced (see the first RCA comment on 8c8a, the \"banked progress\" analysis): when a completion verify run has BANKED per-criterion progress and then hits a SUSTAINED (non-transient) provider outage, the gate still fails closed to \"could not run\" (now exit 11) rather than DEGRADING to an actionable deterministic verdict from the criterion bank via the existing no-LLM finalizer. The module docstring at src/rebar/llm/workflow/completion_recovery.py:11-12 states the design intent: \"a deterministic no-LLM fallback so a run with any banked progress can never die verdict-less.\" A sustained outage with a non-empty bank still does not honor that invariant.\n\n### Why this is a SEPARATE ticket (not folded into 8c8a)\n- 8c8a's fix is behavior-preserving for the fail-closed posture (never\n  uncertified-closes, never fabricates a certifiable verdict). Adding a\n  banked-degrade path is a NEW behavior with its own certifiability question\n  (a degrade verdict is certifiable=False and must NOT auto-close a ticket \u2014\n  see close_precheck.py:696-704), so it needs its own plan review and design.\n- Folding it into the bug would exceed the bugfix-size floor and mask the\n  narrow, provable disposition-plumbing fix.\n\n### Acceptance criteria\n- [ ] A completion verify run with a NON-EMPTY criterion bank that hits a\n      sustained provider outage finalizes a deterministic BLOCK/FAIL verdict\n      from the bank (no additional LLM calls), honoring \"can never die\n      verdict-less\".\n- [ ] The degrade verdict is certifiable=False and does NOT close the subject\n      ticket without an operator decision (no uncertified auto-close).\n- [ ] An EMPTY-bank sustained outage keeps the current retryable exit-11\n      posture (nothing to degrade to).\n- [ ] RED->GREEN with a held-out oracle + defect-seeded mutation.\n\n### Chronic-area context\nThis is the transport instance of a recurring theme (gates failing closed to an un-actionable \"could not run\" instead of degrading to a verdict) tracked across 46a2/3211/0707/10ae/61d8 and a live cluster of OPEN llm-degrade session_logs.",
+        "description": "## Context / Problem\n\nBug 8c8a fixed the disposition-drop defect: a retryable provider outage mid-run in the completion gate now surfaces as exit 11 (\"transient \u2014 retry\"). That is correct for an outage with an EMPTY criterion bank. But when the completion verifier has already banked an **operator-actionable BLOCK** (a genuine banked refutation on an evaluated criterion) and then hits a provider outage, the gate still fails closed to a verdict-less \"could not run\" (exit 11) instead of surfacing the available, actionable feedback \u2014 violating the module's own stated invariant (`completion_recovery.py:11-12`): \"a deterministic no-LLM fallback so a run with any banked progress can never die verdict-less.\" The OPERATOR DECISION comment (2026-08-24) rescopes this: there is NO \"sustained outage\" detection; the trigger is simply \"the bank already holds an operator-actionable BLOCK.\"\n\n## Approach\n\nIn `CompletionAgentStep.run`'s `except LLMUnavailableError` arm (which today only stamps the disposition and re-raises), add a **no-LLM, bank-only degrade** step that runs BEFORE the re-raise:\n\n1. Read the run's criterion bank (a filesystem read; unaffected by the LLM outage).\n2. If the bank holds an **operator-actionable BLOCK** \u2014 an entry with `met=False` whose\n   `evidence_sufficient` is not `False` (a genuine banked refutation, not an insufficiency\n   placeholder and not a PASS) \u2014 read the ticket's expected criteria and finalize a\n   full-coverage verdict via the EXISTING `assemble_deterministic_verdict` finalizer (no\n   further LLM calls: successors/finalizer would only re-fail under the outage). That verdict\n   is `verdict=FAIL`, `finalizer=deterministic_fallback`, `certifiable=False`. Return it as a\n   normal `StepResult` so `close_precheck` takes its `verdict != PASS` branch: it does NOT\n   close the ticket, surfaces the banked findings, and requires an operator decision.\n3. Otherwise (empty bank, or only PASSes / insufficiency placeholders \u2014 nothing actionable),\n   re-raise the SAME outage unchanged, preserving the exit-11 retryable posture (ADR 0040).\n\nThe degrade decision is wrapped so ANY fault in it (a bank read error, an unreadable ticket) falls through to the existing re-raise \u2014 the degrade is an enhancement, never a new failure mode on the outage path. The actionable-BLOCK predicate is added to `completion_verdict_assembly` (beside its existing `_entry_insufficient` seam) and re-exported through `completion_banking`, so the assembler module owns the bank-entry vocabulary.\n\nCertified PASS remains unreachable without execution (unchanged): a degrade verdict is always FAIL and `certifiable=False`, so it can never sign or auto-close.\n\n## Scope\n\n- `src/rebar/llm/workflow/completion_recovery.py` \u2014 the `except LLMUnavailableError` arm gains\n  a guarded bank-only degrade call + a small private helper that reads expected criteria and\n  assembles the deterministic verdict when the bank is actionable.\n- `src/rebar/llm/workflow/completion_verdict_assembly.py` \u2014 add a `bank_has_actionable_block`\n  predicate (met=False AND not insufficient) and export it.\n- `tests/unit/workflow/test_completion_outage_degrade_b39a.py` \u2014 new held-out oracle.\n\nNo ADR change (per the operator decision). No change to `close_precheck`: a `FAIL` verdict already flows to its non-close, findings-surfacing branch (returncode 1), which IS the operator-actionable BLOCK.\n\n## Testing\n\nOffline, no billable call (mirrors `test_completion_outage_disposition_8c8a.py`). A fake primary runner banks a genuine actionable BLOCK through the record tool passed to it, then raises a retryable `LLMUnavailableError`:\n\n- **Actionable-BLOCK bank + outage** \u2192 `run()` returns a `StepResult` whose outputs are\n  `verdict=FAIL`, `certifiable=False`, `finalizer=deterministic_fallback`, and it made NO\n  further runner calls (assert the runner's call count). The banked refuted criterion appears\n  in `findings`.\n- **Empty-bank outage** (and a **PASS-only / insufficiency-only** bank) \u2192 `run()` re-raises\n  `LLMUnavailableError` (exit-11 posture preserved), `failure_diagnostic` retains the\n  retryable disposition.\n- **Defect-seeded mutation**: re-introduce the exact defect (make the arm re-raise\n  unconditionally / drop the bank check) and confirm the actionable-BLOCK test returns to RED,\n  then restore.\n\n## Acceptance Criteria\n\n- [ ] A completion verify run with a NON-EMPTY criterion bank holding an operator-actionable\n      BLOCK/FAIL that hits a provider outage finalizes a deterministic BLOCK/FAIL verdict from\n      the bank with **no additional LLM calls** \u2014 verified by the held-out test asserting the\n      returned verdict is FAIL, `certifiable=False`, `finalizer=deterministic_fallback`, and\n      the runner made zero further calls after the outage.\n- [ ] The degrade verdict is `certifiable=False` and does NOT close the subject ticket without\n      an operator decision \u2014 verified by the verdict flowing to `close_precheck`'s\n      `verdict != PASS` (non-close, returncode 1) branch; a `certifiable=False` FAIL can never\n      sign or auto-close.\n- [ ] An EMPTY-bank outage (or a bank with no actionable BLOCK) keeps the retryable exit-11\n      posture \u2014 verified by the held-out test asserting `run()` re-raises the outage and\n      `failure_diagnostic` retains `retryable=True`.\n- [ ] Retryable errors keep bounded retries with backoff and emit a clear operator message on\n      terminal exhaustion (the existing ADR-0040 exit-11 surface, unchanged) \u2014 verified by the\n      empty-bank test still landing on the exit-11 \"transient \u2014 retry\" path.\n- [ ] RED\u2192GREEN with a held-out oracle + a defect-seeded mutation (re-introduce the defect \u2192\n      test returns to RED \u2192 restore).\n\n## Portability\n\nNo CI-provider coupling: the degrade path is pure in-process logic in the completion workflow (filesystem bank read + the existing deterministic assembler), triggered by the close/verify operation on every environment, with or without CI.",
         "priority": "Medium",
         "status": "In Progress",
-        "summary": "Completion gate: degrade to banked verdict on sustained provider outage"
+        "summary": "Completion gate: retry-with-backoff + operator-actionable BLOCK from banked criteria (never verdict-less)"
       },
       "created_at": "2026-08-24T04:40:07Z",
       "jira_id": "4589967",
@@ -37997,9 +38249,17 @@
       "updated_at": "2026-08-15T15:10:37Z"
     },
     "c119-2f8c-dfb2-4f52": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nF48 is approved. The vendored Jira Data Center Dockerfile names an upstream path but omits the source revision, license identifier, protected license text, and modification statement. The upstream root `LICENSE` at commit `e3c7b167b065660605645cef7f101cbb324772e4` has SHA-256 digest `a432e25d7fa27b288cc7ab6ea8e3a9aa27c101579de7fad7a3b5f534ba9e772a`.\n\n## Plan\n\n- Update the comment header in `tests/external/live_jira_dc/Dockerfile` with the `pycontribs/jira` repository, commit `e3c7b167b065660605645cef7f101cbb324772e4`, source path `docker/jira-test-image/Dockerfile`, and license identifier `BSD-2-Clause`.\n- State that the local copy adds `-Dproduct.start.timeout=2700000` and expanded operational annotations while retaining the pinned base digest, Jira version, exposed port, and `-DskipAllPrompts=true`.\n- Store the pinned upstream root `LICENSE` bytes unchanged in `tests/external/live_jira_dc/pycontribs-jira-LICENSE.txt`.\n- Add an upstream source licensing subsection to `tests/external/live_jira_dc/README.md`. Point it to the stored license text and distinguish that source license from Atlassian product licensing.\n- Preserve the existing Atlassian product licensing paragraph.\n- Add a unit assertion in `tests/unit/rebar_reconciler/test_jira_dc_harness_shape.py` that hashes the stored license bytes and compares them with the literal expected digest `a432e25d7fa27b288cc7ab6ea8e3a9aa27c101579de7fad7a3b5f534ba9e772a`. The assertion uses no network service or Jira harness.\n- Preserve every Dockerfile instruction.\n- Add no mechanical prose or character scanner.\n\n## Acceptance Criteria\n\n- [ ] Provenance names the exact repository, revision, source path, and `BSD-2-Clause` identifier.\n- [ ] `tests/external/live_jira_dc/pycontribs-jira-LICENSE.txt` has SHA-256 digest `a432e25d7fa27b288cc7ab6ea8e3a9aa27c101579de7fad7a3b5f534ba9e772a`.\n- [ ] The modification statement identifies the added timeout flag and expanded annotations.\n- [ ] Dockerfile instructions, base digest, Jira version, and entrypoint remain unchanged.\n- [ ] The existing Atlassian product licensing paragraph remains unchanged.\n- [ ] The default unit tier checks the pinned license digest without network or Docker access.\n- [ ] No connected Jira Data Center harness runs during verification.\n- [ ] Focused Dockerfile, license, lint, type, and whitespace checks pass.\n\n## Verification\n\n- Run `shasum -a 256 tests/external/live_jira_dc/pycontribs-jira-LICENSE.txt` and compare the result with `a432e25d7fa27b288cc7ab6ea8e3a9aa27c101579de7fad7a3b5f534ba9e772a`.\n- Run `pytest tests/unit/rebar_reconciler/test_jira_dc_harness_shape.py`.\n- Compare the Dockerfile noncomment instructions before and after the change.\n- Run the repository lint, type, and whitespace checks without starting the connected Jira Data Center harness.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Record pinned Jira Data Center Dockerfile provenance"
+      },
       "created_at": "2026-08-24T17:38:34Z",
       "jira_id": "4590019",
       "jira_key": "REB-3579",
+      "peer_parent": "REB-3575",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:36Z"
     },
@@ -38444,9 +38704,17 @@
       "updated_at": "2026-08-15T15:10:53Z"
     },
     "c479-74a6-8b3b-4171": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nF46, F49A, and F49B are approved. Distribution metadata omits the vendored alias wordlist license. Skill guidance implies that name is required although the maintained checker permits it. Package and MCP summaries omit plan review and signed completion verification.\n\n## Plan\n\n- Include the existing vendored license text in distribution license metadata.\n- Verify wheel and source archive contents without changing the license or wordlist bytes.\n- State that skill description is required and name is optional.\n- Align only the pyproject.toml and server.json summaries with the approved GitHub About positioning.\n- Preserve all other metadata.\n\n## Acceptance Criteria\n\n- [ ] Distribution license metadata includes LICENSE and docs/licenses/adjective-adjective-animal-LICENSE.txt.\n- [ ] Built wheel and source archive contain the vendored license.\n- [ ] The license and both wordlist resources remain byte-identical.\n- [ ] Skill guidance states that description is required and name is optional.\n- [ ] pyproject.toml and server.json use an aligned summary naming AI plan review and signed completion verification.\n- [ ] No GitHub About mutation or other metadata change occurs.\n- [ ] Focused package, skill, manifest, lint, type, and whitespace checks pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Align distribution metadata, package the wordlist license, and correct skill guidance"
+      },
       "created_at": "2026-08-24T17:38:39Z",
       "jira_id": "4590020",
       "jira_key": "REB-3580",
+      "peer_parent": "REB-3575",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:41Z"
     },
@@ -39311,9 +39579,17 @@
       "updated_at": "2026-08-15T15:11:16Z"
     },
     "c92d-2b20-273c-4f78": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nF21, F22A, and F22B are approved. Maintained Jira guidance claims a DIG fallback although project selection must be explicit. The obsolete onboarding reference was retained only until the maintained onboarding flow shipped. Both pressure-test probes default to a deleted ticket executable, substitute DIG, and use ambient Python.\n\n## Plan\n\n- Require explicit project selection with no default or fallback project.\n- Delete scripts/jira-onboarding-reference after confirming no inbound references.\n- Make both manual probes use the checkout virtual environment by default while preserving supported overrides.\n- Require a separate mutation opt-in for each probe and complete a nonmutating preflight before ticket, reconciler, or Jira mutation.\n- Keep connected probes outside CI.\n\n## Acceptance Criteria\n\n- [ ] Jira setup guidance names no default or fallback project.\n- [ ] Neither probe substitutes DIG or another project when JIRA_PROJECT is absent.\n- [ ] Probe defaults use the checkout virtual environment, and REBAR_ENGINE_DIR plus REBAR_TICKET_CLI overrides still work.\n- [ ] Each probe requires documented mutation opt-in and fails before mutation when project, credentials, executable, import capability, or opt-in is absent.\n- [ ] No repository reference remains to scripts/jira-onboarding-reference.\n- [ ] No CI workflow invokes the connected probes.\n- [ ] Focused preflight tests, bash syntax checks, shellcheck, lint, and type checking pass.\n\n## Verification\n\n- Run `pytest tests/scripts/test_jira_pressure_test_preflight.py`.\n- Run `bash -n scripts/jira-pressure-test/e2e_validation_probe.sh scripts/jira-pressure-test/e2e_field_validation_probe.sh`.\n- Run `shellcheck scripts/jira-pressure-test/e2e_validation_probe.sh scripts/jira-pressure-test/e2e_field_validation_probe.sh`.\n- Run `make lint` and `make typecheck` with the checkout virtual environment first on PATH.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Require explicit Jira project selection and repair reference probes"
+      },
       "created_at": "2026-08-24T17:38:44Z",
       "jira_id": "4590021",
       "jira_key": "REB-3581",
+      "peer_parent": "REB-3575",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:46Z"
     },
@@ -41145,6 +41421,20 @@
       "jira_key": "REB-1479",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:04Z"
+    },
+    "d109-30bb-c40d-4c13": {
+      "baseline": {
+        "assignee": null,
+        "description": "Verify MCP works for copilot, codex, and claude via basic CLI commands against the live AWS endpoint. Approval-gated: requires the deploy (S2) to have happened; a human performs the live verification. Independently verifiable: each of the 3 clients executes a basic rebar MCP command successfully against prod.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Live 3-client MCP verification (approval-gated)"
+      },
+      "created_at": "2026-08-24T19:40:59Z",
+      "jira_key": "REB-3595",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:59Z"
     },
     "d123-178f-67fa-442b": {
       "baseline": {
@@ -43712,9 +44002,17 @@
       "updated_at": "2026-08-15T15:13:18Z"
     },
     "dde7-d1a4-bb8e-4432": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nF32, F33, F34A, and F37 are approved. Current documentation cites deleted shell writers, understates the ensure registry, misstates its exception contract, retains obsolete ADR identifiers, and calls Jira Data Center a future backend.\n\n## Plan\n\n- Replace current concurrency citations with maintained Python symbols while preserving historical discussion.\n- Document all nine ensure units and StoreIncompatibleError propagation.\n- Separate the implemented compatibility record from the unimplemented ordered ledger.\n- Correct obsolete ADR cross references.\n- Correct only the two approved Jira-family module descriptions.\n\n## Testing\n\n- Run `.venv/bin/python scripts/check_adr_numbers.py`.\n- Run `.venv/bin/pytest tests/unit/rebar_reconciler/test_backend_neutrality.py`.\n- Run `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`.\n- Run `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`.\n- Run `git diff --check`.\n\n## Acceptance Criteria\n\n- [ ] Current concurrency citations resolve to maintained Python symbols.\n- [ ] Migration guidance lists nine units.\n- [ ] Migration guidance states that StoreIncompatibleError escapes the otherwise fail-soft sweep.\n- [ ] Migration guidance distinguishes the implemented compatibility record from the unimplemented ordered ledger.\n- [ ] Former Fast Forward Only references resolve to ADR 0090.\n- [ ] Vote-carry references resolve to ADR 0091.\n- [ ] ADR statuses remain unchanged.\n- [ ] ADR supersession banners remain unchanged.\n- [ ] ADR renumbering history remains unchanged.\n- [ ] ADR decision substance remains unchanged.\n- [ ] The two Jira-family descriptions identify Data Center as implemented.\n- [ ] `.venv/bin/python scripts/check_adr_numbers.py` passes.\n- [ ] `.venv/bin/pytest tests/unit/rebar_reconciler/test_backend_neutrality.py` passes.\n- [ ] `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` passes.\n- [ ] `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck` passes.\n- [ ] `git diff --check` passes.\n- [ ] No broader comment cleanup occurs.\n- [ ] No behavior change occurs.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Correct concurrency, migration, ADR, and Jira-family documentation"
+      },
       "created_at": "2026-08-24T17:38:49Z",
       "jira_id": "4590022",
       "jira_key": "REB-3582",
+      "peer_parent": "REB-3575",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:52Z"
     },
@@ -44737,6 +45035,20 @@
       "jira_key": "REB-361",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:47Z"
+    },
+    "e32d-6ea1-029a-435d": {
+      "baseline": {
+        "assignee": null,
+        "description": "Compute GC-eligibility for a .retired tombstone: its folding compaction commit has been reachable from the sync remote's tickets ref for >= N days (config key from the ADR). Read-only; no deletion. Independently verifiable: eligibility true/false against synthetic remote-reachability + age fixtures.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Remote-anchored eligibility check for .retired GC (horizon computation)"
+      },
+      "created_at": "2026-08-24T19:41:00Z",
+      "jira_key": "REB-3596",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:41:00Z"
     },
     "e339-9709-15fe-419a": {
       "baseline": {
@@ -48467,7 +48779,7 @@
         },
         "description": "## Context / Outcome\nNested subprocess/SDK/wrapper/reconciler retries mean a timeout can multiply Jira writes or leave acceptance ambiguous. Prove one provider-neutral budget by setting an exact summary through Cloud and DC. Jira has no idempotency key, so recovery observes desired state before replay. S1 establishes ADR 0103; S3 owns cutover/consumption; S5 finalizes it.\n\n## Approach\n1. Define an operation/outcome contract: stable logical id, desired postcondition, invocation/request counts, disposition, failure scope, replay safety, provider delay, `retry_not_before`, and bounded redacted diagnostics (at most eight chronological entries; each message redacted then capped at 512 Unicode code points).\n2. One physical invocation is one executor call to a write or observation; raw requests counted separately. At most three invocations and 15s cumulative sleep. Fallback delay `2**(attempt+1)+U[0,1)`: [2s,3s), then [4s,5s). Provider `Retry-After`, parsed by `_errors.parse_retry_after`, is a lower bound.\n3. Add a constructor-injected internal route selector at dispatch, defaulting to legacy in S1 (not config/env); tests explicitly select the executor. Only exact `{\"summary\"}` is eligible; mixed fields remain one legacy call. No dual-send. S3 owns venue-gated validation and default-on cutover.\n4. Cloud makes one ACLI process per write, preserving POSIX/non-POSIX cleanup; decode sanitized exit/stdout/stderr, unknown shapes fail loud. Recovery uses primary-store `get_issue_by_rest`, never ACLI JQL. A per-call policy on `acli_rest._rest_urlopen_with_retry` gives summary recovery one attempt/no sleep; other callers keep three attempts (2s/5s).\n5. Build the dedicated DC executor via the public `jira.JIRA(..., max_retries=0)` seam, then fail fast unless the constructed client's `_session.max_retries == 0`. Validate this riskiest capability FIRST, in-session, against the REAL `jira` 3.10.5 library (see the AC): an offline construction test proves the knob before executor logic layers on it, mirroring the accepted construction-time guard at `llm/anthropic_model.py`. The legacy client keeps current SDK retry. Selected pre-read/write/read-back calls use `_with_connection_retry` under a per-call one-attempt/no-sleep policy; legacy callers unchanged.\n6. A DC summary-write invocation is GET -> PUT -> GET with no hidden repeats; failure ends that invocation. Successful read-back is authoritative. After an ambiguous PUT, a separate GET observation consumes the next invocation.\n7. Desired summary observed after timeout is recovered success; conclusive old state may replay within remaining budget; failed/rate-limited/inconclusive returns non-replaying `commit_unknown`. A delay that cannot fit returns `retry_not_before` without sleeping. Auth/TLS/permission/invalid-request/permanent failures do not retry; eligible network/429/retryable-5xx use the shared schedule.\n8. Keep the `update_one`/`apply_handlers.handle_update` boundary while S1 is test-only. `dispatch_one` maps success/recovered success to the legacy result, filling `_fields_synced` only after conclusive success; `_comment_errors`/`_subop` keep shapes; `commit_unknown`/`retry_not_before` map to a tagged internal result. `handle_update` records one redacted per-mutation message (<=512 code points), leaves `_fields_synced` empty, advances no baseline/provenance, persists no S1 deferral, and lets the batch continue. S3 later maps terminal dispositions to pass/fuse control and durable deferral, then retires the bridge.\n9. Emit exactly one redacted completion log per terminal/exhausted outcome or cleanup failure: only logical id, disposition, invocation count, request count, cleanup status, `retry_not_before`, and one redacted message (<=512 code points); the whole log <=1,024 code points.\n10. ADR 0103 records the retry owner, Jira idempotency limit, observe-before-replay, budget, lifecycle owners, rollback, and deltas from ADR 0084/0087 and desired-state ADRs 0004/0026/0029. The 15s cumulative limit supersedes ADR 0084 only on selected routes.\n\n## Scope\n- Core: `operation_outcome.py`, `retry_budget.py`, `dispatch_one.py`, `dispatch_apply_phases.py`, `apply_handlers.py`.\n- Cloud: `acli.py`, `acli_subprocess.py`, `acli_rest.py`, backend; preserve unrelated REST retry defaults.\n- DC: `transport.py`, `retry.py`, `_issues.py`, backend; dedicated executor client and per-call policy preserve legacy defaults.\n- ADR 0103; budget/outcome, handler, historical ACLI, cleanup, and DC request tests.\n\n## Testing\nFake-clock/stateful tests cover schedules, deadlines, request order, ambiguity, recovery, failure classes, and no real sleep. Poison tests reject hidden retry or extra ACLI processes; neighbor tests preserve unselected behavior. Handler tests prevent false state advance. Historical triples pin decoding, real processes pin cleanup, output tests pin bounds/redaction. A real-`jira`-library construction test (offline) pins the retry-disable seam against the actual SDK. S3 owns venue-gated evidence; S5 owns final live confirmation.\n\n## Compatibility / Rollback\nProduction stays on legacy through the internal selector. Rollback selects legacy before a call; no config/env surface or dual-send. S3 changes the default after validation. Selected routes use the new budget, long-delay deferral, fail-loud unknown ACLI shapes, and non-replaying inconclusive recovery; other callers retain current behavior.\n\n## Acceptance Criteria\n- [x] Cloud and DC summary routes produce one provider-neutral outcome schema; tests assert every field.\n- [x] Repeated invocations preserve one logical id.\n- [x] No selected operation exceeds three invocations or 15 seconds cumulative sleep.\n- [x] Each selected DC write invocation is exactly GET/PUT/GET with no hidden repeats.\n- [x] Cloud recovery performs one primary-store REST request with no sleep; neighbor tests preserve existing REST retry.\n- [x] Executor-selected exact `{\"summary\"}` bypasses generic `_call_with_retry`.\n- [x] The constructor selector defaults to legacy, adds no config/env key, and tests explicitly enable it.\n- [x] Mixed fields stay one unsplit legacy call.\n- [x] Confirmed outcomes preserve legacy result, `_fields_synced`, `_comment_errors`, and `_subop` shapes.\n- [x] Every terminal outcome records exactly one redacted per-mutation message capped at 512 Unicode code points, with no baseline/provenance advance or S1 deferral.\n- [x] ADR and contract name S3 as sole cutover, fuse/deferral consumer, and bridge-retirement owner.\n- [x] The Jira 3.10.5 executor passes `max_retries=0` and fails fast unless `_session.max_retries == 0`; legacy SDK retry is unchanged.\n- [x] A test against the REAL `jira` 3.10.5 library builds `jira.JIRA(..., max_retries=0, get_server_info=False, validate=False)` offline and asserts `_session.max_retries == 0` (not via fake transports); skipped when the `jira-datacenter` extra is absent.\n- [x] Selected DC wrapper calls are one-attempt/no-sleep; legacy wrapper behavior is unchanged.\n- [x] Fallback sleeps remain [2s,3s), then [4s,5s).\n- [x] Over-budget provider delay returns `retry_not_before` without sleep.\n- [x] Permanent failures use one invocation; eligible transient failures use the schedule.\n- [x] Satisfied observation returns recovered success without another write.\n- [x] Conclusive old state permits only remaining-budget replay.\n- [x] Failed/inconclusive observation returns non-replaying `commit_unknown`.\n- [x] ACLI cleanup passes for POSIX groups and non-POSIX children.\n- [x] Historical ACLI triples decode deterministically; unknown triples do not retry.\n- [x] Operation outcomes hold at most eight diagnostics, each redacted message <=512 code points.\n- [x] Every terminal/exhausted outcome or cleanup failure emits exactly one completion log with only the step-9 fields; each message <=512 and the whole log <=1,024 code points.\n- [x] ADR 0103 records contract, ownership, compatibility deltas, rollback, and prior art; index checks pass.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "RP-03 S1 \u2014 Execute one Jira postcondition through a single retry budget"
       },
       "created_at": "2026-08-18T03:44:57Z",
@@ -48987,10 +49299,24 @@
     },
     "f828-6f5e-3b15-41f5": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\nReconcile planning currently mixes snapshot reads, binding lifecycle decisions, global mode caps, and later handler assumptions. Preview exposes mutations but not the lifecycle effects a live pass would attempt. Without a pure plan value, retry recovery can recompute against different observations and global filters can be applied after decision-bearing work.\n\n## Outcome\nBuild one immutable observation per pass and pure `TicketPlan` values per local/remote identity. A plan contains the existing `Mutation` values plus lifecycle intents, ticket dependencies, diagnostics, disposition, and observation/version identity. Run selection, filter, mode cap, and global safety limits before any lifecycle or remote effect. Emit the new plan in shadow while legacy dispatch remains authoritative.\n\n## Plan\n1. Define immutable observation and plan value objects using open provider-neutral payloads. Keep the existing `Mutation` vocabulary/serialization unchanged.\n2. Refactor existing differ outputs into a pure planner that consumes local snapshot, remote snapshot, binding read view, mode, selection/filter, and caps without I/O.\n3. Represent bind/confirm/re-key/retire/baseline/comment identity changes as versioned lifecycle intents; do not execute them during planning.\n4. Encode inter-ticket dependencies such as create-before-link and parent-before-child explicitly in plans. A blocked prerequisite yields a deferred disposition rather than an out-of-order mutation.\n5. Extend dry-run/check preview with a versioned lifecycle-intents section while preserving the existing mutation array shape and hashes. Shadow-compare plan mutations/dispositions to legacy output and fail loudly on unexplained divergence in tests.\n\n## Testing (RED \u2192 GREEN)\n- Pure table tests feed frozen local/remote/binding snapshots and assert exact plans, dependencies, diagnostics, and dispositions with no patched filesystem/provider calls.\n- Ordering tests prove selection/filter/caps happen before lifecycle intent and that truncated scope cannot mutate or advance unselected tickets.\n- Preview golden tests preserve legacy mutation bytes/hash and add a versioned lifecycle-intent section.\n- Ticket-sourced cases cover tombstones, pending/index lag, moved keys, hierarchy/link ordering, impossible links, partial snapshots, and filtered passes.\n\n## Compatibility / rollback\nShadow mode has zero write authority. Removing the shadow planner returns to legacy differ/preview unchanged. Existing mutation fields and stored ticket/binding formats remain readable; consumers can ignore the additive versioned lifecycle-intent section. No adapter call or binding save is permitted from the planner.\n\n## Acceptance Criteria\n- [ ] Given the same frozen observation, planning is deterministic and produces immutable per-ticket mutations, lifecycle intents, dependencies, diagnostics, disposition, and version identity with zero I/O.\n- [ ] Selection, filter, mode cap, and global safety limits exclude work before any lifecycle intent or remote operation is eligible.\n- [ ] Create/link and hierarchy prerequisites are explicit; blocked work is deferred and never emitted out of order.\n- [ ] Preview preserves the existing mutation array and canonical hash while adding a versioned lifecycle-intents section that old consumers may ignore.\n- [ ] Shadow comparisons match existing provider-neutral mutation/disposition behavior for ticket-sourced regressions or name each approved behavioral delta.\n- [ ] Construction, check, dry-run, and shadow planning perform zero repository saves, ticket writes, Jira calls, or child-process launches.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "RP-03 S2 \u2014 Shadow immutable per-ticket plans from one observation"
       },
       "created_at": "2026-08-18T03:45:04Z",
@@ -50099,6 +50425,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-18T19:39:31Z"
     },
+    "fd4a-4e91-f179-4932": {
+      "baseline": {
+        "assignee": null,
+        "description": "Add the MCP HTTP service to the box per the ADR (deft-evolutive-mosasaur). New mcp compose service + Dockerfile (loopback-bound rebar-mcp HTTP), nginx /mcp/ location with the ADR-decided guard, and any terraform for a new gateway/route. INFRA; the actual AWS provision/deploy is approval-gated (human performs). Independently verifiable: service boots fail-closed per ADR 0050 HTTP guards; /mcp/ reachable through the guard in a local/staging compose.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "rebar-mcp HTTP transport service on the AWS box (compose + Dockerfile + nginx /mcp/ route)"
+      },
+      "created_at": "2026-08-24T19:41:00Z",
+      "jira_key": "REB-3597",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:41:00Z"
+    },
     "fd71-a0a0-d9b0-4769": {
       "baseline": {
         "assignee": null,
@@ -50792,7 +51132,7 @@
         },
         "description": "Investigate live drift between the rebar ticket branch and Jira REB project. Focus on tickets that are open or in progress in either system.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Investigate drift between Jira and rebar "
       },
       "created_at": "2026-08-23T11:34:34Z",
@@ -50814,6 +51154,20 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-23T11:34:36Z"
+    },
+    "jira-reb-3584": {
+      "baseline": {
+        "assignee": null,
+        "description": "Update the copilot, codex, and claude client configs to connect to the rebar MCP endpoint (URL + auth from the ADR). Premature until S2 endpoint + auth land. Independently verifiable: each client lists the rebar MCP server and can call a basic read tool against a reachable endpoint.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Wire copilot / codex / claude MCP client configs to the rebar MCP server"
+      },
+      "created_at": "2026-08-24T19:40:41Z",
+      "jira_key": "REB-3584",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T19:40:41Z"
     },
     "jira-reb-529": {
       "baseline": {
@@ -51904,7 +52258,14 @@
     "1787587964537222001": "__rebar_unknown_comment_id__",
     "1787588214481072001": "__rebar_unknown_comment_id__",
     "1787592827445316001": "__rebar_unknown_comment_id__",
-    "1787592900281798001": "__rebar_unknown_comment_id__"
+    "1787592900281798001": "__rebar_unknown_comment_id__",
+    "1787596885874107001": "__rebar_unknown_comment_id__",
+    "1787596903475440001": "__rebar_unknown_comment_id__",
+    "1787597308891726001": "__rebar_unknown_comment_id__",
+    "1787597691456824001": "__rebar_unknown_comment_id__",
+    "1787597899419843001": "__rebar_unknown_comment_id__",
+    "1787598613584229001": "__rebar_unknown_comment_id__",
+    "1787599609140263001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -53951,7 +54312,24 @@
     "REB-3580": "c479-74a6-8b3b-4171",
     "REB-3581": "c92d-2b20-273c-4f78",
     "REB-3582": "dde7-d1a4-bb8e-4432",
+    "REB-3583": "0654-547c-02b6-4522",
+    "REB-3584": "jira-reb-3584",
+    "REB-3585": "51a7-5d9b-95cb-4903",
+    "REB-3586": "6964-40bb-46c9-48a7",
+    "REB-3587": "866f-440c-3686-42df",
+    "REB-3588": "86c0-2e93-93c7-4704",
+    "REB-3589": "8bcf-b6c1-1811-44e5",
     "REB-359": "e2e3-4f43-8c52-4f89",
+    "REB-3590": "9015-739e-e72c-4fe5",
+    "REB-3591": "987c-67d0-258e-4069",
+    "REB-3592": "a45f-bd45-513a-49cb",
+    "REB-3593": "aa0b-92f6-c132-4c23",
+    "REB-3594": "aff9-1252-ad21-4695",
+    "REB-3595": "d109-30bb-c40d-4c13",
+    "REB-3596": "e32d-6ea1-029a-435d",
+    "REB-3597": "fd4a-4e91-f179-4932",
+    "REB-3598": "14f5-ca81-b70d-4550",
+    "REB-3599": "b173-e50a-4b93-455f",
     "REB-36": "15f6-10d4-0014-4671",
     "REB-360": "e300-1102-662a-4428",
     "REB-361": "e320-7744-a6aa-4000",
