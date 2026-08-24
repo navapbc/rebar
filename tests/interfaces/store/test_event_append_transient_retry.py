@@ -61,6 +61,38 @@ def test_macos_einval_matches_via_errno_independent_prefix() -> None:
     assert event_append._is_transient_add_error(einval_only)
 
 
+# git's lockfile-commit failure for the INDEX write (read-cache.c write_locked_index /
+# do_write_index via commit_lock_file), emitted verbatim by `git add` / `git write-tree` /
+# a commit's pre-ref-update index prep on a transient runner-FS hiccup. Reported from a
+# production `rebar create` that required an operator retry (bug scary-fiscal-grunion). It is
+# the INDEX-write sibling of the object-DB temp-create WRITE faults above and must self-heal
+# the same way.
+_TRANSIENT_INDEX_WRITE_STDERR = "fatal: unable to write new index file"
+
+# git's DISTINCT message for a POST-ref-update index-write failure (builtin/commit.c, after
+# HEAD already moved). It must NEVER be classified transient: retrying it could duplicate the
+# already-committed event. Note the underscore ("new_index file") — it does not contain the
+# contiguous marker substring, which is what keeps the two apart.
+_POST_REF_INDEX_WRITE_STDERR = (
+    "fatal: repository has been updated, but unable to write\nnew_index file."
+)
+
+
+def test_index_write_stderr_is_classified_transient() -> None:
+    """`fatal: unable to write new index file` — the production signature reported on
+    scary-fiscal-grunion — must match the transient WRITE retry marker so the store self-heals
+    instead of surfacing it as a hard write failure requiring an operator retry."""
+    assert event_append._is_transient_add_error(_TRANSIENT_INDEX_WRITE_STDERR)
+
+
+def test_post_ref_update_index_write_stderr_is_not_transient() -> None:
+    """The POST-ref-update index-write failure (`repository has been updated, but unable to
+    write new_index file`) must NOT be classified transient: HEAD has already moved, so a
+    blind retry could duplicate the committed event. This is the safety boundary that makes
+    retrying the pre-ref-update `unable to write new index file` provably idempotent."""
+    assert not event_append._is_transient_add_error(_POST_REF_INDEX_WRITE_STDERR)
+
+
 def _fresh_tracker(tmp_path: Path, name: str) -> str:
     repo = tmp_path / name
     repo.mkdir()
@@ -221,6 +253,44 @@ def test_single_write_retries_transient_commit_odb_failure(
         ["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True, check=False
     )
     assert "COMMENT tk-c" in r.stdout
+
+
+def test_single_write_retries_transient_index_write_add_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transient `fatal: unable to write new index file` on `git add` must self-heal on
+    retry (bug scary-fiscal-grunion). This is the INDEX-write member of the runner-FS transient
+    WRITE family; it was the one signature the shared retry did not cover, so a production
+    `rebar create` surfaced it as a hard StoreError and required an operator retry."""
+    tracker = _fresh_tracker(tmp_path, "index-write-add")
+    _fail_first_add(monkeypatch, _TRANSIENT_INDEX_WRITE_STDERR)
+
+    rc = event_append.stage_and_commit(tracker, "tk-iw", _event("u-index-write"))
+    assert rc == 0
+
+    r = subprocess.run(
+        ["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True, check=False
+    )
+    assert "COMMENT tk-iw" in r.stdout
+
+
+def test_single_write_retries_transient_index_write_commit_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same `fatal: unable to write new index file` transient on `git commit`'s
+    pre-ref-update index prep must self-heal on retry, and — because HEAD had not moved when
+    the marker matched — commit exactly one event (no duplicate)."""
+    tracker = _fresh_tracker(tmp_path, "index-write-commit")
+    _fail_first_commit(monkeypatch, _TRANSIENT_INDEX_WRITE_STDERR)
+
+    rc = event_append.stage_and_commit(tracker, "tk-iwc", _event("u-index-write-commit"))
+    assert rc == 0
+
+    r = subprocess.run(
+        ["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True, check=False
+    )
+    lines = [ln for ln in r.stdout.splitlines() if "COMMENT tk-iwc" in ln]
+    assert len(lines) == 1, "recovery must commit exactly one event, never a duplicate"
 
 
 def test_orphan_index_lock_under_write_lock_self_heals(tmp_path: Path) -> None:
