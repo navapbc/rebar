@@ -1,22 +1,15 @@
 #!/usr/bin/env python3
-"""CI drift-guard: keep server.json's advertised env-var contract in sync with code.
+"""Keep the environment contract in ``server.json`` aligned with code.
 
-WHY THIS EXISTS
----------------
-``server.json`` is the MCP front-door manifest (what an MCP client shows a user
-before install). It once advertised only a stale subset of the real environment
-gates — it listed the *deprecated* ``REBAR_MCP_ALLOW_RECONCILE_LIVE`` while
-omitting ``REBAR_MCP_ALLOW_LLM`` and ``REBAR_MCP_ALLOW_JIRA_SYNC`` entirely, so
-the LLM / Jira-sync tools appeared but failed at call time with no manifest hint.
+MCP clients read ``server.json`` before installation. The
+``rebar.mcp_server.MCP_ENV_VARS`` inventory defines the supported names and
+descriptions. The manifest contract marks every declared variable as optional,
+so each canonical ``isRequired`` value is ``false``.
 
-``rebar.mcp_server.MCP_ENV_VARS`` is the SINGLE SOURCE OF TRUTH for the env vars
-the server honors. This guard diffs ``server.json``'s advertised
-``environmentVariables`` against that canonical list and fails the build on any
-divergence (missing, extra, or renamed var), so the manifest can never silently
-drift again. Style mirrors the prompt-index / criteria-routing drift gates in
-``.github/workflows/test.yml``.
+This checker compares complete records and rejects missing names, extra names,
+changed fields, and duplicate names.
 
-To fix a failure: regenerate the env block from the canonical list, e.g.
+Regeneration command
 
     python - <<'PY'
     import json, rebar.mcp_server as m
@@ -37,43 +30,113 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import cast
 
 from rebar.mcp_server import MCP_ENV_VARS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVER_JSON = REPO_ROOT / "server.json"
+RECORD_FIELDS = ("name", "description", "isRequired")
+EnvRecord = dict[str, object]
 
 
-def manifest_env_names() -> list[str]:
-    """The env-var names advertised by server.json's first package."""
-    data = json.loads(SERVER_JSON.read_text())
-    packages = data.get("packages") or []
-    if not packages:
-        raise SystemExit("server.json: no 'packages' entry to read environmentVariables from")
-    return [e["name"] for e in packages[0].get("environmentVariables", [])]
+def canonical_env_records() -> list[EnvRecord]:
+    """Build the complete manifest records defined by the code inventory."""
+    return [
+        {
+            "name": item["name"],
+            "description": item["description"],
+            "isRequired": False,
+        }
+        for item in MCP_ENV_VARS
+    ]
+
+
+def manifest_env_records() -> list[EnvRecord]:
+    """Read the environment records advertised by the first package."""
+    data = cast(dict[str, object], json.loads(SERVER_JSON.read_text()))
+    packages = data.get("packages")
+    if not isinstance(packages, list) or not packages:
+        raise SystemExit("server.json: no packages entry contains environmentVariables")
+    package = packages[0]
+    if not isinstance(package, dict):
+        raise SystemExit("server.json: the first package must be an object")
+    records = package.get("environmentVariables", [])
+    if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
+        raise SystemExit("server.json: environmentVariables must be a list of objects")
+    return [cast(EnvRecord, item) for item in records]
+
+
+def _record_name(record: EnvRecord) -> str:
+    name = record.get("name")
+    return name if isinstance(name, str) else repr(name)
+
+
+def _duplicate_names(records: list[EnvRecord]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for record in records:
+        name = _record_name(record)
+        if name in seen:
+            duplicates.add(name)
+        seen.add(name)
+    return sorted(duplicates)
+
+
+def _same_value(expected: object, advertised: object) -> bool:
+    return type(expected) is type(advertised) and expected == advertised
+
+
+def compare_env_records(canonical: list[EnvRecord], advertised: list[EnvRecord]) -> list[str]:
+    """Return diagnostics for every difference between two record inventories."""
+    diagnostics: list[str] = []
+    canonical_duplicates = _duplicate_names(canonical)
+    advertised_duplicates = _duplicate_names(advertised)
+    if canonical_duplicates:
+        diagnostics.append(f"DUPLICATE names in MCP_ENV_VARS: {canonical_duplicates}")
+    if advertised_duplicates:
+        diagnostics.append(f"DUPLICATE names in server.json: {advertised_duplicates}")
+
+    canonical_by_name = {_record_name(item): item for item in canonical}
+    advertised_by_name = {_record_name(item): item for item in advertised}
+    canonical_names = set(canonical_by_name)
+    advertised_names = set(advertised_by_name)
+
+    missing = sorted(canonical_names - advertised_names)
+    extra = sorted(advertised_names - canonical_names)
+    if missing:
+        diagnostics.append(f"MISSING from server.json: {missing}")
+    if extra:
+        diagnostics.append(f"EXTRA in server.json: {extra}")
+
+    for name in sorted(canonical_names & advertised_names):
+        expected = canonical_by_name[name]
+        found = advertised_by_name[name]
+        for field in RECORD_FIELDS:
+            if _same_value(expected.get(field), found.get(field)):
+                continue
+            diagnostics.append(
+                f"CHANGED {name}.{field}. "
+                f"Canonical value {expected.get(field)!r}. "
+                f"server.json value {found.get(field)!r}."
+            )
+    return diagnostics
 
 
 def main() -> int:
-    canonical = [v["name"] for v in MCP_ENV_VARS]
-    advertised = manifest_env_names()
+    canonical = canonical_env_records()
+    advertised = manifest_env_records()
+    diagnostics = compare_env_records(canonical, advertised)
 
-    canon_set, adv_set = set(canonical), set(advertised)
-    missing = canon_set - adv_set  # honored in code but not advertised
-    extra = adv_set - canon_set  # advertised but not a real gate
-
-    if missing or extra:
-        print(
-            "::error::server.json env-var contract has drifted from rebar.mcp_server.MCP_ENV_VARS"
-        )
-        if missing:
-            print(f"  MISSING from server.json (real gates not advertised): {sorted(missing)}")
-        if extra:
-            print(f"  EXTRA in server.json (advertised but not a real gate): {sorted(extra)}")
-        print("  Regenerate server.json's environmentVariables from MCP_ENV_VARS")
-        print("  (see this script's docstring for the one-liner).")
+    if diagnostics:
+        print("::error::server.json environment contract differs from MCP_ENV_VARS")
+        for diagnostic in diagnostics:
+            print(f"  {diagnostic}")
+        print("  Regenerate server.json environmentVariables from MCP_ENV_VARS.")
+        print("  The script docstring contains the regeneration command.")
         return 1
 
-    print(f"server.json env contract: OK ({len(canonical)} vars in sync with MCP_ENV_VARS).")
+    print(f"server.json environment contract: OK. {len(canonical)} records match MCP_ENV_VARS.")
     return 0
 
 
