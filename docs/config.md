@@ -498,8 +498,8 @@ The code-reading gates (`review_plan` / `verify_completion` / `review` / `review
 (attested), not the server's mutable checkout. `snapshot` is a *reserved* section (the core
 loader recognises `[snapshot]`/`[tool.rebar.snapshot]` and never warns/rejects it) resolved
 **env-first** by `rebar._snapshot`: `REBAR_GATE_*` env > the `[snapshot]` table > built-in
-default. Full behavior, the HMAC trust model, and the EFS/NFS `flock` caveat are in
-[repo-snapshot-gates.md](repo-snapshot-gates.md).
+default. Full behavior, the operation-certificate trust model, and the EFS/NFS `flock` caveat
+are in [repo-snapshot-gates.md](repo-snapshot-gates.md).
 
 ```toml
 [snapshot]

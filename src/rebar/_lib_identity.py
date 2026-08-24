@@ -182,10 +182,11 @@ def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> SignResult:
     """Sign a manifest of verified steps for a ticket with the environment key.
 
     ``manifest`` is a list of verified-step strings (or a JSON-array string).
-    Computes an HMAC-SHA256 signature with the environment-specific signing key
-    (``REBAR_SIGNING_KEY`` or the gitignored ``.signing-key``), persists it as a
-    SIGNATURE event, and returns the record
-    ``{ticket_id, manifest, algorithm, signature, key_id, head_sha, signed_at}``.
+    Mints an asymmetric operation certificate (a ``rebar.opcert.v1`` DSSE envelope carrying an
+    SSHSIG signature over its PAE bytes, produced with the environment's auto-generated Ed25519
+    key at ``<tracker>/.opcert-key``), persists it as a SIGNATURE event, and returns the record
+    ``{ticket_id, manifest, algorithm, envelope, principal, material_fingerprint,
+    merged_log_commit, signed_at}``.
     """
     from rebar import signing
     from rebar.signing import SigningError

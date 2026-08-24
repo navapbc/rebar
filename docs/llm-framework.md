@@ -956,16 +956,21 @@ main checkout verifies the main checkout's `HEAD`, not your worktree edits):
 > was force-closed for operator attestation. Assert what was *delivered*; let the gate decide
 > whether the close is signed. (See the ticket-template guidance in `plan-review-criteria-guide.md`.)
 
-**Trust model.** The signature is only *secure/meaningful* when rebar runs as the **MCP
-server**, whose environment signing key is canonical; a CLI/library install signs with a local
-key that **CI** reads as `foreign_key` (intentionally not secure). So CI verifies a closed
-ticket's attestation under the MCP server's key; local installs cannot mint a CI-trusted
-attestation. The agent is read-only and never signs its own homework — a deterministic gate
-acts on its verdict, and a successful prompt-injection can at worst flip the *advisory* verdict,
-never forge the signature. The completion-verification close gate is the sole close-gate
-attestation (it signs a PASS verdict *after* the close). An unreadable config is an **error** —
-gate resolution raises `ConfigError` and the close fails loudly (operator ruling 39f8-ae7c) — so a
-broken config can neither auto-enable the gate nor silently skip it.
+**Trust model.** Each environment signs its own verdicts with its **own auto-generated
+Ed25519 key** and the signature is an asymmetric operation certificate (a DSSE envelope
+carrying an SSHSIG signature over its PAE bytes), attributed to the **signing environment**
+and **verifiable by anyone** against that environment's public key — no shared secret is
+needed to verify. In the low-security default an op-cert is a **verifiable process record,
+not a control**. A high-security project **pins a required trusted environment's public key
+in `.rebar/trusted_environments.yaml`** (on the Gerrit-gated `main` branch) and the **merge
+gate** (`rebar verify-opcert`) enforces that the required environment's completion-verifier
+certificate exists and verifies over the merged log — so a developer who wants to pass cannot
+forge a verdict from an unpinned key. The agent is read-only and never signs its own homework — a
+deterministic gate acts on its verdict, and a successful prompt-injection can at worst flip the
+*advisory* verdict, never forge the signature. The completion-verification close gate is the sole
+close-gate attestation (it signs a PASS verdict *after* the close). An unreadable config is an
+**error** — gate resolution raises `ConfigError` and the close fails loudly (operator ruling
+39f8-ae7c) — so a broken config can neither auto-enable the gate nor silently skip it.
 
 ## See also — reuse reference + the plan-review gate
 

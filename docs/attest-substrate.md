@@ -1,11 +1,13 @@
 # The attestation substrate (`rebar.attest`)
 
 A hardened, standards-based signing substrate for rebar attestations: a **DSSE envelope**,
-a **pluggable scheme registry** with a **per-kind policy table**, an **SSHSIG** asymmetric
-scheme, and the existing **HMAC** registered as a legacy scheme. It is the shared signing
-layer the identity and operation-certificate epics build on. Design rationale and the
-threat model are in [ADR 0044](adr/0044-asymmetric-attestation-substrate.md); this page is
-the developer reference for the API.
+a **pluggable scheme registry** with a **per-kind policy table**, and an **SSHSIG**
+asymmetric scheme. The identity and operation-certificate kinds both sign through SSHSIG;
+the legacy symmetric **HMAC** scheme has been **retired from the registry** (ADR 0049
+contract phase — see [`docs/migrations/hmac-opcert-removal.md`](migrations/hmac-opcert-removal.md)).
+It is the shared signing layer the identity and operation-certificate epics build on. Design
+rationale and the threat model are in [ADR 0044](adr/0044-asymmetric-attestation-substrate.md);
+this page is the developer reference for the API.
 
 ## The pieces
 
@@ -14,10 +16,10 @@ the developer reference for the API.
 | `rebar.attest.dsse`        | `pae()`, `encode()`/`decode()`, `Envelope`, `Signature` |
 | `rebar.attest.registry`    | `verify(kind, envelope, trust_root)`, `Policy`, `Verdict`, `Scheme`, `register_scheme()`, `resolve()`, `POLICY` |
 | `rebar.attest.sshsig`      | `SshsigScheme`, `sign()`, `ssh_keygen_version()`, `ensure_available()` |
-| `rebar.attest.hmac_legacy` | `HmacScheme`, `register_legacy_schemes()` |
+| `rebar.attest.opcert`      | `sign_opcert()`, `verify_opcert()`, `register_opcert_policy()` |
 
-Importing `rebar.attest` registers the built-in schemes (HMAC-legacy and SSHSIG) and pins
-the legacy-kind policy, so the registry is ready to use on import.
+Importing `rebar.attest` registers the built-in SSHSIG scheme and pins the authorship and
+operation-certificate kind policies, so the registry is ready to use on import.
 
 ## DSSE envelope + PAE
 
@@ -61,7 +63,7 @@ if verdict.verified:
   an **unknown policy scheme** fails **closed** (a non-verified `Verdict`, never an
   exception).
 - `trust_root` is the scheme-specific trust anchor supplied by the caller — the
-  `allowed_signers` content for SSHSIG, the HMAC key for the HMAC scheme. *Which keys to
+  `allowed_signers` content for SSHSIG (the only registered scheme). *Which keys to
   trust* is a deployment concern; it is **not** pinned in the policy table.
 - The scheme receives the envelope's `pae()` bytes, its signatures, and the
   **policy-pinned** `namespace` (domain separation), plus `trust_root`.
@@ -72,9 +74,9 @@ Producing a signed attestation for a `kind` is the mirror of `verify`: look up t
 pinned `Policy(scheme, namespace)`, produce a signature with **that scheme's signer** over
 the DSSE-PAE bytes, and wrap it in an envelope. There is deliberately **no single
 `sign(kind, body)` function** in the substrate, because producing a signature needs *key
-material* whose location is scheme- and deployment-specific — the environment HMAC key, or
-a private SSH key path — that the substrate cannot and should not resolve on the caller's
-behalf (see ADR 0044, *Consequences*). The **verify** side is unified (verify-by-anyone is
+material* whose location is scheme- and deployment-specific — a private SSH key path — that
+the substrate cannot and should not resolve on the caller's behalf (see ADR 0044,
+*Consequences*). The **verify** side is unified (verify-by-anyone is
 the shared need); the **sign** side is assembled by the caller from the kind's scheme
 signer. The pattern:
 
@@ -87,7 +89,8 @@ def sign_for_kind(kind: str, body: bytes, *, key_path: str) -> str:
     if policy.scheme == "sshsig":
         sig = sshsig.sign(pae_bytes, key_path, policy.namespace)   # SSHSIG signer
         keyid = "attester@example.com"              # the principal
-    # (HMAC-kind signing uses the env key over pae_bytes; see docs/manifest-signing.md)
+    # (Every registered kind signs through SSHSIG; the op-cert kinds mint through
+    #  rebar.signing.sign_manifest — see docs/manifest-signing.md.)
     return dsse.encode("application/vnd.rebar.attest+json", body, [{"keyid": keyid, "sig": sig}])
 
 envelope_text = sign_for_kind("authorship", body, key_path="~/.ssh/id_ed25519")
@@ -147,14 +150,18 @@ expired validity window (`valid-before` in `allowed_signers`), and when `ssh-key
 absent or `< 8.9`. `ensure_available()` raises `SshKeygenUnavailable` on an unusable
 toolchain.
 
-### HMAC legacy (`rebar.attest.hmac_legacy`)
+### HMAC legacy — retired (`rebar.attest.hmac_legacy` removed)
 
-The existing HMAC-SHA256 primitive as a forward-looking HMAC-**over-DSSE-PAE** registry
-scheme, keyed `HMAC-SHA256`, with the legacy kinds (`plan-review`, `completion-verifier`)
-pinned to it (namespace `rebar-attest-hmac`). `trust_root` is the HMAC key.
+The registry once carried the symmetric HMAC-SHA256 primitive as a legacy scheme with the
+op-cert kinds (`plan-review`, `completion-verifier`) pinned to it. That scheme and its
+`hmac_legacy` module were **removed** in the operation-certificate contract phase (ADR 0049,
+story 8f1d): those two kinds now resolve **only** the asymmetric `sshsig` op-cert scheme, and
+an unpinned kind fails closed (`unknown_kind`).
 
-> **Scope note.** Existing legacy attestations (a hex HMAC over the canonical
-> `{v,algorithm,ticket_id,manifest}` payload) still verify **unchanged** through
-> `rebar.signing` — they are not rerouted through the registry. Re-enveloping old records
-> is the operation-certificate epic's contract phase. See `docs/manifest-signing.md` for
-> the legacy HMAC signing path.
+> **Scope note.** A pre-existing HMAC-signed `plan-review` / `completion-verifier` record now
+> reads **NOT-certified** (verdict `unknown_scheme`, computed on read; the append-only event
+> is never mutated). Re-run the gate to re-issue an asymmetric op-cert. The generic HMAC
+> utility (`rebar.signing.compute_signature` / `verify_record`, the `.signing-key` genesis)
+> is **unchanged** and remains available for non-op-cert consumers; see
+> [`docs/manifest-signing.md`](manifest-signing.md) and
+> [the HMAC operation-certificate removal record](migrations/hmac-opcert-removal.md).
