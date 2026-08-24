@@ -276,3 +276,39 @@ def test_route_lookup_returns_lazy_reference_not_resolved_module() -> None:
 
 def test_unknown_spelling_lookup_returns_none() -> None:
     assert _registry.route_for("definitely-not-a-command") is None
+
+
+# --- Alias resolution (RP-05 S2a follow-up: route_for is the authoritative resolver) ---
+def test_route_for_resolves_an_alias_to_its_owning_route() -> None:
+    # An invocation typed as an alias resolves to the Route that declares it.
+    routes = (_route("list", aliases=("ls",)),)
+    resolved = _registry.route_for("ls", routes=routes)
+    assert resolved is not None
+    assert resolved.name == "list"
+
+
+def test_route_for_canonical_name_takes_precedence_over_alias() -> None:
+    # When a spelling is BOTH a canonical name (of one route) and an alias (of
+    # another), the canonical owner wins — names take precedence over aliases.
+    routes = (_route("show"), _route("list", aliases=("show",)))
+    resolved = _registry.route_for("show", routes=routes)
+    assert resolved is not None
+    assert resolved.name == "show"
+
+
+def test_route_for_does_not_resolve_a_retired_routes_alias() -> None:
+    # A retired route is unrouted, so its aliases must not resolve.
+    routes = (_route("purge-bridge", retired=True, group="bridge", aliases=("purge",)),)
+    assert _registry.route_for("purge", routes=routes) is None
+
+
+def test_route_for_unknown_spelling_with_explicit_table_returns_none() -> None:
+    routes = (_route("list", aliases=("ls",)),)
+    assert _registry.route_for("nope", routes=routes) is None
+
+
+def test_route_for_shipped_table_has_no_alias_regression() -> None:
+    # The shipped table declares no aliases today; canonical resolution and the
+    # unknown-spelling contract must be unchanged.
+    assert _registry.route_for("show") is not None
+    assert _registry.route_for("definitely-not-a-command") is None
