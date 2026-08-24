@@ -4893,6 +4893,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-18T23:36:56Z"
     },
+    "1b8b-fa85-b280-42ee": {
+      "created_at": "2026-08-24T17:38:08Z",
+      "jira_id": "4590014",
+      "jira_key": "REB-3574",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T17:38:11Z"
+    },
     "1ba5-39de-2fc2-45f0": {
       "baseline": {
         "assignee": null,
@@ -8401,6 +8408,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-23T23:35:47Z"
     },
+    "2bce-d81d-0eed-42e5": {
+      "created_at": "2026-08-24T17:38:13Z",
+      "jira_id": "4590015",
+      "jira_key": "REB-3575",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T17:38:15Z"
+    },
     "2be7-80d6-208a-4737": {
       "baseline": {
         "assignee": {
@@ -9657,8 +9671,16 @@
       "updated_at": "2026-08-15T14:55:37Z"
     },
     "30ee-5ba7-6d6a-45b5": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nThe E0-E4 opus review (3-agent panel, 2026-06-14) flagged single-source-of-truth drift introduced during the in-process ports. Non-blocking (correctness verified) but a maintainability liability for agent edits.\n\n## What\n- env_id/author/ghost-check are re-implemented inline in transition.py, txn-callers, delete.py, compact.py instead of using rebar._commands._seam (env_id/author/require_not_ghost). The .env-id MISSING fallback even diverges: delete='unknown', compact=_DEFAULT_ENV_ID UUID, transition=_seam empty string. Route all through _seam; document any intentional fallback difference at the seam.\n- _scratch_cleanup duplicated in transition.py + delete.py with divergent base-dir derivation; scratch._base_dir is a 3rd copy. Extract one shared scratch_base()/cleanup_for_ticket().\n- gitdir-from-.git-file parsing copied in fsck._resolve_tracker_git_dir + 3 local variants inside init.py. Extract one resolve_git_dir() helper (fsck_recover already imports fsck's correctly).\n- Stale docstrings/dead code: transition.py top docstring says compact 'still subprocesses' (it was rewired); __init__.py module docstring says 'write path wraps the bash dispatcher' (now in-process); _ok/_json likely dead post-migration; _cli docstring still says 'E0 NOT yet the entrypoint'.\n\n## Acceptance Criteria\n- [ ] env_id/author/ghost-check sourced from _seam in transition/txn/delete/compact (or divergence documented)\n- [ ] one shared scratch base/cleanup helper; one resolve_git_dir helper\n- [ ] stale docstrings refreshed; confirmed-dead _ok/_json removed\n- [ ] full suite green; no behavior change (pure refactor)",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Tier E review follow-up: consolidate duplicated helpers via _seam/shared (env_id/author/ghost-check, scratch_cleanup, gitdir parsing)"
+      },
       "created_at": "2026-08-15T14:55:38Z",
       "jira_key": "REB-71",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:38Z"
     },
@@ -9943,8 +9965,16 @@
       "updated_at": "2026-08-15T14:55:46Z"
     },
     "31a2-aacb-739a-4219": {
+      "baseline": {
+        "assignee": null,
+        "description": "",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Tier D: sync.py: _reconverge_tickets port (merge-union, UUID fork, local-ahead-by-HEAD)"
+      },
       "created_at": "2026-08-15T14:55:46Z",
       "jira_key": "REB-76",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:46Z"
     },
@@ -11357,6 +11387,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:29Z"
+    },
+    "38f8-9409-ac3b-4408": {
+      "created_at": "2026-08-24T17:38:18Z",
+      "jira_id": "4590016",
+      "jira_key": "REB-3576",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T17:38:20Z"
     },
     "3907-0110-7688-43bd": {
       "baseline": {
@@ -18641,6 +18678,13 @@
       "jira_key": "REB-1640",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:20Z"
+    },
+    "5cda-6f1e-533f-4e0b": {
+      "created_at": "2026-08-24T17:38:23Z",
+      "jira_id": "4590017",
+      "jira_key": "REB-3577",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T17:38:26Z"
     },
     "5cfa-846b-aef1-4a37": {
       "created_at": "2026-08-15T15:00:21Z",
@@ -26525,6 +26569,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:36Z"
     },
+    "881f-2df2-f3bc-4f95": {
+      "created_at": "2026-08-24T17:38:29Z",
+      "jira_id": "4590018",
+      "jira_key": "REB-3578",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T17:38:31Z"
+    },
     "8840-011f-5b6d-41ab": {
       "baseline": {
         "assignee": null,
@@ -28909,7 +28960,7 @@
     "93c4-2b9f-749a-4243": {
       "baseline": {
         "assignee": null,
-        "description": "## Context\n\nThe read-only RCA on absurd-zoometric-bobwhite proved that six markerless reconciler echo bodies on three tickets account for a conservative 760 excess COMMENT events / 18,496,834 bytes plus 229,222,450 repeated bytes inside active and retired snapshots. The deployed comment-id and marker fixes converged; no later target-body COMMENT exists through the incident tip. The retained artifacts remain reachable.\n\nThis ticket is PREPARATION ONLY. It may add and test no-push tooling, produce local disposable rewrite candidates, and rehearse restore/refusal behavior. It must not pause writers, publish a lease, force-update tickets, delete Jira comments, or mutate the authoritative tracker. A separate blocked execution ticket owns the quiet window and requires fresh operator approval.\n\n## Correct semantic oracle\n\nRemoving echoes necessarily changes reduced state. The permitted ticket-state delta is only the removal of immutable-manifest-enumerated reconciler echo copies. For each of the six incident groups, exactly one Jira-identity-backed local echo survives. Every non-candidate comment, field, link, status, attestation, and audit record remains equivalent. Retained event bytes and signatures remain byte-identical.\n\nThe incident seed is the exact tuple of ticket id and body SHA-256:\n\n- 8625-7bea-67db-4cdc: 2a28832f8d7fdb3bbadf4557d163037c31fb6bc32693965c42aa18629ef7de5e, c39cb4843535b2c26790137988010500e53d3dcce3098d315d6ea20f7e00c7e4, eacbefb8d54080f1217c70dc4be4641d20a25b32f88fb42ff5b2a2efb2e64dab\n- 9305-b42c-3262-4c58: d429bb0c7d590613d15e2f3f54ed0366143760ca14df0412d14d9bbcaeff6ada, fe854c5c4a276fd5a1a92132c3a9598d3828bfa687d6a23fd75a8afc06e0397b\n- e27c-5a20-cd13-43b2: 45f2497fe6298f1172575407f534a63a2dc0825b54c51f29b40b1470f6a73735\n\nCounts and paths are never hardcoded as authority; they are re-enumerated at the frozen execution tip. A candidate must also be a COMMENT authored by env/author reconciler, carry a Jira comment id, and match its ticket/hash tuple.\n\nEvery COMMENT whose timestamp is a current bridge comment_ids key is protected. Every real mapped Jira id is a survivor constraint; the unknown-id sentinel is protected provenance, never treated as an id. A complete fresh Jira inventory must show exactly one live id for each target body and a matching local event. Multiple live copies, no match, multiple conflicting mapped ids, incomplete pagination, or any envelope/body drift refuses. If one live Jira id was imported more than once locally, retain one manifest-selected event for that same identity; age alone never chooses the identity.\n\nSnapshots are derived state, not disposable audit data. Each active and retired target snapshot is transformed only by removing manifest target comment entries, target source UUIDs, and their authorship-ledger rows, with summary counts recomputed. All other snapshot fields and all non-target blobs remain identical.\n\n## Plan\n\n1. Add an incident-specific manifest builder. It requires a clean fresh unfiltered, non-promisor tickets clone; an exact source tip; a verified off-repo backup manifest; and complete read-only Jira inventories with reported totals. It snapshots remote heads/tags before and after, refuses movement, and emits canonical JSON containing every target path, UUID, HLC, event blob/hash, Jira id, survivor, snapshot blob transformation, bridge-map constraint, expected state delta, source tip, and manifest digest.\n2. Reuse prepare_reclaim_backup.py for the complete bundle, remote-ref census, off-repo path refusal, bundle verification, and throwaway restore proof. Do not weaken or duplicate those gates.\n3. Add a dry-run-only stock-Git rewriter. It has no push path. It consumes only the immutable manifest, removes the exact non-survivor COMMENT paths across their active/retired names, rewrites only enumerated snapshot blobs, adds a fresh epoch to the final store-compat tree, and creates a local output ref. Any manifest, blob-sharing, source-tip, remote-ref, or expected-old-content mismatch fails before producing a candidate.\n4. Emit an old-to-new commit map and verify topology/identity. Commit and merge counts remain equal; changed paths at every mapped commit are limited to manifest event/snapshot paths plus the final store-compat epoch. Retained event UUID/content/signature and normalized authorship verdict multisets remain equal. Removed UUID/ledger deltas equal the manifest exactly.\n5. Replay the full store before/after. All unaffected tickets are identical. For the three targets, normalized state is identical after subtracting only the enumerated echo comments. Bridge bindings/comment_ids are byte-identical, one live Jira-backed echo remains per group, fsck is clean, and no snapshot cites a removed UUID.\n6. Rehearse on synthetic real Git repositories: active/retired events, many snapshot generations, duplicate imports of one Jira id, a mapped newest survivor, unknown-id sentinels, partial Jira pagination, ambiguous live copies, moving refs, shared blobs, dirty/shallow/promisor clones, interrupted/retried local rewrite, bundle restore, exact rollback, and stale pre-epoch writer refusal at both union sites. Instrument Git calls to prove no push or remote update occurs.\n7. Add a quiet-window runbook that reuses passive-managerial-urson: direct quiescence proofs for reconcile/review-bot/MCP/host/scheduled writers; exact deployed-runtime identity; no fixed waits; frozen lease; fresh unfiltered clone; independently restored bundle; local parity gates; exact force-with-lease only after separate approval; old-tip non-resurrection; persistent-writer recloning; and a rehearsed second-window rollback. The runbook stops before activation in this ticket.\n8. Report pack, logical checkout, allocated checkout, file/slack, Git-directory, and whole-clone before/after as observations. tracker-footprint remains opt-in, read-only, unscheduled, non-gating, and threshold-free.\n\n## Acceptance Criteria\n\n- [ ] Manifest generation is deterministic at one frozen tip, enumerates only the six incident groups, protects bridge mappings/source comments, proves complete Jira input before selection, and refuses every ambiguity or stale input.\n- [ ] The local rewrite changes only manifest COMMENT/snapshot material plus the new epoch, keeps exactly one live-Jira-identity echo per group, and preserves all unrelated reduced state and retained event bytes.\n- [ ] Active and retired snapshots, source UUID lists, and authorship ledgers are transformed consistently; full replay, fsck, and normalized retained-authorship parity pass.\n- [ ] A complete off-repo bundle is created and independently restored before any candidate; exact rollback and stale-writer refusal are proven in synthetic real-Git rehearsal.\n- [ ] The implementation contains no push/remote-update path, and tests prove the authoritative remote and source ref remain unchanged.\n- [ ] The operator runbook includes direct quiescence, runtime identity, exact lease, re-clone, non-resurrection, rollback, and post-read verification, and explicitly requires a new approval before activation.\n- [ ] Real-store read-only dry-run evidence re-enumerates expected/reclaimed bytes at its observed tip without treating the historical 247,719,284-byte estimate as a pack/allocation result.\n- [ ] Focused tests, make lint, make typecheck, and the project test gate pass.",
+        "description": "## Context\nThe RCA on absurd-zoometric-bobwhite proved that six markerless reconciler echo bodies on three tickets account for the concentrated retained payload. Preparation initially required exactly one live Jira copy per body and correctly refused current reality: each body now has two. Prior cleanup just-preglacial-yeti preserved one preexisting copy per body; reconciler runs 32447039101 and 32447697242 then created and imported six rollout copies. The operator selected coordinated option A: account for Jira and rebar together by disabling the GitHub Actions reconciler, deleting the rollout copies in Jira and the corresponding/non-survivor local history, then re-enabling only after verification.\n\nThis ticket remains PREPARATION ONLY. It may add and test a dry-run-default exact-six Jira cleanup surface, produce disposable local rewrite candidates, and document the combined window. It must not disable or enable GitHub Actions, DELETE Jira data, pause writers, publish leases, or update authoritative tickets history. Those actions belong to synonymous-senatorial-cuscus after the ready checkpoint.\n\n## Incident authority and semantic oracle\nThe incident seed remains the exact tuple of ticket id and body SHA-256:\n- 8625-7bea-67db-4cdc: 2a28832f8d7fdb3bbadf4557d163037c31fb6bc32693965c42aa18629ef7de5e, c39cb4843535b2c26790137988010500e53d3dcce3098d315d6ea20f7e00c7e4, eacbefb8d54080f1217c70dc4be4641d20a25b32f88fb42ff5b2a2efb2e64dab\n- 9305-b42c-3262-4c58: d429bb0c7d590613d15e2f3f54ed0366143760ca14df0412d14d9bbcaeff6ada, fe854c5c4a276fd5a1a92132c3a9598d3828bfa687d6a23fd75a8afc06e0397b\n- e27c-5a20-cd13-43b2: 45f2497fe6298f1172575407f534a63a2dc0825b54c51f29b40b1470f6a73735\n\nAt manifest time each group must contain exactly one preexisting survivor and exactly one rollout-created deletion target. The deletion allowlist is 997143, 997144, 997145, 997255, 997256, and 997293, each bound to its expected Jira issue, body hash, author account, and the independently proven rollout provenance. The survivors are 963510, 963511, 963512, 963788, 963789, and 964272. No survivor is selected by age alone. Any extra, missing, moved, edited, differently authored, or differently normalized copy is an abort.\n\nThe Git candidate removes every manifest-enumerated non-survivor reconciler COMMENT, including the six Jira deletion identities, and transforms only the enumerated active/retired snapshots plus final .store-compat.json epoch. It preserves the six survivor events, all unrelated paths and bytes, bridge bindings, signatures, topology, authorship, and reduced state except the enumerated echo delta.\n\n## Plan\n1. Extend the immutable manifest builder to validate the exact two-live-copy pre-cleanup state and emit one Jira cleanup action plus one survivor per group. Continue to require the clean unfiltered source, exact source tip/ref, complete independently restored bundle, full remote census, complete Jira Cloud v3 pagination, production rich-text normalization, and bridge/source identity checks.\n2. Add an incident-specific Jira cleanup tool. Default mode is GET-only dry run. It captures every raw Jira page and a normalized plan off-repository before deletion. Execution requires --execute plus the exact manifest digest. It deletes only the six manifest IDs in canary order REB-2605, REB-1931, REB-1567; logs every attempt append-only; never blindly retries an ambiguous response; re-reads to distinguish landed deletion from failure; and verifies every survivor and every non-target comment remains byte/identity equivalent.\n3. Keep the stock-Git history rewriter local-only with no push or remote-update path. It consumes the immutable manifest, removes only enumerated events/snapshot material, changes the final epoch, emits a complete old-to-new commit map, and verifies commit/merge counts, parent topology, author/committer/message identity, per-commit path envelope, replay, snapshots, retained bytes, bridge bytes, refs, and fsck.\n4. Update the runbook so one quiet window disables .github/workflows/reconcile-bridge.yml via GitHub Actions, proves state=disabled_manually and no queued/in-progress run or live lease, freezes the exact Git/Jira inputs, executes and verifies the exact-six Jira cleanup, obtains two unchanged production-equivalent dry-run observations while the acting workflow remains disabled, publishes the verified Git candidate with the exact old-tip lease, replaces persistent clones, and only then re-enables the workflow. Any failure keeps the workflow disabled and invokes the documented correction or separately quiesced rollback path.\n5. Rehearse the full sequence without shared mutation: current live Jira inventory -> immutable cleanup plan -> simulated post-cleanup inventory -> local history candidate -> whole-store replay/parity -> layered threshold-free measurements -> disposable exact-lease rollback/forward. Preserve failed attempts as evidence.\n6. Reuse prior repairs: binary-safe fast-export framing, full-ref backup census, independent bundle restore, epoch refusal, exact leases, persistent-clone replacement, retry-safe deletion logs, and post-read verification. Do not restore the old identical-HEAD-tree oracle, infer pack savings from logical bytes, choose oldest/newest without causal identity, use fixed sleeps as quiescence, or add recurring thresholds, schedules, collectors, ratchets, or workflow gates.\n\n## Acceptance Criteria\n- [ ] The canonical manifest deterministically binds exactly six ticket/body groups, six rollout-created Jira deletion IDs, and six proven survivors at one frozen source/Jira observation; every identity, pagination, backup, ref, body, author, or copy-count ambiguity refuses before mutation.\n- [ ] The Jira cleanup command is GET-only by default; explicit execution is digest-bound, exact-six, canary ordered, append-only logged, ambiguity-safe, resumable, and post-verifies survivor plus non-target parity from a complete pre-delete backup.\n- [ ] The local rewrite changes only manifest COMMENT/snapshot material plus the new epoch, removes the Jira-deleted local identities with all other non-survivor echoes, and preserves exactly the six surviving live-Jira-backed events.\n- [ ] Active and retired snapshots, source UUIDs, counts, comments, and authorship ledgers transform consistently; full replay, commit-map/topology/identity checks, retained-byte checks, bridge parity, refs, and fsck pass.\n- [ ] A complete off-repo bundle is independently restored before any candidate; disposable exact-lease rollback/forward and stale-epoch refusal are proven.\n- [ ] Tests prove neither preparation helper can push or update an authoritative Git ref, dry-run cannot DELETE Jira, and every precondition failure occurs before its first external mutation.\n- [ ] The runbook directly verifies GitHub Actions disablement and run drainage, exact deployed runtime identity, Jira/Git sequencing, two unchanged dry runs, exact lease, re-clone, non-resurrection, rollback, and re-enable-only-after-verification.\n- [ ] Real-store rehearsal records the observed manifest delta, whole-store replay, threshold-free pack/logical/allocated/file/slack/Git/clone measurements, and disposable rollback without mutating Jira or authoritative refs.\n- [ ] Focused tests, make lint, make typecheck, and the project test gate pass.",
         "priority": "High",
         "status": "In Progress",
         "summary": "Prepare a manifest-driven targeted reclaim for reconciler comment echoes"
@@ -37945,6 +37996,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:37Z"
     },
+    "c119-2f8c-dfb2-4f52": {
+      "created_at": "2026-08-24T17:38:34Z",
+      "jira_id": "4590019",
+      "jira_key": "REB-3579",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T17:38:36Z"
+    },
     "c130-6a87-531e-4441": {
       "baseline": {
         "assignee": null,
@@ -38384,6 +38442,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:53Z"
+    },
+    "c479-74a6-8b3b-4171": {
+      "created_at": "2026-08-24T17:38:39Z",
+      "jira_id": "4590020",
+      "jira_key": "REB-3580",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T17:38:41Z"
     },
     "c494-eb77-60da-47dd": {
       "baseline": {
@@ -39244,6 +39309,13 @@
       "peer_parent": "REB-2658",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:16Z"
+    },
+    "c92d-2b20-273c-4f78": {
+      "created_at": "2026-08-24T17:38:44Z",
+      "jira_id": "4590021",
+      "jira_key": "REB-3581",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T17:38:46Z"
     },
     "c943-1b38-d613-4013": {
       "created_at": "2026-08-15T15:11:17Z",
@@ -43638,6 +43710,13 @@
       "peer_parent": "REB-870",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:18Z"
+    },
+    "dde7-d1a4-bb8e-4432": {
+      "created_at": "2026-08-24T17:38:49Z",
+      "jira_id": "4590022",
+      "jira_key": "REB-3582",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T17:38:52Z"
     },
     "de8a-a0c6-e85c-4451": {
       "baseline": {
@@ -51823,7 +51902,9 @@
     "1787578044919140001": "__rebar_unknown_comment_id__",
     "1787582675639473001": "__rebar_unknown_comment_id__",
     "1787587964537222001": "__rebar_unknown_comment_id__",
-    "1787588214481072001": "__rebar_unknown_comment_id__"
+    "1787588214481072001": "__rebar_unknown_comment_id__",
+    "1787592827445316001": "__rebar_unknown_comment_id__",
+    "1787592900281798001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -53860,7 +53941,16 @@
     "REB-3571": "8d34-9687-604c-49c8",
     "REB-3572": "7f5a-c602-976c-4615",
     "REB-3573": "da70-18a5-898d-47ea",
+    "REB-3574": "1b8b-fa85-b280-42ee",
+    "REB-3575": "2bce-d81d-0eed-42e5",
+    "REB-3576": "38f8-9409-ac3b-4408",
+    "REB-3577": "5cda-6f1e-533f-4e0b",
+    "REB-3578": "881f-2df2-f3bc-4f95",
+    "REB-3579": "c119-2f8c-dfb2-4f52",
     "REB-358": "e2b0-f2aa-bcac-4242",
+    "REB-3580": "c479-74a6-8b3b-4171",
+    "REB-3581": "c92d-2b20-273c-4f78",
+    "REB-3582": "dde7-d1a4-bb8e-4432",
     "REB-359": "e2e3-4f43-8c52-4f89",
     "REB-36": "15f6-10d4-0014-4671",
     "REB-360": "e300-1102-662a-4428",
