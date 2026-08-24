@@ -142,11 +142,12 @@
     "pack_layer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["logical_bytes", "file_count", "scope"],
+      "required": ["logical_bytes", "file_count", "scope", "complete"],
       "properties": {
         "logical_bytes": { "type": "integer", "minimum": 0 },
         "file_count": { "type": "integer", "minimum": 0 },
-        "scope": { "enum": ["standalone", "shared"] }
+        "scope": { "enum": ["standalone", "shared"] },
+        "complete": { "type": "boolean" }
       }
     }
   }
