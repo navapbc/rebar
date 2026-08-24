@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -40,6 +41,32 @@ logger = logging.getLogger(__name__)
 
 
 _PLAN_REVIEW_CLOSE_TYPES = frozenset({"task", "story", "epic"})
+
+
+def _new_close_metrics() -> dict[str, int]:
+    metrics = dict.fromkeys(
+        (
+            "pre_verifier_total_ms structural_scan_ms material_policy_ms descendant_scope_ms "
+            "landing_check_ms verifier_call_ms git_history_read_ms alias_index_build_ms "
+            "ticket_ref_resolution_ms diff_validation_ms commits_inspected distinct_references "
+            "descendant_ids referencing_commits_found"
+        ).split(),
+        0,
+    )
+    return metrics | {"_pre_verifier_started_ns": time.monotonic_ns()}
+
+
+def _timed_close_phase(
+    metrics: dict[str, int],
+    metric_name: str,
+    operation: Callable[..., Any],
+    *args,
+    **kwargs,
+) -> Any:
+    started_ns = time.monotonic_ns()
+    result = operation(*args, **kwargs)
+    metrics[metric_name] = (time.monotonic_ns() - started_ns) // 1_000_000
+    return result
 
 
 def _raise_plan_review_close_gate_error(ticket_id: str, check: dict[str, object]) -> None:
@@ -537,31 +564,27 @@ def close_ticket(
     caused_by: str = "",
     ref: str | None = None,
 ) -> dict:
-    """Perform the locked write and its post-processing tail; return the transition
-    result ``{ticket_id, from, to, newly_unblocked, noop}``.
+    """Run the close tail and return ``{ticket_id, from, to, newly_unblocked, noop}``.
 
-    For a CLOSE this owns the close-path invariants in their LOAD-BEARING order
-    (verify -> close -> sign): the unresolved-open-children structural guard, the
-    completion-verification precheck (runs the verifier OUTSIDE the write lock, blocks
-    fail-closed on FAIL / unavailable-LLM, returns the manifest to sign on PASS), the
-    locked write, then — only AFTER a confirmed close — signing the PASS attestation,
-    the force-close audit comment, and per-ticket scratch cleanup. A
-    non-close transition falls through to just the locked write. Both paths end with a
-    best-effort push (transition_core commits inline, not via write_and_push)."""
-    # Open-children guard + newly_unblocked (one batch pass), only on close.
+    Owns the load-bearing close order verify -> close -> sign: structural and completion
+    checks run outside the write lock, then the locked write runs, and PASS signing follows
+    only after a confirmed close. Non-close transitions write directly; both paths push."""
+    close_metrics = _new_close_metrics()
     newly_unblocked: list[str] = []
     if target_status == "closed":
-        batch = batch_close_operations(ticket_ids=[ticket_id], tracker_dir=tracker)
+        batch = _timed_close_phase(
+            close_metrics,
+            "structural_scan_ms",
+            batch_close_operations,
+            ticket_ids=[ticket_id],
+            tracker_dir=tracker,
+        )
         open_children = batch["open_children"]
         newly_unblocked = batch["newly_unblocked"]
         if open_children:
             count = len(open_children)
-            # The child-closure relationship is a STRUCTURAL INTEGRITY invariant (a parent is
-            # not complete while its children are open), NOT a quality gate — so it is enforced
-            # UNCONDITIONALLY: --force (which bypasses any enabled start-work gate AND the
-            # signature/completion-verifier requirement) cannot
-            # close a parent over open children. Resolve/close the children first, or detach
-            # (re-home) them, then close the parent.
+            # Child closure is structural integrity, not a quality gate: even a forced close
+            # cannot put a parent over open children. Resolve/close or re-home them first.
             raise CommandError(
                 f"Error: cannot close ticket '{ticket_id}' while it has {count} unresolved "
                 "(non-closed) child ticket(s) — the child-closure invariant cannot be bypassed "
@@ -615,7 +638,10 @@ def close_ticket(
         ticket_state = _reduce(os.path.join(tracker, ticket_id)) or {}
         ticket_type = ticket_state.get("ticket_type", "")
         if not force_close and ticket_type in _PLAN_REVIEW_CLOSE_TYPES:
-            plan_review_recheck = _plan_review_close_recheck(
+            plan_review_recheck = _timed_close_phase(
+                close_metrics,
+                "material_policy_ms",
+                _plan_review_close_recheck,
                 ticket_id,
                 ticket_state,
                 repo_root=repo_root,
@@ -632,6 +658,7 @@ def close_ticket(
             force_close=force_close,
             close_class=close_class,
             ref=ref,
+            metrics=close_metrics,
         )
     elif target_status == "closed":
         # `idea -> closed` is a reject/drop, not a completion: the gate never applied.

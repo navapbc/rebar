@@ -553,6 +553,25 @@ def load_tracker(config: ProbeConfig) -> tuple[dict[str, str], list[dict[str, An
                     "total_ms": metrics.get("total_ms") if isinstance(metrics, dict) else None,
                     "det_ms": metrics.get("det_ms") if isinstance(metrics, dict) else None,
                     "llm_ms": metrics.get("llm_ms") if isinstance(metrics, dict) else None,
+                    **{
+                        name: metrics.get(name) if isinstance(metrics, dict) else None
+                        for name in (
+                            "pre_verifier_total_ms",
+                            "structural_scan_ms",
+                            "material_policy_ms",
+                            "descendant_scope_ms",
+                            "landing_check_ms",
+                            "verifier_call_ms",
+                            "git_history_read_ms",
+                            "alias_index_build_ms",
+                            "ticket_ref_resolution_ms",
+                            "diff_validation_ms",
+                            "commits_inspected",
+                            "distinct_references",
+                            "descendant_ids",
+                            "referencing_commits_found",
+                        )
+                    },
                     "ran_model": ran_model,
                     "verdict": data.get("verdict"),
                     "schema": data.get("schema"),
