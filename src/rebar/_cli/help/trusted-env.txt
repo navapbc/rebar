@@ -6,7 +6,7 @@ Add or revoke trusted environment keys with ticket log position anchors.
 positional arguments:
   {add,revoke}
   env_id
-  target        <public_key> for add; <public_key-or-index> for revoke
+  target        <public_key> for add, or <public_key-or-index> for revoke
 
 options:
-  --root ROOT   repo root (default: cwd); resolves the ticket store
+  --root ROOT   repo root that resolves the ticket store (default: cwd)

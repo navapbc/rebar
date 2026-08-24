@@ -1,13 +1,13 @@
 Usage: rebar explain [-h] [topic]
 
-Print a plan-review criterion's authoring-guide section (e.g. `rebar explain
-F1`), or an author-facing prose guide (commit-trailer, plan, review) — e.g.
-`rebar explain plan` for how to write a plan that passes the plan-review gate.
-One shared lookup with the MCP explain_criterion tool.
+Print a plan-review criterion's authoring-guide section (for example `rebar
+explain F1`), or an author-facing prose guide (commit-trailer, plan, review).
+For example, `rebar explain plan` explains how to write a plan that passes the
+plan-review gate. One shared lookup with the MCP explain_criterion tool.
 
 positional arguments:
-  topic       a plan-review criterion id (e.g. F1, G3) or a guide (commit-
-              trailer, plan, review)
+  topic       a plan-review criterion id (for example F1 or G3) or a guide
+              (commit-trailer, plan, review)
 
 options:
   -h, --help  show this help message and exit

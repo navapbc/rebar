@@ -1,11 +1,11 @@
 Usage: rebar sign-review [-h] [--output {json,text}] [ticket_id]
 
-Cheaply (re)persist the plan-review attestation for an already-computed, still-
-valid PASS verdict from the latest REVIEW_RESULT sidecar — WITHOUT re-running
-the multi-pass LLM review. Use it to recover a signature that a `rebar review-
-plan` computed but failed to persist (e.g. a transient git index.lock). Refuses
-to sign a non-PASS or a verdict that is stale because the plan changed since the
-review.
+Persist the plan-review attestation again, cheaply, for an already-computed and
+still-valid PASS verdict from the latest REVIEW_RESULT sidecar, without re-
+running the multi-pass LLM review. Use it to recover a signature that `rebar
+review-plan` computed but failed to persist, for example after a transient git
+index.lock. It refuses to sign a non-PASS verdict or a verdict that is stale
+because the plan changed since the review.
 
 positional arguments:
   ticket_id             ticket id, short id, or alias

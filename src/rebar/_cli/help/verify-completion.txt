@@ -1,39 +1,41 @@
 Usage: rebar verify-completion [-h] [--graph | --no-graph] [--output {json,text}] [--check] [--no-sign] [--ref REF] [--source {attested,local}] [ticket_id]
 
-Run the completion-verifier agent on a ticket and emit a PASS/FAIL verdict that
-its completion requirements (acceptance/success/close criteria, definitions of
-done; for bugs, that the bug is resolved) are demonstrably met by the
-implementation. Needs the 'agents' extra + a model API key; see `rebar verify-
-completion --check`.
+Run the completion-verifier agent on a ticket and emit a PASS or FAIL verdict
+for whether its completion requirements are demonstrably met by the
+implementation. Completion requirements are the acceptance, success, and close
+criteria and the definitions of done, and for a bug, that the bug is resolved.
+Requires the 'agents' extra and a model API key. Run `rebar verify-completion
+--check` to confirm availability.
 
 positional arguments:
   ticket_id             ticket id, short id, or alias
 
 options:
   -h, --help            show this help message and exit
-  --graph, --no-graph   include the ticket's descendants; use --no-graph to
-                        force own-criteria verification (default: auto — on for
-                        epics, off otherwise)
+  --graph, --no-graph   include the ticket's descendants. Use --no-graph to
+                        force own-criteria verification (default: auto, on for
+                        epics and off otherwise)
   --output, -o {json,text}
   --check               print backend/credential availability and exit
-  --no-sign             run the verifier but do NOT SIGN a reusable completion-
-                        verifier attestation. By default an attested
-                        (source=attested) PASS SIGNS that attestation — what a
-                        later same-ref `rebar transition ... closed` REUSES to
-                        skip a duplicate (billable) verifier run — so this flag
-                        is the explicit opt-out. The COMPLETION_VERDICT sidecar
-                        is STILL emitted for both PASS and FAIL (only the
-                        signature is skipped). A local (--source local) verdict
-                        is never signed regardless
-  --ref REF             branch | tag | SHA to verify against (default:
-                        origin/main; configurable via REBAR_GATE_REF /
-                        [snapshot].ref) — pass --ref HEAD when the review
-                        depends on code you have committed locally but not yet
-                        landed on the default ref (a stacked change or feature
-                        branch): the default ref reads a snapshot predating that
-                        code, so symbols it adds read as 'does not exist' false
-                        findings
+  --no-sign             run the verifier but do not sign a reusable completion-
+                        verifier attestation. By default an attested PASS
+                        (source=attested) signs that attestation, which a later
+                        same-ref `rebar transition ... closed` reuses to skip a
+                        duplicate billable verifier run, so this flag is the
+                        explicit opt-out. The COMPLETION_VERDICT sidecar is
+                        still emitted for both PASS and FAIL, and only the
+                        signature is skipped. A local verdict (--source local)
+                        is never signed
+  --ref REF             a branch, tag, or commit SHA to verify against (default:
+                        origin/main, configurable through REBAR_GATE_REF or
+                        [snapshot].ref). Pass --ref HEAD when the review depends
+                        on code you have committed locally but have not yet
+                        landed on the default ref, such as a stacked change or
+                        feature branch. The default ref reads a snapshot that
+                        predates that code, so symbols it adds report as 'does
+                        not exist' false findings
   --source {attested,local}
-                        attested (default): verify a snapshot pinned at --ref
-                        (signs, records verified_at_sha); local: read the in-
-                        place checkout (dirty allowed, never signs)
+                        attested (default) verifies a snapshot pinned at --ref,
+                        signs the result, and records verified_at_sha. local
+                        reads the in-place checkout, allows a dirty tree, and
+                        never signs

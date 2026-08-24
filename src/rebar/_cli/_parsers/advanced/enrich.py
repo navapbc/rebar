@@ -26,7 +26,7 @@ def build(*, prog: str) -> argparse.ArgumentParser:
         "mode",
         nargs="?",
         choices=("status",),
-        help="'status' prints the queue buckets as JSON; omit to drain",
+        help="'status' prints the queue buckets as JSON. Omit to drain",
     )
     parser.add_argument("--drain", action="store_true", help="bounded drain of the overlap queue")
     parser.add_argument("--once", action="store_true", help="process a single queue entry")
