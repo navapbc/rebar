@@ -340,15 +340,23 @@ def test_infer_provider() -> None:
 
 def test_model_string_selection_is_provider_agnostic() -> None:
     """The runtime picks the provider purely from the model string (no per-provider
-    construction code): a bare name is provider-qualified, and legacy ``openai:`` is
-    normalized to the explicit Chat Completions qualifier."""
+    construction code): a bare name is provider-qualified, and hosted ``openai:`` defaults to
+    the Responses API (ticket 155c), while a custom ``base_url`` keeps it on Chat Completions."""
     pytest.importorskip("pydantic_ai")
     from rebar.llm.config import LLMConfig
     from rebar.llm.runner import _pai_model
 
     assert _pai_model(LLMConfig(model="claude-opus-4-8")) == "anthropic:claude-opus-4-8"
-    assert _pai_model(LLMConfig(model="gpt-4o", model_provider="openai")) == "openai-chat:gpt-4o"
-    assert _pai_model(LLMConfig(model="openai:gpt-4o")) == "openai-chat:gpt-4o"
+    assert (
+        _pai_model(LLMConfig(model="gpt-4o", model_provider="openai")) == "openai-responses:gpt-4o"
+    )
+    assert _pai_model(LLMConfig(model="openai:gpt-4o")) == "openai-responses:gpt-4o"
+    # the explicit Chat fallback, and a custom endpoint, both stay on Chat Completions
+    assert _pai_model(LLMConfig(model="openai-chat:gpt-4o")) == "openai-chat:gpt-4o"
+    assert (
+        _pai_model(LLMConfig(model="openai:gpt-4o", base_url="http://local/v1"))
+        == "openai-chat:gpt-4o"
+    )
     qualified = "google-gla:gemini-2.5-flash"
     assert _pai_model(LLMConfig(model=qualified)) == qualified
 

@@ -74,7 +74,11 @@ def test_the_class_table_end_to_end_qualifies_a_bedrock_id(model):
 )
 def test_an_already_qualified_string_is_returned_unchanged(already):
     provider = already.split(":", 1)[0]
-    expected = already.replace("openai:", "openai-chat:", 1) if provider == "openai" else already
+    # Bare hosted ``openai:`` normalizes to the Responses API default (ticket 155c); every other
+    # qualifier — including the explicit ``openai-chat:`` fallback — is returned unchanged.
+    expected = (
+        already.replace("openai:", "openai-responses:", 1) if provider == "openai" else already
+    )
     assert _resolve_target(already, provider) == expected
     # …and also when NO provider is configured, so inference cannot double-prefix either.
     assert _resolve_target(already, None) == expected
@@ -117,7 +121,7 @@ def test_infer_provider_does_not_mistake_a_version_suffix_for_a_qualifier(model)
     ("model", "expected"),
     [
         ("claude-opus-4-8", "anthropic:claude-opus-4-8"),  # inferred by name prefix
-        ("gpt-4o", "openai-chat:gpt-4o"),
+        ("gpt-4o", "openai-responses:gpt-4o"),  # hosted OpenAI now defaults to the Responses API
     ],
 )
 def test_inference_still_qualifies_a_bare_known_model(model, expected):
@@ -154,10 +158,34 @@ def test_a_matching_inline_qualifier_is_not_a_conflict():
     assert _resolve_target("anthropic:claude-opus-4-8", "anthropic") == "anthropic:claude-opus-4-8"
 
 
-@pytest.mark.parametrize("provider", ["openai", "openai-chat"])
-@pytest.mark.parametrize("model", ["openai:gpt-4o", "openai-chat:gpt-4o"])
-def test_openai_provider_aliases_resolve_to_explicit_chat_completions(model, provider):
-    assert _resolve_target(model, provider) == "openai-chat:gpt-4o"
+@pytest.mark.parametrize(
+    ("model", "provider", "expected"),
+    [
+        # Bare hosted ``openai`` (qualifier and/or provider) now defaults to the Responses API…
+        ("openai:gpt-4o", "openai", "openai-responses:gpt-4o"),
+        ("gpt-4o", "openai", "openai-responses:gpt-4o"),
+        # …while the explicit ``openai-chat`` fallback — as a qualifier or a configured provider,
+        # in any combination with the ``openai`` family — stays on Chat Completions (ticket 155c).
+        ("openai-chat:gpt-4o", "openai-chat", "openai-chat:gpt-4o"),
+        ("openai-chat:gpt-4o", "openai", "openai-chat:gpt-4o"),
+        ("openai:gpt-4o", "openai-chat", "openai-chat:gpt-4o"),
+        ("gpt-4o", "openai-chat", "openai-chat:gpt-4o"),
+    ],
+)
+def test_openai_family_default_flips_to_responses_but_explicit_chat_stays(
+    model, provider, expected
+):
+    assert _resolve_target(model, provider) == expected
+
+
+@pytest.mark.parametrize("provider", [None, "openai"])
+def test_a_custom_endpoint_keeps_the_openai_family_on_chat_completions(provider):
+    """A custom OpenAI-compatible endpoint cannot use the Responses API in rebar (the builder is
+    registered only under ``openai``/``openai-chat`` and vendor ``/v1/responses`` support is
+    UNKNOWN), so the default flip must NOT apply when an endpoint is present (ticket 155c)."""
+    endpoint = "http://local:1234/v1"
+    assert _resolve_target("gpt-4o", provider, endpoint=endpoint) == "openai-chat:gpt-4o"
+    assert _resolve_target("openai:gpt-4o", provider, endpoint=endpoint) == "openai-chat:gpt-4o"
 
 
 def test_the_conflict_is_raised_not_silently_resolved():
@@ -177,7 +205,7 @@ def test_the_conflict_is_raised_not_silently_resolved():
 # for any qualifier outside its registry. Membership narrows AND widens — slashed gateway names
 # were rejected by the old regex and now split correctly.
 
-_KNOWN_24 = frozenset(
+_KNOWN_25 = frozenset(
     {
         "anthropic",
         "bedrock",
@@ -201,6 +229,7 @@ _KNOWN_24 = frozenset(
         "moonshotai",
         "openai",
         "openai-chat",
+        "openai-responses",
         "vertexai",
         "xai",
     }
@@ -212,10 +241,10 @@ def test_known_provider_names_is_exactly_the_registry():
     exactly is what makes the drift test below meaningful."""
     from rebar.llm.config import KNOWN_PROVIDER_NAMES
 
-    assert KNOWN_PROVIDER_NAMES == _KNOWN_24
+    assert KNOWN_PROVIDER_NAMES == _KNOWN_25
 
 
-@pytest.mark.parametrize("name", sorted(_KNOWN_24))
+@pytest.mark.parametrize("name", sorted(_KNOWN_25))
 def test_every_known_provider_name_splits_as_a_qualifier(name):
     """Back-compat enumerated, not assumed."""
     assert split_provider_qualifier(f"{name}:some-model") == (name, "some-model")
@@ -270,7 +299,7 @@ def test_a_configured_provider_that_is_not_a_provider_name_is_rejected():
         _resolve_target("claude-opus-4-8", "bedrok")
     msg = str(exc.value)
     assert "bedrok" in msg, f"the error must name the offending value: {msg}"
-    assert any(name in msg for name in _KNOWN_24), f"the error must list valid names: {msg}"
+    assert any(name in msg for name in _KNOWN_25), f"the error must list valid names: {msg}"
 
 
 def test_a_configured_provider_that_is_a_member_still_composes():
