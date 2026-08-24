@@ -37,7 +37,12 @@ DEFINITIONS: dict[str, str] = {
     "allocation_overhead_bytes": (
         "Allocated bytes minus logical bytes; the result may be negative."
     ),
-    "pack": ("Logical bytes of .pack files in the primary common Git object database."),
+    "pack": (
+        "Logical bytes of .pack files in the primary common Git object database; "
+        "non-exclusive when the checkout borrows objects from an alternate object "
+        "database, in which case the pack layer reports complete=false and must not "
+        "be read as the whole object store."
+    ),
     "whole_clone": (
         "The unique union of checkout and Git-directory pathnames, with allocation "
         "inode-deduplicated across both roots."
@@ -199,7 +204,7 @@ def _object_database(paths: StorePaths) -> tuple[str, list[str], Path, tuple[Pat
     return scope, reasons, common_dir, _unique_roots(git_dir, common_dir)
 
 
-def _pack_layer(common_dir: Path, *, scope: str) -> dict[str, object]:
+def _pack_layer(common_dir: Path, *, scope: str, complete: bool) -> dict[str, object]:
     pack_dir = common_dir / "objects" / "pack"
     logical_bytes = 0
     file_count = 0
@@ -214,7 +219,12 @@ def _pack_layer(common_dir: Path, *, scope: str) -> dict[str, object]:
                 file_count += 1
     except OSError as exc:
         raise FootprintError("cannot inspect tracker pack files") from exc
-    return {"logical_bytes": logical_bytes, "file_count": file_count, "scope": scope}
+    return {
+        "logical_bytes": logical_bytes,
+        "file_count": file_count,
+        "scope": scope,
+        "complete": complete,
+    }
 
 
 def measure_tracker(
@@ -232,6 +242,7 @@ def measure_tracker(
     paths = StorePaths(tracker_root)
     try:
         scope, reasons, common_dir, git_roots = _object_database(paths)
+        pack_complete = "alternates" not in reasons
         checkout = _Totals()
         git_directory = _Totals()
         whole = _Totals()
@@ -249,7 +260,7 @@ def measure_tracker(
         "source": source,
         "object_database": {"scope": scope, "shared_reasons": reasons},
         "layers": {
-            "pack": _pack_layer(common_dir, scope=scope),
+            "pack": _pack_layer(common_dir, scope=scope, complete=pack_complete),
             "checkout": _layer(checkout),
             "git_directory": _layer(git_directory),
             "whole_clone": {**_layer(whole), "scope": scope},

@@ -518,7 +518,10 @@ measure_fresh_clone(repo_root) -> dict[str, object]
 `measure_tracker` is a read-only filesystem/Git inspection of one already-materialized
 tracker. It uses `StorePaths` to resolve Git's worktree-specific and common directories,
 labels linked-worktree/alternates object databases as shared, and returns separate pack,
-checkout, Git-directory, and whole-clone layers. Logical bytes count pathnames via `lstat`;
+checkout, Git-directory, and whole-clone layers. The pack layer measures only the primary
+common object database and carries a `complete` flag that is `false` when the checkout borrows
+objects from an alternate object database, so a shared clone's near-empty primary pack is never
+mistaken for the whole object store. Logical bytes count pathnames via `lstat`;
 allocated bytes use `st_blocks * 512` with inode deduplication and become a structured
 `unavailable` when the platform lacks that field.
 
