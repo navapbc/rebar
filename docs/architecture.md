@@ -96,16 +96,15 @@ over one git-backed store.
   git-canonical (packaged `reviewers/*.md` or project `.rebar/prompts/`). See
   [llm-framework.md](llm-framework.md).
 
-### Accepted configuration and provider-composition boundary (RP-04; migration pending)
+### Implemented operation-scoped configuration and provider composition boundary
 
-[ADR 0098](adr/0098-operation-scoped-config-and-provider-composition.md) establishes one
-immutable, serializable, non-secret snapshot per operation, composed at the application
-boundary with separate live `GitRuntime`, `LLMRuntime`, and selected `BridgeRuntime`
-bindings. Provider SDKs/helpers remain responsible for credential issuance, storage,
-refresh, and invalidation; Rebar-owned factories retain Rebar's retry, timeout, cache,
-output, error, and lifecycle policy. Static material is provider-specific and unwrapped
-only at the sending adapter. The migration is not yet implemented; current
-ambient/per-consumer configuration paths remain until RP-04's expand/contract cutover.
+[ADR 0098](adr/0098-operation-scoped-config-and-provider-composition.md) established the boundary implemented by RP-04 under ticket `vibrant-legal-hind`. `rebar.config.compose_operation_snapshot` resolves one immutable, serializable, non-secret `OperationSnapshot` for an operation. The snapshot contains effective values, source provenance, the repository root, and an envelope version. It excludes credentials and capability objects.
+
+Behavior-bearing runtime bindings remain outside the snapshot. `ReconcilerRuntime` derives captured Jira scope and the selected backend from an operation snapshot. `LLMRuntime` carries provider-native `AnthropicAuth`, `BedrockAuth`, and `OpenAIAuth` values into provider construction. The review bot stores that runtime beside non-secret startup policy in `StartupBinding`. The operation certificate service composes `OpcertSigner` at startup and passes it through the context-local `bound_signer` seam. ADR 0098 uses `GitRuntime` and `BridgeRuntime` as design-role labels. The code does not expose classes with those names.
+
+Configuration reads are routed through the approved composition and credential boundaries in `rebar._config_sources` and `rebar._config_resolvers`. `scripts/check_config_ownership.py`, which runs through `make lint`, rejects prohibited ambient reads below those boundaries. Its legacy exception list is empty.
+
+`OperationSnapshot` does not control every operation. CLI, MCP, public library, shared command, and direct reconciler entry points still compose diagnostic snapshots beside their existing behavior. `REBAR_OPERATION_SNAPSHOT_SHADOW` remains enabled by default and diagnostic only. See [config.md](config.md#rebar_operation_snapshot_shadow) for its behavior and ticket `opal-daffy-mutt` for the post-RP-04 documentation correction. The reusable interfaces and binding details are in [reuse-surface.md](reuse-surface.md#6-operation-scoped-configuration).
 
 ### Lazy CLI command and capability registry (RP-05; migration pending)
 

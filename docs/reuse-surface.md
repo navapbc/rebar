@@ -502,45 +502,47 @@ The prerequisites are deliberately split:
 Neither `scc` nor `jscpd` is a pip dependency of rebar. Their adapters resolve executables
 from `PATH`; a missing or failing tool is reported as `Unavailable`, never as fabricated zero.
 
-## 6. The operation snapshot — `rebar.config.OperationSnapshot` (RP-04)
+## 6. Operation-scoped configuration
 
-`rebar._operation_config` (re-exported from `rebar.config`) is the supported seam for
-composing **one immutable, serializable, NON-SECRET configuration authority per
-operation**. It delegates rather than reimplements: root selection to
-`rebar._config_sources.repo_root`, precedence + provenance to
-`rebar.config.resolve_with_sources` (defaults < user < project < env < cli), and
-canonical serialization/fingerprinting to `rebar._store.canonical`.
+`rebar._operation_config`, re-exported from `rebar.config`, provides the supported composition seam implemented by RP-04 under ticket `vibrant-legal-hind` and established by [ADR 0098](adr/0098-operation-scoped-config-and-provider-composition.md). It composes one immutable, serializable, non-secret `OperationSnapshot` for an operation.
 
-Construction:
+The composer delegates these responsibilities:
 
-- `compose_operation_snapshot(*, cli_overrides=None, repo_root=None) -> OperationSnapshot`
-  — the central composer. A malformed selected config makes `resolve_with_sources`
-  raise `ConfigError`, which propagates (fail-fast, before any effect).
-- `OperationSnapshot.build(*, envelope_version, repo_root, values, sources)` — the
-  validating constructor. Every leaf in `values` must be a JSON primitive (or a nested
-  list/dict of primitives); a pydantic `SecretStr`/`SecretBytes` or any live object is
-  rejected with `TypeError`, so a snapshot can never carry secret material.
-- `OperationSnapshot.from_document(doc)` — rebuild from `canonical_document()`; a
-  mismatched `envelope_version` raises `rebar.config.ConfigError`.
+- Root selection uses `rebar._config_sources.repo_root`.
+- Precedence and provenance use `rebar.config.resolve_with_sources` with the order defaults < user < project < env < cli.
+- Canonical serialization and fingerprinting use `rebar._store.canonical`.
 
-Serialization / projection (all read-only):
+### Construction
 
-- `.canonical_document() -> dict` — the hashed document (plain nested dicts).
-- `.canonical_bytes() -> bytes` / `.fingerprint() -> str` — delegate to
-  `rebar._store.canonical` (a 64-hex sha256 fingerprint).
-- `.project(*sections) -> OperationProjection` — an immutable view restricted to the
-  named sections (`KeyError` for an unknown section).
+- `compose_operation_snapshot(*, cli_overrides=None, repo_root=None) -> OperationSnapshot` is the central composer. A malformed selected configuration makes `resolve_with_sources` raise `ConfigError` before a behavior-bearing effect.
+- `OperationSnapshot.build(*, envelope_version, repo_root, values, sources)` is the validating constructor. Every leaf in `values` must be a JSON primitive or a nested list or dictionary of primitives. A Pydantic `SecretStr`, `SecretBytes`, or runtime object raises `TypeError`.
+- `OperationSnapshot.from_document(doc)` rebuilds a snapshot from `canonical_document()`. A mismatched `envelope_version` raises `rebar.config.ConfigError`.
 
-`ENVELOPE_VERSION` is the current schema version. The `values`/`sources` mappings are
-frozen (`types.MappingProxyType`) at both levels, so a composed snapshot is safe to
-share across an operation without defensive copies.
+### Serialization and projection
 
-**Shadow mode (temporary, S1–S6).** `shadow_enabled()` reads
-`REBAR_OPERATION_SNAPSHOT_SHADOW` (default enabled; see
-[config.md](config.md#rebar_operation_snapshot_shadow)). While the walking skeleton is
-in place, `emit_shadow_snapshot(*, cli_overrides=None, repo_root=None, surface=...)`
-composes one snapshot per operation and logs a REDACTED diagnostic (envelope version,
-source kinds, truncated fingerprint — never values, secrets, or paths). It is
-**diagnostic only**: it does NOT control execution, and any non-`ConfigError` failure is
-caught so the legacy operation continues untouched. The switch and the shadow wiring are
-removed in S7 once a real consumer is cut over.
+- `.canonical_document() -> dict` returns the hashed document as nested dictionaries.
+- `.canonical_bytes() -> bytes` and `.fingerprint() -> str` delegate to `rebar._store.canonical`. The fingerprint is a 64-character SHA-256 value.
+- `.project(*sections) -> OperationProjection` returns an immutable view restricted to the named sections. An unknown section raises `KeyError`.
+
+`ENVELOPE_VERSION` is the schema version. The `values` and `sources` mappings use `types.MappingProxyType` at both levels, so a composed snapshot can be shared without defensive copies.
+
+### Runtime bindings and authentication carriers
+
+Runtime capabilities remain outside `OperationSnapshot` and its fingerprint. The implemented bindings are specific to their owners:
+
+- `rebar_reconciler.runtime.ReconcilerRuntime` derives immutable `ReconcilerSettings` from an operation snapshot and builds only the selected Jira backend. `CloudStaticAuth` and `DataCenterStaticAuth` exclude the selected adapter credential from representations, comparisons, and hashes. The provider-specific factory reveals the credential only while constructing the client.
+- `rebar.llm.auth.LLMRuntime` carries optional provider-native authentication. `AnthropicAuth` holds either an API key or OAuth token. `BedrockAuth` holds a caller-owned boto3 session. `OpenAIAuth` holds a key or rotating key callable. `ProviderSession` consumes only the carrier for the selected provider while retaining Rebar's client construction, retry, timeout, and teardown policies.
+- `rebar.review_bot.startup.StartupBinding` pairs `LLMRuntime` with read-only non-secret startup policy. A running review bot retains this binding until restart.
+- `rebar.opcert_service.keyprov.OpcertSigner` holds the process-owned operation certificate key copy and principal. `rebar._opcert_binding.bound_signer` passes it through a context-local binding so concurrent gate workers do not patch process-global signing variables.
+
+ADR 0098 names `GitRuntime` and `BridgeRuntime` as design roles. The implementation does not expose classes with those names. Git operations continue through the store and repository seams. Jira reconciliation uses `ReconcilerRuntime` instead of a general `BridgeRuntime`.
+
+### Configuration ownership enforcement
+
+`rebar._config_sources` owns raw configuration input and `rebar._config_resolvers` owns the approved below-seam resolvers. `scripts/check_config_ownership.py` derives credential names and backend keys, then rejects prohibited ambient reads below the composition, credential, and backend boundaries. The gate runs through `make lint`. `scripts/config_ownership_exceptions.py` contains no legacy exceptions.
+
+### Diagnostic shadow
+
+`emit_shadow_snapshot(*, cli_overrides=None, repo_root=None, surface=...)` remains wired across CLI, MCP, public library, shared command, and direct reconciler entry points. It composes a snapshot and logs only the envelope version, source kinds, and a truncated fingerprint. It never logs values, secrets, or paths, and it does not control execution. The diagnostic emitter catches every `Exception`, including `ConfigError`, so the existing operation continues. Direct calls to `compose_operation_snapshot()` remain fail-fast.
+
+`shadow_enabled()` reads `REBAR_OPERATION_SNAPSHOT_SHADOW`. The switch is enabled by default and remains active until a future behavior-bearing cutover retires the diagnostic path. See [config.md](config.md#rebar_operation_snapshot_shadow) for accepted values. Ticket `opal-daffy-mutt` records the correction that retained this switch after RP-04 closed.
