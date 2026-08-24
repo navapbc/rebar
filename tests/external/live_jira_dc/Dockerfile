@@ -1,15 +1,18 @@
-# Vendored Jira Data Center test harness (story J5 / epic e369).
+# Vendored Jira Data Center test harness wrapper.
 #
-# WHY VENDORED, NOT PULLED: `pycontribs/jira-test-image:8.17.1` is NOT a pullable
-# image — it is a LOCAL BUILD NAME. `docker pull pycontribs/jira-test-image:8.17.1`
-# fails with "pull access denied ... repository does not exist", and the Docker Hub
-# API for that repo returns `{"message": "object not found"}`. The `pycontribs`
-# namespace holds only OS base images; there is no jira-test-image there. That tag
-# is the name the pycontribs/jira project's own README tells YOU to build locally
-# (`docker build -t pycontribs/jira-test-image:8.17.1 docker/jira-test-image`). So
-# this file is a vendored reproduction of that upstream Dockerfile (attribution:
-# pycontribs/jira, docker/jira-test-image/Dockerfile), built here rather than
-# pulled from anywhere or cloned from another repo at test time.
+# Upstream repository: https://github.com/pycontribs/jira
+# Pinned revision: e3c7b167b065660605645cef7f101cbb324772e4
+# Upstream source path: docker/jira-test-image/Dockerfile
+# Upstream license identifier: BSD-2-Clause
+# Stored upstream license: pycontribs-jira-LICENSE.txt
+#
+# This copy adds `-Dproduct.start.timeout=2700000` and expands the operational
+# annotations for base-image provenance, runtime downloads, startup behavior,
+# architecture constraints, and ineffective timeout properties.
+#
+# The upstream `pycontribs/jira-test-image:8.17.1` name is a local build name.
+# It is not published to a container registry, so this repository builds the
+# vendored wrapper instead of pulling that name or cloning the upstream repository.
 #
 # The base IS pullable and is pinned by DIGEST (not tag), so the base layer never
 # drifts under us even if the `addono/jira-software-standalone` tag moves.

@@ -26,6 +26,7 @@ instance ships well-known ``admin``/``admin`` credentials.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,15 @@ _REPO = Path(__file__).resolve().parents[3]
 _HARNESS = _REPO / "tests" / "external" / "live_jira_dc"
 _DOCKERFILE = _HARNESS / "Dockerfile"
 _COMPOSE = _HARNESS / "docker-compose.yml"
+_PYCONTRIBS_LICENSE = _HARNESS / "pycontribs-jira-LICENSE.txt"
+_PYCONTRIBS_LICENSE_SHA256 = "a432e25d7fa27b288cc7ab6ea8e3a9aa27c101579de7fad7a3b5f534ba9e772a"
+
+
+def test_vendored_pycontribs_license_matches_the_pinned_source() -> None:
+    """The stored license bytes match the selected upstream revision."""
+    assert _PYCONTRIBS_LICENSE.is_file(), f"missing {_PYCONTRIBS_LICENSE}"
+    digest = hashlib.sha256(_PYCONTRIBS_LICENSE.read_bytes()).hexdigest()
+    assert digest == _PYCONTRIBS_LICENSE_SHA256
 
 
 def test_harness_directory_exists_under_the_external_tier() -> None:
