@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# E2E Validation Probe — exercises the full bidirectional sync pipeline
-# against live Jira.
+# E2E validation probe
+# Exercises the bidirectional sync pipeline against a connected Jira instance.
 #
-# REFERENCE / MANUAL PRESSURE-TEST TOOLING — see scripts/jira-pressure-test/README.md.
-# This script is NOT part of the automated test suite and is NOT shipped in the
-# published wheel. It hits LIVE Jira and is run by hand to harden / pressure-test
-# the reconciler's Jira sync when making bridge changes. Do not wire it into CI.
+# MAINTAINED MANUAL PRESSURE-TEST TOOLING. See scripts/jira-pressure-test/README.md.
+# This script is excluded from the automated test suite and published wheel.
+# Run it manually when validating bridge changes. Do not add it to CI.
 #
 # Phases:
 #   1. Create local ticket → sync outbound → verify Jira issue created
@@ -15,24 +14,61 @@
 #   5. Reconciliation check → verify 0 discrepancies
 #   6. Cleanup — delete Jira issue + local ticket
 #
-# Usage: run manually from the repo root.
-# Requires: JIRA_URL, JIRA_USER, JIRA_API_TOKEN, JIRA_PROJECT env vars.
-# Working directory: repo root.
+# Run this probe manually from the repository root. It requires
+# REBAR_E2E_VALIDATION_PROBE=1 and explicit Jira connection variables.
 
 set -euo pipefail
+
+if [ "${REBAR_E2E_VALIDATION_PROBE:-0}" != "1" ]; then
+    echo "FATAL: e2e_validation_probe.sh requires REBAR_E2E_VALIDATION_PROBE=1" >&2
+    echo "The probe creates Jira issues in the selected project." >&2
+    exit 2
+fi
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-# This reference probe lives under scripts/jira-pressure-test/, so the rebar
-# engine (dispatcher, reconciler package, rebar_reconciler/acli.py) is anchored at
-# the repo's src/rebar/_engine tree rather than a sibling of this script.
-_SCRIPTS_DIR="${REBAR_ENGINE_DIR:-${REPO_ROOT}/src/rebar/_engine}"
-TICKET_CLI="${REBAR_TICKET_CLI:-${_SCRIPTS_DIR}/rebar}"
-RECONCILER_DIR="$_SCRIPTS_DIR"
-JIRA_PROJECT="${JIRA_PROJECT:-DIG}"
+RECONCILER_DIR="${REBAR_ENGINE_DIR:-${REPO_ROOT}/src/rebar/_engine}"
+PYTHON_BIN="${REPO_ROOT}/.venv/bin/python"
+TICKET_CLI="${REBAR_TICKET_CLI:-${REPO_ROOT}/.venv/bin/rebar}"
+
+for variable in JIRA_URL JIRA_USER JIRA_API_TOKEN JIRA_PROJECT; do
+    if [ -z "${!variable:-}" ]; then
+        echo "FATAL: ${variable} is not set." >&2
+        exit 2
+    fi
+done
+if [ ! -x "$PYTHON_BIN" ]; then
+    echo "FATAL: checkout Python is not executable at ${PYTHON_BIN}." >&2
+    exit 2
+fi
+if [ ! -x "$TICKET_CLI" ]; then
+    echo "FATAL: ticket CLI is not executable at ${TICKET_CLI}." >&2
+    exit 2
+fi
+if [ ! -d "$RECONCILER_DIR" ]; then
+    echo "FATAL: rebar engine directory does not exist at ${RECONCILER_DIR}." >&2
+    exit 2
+fi
+if ! (cd "$RECONCILER_DIR" && "$PYTHON_BIN" -c "
+from rebar_reconciler.adapters.jira import acli as mod
+client_type = getattr(mod, 'AcliClient', None)
+operations = (
+    ('mod.update_issue', getattr(mod, 'update_issue', None)),
+    ('mod.AcliClient.get_issue', getattr(client_type, 'get_issue', None)),
+    ('mod.AcliClient.get_comments', getattr(client_type, 'get_comments', None)),
+    ('mod.AcliClient.add_comment', getattr(client_type, 'add_comment', None)),
+    ('mod.AcliClient.delete_issue', getattr(client_type, 'delete_issue', None)),
+)
+missing = [name for name, operation in operations if not callable(operation)]
+if missing:
+    raise TypeError('required Jira adapter operations are not callable: ' + ', '.join(missing))
+"); then
+    echo "FATAL: checkout Python cannot load required Jira adapter operations from ${RECONCILER_DIR}." >&2
+    exit 2
+fi
 PROBE_TS="$(date +%s)"
 PROBE_TAG="probe-test"
 E2E_TAG="e2e-validation"
@@ -68,11 +104,10 @@ skip_test() {
     SKIPPED=$((SKIPPED + 1))
 }
 
-# Run one bridge-engine operation and capture output. Arguments are forwarded to
-# python -m rebar_reconciler (for example, preview or sync --max-changes 10).
+# Run one reconciler operation with the checkout Python.
 run_reconciler() {
     local output
-    output=$(cd "$RECONCILER_DIR" && python -m rebar_reconciler "$@" 2>&1) || true
+    output=$(cd "$RECONCILER_DIR" && "$PYTHON_BIN" -m rebar_reconciler "$@" 2>&1) || true
     echo "$output"
 }
 
@@ -90,10 +125,16 @@ get_jira_field() {
     local key="$1"
     local field="$2"
     cd "$RECONCILER_DIR"
-    python3 -c "
-import importlib.util, sys, json
-from rebar_reconciler import acli as mod
-issue = mod.get_issue('${key}')
+    "$PYTHON_BIN" -c "
+import json, os
+from rebar_reconciler.adapters.jira import acli as mod
+client = mod.AcliClient(
+    jira_url=os.environ['JIRA_URL'],
+    user=os.environ['JIRA_USER'],
+    api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
+)
+issue = client.get_issue('${key}')
 fields = issue.get('fields', issue)
 val = fields.get('${field}', '')
 if isinstance(val, dict):
@@ -115,10 +156,16 @@ get_jira_labels() {
 get_jira_comments() {
     local key="$1"
     cd "$RECONCILER_DIR"
-    python3 -c "
-import importlib.util, json
-from rebar_reconciler import acli as mod
-comments = mod.get_comments('${key}')
+    "$PYTHON_BIN" -c "
+import os
+from rebar_reconciler.adapters.jira import acli as mod
+client = mod.AcliClient(
+    jira_url=os.environ['JIRA_URL'],
+    user=os.environ['JIRA_USER'],
+    api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
+)
+comments = client.get_comments('${key}')
 for c in comments:
     body = c.get('body', '') if isinstance(c, dict) else str(c)
     print(body)
@@ -129,7 +176,7 @@ for c in comments:
 get_local_field() {
     local ticket_id="$1"
     local field="$2"
-    "$TICKET_CLI" show "$ticket_id" 2>/dev/null | python3 -c "
+    "$TICKET_CLI" show "$ticket_id" 2>/dev/null | "$PYTHON_BIN" -c "
 import sys, json
 data = json.load(sys.stdin)
 val = data.get('${field}', '')
@@ -149,7 +196,7 @@ check_binding() {
         echo "no-bindings-file"
         return
     fi
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import json, sys
 data = json.load(open('${bindings_file}'))
 entry = data.get('bindings', {}).get('${local_id}')
@@ -338,11 +385,11 @@ echo "=== PHASE 3: Edit on Jira side and sync inbound ==="
 echo ""
 
 # Step 10: Edit Jira summary via ACLI.
-# Use the AcliClient to avoid raw subprocess calls.
+# Use the Jira adapter wrapper to avoid raw subprocess calls.
 cd "$RECONCILER_DIR"
-if python3 -c "
+if "$PYTHON_BIN" -c "
 import importlib.util
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 mod.update_issue('${JIRA_KEY}', summary='E2E-PROBE: JIRA-EDITED ${PROBE_TS}')
 " 2>&1; then
     pass_test "Phase3.jira-edit-summary"
@@ -351,10 +398,16 @@ else
 fi
 
 # Step 11: Add Jira comment via ACLI.
-if python3 -c "
-import importlib.util
-from rebar_reconciler import acli as mod
-mod.add_comment('${JIRA_KEY}', 'Probe comment from Jira')
+if "$PYTHON_BIN" -c "
+import os
+from rebar_reconciler.adapters.jira import acli as mod
+client = mod.AcliClient(
+    jira_url=os.environ['JIRA_URL'],
+    user=os.environ['JIRA_USER'],
+    api_token=os.environ['JIRA_API_TOKEN'],
+    jira_project=os.environ['JIRA_PROJECT'],
+)
+client.add_comment('${JIRA_KEY}', 'Probe comment from Jira')
 " 2>&1; then
     pass_test "Phase3.jira-add-comment"
 else
@@ -396,7 +449,7 @@ echo ""
 # prior Jira-side edit converges over 2-3 passes), so reconcile until the
 # filtered count reaches 0 before asserting no-op idempotency.
 echo "Settling to steady state (eventual consistency)..."
-for s in 1 2 3 4 5 6; do
+for _ in 1 2 3 4 5 6; do
     reconciler_output=$(run_filtered_reconciler)
     mc=$(extract_mutation_count "$reconciler_output")
     [ "$mc" = "0" ] && break
@@ -404,7 +457,6 @@ for s in 1 2 3 4 5 6; do
 done
 
 # Once settled, repeated no-op passes MUST each be 0 (true idempotency).
-idempotency_ok=true
 for i in 1 2 3; do
     echo "Idempotency pass ${i}..."
     reconciler_output=$(run_filtered_reconciler)
@@ -414,7 +466,6 @@ for i in 1 2 3; do
         pass_test "Phase4.idempotency-pass-${i} (0 mutations)"
     else
         fail_test "Phase4.idempotency-pass-${i}" "expected 0 mutations, got: ${mutation_count}"
-        idempotency_ok=false
     fi
 done
 
@@ -450,14 +501,14 @@ echo ""
 
 # Step 18: Delete the Jira test issue.
 cd "$RECONCILER_DIR"
-if python3 -c "
+if "$PYTHON_BIN" -c "
 import importlib.util, os
-from rebar_reconciler import acli as mod
+from rebar_reconciler.adapters.jira import acli as mod
 client = mod.AcliClient(
     jira_url=os.environ['JIRA_URL'],
     user=os.environ['JIRA_USER'],
     api_token=os.environ['JIRA_API_TOKEN'],
-    jira_project=os.environ.get('JIRA_PROJECT', 'DIG'),
+    jira_project=os.environ['JIRA_PROJECT'],
 )
 client.delete_issue('${JIRA_KEY}')
 " 2>&1; then

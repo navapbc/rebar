@@ -2,7 +2,8 @@
 
 Gated like tests/external/test_reconcile_live.py: marked ``external`` (excluded
 from the default ``-m "not integration and not external"`` CI run) and skipped
-unless live Jira credentials AND the ``acli`` binary are present.
+unless Jira connection configuration including ``JIRA_PROJECT`` and the ``acli``
+binary are present.
 
 Scope: this proves whether ``set_relationship`` / ``get_issue_links`` /
 ``delete_issue_link`` function live, AND captures the EXACT JSON shape of a live
@@ -14,9 +15,9 @@ Every Jira issue and link created here is cleaned up in a try/finally that runs
 even on failure. Authorized for PROBE issues this test creates and deletes
 itself.
 
-Run locally with credentials::
+Run locally with configuration::
 
-    JIRA_URL=… JIRA_USER=… JIRA_API_TOKEN=… pytest -m external \
+    JIRA_URL=… JIRA_USER=… JIRA_API_TOKEN=… JIRA_PROJECT=… pytest -m external \
         tests/external/test_link_sync_live.py
 """
 
@@ -32,11 +33,15 @@ pytestmark = pytest.mark.external
 
 
 def _live_jira_ready() -> bool:
-    creds = all(os.environ.get(k) for k in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN"))
-    return creds and shutil.which("acli") is not None
+    configured = all(
+        os.environ.get(k) for k in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN", "JIRA_PROJECT")
+    )
+    return configured and shutil.which("acli") is not None
 
 
-_skip = pytest.mark.skipif(not _live_jira_ready(), reason="no live Jira creds / acli binary")
+_skip = pytest.mark.skipif(
+    not _live_jira_ready(), reason="missing Jira connection configuration or acli binary"
+)
 
 
 def _build_client():
@@ -57,7 +62,7 @@ def _build_client():
         jira_url=os.environ["JIRA_URL"],
         user=os.environ["JIRA_USER"],
         api_token=os.environ["JIRA_API_TOKEN"],
-        jira_project=os.environ.get("JIRA_PROJECT", "DIG"),
+        jira_project=os.environ["JIRA_PROJECT"],
     )
 
 
