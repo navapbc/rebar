@@ -203,33 +203,76 @@ def link(id1: str, id2: str, relation: str, *, force: str = "", repo_root=None) 
 
 
 def unlink(id1: str, id2: str, relation: str | None = None, *, repo_root=None) -> None:
+    """Remove an active link from ``id1`` to ``id2``.
+
+    When ``relation`` is provided, the function removes that relation. Otherwise it removes
+    the most recently created active link for the ordered pair. A ``relates_to`` removal also
+    removes the reciprocal link when one exists. Each direction is a separate ``UNLINK`` event
+    and commit through the locked store path. Each commit invokes configured ticket publication.
+
+    ``repo_root`` selects the repository and its configured tracker. Ticket resolution, relation
+    validation, missing-link, and store failures raise :class:`RebarError`.
+    """
     from rebar._commands import unlink as _unlink_cmd
 
     _python_leaf(_unlink_cmd.unlink_core, id1, id2, relation, repo_root=repo_root, what="unlink")
 
 
 def tag(ticket_id: str, tag: str, *, repo_root=None) -> None:
+    """Add a tag to a ticket through a ``TAG_DELTA`` event.
+
+    The tag is trimmed and validated. An existing tag is an idempotent success that writes no
+    event. A new tag is appended through the locked store path and committed. The commit invokes
+    configured ticket publication. ``repo_root`` selects the repository and its configured
+    tracker. Ticket resolution, tag validation, and store failures raise :class:`RebarError`.
+    """
     from rebar._commands import leaf
 
     _python_leaf(leaf.tag, ticket_id, tag, repo_root=repo_root, what="tag")
 
 
 def untag(ticket_id: str, tag: str, *, repo_root=None) -> None:
+    """Remove a tag from a ticket through a ``TAG_DELTA`` event.
+
+    The tag is trimmed and validated. An absent tag is an idempotent success that writes no
+    event. A present tag is removed through the locked store path and committed. The commit invokes
+    configured ticket publication. ``repo_root`` selects the repository and its configured
+    tracker. Ticket resolution, tag validation, and store failures raise :class:`RebarError`.
+    """
     from rebar._commands import leaf
 
     _python_leaf(leaf.untag, ticket_id, tag, repo_root=repo_root, what="untag")
 
 
 def archive(ticket_id: str, *, repo_root=None) -> None:
+    """Archive an open ticket and preserve its terminal state.
+
+    The function first folds eligible events into a ``SNAPSHOT``. It then appends an
+    ``ARCHIVED`` event and updates the derived archive marker. An archived ticket is an
+    idempotent success. A ticket in another status is rejected. The fold and archive event are
+    committed, and the event append invokes configured ticket publication. ``repo_root``
+    selects the repository and its configured tracker. Ticket resolution, status, compaction,
+    and store failures raise :class:`RebarError`.
+    """
     from rebar._commands import leaf
 
     _python_leaf(leaf.archive, ticket_id, repo_root=repo_root, what="archive")
 
 
 def compact(ticket_id: str | None = None, *, repo_root=None) -> None:
-    # In-process (Tier E E3): compact-on-id via the shared compaction core
-    # (ticket-compact.sh retired from this path). Output is captured (the bash
-    # library wrapper captured it too); failures raise RebarError.
+    """Fold eligible events for one ticket into a ``SNAPSHOT``.
+
+    ``ticket_id`` accepts any resolvable ticket identifier. Its annotation permits ``None``, but
+    omitting the identifier is a usage failure. The selected repository supplies the tracker,
+    compaction threshold, compaction horizon, and sync policy. Before the fold, the function
+    performs the configured freshness check. A qualifying fold writes a snapshot, retires the
+    absorbed event files, commits the storage changes atomically, and invokes configured ticket
+    publication. A ticket below the threshold or with a snapshot after the freshness check is
+    unchanged.
+
+    Command output is captured. A nonzero command result raises :class:`RebarError` with its
+    return code and stderr. ``repo_root`` selects the repository and its configured tracker.
+    """
     import contextlib
     import io
 

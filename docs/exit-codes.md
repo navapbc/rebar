@@ -17,7 +17,7 @@ to an emitted code are contract changes and must be called out in release notes.
 | `1`  | runtime error | Ticket not found, invalid input value, a missing **required positional** argument, a failed precondition, or a per-ticket gate's **fail verdict**. The general-purpose error code. |
 | `2`  | usage error | An unrecognized CLI `--option` on a **structured read command** (`show`, `list`, `deps`, `ready`, `search`), which reject unknown options rather than silently ignoring them. Also the not-found/usage path of `clarity-check` (see the gate note below). The plan-review gate's **INDETERMINATE** verdict also exits `2` — either from a non-retryable LLM degrade **or** from the deliberate **not-claimable fast-fail** (`review-plan` refusing a ticket that can't be claimed yet — a `ticket-not-claimable` finding with `coverage.llm_ran=false`; **no LLM ran**). `review-plan --retry` also exits `2` when it **refuses an ineligible resume** (the latest result is a PASS/BLOCK, a non-retryable indeterminate, or a missing/legacy/corrupt/stale/digest-mismatched journal) — before any model call, no sidecar, the full-review remedy on stderr — and when `--retry` is combined with `--force`/`--status`/`--check` (a flag conflict). Predates and is unchanged by exit 11. |
 | `10` | concurrency mismatch | Optimistic-concurrency rejection: a state-dependent op (`transition`/`claim`/`reopen`) re-read the ticket under lock and the actual status no longer matched the expected one. **Normal under parallelism** — re-read and pick another, never force. Emitted by `_commands/txn.py` (`ConcurrencyMismatch`). |
-| `11` | transient — retry | An LLM gate (`review-plan` / `review-code` / `verify-completion` / the `close` completion gate) degraded on a **systemic, retryable** LLM failure (rate-limit / connection blip — the classifier's `WAIT_AND_RETRY` / `RETRY_NOW` disposition). The verdict is unsigned; **re-run after the backoff window** rather than treating it as a real BLOCK/FAIL. Distinct from `2` (INDETERMINATE, non-retryable) so a driving agent can auto-retry only the genuinely transient case. Additive (2026-07 window) — see "Recorded decisions". |
+| `11` | retryable gate fault | An LLM gate could not produce a usable result and the caller may retry without changing the reviewed work. `review-plan`, `review-code`, `verify-completion`, and the `close` completion gate emit `11` for provider degradation classified as retryable. `verify-completion` and the `close` gate also emit `11` when bounded completion recovery returns `verdict_obtainable=false`. An ordinary completion FAIL remains `1`. A nonretryable raised completion error also remains `1`. A nonretryable plan-review or code-review INDETERMINATE remains `2`. See "Recorded decisions". |
 | `3`  | stale-rebase sentinel / poor health | `fsck-recover --detect-only` found a paused rebase or merge; `validate` scored repo health 2/5; or a **legacy reconciler route** found another pass in flight. Canonical bridge routes translate that last benign state to 0. |
 | `4`  | critical health / legacy phase gate | `validate` scored repo health 1/5, or a **legacy reconciler route** was stopped by its historical phase gate. Canonical bridge routes translate the phase-gate state to 0. |
 | `12` | review attestation stale or absent | `review-plan --status` found the ticket's plan-review attestation is not current — the plan changed since the last review, the attestation was never written, or the verified-at SHA is no longer reachable. Exit 0 means current; 12 means a fresh `rebar review-plan` is needed before `claim` will pass the gate (`src/rebar/_cli/_llm_commands.py` — `return 0 if status["ok"] else 12`). |
@@ -156,7 +156,7 @@ guarantee `2`).
 | `show` | 0 | 1 | — | structured read (unknown option → 2); not-found also emits a parseable JSON error on stdout |
 | `summary` | 0 | 0 | — | tolerant read: unknown id renders `[unknown]`, still 0 |
 | `tag` | 0 | 1 | — | |
-| `transition` | 0 | 1 | 10 | 10 on stale `current` status |
+| `transition` | 0 | 1 | 10 | 10 on stale `current` status. A close guarded by completion verification also returns 11 for a retryable raised verifier error or `verdict_obtainable=false`. |
 | `unlink` | 0 | 1 | — | |
 | `untag` | 0 | 1 | — | removing an absent tag is still 0 |
 | `validate` | **0-4** | — | — | **exception**: exit is a health-severity bucket, not the standard contract; takes **no** ticket id (passing one → 1) |
@@ -191,7 +191,7 @@ guarantee `2`).
 | `trusted-env` | 0 | — | — | no ticket id; maintains `.rebar/trusted_environments.yaml`; bad args → 2; error → 1 |
 | `verify-authorship` | 0 | — | — | back-compat alias for `verify-identity`; same codes: 0 = verified, 1 = not-verified, 2 = bad args |
 | `verify-commit-ticket` | 0 | — | — | no ticket id; 0 = commit has a valid rebar-ticket trailer, 1 = missing or invalid, 2 = bad args |
-| `verify-completion` | 0 | 1 | — | PASS → 0, FAIL → 1, retryable degrade → 11 (shape B — raised `LLMError`) |
+| `verify-completion` | 0 | 1 | — | PASS → 0, ordinary FAIL → 1, nonretryable raised `LLMError` → 1, retryable raised `LLMError` → 11, `verdict_obtainable=false` → 11 |
 | `verify-identity` | 0 | — | — | authenticated-authorship merge gate; 0 = verified, 1 = not-verified, 2 = bad args |
 | `verify-opcert` | 0 | — | — | no ticket id; 0 = op-cert valid, 1 = invalid or not found, 2 = bad args |
 | `verify-signature` | 0 | — | — | no ticket id; certifies a manifest attestation (shape-aware: an asymmetric op-cert, or a legacy record); 0 = signature verified, 1 = not-verified (or, for a legacy HMAC record, a missing key), 2 = bad args |
@@ -236,33 +236,16 @@ The gate convention (clarity-check not-found = 2) and `validate`'s health-bucket
 exit were **kept as-is and documented** rather than changed, to avoid altering
 verdict/severity semantics that agents already depend on.
 
-### Exit 11 — block-but-retryable (2026-07 window, story `authorial-hated-blackbear`, epic `jira-reb-687`)
+### Exit 11 block-but-retryable outcomes
 
-The LLM gates can fail for two very different reasons: your plan/code is wrong (a
-real BLOCK/FAIL), or the **model provider** hiccuped (a rate-limit, a connection
-blip, an outage). Collapsing both onto the existing exit codes meant a driving
-agent could not tell "fix your work" from "retry in a minute". Exit **11** peels
-off the **systemic, retryable** subset — the LLM-failure classifier's
-`WAIT_AND_RETRY` / `RETRY_NOW` disposition (`coverage.resolution_class` on the
-degraded verdict; `.outcome` on a raised completion error) — into its own code.
+Exit 11 distinguishes a retryable gate fault from a judgment about the reviewed work. The provider-degradation mapping is recorded by story `authorial-hated-blackbear` and epic `jira-reb-687`. The bounded completion recovery mapping is recorded by `xenophobic-allpurpose-serval`.
 
-- **What emits it:** `rebar review-plan` / `review-code` (shape A — read
-  `coverage.retryable`) and `rebar verify-completion` / `rebar close`'s completion
-  gate (shape B — read the raised error's `.outcome.retryable`). A non-retryable
-  degrade still exits `2` (INDETERMINATE); a real BLOCK/FAIL still exits `1`.
-- **Why additive-safe (no consumer breaks):**
-  - The **driving agent / human** is the primary consumer (this doc): treat 11 as
-    "transient — re-run after the backoff", else fall back to any-non-zero-is-failure.
-  - **CI** (`.github/workflows/gerrit-verify.yaml`, `test.yml`) runs `make`
-    targets and never invokes the gate CLIs, so 11 is invisible to the `Verified`
-    vote — it uses plain any-non-zero-is-failure semantics.
-  - The **Gerrit review-bot** (`src/rebar/review_bot/adapter.py`) votes off the
-    code-review **verdict dict** (PASS/BLOCK/INDETERMINATE), not CLI exit codes,
-    and already tolerates unknown `coverage` keys.
-- **Rollback:** revert the CLI mapping and the retryable subset falls back to the
-  existing INDETERMINATE exit (`2` for review-plan, `1` for the close gate). The
-  verdicts' optional `coverage.resolution_class` / `retryable` fields are ignored
-  by readers — no data migration.
+- **Review degradation.** `review-plan` and `review-code` return `11` when `coverage.retryable` is true. A nonretryable INDETERMINATE returns `2`.
+- **Raised completion errors.** `verify-completion` and the `close` completion gate inspect the raised `LLMError` outcome. A retryable outcome returns `11`. A nonretryable outcome fails closed with `1`.
+- **Unusable completion results.** Bounded recovery can return `verdict_obtainable=false` after it cannot obtain an itemized completion judgment. Both `verify-completion` and the `close` gate return `11` for that result. An ordinary completion FAIL remains `1` because it states that acceptance criteria are unmet.
+- **Consumer guidance.** Retry `11` after the indicated backoff. Treat every other nonzero code according to its documented contract. Consumers that treat every nonzero code as failure remain compatible.
+- **Other consumers.** Project CI does not invoke these gate commands. The Gerrit review bot consumes verdict dictionaries instead of CLI exit codes.
+- **Rollback.** Removing the mapping would restore the earlier `2` result for retryable review degradation and the earlier `1` result for retryable completion faults. The optional classifier fields require no data migration.
 
 ### The `--review` flag on `edit` and `claim` (2026-07 window, story `a114-8f96-ff2d-461d`)
 
