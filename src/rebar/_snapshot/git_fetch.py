@@ -11,6 +11,7 @@ dependency runs one way: ``repo_snapshot`` imports this module, never the revers
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import threading
 from collections.abc import Iterator
@@ -164,6 +165,30 @@ def rev_parse(repo_root: str, ref: str) -> str | None:
     )
     sha = proc.stdout.strip()
     return sha or None
+
+
+# A full object name: 40 hex (sha1) or 64 hex (sha256). Abbreviations are deliberately
+# excluded — a short prefix is ambiguous, so it is NOT eligible for the fetch short-circuit.
+_FULL_SHA_RE = re.compile(r"\A(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\Z")
+
+
+def is_present_full_sha(repo_root: str, ref: str) -> bool:
+    """True when ``ref`` is a FULL object name already present locally as a commit.
+
+    A full SHA is immutable, so — unlike a branch or tag — it owes no remote-freshness
+    fetch: when the commit object is already in the repo, an attested resolution can skip
+    the opening fetch entirely (bug sawdusty-snotty-fossa) rather than paying even a scoped
+    single-want round-trip. Abbreviated names are rejected (ambiguous) and moving refs never
+    match, so freshness for branches/tags and targeted recovery for an ABSENT full SHA are
+    both preserved by the callers that gate on this predicate. ``GIT_NO_LAZY_FETCH`` keeps
+    the presence probe OFFLINE — on a promisor/partial clone an absent object must NOT be
+    lazily fetched here (that is the very round-trip we skip); it returns non-zero instead,
+    so the caller falls through to the explicit, fail-closed targeted-want fetch."""
+    if not _FULL_SHA_RE.match(ref):
+        return False
+    env = {**os.environ, "GIT_NO_LAZY_FETCH": "1"}
+    proc = git_run(repo_root, "cat-file", "-e", "--end-of-options", f"{ref}^{{commit}}", env=env)
+    return proc.returncode == 0
 
 
 def is_auth_failure(stderr: str) -> bool:

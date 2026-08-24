@@ -76,6 +76,7 @@ from rebar._snapshot.git_fetch import (
     git_run,
     has_remote,
     is_missing_ref,
+    is_present_full_sha,
     rev_parse,
     scoped_fetch_target,
     stall_abort_args,
@@ -253,20 +254,19 @@ def resolve_ref(
 ) -> str:
     """Resolve a client ``ref`` (branch | tag | SHA) to an immutable commit SHA.
 
-    When an ``origin`` remote exists and ``fetch`` is set, fetches first — SCOPED to ``ref``
-    (see :func:`~rebar._snapshot.git_fetch.scoped_fetch_target`) so ``origin/main`` (or any
-    moving branch/tag/SHA) resolves without pulling unrelated heads; a SHA absent locally
+    When an ``origin`` remote exists and ``fetch`` is set, a locally-present full SHA skips its
+    fetch (immutable; :func:`~rebar._snapshot.git_fetch.is_present_full_sha`); any other ref
+    fetches SCOPED (:func:`~rebar._snapshot.git_fetch.scoped_fetch_target`). A SHA absent locally
     needs ``uploadpack.allowReachableSHA1InWant``. Raises :class:`SnapshotRefError`
     (fail-closed) if the ref never resolves, or :class:`SnapshotFetchError` for a
     transport/auth/stall failure. ``blobless`` forwards to ``fetch_origin`` (a MATERIALIZE
     caller passes ``blobless=False``)."""
     root = str(repo_root) if repo_root else "."
     remote_present = fetch and has_remote(root, remote)
-    # SCOPE the opening fetch to `ref` (bug lemuroid-compliant-hoopoe): a bare
-    # `git fetch origin` applies the clone's all-heads refspec and pulls the whole tickets
-    # history for a code-SHA lookup (512s / a 300s timeout in the field). A transport/auth/
-    # stall failure FAILS CLOSED (re-raised); only is_missing_ref degrades to the ref error.
-    if remote_present:
+    # SKIP the fetch for a locally-present full SHA (bug sawdusty-snotty-fossa; immutable, none
+    # owed); else SCOPE it to `ref` (bug lemuroid-compliant-hoopoe) so a bare all-heads fetch
+    # never pulls the tickets history. Transport/auth/stall FAILS CLOSED; is_missing_ref -> ref err.
+    if remote_present and not is_present_full_sha(root, ref):
         try:
             fetch_origin(
                 root,
