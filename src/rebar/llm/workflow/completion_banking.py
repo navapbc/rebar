@@ -41,6 +41,7 @@ from rebar.llm.errors import CompletionRecoveryError
 # cluster); re-exported here so existing callers and the public `__all__` are unchanged.
 from rebar.llm.workflow.completion_verdict_assembly import (
     assemble_deterministic_verdict,
+    bank_has_actionable_block,
     merge_finalizer_with_bank,
     ticket_id_of,
 )
@@ -675,6 +676,7 @@ __all__ = [
     "PlannedBatch",
     "allocate_batch",
     "assemble_deterministic_verdict",
+    "bank_has_actionable_block",
     "criterion_id_map",
     "harvest_structured_into_bank",
     "iteration_limit_for",
