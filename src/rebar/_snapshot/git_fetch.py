@@ -14,11 +14,13 @@ import os
 import re
 import subprocess
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from rebar._store.gitutil import run_git
+from rebar._store.git_outcome import is_ref_cas_mismatch
+from rebar._store.gitutil import fetch_coordination_lock, run_git
 
 try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
     import fcntl
@@ -87,8 +89,6 @@ def interprocess_lock(lock_path: Path) -> Iterator[None]:
         return
     # Fallback: atomic mkdir spin-lock.
     mkdir_lock = lock_path.with_suffix(lock_path.suffix + ".d")
-    import time
-
     while True:
         try:
             os.mkdir(str(mkdir_lock))
@@ -255,6 +255,12 @@ _STALL_WINDOW_SECONDS = 10
 # a persistently dead remote still fails closed in bounded time.
 _STALL_ATTEMPTS = 3
 
+# Backoff between bounded retries of the concurrent-fetch ref compare-and-swap mismatch
+# (bug agrologic-oval-bobolink). The common-dir fetch lock already excludes rebar peers, so
+# a CAS here is a NON-rebar git peer moving the ref; a short settle lets it land before the
+# re-read. Bounded by the same stall-attempt budget so a persistent racer still fails closed.
+_CAS_RETRY_BACKOFF_S = 0.1
+
 # curl's wording when the low-speed check fires, as git relays it on stderr:
 #   "fatal: ... Operation too slow. Less than 1000 bytes/sec transferred the last 5 seconds"
 _STALL_STDERR_MARKER = "operation too slow"
@@ -305,11 +311,19 @@ def fetch_origin(
     a promisor remote.
 
     ``lock_path`` is the cross-process fetch lock file (the snapshot store owns its
-    location, so the caller supplies it and this layer stays free of store layout).
+    location, so the caller supplies it and this layer stays free of store layout). A
+    SECOND, bounded cross-process lock keyed on the repo's canonical Git COMMON directory
+    (:func:`~rebar._store.gitutil.fetch_coordination_lock`) additionally serializes this
+    fetch against EVERY other rebar ref-updating fetch that shares those remote-tracking
+    refs — a sync-leg fetch, or a snapshot fetch from another worktree — which the
+    snapshot-store lock alone cannot see (bug agrologic-oval-bobolink).
 
     Raises :class:`SnapshotFetchError` (fail-closed) on failure, with an actionable
     credential remedy when the remote rejected us for auth reasons; a timeout is likewise
-    surfaced as a descriptive error rather than a hang."""
+    surfaced as a descriptive error rather than a hang. A concurrent-fetch ref
+    compare-and-swap mismatch is bounded-retried (the residual race is a NON-rebar git peer,
+    which does not take the common-dir lock); an exhausted retry raises one actionable
+    error."""
     # Disable any interactive credential prompt so a missing credential fails fast with a
     # descriptive error instead of hanging the long-lived server on a TTY prompt.
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
@@ -327,11 +341,18 @@ def fetch_origin(
 
     attempts = config.resolve_stall_attempts(_STALL_ATTEMPTS)
     for attempt in range(1, attempts + 1):
-        # Re-acquire both locks PER ATTEMPT rather than holding them across the whole retry
+        # Re-acquire the locks PER ATTEMPT rather than holding them across the whole retry
         # budget: a peer that is waiting to fetch the same repo gets a turn between our
         # attempts, and — better still — may land the fetch we were failing at, so our next
-        # attempt is served by a warmer remote instead of queueing behind a dead one.
-        with fetch_lock_for(repo_root), interprocess_lock(lock_path):
+        # attempt is served by a warmer remote instead of queueing behind a dead one. The
+        # common-dir fetch lock (outermost cross-process leg) coordinates with the sync
+        # fetch and other worktrees' snapshot fetches; the snapshot-store lock is the
+        # in-store global fetch lock.
+        with (
+            fetch_lock_for(repo_root),
+            fetch_coordination_lock(repo_root),
+            interprocess_lock(lock_path),
+        ):
             try:
                 proc = subprocess.run(
                     argv,
@@ -354,33 +375,53 @@ def fetch_origin(
         if proc.returncode == 0:
             return
         stderr = (proc.stderr or "").strip()
-        # ONLY a stall is retried. Every other failure carries a diagnosis that a second
-        # identical invocation cannot change — bad credentials stay bad, a missing ref
-        # stays missing, an unreachable host stays unreachable — so retrying them would
-        # just multiply the latency of a certain failure. Those fall straight through to
-        # the error branches below on the first attempt.
-        if not is_stall_abort(stderr) or attempt == attempts:
+        # A stall or a concurrent-fetch ref CAS mismatch is worth another attempt; every
+        # other failure carries a diagnosis a second identical invocation cannot change —
+        # bad credentials stay bad, a missing ref stays missing, an unreachable host stays
+        # unreachable — so those fall straight through to the error branches below on the
+        # first attempt. The common-dir lock already excludes rebar peers, so a CAS here
+        # means a NON-rebar git peer moved the ref; a brief backoff lets it settle before we
+        # re-read.
+        cas = is_ref_cas_mismatch(stderr)
+        if (not is_stall_abort(stderr) and not cas) or attempt == attempts:
             break
+        if cas:
+            time.sleep(_CAS_RETRY_BACKOFF_S)
     if proc.returncode != 0:
-        if is_stall_abort(stderr):
-            raise SnapshotFetchError(
-                f"git fetch from '{remote}' stalled — the connection was established but "
-                f"transferred almost nothing, and {attempts} attempt(s) all aborted on the "
-                "low-speed check (attested mode fails closed). The remote may be wedged or "
-                f"the network path broken. git said: {stderr or '<no detail>'}",
-                stderr=stderr,
-            )
-        if is_auth_failure(stderr):
-            raise SnapshotFetchError(
-                f"git fetch from '{remote}' was rejected for authentication — the rebar "
-                "MCP server needs read credentials to fetch the verified ref from a "
-                "private repository. Configure a git credential helper, a deploy key, "
-                "or a token for the server's clone (see the MCP-server setup docs), "
-                f"then retry. git said: {stderr or '<no detail>'}",
-                stderr=stderr,
-            )
+        _raise_fetch_failure(remote, stderr, attempts)
+
+
+def _raise_fetch_failure(remote: str, stderr: str, attempts: int) -> None:
+    """Translate a non-zero ``git fetch`` into the one actionable fail-closed error its
+    signature calls for (stall / ref CAS exhaustion / auth / generic). Split out of
+    :func:`fetch_origin` so the retry loop stays flat."""
+    if is_stall_abort(stderr):
         raise SnapshotFetchError(
-            f"git fetch from '{remote}' failed (attested mode fails closed): "
+            f"git fetch from '{remote}' stalled — the connection was established but "
+            f"transferred almost nothing, and {attempts} attempt(s) all aborted on the "
+            "low-speed check (attested mode fails closed). The remote may be wedged or "
+            f"the network path broken. git said: {stderr or '<no detail>'}",
+            stderr=stderr,
+        )
+    if is_ref_cas_mismatch(stderr):
+        raise SnapshotFetchError(
+            f"git fetch from '{remote}' lost git's ref compare-and-swap to a concurrent "
+            f"ref-updating fetch on the same Git common directory, and {attempts} "
+            "coordinated attempt(s) did not converge (attested mode fails closed) — a "
+            "non-rebar git peer may be updating the same remote-tracking ref. git said: "
             f"{stderr or '<no detail>'}",
             stderr=stderr,
         )
+    if is_auth_failure(stderr):
+        raise SnapshotFetchError(
+            f"git fetch from '{remote}' was rejected for authentication — the rebar "
+            "MCP server needs read credentials to fetch the verified ref from a "
+            "private repository. Configure a git credential helper, a deploy key, "
+            "or a token for the server's clone (see the MCP-server setup docs), "
+            f"then retry. git said: {stderr or '<no detail>'}",
+            stderr=stderr,
+        )
+    raise SnapshotFetchError(
+        f"git fetch from '{remote}' failed (attested mode fails closed): {stderr or '<no detail>'}",
+        stderr=stderr,
+    )

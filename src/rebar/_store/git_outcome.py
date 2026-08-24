@@ -213,6 +213,29 @@ def is_git_lock(text: str) -> bool:
     return REF_LOCK_MARKER in low or (GENERIC_LOCK_MARKER in low and "file exists" in low)
 
 
+# The concurrent ref compare-and-swap mismatch a RACING ref-updating fetch leaves behind:
+# ``cannot lock ref '<ref>': is at <new> but expected <old>``. A peer advanced the
+# remote-tracking ref between this fetch's negotiation and its ref update, so re-reading and
+# retrying converges (bug agrologic-oval-bobolink). Distinct from a stuck ``<name>.lock``
+# create conflict (:func:`is_git_lock`), which is a still-HELD lock file, not ref MOVEMENT —
+# the two are DIFFERENT outcomes (a lock file is ridden out where it lives; the CAS mismatch
+# is serialized by the common-dir fetch lock and bounded-retried by the fetch callers).
+_REF_CAS_MISMATCH_RE = re.compile(
+    r"cannot lock ref.*\bis at\b.*\bbut expected\b", re.IGNORECASE | re.DOTALL
+)
+
+
+def is_ref_cas_mismatch(text: str) -> bool:
+    """True for the concurrent ref compare-and-swap mismatch (``cannot lock ref '<ref>':
+    is at <new> but expected <old>``) that two uncoordinated ref-updating fetches produce.
+
+    A CAS mismatch is a STRICT SUBSET of :func:`is_git_lock` (both carry ``cannot lock
+    ref``), so a caller that needs to tell "ref MOVED under me, re-read and retry" apart from
+    "a ``<name>.lock`` is still HELD" must test THIS predicate first/explicitly — the fetch
+    paths do exactly that before falling through to the generic lock handling."""
+    return _REF_CAS_MISMATCH_RE.search(text) is not None
+
+
 def is_transient_object_read(text: str) -> bool:
     """git's transient object-DB READ signature."""
     return _any(text, TRANSIENT_OBJECT_MARKERS) is not None

@@ -602,7 +602,7 @@ concurrent local appender's `git add`/`commit`. The policy:
 ```
 if tracker is in a rebase/merge recovery state:        # I9 / bug 637b
     skip — never reset/merge through recovery; hint fsck-recover
-fetch origin tickets                                   # (network; best-effort)
+fetch origin tickets    # (network; best-effort; common-dir-coordinated — see below)
 if no origin/tickets: return
 
 if merge-base(HEAD, origin/tickets) is empty:          # UNRELATED histories
@@ -688,6 +688,37 @@ could approach that budget) should migrate to **disabled auto-maintenance +
 git-upstream / GitLab-Gitaly pattern; the ADR 0051 escape hatch). Git's own ~30-day
 unreachable-reflog window remains a free backstop — but rebar no longer *depends* on it
 for correctness.
+
+### Fetch coordination — the Git common-directory lock
+
+Ref-updating fetches are **serialized by the canonical Git common directory** (bug
+`agrologic-oval-bobolink`). Remote-tracking refs (`refs/remotes/origin/tickets`) live in the
+**common** dir, which every linked worktree — and the symlinked `.tickets-tracker` clone —
+**shares**. `git fetch` updates a remote-tracking ref with **compare-and-swap** semantics, so
+two *uncoordinated* fetches against one common dir race: the loser fails
+`cannot lock ref 'refs/remotes/origin/tickets': is at <new> but expected <old>`. That failure
+has two faces, and BOTH are defects: the **attested snapshot** fetch
+(`rebar._snapshot.git_fetch.fetch_origin`) aborts a gate operation fail-closed, and the
+**sync** fetch (`rebar._store.sync.reconverge`) silently drops a freshness round. The
+per-worktree advisory git-op lock (`_store_git_op_lock`, bug 9305) does **not** cover this: its
+identity is the *per-worktree* git dir (right for the per-worktree `index.lock`, wrong for the
+*shared* remote-tracking refs), and the sync/snapshot fetch legs run outside it.
+
+Coordination is two composed mechanisms, applied at **both** fetch entry points:
+
+- **A blocking cross-process fetch lock keyed on the common dir**
+  (`gitutil.fetch_coordination_lock` → `<common-dir>/rebar-fetch.lock`, resolved through
+  `commondir` pointers and `realpath` so worktrees and symlinks collapse to one identity). It
+  is a **dedicated fetch lock, never the ticket write lock** — a slow network fetch serializes
+  only other *fetches*, so a blocked remote cannot block a local ticket writer (the fetch
+  still runs OUTSIDE `.ticket-write.lock`, exactly as before).
+- **A bounded retry of the exact CAS mismatch** (`git_outcome.is_ref_cas_mismatch`). The lock
+  removes the rebar-vs-rebar race; the retry absorbs a **residual** race with a **non-rebar**
+  git peer, which never takes the lock. The sync path stays best-effort (an exhausted retry
+  skips the round, never raises); the snapshot path fails closed with one actionable
+  exhausted-recovery error. The CAS mismatch is classified **distinctly** from a held
+  `<name>.lock` create conflict — the latter is contention (ridden out where it lives), the
+  former is ref *movement* (serialized + retried here).
 
 ### Read-freshness policy (uniform across CLI, library, and MCP)
 

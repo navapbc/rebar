@@ -45,10 +45,16 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import time
 
-from rebar._store import compat, merge_recovery
+from rebar._store import compat, git_outcome, merge_recovery
 from rebar._store import lock as _lock
-from rebar._store.gitutil import _with_transient_fault_retry, run_git, run_git_bounded
+from rebar._store.gitutil import (
+    _with_transient_fault_retry,
+    fetch_coordination_lock,
+    run_git,
+    run_git_bounded,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,14 @@ _SYNC_LOCK_TIMEOUT = 15  # bash TICKET_SYNC_LOCK_TIMEOUT default
 # sync indefinitely. These calls are best-effort already (`_ok` returns False on
 # failure), so a timeout surfaces as a failed CompletedProcess, never a hang.
 _GIT_TIMEOUT = 30
+
+# Bounded recovery for the concurrent ref compare-and-swap mismatch (bug
+# agrologic-oval-bobolink). The common-dir fetch lock serializes rebar peers; this retry
+# absorbs a residual race with a NON-rebar git peer (which never takes that lock). A tiny
+# jittered backoff lets the peer's fetch land before we re-read. Sync stays best-effort:
+# an exhausted retry just skips this freshness round, it never raises.
+_FETCH_CAS_ATTEMPTS = 3
+_FETCH_CAS_BACKOFF_S = 0.1
 
 
 # raw-git-ok: locked store seam internal
@@ -70,6 +84,27 @@ def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
 # raw-git-ok: locked store seam internal
 def _ok(tracker: str, *args: str) -> bool:
     return _git(tracker, *args).returncode == 0
+
+
+def _coordinated_fetch(tracker: str, remote_name: str, refspec: str) -> bool:
+    """Best-effort remote-tracking fetch, coordinated against peer fetches sharing one Git
+    common directory (bug agrologic-oval-bobolink).
+
+    Serialized behind the common-dir fetch lock so a concurrent rebar fetch cannot race
+    git's ref compare-and-swap, and bounded-retried on the residual CAS mismatch a NON-rebar
+    git peer can still leave (``cannot lock ref … is at … but expected …``). Returns True on
+    a completed fetch, False on any other failure — sync stays best-effort, so a failed or
+    CAS-exhausted fetch simply skips this freshness round rather than raising."""
+    for attempt in range(1, _FETCH_CAS_ATTEMPTS + 1):
+        with fetch_coordination_lock(tracker):
+            proc = _git(tracker, "fetch", remote_name, refspec, "--quiet")
+        if proc.returncode == 0:
+            return True
+        combined = (proc.stderr or "") + (proc.stdout or "")
+        if not git_outcome.is_ref_cas_mismatch(combined) or attempt == _FETCH_CAS_ATTEMPTS:
+            return False
+        time.sleep(_FETCH_CAS_BACKOFF_S)
+    return False
 
 
 def _carries_ticket_events(tracker: str) -> bool:
@@ -291,7 +326,7 @@ def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIM
     # the destination ref makes the remote-tracking ref appear regardless of the
     # clone's configured refspec (same idiom as review_bot.gerrit_client).
     refspec = f"+refs/heads/{branch}:refs/remotes/{remote_name}/{branch}"
-    if not _ok(tracker, "fetch", remote_name, refspec, "--quiet"):
+    if not _coordinated_fetch(tracker, remote_name, refspec):
         return
     # Still guard on the ref existing: a remote that genuinely has no such branch
     # fetches fine (nothing matched) and must remain a quiet no-op.
