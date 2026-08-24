@@ -42,10 +42,12 @@ has been replaced.)
 
 from __future__ import annotations
 
+import bisect
 import json
 import os
 import re
 import sys
+from typing import NamedTuple
 
 from rebar._alias import compute_alias
 
@@ -215,6 +217,62 @@ def _effective_alias_for_dir(tracker_dir: str, name: str) -> str:
     return stored_alias or compute_alias(name) or ""
 
 
+class ResolverScanIndex(NamedTuple):
+    """Everything a many-id resolution needs from ONE pass over the tracker root.
+
+    ``alias_to_dirs`` — ``{effective alias -> [ticket-dir names]}`` for the alias
+    branch. ``sorted_dir_names`` — the sorted list of non-dot ticket directory
+    names, so the 8-hex short-id and generic-prefix branches can prefix-match by
+    :func:`bisect` instead of re-listing the tracker root per candidate. Both are
+    built together so a scanner (e.g. the close precheck's walk over every
+    historical commit reference) pays ONE store listing regardless of how many
+    distinct candidates history references.
+    """
+
+    alias_to_dirs: dict[str, list[str]]
+    sorted_dir_names: list[str]
+
+
+def _scan_tracker_root(tracker_dir: str) -> ResolverScanIndex | None:
+    """Single pass over the tracker root building both resolution indexes.
+
+    Returns ``None`` on a hard failure listing the tracker (so callers fall back
+    to per-call scanning), matching :func:`_scan_alias`'s contract that a hard
+    failure never masquerades as "no match". Dotfiles (e.g. ``.bridge_state``) and
+    non-directory entries are excluded, mirroring the per-candidate scan filters.
+    """
+    try:
+        entries = os.listdir(tracker_dir)
+    except OSError as exc:
+        print(f"Error: cannot list {tracker_dir!r}: {exc}", file=sys.stderr)
+        return None
+    alias_to_dirs: dict[str, list[str]] = {}
+    dir_names: list[str] = []
+    for name in entries:
+        if name.startswith(".") or not os.path.isdir(os.path.join(tracker_dir, name)):
+            continue
+        dir_names.append(name)
+        effective_alias = _effective_alias_for_dir(tracker_dir, name)
+        if effective_alias:
+            alias_to_dirs.setdefault(effective_alias, []).append(name)
+    dir_names.sort()
+    return ResolverScanIndex(alias_to_dirs=alias_to_dirs, sorted_dir_names=dir_names)
+
+
+def build_resolver_scan_index(tracker_dir: str) -> ResolverScanIndex | None:
+    """Build the combined alias + directory-name index in ONE tracker-root pass.
+
+    A caller that must resolve MANY ids against the same store (the close
+    precheck's walk over every historical commit reference) builds this once and
+    threads it into :func:`resolve_ticket_id` via ``alias_index=`` and
+    ``dir_names=`` — turning an O(unique_candidates x store) sequence of full-store
+    listings (alias AND short-id/prefix branches) into one pass plus in-memory
+    lookups. Returns ``None`` on a hard failure listing the tracker, so the caller
+    can fall back to per-call scanning.
+    """
+    return _scan_tracker_root(tracker_dir)
+
+
 def build_alias_index(tracker_dir: str) -> dict[str, list[str]] | None:
     """Build ``{alias -> [ticket-dir names]}`` in a single pass over the tracker.
 
@@ -225,18 +283,30 @@ def build_alias_index(tracker_dir: str) -> dict[str, list[str]] | None:
     in-memory lookups. Returns ``None`` on a hard failure listing the tracker (so
     the caller can fall back to per-call scanning), matching :func:`_scan_alias`'s
     contract that a hard failure never masquerades as "no match".
+
+    This is the alias-only view of :func:`build_resolver_scan_index`; a caller that
+    also resolves short-id/prefix candidates should build the combined index once.
     """
-    try:
-        entries = os.listdir(tracker_dir)
-    except OSError as exc:
-        print(f"Error: cannot list {tracker_dir!r}: {exc}", file=sys.stderr)
-        return None
-    index: dict[str, list[str]] = {}
-    for name in entries:
-        effective_alias = _effective_alias_for_dir(tracker_dir, name)
-        if effective_alias:
-            index.setdefault(effective_alias, []).append(name)
-    return index
+    scanned = _scan_tracker_root(tracker_dir)
+    return None if scanned is None else scanned.alias_to_dirs
+
+
+def _dir_prefix_matches(sorted_names: list[str], prefix: str) -> list[str]:
+    """Ticket-dir names in ``sorted_names`` that start with ``prefix``.
+
+    ``sorted_names`` is pre-sorted, so the matching names form one contiguous run
+    found by :func:`bisect` — O(log store + matches) instead of a full scan. Used
+    to resolve short-id and generic-prefix candidates against a prebuilt index
+    without re-listing the tracker root.
+    """
+    start = bisect.bisect_left(sorted_names, prefix)
+    matches: list[str] = []
+    for name in sorted_names[start:]:
+        if name.startswith(prefix):
+            matches.append(name)
+        else:
+            break
+    return matches
 
 
 def _scan_alias(target: str, tracker_dir: str) -> list[str] | None:
@@ -261,12 +331,85 @@ def _scan_alias(target: str, tracker_dir: str) -> list[str] | None:
     return alias_matches
 
 
+def _resolve_short_id(
+    ticket_id: str, tracker_dir: str, *, quiet: bool, dir_names: list[str] | None
+) -> str | None:
+    """Resolve an 8-hex two-quad short id to its unique ticket dir, or ``None``.
+
+    An exact directory of that name wins first; otherwise the id is a 9-char
+    prefix of a full canonical dir name. With ``dir_names`` (a prebuilt sorted
+    listing) the prefix run is found by :func:`bisect`; without it the tracker
+    root is listed once. An ambiguous (>1) or empty match is ``None`` — the
+    ambiguity is reported unless ``quiet``.
+    """
+    short_hit = _existing_ticket_dir_name(tracker_dir, ticket_id)
+    if short_hit is not None:
+        return short_hit
+    if dir_names is not None:
+        matches = _dir_prefix_matches(dir_names, ticket_id)
+    else:
+        try:
+            matches = [
+                n
+                for n in os.listdir(tracker_dir)
+                if not n.startswith(".")
+                and n[:9] == ticket_id
+                and os.path.isdir(os.path.join(tracker_dir, n))
+            ]
+        except OSError:
+            return None
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1 and not quiet:
+        print(
+            f"Error: Ambiguous 8-hex ID '{ticket_id}' matches: {' '.join(sorted(matches))}",
+            file=sys.stderr,
+        )
+    return None
+
+
+def _resolve_prefix(
+    ticket_id: str, tracker_dir: str, *, quiet: bool, dir_names: list[str] | None
+) -> str | None:
+    """Resolve a >=4-char (compatibility) prefix to its unique ticket dir, or ``None``.
+
+    With ``dir_names`` (a prebuilt sorted listing) the prefix run is found by
+    :func:`bisect`; without it the tracker root is listed once. An ambiguous (>1)
+    or empty match is ``None`` — the ambiguity is reported unless ``quiet``.
+    """
+    if len(ticket_id) < 4:
+        return None
+    if dir_names is not None:
+        matches = _dir_prefix_matches(dir_names, ticket_id)
+    else:
+        try:
+            matches = [
+                n
+                for n in os.listdir(tracker_dir)
+                if not n.startswith(".")
+                and n.startswith(ticket_id)
+                and os.path.isdir(os.path.join(tracker_dir, n))
+            ]
+        except OSError:
+            return None
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1 and not quiet:
+        print(
+            f"Error: Ambiguous prefix '{ticket_id}' matches multiple tickets: "
+            f"{' '.join(sorted(matches))}",
+            file=sys.stderr,
+        )
+    return None
+
+
 def resolve_ticket_id(
     ticket_id: str,
     tracker_dir: str,
     *,
     quiet: bool = False,
     alias_index: dict[str, list[str]] | None = None,
+    dir_names: list[str] | None = None,
 ) -> str | None:
     """Return the canonical ticket directory name for ``ticket_id``, or None.
 
@@ -277,12 +420,13 @@ def resolve_ticket_id(
     candidates the user never supplied, e.g. the close precheck's walk over
     historical commit references, where an unrelated ambiguity is noise.
 
-    ``alias_index`` — when a caller resolves MANY ids against the same store, it
-    can prebuild an ``{alias -> [dir names]}`` map with :func:`build_alias_index`
-    and pass it here; the alias-resolution branch then does an in-memory lookup
-    instead of a fresh full-store scan, keeping the whole walk to one store pass.
-    The result is identical to per-call scanning (same match set, same ambiguity
-    handling).
+    ``alias_index`` / ``dir_names`` — when a caller resolves MANY ids against the
+    same store, it can prebuild both with :func:`build_resolver_scan_index` and
+    pass them here; the alias branch then does an in-memory lookup and the
+    short-id / generic-prefix branches a :func:`bisect` over the sorted dir names,
+    instead of a fresh full-store listing per candidate — keeping the whole walk
+    to one store pass. The result is identical to per-call scanning (same match
+    set, same ambiguity handling).
     """
     # Fast path: if the input already names an existing ticket directory, use it
     # directly. `_existing_ticket_dir_name` guards the input as a safe path
@@ -300,28 +444,7 @@ def resolve_ticket_id(
         return _existing_ticket_dir_name(tracker_dir, ticket_id)
 
     if _SHORT_ID_RE.match(ticket_id):
-        short_hit = _existing_ticket_dir_name(tracker_dir, ticket_id)
-        if short_hit is not None:
-            return short_hit
-        try:
-            matches = [
-                n
-                for n in os.listdir(tracker_dir)
-                if not n.startswith(".")
-                and n[:9] == ticket_id
-                and os.path.isdir(os.path.join(tracker_dir, n))
-            ]
-        except OSError:
-            return None
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            if not quiet:
-                print(
-                    f"Error: Ambiguous 8-hex ID '{ticket_id}' matches: {' '.join(sorted(matches))}",
-                    file=sys.stderr,
-                )
-        return None
+        return _resolve_short_id(ticket_id, tracker_dir, quiet=quiet, dir_names=dir_names)
 
     # Jira issue key (e.g. REB-310) → bound local ticket via the binding store.
     # Checked before the alias scan; the shapes are disjoint, so this only matches
@@ -348,28 +471,7 @@ def resolve_ticket_id(
                 )
             return None
 
-    if len(ticket_id) >= 4:
-        try:
-            matches = [
-                n
-                for n in os.listdir(tracker_dir)
-                if not n.startswith(".")
-                and n.startswith(ticket_id)
-                and os.path.isdir(os.path.join(tracker_dir, n))
-            ]
-        except OSError:
-            return None
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            if not quiet:
-                print(
-                    f"Error: Ambiguous prefix '{ticket_id}' matches multiple tickets: "
-                    f"{' '.join(sorted(matches))}",
-                    file=sys.stderr,
-                )
-
-    return None
+    return _resolve_prefix(ticket_id, tracker_dir, quiet=quiet, dir_names=dir_names)
 
 
 def resolve_ticket_dir_name(ticket_id: str, tracker_dir: str) -> str:

@@ -31,6 +31,9 @@ from rebar._ids import (
     build_alias_index as build_alias_index,
 )
 from rebar._ids import (
+    build_resolver_scan_index as build_resolver_scan_index,
+)
+from rebar._ids import (
     resolve_ticket_dir_name as resolve_ticket_dir_name,
 )
 from rebar._ids import (
@@ -44,6 +47,7 @@ __all__ = [
     "_resolve_via_binding_store",
     "_scan_alias",
     "build_alias_index",
+    "build_resolver_scan_index",
     "resolve_ticket_dir_name",
     "resolve_ticket_id",
 ]

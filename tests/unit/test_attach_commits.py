@@ -250,3 +250,150 @@ def test_docs_guide_verb():
 
 def test_docs_guide_remedy():
     assert "rebar set-file-impact" in _repo_file("src/rebar/_guides/commit-ticket-trailer.md")
+
+
+# ── Impact-present close scan must be bounded (history x tracker regression) ──
+def _init_rebar_repo(tmp_path):
+    import rebar
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    _git(repo, "config", "user.email", "t@e")
+    _git(repo, "config", "user.name", "t")
+    rebar.init_repo(repo_root=str(repo))
+    _git(repo, "commit", "--allow-empty", "-qm", "root")
+    return repo
+
+
+def test_referencing_commits_bounded_scans_for_non_alias_candidates(tmp_path, monkeypatch):
+    """Impact-present close commit discovery must not walk the tracker root once
+    PER unique historical candidate. The alias branch was bounded by an earlier
+    fix; this pins the residual short-id / generic-prefix candidate branches
+    (ordinary subject prefixes and deprecated four-digit fragments) to the same
+    single-index-build-per-invocation contract, without changing crediting.
+    """
+    import os
+
+    import rebar
+    from rebar import config
+
+    repo = _init_rebar_repo(tmp_path)
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    tracker = config.tracker_dir(str(repo))
+
+    # Target ticket credited via an ALIAS trailer (goes through the alias index).
+    created = rebar.create_ticket("task", "under close", repo_root=str(repo), return_alias=True)
+    target_alias, target_id = created["alias"], created["id"]
+    _git(repo, "commit", "--allow-empty", "-qm", f"land\n\nrebar-ticket: {target_alias}")
+    target_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    # Many commits whose trailers are DISTINCT non-alias candidates that match no
+    # ticket: 8-hex short-id shapes and deprecated 4-hex fragments. Each of these
+    # historically drove a fresh full tracker-root os.listdir.
+    n = 25
+    for i in range(n):
+        _git(repo, "commit", "--allow-empty", "-qm", f"a{i}\n\nrebar-ticket: {i:04x}-{i:04x}")
+    for i in range(n):
+        _git(repo, "commit", "--allow-empty", "-qm", f"b{i}\n\nrebar-ticket: {i:04x}")
+
+    tracker_norm = os.path.normpath(str(tracker))
+    real_listdir = os.listdir
+    scans = {"n": 0}
+
+    def counting_listdir(path):
+        try:
+            if os.path.normpath(os.fspath(path)) == tracker_norm:
+                scans["n"] += 1
+        except (TypeError, ValueError):
+            pass
+        return real_listdir(path)
+
+    monkeypatch.setattr(os, "listdir", counting_listdir)
+    found = commit_impact.referencing_commits({target_id}, str(tracker), str(repo))
+
+    # Correctness: the alias-credited commit is still found.
+    assert target_sha in found
+    # Performance contract: full tracker-root scans do not grow with the number
+    # of distinct non-alias candidates in history.
+    assert scans["n"] <= 1, (
+        f"resolved {2 * n} distinct non-alias candidates with {scans['n']} full "
+        f"tracker-root scans; expected a single indexed pass"
+    )
+
+
+def test_indexed_short_id_and_prefix_resolution_matches_per_call(tmp_path):
+    """The newly-indexed short-id and generic-prefix branches must return the
+    SAME result via the prebuilt scan index as a per-call os.listdir scan — for a
+    unique short-id prefix, a unique generic prefix, and an ambiguous prefix
+    (None, never a silent arbitrary pick). Pins AC#3 for the indexed path.
+    """
+    from rebar import _ids
+
+    tracker = tmp_path / "tracker"
+    tracker.mkdir()
+    for name in ("1234-5678-9abc-def0", "1234-5678-0000-1111", "abcd-ef01-2233-4455"):
+        d = tracker / name
+        d.mkdir()
+        (d / "0001-CREATE.json").write_text("{}", encoding="utf-8")
+
+    index = _ids.build_resolver_scan_index(str(tracker))
+    assert index is not None
+
+    def both(candidate):
+        per_call = _ids.resolve_ticket_id(candidate, str(tracker), quiet=True)
+        indexed = _ids.resolve_ticket_id(
+            candidate,
+            str(tracker),
+            quiet=True,
+            alias_index=index.alias_to_dirs,
+            dir_names=index.sorted_dir_names,
+        )
+        assert indexed == per_call, candidate
+        return indexed
+
+    # Ambiguous 8-hex short id (two dirs share the first two quads) -> None both ways.
+    assert both("1234-5678") is None
+    # Unique generic prefix -> the one matching dir, identically via the index.
+    assert both("abcd-ef01") == "abcd-ef01-2233-4455"
+    # Ambiguous generic prefix -> None both ways.
+    assert both("1234") is None
+    # Unique longer generic prefix -> resolves via the indexed bisect path.
+    assert both("1234-5678-9") == "1234-5678-9abc-def0"
+
+
+def test_build_resolver_scan_index_returns_none_on_unlistable_tracker(tmp_path):
+    """The documented fail-open contract: a hard failure listing the tracker root
+    yields None (so referencing_commits falls back to per-call scanning) rather
+    than masquerading as an empty store. build_alias_index shares the contract.
+    """
+    from rebar import _ids
+
+    missing = tmp_path / "does-not-exist"
+    assert _ids.build_resolver_scan_index(str(missing)) is None
+    assert _ids.build_alias_index(str(missing)) is None
+
+
+def test_referencing_commits_falls_back_to_per_call_scan_without_index(tmp_path, monkeypatch):
+    """When the one-pass index build reports a hard failure (None), referencing_commits
+    still credits the right commit via per-call resolution — alias_index/dir_names both
+    None restores the pre-index scanning path with identical crediting.
+    """
+    import rebar
+    from rebar import config
+    from rebar._engine_support import resolver
+
+    repo = _init_rebar_repo(tmp_path)
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    tracker = config.tracker_dir(str(repo))
+
+    created = rebar.create_ticket("task", "under close", repo_root=str(repo), return_alias=True)
+    target_alias, target_id = created["alias"], created["id"]
+    _git(repo, "commit", "--allow-empty", "-qm", f"land\n\nrebar-ticket: {target_alias}")
+    target_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    # Force the None (index-unavailable) branch; resolution must fall back cleanly.
+    monkeypatch.setattr(resolver, "build_resolver_scan_index", lambda _tracker: None)
+
+    found = commit_impact.referencing_commits({target_id}, str(tracker), str(repo))
+    assert target_sha in found
