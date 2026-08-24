@@ -75,7 +75,9 @@ from rebar._snapshot.git_fetch import (
     fetch_origin,
     git_run,
     has_remote,
+    is_missing_ref,
     rev_parse,
+    scoped_fetch_target,
     stall_abort_args,
 )
 from rebar._store import fsutil
@@ -251,28 +253,40 @@ def resolve_ref(
 ) -> str:
     """Resolve a client ``ref`` (branch | tag | SHA) to an immutable commit SHA.
 
-    When an ``origin`` remote exists and ``fetch`` is set, fetches first so the default
-    ``origin/main`` (and any moving branch/tag) resolves against the remote, not a stale
-    local copy. A SHA that is not present locally triggers a targeted fetch (requires the
-    remote's ``uploadpack.allowReachableSHA1InWant``). Raises :class:`SnapshotRefError`
-    (fail-closed) if the ref still does not resolve. ``blobless`` is forwarded verbatim to
-    :func:`~rebar._snapshot.git_fetch.fetch_origin`; it defaults to ``True``
-    (commits/trees only) because a bare resolution never needs file content. A caller
-    about to MATERIALIZE the resolved SHA must pass ``blobless=False``."""
+    When an ``origin`` remote exists and ``fetch`` is set, fetches first — SCOPED to ``ref``
+    (see :func:`~rebar._snapshot.git_fetch.scoped_fetch_target`) so ``origin/main`` (or any
+    moving branch/tag/SHA) resolves without pulling unrelated heads; a SHA absent locally
+    needs ``uploadpack.allowReachableSHA1InWant``. Raises :class:`SnapshotRefError`
+    (fail-closed) if the ref never resolves, or :class:`SnapshotFetchError` for a
+    transport/auth/stall failure. ``blobless`` forwards to ``fetch_origin`` (a MATERIALIZE
+    caller passes ``blobless=False``)."""
     root = str(repo_root) if repo_root else "."
     remote_present = fetch and has_remote(root, remote)
+    # SCOPE the opening fetch to `ref` (bug lemuroid-compliant-hoopoe): a bare
+    # `git fetch origin` applies the clone's all-heads refspec and pulls the whole tickets
+    # history for a code-SHA lookup (512s / a 300s timeout in the field). A transport/auth/
+    # stall failure FAILS CLOSED (re-raised); only is_missing_ref degrades to the ref error.
     if remote_present:
-        fetch_origin(root, lock_path=_fetch_lock_path(), remote=remote, blobless=blobless)
+        try:
+            fetch_origin(
+                root,
+                lock_path=_fetch_lock_path(),
+                ref=scoped_fetch_target(ref, remote),
+                remote=remote,
+                blobless=blobless,
+            )
+        except SnapshotFetchError as exc:
+            if not is_missing_ref(exc.stderr):
+                raise
     sha = rev_parse(root, ref)
     if sha is None and remote_present:
-        # A bare SHA (or a ref only reachable by an explicit want) not present after the
-        # general fetch — try a targeted fetch (allowReachableSHA1InWant on the remote).
         try:
             fetch_origin(
                 root, lock_path=_fetch_lock_path(), ref=ref, remote=remote, blobless=blobless
             )
-        except SnapshotFetchError:
-            pass  # fall through to the descriptive ref error below
+        except SnapshotFetchError as exc:
+            if not is_missing_ref(exc.stderr):
+                raise
         sha = rev_parse(root, ref)
     if sha is None:
         raise SnapshotRefError(
