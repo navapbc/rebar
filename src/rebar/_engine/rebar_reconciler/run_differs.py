@@ -259,6 +259,29 @@ def run_differs(ctx: Any) -> None:
 
     ctx.mutations = mutations
 
+    # Shadow layer (RP-03 S2 T1): attach a deterministic, PURE ticket plan derived
+    # solely from the finalized ``ctx.mutations`` and the pass inputs — without
+    # disturbing ``ctx.mutations`` (still authoritative). ``ctx.observation`` /
+    # ``ctx.ticket_plans`` are not declared on _PassContext; the plain dataclass
+    # accepts the attribute assignment. Every ctx field is read via getattr with a
+    # default so a partial SimpleNamespace test ctx is tolerated, and no I/O is
+    # performed (no binding_store method calls).
+    ticket_planner = _load("rebar_reconciler.ticket_planner", "ticket_planner.py")
+    prev_snapshot = getattr(ctx, "prev_snapshot", {}) or {}
+    ctx.observation, ctx.ticket_plans = ticket_planner.plan_pass(
+        pass_id=getattr(ctx, "pass_id", ""),
+        local_snapshot=prev_snapshot,
+        remote_snapshot=getattr(ctx, "curr_snapshot", {}) or {},
+        binding_view={},
+        mode=str(getattr(ctx, "target_mode", "") or ""),
+        selection={
+            "kind": getattr(ctx, "selection_kind", None),
+            "ids": sorted(getattr(ctx, "selection_ids", None) or []),
+        },
+        limits={"max_changes": getattr(ctx, "max_changes", None)},
+        mutations=ctx.mutations,
+    )
+
 
 def _run_differs_invariants(ctx: Any) -> tuple[bool, set[str], list]:
     """Invariant phase: at-most-one-local-id filing + dual-identity round-trip.
