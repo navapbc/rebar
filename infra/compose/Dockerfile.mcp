@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# rebar MCP HTTP transport service image (ADR deft-evolutive-mosasaur /
+# docs/adr/0104-mcp-on-box.md; story cibophobic-holohedral-esok).
+#
+# Builds `rebar-mcp` speaking the Streamable-HTTP transport. The build context is the
+# REPO ROOT (like Dockerfile.opcert / Dockerfile.reviewbot; see docker-compose.yml
+# build.context), so the whole package is available to the locked install.
+#
+# python:3.12-slim is Debian bookworm, whose `openssh-client` is OpenSSH 9.x —
+# comfortably >= 8.9, the floor the op-cert SSHSIG signer requires: the certified MCP
+# tools (review_plan/verify_completion) mint op-certs via `ssh-keygen -Y sign`. The RUN
+# below FAILS THE BUILD if the installed ssh-keygen is older than 8.9, so the
+# requirement can never silently regress (mirrors Dockerfile.opcert).
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Runtime deps:
+#  - git: rebar's engine shells out to git for the event store + the authoritative fetch.
+#  - openssh-client (OpenSSH >= 8.9): the certified tools sign op-certs via `ssh-keygen -Y sign`.
+#  - ca-certificates: TLS to the review/tickets remotes.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && ver="$(ssh -V 2>&1 | sed -nE 's/.*OpenSSH_([0-9]+\.[0-9]+).*/\1/p')" \
+    && echo "detected OpenSSH ${ver}" \
+    && awk -v v="$ver" 'BEGIN { split(v, p, "."); if (p[1] < 8 || (p[1] == 8 && p[2] < 9)) exit 1 }' \
+    || { echo "ERROR: OpenSSH >= 8.9 is required (op-cert SSHSIG signing)" >&2; exit 1; }
+
+WORKDIR /app
+
+# Install THROUGH the committed uv.lock (same verified dependency set as CI/local dev):
+#  - agents: the rebar.llm gate runtime the certified tools drive.
+#  - mcp: the FastMCP server + Streamable-HTTP transport (uvicorn) + pyjwt.
+# Secrets (the static bearer tokens file, the op-cert signing key) are materialized
+# OUTSIDE the app (avians' fetch-secrets slice) and bind-mounted in — the app runtime
+# needs no boto3/SSM/AWS.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY . /app
+RUN uv sync --locked --no-dev --extra agents --extra mcp
+ENV PATH="/app/.venv/bin:$PATH"
+
+# The HTTP transport posture is supplied by the compose service env (REBAR_MCP_*).
+# Default the transport here too so a bare `docker run` of this image speaks HTTP.
+ENV REBAR_MCP_TRANSPORT=http \
+    REBAR_MCP_HTTP_HOST=0.0.0.0 \
+    REBAR_MCP_HTTP_PORT=8091
+EXPOSE 8091
+
+# Liveness: hit the loopback /health endpoint (unauthenticated custom route — outside
+# the auth + DNS-rebinding middleware, so no bearer / Host allowlist entry is needed).
+# Uses python (already present) rather than curl to avoid an extra apt dependency.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=4).status==200 else 1)"
+
+# Boot the MCP server. Transport is HTTP via the env above (main() -> run_mcp).
+CMD ["rebar-mcp"]
