@@ -3733,9 +3733,17 @@
       "updated_at": "2026-08-21T05:38:16Z"
     },
     "14f5-ca81-b70d-4550": {
+      "baseline": {
+        "assignee": null,
+        "description": "Wire the copilot, codex, and claude client configs to connect to the rebar MCP endpoint over remote HTTP with a `static` bearer PAT (ADR deft-evolutive-mosasaur; PATs from exuberant-blockish-avians). Single concern: the three client-side config shapes + a basic read-tool smoke \u2014 the endpoint/edge is esok, the credentials are avians, live prod verification is jackal.\n\n## Approach + rationale (research-confirmed static bearer for all three)\nResearch confirmed all three clients support a static `Authorization: Bearer <token>` header for a remote HTTP MCP server and none require OAuth, so one auth shape covers all three:\n- **Copilot**: `~/.copilot/mcp-config.json` \u2014 the rebar server entry with the HTTPS `/mcp/` URL and a\n  `headers` map carrying `Authorization: Bearer <PAT>`.\n- **Codex**: `~/.codex/config.toml` \u2014 TOML server entry using `bearer_token_env_var` (or\n  `http_headers`/`env_http_headers`) so the PAT comes from the environment, not the committed file.\n- **Claude**: `.mcp.json` (`headers`) or `--header`. Document the gotcha: a static header takes\n  precedence and does NOT fall back to OAuth if rejected, so a wrong/expired PAT fails hard (not a\n  silent OAuth retry).\nEach references the gitignored credential from avians (env var / local file), never an inline secret.\n\n## Acceptance criteria (in-session)\n- Tier: **real client config load + a basic read-tool call** (test-design \u00a73 \"external-service\n  mapping\" via a reachable staging endpoint or a local `rebar-mcp` HTTP instance). Oracles:\n  - Each of the three configs is accepted by its client and lists the `rebar` MCP server (assert via\n    each client's server-list command), against a reachable endpoint.\n  - Each client executes ONE basic read tool (e.g. a ticket `show`/`list`) successfully through the\n    HTTP transport with the bearer header (oracle: a real tool result, not just \"connected\").\n  - Contrast (\u00a76): an absent/invalid bearer yields an auth failure surfaced to the client (401), not\n    a hang \u2014 confirming the header is actually on the request path.\n- No secret is committed (the PAT is sourced from the avians env var / gitignored file).\n\n## Compat / rollback\nAdditive client config; rollback = remove the three server entries. No server-side change.\n\nDepends on: cibophobic-holohedral-esok (reachable endpoint), exuberant-blockish-avians (PATs). Blocks: creased-childlike-jackal (live prod verification).",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Wire copilot / codex / claude MCP client configs to the rebar MCP server"
+      },
       "created_at": "2026-08-24T19:40:44Z",
       "jira_id": "4590044",
       "jira_key": "REB-3598",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-24T19:40:49Z"
     },
@@ -4944,10 +4952,24 @@
     },
     "1b8b-fa85-b280-42ee": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context\n\nF47 is approved as research. The legacy ticket wordlist is byte-stable but lacks an established upstream revision or license. The import commit names Digital Service Orchestra without recording a source or terms.\n\n## Plan\n\n- Record the current digest, line count, byte size, and introduction commit for src/rebar/_engine/resources/ticket-wordlist.txt.\n- Examine primary-source history and upstream candidates.\n- Record the canonical location, retrieval date, source revision, comparison method, and result for every source examined.\n- Classify provenance evidence as proven, disproven, or unresolved.\n- Classify license evidence as proven, disproven, or unresolved.\n- Record supported repository corrections in a separate proposal that requires approval before implementation.\n- Do not edit repository files.\n- Do not make an attribution or license claim without primary-source proof.\n\n## Acceptance Criteria\n\n- [ ] The ticket records the SHA-256 digest of the legacy wordlist.\n- [ ] The ticket records the line count of the legacy wordlist.\n- [ ] The ticket records the byte size of the legacy wordlist.\n- [ ] The ticket records the introduction commit of the legacy wordlist.\n- [ ] Every primary source examined has a canonical location.\n- [ ] Every primary source examined has a retrieval date.\n- [ ] Every primary source examined identifies a source revision when one exists.\n- [ ] Every primary source examined records its comparison method.\n- [ ] Every primary source examined records its comparison result.\n- [ ] The conclusion classifies provenance evidence.\n- [ ] The conclusion classifies license evidence.\n- [ ] No attribution claim is made without primary-source proof.\n- [ ] No license claim is made without primary-source proof.\n- [ ] Any repository correction is proposed separately for approval.\n- [ ] The repository worktree remains unchanged.\n\n## Verification\n\n- `shasum -a 256 src/rebar/_engine/resources/ticket-wordlist.txt`\n- `wc -l -c src/rebar/_engine/resources/ticket-wordlist.txt`\n- `git log --follow --format=\"%H %aI %s\" -- src/rebar/_engine/resources/ticket-wordlist.txt`\n- `git diff --exit-code`\n- Inspect each recorded primary source for its canonical location, retrieval date, source revision when available, comparison method, and comparison result.\n- Inspect the conclusion to confirm that unresolved evidence remains unresolved.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\n\nF47 is approved as research. The legacy ticket wordlist is byte-stable but lacks an established upstream revision or license. The import commit names Digital Service Orchestra without recording a source or terms.\n\n## Plan\n\n- Record the current digest, line count, byte size, and introduction commit for src/rebar/_engine/resources/ticket-wordlist.txt.\n- Examine primary-source history and upstream candidates.\n- Record the canonical location, retrieval date, source revision, comparison method, and result for every source examined.\n- Classify provenance evidence as proven, disproven, or unresolved.\n- Classify license evidence as proven, disproven, or unresolved.\n- Record supported repository corrections in a separate proposal that requires approval before implementation.\n- Do not edit repository files.\n- Do not make an attribution or license claim without primary-source proof.\n\n## Acceptance Criteria\n\n- [x] The ticket records the SHA-256 digest of the legacy wordlist.\n- [x] The ticket records the line count of the legacy wordlist.\n- [x] The ticket records the byte size of the legacy wordlist.\n- [x] The ticket records the introduction commit of the legacy wordlist.\n- [x] Every primary source examined has a canonical location.\n- [x] Every primary source examined has a retrieval date.\n- [x] Every primary source examined identifies a source revision when one exists.\n- [x] Every primary source examined records its comparison method.\n- [x] Every primary source examined records its comparison result.\n- [x] The conclusion classifies provenance evidence.\n- [x] The conclusion classifies license evidence.\n- [x] No attribution claim is made without primary-source proof.\n- [x] No license claim is made without primary-source proof.\n- [x] Any repository correction is proposed separately for approval. No correction is supported by the available evidence.\n- [x] The repository worktree remains unchanged.\n\n## Verification\n\n- `shasum -a 256 src/rebar/_engine/resources/ticket-wordlist.txt`\n- `wc -l -c src/rebar/_engine/resources/ticket-wordlist.txt`\n- `git log --follow --format=\"%H %aI %s\" -- src/rebar/_engine/resources/ticket-wordlist.txt`\n- `git diff --exit-code`\n- Inspect each recorded primary source for its canonical location, retrieval date, source revision when available, comparison method, and comparison result.\n- Inspect the conclusion to confirm that unresolved evidence remains unresolved.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Research legacy wordlist provenance without attribution claims"
       },
       "created_at": "2026-08-24T17:38:08Z",
@@ -8467,10 +8489,24 @@
     },
     "2bce-d81d-0eed-42e5": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nImplement the documentation, metadata, comment, and provenance recommendations approved after the F21 through F49 survey and independent filtering. F21 requires explicit Jira project selection with no default or fallback project. F28A records that GitHub Actions is active, GitHub Issues is disabled, and Issues integration is planned. F24 remains pending and is not part of this epic.\n\n## Plan\n\n- Execute taut-uncanny-koi for F21, F22A, and F22B.\n- Execute xenophobic-allpurpose-serval for F25 and F27.\n- Execute shapable-decayed-nematode for F32, F33, F34A, and F37.\n- Execute bleached-unadvised-anhinga for F43A, F43B, and F44.\n- Execute irritable-junior-fairyfly for F28A and F45.\n- Execute pedagogish-certain-butterfly for F46, F49A, and F49B.\n- Execute interested-bluecoated-illadopsis for F48.\n- Execute tracker-only research story cuddlesome-amoral-oyster for F47.\n- Run file-disjoint repository children in parallel worktrees. Each child owns its complete file set, and pedagogish-certain-butterfly is the sole pyproject.toml owner in this epic.\n- Send every repository change through Gerrit.\n- Preserve historical ADR decisions while correcting inaccurate cross references and operational examples.\n- Add no mechanical prose, punctuation, vocabulary, character, or comment enforcement.\n\n## Acceptance Criteria\n\n- [ ] Every approved recommendation in the eight child stories is implemented or recorded with its stated evidence.\n- [ ] Every child story is closed without force after its own acceptance criteria pass.\n- [ ] [operator-attested] Each of the seven repository children is merged to main.\n- [ ] [operator-attested] Each repository merge has LLM-Review +1 and Verified +1.\n- [ ] [operator-attested] Each repository merge has no unresolved comments at submission.\n- [ ] The research child records its conclusion without modifying repository files.\n- [ ] The Markdown-only GitHub and Gerrit runbook child skips the full local test suite and passes its focused documentation checks.\n- [ ] No child introduces mechanical writing or character enforcement.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Correct approved documentation, metadata, and provenance findings"
       },
       "created_at": "2026-08-24T17:38:13Z",
@@ -11463,10 +11499,24 @@
     },
     "38f8-9409-ac3b-4408": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nF28A and F45 are approved with the operator correction. GitHub Actions is active and supplies Verified. GitHub Issues is disabled. The operator confirmed that a future integration is planned. No dedicated implementation record was found in the tracker during this survey, so this story does not add an unsupported ticket citation. Current runbooks also describe inactive Verified enforcement, obsolete vote carry, and prior submit behavior. The committed desired state is `infra/gerrit/project.config`.\n\n## Plan\n\n- Update `infra/runbooks/github-mirror-lock.md` with the current GitHub Actions and GitHub Issues posture.\n- State that future GitHub Issues integration is planned without presenting it as available or citing an unidentified record.\n- Update `docs/gerrit-aws-setup.md` and `infra/runbooks/two-vote-gate-rollback.md` from `infra/gerrit/project.config`.\n- Document that `LLM-Review` must reach MAX and carries across `NO_CODE_CHANGE`, `MERGE_FIRST_PARENT_UPDATE`, and `TRIVIAL_REBASE`.\n- Document that `Verified` must reach MAX and carries across `NO_CODE_CHANGE` and `TRIVIAL_REBASE`, but not `MERGE_FIRST_PARENT_UPDATE`.\n- Document that both label functions use `NoBlock` while submit requirements enforce both votes. The `LLM-Review` requirement also rejects unresolved comments.\n- Document `rebase if necessary` as the submit action.\n- Preserve Gerrit-only merging and rollback procedures.\n- Make no service setting changes.\n\n## Acceptance Criteria\n\n- [ ] `infra/runbooks/github-mirror-lock.md` states that GitHub Actions remains enabled and supplies Verified.\n- [ ] `infra/runbooks/github-mirror-lock.md` states that GitHub Issues is disabled and that future integration is planned but unavailable.\n- [ ] Runbook descriptions of both labels and their submit requirements match `infra/gerrit/project.config`.\n- [ ] Runbook descriptions of each label copy condition match `infra/gerrit/project.config`.\n- [ ] Submit guidance reflects the `rebase if necessary` action in `infra/gerrit/project.config`.\n- [ ] Gerrit-only merging and rollback procedures remain intact.\n- [ ] Only `infra/runbooks/github-mirror-lock.md`, `docs/gerrit-aws-setup.md`, and `infra/runbooks/two-vote-gate-rollback.md` change.\n- [ ] Focused documentation, ADR, link, and whitespace checks pass. The full local test suite is skipped.\n\n## Verification\n\n- Compare the edited guidance with the `LLM-Review`, `Verified`, submit-requirement, and submit sections of `infra/gerrit/project.config`.\n- Run the focused documentation, ADR, link, and whitespace checks used by the repository.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Align GitHub mirror and Gerrit gate runbooks"
       },
       "created_at": "2026-08-24T17:38:18Z",
@@ -18784,10 +18834,24 @@
     },
     "5cda-6f1e-533f-4e0b": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nF43A, F43B, and F44 are approved. MCP authentication documentation calls four implemented strategies unavailable. An SSO module links to a missing runbook. S3 guidance and ADR 0093 prescribe a rejected config command form.\n\n## Plan\n\n- Describe static, JWT, introspection, proxy, and custom MCP authentication strategies as implemented.\n- Correct AuthConfigError documentation without changing fail-closed behavior.\n- Link the approved SSO module reference to infra/runbooks/sso-auth-host.md.\n- Replace rebar config -c with persistent sync.remote configuration in rebar.toml.\n- Preserve ADR 0093 decision substance and status.\n\n## Acceptance Criteria\n\n- [ ] MCP authentication module documentation describes all five implemented strategies.\n- [ ] AuthConfigError documentation matches the implemented error contract.\n- [ ] The approved missing runbook reference resolves to infra/runbooks/sso-auth-host.md.\n- [ ] S3 setup examples use supported persistent project configuration.\n- [ ] S3 back-out examples use supported persistent project configuration.\n- [ ] Authentication behavior remains unchanged.\n- [ ] S3 behavior remains unchanged.\n- [ ] ADR 0093 decision substance remains unchanged.\n- [ ] ADR 0093 status remains unchanged.\n- [ ] The commands in Verification pass.\n- [ ] The separate auth/RUNBOOK.md reference remains outside this approved scope.\n\n## Verification\n\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/interfaces/facades/test_mcp_auth.py tests/interfaces/facades/test_mcp_auth_introspection.py tests/interfaces/facades/test_mcp_auth_custom.py tests/interfaces/facades/test_mcp_auth_jwks.py tests/interfaces/facades/test_mcp_auth_proxy.py tests/unit/test_sync_remote_config.py`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n- `git diff --check`\n- Inspect the S3 examples against the sync.remote configuration model.\n- Inspect the authentication documentation against the implemented verifier classes and AuthConfigError call sites.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Correct MCP authentication and S3 configuration guidance"
       },
       "created_at": "2026-08-24T17:38:23Z",
@@ -26724,10 +26788,24 @@
     },
     "881f-2df2-f3bc-4f95": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nF25 and F27 are approved. Exit-code guidance omits the completion path marked verdict_obtainable=false. Five public mutation wrappers lack client-facing documentation following the library write-surface split.\n\n## Plan\n\n- Document retryable raised LLMError failures and results marked verdict_obtainable=false as exit 11.\n- Distinguish those paths from ordinary completion failure and nonretryable indeterminate outcomes.\n- Document unlink, tag, untag, archive, and compact signatures, effects, errors, repository selection, event or storage effects, and publication behavior.\n- Remove stale shell-history narration where it obscures current compact behavior.\n- Compare each documentation statement with its named code path or public signature.\n- Change no public behavior.\n\n## Acceptance Criteria\n\n- [ ] docs/exit-codes.md documents exit 11 for a retryable LLMError raised during completion verification.\n- [ ] docs/exit-codes.md documents exit 11 when bounded completion recovery returns verdict_obtainable=false.\n- [ ] Ordinary completion failure and nonretryable indeterminate outcomes remain distinct.\n- [ ] Public docstrings in src/rebar/_lib_mutations.py cover each named mutation wrapper.\n- [ ] docs/reuse-surface.md covers each named mutation wrapper.\n- [ ] Reviewer inspection confirms that the documentation matches the named code paths and signatures.\n- [ ] The commands in Verification pass.\n- [ ] No public behavior changes.\n\n## Verification\n\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/interfaces/lifecycle/test_exit_codes.py tests/interfaces/facades/test_leaf_writes_parity.py`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n- Review docs/exit-codes.md against `src/rebar/_cli/_llm_commands.py::_verify_completion` and `src/rebar/_commands/close_precheck.py::_completion_precheck`.\n- Review docs/reuse-surface.md and each public docstring against the corresponding signature in src/rebar/_lib_mutations.py.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Document completion retry outcomes and public mutation functions"
       },
       "created_at": "2026-08-24T17:38:29Z",
@@ -32539,10 +32617,24 @@
     },
     "a454-9285-b999-4ac5": {
       "baseline": {
-        "assignee": null,
-        "description": "Before acting on this ticket, validate whether we already do this.\n\n## What\n\nParking-lot (status `idea`) for the two lower-value interface inventories the audit\nalso proposed: a generated **Python public-API inventory** and a generated\n**config-key inventory**. These are deliberately NOT committed as active work yet \u2014\nthe CLI and MCP references (sibling tickets) carry most of the client value, and the\nenv-var registry is already generated. Promote this to `open` only if there is\ndemonstrated reader demand or drift pain.\n\n## Rationale for parking (not shipping now)\n- `docs/config.md` is primarily a hand-authored design-of-record; a generated key\n  table would complement, not replace it \u2014 lower leverage than CLI/MCP.\n- The Python public API is comparatively stable and already described by\n  `docs/api-stability.md` / `docs/reuse-surface.md`.\n\n## Acceptance Criteria (if promoted)\n- [ ] A generator emits `docs/config-reference.md` (config keys) and/or\n      `docs/python-api-reference.md`, each marked generated, with a CI drift gate.\n- [ ] Output derives from the config schema / public `__all__` respectively.\n\nFiles (if promoted): `scripts/gen_config_reference.py` (new),\n`scripts/gen_api_reference.py` (new), `docs/config-reference.md` (new),\n`docs/python-api-reference.md` (new), `.github/workflows/test.yml`.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "Portable Python public-API surface drift gate (griffe-check-style, test-linked).\n\n## Context / Problem\n\nrebar's Python public API is described by two hand-authored docs (`docs/api-stability.md`, `docs/reuse-surface.md`). `docs/reuse-surface.md` needs recurring manual upkeep (touched by most RP-04 slices). The only automated guard is `tests/unit/test_reuse_surface_doc.py` (ticket f5df): it hardcodes a curated SUBSET of signatures (signing, prompt library, runner/contracts, workflow executor) and must be hand-edited in lockstep with every signature change \u2014 narrow, and a manual burden. The config-key half of the original audit is already delivered (sibling ticket 3199 shipped `scripts/gen_config_reference.py` + `docs/config-reference.md` with a portable test-based drift gate) and is OUT of scope here.\n\n## Approach\n\nAdd a `griffe check`-style **public-API surface drift gate** \u2014 snapshot the current public surface into a committed baseline and fail on any diff \u2014 implemented with the same self-contained, pure-stdlib introspection the repo already uses (`inspect`/`importlib`, as in `tests/unit/test_reuse_surface_doc.py` and `scripts/gen_config_reference.py`). This is the direct analog of the existing config-key drift gate and avoids adding `griffe` (or any new) dependency; a self-contained approach is already proven portable and idiomatic here. We do NOT build a generated Markdown API reference \u2014 the OSS evidence (griffe/mkdocstrings ecosystem, setuptools-scm's `api-check`) shows the high-ROI move is a surface diff gate, not an auto-generated doc. The hand-authored `docs/api-stability.md` / `docs/reuse-surface.md` stay the curated narrative; the gate guards the surface, the prose stays human.\n\n- New `scripts/gen_api_surface.py`: introspects the surface, `--update` writes the committed\n  baseline JSON, `--check` (default) diffs live vs baseline and exits non-zero on drift with a\n  clear \"run `--update`\" remediation message. Mirrors `scripts/gen_config_reference.py`'s\n  `main([...])`/`--check` shape.\n- New `tests/unit/api_surface_baseline.json`: the committed baseline snapshot.\n- New `tests/unit/test_api_surface_gate.py`: the portable unit-tier test that fails under\n  `make test` (no CI-provider dependency) when the surface drifts. It runs the authoritative\n  check in a clean subprocess so it reflects the real installed surface (immune to the unit\n  tier's autouse `rebar.append_session_log` monkeypatch in `tests/unit/conftest.py:86`).\n- Delete `tests/unit/test_reuse_surface_doc.py`; the new baseline captures its whole subset\n  automatically and dedicated subsumption assertions prove no coverage is lost.\n\n**Source-of-truth rule (pinned):** the guarded surface is the union, over a pinned `MODULES` list, of each module's public members \u2014 `module.__all__` when defined (the `rebar` facade and `rebar.signing`/`rebar.llm.workflow.executor` define one), else every non-underscore attribute the module OWNS (`__module__` is that module/submodule, or a module-level constant with no `__module__`), excluding imported re-exports and submodules. `MODULES` = the `rebar` facade (`src/rebar/__init__.py:171` `__all__`) plus the reuse subsystems documented in `docs/reuse-surface.md`: `rebar.signing`, `rebar.llm.runner`, `rebar.llm.contracts`, `rebar.llm.findings`, `rebar.llm.prompting.prompts`, `rebar.llm.workflow.executor`. Per symbol the baseline pins: callable parameter list (name + kind + default-repr), class bases + dataclass fields + public-method signatures, and the value of pinned immutable constants (guards e.g. `prompts.FRONT_MATTER_KEYS`, `prompts.EXECUTION_MODES`). The baseline is stored as committed JSON at `tests/unit/api_surface_baseline.json` and updated only via `python scripts/gen_api_surface.py --update`.\n\n## Scope\n\n- `scripts/gen_api_surface.py` (new) \u2014 the introspection + `--check`/`--update` gate.\n- `tests/unit/api_surface_baseline.json` (new) \u2014 the committed surface baseline.\n- `tests/unit/test_api_surface_gate.py` (new) \u2014 the portable drift + subsumption test.\n- `tests/unit/test_reuse_surface_doc.py` (deleted) \u2014 subsumed by the new gate.\n- `docs/reuse-surface.md` \u2014 update the one-line note that points readers at the old test so it\n  names the new gate + baseline + update command.\n\n## Testing\n\nPortable unit-tier tests (`make test`, no CI-provider dependency):\n- Committed baseline is current: the gate `--check` exits 0 in a clean subprocess.\n- RED\u2192GREEN drift detection: injecting a removed symbol, an added symbol, and a renamed\n  parameter each makes `--check`/`diff_surface` report the drift (exit 1); an identical\n  surface reports no drift.\n- Baseline-update path: `--update` writes the surface then `--check` is clean; a deliberately\n  stale baseline trips `--check` and re-running `--update` accepts the intended change.\n- Subsumption: the exact signing / prompt-library / runner-contract / workflow-executor subset\n  the deleted `test_reuse_surface_doc.py` hardcoded is still asserted present in the surface.\n\n## Acceptance Criteria\n\n- [ ] A portable test in `tests/unit/test_api_surface_gate.py` runs under `make test` with no\n      CI-provider dependency and asserts the live public Python API surface matches the\n      committed baseline `tests/unit/api_surface_baseline.json`, failing on any removed/renamed\n      public symbol or changed signature. Oracle: `make test` collects the test; the gate\n      subprocess `python scripts/gen_api_surface.py --check` exits 0 on a clean tree.\n- [ ] The gate derives the surface from the pinned source-of-truth rule stated in Approach\n      (`MODULES` public members via `__all__`-or-owned). Oracle: `test_baseline_file_is_committed_and_wellformed`\n      asserts every pinned module appears in the baseline.\n- [ ] The hardcoded-subset assertions in `test_reuse_surface_doc.py` are removed and subsumed\n      with no loss of coverage. Oracle: that file no longer exists; the four `test_subsumes_*`\n      tests assert the same signing/prompt/runner/workflow signatures are guarded.\n- [ ] An intentional surface change is accommodated by the documented `--update` step,\n      exercised by a test. Oracle: `test_intentional_change_is_accommodated_by_updating_the_baseline`\n      shows a stale baseline fails `--check` and passes after `--update`.\n- [ ] RED\u2192GREEN: a test proves the gate catches an injected surface drift (added/removed public\n      symbol, renamed param). Oracle: `test_check_trips_when_a_public_symbol_is_removed` /\n      `_added` / `test_check_trips_when_a_signature_changes` assert exit 1 and the named drift line.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Portable Python public-API surface drift gate (griffe-check-style, test-linked)"
       },
       "created_at": "2026-08-15T15:07:49Z",
@@ -35221,9 +35313,17 @@
       "updated_at": "2026-08-15T15:09:06Z"
     },
     "b173-e50a-4b93-455f": {
+      "baseline": {
+        "assignee": null,
+        "description": "Register the AWS box as a trusted signing environment so plan-review and completion-verifier op-certs minted via the on-box MCP server are ENFORCEABLE (ADR deft-evolutive-mosasaur, decision 3; ADR 0049). Without this, MCP-minted certs are not trusted and certified ops through MCP are unenforceable. Single concern: the trust-environment provisioning + config \u2014 distinct from the MCP service (esok) and the client auth (avians).\n\n## Approach + rationale\nPer ADR 0049, an op-cert is only enforceable when the signing environment is registered and `verify.require_environment` is on. Provision the box's opcert signing key (out-of-band, like the existing opcert service key), pin its PUBLIC key in `.rebar/trusted_environments.yaml` on `main` (the authoritative-state file), and confirm `verify.require_environment` is enabled so a cert minted by the box verifies and a cert from an unregistered environment does not. This is additive to the existing opcert trust path (which coexists); it does not change how the two existing op-cert kinds are issued, only that the box is now a recognized signer for MCP-minted certs.\n\n## Acceptance criteria (in-session; security trust-boundary overlay)\n- Tier: **real signing + verification round-trip** (test-design \u00a73 \"external-service mapping\" done as\n  an in-process crypto round-trip). Oracles:\n  - `.rebar/trusted_environments.yaml` on `main` contains the box's environment id + its PUBLIC key\n    only (assert no private key material is committed \u2014 negative control, \u00a76).\n  - A plan-review/completion cert signed by the box's key VERIFIES under `verify.require_environment`\n    (positive), and an otherwise-identical cert signed by an UNREGISTERED key is REJECTED (contrast,\n    \u00a76) \u2014 asserted through the real verify path, not a stub.\n- The private signing key is provisioned out-of-band (SSM / secret store), never committed (guard as\n  in avians).\n\n## Compat / rollback / migration-safety\nAdditive registration; existing opcert/remote-cert trust path unchanged (regression oracle: an existing opcert-minted cert still verifies). Rollback = remove the box's entry from `.rebar/trusted_environments.yaml` (MCP-minted certs then stop verifying; existing paths unaffected). Approval-gated: touches the authoritative trust config on `main` + provisions a signing key (a human performs the key provisioning).\n\nDepends on: deft-evolutive-mosasaur (ADR). Blocks: inadequate-hydrated-starling (guidance asserts certified ops are enforceable via MCP, true only once the box is a trusted env).",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Register the AWS box as a trusted signing environment (enforceable MCP-minted op-certs)"
+      },
       "created_at": "2026-08-24T19:40:55Z",
       "jira_id": "4590045",
       "jira_key": "REB-3599",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-24T19:40:58Z"
     },
@@ -38250,10 +38350,24 @@
     },
     "c119-2f8c-dfb2-4f52": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nF48 is approved. The vendored Jira Data Center Dockerfile names an upstream path but omits the source revision, license identifier, protected license text, and modification statement. The upstream root `LICENSE` at commit `e3c7b167b065660605645cef7f101cbb324772e4` has SHA-256 digest `a432e25d7fa27b288cc7ab6ea8e3a9aa27c101579de7fad7a3b5f534ba9e772a`.\n\n## Plan\n\n- Update the comment header in `tests/external/live_jira_dc/Dockerfile` with the `pycontribs/jira` repository, commit `e3c7b167b065660605645cef7f101cbb324772e4`, source path `docker/jira-test-image/Dockerfile`, and license identifier `BSD-2-Clause`.\n- State that the local copy adds `-Dproduct.start.timeout=2700000` and expanded operational annotations while retaining the pinned base digest, Jira version, exposed port, and `-DskipAllPrompts=true`.\n- Store the pinned upstream root `LICENSE` bytes unchanged in `tests/external/live_jira_dc/pycontribs-jira-LICENSE.txt`.\n- Add an upstream source licensing subsection to `tests/external/live_jira_dc/README.md`. Point it to the stored license text and distinguish that source license from Atlassian product licensing.\n- Preserve the existing Atlassian product licensing paragraph.\n- Add a unit assertion in `tests/unit/rebar_reconciler/test_jira_dc_harness_shape.py` that hashes the stored license bytes and compares them with the literal expected digest `a432e25d7fa27b288cc7ab6ea8e3a9aa27c101579de7fad7a3b5f534ba9e772a`. The assertion uses no network service or Jira harness.\n- Preserve every Dockerfile instruction.\n- Add no mechanical prose or character scanner.\n\n## Acceptance Criteria\n\n- [ ] Provenance names the exact repository, revision, source path, and `BSD-2-Clause` identifier.\n- [ ] `tests/external/live_jira_dc/pycontribs-jira-LICENSE.txt` has SHA-256 digest `a432e25d7fa27b288cc7ab6ea8e3a9aa27c101579de7fad7a3b5f534ba9e772a`.\n- [ ] The modification statement identifies the added timeout flag and expanded annotations.\n- [ ] Dockerfile instructions, base digest, Jira version, and entrypoint remain unchanged.\n- [ ] The existing Atlassian product licensing paragraph remains unchanged.\n- [ ] The default unit tier checks the pinned license digest without network or Docker access.\n- [ ] No connected Jira Data Center harness runs during verification.\n- [ ] Focused Dockerfile, license, lint, type, and whitespace checks pass.\n\n## Verification\n\n- Run `shasum -a 256 tests/external/live_jira_dc/pycontribs-jira-LICENSE.txt` and compare the result with `a432e25d7fa27b288cc7ab6ea8e3a9aa27c101579de7fad7a3b5f534ba9e772a`.\n- Run `pytest tests/unit/rebar_reconciler/test_jira_dc_harness_shape.py`.\n- Compare the Dockerfile noncomment instructions before and after the change.\n- Run the repository lint, type, and whitespace checks without starting the connected Jira Data Center harness.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Record pinned Jira Data Center Dockerfile provenance"
       },
       "created_at": "2026-08-24T17:38:34Z",
@@ -38705,10 +38819,24 @@
     },
     "c479-74a6-8b3b-4171": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nF46, F49A, and F49B are approved. Distribution metadata omits the vendored alias wordlist license. Skill guidance implies that name is required although the maintained checker permits it. Package and MCP summaries omit plan review and signed completion verification.\n\n## Plan\n\n- Include the existing vendored license text in distribution license metadata.\n- Verify wheel and source archive contents without changing the license or wordlist bytes.\n- State that skill description is required and name is optional.\n- Align only the pyproject.toml and server.json summaries with the approved GitHub About positioning.\n- Preserve all other metadata.\n\n## Acceptance Criteria\n\n- [ ] Distribution license metadata includes LICENSE and docs/licenses/adjective-adjective-animal-LICENSE.txt.\n- [ ] Built wheel and source archive contain the vendored license.\n- [ ] The license and both wordlist resources remain byte-identical.\n- [ ] Skill guidance states that description is required and name is optional.\n- [ ] pyproject.toml and server.json use an aligned summary naming AI plan review and signed completion verification.\n- [ ] No GitHub About mutation or other metadata change occurs.\n- [ ] Focused package, skill, manifest, lint, type, and whitespace checks pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Align distribution metadata, package the wordlist license, and correct skill guidance"
       },
       "created_at": "2026-08-24T17:38:39Z",
@@ -39580,10 +39708,24 @@
     },
     "c92d-2b20-273c-4f78": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nF21, F22A, and F22B are approved. Maintained Jira guidance claims a DIG fallback although project selection must be explicit. The obsolete onboarding reference was retained only until the maintained onboarding flow shipped. Both pressure-test probes default to a deleted ticket executable, substitute DIG, and use ambient Python.\n\n## Plan\n\n- Require explicit project selection with no default or fallback project.\n- Delete scripts/jira-onboarding-reference after confirming no inbound references.\n- Make both manual probes use the checkout virtual environment by default while preserving supported overrides.\n- Require a separate mutation opt-in for each probe and complete a nonmutating preflight before ticket, reconciler, or Jira mutation.\n- Keep connected probes outside CI.\n\n## Acceptance Criteria\n\n- [ ] Jira setup guidance names no default or fallback project.\n- [ ] Neither probe substitutes DIG or another project when JIRA_PROJECT is absent.\n- [ ] Probe defaults use the checkout virtual environment, and REBAR_ENGINE_DIR plus REBAR_TICKET_CLI overrides still work.\n- [ ] Each probe requires documented mutation opt-in and fails before mutation when project, credentials, executable, import capability, or opt-in is absent.\n- [ ] No repository reference remains to scripts/jira-onboarding-reference.\n- [ ] No CI workflow invokes the connected probes.\n- [ ] Focused preflight tests, bash syntax checks, shellcheck, lint, and type checking pass.\n\n## Verification\n\n- Run `pytest tests/scripts/test_jira_pressure_test_preflight.py`.\n- Run `bash -n scripts/jira-pressure-test/e2e_validation_probe.sh scripts/jira-pressure-test/e2e_field_validation_probe.sh`.\n- Run `shellcheck scripts/jira-pressure-test/e2e_validation_probe.sh scripts/jira-pressure-test/e2e_field_validation_probe.sh`.\n- Run `make lint` and `make typecheck` with the checkout virtual environment first on PATH.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Require explicit Jira project selection and repair reference probes"
       },
       "created_at": "2026-08-24T17:38:44Z",
@@ -44003,10 +44145,24 @@
     },
     "dde7-d1a4-bb8e-4432": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nF32, F33, F34A, and F37 are approved. Current documentation cites deleted shell writers, understates the ensure registry, misstates its exception contract, retains obsolete ADR identifiers, and calls Jira Data Center a future backend.\n\n## Plan\n\n- Replace current concurrency citations with maintained Python symbols while preserving historical discussion.\n- Document all nine ensure units and StoreIncompatibleError propagation.\n- Separate the implemented compatibility record from the unimplemented ordered ledger.\n- Correct obsolete ADR cross references.\n- Correct only the two approved Jira-family module descriptions.\n\n## Testing\n\n- Run `.venv/bin/python scripts/check_adr_numbers.py`.\n- Run `.venv/bin/pytest tests/unit/rebar_reconciler/test_backend_neutrality.py`.\n- Run `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`.\n- Run `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`.\n- Run `git diff --check`.\n\n## Acceptance Criteria\n\n- [ ] Current concurrency citations resolve to maintained Python symbols.\n- [ ] Migration guidance lists nine units.\n- [ ] Migration guidance states that StoreIncompatibleError escapes the otherwise fail-soft sweep.\n- [ ] Migration guidance distinguishes the implemented compatibility record from the unimplemented ordered ledger.\n- [ ] Former Fast Forward Only references resolve to ADR 0090.\n- [ ] Vote-carry references resolve to ADR 0091.\n- [ ] ADR statuses remain unchanged.\n- [ ] ADR supersession banners remain unchanged.\n- [ ] ADR renumbering history remains unchanged.\n- [ ] ADR decision substance remains unchanged.\n- [ ] The two Jira-family descriptions identify Data Center as implemented.\n- [ ] `.venv/bin/python scripts/check_adr_numbers.py` passes.\n- [ ] `.venv/bin/pytest tests/unit/rebar_reconciler/test_backend_neutrality.py` passes.\n- [ ] `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` passes.\n- [ ] `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck` passes.\n- [ ] `git diff --check` passes.\n- [ ] No broader comment cleanup occurs.\n- [ ] No behavior change occurs.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Correct concurrency, migration, ADR, and Jira-family documentation"
       },
       "created_at": "2026-08-24T17:38:49Z",
@@ -52265,7 +52421,14 @@
     "1787597691456824001": "__rebar_unknown_comment_id__",
     "1787597899419843001": "__rebar_unknown_comment_id__",
     "1787598613584229001": "__rebar_unknown_comment_id__",
-    "1787599609140263001": "__rebar_unknown_comment_id__"
+    "1787599609140263001": "__rebar_unknown_comment_id__",
+    "1787600340674036001": "__rebar_unknown_comment_id__",
+    "1787600423932723001": "__rebar_unknown_comment_id__",
+    "1787601203227327001": "__rebar_unknown_comment_id__",
+    "1787602551593143001": "__rebar_unknown_comment_id__",
+    "1787602618154499001": "__rebar_unknown_comment_id__",
+    "1787602743973194001": "__rebar_unknown_comment_id__",
+    "1787603466562847001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
