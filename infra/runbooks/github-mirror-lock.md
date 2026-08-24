@@ -5,6 +5,8 @@ key** (`rebar-gerrit-replication`, S5) can update them. Every human/admin push,
 PR-merge, force-push, deletion, and tag write is rejected; GitHub becomes a
 read-only mirror and contributions flow through Gerrit.
 
+The active Gerrit gate requires both `LLM-Review` and `Verified`. GitHub Actions supplies the `Verified` vote. The enforced label and submit configuration is [`infra/gerrit/project.config`](../gerrit/project.config). [ADR 0047](../../docs/adr/0047-retire-autolander-rebase-if-necessary.md) defines the plain Gerrit Submit flow. [ADR 0091](../../docs/adr/0091-llm-review-carry-trivial-rebase.md) records the `LLM-Review` carry decision.
+
 ## How the lock works (the `update` rule)
 
 A repository ruleset's **`update`** rule means *"restrict updates"*: only the
@@ -109,30 +111,29 @@ The lock is only proven by rejected operations. As a **non-bypass** user
 Inspect state any time:
 `gh api /repos/navapbc/rebar/rulesets --jq '.[] | {id,name,enforcement}'`.
 
-## Mirror-hygiene (OPTIONAL cutover steps)
+## GitHub feature posture
 
-Make the GitHub side read-through-only. These are **gh-api / repo-settings**
-steps, not Terraform (Terraform here does not manage the `github_repository`):
+The mirror lock controls writes to GitHub refs. It does not disable GitHub Actions or GitHub Issues.
+
+GitHub Actions remains enabled. The Gerrit CI bridge dispatches GitHub Actions for each patch set and returns the result as the `Verified` vote. Actions also checks `main` after Gerrit replication, as described by ADR 0047. Disabling Actions removes the active CI leg and blocks submission while `Verified` remains required.
+
+GitHub Issues is disabled. Future integration is planned, but issue intake through GitHub is not available. Do not enable Issues until that integration is available.
+
+Inspect the settings without changing them:
 
 ```bash
-# Disable Issues; reduce merge surface (PRs are already unmergeable via the lock)
-gh api -X PATCH /repos/navapbc/rebar -F has_issues=false
-
-# Disable Actions (mirror does not run CI)
-gh api -X PUT /repos/navapbc/rebar/actions/permissions -F enabled=false
-
-# Add a "mirror — contribute via Gerrit" banner to the repo description / README
-gh api -X PATCH /repos/navapbc/rebar \
-  -f description="Mirror of the Gerrit canonical repo — contribute via Gerrit, not GitHub."
+gh api /repos/navapbc/rebar --jq '{has_issues}'
+gh api /repos/navapbc/rebar/actions/permissions --jq '{enabled}'
 ```
+
+The mirror lock continues to reject direct pushes and pull request merges. Gerrit remains the only merge path.
 
 ## Rollback
 
 ### When to roll back (trigger)
 Roll back **immediately** if, after the cutover, **any** of these hold — they mean `main` is
 effectively frozen with no working path in:
-- **Gerrit is unavailable or the `LLM-Review` bot is down / not voting**, so no change can reach
-  `LLM-Review = +1` and nothing can submit.
+- **A required vote cannot be produced.** This includes a Gerrit or review-bot failure that prevents `LLM-Review = +1`. It also includes a GitHub Actions or CI bridge failure that prevents `Verified = +1`.
 - **Replication to GitHub `main` is failing** (GitHub `main` stops advancing while Gerrit `main`
   moves — check `replication_log` on the box or compare the two `main` SHAs).
 - **A critical hotfix must land now** and the Gerrit path is blocked for any reason.
@@ -171,8 +172,10 @@ gh auth status
 ./infra/github/rollback-mirror-lock.sh              # delete the two locks + restore main-protection
 # variants:
 ./infra/github/rollback-mirror-lock.sh --disable           # disable (keep) the locks instead of deleting
-./infra/github/rollback-mirror-lock.sh --reenable-features # also re-enable PRs/Issues/Actions
+./infra/github/rollback-mirror-lock.sh --reenable-features # legacy feature reset, including Issues
 ```
+
+Do not pass `--reenable-features` under the current repository posture because it enables GitHub Issues. GitHub Actions already remains enabled. Use this option only when restoring GitHub collaboration surfaces is an intended part of the rollback.
 
 The script: (1) removes (or disables) `gerrit-mirror-lock-main` and
 `gerrit-mirror-lock-tags` by name; (2) recreates `main-protection` from
@@ -192,19 +195,13 @@ does not manage.
 > by the d251 PoC, which ran an **apply-prove-rollback** (the lock was proven on the
 > live repo, then `main-protection` was restored). Apply these only at a real cutover.
 
-### Feature toggles (mirror hygiene)
-Once `main` is locked to the deploy key, turn off the now-unused GitHub collaboration
-surfaces so contributors are routed to Gerrit (all reversible via the same API):
+### GitHub feature posture
 
-```bash
-# Disable Pull Requests is not a single repo flag; restrict to the mirror posture by
-# disabling Issues, Projects, Wiki, and Actions, and removing merge methods so the UI
-# offers no PR-merge path. (Re-enable by setting each back to true / restoring Actions.)
-gh api -X PATCH repos/navapbc/rebar \
-  -F has_issues=false -F has_projects=false -F has_wiki=false
-gh api -X PUT  repos/navapbc/rebar/actions/permissions -F enabled=false
-# Do NOT archive the repo — archiving freezes the replication bot's pushes too.
-```
+Keep GitHub Actions enabled because it supplies the active `Verified` vote and checks replicated changes on `main`.
+
+Keep GitHub Issues disabled. Future integration is planned, but the GitHub issue intake path is unavailable.
+
+The mirror lock already prevents pull request merges. It does not require changes to Projects or Wiki. Do not archive the repository because archiving also blocks replication.
 
 ### Mirror banner (About + README)
 Set the repo description/About and add a README banner at the top:
@@ -217,10 +214,7 @@ gh repo edit navapbc/rebar \
 README banner text (prepend to README.md at cutover):
 
 ```markdown
-> **This GitHub repo is a read-only mirror.** `main` only advances via the
-> Gerrit server at `rebar.solutions.navateam.com` after the automated `LLM-Review`
-> gate passes. **Do not open GitHub PRs** — see [CONTRIBUTING.md](CONTRIBUTING.md)
-> for the Gerrit contribution workflow.
+> **This GitHub repository is a read-only mirror.** `main` advances through the Gerrit server at `rebar.solutions.navateam.com` after `LLM-Review` and `Verified` pass. **Do not open GitHub pull requests.** See [CONTRIBUTING.md](CONTRIBUTING.md) for the Gerrit contribution workflow.
 ```
 
 ### Contributor workflow under mirror mode (the CONTRIBUTING.md content)
