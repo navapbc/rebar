@@ -369,3 +369,27 @@ def test_completion_log_message_is_redacted_and_capped_at_512_code_points():
 def test_whole_completion_log_is_capped_at_1024_code_points():
     log = se.render_completion_log(_unknown_outcome(), message="." * 5000)
     assert len(log) <= 1024
+
+
+# ── AC (S1): the retry-disable seam holds against the REAL jira library ─────────
+#
+# build_executor_client relies on the pycontribs/jira SDK honouring max_retries=0 at
+# the requests-session level (client._session.max_retries == 0). Every other test here
+# swaps in _FakeJira, which proves our GLUE but NOT that the real 3.10.5 library actually
+# exposes that knob the way the fail-loud guard assumes. This test constructs the REAL
+# jira.JIRA OFFLINE — get_server_info=False + validate=False make the constructor issue no
+# network call — with max_retries=0, and asserts the resulting session disabled retries.
+# It is skipped when the [jira-datacenter] extra (which provides `jira`) is absent, so the
+# core unit tier stays dependency-free while the extras lanes exercise it for real.
+def test_real_jira_library_disables_sdk_retries_when_constructed_offline() -> None:
+    jira = pytest.importorskip("jira")
+
+    client = jira.JIRA(
+        server="https://jira.invalid.example",
+        token_auth="offline-token-never-sent",
+        max_retries=0,
+        get_server_info=False,
+        validate=False,
+    )
+
+    assert client._session.max_retries == 0
