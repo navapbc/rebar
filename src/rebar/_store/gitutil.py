@@ -374,6 +374,86 @@ def _store_git_op_lock(tracker: str) -> Iterator[None]:
             pass
 
 
+# Cross-process fetch coordination keyed on the Git COMMON directory (bug
+# agrologic-oval-bobolink). Remote-tracking refs (``refs/remotes/<remote>/<branch>``) live
+# in the common dir, SHARED by every linked worktree and by the symlinked tickets clone. Two
+# uncoordinated ref-updating fetches against one common dir race git's ref compare-and-swap,
+# and the loser fails ``cannot lock ref '<ref>': is at <new> but expected <old>`` — the
+# snapshot fetch aborts an attested op, the sync fetch silently drops a freshness round.
+# The per-worktree advisory git-op lock above does NOT cover this: its identity is the
+# per-worktree git dir (correct for the per-worktree ``index.lock``), while the racing refs
+# are shared, and the sync/snapshot fetch legs run OUTSIDE it anyway. So ref-updating
+# fetches take ONE BLOCKING exclusive flock keyed on the canonical common dir, which
+# serializes every rebar fetcher sharing those refs regardless of which worktree or
+# operation drives it. It is a dedicated FETCH lock, never the ticket write lock, so a slow
+# network fetch serializes only other fetches — never a local ticket writer.
+_FETCH_COORD_LOCK_NAME = "rebar-fetch.lock"
+
+
+def _resolve_common_git_dir(repo_root: str) -> str | None:
+    """The canonical Git COMMON directory of *repo_root* — the one every linked worktree
+    shares and where remote-tracking refs live — symlink-resolved to an absolute path, or
+    ``None`` when *repo_root* is not a git repo.
+
+    A linked worktree's per-worktree git dir carries a ``commondir`` pointer to it; a main
+    checkout's git dir IS the common dir. Pure filesystem (no git subprocess), matching this
+    module's other git-dir resolution, and ``realpath`` collapses the ``.tickets-tracker``
+    symlink so two worktrees of one store resolve to the SAME identity."""
+    git_dir = _resolve_tracker_git_dir(repo_root)
+    if not git_dir:
+        return None
+    commondir_marker = os.path.join(git_dir, "commondir")
+    if os.path.isfile(commondir_marker):
+        try:
+            with open(commondir_marker, encoding="utf-8") as f:
+                common = f.read().strip()
+        except OSError:
+            common = ""
+        if common:
+            if not os.path.isabs(common):
+                common = os.path.join(git_dir, common)
+            git_dir = common
+    return os.path.realpath(git_dir)
+
+
+@contextmanager
+def fetch_coordination_lock(repo_root: str) -> Iterator[None]:
+    """Hold the exclusive cross-process fetch lock for *repo_root*'s Git COMMON dir.
+
+    BLOCKING (unlike the advisory git-op lock, which degrades to unlocked): a ref-updating
+    fetch must WAIT for a peer fetch on the same common dir rather than race it, because the
+    loser of git's ref compare-and-swap gets no in-band recovery here. Keyed on the canonical
+    (symlink/worktree-resolved) common dir so linked worktrees and the symlinked tickets
+    clone share ONE lock.
+
+    Best-effort acquisition only: if the common dir cannot be resolved (not a git repo) or
+    the lock file cannot be opened, the block proceeds UNLOCKED — the caller's bounded
+    compare-and-swap retry stays the safety net, and that retry is also what covers a
+    NON-rebar git peer, which never takes this lock at all."""
+    common = _resolve_common_git_dir(repo_root)
+    if common is None:
+        yield
+        return
+    lock_path = os.path.join(common, _FETCH_COORD_LOCK_NAME)
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError:
+        yield
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 # Test seam: a no-arg callable (default ``None`` = disabled) invoked inside
 # ``_reclaim_if_stale_index_lock`` at the TOCTOU window — after the lock is judged stale and
 # before the guarded unlink — so a test can deterministically inject a peer replacing the
