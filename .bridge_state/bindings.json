@@ -8309,7 +8309,7 @@
         },
         "description": "## Context\nThe duration investigation reconstructed end-to-end `review-plan` and gated-close wall time from Codex rollout logs a...\n## CLI contract and frozen example\nRepository-neutral defaults are explicit:\n- Repeatable `--log-root PATH` defaults to `~/.codex/sessions` and `~/.codex/archived_sessions`, resolved with `Path....\n- `--tracker PATH` defaults to `.tickets-tracker` relative to the invocation working directory.\n- `--since` and `--until` are optional ISO-8601 bounds; omission means unbounded on that side.\n- `--provider-prefix` is optional; omission accepts any actual provider while still requiring positive `metrics.llm_c...\n- `--current-since` is optional; omission suppresses the current-regime sensitivity. The single term `current regime`...\nThe frozen analysis is reproduced with: `python scripts/rebar_duration_probe.py summary --tracker .tickets-tracker --...\n## Plan\n- Keep `scripts/rebar_duration_probe.py` as the read-only, standard-library-only CLI/reporting layer. Extract rollout...\n- Preserve the existing modes (`summary`, `table`, `clean`, `all`, and `unmatched`) while applying the CLI contract a...\n- Add a gated-close phase breakdown. Read `COMPLETION_VERDICT`, closing `STATUS`, and completion `SIGNATURE` timestam...\n- Label every phase as direct metric, direct event interval, or inferred residual; do not imply an uninstrumented bou...\n- Add focused synthetic tests for command classification, terminal reconstruction, percentile calculation, cohort fil...\n- Run `python scripts/check_import_walk.py` in addition to focused pytest and Ruff checks. If a non-stdlib optional d...\n- Do not change agent-duration guidance in this ticket.\n## Acceptance Criteria\n- [x] The reusable probe is stored at `scripts/rebar_duration_probe.py`.\n- [x] Source contains no literal machine-specific user-home or worktree path.\n- [x] The documented command reproduces the frozen provider-clean window.\n- [x] `--current-since 2026-08-22T00:00:00Z` selects the frozen current-regime cohort.\n- [x] No-LLM operations remain distinguishable from completed model-backed cohorts.\n- [x] Forced, status/check/help, unmatched, and interrupted operations remain distinguishable from completed model-ba...\n- [x] Gated-close output reports pre-verifier residual, deterministic verifier, LLM verifier, verdict-to-status, stat...\n- [x] Each gated-close phase is labeled as a direct metric, direct event interval, or inferred residual.\n- [x] Focused tests use synthetic fixtures only and pass.\n- [x] The standalone script passes the import-walk check without import-time side effects.\n- [x] Repository guidance remains unchanged pending separate operator confirmation.\n[full output: \"$HOME/Library/Application Support/rtk/tee/1787538198_jq_-r__description.log\"]",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Persist reusable gate-duration probe"
       },
       "created_at": "2026-08-23T23:35:44Z",
@@ -10758,9 +10758,17 @@
       "updated_at": "2026-08-15T14:56:11Z"
     },
     "363c-618c-16b0-4c97": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nWhile revalidating `epidemic-chocolaty-imago` at `origin/main` `813baac9b01524a024523a8516d563b17f395358`, `rebar review-plan` failed closed before model execution: `git fetch from origin timed out after 300s`. GitHub authentication and ref discovery were healthy: `git ls-remote --heads origin main` completed in 1.09s.\n\nThe code checkout configures `remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*`. `rebar._snapshot.repo_snapshot.resolve_ref` always calls `fetch_origin` without a ref before resolution, and materialized attested review sets `blobless=False`; production therefore runs an unfiltered `git fetch origin` across every configured head. This repository deliberately keeps code on `main` and the large ticket store on `tickets` at the same remote, so a review of `origin/main` pulls the unrelated tickets history into the code checkout common object database. At reproduction time that shared database reported 117 packs, 8,758,551 packed objects, and 11.55 GiB of pack storage, plus interrupted temporary packs.\n\nA controlled reproduction of the exact unfiltered general fetch remained active for more than one minute and was stopped after proving the transfer shape. A separate disposable clone configured by `git clone --single-branch --branch main --filter=blob:none` had only `+refs/heads/main:refs/remotes/origin/main`, completed in 22 seconds, and the same attested plan review completed with a signed PASS at the exact upstream SHA. This excludes missing credentials, an unreachable remote, ticket material, and the model runner.\n\n## Relationship to existing repairs\n`agrologic-oval-bobolink` proves that ref-updating fetches also require common-directory coordination and bounded recovery. Its scope preserves tracker sync\u2019s explicit tickets refspec and addresses concurrent compare-and-swap races; it does not prevent the snapshot layer from fetching unrelated heads or transferring an oversized branch. This bug is complementary, not a duplicate. Do not weaken that ticket\u2019s coordination requirements, remove tracker sync\u2019s explicit tickets refspec, reintroduce a size gate, or make ordinary reviews depend on a tickets-store budget.\n\n## Remediation constraints\nResolve and materialize only the requested gate ref while preserving freshness for moving branches/tags and support for explicit reachable SHAs. An unfiltered materialization may fetch all objects reachable from the selected ref, but must not update or transfer unrelated remote heads. Preserve fail-closed attested semantics, credential-safe errors, noninteractive authentication, partial-clone correctness, and the common-directory coordination/recovery contract tracked by `agrologic-oval-bobolink`.\n\n## Acceptance Criteria\n- [ ] Reviewing `origin/main` against a remote that also has a much larger `tickets` head fetches/materializes `main` without updating `refs/remotes/origin/tickets` or transferring objects reachable only from `tickets`.\n- [ ] Moving branch and tag refs are refreshed before resolution, and an explicit reachable SHA remains supported with a descriptive fail-closed error when the server refuses the want.\n- [ ] `blobless=False` obtains every blob needed to materialize the selected commit in one bounded path without latching an ordinary clone into an unusable promisor state.\n- [ ] Snapshot fetches retain common-Git-directory coordination and bounded recovery from `agrologic-oval-bobolink`; network I/O does not take the ticket write lock.\n- [ ] Deterministic local-repository tests include an oversized unrelated branch and prove selected-ref transfer/ref-update isolation before and after the fix.\n- [ ] Existing plan-review, completion-verifier, code-review, tag, SHA, partial-clone, authentication, timeout, and narrow-tracker-sync tests remain green.\n- [ ] Concurrency/snapshot documentation explains selected-ref fetch scope and its distinction from tracker synchronization.\n- [ ] `make lint`, `make typecheck`, and the project test gate pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Attested snapshot fetch pulls unrelated oversized tickets branch"
+      },
       "created_at": "2026-08-24T03:43:49Z",
       "jira_id": "4589962",
       "jira_key": "REB-3556",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-24T03:43:52Z"
     },
@@ -11330,6 +11338,13 @@
       "jira_key": "REB-88",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:32Z"
+    },
+    "39a2-4832-e436-4850": {
+      "created_at": "2026-08-24T04:39:52Z",
+      "jira_id": "4589964",
+      "jira_key": "REB-3558",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T04:39:54Z"
     },
     "39c1-2a32-b564-4b4b": {
       "baseline": {
@@ -12462,6 +12477,13 @@
       "jira_key": "REB-423",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:16Z"
+    },
+    "3f22-7fd4-aae7-48b4": {
+      "created_at": "2026-08-24T04:39:56Z",
+      "jira_id": "4589965",
+      "jira_key": "REB-3559",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T04:39:59Z"
     },
     "3f42-81a9-6f87-4e13": {
       "baseline": {
@@ -21340,6 +21362,13 @@
       "jira_key": "REB-1396",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:03Z"
+    },
+    "6e2f-2814-4f92-4873": {
+      "created_at": "2026-08-24T04:40:02Z",
+      "jira_id": "4589966",
+      "jira_key": "REB-3560",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T04:40:04Z"
     },
     "6e31-8846-0eee-404a": {
       "baseline": {
@@ -34897,6 +34926,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-20T06:43:45Z"
     },
+    "b39a-8770-a8b2-459a": {
+      "created_at": "2026-08-24T04:40:07Z",
+      "jira_id": "4589967",
+      "jira_key": "REB-3561",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T04:40:09Z"
+    },
     "b3a2-2268-c391-43df": {
       "baseline": {
         "assignee": null,
@@ -38325,9 +38361,17 @@
       "updated_at": "2026-08-15T15:11:03Z"
     },
     "c6bd-b10e-74f1-407f": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nAn attested gate against a locally present full commit SHA still performs a general fetch before resolving the SHA. In a checkout whose `remote.origin.fetch` maps every head, this becomes `git fetch --no-filter origin`. Git applies the broad refspec and fetches every configured head, including `tickets`, although the gate will materialize one code commit.\n\nThe current snapshot contract states that attested mode fetches first when needed and materializes the committed tree at the selected SHA. A locally present full SHA does not need remote freshness. The general fetch adds unrelated transfer cost and can prevent the gate from reaching model execution.\n\n## Rebar-debug orientation\n\n- Step 0(a). Searches for `promisor`, `broad-fetch performance`, `snapshot no-filter partial clone pack bloat`, and the exact timeout found related closed tickets but no bug with this scope. `suave-constant-cow` handles byte-starved transport stalls. `agrologic-oval-bobolink` handles uncoordinated ref updates. Neither limits the ref set of a successful no-filter fetch.\n- Step 0(b). The occurrence was reported against `813baac9b01524a024523a8516d563b17f395358`.\n- Step 0(c). The F30A worktree matched `origin/main` at that revision.\n\n## Confirmed mechanism\n\n`resolve_ref` calls `fetch_origin` without a target before it attempts `rev_parse`, at `src/rebar/_snapshot/repo_snapshot.py` lines 262 through 266. Materializing callers pass `blobless=False`. `fetch_origin` therefore constructs a general `git fetch --quiet --no-filter origin` and bounds the subprocess at 300 seconds, at `src/rebar/_snapshot/git_fetch.py` lines 256 through 283. The configured `remote.origin.fetch` decides which heads that command transfers.\n\nThe affected checkout uses `+refs/heads/*:refs/remotes/origin/*`. A main-only comparison checkout uses `+refs/heads/main:refs/remotes/origin/main`. The remote currently has 19 heads. The broad checkout contains about 12 GB of Git objects, 115 packs, and recent packs ranging from about 160 MB to 338 MB. One unfinished pack is about 2.3 GB.\n\n## Proof\n\n- F30A completion verification against the full SHA made no model call and failed after the production 300 second fetch timeout. A direct `git fetch origin main` had completed in 3.9 seconds shortly before.\n- Ticket `unromantic-ferny-arawana` records an independent run at the same revision. Its broad partial-clone checkout made zero model calls and failed after 512.139 seconds because the general fetch reached the 300 second timeout. Its main-only comparison checkout crossed the fetch boundary and completed with signed PASS in 133.411 seconds.\n- The F30A isolated main-only clone also crossed this boundary and completed an attested plan review with signed PASS.\n- The target commit tree contains 3,550 objects and zero missing objects in the affected checkout. Materialization did not require a general fetch to acquire this tree.\n- Source inspection and process sampling rule out the enrich drain as the direct blocker. Enrich drain releases its advisory lock before model work at `src/rebar/llm/enrich_drain.py` lines 358 through 428. It does not own the code snapshot fetch lock.\n\nThe configuration differential distinguishes broad ref selection from provider latency, credentials, an absent target object, and the enrich-drain lock. Transport stalls remain possible in general, but they do not explain why the main-only comparison passes while the broad checkout fails at the same revision.\n\n## Defect legitimacy\n\n`docs/repo-snapshot-gates.md` states that attested mode fetches first when needed and materializes the selected SHA. It also defines the full SHA as the code version the gate verifies. Fetching unrelated heads is outside that contract and prevents supported gates from completing. This is a defect.\n\n## Remediation constraints\n\n- Preserve freshness for moving branches and tags.\n- Preserve targeted recovery for a full SHA that is absent locally.\n- Preserve complete blob acquisition for the selected tree.\n- Preserve `--end-of-options` protection for client-supplied refs.\n- Do not narrow or rewrite the checkout owner's configured refspec as a side effect.\n- Keep attested mode fail-closed when the selected ref or required object cannot be obtained.\n\n## Acceptance criteria\n\n- [ ] A locally resolvable full SHA does not trigger a general fetch whose scope expands through `remote.origin.fetch`.\n- [ ] A moving branch or tag is refreshed before resolution.\n- [ ] A missing full SHA uses a targeted fetch and either resolves or fails closed with an actionable error.\n- [ ] Materialization acquires every missing blob for the selected tree without fetching unrelated heads.\n- [ ] A deterministic local-remote test uses a broad refspec and a large unrelated branch, then proves that resolving and materializing a present SHA does not transfer the unrelated objects.\n- [ ] Existing snapshot security, partial-clone, timeout, and concurrency tests remain green.\n- [ ] Current snapshot documentation describes fetch scope for full SHAs, moving refs, and missing objects.\n- [ ] Focused tests, `make lint`, `make typecheck`, and the project test gate pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Attested exact-SHA snapshot performs a broad no-filter fetch across every origin head"
+      },
       "created_at": "2026-08-24T03:43:57Z",
       "jira_id": "4589963",
       "jira_key": "REB-3557",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-24T03:44:00Z"
     },
@@ -41616,9 +41660,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\n\n`docs/architecture.md` describes RP-04 as unimplemented. `docs/reuse-surface.md` predicts removal of its diagnostic shadow during S7. RP-04 is closed. Ticket `vibrant-legal-hind`, ADR 0098, and ticket `opal-daffy-mutt` establish the current qualified boundary. `REBAR_OPERATION_SNAPSHOT_SHADOW` remains enabled by default and diagnostic only on legacy shadow surfaces.\n\n## Plan\n\n- Describe the implemented `OperationSnapshot` composer.\n- Identify each current runtime binding without claiming universal operation control.\n- Describe provider authentication carriers.\n- Describe the configuration ownership gate.\n- Identify the remaining diagnostic-only shadow boundary and its enabled default.\n- Replace migration-pending wording that RP-04 completion superseded.\n- Preserve ADR 0098 as the historical decision record.\n- Leave runtime behavior unchanged.\n\n## Acceptance Criteria\n\n- [ ] `docs/architecture.md` identifies RP-04 as implemented and describes snapshot composition.\n- [ ] The documentation identifies the current runtime bindings.\n- [ ] The documentation describes provider authentication carriers.\n- [ ] The documentation describes configuration ownership enforcement.\n- [ ] The remaining diagnostic shadow is described as diagnostic only and enabled by default.\n- [ ] The documentation does not claim universal operation control.\n- [ ] ADR 0098 remains unchanged.\n- [ ] Runtime behavior remains unchanged.\n- [ ] `python scripts/check_docs_index.py --check` passes.\n- [ ] `python -m pytest tests/unit/test_reuse_surface_doc.py tests/unit/test_operation_snapshot.py tests/interfaces/contracts/test_operation_snapshot_surfaces.py -q` passes.\n- [ ] `python scripts/check_config_ownership.py` passes.\n- [ ] `git diff --check` passes.\n\n## Testing\n\n- `python scripts/check_docs_index.py --check`\n- `python -m pytest tests/unit/test_reuse_surface_doc.py tests/unit/test_operation_snapshot.py tests/interfaces/contracts/test_operation_snapshot_surfaces.py -q`\n- `python scripts/check_config_ownership.py`\n- `git diff --check`",
+        "description": "## Context\n\n`docs/architecture.md` describes RP-04 as unimplemented. `docs/reuse-surface.md` predicts removal of its diagnostic shadow during S7. RP-04 is closed. Ticket `vibrant-legal-hind`, ADR 0098, and ticket `opal-daffy-mutt` establish the current qualified boundary. `REBAR_OPERATION_SNAPSHOT_SHADOW` remains enabled by default and diagnostic only on legacy shadow surfaces.\n\n## Plan\n\n- Describe the implemented `OperationSnapshot` composer.\n- Identify each current runtime binding without claiming universal operation control.\n- Describe provider authentication carriers.\n- Describe the configuration ownership gate.\n- Identify the remaining diagnostic-only shadow boundary and its enabled default.\n- Replace migration-pending wording that RP-04 completion superseded.\n- Preserve ADR 0098 as the historical decision record.\n- Leave runtime behavior unchanged.\n\n## Acceptance Criteria\n\n- [x] `docs/architecture.md` identifies RP-04 as implemented and describes snapshot composition.\n- [x] The documentation identifies the current runtime bindings.\n- [x] The documentation describes provider authentication carriers.\n- [x] The documentation describes configuration ownership enforcement.\n- [x] The remaining diagnostic shadow is described as diagnostic only and enabled by default.\n- [x] The documentation does not claim universal operation control.\n- [x] ADR 0098 remains unchanged.\n- [x] Runtime behavior remains unchanged.\n- [x] `python scripts/check_docs_index.py --check` passes.\n- [x] `python -m pytest tests/unit/test_reuse_surface_doc.py tests/unit/test_operation_snapshot.py tests/interfaces/contracts/test_operation_snapshot_surfaces.py -q` passes.\n- [x] `python scripts/check_config_ownership.py` passes.\n- [x] `git diff --check` passes.\n\n## Testing\n\n- `python scripts/check_docs_index.py --check`\n- `python -m pytest tests/unit/test_reuse_surface_doc.py tests/unit/test_operation_snapshot.py tests/interfaces/contracts/test_operation_snapshot_surfaces.py -q`\n- `python scripts/check_config_ownership.py`\n- `git diff --check`",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "F30A document the implemented RP-04 boundary"
       },
       "created_at": "2026-08-23T19:34:45Z",
@@ -45574,10 +45618,24 @@
     },
     "e93d-f75c-1082-4d14": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\n`docs/assets/rebar-demo.svg` uses a deprecated four digit ticket reference, an unconditional bare assignee, stale displayed output, and narration that no longer matches the supported workflow. Ticket weak-amenable-worm records the decision to keep this asset static and text-editable.\n\n## Plan\n\n- Replace deprecated references with supported aliases or two-quad identifiers.\n- Remove the unconditional explicit assignee from the claim example.\n- Align displayed commands, responses, and narration with current CLI contracts.\n- Preserve the static SVG implementation without adding a generator.\n- Preserve the image role, `aria-label`, and README alternative text mechanisms. Update their wording only where the displayed interaction changes.\n- Render and inspect the SVG at normal and narrow display sizes.\n\n## Acceptance Criteria\n\n- [ ] Every displayed ticket reference uses a supported authoring form.\n- [ ] The claim example does not require an explicit assignee.\n- [ ] Displayed output matches current CLI behavior and punctuation.\n- [ ] The narration matches the displayed interaction.\n- [ ] The SVG remains static and text-editable.\n- [ ] The SVG retains its accessibility label and the README retains alternative text.\n- [ ] Rendered normal and narrow views remain legible.\n\n## Testing\n\n- `xmllint --noout docs/assets/rebar-demo.svg`\n- `python scripts/check_readme_quickstart.py`\n- `python scripts/check_docs_index.py --check`\n- `git diff --check`",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "F16 correct the static CLI workflow demonstration"
       },
       "created_at": "2026-08-23T18:38:31Z",
@@ -46364,6 +46422,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:53Z"
+    },
+    "ed53-bc12-ab39-4845": {
+      "created_at": "2026-08-24T04:40:12Z",
+      "jira_id": "4589968",
+      "jira_key": "REB-3562",
+      "state": "confirmed",
+      "updated_at": "2026-08-24T04:40:14Z"
     },
     "ed57-3657-6d0a-4cca": {
       "baseline": {
@@ -51201,8 +51266,14 @@
     "1787526087396328001": "__rebar_unknown_comment_id__",
     "1787527270439172001": "__rebar_unknown_comment_id__",
     "1787540330847606001": "__rebar_unknown_comment_id__",
+    "1787541837887253001": "__rebar_unknown_comment_id__",
     "1787542023674332001": "__rebar_unknown_comment_id__",
-    "1787542630626620001": "__rebar_unknown_comment_id__"
+    "1787542630626620001": "__rebar_unknown_comment_id__",
+    "1787544026806845001": "__rebar_unknown_comment_id__",
+    "1787544415058159001": "__rebar_unknown_comment_id__",
+    "1787544429166967001": "__rebar_unknown_comment_id__",
+    "1787544686927382001": "__rebar_unknown_comment_id__",
+    "1787546092271596001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -53229,7 +53300,12 @@
     "REB-3555": "d123-178f-67fa-442b",
     "REB-3556": "363c-618c-16b0-4c97",
     "REB-3557": "c6bd-b10e-74f1-407f",
+    "REB-3558": "39a2-4832-e436-4850",
+    "REB-3559": "3f22-7fd4-aae7-48b4",
     "REB-356": "620c-fbde-37ce-40bf",
+    "REB-3560": "6e2f-2814-4f92-4873",
+    "REB-3561": "b39a-8770-a8b2-459a",
+    "REB-3562": "ed53-bc12-ab39-4845",
     "REB-357": "e249-1034-3237-44b0",
     "REB-358": "e2b0-f2aa-bcac-4242",
     "REB-359": "e2e3-4f43-8c52-4f89",
