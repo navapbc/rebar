@@ -160,7 +160,10 @@ CERTBOT_PATHS='infra/scripts/install-certbot-timer.sh'
 # (The script BODY, autodeploy.sh, still updates in place via the BOT_PATHS rsync like any
 # other source; this exclusion is specifically about the installer/unit-file self-update.)
 # rsync excludes: protect the SSM secrets .env, the deploy marker, and dev/state dirs.
-RSYNC_EXCLUDES=(--exclude '/.git' --exclude 'infra/compose/.env' --exclude '/.deployed_ref' \
+# The materialized mcp-static-tokens.json is SSM-sourced + rsync-EXCLUDED like .env (gotcha
+# f600): a value-only re-materialize must not be clobbered by `rsync --delete`.
+RSYNC_EXCLUDES=(--exclude '/.git' --exclude 'infra/compose/.env' \
+  --exclude 'infra/compose/mcp-static-tokens.json' --exclude 'infra/compose/mcp-static-tokens.json.*' --exclude '/.deployed_ref' \
   --exclude '/.venv' --exclude '/.terraform' --exclude '/.serena' --exclude '/.claude' --exclude '/.tickets-tracker')
 
 mkdir -p "$STATE_DIR"

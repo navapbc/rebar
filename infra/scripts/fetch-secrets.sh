@@ -16,6 +16,9 @@
 #   /rebar/prod/github-oauth-client-id     -> GITHUB_OAUTH_CLIENT_ID     (WS8, OPTIONAL)
 #   /rebar/prod/github-oauth-client-secret -> GITHUB_OAUTH_CLIENT_SECRET (WS8, OPTIONAL)
 #   /rebar/prod/reviewbot-tickets-pat      -> REVIEWBOT_TICKETS_PAT      (data capture, OPTIONAL)
+#   /rebar/prod/mcp-client-pat-copilot     -> MCP_CLIENT_PAT_COPILOT     (MCP static auth, OPTIONAL)
+#   /rebar/prod/mcp-client-pat-codex       -> MCP_CLIENT_PAT_CODEX       (MCP static auth, OPTIONAL)
+#   /rebar/prod/mcp-client-pat-claude      -> MCP_CLIENT_PAT_CLAUDE      (MCP static auth, OPTIONAL)
 # The two OAuth creds are OPTIONAL here (blank if unpopulated) — they are only needed
 # under auth.type = OAUTH, and compose-up.sh FAILS LOUD if OAUTH is selected but they
 # are empty. Making them REQUIRED here would couple every boot (incl. non-OAUTH rollback)
@@ -138,6 +141,47 @@ else
   echo "fetch-secrets.sh: opcert-ed25519-key is blank — wrote an EMPTY ${opcert_key_path}; the op-cert gate service will fail startup key composition until the SSM slot is set" >&2  # gitleaks:allow
 fi
 
+# OPTIONAL: the per-client MCP bearer PATs (epic jira-reb-3527 "Enable MCP on AWS", ADR 0104 §1).
+# One SecureString per client; each client presents its own bearer PAT to the nginx `/mcp/` TLS
+# edge and the `static` verifier authenticates it. Two on-box sinks (gotcha f600 — the .env is
+# rsync-EXCLUDED, so a rotated SSM value is MATERIALIZED here, not baked into the rsync'd tree):
+#   1. the RAW value lands in the 0600 .env as MCP_CLIENT_PAT_* (below, in the .env heredoc);
+#   2. the tokens file the verifier reads (mcp-static-tokens.json) references it via `token_env`
+#      — env-var NAMES, never a plaintext token, never the raw value in the tokens file (ADR 0050
+#      §4 / ADR 0104: the server holds only SHA-256 digests, supplied via env-var names).
+# A blank slot's record is OMITTED so `_parse_static_record` never sees an empty token_env; the
+# file is ALWAYS written (bug beb1 — a missing bind-mount source would make docker create a
+# DIRECTORY). All-blank ⇒ `{"tokens": []}` and the verifier fails-closed at startup ("defines no
+# tokens") until an operator populates ≥1 PAT. Rotation is operator-driven (re-materialize +
+# RESTART rebar-mcp so the init-time verifier re-reads) — see infra/runbooks/mcp-client-pats.md.
+mcp_pat_copilot="$(get_param_optional mcp-client-pat-copilot)"
+mcp_pat_codex="$(get_param_optional mcp-client-pat-codex)"
+mcp_pat_claude="$(get_param_optional mcp-client-pat-claude)"
+mcp_static_tokens_path="$(dirname "${ENV_FILE}")/mcp-static-tokens.json"
+
+# Append one token_env record per POPULATED client (env-var NAMES only; no secret interpolated).
+mcp_records=""
+add_mcp_record() {
+  local client="$1" value="$2" envvar="$3"
+  [ -z "${value}" ] && return 0
+  [ -n "${mcp_records}" ] && mcp_records="${mcp_records}, "
+  mcp_records="${mcp_records}{\"name\": \"${client}\", \"client_id\": \"${client}\", \"scopes\": [], \"token_env\": \"${envvar}\"}"
+}
+add_mcp_record copilot "${mcp_pat_copilot}" MCP_CLIENT_PAT_COPILOT
+add_mcp_record codex "${mcp_pat_codex}" MCP_CLIENT_PAT_CODEX
+add_mcp_record claude "${mcp_pat_claude}" MCP_CLIENT_PAT_CLAUDE
+
+mcp_tokens_tmp="$(mktemp "${mcp_static_tokens_path}.XXXXXX")"
+chmod 600 "${mcp_tokens_tmp}"
+printf '{"tokens": [%s]}\n' "${mcp_records}" > "${mcp_tokens_tmp}"
+mv -f "${mcp_tokens_tmp}" "${mcp_static_tokens_path}"
+chmod 600 "${mcp_static_tokens_path}"
+if [ -n "${mcp_records}" ]; then
+  echo "fetch-secrets.sh: wrote ${mcp_static_tokens_path} (0600) with MCP static-token records" >&2
+else
+  echo "fetch-secrets.sh: no MCP client PATs set — wrote an EMPTY token set to ${mcp_static_tokens_path}; the static verifier fails-closed until ≥1 PAT is populated" >&2
+fi
+
 # --- Write the .env atomically (0600), then move into place ----------------
 tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
 chmod 600 "${tmp}"
@@ -153,6 +197,11 @@ chmod 600 "${tmp}"
   echo "REVIEWBOT_TICKETS_PAT=${reviewbot_tickets_pat}"
   # Path (not the key material) to the materialized bot signing key; empty ⇒ unsigned.
   echo "REBAR_IDENTITY_SIGNING_KEY=${signing_key_path}"
+  # Per-client MCP bearer PATs (blank ⇒ that client's record was omitted from the tokens file).
+  # The tokens file references these env-var NAMES via token_env; the raw values live only here.
+  echo "MCP_CLIENT_PAT_COPILOT=${mcp_pat_copilot}"
+  echo "MCP_CLIENT_PAT_CODEX=${mcp_pat_codex}"
+  echo "MCP_CLIENT_PAT_CLAUDE=${mcp_pat_claude}"
   echo "REVIEW_BOT_PORT=8000"
 } >"${tmp}"
 mv -f "${tmp}" "${ENV_FILE}"
