@@ -49,7 +49,15 @@ class SnapshotFetchError(SnapshotError):
     """``git fetch`` failed — typically missing/invalid credentials for a private repo.
 
     Carries an actionable remedy (configure a credential helper / deploy key / token);
-    see the MCP-server setup docs. Attested mode treats this as fail-closed."""
+    see the MCP-server setup docs. Attested mode treats this as fail-closed.
+
+    ``stderr`` preserves git's raw failure text so a caller can classify the failure
+    (e.g. :func:`is_missing_ref` — a scoped fetch of a ref the remote simply lacks is a
+    resolution miss, not a transport failure) without re-parsing the composed message."""
+
+    def __init__(self, *args: object, stderr: str = "") -> None:
+        super().__init__(*args)
+        self.stderr = stderr
 
 
 class SnapshotRefError(SnapshotError):
@@ -161,6 +169,42 @@ def rev_parse(repo_root: str, ref: str) -> str | None:
 def is_auth_failure(stderr: str) -> bool:
     low = stderr.lower()
     return any(marker in low for marker in _AUTH_STDERR_MARKERS)
+
+
+# stderr fragments that mean "the remote simply does not have the ref we asked for" — a
+# scoped fetch of a nonexistent branch. This is a RESOLUTION miss (the caller should fall
+# through to a targeted SHA want / fail-closed ref error), NOT a transport failure that must
+# fail closed. Distinct from an auth/stall/timeout failure.
+_MISSING_REF_STDERR_MARKERS = (
+    "couldn't find remote ref",
+    "no such ref",
+    "not our ref",
+)
+
+
+def is_missing_ref(stderr: str) -> bool:
+    """True when git's stderr shows the requested ref does not exist on the remote."""
+    low = stderr.lower()
+    return any(marker in low for marker in _MISSING_REF_STDERR_MARKERS)
+
+
+def scoped_fetch_target(ref: str, remote: str) -> str:
+    """The single-ref fetch target that scopes an attested resolution's opening fetch.
+
+    A remote-qualified ``ref`` (``<remote>/<name>``) becomes a forced tracking refspec
+    ``+<name>:refs/remotes/<remote>/<name>`` — git transfers ONLY that branch and updates
+    ``refs/remotes/<remote>/<name>`` so ``rev_parse(ref)`` resolves it (a bare
+    ``git fetch <remote> <name>`` only writes ``FETCH_HEAD``). Any other form (a plain
+    branch/tag, or a bare SHA served under ``allowReachableSHA1InWant``) is passed through
+    as a targeted want. Either way the fetch names a target, so it never falls back to the
+    clone's configured all-heads refspec (bug lemuroid-compliant-hoopoe). Handed to
+    :func:`fetch_origin` as ``ref`` — placed after ``--end-of-options``, so a hostile value
+    is treated strictly as a refspec (fail-closed on an invalid one), never as an option."""
+    prefix = f"{remote}/"
+    if ref.startswith(prefix) and len(ref) > len(prefix):
+        name = ref[len(prefix) :]
+        return f"+{name}:refs/remotes/{remote}/{name}"
+    return ref
 
 
 # --------------------------------------------------------------------------------------
@@ -298,7 +342,8 @@ def fetch_origin(
                 f"git fetch from '{remote}' stalled — the connection was established but "
                 f"transferred almost nothing, and {attempts} attempt(s) all aborted on the "
                 "low-speed check (attested mode fails closed). The remote may be wedged or "
-                f"the network path broken. git said: {stderr or '<no detail>'}"
+                f"the network path broken. git said: {stderr or '<no detail>'}",
+                stderr=stderr,
             )
         if is_auth_failure(stderr):
             raise SnapshotFetchError(
@@ -306,9 +351,11 @@ def fetch_origin(
                 "MCP server needs read credentials to fetch the verified ref from a "
                 "private repository. Configure a git credential helper, a deploy key, "
                 "or a token for the server's clone (see the MCP-server setup docs), "
-                f"then retry. git said: {stderr or '<no detail>'}"
+                f"then retry. git said: {stderr or '<no detail>'}",
+                stderr=stderr,
             )
         raise SnapshotFetchError(
             f"git fetch from '{remote}' failed (attested mode fails closed): "
-            f"{stderr or '<no detail>'}"
+            f"{stderr or '<no detail>'}",
+            stderr=stderr,
         )
