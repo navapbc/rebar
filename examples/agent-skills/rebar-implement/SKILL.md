@@ -164,13 +164,7 @@ the user's checkout.
 
 # Phase 2 — Claim the epic
 
-Move the epic itself into progress so the board reflects live work under it: `rebar claim <epic>
---assignee <you>` (or `rebar transition <epic> open in_progress`). If the **plan-review claim
-gate** is enabled, a ticket must pass `rebar review-plan <id>` before it can be claimed —
-run it, **remediate any blocking finding and re-run until it passes**; apply the advisory findings
-that genuinely improve the plan (and justify skipping the rest) — not a mandate to remediate every one. Note: claiming a child later will **cascade** a claim up to any
-still-`open` parent, running *that* parent's plan-review gate too — so earning the epic's
-attestation now avoids a surprise block when you claim its first leaf. Log the claim.
+Move the epic itself into progress with `rebar claim <epic>` so the board reflects work under it. Atomic claim prevents two agents from claiming the same ticket. Run claim without `--assignee`. A configured `ticket.default_assignee` supplies the identity. An empty setting leaves the ticket unassigned. Pass `--assignee` only for an explicit override. In a Jira-reconciled store, the override must use email or accountId. Never prescribe a bare handle. If the **plan-review claim gate** is enabled, a ticket must pass `rebar review-plan <id>` before it can be claimed. Run the review and remediate every blocking finding until it passes. Apply advisory findings that improve the plan and record the reason for any deferral. Claiming a child later cascades a claim to any parent that remains `open`, including the parent's plan-review gate. Earning the epic attestation now prevents that gate from blocking the first leaf claim. Log the claim.
 
 > **Single-leaf run.** When Phase 0 resolved a childless story/task, "the epic" *is* that
 > leaf: claim it here, then execute it once as the code leaf in Phase 4 (there is no tree to
@@ -201,8 +195,7 @@ For each ticket, dispatch by kind:
 - **Code-changing leaf:** claim it, then run the **TDD held-out loop** (Phase 4), then land it
   as a stacked change and close it (Phases 4→5).
 
-Claim every ticket with `rebar claim <id> --assignee <you>` *before* working it; on exit 10 /
-`ConcurrencyError` someone else holds it — pick another, don't force. Log each claim.
+Claim every ticket with atomic `rebar claim <id>` *before* working it. Use the identity behavior from Phase 2 and omit `--assignee` unless an explicit override is required. On exit 10 or `ConcurrencyError`, another agent holds the ticket. Pick another ticket and never force the claim. Log each claim.
 
 # Phase 4 — The TDD held-out loop (for each code-changing leaf)
 
