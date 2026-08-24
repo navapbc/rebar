@@ -602,3 +602,72 @@ def test_non_positive_call_timeout_falls_back_to_ambient(monkeypatch):
     assert acli_subprocess._effective_call_timeout(0) == 77.0
     assert acli_subprocess._effective_call_timeout(-3) == 77.0
     assert acli_subprocess._effective_call_timeout(45) == 45
+
+
+# ---------------------------------------------------------------------------
+# REB-3115 S1 T2 (AC6) — timeout cleanup passes on non-POSIX too
+# ---------------------------------------------------------------------------
+#
+# The POSIX tests above prove the process-GROUP reap (killpg). AC6 additionally
+# requires the non-POSIX fallback — a plain ``proc.kill()`` + bounded wait — to
+# reap a timed-out child. The shared reaper (``rebar._proc.reap_process_group``,
+# reached through ``acli_subprocess._reap_process_group``) branches on ``os.name``;
+# patching it to a non-"posix" value on this POSIX host drives the fallback branch
+# against a REAL hanging child. ``start_new_session`` is a POSIX-only spawn kwarg
+# but harmless here; only the reap path differs.
+
+
+@POSIX_ONLY  # we still need a real fork()able child; only the reaper branch is forced non-POSIX
+def test_non_posix_timeout_reaps_the_direct_child(real_child, monkeypatch):
+    """With ``os.name`` forced non-POSIX in the shared reaper, a hung child is still
+    reaped via the ``proc.kill()`` fallback and the call ends in AcliTimeoutError."""
+    from rebar import _proc
+
+    monkeypatch.setattr(_proc.os, "name", "nt")
+
+    with pytest.raises(acli_subprocess.AcliTimeoutError):
+        acli_subprocess._run_acli(
+            [str(real_child.ready)],
+            acli_cmd=_fake_cmd(_SIMPLE_HANG),
+            retry_on_timeout=False,
+        )
+
+    assert len(real_child.pids) == 1, f"expected one spawn, got {real_child.pids}"
+    survivors = _wait_until_gone(real_child.pids)
+    if survivors:
+        for pid in survivors:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+        pytest.fail(f"non-POSIX fallback did not reap child PID(s): {sorted(survivors)}")
+
+
+def test_non_posix_reaper_uses_kill_not_killpg(monkeypatch):
+    """Unit-level proof of the branch: on non-POSIX the shared reaper calls
+    ``proc.kill()`` and waits, and NEVER reaches ``os.killpg`` (absent on Windows)."""
+    import logging
+
+    from rebar import _proc
+
+    monkeypatch.setattr(_proc.os, "name", "nt")
+
+    class _FakeProc:
+        pid = 4321
+
+        def __init__(self) -> None:
+            self.killed = False
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout=None) -> int:
+            return 0
+
+    def _boom_killpg(*_a, **_k):  # pragma: no cover - must never be called
+        raise AssertionError("killpg must not be used on the non-POSIX path")
+
+    monkeypatch.setattr(_proc.os, "killpg", _boom_killpg, raising=False)
+    proc = _FakeProc()
+    _proc.reap_process_group(
+        proc, grace=0.01, drain=0.01, label="acli", logger=logging.getLogger("t")
+    )
+    assert proc.killed, "non-POSIX reap must call proc.kill()"

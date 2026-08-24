@@ -368,6 +368,30 @@ class JiraBackend:
     def get_comment_map(self, project_key: str) -> dict[str, Any]:
         return self.transport.get_comment_map(project_key)
 
+    # --- typed Cloud summary operation (REB-3115 S1 T2) ---
+    def execute_summary_operation(self, remote_id: str, new_summary: str) -> Any:
+        """Execute ONE Cloud summary write as a typed ``OperationOutcome`` (REB-3115
+        S1 T2): EXACTLY ONE ``acli jira workitem edit`` process, no adapter-level
+        sleep or replay. The shared retry budget owns replay; this only executes and
+        classifies. Imported function-locally to keep the summary seam off the
+        backend's import path until a call site drives it (core dispatch cutover is
+        out of scope for this task)."""
+        from rebar_reconciler.adapters.jira import summary_operation
+
+        return summary_operation.execute_cloud_summary_write(self.transport, remote_id, new_summary)
+
+    def observe_summary_operation(
+        self, remote_id: str, expected_summary: str, *, budget_remaining: bool
+    ) -> Any:
+        """Observe the primary store for a prior Cloud summary write with EXACTLY ONE
+        one-attempt/no-sleep REST GET, returning a typed ``OperationOutcome`` mapped
+        through the shared ``decide_replay`` table (REB-3115 S1 T2)."""
+        from rebar_reconciler.adapters.jira import summary_operation
+
+        return summary_operation.observe_summary_via_rest(
+            self.transport, remote_id, expected_summary, budget_remaining=budget_remaining
+        )
+
 
 @register("jira")
 def _build_jira_backend(config: Any) -> JiraBackend:

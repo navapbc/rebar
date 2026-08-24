@@ -9,6 +9,7 @@ typed errors that surface those conditions. stdlib only.
 
 from __future__ import annotations
 
+import enum
 import json
 import logging
 import os
@@ -353,6 +354,105 @@ def _check_mutation_failure(stdout: str, cmd: list[str]) -> None:
             else f"successCount=0 (totalCount={parsed.get('totalCount')!r})"
         )
         raise AcliMutationError(f"ACLI mutation reported FAILURE (exit=0) for {cmd!r}: {detail}")
+
+
+class UnknownAcliOutcomeError(RuntimeError):
+    """A sanitized ACLI ``(exit, stdout, stderr)`` triple matched no known outcome
+    shape (REB-3115 S1 T2, AC5).
+
+    FAIL LOUD: an unrecognized shape is NEVER silently retried or treated as a
+    success. The whole point of decoding the historical corpus deterministically is
+    that a shape nobody catalogued is a bug (a new ACLI error surface, a corrupted
+    capture) that a human must see — a blind retry would either mask a permanent
+    failure as a transient one or, worse, re-drive an ambiguous write.
+    """
+
+
+class AcliOutcome(str, enum.Enum):
+    """The deterministic decode classes for a historical ACLI ``(exit, stdout,
+    stderr)`` triple (REB-3115 S1 T2, AC5)."""
+
+    applied = "applied"
+    mutation_failure = "mutation_failure"
+    auth_failure = "auth_failure"
+    rate_limited = "rate_limited"
+    assignee_error = "assignee_error"
+
+
+def _mutation_result_shape(stdout: str | None) -> str | None:
+    """Classify an exit-0 ACLI ``--json`` stdout as ``"success"``, ``"failure"`` or
+    ``None`` (not a mutation-result shape — a created-issue dict, a search list, or
+    empty output). Pure and side-effect free; shares its detection with
+    :func:`_check_mutation_failure`."""
+    if not stdout or not stdout.strip():
+        return None
+    try:
+        parsed = json.loads(stdout)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    results = parsed.get("results")
+    success_count = parsed.get("successCount")
+    if not (isinstance(results, list) or success_count is not None):
+        return None
+    if success_count == 0:
+        return "failure"
+    if isinstance(results, list):
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status") or "").strip().upper() == "FAILURE":
+                return "failure"
+    return "success"
+
+
+def decode_acli_triple(returncode: int, stdout: str | None, stderr: str | None) -> AcliOutcome:
+    """Decode a sanitized historical ACLI ``(exit, stdout, stderr)`` triple into a
+    known :class:`AcliOutcome`, or FAIL LOUD (REB-3115 S1 T2, AC5).
+
+    Deterministic and pure — no subprocess, no clock, no network. The mapping:
+
+    * exit 0 + a mutation-result ``FAILURE`` / ``successCount==0`` → ``mutation_failure``;
+    * exit 0 + a benign shape (a success mutation result, a created-issue dict, a
+      search list, or empty stdout) → ``applied``;
+    * exit 0 + non-empty, non-JSON stdout → :class:`UnknownAcliOutcomeError`;
+    * nonzero + credential-rejection stderr → ``auth_failure`` (the real exit-1
+      unauthorized shape lands here);
+    * nonzero + rate-limit stderr → ``rate_limited``;
+    * nonzero + deterministic assignee-error stderr → ``assignee_error``;
+    * nonzero with no recognizable marker → :class:`UnknownAcliOutcomeError`.
+
+    An unknown shape RAISES rather than defaulting to a retry class, so a novel
+    error surface can never be silently re-driven.
+    """
+    if returncode == 0:
+        shape = _mutation_result_shape(stdout)
+        if shape == "failure":
+            return AcliOutcome.mutation_failure
+        if shape == "success" or not (stdout and stdout.strip()):
+            return AcliOutcome.applied
+        # Exit 0 with a shape we recognize as benign JSON (dict/list) → applied.
+        try:
+            json.loads(stdout)
+        except (ValueError, TypeError) as exc:
+            raise UnknownAcliOutcomeError(
+                f"ACLI exited 0 with non-JSON stdout of an unrecognized shape "
+                f"(len={len(stdout)}); refusing to classify."
+            ) from exc
+        return AcliOutcome.applied
+    text = stderr or ""
+    if _is_auth_failure(text):
+        return AcliOutcome.auth_failure
+    lowered = text.lower()
+    if any(m in lowered for m in _RATE_LIMIT_MARKERS):
+        return AcliOutcome.rate_limited
+    if _ASSIGNEE_PERMISSION_ERROR in text or _ASSIGNEE_NOT_FOUND_ERROR in text:
+        return AcliOutcome.assignee_error
+    raise UnknownAcliOutcomeError(
+        f"ACLI exited {returncode} with stderr carrying no recognized marker "
+        "(auth / rate-limit / assignee); refusing to classify or retry."
+    )
 
 
 def _decode_partial(data: Any) -> str | None:

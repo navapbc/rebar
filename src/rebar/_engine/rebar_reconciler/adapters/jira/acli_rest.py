@@ -21,7 +21,28 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from typing import Any
+
+
+@dataclass(frozen=True)
+class _OneAttemptNoSleep:
+    """A tiny frozen marker whose SINGLE module-level instance
+    (:data:`ONE_ATTEMPT_NO_SLEEP`) opts a REST call into the one-attempt / no-sleep
+    per-call policy (REB-3115 S1 T2).
+
+    Frozen so it is hashable and immutable, and DELIBERATELY compared by identity
+    (``retry_policy is ONE_ATTEMPT_NO_SLEEP``) rather than by value — the shared
+    singleton is the token the summary-recovery call site threads through, and the
+    held-out oracle asserts it is the exact same object re-exported from
+    ``summary_operation``. Any other ``retry_policy`` value (including ``None``, the
+    default) leaves every caller on the legacy three-attempt / 2s-5s policy unchanged.
+    """
+
+
+#: The SOLE one-attempt/no-sleep policy token. Re-exported unchanged from
+#: ``summary_operation`` so exactly one shared singleton exists across the seam.
+ONE_ATTEMPT_NO_SLEEP = _OneAttemptNoSleep()
 
 
 class AcliRestMixin:
@@ -38,14 +59,23 @@ class AcliRestMixin:
         req: urllib.request.Request,
         *,
         timeout: int = 10,
+        retry_policy: Any = None,
     ) -> Any:
         """Execute urlopen(req, timeout=timeout) with transient-fault retry.
 
-        Retries up to 2 times (3 total attempts) on transient connectivity
-        errors: builtin ``TimeoutError`` (read-timeout from ssl/socket layer),
-        ``urllib.error.URLError`` whose reason is a ``TimeoutError`` or
-        ``ConnectionError``, and bare ``ConnectionError``.  Backoff delays are
-        2 s after the first failure, 5 s after the second.
+        By default retries up to 2 times (3 total attempts) on transient
+        connectivity errors: builtin ``TimeoutError`` (read-timeout from
+        ssl/socket layer), ``urllib.error.URLError`` whose reason is a
+        ``TimeoutError`` or ``ConnectionError``, and bare ``ConnectionError``.
+        Backoff delays are 2 s after the first failure, 5 s after the second.
+
+        When ``retry_policy is ONE_ATTEMPT_NO_SLEEP`` (REB-3115 S1 T2) the call
+        makes EXACTLY ONE attempt and NEVER sleeps — the shared logical retry
+        budget owns replay for that caller, so the transport must not also
+        re-drive it. The attempt count and backoff schedule are the ONLY thing
+        the policy changes; with any other value (including the ``None`` default)
+        behaviour is byte-for-byte identical to before (3 attempts, sleeps 2 then
+        5), so every unrelated caller is untouched.
 
         Does NOT retry on ``urllib.error.HTTPError`` (4xx / 5xx) — HTTP-level
         error semantics are unchanged.  Raises the original exception after all
@@ -54,9 +84,9 @@ class AcliRestMixin:
         Retries are logged to stderr at WARNING level so they appear in the
         probe run log without polluting normal output.
         """
-        _BACKOFFS = (2, 5)  # seconds between attempt 1→2 and 2→3
+        attempts, _BACKOFFS = (1, ()) if retry_policy is ONE_ATTEMPT_NO_SLEEP else (3, (2, 5))
         last_exc: BaseException | None = None
-        for attempt in range(3):
+        for attempt in range(attempts):
             try:
                 return urllib.request.urlopen(req, timeout=timeout)
             except urllib.error.HTTPError:
@@ -71,7 +101,7 @@ class AcliRestMixin:
                     last_exc = exc
                 else:
                     raise
-            if attempt < 2:
+            if attempt < attempts - 1:
                 delay = _BACKOFFS[attempt]
                 print(
                     f"[REST-retry] attempt {attempt + 1} failed "
@@ -204,11 +234,15 @@ class AcliRestMixin:
                 matched.append(acct)
         return matched[0] if len(matched) == 1 else None
 
-    def _direct_rest_get(self, path: str) -> Any:
+    def _direct_rest_get(self, path: str, *, retry_policy: Any = None) -> Any:
         """GET JSON data from a Jira REST path using stored credentials.
 
         Follows the same urllib pattern as _direct_rest_put().
         Raises urllib.error.HTTPError on non-2xx response.
+
+        ``retry_policy`` is threaded to :meth:`_rest_urlopen_with_retry`; the ONLY
+        caller that passes ``ONE_ATTEMPT_NO_SLEEP`` (REB-3115 S1 T2) is the summary
+        recovery read, so every other consumer keeps the default 3-attempt policy.
 
         Returns whatever json.loads decodes from the response body. Most Jira
         endpoints return a JSON object, but a few (e.g. issue-properties value
@@ -225,7 +259,7 @@ class AcliRestMixin:
                 "Accept": "application/json",
             },
         )
-        with self._rest_urlopen_with_retry(req, timeout=10) as resp:
+        with self._rest_urlopen_with_retry(req, timeout=10, retry_policy=retry_policy) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     def get_issue_property(self, jira_key: str, property_key: str) -> Any:

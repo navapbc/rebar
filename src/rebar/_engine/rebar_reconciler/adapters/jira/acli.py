@@ -422,15 +422,19 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             jira_key, acli_cmd=self._acli_cmd, call_timeout=self._call_timeout
         )
 
-    def get_issue_by_rest(self, jira_key: str) -> dict[str, Any]:
+    def get_issue_by_rest(self, jira_key: str, *, retry_policy: Any = None) -> dict[str, Any]:
         """Get a Jira issue via direct REST GET (immediately consistent).
 
         Unlike get_issue (which uses ACLI's JQL search internally), this
         hits GET /rest/api/3/issue/{key} which reads from the primary store
         and is not subject to Jira Cloud's search index lag.
+
+        ``retry_policy`` (default ``None`` = legacy 3-attempt policy) threads to
+        :meth:`_direct_rest_get`; only the summary-recovery call site passes the
+        optional ``ONE_ATTEMPT_NO_SLEEP`` (REB-3115 S1 T2).
         """
         path = f"/rest/api/3/issue/{jira_key}"
-        return self._direct_rest_get(path)
+        return self._direct_rest_get(path, retry_policy=retry_policy)
 
     def add_comment(self, jira_key: str, body: str) -> dict[str, Any]:
         """Add a comment to a Jira issue via ACLI."""

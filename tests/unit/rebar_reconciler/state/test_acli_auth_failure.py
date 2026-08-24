@@ -183,3 +183,42 @@ def test_ordinary_failure_keeps_the_generic_operational_classification():
     assert result.disposition is reconciler_main._Disposition.OPERATIONAL_FAILURE
     assert "error_class" not in result.details
     assert "reconcile_once raised" in (result.legacy_message or "")
+
+
+# ---------------------------------------------------------------------------
+# REB-3115 S1 T2 (AC5) — the real exit-1 unauthorized shape decodes deterministically
+# ---------------------------------------------------------------------------
+#
+# ``decode_acli_triple`` is the deterministic classifier over historical
+# ``(exit, stdout, stderr)`` triples. The real bridge-run credential rejection —
+# exit 1 with the ✗ unauthorized stderr captured verbatim above — must decode to
+# the ``auth_failure`` class (never a generic retryable failure, never
+# fail-loud).
+
+
+def test_decode_real_exit1_unauthorized_is_auth_failure():
+    outcome = acli_subprocess.decode_acli_triple(1, "", LIVE_AUTH_STDERR)
+    assert outcome is acli_subprocess.AcliOutcome.auth_failure
+
+
+@pytest.mark.parametrize(
+    "stderr_text",
+    [
+        "✗ Error: unauthorized: use `acli [product] auth login` to authenticate",
+        "authentication failed",
+        "Error: invalid credentials",
+        "please run `acli jira auth login`",
+    ],
+)
+def test_decode_credential_rejection_wording_is_auth_failure(stderr_text: str):
+    assert (
+        acli_subprocess.decode_acli_triple(1, "", stderr_text)
+        is acli_subprocess.AcliOutcome.auth_failure
+    )
+
+
+def test_decode_unknown_nonzero_shape_fails_loud_and_does_not_retry():
+    with pytest.raises(acli_subprocess.UnknownAcliOutcomeError):
+        acli_subprocess.decode_acli_triple(1, "", "Error: something entirely unexpected happened")
+    with pytest.raises(acli_subprocess.UnknownAcliOutcomeError):
+        acli_subprocess.decode_acli_triple(3, "", "")

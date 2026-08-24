@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "note": "REB-3115 S1 T2 (AC5) — sanitized historical ACLI (exit, stdout, stderr) triples. Every value is redacted/synthetic: no real issue keys, tokens, emails, or hostnames. `expect` is either a decode_acli_triple AcliOutcome value or the literal 'unknown' (which must raise UnknownAcliOutcomeError). These decode deterministically and unknown shapes FAIL LOUD without retry.",
+  "cases": [
+    {
+      "name": "edit_success_mutation_result",
+      "returncode": 0,
+      "stdout": "{\"results\": [{\"status\": \"SUCCESS\", \"id\": \"PROJ-100\"}], \"totalCount\": 1, \"successCount\": 1}",
+      "stderr": "",
+      "expect": "applied"
+    },
+    {
+      "name": "created_issue_plain_dict",
+      "returncode": 0,
+      "stdout": "{\"key\": \"PROJ-101\", \"id\": \"10001\"}",
+      "stderr": "",
+      "expect": "applied"
+    },
+    {
+      "name": "search_returns_list",
+      "returncode": 0,
+      "stdout": "[{\"key\": \"PROJ-102\"}, {\"key\": \"PROJ-103\"}]",
+      "stderr": "",
+      "expect": "applied"
+    },
+    {
+      "name": "view_empty_stdout",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "expect": "applied"
+    },
+    {
+      "name": "mutation_failure_status_failure",
+      "returncode": 0,
+      "stdout": "{\"results\": [{\"status\": \"FAILURE\", \"id\": \"PROJ-104\", \"message\": \"Field 'summary' cannot be set\"}], \"totalCount\": 1, \"successCount\": 0}",
+      "stderr": "",
+      "expect": "mutation_failure"
+    },
+    {
+      "name": "mutation_failure_success_count_zero",
+      "returncode": 0,
+      "stdout": "{\"results\": [], \"totalCount\": 1, \"successCount\": 0}",
+      "stderr": "",
+      "expect": "mutation_failure"
+    },
+    {
+      "name": "real_exit1_unauthorized",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "\u2717 Error: unauthorized: use `acli [product] auth login` to authenticate",
+      "expect": "auth_failure"
+    },
+    {
+      "name": "authentication_failed_marker",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "authentication failed: token rejected",
+      "expect": "auth_failure"
+    },
+    {
+      "name": "invalid_credentials_marker",
+      "returncode": 2,
+      "stdout": "",
+      "stderr": "Error: invalid credentials supplied",
+      "expect": "auth_failure"
+    },
+    {
+      "name": "rate_limited_429",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "Error: HTTP 429 too many requests; retry-after: 30",
+      "expect": "rate_limited"
+    },
+    {
+      "name": "rate_limit_wording",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "request was rate-limited by the server",
+      "expect": "rate_limited"
+    },
+    {
+      "name": "assignee_cannot_be_assigned",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "Error: user cannot be assigned to this issue",
+      "expect": "assignee_error"
+    },
+    {
+      "name": "assignee_user_not_found",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "User not found for email: redacted@example.invalid",
+      "expect": "assignee_error"
+    },
+    {
+      "name": "unknown_nonzero_no_marker",
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "Error: something entirely unexpected happened on the server",
+      "expect": "unknown"
+    },
+    {
+      "name": "unknown_nonzero_empty_stderr",
+      "returncode": 3,
+      "stdout": "",
+      "stderr": "",
+      "expect": "unknown"
+    },
+    {
+      "name": "unknown_exit0_non_json_stdout",
+      "returncode": 0,
+      "stdout": "not json at all — some garbled banner",
+      "stderr": "",
+      "expect": "unknown"
+    }
+  ]
+}
