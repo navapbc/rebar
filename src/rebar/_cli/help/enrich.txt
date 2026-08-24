@@ -3,7 +3,7 @@ Usage: rebar enrich [-h] [--drain] [--once] [{status}]
 Inspect or drain the ticket enrichment queue.
 
 positional arguments:
-  {status}    'status' prints the queue buckets as JSON; omit to drain
+  {status}    'status' prints the queue buckets as JSON. Omit to drain
 
 options:
   -h, --help  show this help message and exit
