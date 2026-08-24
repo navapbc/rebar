@@ -270,6 +270,13 @@ def _map(exc: BaseException | None, ctx: ClassifyContext) -> ResolutionClass:
         return ResolutionClass.RETRY_NOW
     if isinstance(exc, httpx.TimeoutException):  # ReadTimeout / PoolTimeout / WriteTimeout
         return ResolutionClass.WAIT_AND_RETRY
+    # botocore/Bedrock transport timeouts, PARALLEL to the httpx timeout arm above, matched by
+    # class-name + module WITHOUT importing botocore (soft optional-dependency detection): a
+    # raw provider read/connect timeout is a transient outage, not a NEEDS_INVESTIGATION fault.
+    if type(exc).__name__ in ("ReadTimeoutError", "ConnectTimeoutError") and type(
+        exc
+    ).__module__.startswith("botocore"):
+        return ResolutionClass.WAIT_AND_RETRY
     if isinstance(exc, ModelHTTPError):
         return _map_http(exc)
     if isinstance(exc, ContentFilterError):
