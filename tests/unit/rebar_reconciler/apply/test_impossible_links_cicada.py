@@ -516,7 +516,7 @@ def test_removals_and_healthy_adds_are_untouched(store, apply_records, monkeypat
     from rebar_reconciler.peer_confirmations import open_store as _open_pc
 
     _pc = _open_pc(repo)
-    _pc.record(a, b, "blocks", pass_id="test-a4bd")
+    _pc.record(a, b, "blocks")
     _pc.save()
 
     removed = apply_records._inbound_update_apply_links(
