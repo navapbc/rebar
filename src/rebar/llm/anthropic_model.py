@@ -35,9 +35,12 @@ logger = logging.getLogger(__name__)
 
 # Internal provider names -> the Pydantic AI model-string prefix. A small, declarative
 # map (NOT per-provider behaviour) so the provider is chosen purely by the model string.
+# NOTE (ticket 155c): the bare ``openai`` request is resolved BEFORE this map, by
+# ``_openai_wire_prefix`` (Responses by default, Chat for a custom ``base_url``), so there is
+# deliberately no ``"openai"`` row here — a static ``openai:*`` prefix cannot encode that
+# base_url-dependent choice.
 _PAI_PROVIDER_PREFIX = {
     "anthropic": "anthropic",
-    "openai": "openai-chat",
     "google_genai": "google-gla",
     "google": "google-gla",
 }
@@ -190,17 +193,31 @@ def _build_retrying_anthropic_model(
 
 def _pai_model(cfg: LLMConfig):
     """The Pydantic AI model string for ``cfg`` (provider-qualified). If ``cfg.model``
-    already carries a ``provider:`` prefix it is preserved, except that legacy
-    ``openai:`` is made explicit as ``openai-chat:``. Otherwise the provider is inferred
-    (or taken from ``cfg.model_provider``) and mapped to Pydantic AI's prefix — no
-    per-provider construction code, the string is the only switch."""
+    already carries a ``provider:`` prefix it is preserved, except that a bare/legacy
+    ``openai:`` request is made explicit (ticket 155c): ``openai-responses:`` for hosted
+    OpenAI, or ``openai-chat:`` when a custom ``base_url`` is configured (a custom
+    OpenAI-compatible endpoint stays on Chat Completions — rebar builds it only under the
+    ``openai``/``openai-chat`` keys and vendor ``/v1/responses`` support is UNKNOWN). An
+    EXPLICIT ``openai-chat:`` (or ``model_provider = "openai-chat"``) is preserved as-is; its
+    hosted use is the deprecated fallback the runner signals. Otherwise the provider is inferred
+    (or taken from ``cfg.model_provider``) and mapped to Pydantic AI's prefix — no per-provider
+    construction code, the string is the only switch."""
     m = cfg.model
     if ":" in m:
         if m.startswith("openai:"):
-            return f"openai-chat:{m.split(':', 1)[1]}"
+            return f"{_openai_wire_prefix(cfg.base_url)}:{m.split(':', 1)[1]}"
         return m
     from rebar.llm.config import infer_provider
 
     prov = cfg.model_provider or infer_provider(m, None)
+    if prov == "openai":
+        return f"{_openai_wire_prefix(cfg.base_url)}:{m}"
     prefix = _PAI_PROVIDER_PREFIX.get(prov or "", prov)
     return f"{prefix}:{m}" if prefix else m
+
+
+def _openai_wire_prefix(base_url: str | None) -> str:
+    """The hosted-OpenAI wire prefix for a bare/inferred ``openai`` request (ticket 155c):
+    ``openai-responses`` by default, ``openai-chat`` when a custom OpenAI-compatible
+    ``base_url`` is configured (which rebar can only build as Chat)."""
+    return "openai-chat" if base_url else "openai-responses"

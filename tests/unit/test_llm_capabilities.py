@@ -257,6 +257,7 @@ def test_thinking_argument_still_forces_prompted_output():
     [
         ("openai:gpt-4o", True),
         ("openai-chat:gpt-4o", True),
+        ("openai-responses:gpt-4o", True),  # ticket 155c: capability parity with Chat
         ("google-gla:gemini-2.5-flash", True),
         ("google-vertex:gemini-2.5-flash", True),
         ("vertexai:gemini-2.5-flash", True),

@@ -235,6 +235,7 @@ KNOWN_PROVIDER_NAMES: frozenset[str] = frozenset(
         "moonshotai",
         "openai",
         "openai-chat",
+        "openai-responses",
         "vertexai",
         "xai",
     }

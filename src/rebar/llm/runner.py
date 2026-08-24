@@ -336,6 +336,33 @@ class PydanticAIRunner:
                 pass
             raise
 
+    def _recover_slot_endpoint(self, cfg: LLMConfig, resolved: str) -> LLMConfig:
+        """Fold a model-class SLOT endpoint into ``cfg.base_url`` and emit the hosted
+        ``openai-chat:`` deprecation, returning the (possibly updated) config.
+
+        A model class may set its endpoint on the SLOT (``REBAR_LLM_<CLASS>_ENDPOINT`` / the
+        ``endpoint`` field), which ops drop when they collapse the class onto ``cfg.model``.
+        Recover it from the resolved string (the identity ``fallback_targets_for`` keys on) and
+        apply it as ``base_url`` when the operator set none, so the PRIMARY routes through rebar's
+        OpenAI-compatible builder with best_effort provenance instead of pydantic-ai's stock
+        provider (bug 6e70). Never overrides an explicit ``base_url``; both slot reads take the
+        CONFIG's own root (bug 2876).
+
+        Hosted OpenAI on the explicit ``openai-chat:`` fallback is DEPRECATED (ticket 155c:
+        Responses-API cutover); signal it once per run via the central registry — but NOT when a
+        custom ``base_url``/slot ``endpoint`` (folded in above) forces Chat by construction, a
+        constraint with no ``openai-responses:`` alternative, not a deprecated opt-in.
+        """
+        if not cfg.base_url and self._model_override is None:
+            slot_endpoint = primary_endpoint_for(resolved, repo_root=cfg.repo_path)
+            if slot_endpoint:
+                cfg = replace(cfg, base_url=slot_endpoint)
+        if resolved.startswith("openai-chat:") and not cfg.base_url:
+            from rebar._deprecations import warn_deprecated
+
+            warn_deprecated("cfg:the hosted-OpenAI 'openai-chat:' provider prefix", logger=logger)
+        return cfg
+
     def run(self, req: RunRequest) -> dict:
         # Guard the agents extra FIRST — before importing any pydantic_ai submodule —
         # so an absent extra surfaces as a clean LLMConfigError (naming the extra), not a
@@ -394,21 +421,7 @@ class PydanticAIRunner:
                 tools = [*tools, *req.extra_tools]
             toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
         resolved = _pai_model(cfg)
-        # A model class may configure its endpoint on the SLOT (`REBAR_LLM_<CLASS>_ENDPOINT` /
-        # the `endpoint` field) rather than as a top-level `base_url`. Ops collapse the class
-        # onto `cfg.model` via `resolve_model_string`, which drops that endpoint, so recover it
-        # here from the resolved string (the same identity `fallback_targets_for` keys on) and
-        # apply it as `base_url` when the operator set none — this registers rebar's
-        # OpenAI-compatible builder for the PRIMARY model, stamps the endpoint host into the
-        # signed provenance, and flips the tier to best_effort, uniformly with the top-level
-        # `REBAR_LLM_BASE_URL` path. Without it the primary silently fell through to
-        # pydantic-ai's stock OpenAIProvider and failed with "Missing credentials" (bug 6e70).
-        # Never overrides an explicit `base_url`; a class with no slot endpoint is a no-op.
-        # Both slot reads take the CONFIG's own root, not the ambient cwd (bug 2876).
-        if not cfg.base_url and self._model_override is None:
-            slot_endpoint = primary_endpoint_for(resolved, repo_root=cfg.repo_path)
-            if slot_endpoint:
-                cfg = replace(cfg, base_url=slot_endpoint)
+        cfg = self._recover_slot_endpoint(cfg, resolved)
         # Provider resolution is delegated to the per-run ProviderSession seam (story S1 /
         # one-provider-factory) — the ONE place answering "how is a Provider built for
         # provider X", incl. "it isn't": a rebar-registered provider (today, only anthropic)
