@@ -678,6 +678,13 @@ def build_server(cfg=None):
     register_read_tools(mcp, ctx)
     register_llm_tools(mcp, ctx)
     register_write_tools(mcp, ctx)
+
+    # Box-facing health/gauge/grace (ADR deft-evolutive-mosasaur): expose /health with
+    # the certified-op in-flight gauge and instrument the LLM tools. Harmless for stdio
+    # (the custom route is only served by the HTTP app). See rebar._mcp_health.
+    from rebar._mcp_health import wire_health
+
+    wire_health(mcp)
     return mcp
 
 
@@ -733,7 +740,9 @@ def main() -> None:
     # (fail-closed). The transport selection drives both build_server and run().
     cfg = rebar.config.compose_config()
     server = build_server(cfg)
-    server.run(transport="streamable-http" if cfg.mcp.transport == "http" else "stdio")
+    from rebar._mcp_health import run_mcp
+
+    run_mcp(server, cfg.mcp)
 
 
 if __name__ == "__main__":

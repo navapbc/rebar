@@ -41,6 +41,20 @@ map $http_x_opcert_guard $opcert_guard_ok {
     include /etc/nginx/opcert-guard*.conf;
 }
 
+# --- MCP switchable upstream (ADR deft-evolutive-mosasaur / story esok) ------
+# The rebar MCP HTTP service is reached at /mcp/ through a NAMED upstream whose single
+# `server` line lives in a SEPARATE, materialized include — the atomic-flip seam the
+# blue-green autodeploy slice (panicky-sylphish-foxterrier) re-points. The include is a
+# GLOB (`mcp-upstream*.conf`) but, UNLIKE the /opcert/ map's zero-match-safe `default 0`,
+# an `upstream {}` with ZERO `server` lines is a config error — so the committed seed
+# infra/nginx/mcp-upstream.conf MUST be installed to /etc/nginx/mcp-upstream.conf before
+# `nginx -t`. infra/scripts/materialize-mcp-upstream.sh (wired into compose-up.sh) copies
+# that seed only-if-absent on a fresh boot; a flip then rewrites that one installed file +
+# `nginx -s reload`.
+upstream rebar_mcp {
+    include /etc/nginx/mcp-upstream*.conf;
+}
+
 # --- Port 80: ACME challenge + redirect everything else to HTTPS -----------
 server {
     listen 80;
@@ -99,6 +113,26 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # --- rebar MCP: /mcp -> the Streamable-HTTP service via the switchable upstream ---
+    # TLS terminates HERE (nginx edge); the MCP service is loopback-published and speaks
+    # plain HTTP behind it (REBAR_MCP_HTTP_TLS_AT_EDGE=true acknowledges this). proxy_pass
+    # to the NAMED upstream `rebar_mcp` (materialized include = the blue-green flip seam).
+    # A PREFIX `location /mcp` (no trailing slash) so BOTH the bare `/mcp` endpoint and
+    # `/mcp/...` match; NO path on proxy_pass so the URI is PRESERVED — the MCP server
+    # mounts its Streamable-HTTP endpoint at /mcp (REBAR_MCP_HTTP_PATH). The DNS-rebinding
+    # guard checks the forwarded Host, so pass the public $host through; the allowlist
+    # (REBAR_MCP_HTTP_ALLOWED_HOSTS/_ORIGINS) must name this host/origin.
+    location /mcp {
+        proxy_pass http://rebar_mcp;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        # Streamable-HTTP responses are SSE streams: disable buffering + let them idle.
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
     }
 
     # --- Gerrit: everything else -----------------------------------------

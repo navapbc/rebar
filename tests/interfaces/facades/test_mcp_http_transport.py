@@ -273,3 +273,308 @@ def test_generators_not_stale_and_include_new_keys():
     for var in NEW_ENV_VARS:
         assert var in ref, f"{var} missing from docs/mcp-reference.md"
         assert var in env, f"{var} missing from docs/env-vars.md"
+
+
+# ── /health, the in-flight gauge, and bounded SIGTERM grace (ADR 0104) ────────
+def _write_static_tokens(tmp_path) -> str:
+    """Write a minimal valid static-tokens file (one sha256 record) and return its
+    path, so an auth-enabled build has a working `static` verifier."""
+    import hashlib
+
+    digest = hashlib.sha256(b"secret-token").hexdigest()
+    tokens = {
+        "tokens": [{"name": "probe", "client_id": "probe", "scopes": [], "token_sha256": digest}]
+    }
+    path = tmp_path / "mcp-static-tokens.json"
+    path.write_text(json.dumps(tokens), encoding="utf-8")
+    return str(path)
+
+
+def _auth_http_config(tmp_path, **overrides) -> Config:
+    """A Config selecting the HTTP transport with auth ENABLED (static strategy),
+    for the /health auth-exemption oracle. Loopback bind so no TLS/allowlist ack is
+    needed; a token verifier is built so the unauthenticated-HTTP gate is satisfied."""
+    mcp_kwargs = dict(
+        transport="http",
+        auth_enabled=True,
+        auth_strategies=("static",),
+        auth_static_tokens_file=_write_static_tokens(tmp_path),
+        auth_issuer_url="https://rebar.example",
+        auth_resource_server_url="https://rebar.example/mcp",
+    )
+    mcp_kwargs.update(overrides)
+    return Config(mcp=McpConfig(**mcp_kwargs))
+
+
+def test_health_reports_in_flight_gauge_idle_inflight_and_contrast():
+    """/health returns JSON with an integer in_flight that reads 0 at idle,
+    increments while a certified op is held in flight (through the real endpoint),
+    returns to 0 after, and does NOT move for a trivial (non-certified) op."""
+    from starlette.testclient import TestClient
+
+    from rebar._mcp_health import _GAUGE_ATTR
+    from rebar.mcp_server import build_server
+
+    server = build_server(_http_config())
+    gauge = getattr(server, _GAUGE_ATTR)
+    app = server.streamable_http_app()
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+        idle = client.get("/health").json()
+        with gauge.track("review_plan"):
+            inflight = client.get("/health").json()
+        after = client.get("/health").json()
+        with gauge.track("list_tickets"):
+            trivial = client.get("/health").json()
+    assert idle == {"in_flight": 0}
+    assert isinstance(inflight["in_flight"], int) and inflight["in_flight"] == 1
+    assert after == {"in_flight": 0}
+    assert trivial == {"in_flight": 0}  # a trivial read never moves the gauge
+
+
+def test_health_is_unauthenticated_even_with_auth_enabled(tmp_path):
+    """/health returns 200 WITHOUT a bearer while auth is enabled (it is a custom
+    route outside RequireAuthMiddleware) — while /mcp still challenges (401)."""
+    from starlette.testclient import TestClient
+
+    from rebar.mcp_server import build_server
+
+    app = build_server(_auth_http_config(tmp_path)).streamable_http_app()
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+        health = client.get("/health")
+        mcp = client.post("/mcp", json=INIT_REQUEST, headers=MCP_HEADERS)
+    assert health.status_code == 200
+    assert health.json() == {"in_flight": 0}
+    assert mcp.status_code == 401  # the MCP endpoint still enforces the bearer
+
+
+def test_certified_tool_instrumentation_moves_the_gauge():
+    """instrument_certified_tools wraps a certified tool's fn so running it moves
+    the gauge; a non-certified tool's fn is left untouched. Uses a blocking stub so
+    the increment is observable while the call is in flight."""
+    import threading
+    from types import SimpleNamespace
+
+    from rebar._mcp_health import InFlightGauge, instrument_certified_tools
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def _blocking_review_plan(*_a, **_k):
+        started.set()
+        release.wait(timeout=5)
+        return "done"
+
+    def _trivial(*_a, **_k):
+        return "ok"
+
+    certified = SimpleNamespace(fn=_blocking_review_plan, is_async=False)
+    trivial = SimpleNamespace(fn=_trivial, is_async=False)
+    async_certified_fn = object()
+    async_certified = SimpleNamespace(fn=async_certified_fn, is_async=True)
+    tools = {
+        "review_plan": certified,
+        "list_tickets": trivial,
+        # verify_completion is a certified name but marked async → must be left alone;
+        # review_code / scan_spec are absent (get_tool → None) → skipped, not an error.
+        "verify_completion": async_certified,
+    }
+    manager = SimpleNamespace(get_tool=lambda n: tools.get(n))
+    mcp = SimpleNamespace(_tool_manager=manager)
+
+    gauge = InFlightGauge()
+    instrument_certified_tools(mcp, gauge)
+
+    assert trivial.fn is _trivial  # non-certified tool untouched
+    assert certified.fn is not _blocking_review_plan  # certified tool wrapped
+    assert async_certified.fn is async_certified_fn  # async certified tool left untouched
+
+    assert gauge.value == 0
+    worker = threading.Thread(target=certified.fn)
+    worker.start()
+    assert started.wait(timeout=5)
+    assert gauge.value == 1  # certified op is in flight
+    release.set()
+    worker.join(timeout=5)
+    assert gauge.value == 0  # drained after the op returns
+
+
+def test_wired_server_moves_gauge_for_a_really_registered_certified_tool():
+    """Integration of the PRODUCTION wiring: a really-registered certified tool
+    (name review_plan) on a real FastMCP, instrumented by wire_health, moves the
+    /health gauge while it runs and returns to 0 after — proving instrument_certified_tools
+    + _wrap_tool_fn actually wrap a genuinely-registered tool (only the tool BODY is a
+    stub). Read through the real /health route via TestClient."""
+    import threading
+
+    from mcp.server.fastmcp import FastMCP
+    from starlette.testclient import TestClient
+
+    from rebar._mcp_health import wire_health
+
+    server = FastMCP("rebar-test", host="127.0.0.1", port=8000)
+    started = threading.Event()
+    release = threading.Event()
+
+    @server.tool(name="review_plan")
+    def review_plan() -> str:  # a stubbed certified op
+        started.set()
+        release.wait(timeout=5)
+        return "ok"
+
+    wire_health(server)
+    wrapped = server._tool_manager.get_tool("review_plan").fn  # the production wrapper
+    app = server.streamable_http_app()
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+        assert client.get("/health").json() == {"in_flight": 0}
+        worker = threading.Thread(target=wrapped)
+        worker.start()
+        assert started.wait(timeout=5)
+        assert client.get("/health").json() == {"in_flight": 1}  # via the real endpoint
+        release.set()
+        worker.join(timeout=5)
+        assert client.get("/health").json() == {"in_flight": 0}
+
+
+def test_drain_then_exit_waits_for_gauge_then_exits_within_bound():
+    """drain_then_exit blocks (bounded by grace) until the gauge drains, then calls
+    exit_fn. With a fake clock: it does not exit while in flight, and does once the
+    gauge reaches 0."""
+    from rebar._mcp_health import InFlightGauge, drain_then_exit
+
+    gauge = InFlightGauge()
+    gauge._increment()  # one op in flight
+    now = {"t": 0.0}
+    exited = {"v": False}
+    ticks = {"n": 0}
+
+    def _sleep(dt):
+        now["t"] += dt
+        ticks["n"] += 1
+        if ticks["n"] == 3:  # the op finishes after a few polls
+            gauge._decrement()
+
+    drain_then_exit(
+        gauge,
+        grace_seconds=1200,
+        exit_fn=lambda: exited.__setitem__("v", True),
+        poll_interval=0.5,
+        sleep=_sleep,
+        monotonic=lambda: now["t"],
+    )
+    assert exited["v"] is True
+    assert gauge.value == 0
+    assert now["t"] < 1200  # exited well within the bound once drained
+
+
+def test_drain_then_exit_is_bounded_when_gauge_never_drains():
+    """A stuck op does not hang shutdown forever: drain_then_exit exits once the
+    grace bound elapses even though the gauge is still > 0."""
+    from rebar._mcp_health import InFlightGauge, drain_then_exit
+
+    gauge = InFlightGauge()
+    gauge._increment()
+    now = {"t": 0.0}
+    exited = {"v": False}
+
+    drain_then_exit(
+        gauge,
+        grace_seconds=10,
+        exit_fn=lambda: exited.__setitem__("v", True),
+        poll_interval=1.0,
+        sleep=lambda dt: now.__setitem__("t", now["t"] + dt),
+        monotonic=lambda: now["t"],
+    )
+    assert exited["v"] is True
+    assert gauge.value == 1  # never drained
+    assert now["t"] >= 10  # waited the full bound
+
+
+def test_run_http_with_grace_installs_sigterm_and_bounds_uvicorn(monkeypatch):
+    """run_http_with_grace builds a uvicorn server with a bounded graceful-shutdown
+    timeout equal to the grace, installs a SIGTERM handler, and joins the serving
+    thread. A fake uvicorn Server (run() returns immediately) keeps the test
+    port-free; the SIGTERM handler drains the gauge then sets should_exit."""
+    import signal
+
+    import rebar._mcp_health as health
+    from rebar.mcp_server import build_server
+
+    captured = {}
+
+    class _FakeServer:
+        def __init__(self, config):
+            captured["config"] = config
+            self.should_exit = False
+
+        def run(self):  # returns immediately → serving thread ends at once
+            captured["ran"] = True
+
+    class _FakeConfig:
+        def __init__(self, app, **kwargs):
+            captured["config_kwargs"] = kwargs
+
+    monkeypatch.setattr("uvicorn.Config", _FakeConfig)
+    monkeypatch.setattr("uvicorn.Server", _FakeServer)
+
+    prev = signal.getsignal(signal.SIGTERM)
+    try:
+        server = build_server(_http_config())
+        gauge = getattr(server, health._GAUGE_ATTR)
+        health.run_http_with_grace(server, gauge, grace_seconds=1200)
+        assert captured.get("ran") is True
+        assert captured["config_kwargs"]["timeout_graceful_shutdown"] == 1200
+        assert signal.getsignal(signal.SIGTERM) not in (prev, signal.SIG_DFL)
+    finally:
+        signal.signal(signal.SIGTERM, prev)
+
+
+def test_run_mcp_stdio_delegates_to_fastmcp_run(monkeypatch):
+    """run_mcp on a stdio config calls FastMCP.run(transport='stdio') and does not
+    touch the HTTP grace path."""
+    from types import SimpleNamespace
+
+    from rebar._mcp_health import run_mcp
+
+    calls = {}
+    server = SimpleNamespace(run=lambda **kw: calls.update(kw))
+    run_mcp(server, SimpleNamespace(transport="stdio"))
+    assert calls == {"transport": "stdio"}
+
+
+def test_shutdown_grace_constant_is_positive_and_bounded():
+    """The module grace constant is the documented 1200s budget."""
+    from rebar._mcp_health import DEFAULT_SHUTDOWN_GRACE_SECONDS
+
+    assert DEFAULT_SHUTDOWN_GRACE_SECONDS == 1200
+
+
+def test_sigterm_grace_subprocess_waits_for_inflight_then_exits_zero():
+    """End-to-end SIGTERM grace in a real subprocess: with one op in flight, a
+    SIGTERM does NOT exit immediately — the process waits until the gauge drains
+    (~0.8s here) and then exits 0, all within the grace bound. Drives the real
+    _mcp_health.drain_then_exit via an installed SIGTERM handler + a real signal."""
+    import time
+
+    script = (
+        "import os, sys, time, signal, threading\n"
+        "from rebar._mcp_health import InFlightGauge, drain_then_exit\n"
+        "g = InFlightGauge(); g._increment()\n"
+        "def _release():\n"
+        "    time.sleep(0.8); g._decrement()\n"
+        "threading.Thread(target=_release, daemon=True).start()\n"
+        "def _h(signum, frame):\n"
+        "    drain_then_exit(g, grace_seconds=30, poll_interval=0.05,\n"
+        "                    exit_fn=lambda: sys.exit(0))\n"
+        "signal.signal(signal.SIGTERM, _h)\n"
+        "os.kill(os.getpid(), signal.SIGTERM)\n"
+        "time.sleep(60)\n"
+    )
+    start = time.monotonic()
+    proc = subprocess.run([sys.executable, "-c", script], timeout=30, check=False)
+    elapsed = time.monotonic() - start
+    assert proc.returncode == 0
+    # The release thread holds the op ~0.8s, so a correct grace CANNOT have exited before
+    # then; this lower bound proves it waited for the in-flight op rather than exiting on the
+    # signal. The subprocess timeout=30 above is the hang guard (no upper-bound wall-clock
+    # assert — that is the proven CI flake class).
+    assert elapsed >= 0.5
