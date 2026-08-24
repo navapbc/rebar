@@ -106,27 +106,19 @@ Configuration reads are routed through the approved composition and credential b
 
 `OperationSnapshot` does not control every operation. CLI, MCP, public library, shared command, and direct reconciler entry points still compose diagnostic snapshots beside their existing behavior. `REBAR_OPERATION_SNAPSHOT_SHADOW` remains enabled by default and diagnostic only. See [config.md](config.md#rebar_operation_snapshot_shadow) for its behavior and ticket `opal-daffy-mutt` for the post-RP-04 documentation correction. The reusable interfaces and binding details are in [reuse-surface.md](reuse-surface.md#6-operation-scoped-configuration).
 
-### Lazy CLI command and capability registry (RP-05; migration pending)
+### Implemented lazy CLI command and capability registry (RP-05)
 
-[ADR 0100](adr/0100-cli-command-and-capability-registry.md) establishes one stdlib-only
-immutable lazy route registry as the single authority for top-level command identity,
-spellings/visibility, lazy handler and parser-factory references, mount/init and
-confirmation/output policy, and advertised semantic capabilities. Every command grammar is
-built by one side-effect-free stdlib `argparse` factory that both runtime parsing and
-help generation call, so generated syntax/options cannot drift from execution; there is no
-docs-only grammar, second parser, or Click dependency. Overview, canonical help,
-accepted-alias help, and unknown-command rendering are served from committed,
-runtime-authoritative package-help bytes and routed **before** the RP-04 operation snapshot,
-config materialization, store mount, handler resolution, or any optional import. A separate
-capability registry maps each capability to a packaging extra and a missing posture
-(`error` / `unavailable` / `abstain` / `fallback`), enforced only after the selected
-mode/backend is known. Aliases reuse canonical grammar (compatibility bridge/reconcile
-shims compose the same argument-definition helpers with an alias-specific `prog`); a hidden
-`bridge-status` alias is helpable but undiscoverable; a retired `purge-bridge` spelling stays
-unknown. See [ADR 0100](adr/0100-cli-command-and-capability-registry.md) for the full
-canonical/exact/compatibility/hidden/retired alias taxonomy.
-The migration is expand/contract by command family and not yet implemented; the current
-`frozenset`-census facade in `rebar._cli` remains until RP-05's cutover.
+[ADR 0100](adr/0100-cli-command-and-capability-registry.md) records the route, grammar, help, and capability decisions introduced by RP-05. Epic `grapy-cynical-copepod` records the completed implementation, and task `pettish-snippy-rasbora` records the final runtime cutover.
+
+`rebar._cli._registry.ROUTES` is the immutable authority for recognized top-level command spellings and their execution policy. Each `Route` records its spelling and visibility, lazy handler and parser factory references, bounded invocation adapter, initialization and mount policy, confirmation and output policy, and advertised capability keys. Handler and parser references remain `module.path:attr` strings while the registry is imported. This keeps command handlers and optional packages outside startup. Registry validation rejects duplicate or contradictory entries, malformed references, unsupported adapters or initialization policies, and unknown capability keys without importing handlers.
+
+`rebar._cli.main` serves overview, help, and unknown-command requests from committed package data before operation snapshot composition, configuration materialization, store mounting, handler resolution, or optional imports. Command execution then passes through configuration, mount, and confirmation boundaries before `rebar._cli._execute.execute` selects the route. The executor applies the route initialization policy, imports only the selected handler, and invokes it through the route adapter. Core, bridge, and advanced commands use this path, so there is no separate top-level command dispatch ladder.
+
+Side-effect-free stdlib `argparse` factories define each command grammar. Runtime command parsers and `scripts/gen_cli_help.py` use those factories. The generator walks visible entries in `ROUTES` at build or check time and writes `src/rebar/_cli/help/<command>.txt` plus `overview.txt`. Runtime help serves those committed bytes. `scripts/gen_cli_reference.py` also reads `ROUTES` for the command census, which keeps the external CLI reference aligned with the registered surface.
+
+`rebar._capabilities.CAPABILITIES` is the immutable descriptive registry for semantic optional capabilities. Each entry records a packaging extra, a typed missing posture, a probe module, and an installation hint. Route capability keys are validated against this registry. Availability checks use module discovery without importing the optional package. Error-posture capabilities can fail with a targeted dependency error at their selected execution boundary. Domain components retain ownership of unavailable, abstain, and fallback results. Capability checks occur after the relevant mode, backend, analyzer, renderer, or provider is known, rather than during route selection.
+
+ADR 0100 remains the historical rationale for this boundary, including the canonical, compatibility, hidden, and retired spelling taxonomy. The implementation preserves its stdlib-only startup and pre-operation help invariants.
 
 ### Two writers, one store
 

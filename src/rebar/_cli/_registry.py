@@ -1,15 +1,19 @@
-"""Immutable CLI route registry (RP-05 S2a scaffolding).
+"""Immutable CLI route registry and execution metadata for RP-05.
 
-A stdlib-only, side-effect-free census of every current ``rebar`` spelling. Its
-sole job for S2a is to *shadow* the router: :func:`derive_policy_sets` rebuilds
-the router's live ``_cli`` policy frozensets from this table with ZERO delta,
-without cutting any routing, help, or execution over to it.
+``ROUTES`` is the single authority for recognized top-level command spellings
+and their execution policy. Each ``Route`` stores lazy ``"module.path:attr"``
+strings for its handler and parser factory. Importing this module does not
+resolve those strings or import command handlers or optional dependencies.
 
-Import isolation is a hard contract: importing this module, calling
-:func:`route_for`, and calling :func:`derive_policy_sets` MUST NOT import any
-command handler or optional dependency. Handler / parser references are stored
-as LAZY dotted strings (``"module.path:attr"``) and are never imported at
-construction; they are only shape-validated by :func:`validate`.
+Runtime dispatch calls :func:`route_for` and resolves only the selected handler
+through ``rebar._cli._execute``. Help generation walks ``ROUTES``, resolves
+parser factories during generation, and writes the committed artifacts that
+runtime help serves. :func:`derive_policy_sets` exports compatibility policy
+sets from the same table.
+
+Route capability names come from ``rebar._capabilities.CAPABILITIES``. They
+describe capabilities that a route may exercise. Capability checks remain at
+the selected execution boundary after the mode or backend is known.
 """
 
 from __future__ import annotations
