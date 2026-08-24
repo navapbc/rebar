@@ -358,7 +358,10 @@ rebar tracker-footprint --fresh-clone --output json
 The layers are intentionally distinct:
 
 - `pack` is the exact logical-byte sum of `.pack` files in the primary common Git object
-  database; it excludes indexes and every checked-out file.
+  database; it excludes indexes and every checked-out file. Its `complete` flag is `true`
+  when those pack files are the whole object store backing the checkout, and `false` when the
+  checkout borrows objects from an alternate object database (an `alternates`-backed
+  `git clone --shared`): a non-exclusive pack value must not be read as the whole object store.
 - `checkout.logical_bytes` sums `lstat().st_size` once per non-directory pathname outside
   the tracker's root `.git`; `checkout.file_count` counts those pathnames.
 - `checkout.allocated_bytes` uses `st_blocks * 512`, charging hard-linked storage once per

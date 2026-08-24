@@ -49,6 +49,10 @@ def _render_text(report: dict[str, object]) -> str:
             )
         if "scope" in layer:
             line += f" scope={layer['scope']}"
+        if "complete" in layer:
+            line += f" complete={layer['complete']}"
+            if layer["complete"] is False:
+                line += " (non-exclusive: objects reside in an unmeasured alternate database)"
         lines.append(line)
     lines.append("  definitions:")
     for name, definition in definitions.items():
