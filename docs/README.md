@@ -110,6 +110,7 @@ Browse the generated [ADR index](adr/README.md) for numbered decisions and statu
 These pages support deployment, release, incident response, and recurring maintenance.
 
 - **[ci-provider-matrix.md](ci-provider-matrix.md)**. Credentialed provider coverage and test cadence for LLM integrations.
+- **[comment-echo-reclaim-runbook.md](comment-echo-reclaim-runbook.md)**. Preparation, quiet-window publication, and rollback protocol for the one-time reconciler comment-echo history reclaim.
 - **[dependency-advisory-runbook.md](dependency-advisory-runbook.md)**. Response procedure for dependency vulnerability findings.
 - **[gerrit-aws-setup.md](gerrit-aws-setup.md)**. Deployment of Gerrit and the review bot on AWS.
 - **[jira-dc-capability-map.md](jira-dc-capability-map.md)**. Measured Jira Data Center behavior and regeneration workflow.
