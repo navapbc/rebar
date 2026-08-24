@@ -133,40 +133,17 @@ a stated positive rationale, compat/rollback for any migration, and maintainabil
 its **overlays** (security trust-boundary, infra endpoint-auth, prior-art, migration-safety,
 new-prohibition consumer scan, CI-trigger).
 
-**Establish the dependency graph before you review.** After creating the tickets, `link` the
-children into their parent/prerequisite structure (`blocks`/`depends_on`) so the blocking
-relationships are recorded first. Plan-review is dependency-scoped: a review pins its direct
-dependencies' material, and `rebar review-plan` **fast-fails with no LLM** (unsigned
-`INDETERMINATE`, exit 2) on a ticket that is not yet claimable — one still `open` but blocked by
-an unclosed dependency. So **run the plan-review gate only on unblocked tickets** (`rebar ready`
-identifies them — those whose blockers are all closed), and review **in dependency order** —
-prerequisites/children before their dependents, never a ticket and its dependencies in parallel.
-As dependencies close and later tickets become unblocked, review those in turn. (If `rebar
-ready` returns an empty set right after linking, the graph likely has a cycle or an authoring
-error — inspect and fix the links before proceeding, rather than forcing a review.) For each
-reviewed ticket run `rebar review-plan <id>`; remediate any BLOCK and apply the advisory
-findings that genuinely improve the plan before claiming. Reading the gate first is standard
-process: it is far cheaper to author to the criteria than to remediate a BLOCK after the fact.
+**Establish the dependency graph before you review.** After creating the tickets, use `link` to record their parent and prerequisite relationships with `blocks` or `depends_on`. Plan review is dependency-scoped. A review pins the material from its direct dependencies. The claimability fast-fail returns unsigned `INDETERMINATE` when a ticket is not claimable. Its `coverage.llm_ran` is `false`, and its exit status is 2. This result defers the LLM verdict. It is not a PASS, a passing attestation, or a successful review verdict.
 
-**A blocked ticket has already completed the review cycle successfully — do NOT review it,
-and do NOT force it.** The gate's fast-fail on a not-yet-claimable ticket (status
-`closed`/`idea`/`blocked`, or `open` but blocked by an unclosed dependency) is the **intended
-and correct** outcome, not an obstacle to work around. For the current cycle, treat that
-blocked state as *done*: the ticket has passed through review as far as it can until its
-dependencies close, and it needs no further action from you now. It re-enters the review queue
-on its own when `rebar ready` surfaces it (all blockers closed) — review it *then*, not before.
+Run the plan-review gate only on unblocked tickets. `rebar ready` identifies tickets whose blockers are closed. Review in dependency order, with prerequisites and children before their dependents. Never review a ticket and its dependencies in parallel. As dependencies close, review each newly claimable ticket in turn.
 
-Never pass `--force` to `rebar review-plan` to bypass the claimability check so you can review a
-blocked ticket. `--force` exists as an escape hatch for a **human operator's** explicit
-judgment call; it is not an agent move, and a vague or implied instruction ("review these", "why
-aren't we reviewing yet?") is **not** authorization to force — it is at most a reason to ask.
-Forcing produces a signed attestation against dependencies that are not final, which the gate is
-specifically designed to prevent: a review pins its dependencies' material, so an attestation
-minted while a dependency is still open silently goes stale the moment that dependency changes.
-If you believe a blocked ticket genuinely must be reviewed now, that is a decision only the user
-can make — surface it as a one-question clarification (name the block, the risk of forcing, and
-ask explicitly) rather than inferring permission and forcing on your own. Do not treat a series
-of individually-plausible force decisions as collectively acceptable; each one erodes the gate.
+If `rebar ready` returns an empty set after linking, inspect the graph for a cycle or an authoring error. Correct the links before proceeding. Do not force a review. For each reviewed ticket, run `rebar review-plan <id>`. Remediate every BLOCK and apply advisory findings that improve the plan before claiming. Reading the gate before authoring reduces later remediation.
+
+**A blocked ticket needs no further agent action in the current cycle. Do not review it and do not force it.** The claimability fast-fail applies to a ticket with status `closed`, `idea`, or `blocked`. It also applies to an `open` ticket that has an unclosed dependency. The current-cycle agent action is complete. Wait until the ticket becomes claimable. `rebar ready` surfaces it after all blockers close. Review it then.
+
+Never pass `--force` to `rebar review-plan` to bypass the claimability check for a blocked ticket. `--force` is an escape hatch for an explicit human operator judgment. It is not an agent move. A vague or implied instruction does not authorize force. Ask the user when authorization is unclear.
+
+Forcing produces a signed attestation against dependencies that are not final. The gate prevents this condition because a review pins dependency material. An attestation minted while a dependency remains open becomes stale when that dependency changes. If a blocked ticket must be reviewed before it becomes claimable, ask one question that names the block and the risk. Do not infer permission. Each force decision requires separate authorization.
 
 Before recording any ticket whose acceptance criteria will include or reference testing,
 verification, or behavioral oracles, also read **`test-design.md` in this skill's
