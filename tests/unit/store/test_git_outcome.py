@@ -50,6 +50,7 @@ TABLE: tuple[tuple[str, str, GitKind], ...] = (
         "error: unable to create temporary file: No such file or directory",
         GitKind.TRANSIENT_FS,
     ),
+    (git_outcome.LOCAL, "fatal: unable to write new index file", GitKind.TRANSIENT_FS),
     (
         git_outcome.COMMIT,
         "error: invalid object 100644 4b825dc for 'x.json'\nfatal: Error building trees",
