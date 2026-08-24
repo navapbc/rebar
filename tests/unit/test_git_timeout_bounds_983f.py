@@ -8,8 +8,10 @@ could block indefinitely:
 
 * ``_commands/init.py`` — the cold first ``fetch <remote> <branch>`` of the tickets
   branch into a freshly-initialised store. A cold materialize can legitimately take
-  minutes (a large event-sourced branch over a proxy), so it takes the
-  ``_snapshot/repo_snapshot`` cold precedent (``_GIT_TIMEOUT = 300``).
+  minutes (a large event-sourced branch over a proxy), so it takes the shared
+  ``_snapshot/git_fetch`` cold precedent — the generous, tunable ``fetch_timeout()``
+  backstop (bug curly-open-swan), no longer a FIXED 300s cap that failed an honest large
+  transfer closed.
 * ``_commands/fsck_repair.py`` — the a3-remediation ``push origin HEAD:tickets`` of a
   batch of ticket events against an already-warm clone. Incremental, so it takes the
   ``_store/push`` precedent (``_GIT_TIMEOUT = 30``).
@@ -37,8 +39,17 @@ pytestmark = pytest.mark.unit
 # ── The bound each site chose matches the cited precedent ─────────────────────────────
 
 
-def test_init_fetch_timeout_matches_cold_snapshot_precedent() -> None:
-    assert init._FETCH_TIMEOUT == _snap._GIT_TIMEOUT == 300
+def test_init_fetch_timeout_matches_cold_snapshot_precedent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # init's cold tickets fetch and the snapshot cold-materialize fetch share the SAME
+    # tunable backstop, scaled above the old fixed 300s cap (bug curly-open-swan), and both
+    # honour the same env override live per call.
+    monkeypatch.delenv("REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS", raising=False)
+    assert init._fetch_timeout() == _snap.fetch_timeout()
+    assert init._fetch_timeout() > 300
+    monkeypatch.setenv("REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS", "4200")
+    assert init._fetch_timeout() == _snap.fetch_timeout() == 4200
 
 
 def test_fsck_repair_push_timeout_matches_store_precedent() -> None:
@@ -57,7 +68,7 @@ def test_init_fetch_passes_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(init, "run_git", _spy)
     init._git_fetch("/nonexistent", "fetch", "origin", "tickets")
-    assert seen["timeout"] == init._FETCH_TIMEOUT
+    assert seen["timeout"] == init._fetch_timeout()
     assert seen["timeout"] is not None and seen["timeout"] > 0
 
 
@@ -80,13 +91,15 @@ def test_fsck_repair_push_passes_the_timeout(monkeypatch: pytest.MonkeyPatch) ->
 def test_init_fetch_folds_timeout_into_descriptive_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS", "1500")
+
     def _boom(cwd, *args, **kwargs):
         raise subprocess.TimeoutExpired(["git", *args], kwargs.get("timeout") or 1)
 
     monkeypatch.setattr(init, "run_git", _boom)
     result = init._git_fetch("/nonexistent", "fetch", "origin", "tickets")
     assert result.returncode == 124
-    assert "timed out after 300s" in (result.stderr or "")
+    assert "timed out after 1500s" in (result.stderr or "")
     assert "fetch" in (result.stderr or ""), "the timeout error must name the git op"
 
 

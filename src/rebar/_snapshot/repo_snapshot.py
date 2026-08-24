@@ -68,11 +68,11 @@ from pathlib import Path
 
 from rebar._snapshot.delta_tree import materialize_via_donor
 from rebar._snapshot.git_fetch import (
-    _GIT_TIMEOUT,
     SnapshotError,
     SnapshotFetchError,
     SnapshotRefError,
     fetch_origin,
+    fetch_timeout,
     git_run,
     has_remote,
     is_missing_ref,
@@ -398,15 +398,17 @@ def _ensure_blobs_present(repo_root: str, sha: str, remote: str) -> None:
     argv = ["fetch", "--no-filter", "--refetch", "--quiet", remote, "--end-of-options", sha]
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     try:
-        # Same throughput-keyed abort as fetch_origin: this is the OTHER network fetch on
-        # the materialization path, so without it a stalled remote parks this child on the
-        # 300s wall clock too. The -c pairs must precede the subcommand.
+        # Same throughput-keyed abort AND wall-clock backstop as fetch_origin: this is the
+        # OTHER network fetch on the materialization path, so it shares the generous,
+        # tunable fetch ceiling (fetch_timeout) rather than the fixed 300s cap that failed
+        # an honest large/cold-store transfer closed (bug curly-open-swan). The stall-abort
+        # still guards a wedged remote. The -c pairs must precede the subcommand.
         subprocess.run(
             ["git", "-C", repo_root, *stall_abort_args(), *argv],
             capture_output=True,
             text=True,
             env=env,
-            timeout=_GIT_TIMEOUT,
+            timeout=fetch_timeout(),
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
