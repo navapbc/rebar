@@ -172,6 +172,80 @@ def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None, *, sig
     )
 
 
+def record_completion_verdict(
+    result: dict, ticket_id: str, repo_root=None, *, sign: bool = True
+) -> dict[str, object]:
+    """Record a completion-verifier run made OUTSIDE a close transition ON THE TICKET, so a
+    later same-``--ref`` close REUSES it instead of firing a duplicate (billable) verifier run
+    — the recording half of the close gate's reuse path
+    (:func:`rebar._commands.close_autoresume._reusable_attested_pass`).
+
+    Mirrors the close gate's post-close recording tail, minus the ``verify -> close -> sign``
+    ordering: a standalone verify has no close to sequence against, so the verdict is signed
+    directly against the sha it was verified at (the reuse consumer re-checks that sha against
+    the close's ``--ref``, so an intervening code change simply means the close verifies afresh).
+    Two durable artifacts:
+
+    * the ``COMPLETION_VERDICT`` sidecar (PASS or FAIL) — the same offline-queryable record the
+      close gate emits (:mod:`rebar.llm.completion_sidecar`); and
+    * on an ATTESTED, CERTIFIABLE ``PASS`` pinned to a ``verified_at_sha``, the signed
+      ``completion-verifier`` op-cert, minted through the SHARED producer
+      (:func:`sign_completion_verdict`) so a standalone verify and a close mint the cert the
+      SAME way and the reuse check accepts either.
+
+    NEVER signs a ``local`` (unattested, opt-in) or ``certifiable=False`` verdict — matching the
+    close gate's own suppression of both in ``close_precheck._completion_precheck``
+    (an unattested/uncertified verdict is by contract not a reusable certification: ADR 0005 /
+    epic raze-vet-ditch S4). ``sign=False`` records only the sidecar — the CLI ``--no-sign`` and
+    the MCP read-only opt-outs, symmetric with ``review_plan``.
+
+    Best-effort and NEVER raises: recording is observability plus a close-time optimization, so a
+    sidecar or signing failure leaves the caller's verdict/exit untouched. Returns a
+    machine-readable ``{"signed": bool, "cause": str, "sidecar_written": bool, "error": str}``
+    with ``cause`` one of ``signed`` / ``not_pass`` / ``sign_disabled`` / ``local_source`` /
+    ``not_certifiable`` / ``no_verified_sha`` / ``sign_failed``."""
+    from rebar import config as _config
+    from rebar import signing as _signing
+    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar.llm import completion_sidecar
+
+    # Bind the canonical id (an alias/short id resolves) so the sidecar lands in the right
+    # ticket dir and the op-cert material/ticket steps match what the close later re-derives.
+    tracker = str(_config.tracker_dir(repo_root))
+    resolved_id = resolve_ticket_id(ticket_id, tracker) or ticket_id
+    result.setdefault("ticket_id", resolved_id)
+
+    try:
+        sidecar_written = completion_sidecar.emit(result, material=None, repo_root=repo_root)
+    except Exception:
+        logger.warning(
+            "standalone completion sidecar emit raised for %s; continuing",
+            ticket_id,
+            exc_info=True,
+        )
+        sidecar_written = False
+
+    def _outcome(cause: str, *, error: str = "") -> dict[str, object]:
+        return {"signed": False, "cause": cause, "sidecar_written": sidecar_written, "error": error}
+
+    if str(result.get("verdict", "")).upper() != "PASS":
+        return _outcome("not_pass")
+    if not sign:
+        return _outcome("sign_disabled")
+    if result.get("source") == "local":
+        return _outcome("local_source")
+    if result.get("certifiable") is False:
+        return _outcome("not_certifiable")
+    if not result.get("verified_at_sha"):
+        return _outcome("no_verified_sha")
+    try:
+        sign_completion_verdict(result, resolved_id, repo_root)
+    except _signing.SigningError as exc:
+        logger.warning("standalone completion sign failed for %s: %s", ticket_id, exc.message)
+        return _outcome("sign_failed", error=exc.message)
+    return {"signed": True, "cause": "signed", "sidecar_written": sidecar_written, "error": ""}
+
+
 def _active_caused_by_targets(state: dict) -> list[str]:
     """The net-active ``caused_by`` targets already recorded on a reduced ticket state."""
     return [

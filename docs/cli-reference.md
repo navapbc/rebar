@@ -872,7 +872,7 @@ options:
 ### `verify-completion`
 
 ```
-Usage: rebar verify-completion [-h] [--graph | --no-graph] [--output {json,text}] [--check] [--ref REF] [--source {attested,local}] [ticket_id]
+Usage: rebar verify-completion [-h] [--graph | --no-graph] [--output {json,text}] [--check] [--no-sign] [--ref REF] [--source {attested,local}] [ticket_id]
 
 Run the completion-verifier agent on a ticket and emit a PASS/FAIL verdict that
 its completion requirements (acceptance/success/close criteria, definitions of
@@ -890,6 +890,15 @@ options:
                         epics, off otherwise)
   --output, -o {json,text}
   --check               print backend/credential availability and exit
+  --no-sign             run the verifier but do NOT record the result on the
+                        ticket. By default an attested (source=attested) PASS
+                        SIGNS a completion-verifier attestation (and both PASS
+                        and FAIL emit the COMPLETION_VERDICT sidecar) — that
+                        attestation is what a later same-ref `rebar transition
+                        ... closed` REUSES to skip a duplicate (billable)
+                        verifier run — so this flag is the explicit opt-out. A
+                        local (--source local) verdict is never signed
+                        regardless
   --ref REF             branch | tag | SHA to verify against (default:
                         origin/main; configurable via REBAR_GATE_REF /
                         [snapshot].ref) — pass --ref HEAD when the review
