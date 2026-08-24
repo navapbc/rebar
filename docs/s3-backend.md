@@ -93,11 +93,17 @@ Scope an IAM policy to exactly this bucket **and** the CMK (the helper needs `km
 
 ## 3. Configure the remote and `sync.remote`
 
-Add a git remote whose URL is `s3://bucket/prefix`, then point `sync.remote` at it:
+Add a git remote whose URL is `s3://bucket/prefix`.
 
 ```sh
 git remote add s3tickets s3://my-org-rebar-tickets/tickets
-rebar config -c sync.remote=s3tickets
+```
+
+Set the remote name in the project's `rebar.toml`.
+
+```toml
+[sync]
+remote = "s3tickets"
 ```
 
 The URL may name an AWS profile with `s3://profile@bucket/prefix` (the helper passes it to

@@ -1,23 +1,23 @@
-"""rebar MCP authentication seam (S2) — the provider-agnostic token-verifier layer.
+"""Provider-agnostic token verification for MCP over HTTP.
 
-This module is the SINGLE audience/fail-closed choke point for MCP-over-HTTP auth.
-It builds a :class:`CompositeTokenVerifier` — an ordered chain of provider-specific
-verifiers — and re-checks the RFC 8707 resource (audience) on every accepted token
-INDEPENDENTLY of the sub-verifier, so a mis-scoped token can never slip through. Auth
-is OFF by default; when enabled, ``rebar.mcp_server.build_server`` wires the composite
-into FastMCP's Resource-Server support (the SDK then serves RFC 9728 PRM, emits the
-401/``WWW-Authenticate`` challenge, and enforces ``required_scopes``).
+This module is the audience and fail-closed choke point for MCP authentication.
+:class:`CompositeTokenVerifier` runs an ordered chain of provider-specific
+verifiers and checks the RFC 8707 resource before accepting a token. Authentication
+is disabled by default. When enabled, ``rebar.mcp_server.build_server`` wires the
+composite into FastMCP Resource Server support. The SDK then serves RFC 9728 protected
+resource metadata, emits the 401 ``WWW-Authenticate`` challenge, and enforces
+``required_scopes``.
 
-S2 ships ONLY the dependency-free ``static`` bearer verifier. The factory knows the
-CLOSED strategy vocabulary ({static, jwt, introspection, proxy, custom}) but the other
-four are implemented by later stories — asking for one is a hard ``AuthConfigError``,
-not a silent no-op, so the vocabulary stays honest.
+Five strategies are implemented. ``static`` verifies bearer tokens against a secrets
+file. ``jwt`` verifies signed tokens with a JWKS endpoint. ``introspection`` checks
+opaque tokens through an RFC 7662 endpoint. ``proxy`` accepts an identity forwarded
+by a trusted proxy after middleware validates its shared secret. ``custom`` loads a
+verifier factory from trusted operator configuration.
 
-All verifiers expose ``async def verify_token(self, token) -> AccessToken | None``:
-an ``AccessToken`` accepts, ``None`` rejects. No verifier ever raises to signal
-rejection — a raised exception is treated as NON-acceptance by the composite (never
-swallowed-to-accept). Every error/log line is passed through :func:`redact` so no
-token or secret substring is ever emitted.
+All verifiers expose ``async def verify_token(self, token) -> AccessToken | None``.
+An ``AccessToken`` accepts the request, while ``None`` rejects it. A raised verifier
+error is treated as nonacceptance by the composite. :func:`redact` masks configured
+token and secret substrings in authentication errors and log messages.
 """
 
 from __future__ import annotations
@@ -159,16 +159,18 @@ class ProxyTokenVerifier:
 # start. Closed, explicitly-enumerated family; case-insensitive match.
 _SYMMETRIC_ALGS: frozenset[str] = frozenset({"HS256", "HS384", "HS512"})
 
-# The CLOSED strategy vocabulary. Adding a name here (and a builder branch below) is how
-# a later story lands a new verifier; an entry outside this set is a hard startup error.
+# The closed strategy vocabulary. Every entry must have a builder branch below.
+# An entry outside this set is a hard startup error.
 _STRATEGIES: frozenset[str] = frozenset({"static", "jwt", "introspection", "proxy", "custom"})
 
 
 class AuthConfigError(RuntimeError):
-    """Raised for a fail-closed auth startup/config problem — an unknown or
-    not-yet-implemented strategy, an enabled-but-empty composite, or a malformed
-    static-token secrets record. Propagates out of ``build_server`` so a misconfigured
-    authenticated server refuses to start rather than booting wide open."""
+    """Raised when MCP authentication configuration cannot build a safe verifier.
+
+    Examples include unknown strategies, empty strategy lists, missing secrets,
+    malformed static-token records, unsafe endpoints or algorithms, and invalid custom
+    verifier imports. The error propagates through ``build_server`` so an authenticated
+    server with invalid configuration refuses to start."""
 
 
 class IntrospectionError(RuntimeError):
@@ -609,11 +611,10 @@ def load_custom_verifier(import_path: str):
 def build_composite_verifier(mcp_cfg) -> CompositeTokenVerifier:
     """Build the composite verifier from ``mcp_cfg.auth_strategies`` (ordered).
 
-    Each strategy MUST be in the closed vocabulary ``_STRATEGIES``; anything else is a
-    hard :class:`AuthConfigError`. In S2 only ``static`` is implemented — the other
-    recognized-but-unimplemented strategies raise ``AuthConfigError`` (later stories add
-    them). An empty resulting verifier list (e.g. ``auth_strategies`` empty) is also a
-    hard error: an enabled-but-empty composite would fail open."""
+    Each strategy must be in the closed vocabulary ``_STRATEGIES`` and must map to its
+    implemented verifier. Invalid strategy settings and an empty strategy list raise
+    :class:`AuthConfigError`. The composite independently checks the configured resource
+    before accepting a verifier result."""
     verifiers: list = []
     for strategy in mcp_cfg.auth_strategies:
         if strategy not in _STRATEGIES:
@@ -676,7 +677,7 @@ def build_composite_verifier(mcp_cfg) -> CompositeTokenVerifier:
             # special-cased here.
             verifiers.append(load_custom_verifier(mcp_cfg.auth_custom_import))
         else:
-            # Recognized vocabulary, but the verifier ships in a later story.
+            # Keep additions to the strategy vocabulary fail-closed until a builder exists.
             raise AuthConfigError(f"strategy {strategy!r} is not implemented yet")
 
     if not verifiers:

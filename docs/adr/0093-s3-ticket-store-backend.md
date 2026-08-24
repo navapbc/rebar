@@ -83,6 +83,11 @@ trading a bounded, rare delay for a correctness hazard. The 60s default stays.
   upstream change and is the maintenance cost we accept for a lossless autonomous heal.
 - **Bundle-per-push storage** means the multi-bundle state is normal under concurrency; it is
   handled automatically by the auto-doctor and is not an operator-visible failure.
-- **Back-out** is `rebar config -c sync.remote=<git-remote>`: because the event format is
-  unchanged, moving the tickets branch back to a git host is an ordinary push to the other
-  remote.
+- **Back-out.** Set `sync.remote` in the project `rebar.toml` to the name of the Git remote that will hold the ticket store. This example uses `origin`.
+
+  ```toml
+  [sync]
+  remote = "origin"
+  ```
+
+  The event format is unchanged. Moving the tickets branch back to a Git host is an ordinary push to the other remote.

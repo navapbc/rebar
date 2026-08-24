@@ -57,5 +57,4 @@ cookie is scoped to `.solutions.navateam.com`.
 
 - The Lambda is **published** (`publish = true`) and lives in **us-east-1** —
   both Lambda@Edge requirements.
-- Rotating the signing secret re-bakes and republishes every gate built from
-  this module — see `infra/shared/auth/RUNBOOK.md`.
+- Rotating the signing secret re-bakes and republishes every gate built from this module. See the [SSO authentication host runbook](../../../runbooks/sso-auth-host.md).
