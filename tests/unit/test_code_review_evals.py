@@ -23,6 +23,7 @@ CODE_REVIEW_SPECS = (
     "code-review-verify",
     "code-review-tests",
     "code-review-security",
+    "code-review-docs",
 )
 
 _REPO_ROOT = str(Path(__file__).resolve().parents[2])

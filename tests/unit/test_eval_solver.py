@@ -232,3 +232,67 @@ def test_reroot_preserves_offline_model_override_and_is_noop_for_fake() -> None:
     assert rerooted._model_override is sentinel
     fake = FakeRunner()
     assert eval_solver._rerooted(fake, "/fixture") is fake
+
+
+def test_code_review_files_case_reroots_prompt_and_runner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    checkout = str(tmp_path / "checkout")
+    pathlib.Path(checkout).mkdir()
+    pathlib.Path(checkout, "docs").mkdir()
+    pathlib.Path(checkout, "docs", "client.md").write_text("checkout copy\n")
+    seen: dict[str, str] = {}
+
+    def spy_run(self: PydanticAIRunner, request) -> dict:
+        seen["runner_root"] = self._config.repo_path
+        seen["request_root"] = request.config.repo_path
+        tools = pai_tools.filesystem_tools(self._config.repo_path)
+        read_file = next(tool for tool in tools if tool.__name__ == "read_file")
+        seen["content"] = read_file("docs/client.md")
+        return {"findings": [], "summary": ""}
+
+    monkeypatch.setattr(PydanticAIRunner, "run", spy_run)
+    eval_solver.run_case(
+        "code-review-docs",
+        {
+            "id": "docs-fixture",
+            "expect": "pass",
+            "diff": "--- a/src/cli.py\n+++ b/src/cli.py\n@@\n+NEW_FLAG = '--json'\n",
+            "files": {"docs/client.md": "fixture copy\n"},
+        },
+        runner=_checkout_rooted_runner(checkout),
+        repo_root=checkout,
+    )
+
+    assert seen["runner_root"] == seen["request_root"]
+    assert seen["runner_root"] != checkout
+    assert "fixture copy" in seen["content"]
+    assert "checkout copy" not in seen["content"]
+
+
+def test_code_review_case_without_files_keeps_inline_runner_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    checkout = str(tmp_path / "checkout")
+    pathlib.Path(checkout).mkdir()
+    seen: dict[str, str] = {}
+
+    def spy_run(self: PydanticAIRunner, request) -> dict:
+        seen["runner_root"] = self._config.repo_path
+        seen["request_root"] = request.config.repo_path
+        return {"findings": [], "summary": ""}
+
+    monkeypatch.setattr(PydanticAIRunner, "run", spy_run)
+    eval_solver.run_case(
+        "code-review-docs",
+        {
+            "id": "docs-inline",
+            "expect": "pass",
+            "diff": "--- a/docs/client.md\n+++ b/docs/client.md\n@@\n-old\n+new\n",
+        },
+        runner=_checkout_rooted_runner(checkout),
+        repo_root=checkout,
+    )
+
+    assert seen["runner_root"] == checkout
+    assert seen["request_root"] == checkout

@@ -55,7 +55,7 @@
     "blocking_enabled": false
   },
   "docs": {
-    "exec": "1-TURN",
+    "exec": "AGENT",
     "applies_to": [
       "**/*.md",
       "docs/**",
