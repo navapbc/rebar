@@ -357,6 +357,7 @@ mcp_run_new() {
     -e REBAR_MCP_AUTH_ENABLED=1 \
     -e REBAR_MCP_AUTH_STRATEGIES=static \
     -e "REBAR_MCP_AUTH_RESOURCE_SERVER_URL=${REBAR_MCP_AUTH_RESOURCE_SERVER_URL:-https://rebar.solutions.navateam.com/mcp}" \
+    -e "REBAR_MCP_AUTH_ISSUER_URL=${REBAR_MCP_AUTH_ISSUER_URL:-https://rebar.solutions.navateam.com/mcp}" \
     -e REBAR_MCP_AUTH_STATIC_TOKENS_FILE=/run/secrets/mcp-static-tokens.json \
     -e REBAR_MCP_ALLOW_LLM=1 \
     -e "REBAR_OPCERT_ENV_ID=${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}" \

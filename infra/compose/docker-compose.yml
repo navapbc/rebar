@@ -345,6 +345,10 @@ services:
       REBAR_MCP_AUTH_ENABLED: "1"
       REBAR_MCP_AUTH_STRATEGIES: "static"
       REBAR_MCP_AUTH_RESOURCE_SERVER_URL: "${REBAR_MCP_AUTH_RESOURCE_SERVER_URL:-https://rebar.solutions.navateam.com/mcp}"
+      # OAuth issuer URL advertised in RFC 9728 metadata; AuthSettings rejects an empty
+      # value, so this must be set (no fallback to RESOURCE_SERVER_URL) or the container
+      # crash-loops on a fresh deploy — see haughty-leisured-puffer.
+      REBAR_MCP_AUTH_ISSUER_URL: "${REBAR_MCP_AUTH_ISSUER_URL:-https://rebar.solutions.navateam.com/mcp}"
       # The static bearer digests file, materialized OUTSIDE the app (avians' fetch-secrets
       # slice) and bind-mounted read-only below.
       REBAR_MCP_AUTH_STATIC_TOKENS_FILE: "/run/secrets/mcp-static-tokens.json"
