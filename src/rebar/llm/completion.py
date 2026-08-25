@@ -22,6 +22,7 @@ needs no injected ticket tool.
 from __future__ import annotations
 
 from dataclasses import replace
+from time import monotonic_ns
 
 from rebar.llm.completion_child_gate import (
     build_child_closure_evidence,
@@ -127,6 +128,7 @@ def verify_completion(
     repo_root=None,
     config: LLMConfig | None = None,
     runner: Runner | None = None,
+    phase_metrics: dict[str, int] | None = None,
 ) -> dict:
     """Verify a ticket's completion requirements and return a ``completion_verdict`` dict.
 
@@ -144,23 +146,62 @@ def verify_completion(
     and ``citations`` resolved against the real repo. Raises :class:`LLMError` subclasses on
     missing deps/credentials or a failed/empty structured run.
     """
+    phase_started_ns = monotonic_ns() if phase_metrics is not None else 0
     from rebar.llm import gate_source
 
-    handle = gate_source.resolve_gate_handle(ref, source, repo_root, fetch=fetch)
-    with gate_source.gate_read_root(handle):
-        return gate_source.annotate_result(
-            _verify_completion_inner(
+    if phase_metrics is not None:
+        phase_metrics["verifier_attempt_setup_ms"] = (
+            phase_metrics.get("verifier_attempt_setup_ms", 0)
+            + (monotonic_ns() - phase_started_ns) // 1_000_000
+        )
+        phase_started_ns = monotonic_ns()
+        handle = gate_source.resolve_gate_handle(
+            ref, source, repo_root, fetch=fetch, phase_metrics=phase_metrics
+        )
+        phase_metrics["verifier_handle_resolution_ms"] = (
+            phase_metrics.get("verifier_handle_resolution_ms", 0)
+            + (monotonic_ns() - phase_started_ns) // 1_000_000
+        )
+        read_context = gate_source.gate_read_root(handle, phase_metrics=phase_metrics)
+    else:
+        handle = gate_source.resolve_gate_handle(ref, source, repo_root, fetch=fetch)
+        read_context = gate_source.gate_read_root(handle)
+    with read_context:
+        phase_started_ns = monotonic_ns() if phase_metrics is not None else 0
+        resolved_config = gate_source.apply_handle(
+            config or LLMConfig.from_env(repo_root=repo_root), handle
+        )
+        if phase_metrics is not None:
+            phase_metrics["verifier_handle_apply_ms"] = (
+                phase_metrics.get("verifier_handle_apply_ms", 0)
+                + (monotonic_ns() - phase_started_ns) // 1_000_000
+            )
+            result = _verify_completion_inner(
                 ticket_id,
                 graph=graph,
                 repo_root=repo_root,
-                config=gate_source.apply_handle(
-                    config or LLMConfig.from_env(repo_root=repo_root), handle
-                ),
+                config=resolved_config,
                 runner=runner,
                 verify_ref=handle.sha,
-            ),
-            handle,
-        )
+                phase_metrics=phase_metrics,
+            )
+            phase_started_ns = monotonic_ns()
+        else:
+            result = _verify_completion_inner(
+                ticket_id,
+                graph=graph,
+                repo_root=repo_root,
+                config=resolved_config,
+                runner=runner,
+                verify_ref=handle.sha,
+            )
+        annotated = gate_source.annotate_result(result, handle)
+        if phase_metrics is not None:
+            phase_metrics["verifier_annotation_ms"] = (
+                phase_metrics.get("verifier_annotation_ms", 0)
+                + (monotonic_ns() - phase_started_ns) // 1_000_000
+            )
+    return annotated
 
 
 def _verify_completion_inner(
@@ -171,7 +212,9 @@ def _verify_completion_inner(
     config: LLMConfig,
     runner: Runner | None,
     verify_ref: str | None = None,
+    phase_metrics: dict[str, int] | None = None,
 ) -> dict:
+    phase_started_ns = monotonic_ns() if phase_metrics is not None else 0
     from rebar import _reads
 
     cfg = config
@@ -246,6 +289,31 @@ def _verify_completion_inner(
     # wrapper (_commands.transition) is unchanged; cfg is already tuned (model + floor) above.
     from rebar.llm.workflow import gate_dispatch
 
-    return gate_dispatch.produce_completion_verdict(
-        ticket_id, graph=graph, repo_root=repo_root, cfg=cfg, runner=runner, verify_ref=verify_ref
+    if phase_metrics is None:
+        return gate_dispatch.produce_completion_verdict(
+            ticket_id,
+            graph=graph,
+            repo_root=repo_root,
+            cfg=cfg,
+            runner=runner,
+            verify_ref=verify_ref,
+        )
+    phase_metrics["verifier_inner_setup_ms"] = (
+        phase_metrics.get("verifier_inner_setup_ms", 0)
+        + (monotonic_ns() - phase_started_ns) // 1_000_000
     )
+    phase_started_ns = monotonic_ns()
+    result = gate_dispatch.produce_completion_verdict(
+        ticket_id,
+        graph=graph,
+        repo_root=repo_root,
+        cfg=cfg,
+        runner=runner,
+        verify_ref=verify_ref,
+        phase_metrics=phase_metrics,
+    )
+    phase_metrics["verifier_dispatch_ms"] = (
+        phase_metrics.get("verifier_dispatch_ms", 0)
+        + (monotonic_ns() - phase_started_ns) // 1_000_000
+    )
+    return result

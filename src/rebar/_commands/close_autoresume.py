@@ -35,6 +35,7 @@ failure honestly even with resumptions remaining.
 from __future__ import annotations
 
 import logging
+from time import monotonic_ns
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -204,16 +205,25 @@ def verify_with_auto_resume(
     remaining unmet count) WHEN a resumption was dispatched, so a resumed outcome stays
     diagnosable from the close output and the durable sidecar record alone; a single-attempt
     verdict keeps its exact prior shape (no trail key)."""
+    wrapper_started_ns = monotonic_ns()
+    phase_metrics: dict[str, int] = {}
     from rebar import llm  # LAZY — preserves the core optionality contract
     from rebar.llm import completion_reconcile
 
+    phase_metrics["verifier_wrapper_setup_ms"] = (monotonic_ns() - wrapper_started_ns) // 1_000_000
+    phase_started_ns = monotonic_ns()
     reused = _reusable_attested_pass(ticket_id, ref=ref, repo_root=repo_root)
+    phase_metrics["verifier_reusable_lookup_ms"] = (monotonic_ns() - phase_started_ns) // 1_000_000
     if reused is not None:
         return reused
 
+    phase_started_ns = monotonic_ns()
     max_resumes = _max_resumes(cfg_root)
     trail: list[dict[str, Any]] = []
     prev_credited: int | None = None
+    phase_metrics["verifier_resume_config_ms"] = (monotonic_ns() - phase_started_ns) // 1_000_000
+    phase_metrics["verifier_attempts_ms"] = 0
+    phase_metrics["verifier_between_attempts_ms"] = 0
     while True:
         # graph=False: the close gate verifies THIS ticket's OWN completion criteria, NOT its
         # whole descendant subtree. Children are separate tickets gated on their own close; the
@@ -232,6 +242,7 @@ def verify_with_auto_resume(
         # fetch=False: ref="HEAD" always resolves from the LOCAL object DB, so there is no
         # reason to hit the network — and fetching the real origin on every close would add
         # latency and a failure surface (a slow/unreachable remote) to a purely local verify.
+        phase_started_ns = monotonic_ns()
         result = llm.verify_completion(
             ticket_id,
             graph=False,
@@ -239,41 +250,61 @@ def verify_with_auto_resume(
             ref=(ref or "HEAD"),
             fetch=False,
             repo_root=repo_root,
+            phase_metrics=phase_metrics,
         )
-        credited = _cache_credited_count(result)
-        remaining = _unmet_count(result)
-        attempt = len(trail) + 1
-        trail.append({"attempt": attempt, "cache_credited": credited, "remaining_unmet": remaining})
-        logger.info(
-            "completion verification attempt %d for %s: verdict=%s, %d cache-credited "
-            "PASS(es), %d unmet",
-            attempt,
-            ticket_id,
-            result.get("verdict"),
-            credited,
-            remaining,
-        )
-        if str(result.get("verdict", "")).upper() == "PASS":
-            break
-        # Qualification: REUSE the framework-owned predicate — an unmet record WITHOUT the
-        # evidence_sufficient=false marker is a genuine refutation, which no re-run can help.
-        if not completion_reconcile._insufficiency_only(result):
-            break
-        if attempt > max_resumes:
-            break  # the count bound: 1 initial attempt + max_resumes resumptions
-        if prev_credited is not None and credited <= prev_credited:
-            logger.info(
-                "completion auto-resume for %s stopped early: attempt %d made no "
-                "cache-credit progress (%d, was %d) — an identical re-run would spin",
-                ticket_id,
-                attempt,
-                credited,
-                prev_credited,
+        phase_metrics["verifier_attempts_ms"] += (monotonic_ns() - phase_started_ns) // 1_000_000
+        phase_started_ns = monotonic_ns()
+        try:
+            credited = _cache_credited_count(result)
+            remaining = _unmet_count(result)
+            attempt = len(trail) + 1
+            trail.append(
+                {"attempt": attempt, "cache_credited": credited, "remaining_unmet": remaining}
             )
-            break
-        prev_credited = credited
+            logger.info(
+                "completion verification attempt %d for %s: verdict=%s, %d cache-credited "
+                "PASS(es), %d unmet",
+                attempt,
+                ticket_id,
+                result.get("verdict"),
+                credited,
+                remaining,
+            )
+            if str(result.get("verdict", "")).upper() == "PASS":
+                break
+            # Qualification: REUSE the framework-owned predicate — an unmet record WITHOUT the
+            # evidence_sufficient=false marker is a genuine refutation, which no re-run can help.
+            if not completion_reconcile._insufficiency_only(result):
+                break
+            if attempt > max_resumes:
+                break  # the count bound: 1 initial attempt + max_resumes resumptions
+            if prev_credited is not None and credited <= prev_credited:
+                logger.info(
+                    "completion auto-resume for %s stopped early: attempt %d made no "
+                    "cache-credit progress (%d, was %d) — an identical re-run would spin",
+                    ticket_id,
+                    attempt,
+                    credited,
+                    prev_credited,
+                )
+                break
+            prev_credited = credited
+        finally:
+            phase_metrics["verifier_between_attempts_ms"] += (
+                monotonic_ns() - phase_started_ns
+            ) // 1_000_000
     # Attach the trail only when a resumption actually ran: a single-attempt verdict keeps
     # its exact prior shape, so no existing consumer or pinned record changes.
+    phase_started_ns = monotonic_ns()
     if len(trail) > 1:
         result[TRAIL_KEY] = trail
+    phase_metrics["verifier_attempt_count"] = len(trail)
+    phase_metrics["verifier_resume_count"] = max(0, len(trail) - 1)
+    phase_metrics["verifier_wrapper_finalization_ms"] = (
+        monotonic_ns() - phase_started_ns
+    ) // 1_000_000
+    phase_metrics["verifier_wrapper_total_ms"] = (monotonic_ns() - wrapper_started_ns) // 1_000_000
+    result_metrics = result.get("metrics")
+    if isinstance(result_metrics, dict):
+        result_metrics.update(phase_metrics)
     return result
