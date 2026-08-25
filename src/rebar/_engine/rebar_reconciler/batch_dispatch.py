@@ -18,6 +18,11 @@ cycle.
 
 from __future__ import annotations
 
+import importlib.util
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -37,7 +42,26 @@ from rebar_reconciler.dispatch_one import (
     update_one,
 )
 
+try:
+    from rebar_reconciler._loader import lazy_load
+except ImportError:  # standalone load without package context
+    _loader_key = "rebar_reconciler._loader"
+    if _loader_key not in sys.modules:
+        _loader_spec = importlib.util.spec_from_file_location(
+            _loader_key, Path(__file__).parent / "_loader.py"
+        )
+        assert _loader_spec is not None and _loader_spec.loader is not None
+        _loader_mod = importlib.util.module_from_spec(_loader_spec)
+        sys.modules[_loader_key] = _loader_mod
+        _loader_spec.loader.exec_module(_loader_mod)
+    lazy_load = sys.modules[_loader_key].lazy_load
+
 __all__ = [
+    "COORDINATOR_ROUTE",
+    "LEGACY_ROUTE",
+    "NON_CREATE_FAMILIES",
+    "CutoverOutcome",
+    "CutoverReport",
     "JiraAPIError",
     "RetryExhaustedError",
     "_call_with_retry",
@@ -45,8 +69,11 @@ __all__ = [
     "_index_existing_links",
     "_is_illegal_transition_400",
     "_mutation_to_batch_dict",
+    "build_pass_tally",
+    "coordinate_and_fuse",
     "create_one",
     "delete_one",
+    "route_for",
     "update_one",
 ]
 
@@ -145,4 +172,173 @@ def _mutation_to_batch_dict(mutation) -> dict:
         # silently dropped every outbound blocks/relates link — the link was
         # reported "applied" (the mutation succeeded) but never created in Jira.
         "links": payload.get("links", []),
+    }
+
+
+# ── Non-create cutover surface (RP-03 S3 T3) ─────────────────────────────────────
+#
+# Routes the six non-create mutation families through the S3 coordinator + fuse
+# instead of the legacy per-mutation path, then normalizes their terminal outcomes.
+# The canonical ``coordinator`` / ``pass_fuse`` / ``failure_policy`` /
+# ``operation_outcome`` siblings are loaded lazily by file path (the package's shared
+# ``lazy_load`` idiom) INSIDE the functions, mirroring ``coordinator.py``, so importing
+# this facade never triggers those sibling imports (no cycle). The decision logic is
+# pure given the injected ``execute`` / ``locate`` / ``budget_factory`` / ``now_ms``:
+# it reads no clock and does no I/O.
+
+
+NON_CREATE_FAMILIES = frozenset(
+    {"update", "delete", "probe", "clean_label", "repair_property", "conflict"}
+)
+COORDINATOR_ROUTE = "coordinator"
+LEGACY_ROUTE = "legacy"
+
+
+def route_for(action, overrides=None) -> str:
+    """Select EXACTLY ONE route for a mutation family (never dual-send).
+
+    Every family in :data:`NON_CREATE_FAMILIES` defaults to
+    :data:`COORDINATOR_ROUTE`; any other action (``create``, unknown strings)
+    stays on :data:`LEGACY_ROUTE`. An optional ``overrides`` mapping flips a single
+    family; a route value that is not exactly ``coordinator`` or ``legacy`` raises
+    ``ValueError``.
+    """
+    default = COORDINATOR_ROUTE if action in NON_CREATE_FAMILIES else LEGACY_ROUTE
+    if overrides is None or action not in overrides:
+        return default
+    route = overrides[action]
+    if route not in (COORDINATOR_ROUTE, LEGACY_ROUTE):
+        raise ValueError(f"invalid route override for {action!r}: {route!r}")
+    return route
+
+
+@dataclass(frozen=True, slots=True)
+class CutoverOutcome:
+    """One ticket's normalized cutover result: the coordinator's terminal
+    disposition/bucket/scope, plus the fuse ``FuseDecision`` when it was reclassified
+    to deferred under an already-open scope (``None`` otherwise)."""
+
+    identity: str
+    disposition: object
+    bucket: str
+    failure_scope: object
+    observation_version: object
+    fuse_decision: object
+
+
+@dataclass(frozen=True, slots=True)
+class CutoverReport:
+    """The full cutover result: per-ticket outcomes, the five-bucket tally, the
+    distinct fuse decisions raised this pass, and a ``degraded`` flag (any failure)."""
+
+    outcomes: tuple
+    tallies: Mapping
+    fuse_decisions: tuple
+    degraded: bool
+
+    def outcome_for(self, identity: str) -> CutoverOutcome:
+        for outcome in self.outcomes:
+            if outcome.identity == identity:
+                return outcome
+        raise KeyError(identity)
+
+
+def _empty_locate(_identity):
+    return {}
+
+
+def _fuse_one(outcome, fuse, policy, outcome_mod) -> CutoverOutcome:
+    """Normalize one coordinator outcome against the fuse.
+
+    PRE-check the fuse BEFORE recording this outcome: if a matching scope is
+    already open and this outcome is fuse-ELIGIBLE (a budget-exhaustion / retryable
+    outcome the open scope says not to keep retrying), it is remaining matching work
+    under that open scope, so reclassify it to a ``deferred`` / ``scope_deferred``
+    CutoverOutcome carrying the decision (do NOT record it — a deferred op is held
+    back, not a consumed eligible outcome). A genuine terminal failure
+    (``permanent_failure``) or success is NOT fuse-eligible, so it keeps its own
+    coordinator bucket — an open scope must never MASK a real failure as deferred.
+    Otherwise record it (which opens/resets scopes on this terminal outcome) and carry
+    the coordinator's own bucket/disposition/scope through.
+    """
+    decision = fuse.decision_for(outcome.identity)
+    if decision is not None and policy.is_fuse_eligible(outcome.disposition):
+        return CutoverOutcome(
+            identity=outcome.identity,
+            disposition=outcome_mod.Disposition.scope_deferred,
+            bucket="deferred",
+            failure_scope=decision.scope,
+            observation_version=outcome.observation_version,
+            fuse_decision=decision,
+        )
+    fuse.record(outcome)
+    return CutoverOutcome(
+        identity=outcome.identity,
+        disposition=outcome.disposition,
+        bucket=outcome.bucket,
+        failure_scope=outcome.failure_scope,
+        observation_version=outcome.observation_version,
+        fuse_decision=None,
+    )
+
+
+def coordinate_and_fuse(
+    ticket_plans,
+    *,
+    execute,
+    locate=None,
+    budget_factory=None,
+    now_ms=None,
+    cooldown_ms=None,
+) -> CutoverReport:
+    """Run the S3 coordinator then fold its terminal outcomes through the pass fuse.
+
+    Walks ``report.outcomes`` in the coordinator's dependency/topological order,
+    reclassifying remaining matching work under an already-open scope to ``deferred``
+    (attaching the raising ``FuseDecision``) while independent scopes continue. Returns
+    a :class:`CutoverReport` with the recomputed five-bucket tally, the distinct fuse
+    decisions in first-seen order, and a ``degraded`` flag set when any ticket failed.
+    """
+    coordinator = lazy_load("rebar_reconciler.coordinator", "coordinator.py")
+    fuse_mod = lazy_load("rebar_reconciler.pass_fuse", "pass_fuse.py")
+    policy = lazy_load("rebar_reconciler.failure_policy", "failure_policy.py")
+    outcome_mod = lazy_load("rebar_reconciler.operation_outcome", "operation_outcome.py")
+
+    report = coordinator.coordinate(
+        ticket_plans, execute=execute, budget_factory=budget_factory, locate=locate
+    )
+    fuse = fuse_mod.PassFuse(
+        locate=locate or _empty_locate,
+        now_ms=now_ms,
+        cooldown_ms=fuse_mod.FUSE_COOLDOWN_MS if cooldown_ms is None else cooldown_ms,
+    )
+    outcomes: list[CutoverOutcome] = []
+    fuse_decisions: list = []
+    seen: set = set()
+    for outcome in report.outcomes:
+        cutover = _fuse_one(outcome, fuse, policy, outcome_mod)
+        outcomes.append(cutover)
+        decision = cutover.fuse_decision
+        if decision is not None and id(decision) not in seen:
+            seen.add(id(decision))
+            fuse_decisions.append(decision)
+    tallies = {bucket: 0 for bucket in policy.OUTCOME_BUCKETS}
+    for cutover in outcomes:
+        tallies[cutover.bucket] += 1
+    degraded = tallies["failed"] > 0
+    return CutoverReport(tuple(outcomes), tallies, tuple(fuse_decisions), degraded)
+
+
+def build_pass_tally(report) -> dict:
+    """Project a :class:`CutoverReport` onto the LIVE pass-tally shape the reconciler
+    consumes (``applied_count`` folds recovered into applied; the raw five-bucket map
+    is preserved under ``buckets``)."""
+    tallies = report.tallies
+    return {
+        "applied_count": tallies["applied"] + tallies["recovered"],
+        "failed_count": tallies["failed"],
+        "deferred_count": tallies["deferred"],
+        "skipped_count": tallies["skipped"],
+        "recovered_count": tallies["recovered"],
+        "buckets": dict(tallies),
     }
