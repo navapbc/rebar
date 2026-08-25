@@ -216,11 +216,31 @@ def test_close_phase_values_label_direct_metrics_and_residuals() -> None:
     legacy.start = -200
     legacy.end = 20
     legacy.event = {"timestamp": -100, "total_ms": 0, "signature_at": 0}
+    phase_names = (
+        *probe.DIRECT_PHASE_FIELDS,
+        "legacy_uninstrumented",
+        "deterministic_verifier",
+        "llm_verifier",
+        "verifier_overhead",
+        "verdict_to_status",
+        "status_to_signature",
+        "post_write_tail",
+    )
+    direct_phases = probe.close_phase_values(direct)
+    legacy_phases = probe.close_phase_values(legacy)
 
     assert {
-        "direct_phases": probe.close_phase_values(direct),
-        "direct_workload": probe.close_workload_values(direct),
-        "legacy_phases": probe.close_phase_values(legacy),
+        "direct_phases": {name: direct_phases[name] for name in phase_names},
+        "direct_workload": {
+            name: probe.close_workload_values(direct)[name]
+            for name in (
+                "commits_inspected",
+                "distinct_references",
+                "descendant_ids",
+                "referencing_commits_found",
+            )
+        },
+        "legacy_phases": {name: legacy_phases[name] for name in phase_names},
     } == {
         "direct_phases": {
             "pre_verifier_total": pytest.approx(120),
@@ -248,16 +268,7 @@ def test_close_phase_values_label_direct_metrics_and_residuals() -> None:
             "referencing_commits_found": 114,
         },
         "legacy_phases": {
-            "pre_verifier_total": None,
-            "structural_scan": None,
-            "material_policy": None,
-            "descendant_scope": None,
-            "landing_check": None,
-            "verifier_call": None,
-            "git_history_read": None,
-            "alias_index_build": None,
-            "ticket_ref_resolution": None,
-            "diff_validation": None,
+            **dict.fromkeys(probe.DIRECT_PHASE_FIELDS),
             "legacy_uninstrumented": pytest.approx(100),
             "deterministic_verifier": None,
             "llm_verifier": None,
@@ -267,6 +278,150 @@ def test_close_phase_values_label_direct_metrics_and_residuals() -> None:
             "post_write_tail": pytest.approx(20),
         },
     }
+
+
+def test_close_phase_values_reports_direct_verifier_hierarchy_and_unattributed_time() -> None:
+    invocation = _invocation(llm_calls=1)
+    invocation.event = {
+        "verifier_call_ms": 110_000,
+        "verifier_wrapper_setup_ms": 1_000,
+        "verifier_reusable_lookup_ms": 2_000,
+        "verifier_resume_config_ms": 3_000,
+        "verifier_attempts_ms": 90_000,
+        "verifier_between_attempts_ms": 2_000,
+        "verifier_wrapper_finalization_ms": 2_000,
+        "verifier_wrapper_total_ms": 100_000,
+        "verifier_attempt_setup_ms": 1_000,
+        "verifier_handle_resolution_ms": 20_000,
+        "verifier_snapshot_enter_ms": 1_000,
+        "verifier_handle_apply_ms": 500,
+        "verifier_inner_setup_ms": 2_000,
+        "verifier_dispatch_ms": 60_000,
+        "verifier_annotation_ms": 1_000,
+        "verifier_snapshot_exit_ms": 1_000,
+        "verifier_handle_defaults_ms": 1_000,
+        "verifier_code_snapshot_ms": 5_000,
+        "verifier_build_drift_ms": 2_000,
+        "verifier_ticket_snapshot_ms": 10_000,
+        "verifier_snapshot_gc_ms": 2_000,
+        "verifier_dispatch_setup_ms": 5_000,
+        "verifier_workflow_ms": 50_000,
+        "verifier_dispatch_finalization_ms": 5_000,
+        "verifier_attempt_count": 2,
+        "verifier_resume_count": 1,
+        "verifier_workflow_step_count": 9,
+    }
+
+    phases = probe.close_phase_values(invocation)
+    workloads = probe.close_workload_values(invocation)
+
+    assert {
+        "unattributed_verifier_ms": probe.unattributed_verifier_ms(invocation),
+        "wrapper": {
+            key: phases.get(key)
+            for key in (
+                "verifier_wrapper_setup",
+                "verifier_reusable_lookup",
+                "verifier_resume_config",
+                "verifier_attempts",
+                "verifier_between_attempts",
+                "verifier_wrapper_finalization",
+                "verifier_wrapper_total",
+                "unattributed_verifier",
+            )
+        },
+        "attempt": {
+            key: phases.get(key)
+            for key in (
+                "verifier_attempt_setup",
+                "verifier_handle_resolution",
+                "verifier_snapshot_enter",
+                "verifier_handle_apply",
+                "verifier_inner_setup",
+                "verifier_dispatch",
+                "verifier_annotation",
+                "verifier_snapshot_exit",
+            )
+        },
+        "handle": {
+            key: phases.get(key)
+            for key in (
+                "verifier_handle_defaults",
+                "verifier_code_snapshot",
+                "verifier_build_drift",
+                "verifier_ticket_snapshot",
+                "verifier_snapshot_gc",
+            )
+        },
+        "dispatch": {
+            key: phases.get(key)
+            for key in (
+                "verifier_dispatch_setup",
+                "verifier_workflow",
+                "verifier_dispatch_finalization",
+            )
+        },
+        "workload": {
+            key: workloads.get(key)
+            for key in (
+                "verifier_attempt_count",
+                "verifier_resume_count",
+                "verifier_workflow_step_count",
+            )
+        },
+    } == {
+        "unattributed_verifier_ms": pytest.approx(10_000),
+        "wrapper": {
+            "verifier_wrapper_setup": pytest.approx(1),
+            "verifier_reusable_lookup": pytest.approx(2),
+            "verifier_resume_config": pytest.approx(3),
+            "verifier_attempts": pytest.approx(90),
+            "verifier_between_attempts": pytest.approx(2),
+            "verifier_wrapper_finalization": pytest.approx(2),
+            "verifier_wrapper_total": pytest.approx(100),
+            "unattributed_verifier": pytest.approx(10),
+        },
+        "attempt": {
+            "verifier_attempt_setup": pytest.approx(1),
+            "verifier_handle_resolution": pytest.approx(20),
+            "verifier_snapshot_enter": pytest.approx(1),
+            "verifier_handle_apply": pytest.approx(0.5),
+            "verifier_inner_setup": pytest.approx(2),
+            "verifier_dispatch": pytest.approx(60),
+            "verifier_annotation": pytest.approx(1),
+            "verifier_snapshot_exit": pytest.approx(1),
+        },
+        "handle": {
+            "verifier_handle_defaults": pytest.approx(1),
+            "verifier_code_snapshot": pytest.approx(5),
+            "verifier_build_drift": pytest.approx(2),
+            "verifier_ticket_snapshot": pytest.approx(10),
+            "verifier_snapshot_gc": pytest.approx(2),
+        },
+        "dispatch": {
+            "verifier_dispatch_setup": pytest.approx(5),
+            "verifier_workflow": pytest.approx(50),
+            "verifier_dispatch_finalization": pytest.approx(5),
+        },
+        "workload": {
+            "verifier_attempt_count": 2,
+            "verifier_resume_count": 1,
+            "verifier_workflow_step_count": 9,
+        },
+    }
+
+
+@pytest.mark.parametrize("verifier_call_ms", [606, 590])
+def test_unattributed_verifier_clamps_rounding_tolerance_and_negative_gaps(
+    verifier_call_ms: int,
+) -> None:
+    invocation = _invocation(llm_calls=1)
+    invocation.event = {
+        "verifier_call_ms": verifier_call_ms,
+        **dict.fromkeys(probe.VERIFIER_WRAPPER_PARTITION_FIELDS, 100),
+    }
+
+    assert probe.unattributed_verifier_ms(invocation) == 0
 
 
 def test_print_table_prefers_direct_pre_s_and_preserves_legacy_fallback(capsys) -> None:
@@ -462,6 +617,10 @@ def test_load_tracker_preserves_direct_timing_and_workload_metrics(tmp_path: Pat
         "distinct_references": 112,
         "descendant_ids": 113,
         "referencing_commits_found": 114,
+        **{field: 200 + index for index, field in enumerate(probe.VERIFIER_PHASE_FIELDS.values())},
+        "verifier_attempt_count": 301,
+        "verifier_resume_count": 302,
+        "verifier_workflow_step_count": 303,
     }
     (ticket_dir / "verdict-COMPLETION_VERDICT.json").write_text(
         json.dumps(
@@ -532,12 +691,38 @@ def test_summary_reports_direct_timings_workload_and_legacy_residual(
         "alias_index_build": ("alias_index_build_ms", 500),
         "ticket_ref_resolution": ("ticket_ref_resolution_ms", 750),
         "diff_validation": ("diff_validation_ms", 250),
+        "verifier_wrapper_setup": ("verifier_wrapper_setup_ms", 100),
+        "verifier_reusable_lookup": ("verifier_reusable_lookup_ms", 100),
+        "verifier_resume_config": ("verifier_resume_config_ms", 100),
+        "verifier_attempts": ("verifier_attempts_ms", 4_000),
+        "verifier_between_attempts": ("verifier_between_attempts_ms", 400),
+        "verifier_wrapper_finalization": ("verifier_wrapper_finalization_ms", 300),
+        "verifier_wrapper_total": ("verifier_wrapper_total_ms", 5_000),
+        "verifier_attempt_setup": ("verifier_attempt_setup_ms", 100),
+        "verifier_handle_resolution": ("verifier_handle_resolution_ms", 800),
+        "verifier_snapshot_enter": ("verifier_snapshot_enter_ms", 100),
+        "verifier_handle_apply": ("verifier_handle_apply_ms", 50),
+        "verifier_inner_setup": ("verifier_inner_setup_ms", 500),
+        "verifier_dispatch": ("verifier_dispatch_ms", 2_000),
+        "verifier_annotation": ("verifier_annotation_ms", 100),
+        "verifier_snapshot_exit": ("verifier_snapshot_exit_ms", 100),
+        "verifier_handle_defaults": ("verifier_handle_defaults_ms", 100),
+        "verifier_code_snapshot": ("verifier_code_snapshot_ms", 200),
+        "verifier_build_drift": ("verifier_build_drift_ms", 100),
+        "verifier_ticket_snapshot": ("verifier_ticket_snapshot_ms", 300),
+        "verifier_snapshot_gc": ("verifier_snapshot_gc_ms", 100),
+        "verifier_dispatch_setup": ("verifier_dispatch_setup_ms", 300),
+        "verifier_workflow": ("verifier_workflow_ms", 1_500),
+        "verifier_dispatch_finalization": ("verifier_dispatch_finalization_ms", 200),
     }
     workload_counts = {
         "commits_inspected": 9,
         "distinct_references": 8,
         "descendant_ids": 7,
         "referencing_commits_found": 6,
+        "verifier_attempt_count": 2,
+        "verifier_resume_count": 1,
+        "verifier_workflow_step_count": 9,
     }
     legacy_metrics = {
         "llm_calls": 1,
@@ -591,6 +776,11 @@ def test_summary_reports_direct_timings_workload_and_legacy_residual(
         f"p50/p90/p99={value:.3f}/{value:.3f}/{value:.3f}"
         for field, value in workload_counts.items()
     }
+    expected_direct_lines.add(
+        "unattributed_verifier\t"
+        "source=arithmetic-residual(verifier_call_ms-minus-nonoverlapping-wrapper-partition)\t"
+        "n=1\tp50/p90/p99=1.000/1.000/1.000"
+    )
     expected_legacy_line = (
         "legacy_uninstrumented\t"
         "source=unexplained-legacy-residual(no-causal-attribution)\t"

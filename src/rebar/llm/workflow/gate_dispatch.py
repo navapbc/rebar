@@ -25,9 +25,11 @@ driven by the B1 ``ProductionBatchRunner``; agent steps (verify/coach) run throu
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from time import monotonic_ns
 from typing import Any, NamedTuple
 
 # Back-compat re-export (load-bearing): tests/unit/test_code_review_fp_ledger.py calls
@@ -687,8 +689,19 @@ def _attach_completion_metrics(verdict: dict[str, Any], rec: Any, total_ms: floa
     verdict["metrics"] = {**consumed, "total_ms": round(total_ms, 1)}
 
 
+def _add_phase(metrics: dict[str, int], key: str, elapsed_ns: int) -> None:
+    metrics[key] = metrics.get(key, 0) + elapsed_ns // 1_000_000
+
+
 def produce_completion_verdict(
-    ticket_id: str, *, graph: bool, repo_root=None, cfg, runner=None, verify_ref=None
+    ticket_id: str,
+    *,
+    graph: bool,
+    repo_root=None,
+    cfg,
+    runner=None,
+    verify_ref=None,
+    phase_metrics: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Produce a ``completion_verdict`` by running ``gates/completion-verification.yaml``.
 
@@ -697,8 +710,7 @@ def produce_completion_verdict(
     ``completion_precheck`` op runs the deterministic child-closure check, then the agentic
     verify + reconcile produce the terminal verdict. Preflights and lets
     :class:`LLMUnavailableError` PROPAGATE so the close gate fail-closes."""
-    import time
-
+    dispatch_started_ns = monotonic_ns() if phase_metrics is not None else 0
     from rebar.llm.config import gate_config
     from rebar.llm.runner import get_runner
     from rebar.llm.step_failures import collect_step_failures
@@ -739,6 +751,11 @@ def produce_completion_verdict(
         verify_ref=verify_ref,
     )
     recorder = MemoryRecorder()
+    if phase_metrics is not None:
+        _add_phase(
+            phase_metrics, "verifier_dispatch_setup_ms", monotonic_ns() - dispatch_started_ns
+        )
+        workflow_started_ns = monotonic_ns()
     _t_total = time.monotonic()
     # collect_step_failures wraps the WHOLE run so the reconcile op's drain can see failures
     # from the verify agent step; see completion_reconcile for where the tally lands.
@@ -752,6 +769,9 @@ def produce_completion_verdict(
             recorder=recorder,
         )
     total_ms = round((time.monotonic() - _t_total) * 1000, 1)
+    if phase_metrics is not None:
+        _add_phase(phase_metrics, "verifier_workflow_ms", monotonic_ns() - workflow_started_ns)
+        finalization_started_ns = monotonic_ns()
     verdict = res.terminal_output
     if res.status != "succeeded" or not isinstance(verdict, dict) or "verdict" not in verdict:
         # The verifier failed mid-run — fail closed (never a silent PASS). Raise so the
@@ -760,6 +780,15 @@ def produce_completion_verdict(
             ticket_id, res, completion_step.failure_diagnostic, len(recorder.steps), repo_root
         )
     _attach_completion_metrics(verdict, recorder, total_ms)
+    if phase_metrics is not None:
+        _add_phase(
+            phase_metrics,
+            "verifier_dispatch_finalization_ms",
+            monotonic_ns() - finalization_started_ns,
+        )
+        phase_metrics["verifier_workflow_step_count"] = phase_metrics.get(
+            "verifier_workflow_step_count", 0
+        ) + len(recorder.steps)
     return verdict
 
 
