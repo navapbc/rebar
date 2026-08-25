@@ -60,6 +60,11 @@ class VerifyConfig:
         False,
         "Requires a passing completion verification before a work ticket can close.",
     )
+    completion_pinned_ticket_view: bool = _documented(
+        False,
+        "Uses the experimental non-epic lazy ticket view and atomic completion-close bundle "
+        "when sync.push is always.",
+    )
     # read-via: _commands/gates.py string key
     require_plan_review_for_close: bool = _documented(
         False,

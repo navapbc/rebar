@@ -198,7 +198,7 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/llm/config.py:398` — `_llm_str_source(<non-literal>)`
 - `src/rebar/llm/config.py:407` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:427` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:617` — `_llm_str(<non-literal>)`
+- `src/rebar/llm/config.py:619` — `_llm_str(<non-literal>)`
 - `src/rebar/opcert_service/config.py:72` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:228` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:238` — `os.environ.get(<non-literal>)`
