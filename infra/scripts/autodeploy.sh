@@ -111,6 +111,31 @@ DISK_PRESSURE_PCT="${DISK_PRESSURE_PCT:-80}"
 PRESSURE_PRUNE_MIN_INTERVAL="${PRESSURE_PRUNE_MIN_INTERVAL:-600}"
 PRESSURE_PRUNE_TS_FILE="${PRESSURE_PRUNE_TS_FILE:-$STATE_DIR/pressure-prune-ts}"
 
+# ── mcp blue-green target (panicky-sylphish-foxterrier / ADR 0079 amendment / 0104) ──
+# The on-box rebar-mcp server is a NEVER-IDLE shared endpoint, so the review-bot's
+# stop-and-health-drain deploy above cannot be reused: its gauge-gated drain bound can never
+# reach zero (review-bot bug 7b4a). Instead this target models the LOCAL origin/main updater —
+# immutable release + ATOMIC nginx pointer swap + retire-when-idle: build+tag a new image, start
+# a NEW container ALONGSIDE the old on a free blue/green port, health-check it, atomically flip
+# the /mcp/ upstream include to it (deploy DONE here — it never waits on an in-flight op), then
+# retire the OLD container off the critical path with a GRACEFUL `docker stop` (SIGTERM triggers
+# the container's OWN bounded self-drain, _mcp_health.run_http_with_grace) — NEVER `docker rm -f`
+# a serving container. Managed HOST ports are EXACTLY {8091 (compose-original), MCP_PORT_A,
+# MCP_PORT_B}; the container port is always 8091.
+MCP_IMAGE="${MCP_IMAGE:-compose-mcp}"                 # `docker compose build mcp` image (project 'compose')
+MCP_CONTAINER_PREFIX="${MCP_CONTAINER_PREFIX:-rebar-mcp}"     # autodeploy-managed container name prefix
+MCP_COMPOSE_CONTAINER="${MCP_COMPOSE_CONTAINER:-compose-mcp-1}"  # the boot backend compose-up.sh brings up
+MCP_UPSTREAM_FILE="${MCP_UPSTREAM_FILE:-/etc/nginx/mcp-upstream.conf}"  # materialized nginx /mcp/ include
+MCP_PORT_A="${MCP_PORT_A:-8092}"; MCP_PORT_B="${MCP_PORT_B:-8093}"      # blue/green host ports (8091 reserved)
+MCP_HEALTH_TIMEOUT="${MCP_HEALTH_TIMEOUT:-120}"       # readiness deadline for the NEW mcp container
+# 8 GiB t4g.large: a blue-green overlap briefly DOUBLES the mcp footprint, so refuse the second
+# container when MemAvailable is below this floor. Unreadable fails OPEN (a broken probe must not
+# wedge deploys); MCP_MEM_AVAILABLE_MB overrides the /proc/meminfo reading for tests.
+MCP_MEM_MIN_MB="${MCP_MEM_MIN_MB:-1024}"
+MCP_RELEASES_KEEP="${MCP_RELEASES_KEEP:-1}"           # retain the newest N mcp releases (the live one)
+MCP_RELEASES_CAP="${MCP_RELEASES_CAP:-3}"             # hard cap on managed containers = the {8091,A,B} port pool
+MCP_STOP_GRACE="${MCP_STOP_GRACE:-1260}"             # `docker stop --time`: >= _mcp_health grace (1200) + margin
+
 # review-bot redeploys iff a matching path changed between deployed..target.
 BOT_PATHS='src/rebar/ infra/compose/Dockerfile.reviewbot pyproject.toml infra/compose/docker-compose.yml infra/scripts/reviewbot-ensure-tickets.sh'
 # secrets sources: the .env is SSM-sourced (fetch-secrets.sh) and rsync-EXCLUDED, so a
@@ -120,6 +145,11 @@ BOT_PATHS='src/rebar/ infra/compose/Dockerfile.reviewbot pyproject.toml infra/co
 # fetch-secrets refresh, below) on these paths too. (A pure SSM VALUE rotation with no git
 # change does not advance main, so autodeploy no-ops on it — that path is operator-driven.)
 SECRETS_PATHS='infra/scripts/fetch-secrets.sh infra/terraform/ssm.tf'
+# mcp redeploys (blue-green) iff a matching path changed. esok's canonical `mcp:` compose-comment
+# set. `src/rebar` and `infra/compose/docker-compose.yml` are SHARED with BOT_PATHS on purpose: a
+# shared change triggers BOTH the review-bot AND the mcp target, in INDEPENDENT `if changed`
+# blocks (neither touches the gerrit container or gerrit review flow).
+MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/compose/docker-compose.yml uv.lock pyproject.toml'
 # config paths are DETECT-ONLY in v1 (signalled, never auto-applied).
 # infra/compose/gerrit.config is in this list, NOT in a re-materializing trigger, on
 # purpose: compose-up.sh DOES re-seed it into the site etc dir, but only when compose-up
@@ -264,6 +294,140 @@ reclaim_under_pressure() {
   log "disk pressure reclaim complete"
 }
 
+# ── mcp blue-green helpers (foxterrier) ────────────────────────────────────────
+# All of these are read-mostly discovery + idempotent teardown, so they are safe to call on the
+# no-op tick (mcp_retire_sweep runs there too, reaping containers as they finish draining).
+
+# Names of autodeploy-managed mcp containers (the boot compose backend + every blue-green run).
+# $1 = "-a" to include stopped/exited containers (default: running only).
+mcp_managed() {
+  docker ps ${1:-} --format '{{.Names}}' 2>/dev/null \
+    | grep -E "^(${MCP_CONTAINER_PREFIX}|${MCP_COMPOSE_CONTAINER})" || true
+}
+# The HOST port a managed container publishes container-port 8091 on (echoes nothing if unknown).
+mcp_port_of() { docker port "$1" 8091/tcp 2>/dev/null | sed -E 's/.*:([0-9]+)$/\1/' | head -1; }
+# The port the /mcp/ upstream include currently points at (the LIVE backend).
+mcp_live_port() { sed -nE 's/.*server[[:space:]]+127\.0\.0\.1:([0-9]+);.*/\1/p' "$MCP_UPSTREAM_FILE" 2>/dev/null | head -1; }
+
+# MemAvailable in MB (MCP_MEM_AVAILABLE_MB overrides for tests). Echoes -1 for "unreadable",
+# which the caller treats as fail-OPEN.
+mcp_mem_available_mb() {
+  if [ -n "${MCP_MEM_AVAILABLE_MB:-}" ]; then
+    case "$MCP_MEM_AVAILABLE_MB" in *[!0-9]*|'') echo -1 ;; *) echo "$MCP_MEM_AVAILABLE_MB" ;; esac
+    return 0
+  fi
+  local kb
+  kb="$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)"
+  case "$kb" in ''|*[!0-9]*) echo -1; return 0 ;; esac
+  echo $(( kb / 1024 ))
+}
+
+# Whichever of the blue/green ports is NOT currently bound by a managed container (8091 is
+# reserved for the compose-original). Echoes nothing when BOTH are occupied — the caller then
+# emits AUTODEPLOY_MCP_RETIRE_CAP and backs off rather than colliding with a live port.
+mcp_free_port() {
+  local bound="" n p
+  while read -r n; do
+    [ -n "$n" ] || continue
+    p="$(mcp_port_of "$n")"; [ -n "$p" ] && bound="$bound $p"
+  done < <(mcp_managed)
+  for p in "$MCP_PORT_A" "$MCP_PORT_B"; do
+    case " $bound " in *" $p "*) : ;; *) echo "$p"; return 0 ;; esac
+  done
+  return 0
+}
+
+# Start a NEW mcp container reproducing the compose `mcp:` service EXACTLY. `docker compose up
+# mcp` pins host 8091 and would collide, and `docker run` does NOT interpolate compose's
+# `${VAR:-default}`, so every env value is spelled out here with its compose default. The
+# compose-parity test (test_autodeploy_mcp_bluegreen.py) pins this set to docker-compose.yml so
+# it cannot silently drift — /health is auth-independent and would not catch a wrong
+# REBAR_MCP_AUTH_*/ALLOWED_HOSTS. $1 = container name, $2 = host port.
+mcp_run_new() {
+  docker run -d --name "$1" \
+    --restart always \
+    --stop-timeout "$MCP_STOP_GRACE" \
+    --env-file "$COMPOSE_DIR/.env" \
+    -e REBAR_MCP_TRANSPORT=http \
+    -e REBAR_MCP_HTTP_HOST=0.0.0.0 \
+    -e REBAR_MCP_HTTP_PORT=8091 \
+    -e REBAR_MCP_HTTP_TLS_AT_EDGE=true \
+    -e "REBAR_MCP_HTTP_ALLOWED_HOSTS=${REBAR_MCP_HTTP_ALLOWED_HOSTS:-rebar.solutions.navateam.com}" \
+    -e "REBAR_MCP_HTTP_ALLOWED_ORIGINS=${REBAR_MCP_HTTP_ALLOWED_ORIGINS:-https://rebar.solutions.navateam.com}" \
+    -e REBAR_MCP_AUTH_ENABLED=1 \
+    -e REBAR_MCP_AUTH_STRATEGIES=static \
+    -e "REBAR_MCP_AUTH_RESOURCE_SERVER_URL=${REBAR_MCP_AUTH_RESOURCE_SERVER_URL:-https://rebar.solutions.navateam.com/mcp}" \
+    -e REBAR_MCP_AUTH_STATIC_TOKENS_FILE=/run/secrets/mcp-static-tokens.json \
+    -e REBAR_MCP_ALLOW_LLM=1 \
+    -e "REBAR_OPCERT_ENV_ID=${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}" \
+    -e REBAR_IDENTITY_SIGNING_KEY=/run/secrets/opcert-ed25519-key \
+    -p "127.0.0.1:${2}:8091" \
+    -v "$COMPOSE_DIR/mcp-static-tokens.json:/run/secrets/mcp-static-tokens.json:ro" \
+    -v "$COMPOSE_DIR/opcert-ed25519-key:/run/secrets/opcert-ed25519-key:ro" \
+    "$MCP_IMAGE:$TARGET" >/dev/null 2>&1
+}
+
+# Atomically re-point the /mcp/ upstream include at $1 (a host port) and reload nginx. The temp
+# is a DOTFILE (not matched by the `mcp-upstream*.conf` glob nginx includes) so a half-written
+# file is never picked up; the `mv` is an atomic rename. On a validate/reload failure the
+# previous include is restored byte-identical and the function fails (the caller then removes the
+# NEW container and backs off — the OLD backend stays live).
+mcp_flip_upstream() {
+  local dir base tmp bak
+  dir="$(dirname "$MCP_UPSTREAM_FILE")"; base="$(basename "$MCP_UPSTREAM_FILE")"
+  tmp="$dir/.${base}.$$.tmp"; bak="$dir/.${base}.bak"
+  cp "$MCP_UPSTREAM_FILE" "$bak" 2>/dev/null || true
+  printf 'server 127.0.0.1:%s;\n' "$1" > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$MCP_UPSTREAM_FILE" || { rm -f "$tmp"; return 1; }
+  if ! nginx -t >/dev/null 2>&1 || ! nginx -s reload >/dev/null 2>&1; then
+    [ -f "$bak" ] && mv "$bak" "$MCP_UPSTREAM_FILE"
+    return 1
+  fi
+  rm -f "$bak"
+  return 0
+}
+
+# Retire a single OLD container GRACEFULLY: `docker stop --time` sends SIGTERM, which triggers the
+# container's OWN bounded self-drain (stop intake, wait in_flight->0 up to the app grace, exit).
+# Issued in the BACKGROUND so the tick NEVER waits on the drain (the deploy is already DONE at the
+# flip). NEVER `docker rm -f` — that SIGKILLs an in-flight certified op (review-bot bug 7b4a).
+mcp_retire_graceful() {
+  log "mcp retire: 'docker stop --time ${MCP_STOP_GRACE}' $1 in background (graceful SIGTERM self-drain; never rm -f a serving container)"
+  # Close the deploy flock FD (9) in the subshell: a backgrounded child that inherits it would
+  # hold the lock for up to MCP_STOP_GRACE after the tick exits, so every subsequent autodeploy
+  # tick (for ANY component) would skip with "another deploy holds the lock".
+  ( exec 9>&-; docker stop --time "$MCP_STOP_GRACE" "$1" >/dev/null 2>&1 ) &
+}
+
+# Retire everything except the newest MCP_RELEASES_KEEP (the live backend): ask each still-running
+# old container to drain (idempotent), and REAP any that have already finished draining (exited),
+# freeing its blue/green port. Over MCP_RELEASES_CAP managed containers (too many draining /
+# holding ports) emit AUTODEPLOY_MCP_RETIRE_CAP instead of forcing a kill. Safe on the no-op tick.
+mcp_retire_sweep() {
+  local live n p count
+  live="$(mcp_live_port)"
+  while read -r n; do
+    [ -n "$n" ] || continue
+    p="$(mcp_port_of "$n")"
+    if [ "$(docker inspect -f '{{.State.Running}}' "$n" 2>/dev/null)" = "true" ]; then
+      # Never STOP a running container we cannot prove is not the live backend. If the live
+      # port is UNKNOWN (upstream include missing/unreadable) fail SAFE: leave every running
+      # container alone rather than risk stopping the one still serving /mcp (bug 7b4a). An
+      # already-exited container is safe to reap regardless (it serves nothing).
+      [ -z "$live" ] && continue
+      [ "$p" = "$live" ] && continue                    # keep the live backend (RELEASES_KEEP)
+      mcp_retire_graceful "$n"
+    else
+      docker rm "$n" >/dev/null 2>&1 && log "mcp retire: reaped exited $n (port ${p:-?} freed)"
+    fi
+  done < <(mcp_managed -a)
+  count="$(mcp_managed -a | grep -c . || true)"
+  case "$count" in ''|*[!0-9]*) count=0 ;; esac
+  if [ "$count" -gt "$MCP_RELEASES_CAP" ]; then
+    marker AUTODEPLOY_MCP_RETIRE_CAP over-cap "managed mcp containers=$count > cap=$MCP_RELEASES_CAP; NOT forcing a kill (containers still draining/holding ports)"
+  fi
+}
+
 # ── single-flight ─────────────────────────────────────────────────────────────
 exec 9>"$LOCK"
 flock -n 9 || { log "another deploy holds the lock; skipping"; exit 0; }
@@ -306,6 +470,7 @@ fi
 if [ "$TARGET" = "$DEPLOYED" ]; then
   rm -f "$DEFER_FILE"
   reclaim_under_pressure
+  mcp_retire_sweep          # reap mcp containers that finished draining since the last flip
   log "up to date ($TARGET); no-op"
   exit 0
 fi
@@ -443,6 +608,92 @@ if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
   fi
   prune_docker_caches
   log "review-bot redeployed + healthy"
+fi
+
+# ── mcp: blue-green pointer-swap deploy ONLY on a source change ────────────────
+# INDEPENDENT of the review-bot block above: a shared src/rebar / docker-compose.yml change
+# triggers both, each on its own path. Unlike the review-bot's stop-and-drain, the mcp server is
+# a never-idle shared endpoint, so this does an immutable-release + atomic-pointer-swap cutover
+# (start new alongside old -> health -> flip nginx -> retire old when idle) and NEVER kills an
+# in-flight certified op. Fatal-on-failure like the review-bot (record_backoff_failure + exit 1)
+# so deployed-sha is not advanced and the deploy retries next tick. The gerrit container is never
+# touched (blast-radius assert); gerrit is never involved.
+if changed "$MCP_PATHS"; then
+  log "mcp sources changed $DEPLOYED -> $TARGET; blue-green deploy (blast radius = mcp containers + /mcp nginx upstream only)"
+  gerrit_before_mcp="$(docker inspect -f '{{.Id}}' "$GERRIT_CONTAINER" 2>/dev/null || true)"
+
+  # 1. sync + build the immutable release image, tagged by the target SHA.
+  if ! git -C "$MIRROR_DIR" checkout -q "$TARGET" 2>/dev/null; then
+    err mcp-checkout-failed "git checkout $TARGET in $MIRROR_DIR failed"; record_backoff_failure; exit 1
+  fi
+  if ! rsync -a --delete "${RSYNC_EXCLUDES[@]}" "$MIRROR_DIR/" "$DEPLOY_REPO/" 2>/dev/null; then
+    err mcp-rsync-failed "rsync $MIRROR_DIR -> $DEPLOY_REPO failed"; record_backoff_failure; exit 1
+  fi
+  if ! ( cd "$COMPOSE_DIR" && docker compose build mcp ); then
+    err mcp-build-failed "docker compose build mcp failed"; record_backoff_failure; exit 1
+  fi
+  if ! docker tag "$MCP_IMAGE" "$MCP_IMAGE:$TARGET" >/dev/null 2>&1; then
+    err mcp-tag-failed "docker tag $MCP_IMAGE -> $MCP_IMAGE:$TARGET failed"; record_backoff_failure; exit 1
+  fi
+
+  # 2. memory pre-check BEFORE the 2x overlap (8 GiB box). Below the floor: ABORT before ever
+  #    starting the second container. Unreadable (-1) fails OPEN.
+  mcp_mem="$(mcp_mem_available_mb)"
+  if [ "$mcp_mem" -ge 0 ] && [ "$mcp_mem" -lt "$MCP_MEM_MIN_MB" ]; then
+    marker AUTODEPLOY_MCP_MEM_ABORT low-memory "MemAvailable=${mcp_mem}MB < min ${MCP_MEM_MIN_MB}MB on the 8GiB box; refusing the blue-green 2x overlap"
+    record_backoff_failure; exit 1
+  fi
+  [ "$mcp_mem" -lt 0 ] && log "mcp mem-check: MemAvailable UNREADABLE; failing OPEN (proceeding with the 2x overlap without a memory guarantee)"
+
+  # 3. pick a FREE blue/green host port. Both busy -> emit the cap marker + back off, start
+  #    NOTHING (never collide on a live port; managed set is capped at the {8091,A,B} pool).
+  mcp_newport="$(mcp_free_port)"
+  if [ -z "$mcp_newport" ]; then
+    marker AUTODEPLOY_MCP_RETIRE_CAP port-exhausted "both $MCP_PORT_A and $MCP_PORT_B held by un-reaped mcp containers; not starting a colliding 3rd (cap=$MCP_RELEASES_CAP)"
+    record_backoff_failure; exit 1
+  fi
+  mcp_newname="${MCP_CONTAINER_PREFIX}-${TARGET:0:12}-${mcp_newport}"
+
+  # 4. start the NEW container ALONGSIDE the old.
+  if ! mcp_run_new "$mcp_newname" "$mcp_newport"; then
+    err mcp-run-failed "docker run $mcp_newname on 127.0.0.1:${mcp_newport} failed"
+    docker rm -f "$mcp_newname" >/dev/null 2>&1 || true
+    record_backoff_failure; exit 1
+  fi
+
+  # 5. health-check the NEW container. On failure remove IT and leave the OLD upstream live +
+  #    byte-identical (nothing was flipped) — a rollback, not a cutover.
+  mcp_ok=0; mcp_deadline=$(( $(now) + MCP_HEALTH_TIMEOUT ))
+  while [ "$(now)" -lt "$mcp_deadline" ]; do
+    curl -fsS -m 3 "http://127.0.0.1:${mcp_newport}/health" >/dev/null 2>&1 && { mcp_ok=1; break; }
+    sleep 2
+  done
+  if [ "$mcp_ok" != 1 ]; then
+    err mcp-unhealthy "new mcp container $mcp_newname failed /health within ${MCP_HEALTH_TIMEOUT}s; removing it, leaving the OLD upstream live"
+    docker rm -f "$mcp_newname" >/dev/null 2>&1 || true
+    record_backoff_failure; exit 1
+  fi
+
+  # 6. ATOMICALLY flip the /mcp/ upstream to the new container. The cutover is DONE at the reload;
+  #    it never waits on the OLD backend's in-flight ops. On failure restore the previous include
+  #    (byte-identical) + remove the new container + back off.
+  if ! mcp_flip_upstream "$mcp_newport"; then
+    err mcp-flip-failed "nginx flip to 127.0.0.1:${mcp_newport} failed; restored previous upstream + removing new container"
+    docker rm -f "$mcp_newname" >/dev/null 2>&1 || true
+    record_backoff_failure; exit 1
+  fi
+  log "mcp cutover complete: /mcp upstream now 127.0.0.1:${mcp_newport} (deploy DONE; not waiting on in-flight drain)"
+
+  # 7. retire the OLD backend off the critical path (graceful docker stop, reap when drained).
+  mcp_retire_sweep
+
+  # blast-radius assertion: the gerrit container must be UNTOUCHED.
+  gerrit_after_mcp="$(docker inspect -f '{{.Id}}' "$GERRIT_CONTAINER" 2>/dev/null || true)"
+  if [ -n "$gerrit_before_mcp" ] && [ "$gerrit_before_mcp" != "$gerrit_after_mcp" ]; then
+    err blast-radius "gerrit container id changed during an mcp deploy — investigate"
+  fi
+  prune_docker_caches
+  log "mcp redeployed + healthy at 127.0.0.1:${mcp_newport}"
 fi
 
 # ── host observability probe: re-materialize on a probe-source change ─────────

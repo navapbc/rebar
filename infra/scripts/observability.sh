@@ -16,6 +16,9 @@
 #       (AUTODEPLOY_REVIEW_INTERRUPT) -> rebar/host:review_interrupts (bug 34cd alarm), and
 #       pressure-triggered reclaims on the no-op tick (AUTODEPLOY_DISK_PRESSURE) ->
 #       rebar/host:disk_pressure_prunes (diagnostic counter, task 9d15 — no alarm).
+#   4f. mcp blue-green target (foxterrier): retire/port-pool cap hits (AUTODEPLOY_MCP_RETIRE_CAP)
+#       -> rebar/host:mcp_retire_cap, and low-memory deploy aborts (AUTODEPLOY_MCP_MEM_ABORT) ->
+#       rebar/host:mcp_mem_abort (both alarmed in monitoring_foxterrier.tf).
 #   4b. gerrit-to-platform CI-dispatch failures (Gerrit journald) -> rebar/host:g2p_dispatch_errors (epic 1fa8 alarm).
 #   5. Gate reachability -> Rebar/Gate:GerritReachable (1/0), watched by the S7 gate-down
 #      alarm (treat_missing_data=breaching catches a dead host / stopped probe).
@@ -275,9 +278,19 @@ INTERRUPT_OFFSET_FILE="${INTERRUPT_OFFSET_FILE:-/var/lib/rebar/autodeploy-interr
 INTERRUPT_BOUND_OFFSET_FILE="${INTERRUPT_BOUND_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-bound-offset}"
 INTERRUPT_SIGNAL_OFFSET_FILE="${INTERRUPT_SIGNAL_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-signal-offset}"
 DISK_PRESSURE_OFFSET_FILE="${DISK_PRESSURE_OFFSET_FILE:-/var/lib/rebar/autodeploy-disk-pressure-offset}"
+# mcp blue-green target (panicky-sylphish-foxterrier). Two DISTINCT tokens, kept out of
+# AUTODEPLOY_ERROR so a routine retire-cap / memory abort never inflates deploy_errors:
+#   mcp_retire_cap — the blue/green port pool is exhausted (both A and B held by un-reaped
+#                    containers still draining); the deploy backed off rather than force-killing a
+#                    live container. Sustained = mcp releases are not draining / a stuck container.
+#   mcp_mem_abort  — the 8 GiB box was below the memory floor, so the blue-green 2x overlap was
+#                    refused before the second container started. Sustained = the box is memory-bound.
+MCP_RETIRE_CAP_OFFSET_FILE="${MCP_RETIRE_CAP_OFFSET_FILE:-/var/lib/rebar/autodeploy-mcp-retire-cap-offset}"
+MCP_MEM_ABORT_OFFSET_FILE="${MCP_MEM_ABORT_OFFSET_FILE:-/var/lib/rebar/autodeploy-mcp-mem-abort-offset}"
 mkdir -p "$(dirname "$DEFER_OFFSET_FILE")" "$(dirname "$INTERRUPT_OFFSET_FILE")" \
   "$(dirname "$INTERRUPT_BOUND_OFFSET_FILE")" "$(dirname "$INTERRUPT_SIGNAL_OFFSET_FILE")" \
-  "$(dirname "$DISK_PRESSURE_OFFSET_FILE")"
+  "$(dirname "$DISK_PRESSURE_OFFSET_FILE")" "$(dirname "$MCP_RETIRE_CAP_OFFSET_FILE")" \
+  "$(dirname "$MCP_MEM_ABORT_OFFSET_FILE")"
 publish_autodeploy_marker_delta() {
   local token="$1" metric="$2" offset_file="$3" label="$4" total prev new
   total=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE "$token") || true
@@ -321,6 +334,12 @@ publish_autodeploy_marker_delta \
 # never ran" from "it ran and reclaimed nothing" without host access (task 9d15-d576-e0ca-4596).
 publish_autodeploy_marker_delta '^AUTODEPLOY_DISK_PRESSURE \{' disk_pressure_prunes \
   "$DISK_PRESSURE_OFFSET_FILE" "auto-deploy disk-pressure prunes"
+# mcp blue-green target (panicky-sylphish-foxterrier). Record-anchored like every counter above;
+# each kept out of deploy_errors so a routine retire-cap / memory abort never pages that alarm.
+publish_autodeploy_marker_delta '^AUTODEPLOY_MCP_RETIRE_CAP \{' mcp_retire_cap \
+  "$MCP_RETIRE_CAP_OFFSET_FILE" "mcp blue-green retire/port-pool cap hits (releases not draining)"
+publish_autodeploy_marker_delta '^AUTODEPLOY_MCP_MEM_ABORT \{' mcp_mem_abort \
+  "$MCP_MEM_ABORT_OFFSET_FILE" "mcp blue-green deploys aborted for low memory on the 8GiB box"
 
 
 # --- 4b. gerrit-to-platform CI-dispatch failures (epic 1fa8) ---------------
