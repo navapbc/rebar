@@ -2,14 +2,8 @@
 transition_close.py at the existing call-graph seam — ticket 74a3; the file had crossed the
 locked 800-LOC module-size cap).
 
-:func:`_completion_precheck` is the gate's pre-lock half — the deterministic prechecks
-(bug-class, replacement-link disposition, AC-checkbox completeness, file-impact →
-referencing-commit) followed by the billable ``llm.verify_completion`` run and its
-fail-closed error shaping. Its private helpers (:func:`_is_live_ticket`,
-:func:`_has_live_replacement_link`, :func:`_recorded_replacement_target`,
-:func:`_ensure_duplicate_close_is_linked`, :func:`_referencing_commit_exists`) are called only
-from here. ``transition_close`` re-imports the public seam names so existing monkeypatch targets
-(``transition_close._completion_precheck``) and test imports keep working unchanged.
+It owns deterministic completion checks followed by the billable verifier. ``transition_close``
+re-imports its public seam names so established monkeypatch and library paths remain stable.
 """
 
 from __future__ import annotations
@@ -18,6 +12,7 @@ import logging
 import os
 import time
 from collections.abc import Mapping
+from typing import Any
 
 from rebar import config
 from rebar._commands import close_disposition, txn
@@ -168,13 +163,20 @@ def _resolved_completion_scope(
     tracker: str,
     *,
     metrics: dict[str, int] | None = None,
+    ticket_view: Any | None = None,
 ) -> tuple[str, set[str]]:
     """Resolve the ticket and its transitive descendants to unique canonical ids."""
     from rebar._engine_support.descendants import list_descendants
     from rebar._engine_support.resolver import resolve_ticket_id
 
-    if metrics is not None:
-        started_ns = time.monotonic_ns()
+    started_ns = time.monotonic_ns() if metrics is not None else 0
+    if ticket_view is not None:
+        resolved_id = ticket_view.resolve(ticket_id) or ticket_id
+        accepted_ids = {resolved_id, *ticket_view.transitive_descendant_ids(resolved_id)}
+        if metrics is not None:
+            metrics["descendant_ids"] = len(accepted_ids) - 1
+            metrics["descendant_scope_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
+        return resolved_id, accepted_ids
     resolved_id = resolve_ticket_id(ticket_id, tracker) or ticket_id
     accepted_ids = {resolved_id}
     descendants = list_descendants(ticket_id, tracker)
@@ -197,6 +199,7 @@ def _check_work_landed(
     code_root: str,
     *,
     metrics: dict[str, int] | None = None,
+    ticket_view: Any | None = None,
 ) -> None:
     """The two DET landing checks, kept out of ``_completion_precheck`` so that function
     stays within its complexity ceiling: (1) a ticket recording ``file_impact`` must have a
@@ -204,15 +207,22 @@ def _check_work_landed(
     declared impact."""
     from rebar._engine_support import field_reads
 
-    if metrics is not None:
-        started_ns = time.monotonic_ns()
-    if not _union_file_impact(accepted_ids, tracker):
+    started_ns = time.monotonic_ns() if metrics is not None else 0
+    view_kwargs = {} if ticket_view is None else {"ticket_view": ticket_view}
+    if not _union_file_impact(accepted_ids, tracker, **view_kwargs):
         if metrics is not None:
             metrics["landing_check_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
         return
     metrics_kw = {"metrics": metrics} if metrics is not None else {}
-    referencing = _referencing_commits(accepted_ids, tracker, code_root, **metrics_kw)
-    if field_reads.file_impact(ticket_id, tracker) and not referencing:
+    referencing = _referencing_commits(
+        accepted_ids, tracker, code_root, **view_kwargs, **metrics_kw
+    )
+    own_impact = (
+        ticket_view.field_value(ticket_id, "file_impact")
+        if ticket_view is not None
+        else field_reads.file_impact(ticket_id, tracker)
+    )
+    if own_impact and not referencing:
         raise CommandError(
             f"Error: cannot close {ticket_id}: it records file_impact (a code change) but no "
             f"commit references it (nor any of its descendants). Add a "
@@ -221,12 +231,21 @@ def _check_work_landed(
             "Completion verification cannot confirm the work landed without a referencing commit.",
             returncode=1,
         )
-    _check_file_impact_vs_diff(accepted_ids, referencing, tracker, code_root, **metrics_kw)
+    _check_file_impact_vs_diff(
+        accepted_ids,
+        referencing,
+        tracker,
+        code_root,
+        **view_kwargs,
+        **metrics_kw,
+    )
     if metrics is not None:
         metrics["landing_check_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
 
 
-def _attached_commit_shas(accepted_ids: set[str], tracker: str) -> list[str]:
+def _attached_commit_shas(
+    accepted_ids: set[str], tracker: str, *, ticket_view: Any | None = None
+) -> list[str]:
     """SHAs recorded on the ticket (or a descendant) by COMMITS events — the
     ``rebar attach-commits`` repair surface."""
     from rebar.reducer import reduce_ticket
@@ -234,17 +253,25 @@ def _attached_commit_shas(accepted_ids: set[str], tracker: str) -> list[str]:
     shas: list[str] = []
     for ticket in sorted(accepted_ids):
         try:
-            state = reduce_ticket(os.path.join(tracker, ticket))
-        except Exception:  # noqa: BLE001 -- an unreadable sibling never blocks a close
+            records = (
+                ticket_view.field_value(ticket, "commits")
+                if ticket_view is not None
+                else (reduce_ticket(os.path.join(tracker, ticket)) or {}).get("commits")
+            )
+        except Exception:  # The legacy live path treats an unreadable sibling as unattached.
+            if ticket_view is not None:
+                raise
             continue
-        for record in (state or {}).get("commits") or []:
+        for record in records or []:
             sha = record.get("sha") if isinstance(record, Mapping) else record
             if isinstance(sha, str) and sha.strip():
                 shas.append(sha.strip())
     return shas
 
 
-def _union_file_impact(accepted_ids: set[str], tracker: str) -> list[str]:
+def _union_file_impact(
+    accepted_ids: set[str], tracker: str, *, ticket_view: Any | None = None
+) -> list[str]:
     """``file_impact`` paths declared by the ticket OR any transitive descendant.
 
     Deliberately the SAME id set the referencing-commit scan credits. Reading only THIS
@@ -256,7 +283,12 @@ def _union_file_impact(accepted_ids: set[str], tracker: str) -> list[str]:
 
     paths: list[str] = []
     for ticket in sorted(accepted_ids):
-        for entry in field_reads.file_impact(ticket, tracker) or []:
+        entries = (
+            ticket_view.field_value(ticket, "file_impact")
+            if ticket_view is not None
+            else field_reads.file_impact(ticket, tracker)
+        )
+        for entry in entries or []:
             path = entry.get("path") if isinstance(entry, Mapping) else entry
             if isinstance(path, str) and path.strip():
                 paths.append(path.strip())
@@ -270,6 +302,7 @@ def _check_file_impact_vs_diff(
     code_root: str,
     *,
     metrics: dict[str, int] | None = None,
+    ticket_view: Any | None = None,
 ) -> None:
     """DET close check: every changed path of a linked commit must be declared or exempt.
 
@@ -282,15 +315,15 @@ def _check_file_impact_vs_diff(
     """
     from rebar._engine_support import commit_impact
 
-    if metrics is not None:
-        started_ns = time.monotonic_ns()
-    impact = _union_file_impact(accepted_ids, tracker)
+    started_ns = time.monotonic_ns() if metrics is not None else 0
+    view_kwargs = {} if ticket_view is None else {"ticket_view": ticket_view}
+    impact = _union_file_impact(accepted_ids, tracker, **view_kwargs)
     if not impact:
         if metrics is not None:
             metrics["diff_validation_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
         return  # nothing declared anywhere in scope — out of scope for this check
 
-    for sha in _attached_commit_shas(accepted_ids, tracker) + list(referencing):
+    for sha in _attached_commit_shas(accepted_ids, tracker, **view_kwargs) + list(referencing):
         if commit_impact.is_merge_commit(sha, code_root):
             continue  # a merge authors nothing of its own; its parents are scanned instead
         paths = commit_impact.changed_paths(sha, code_root)
@@ -321,7 +354,11 @@ def _check_file_impact_vs_diff(
 
 
 def _referencing_commits(
-    accepted_ids: set[str], tracker: str, repo_root, metrics: dict[str, int] | None = None
+    accepted_ids: set[str],
+    tracker: str,
+    repo_root,
+    metrics: dict[str, int] | None = None,
+    ticket_view: Any | None = None,
 ) -> list[str]:
     """SHAs of commits referencing ANY of ``accepted_ids``, newest first.
 
@@ -334,8 +371,11 @@ def _referencing_commits(
     """
     from rebar._engine_support import commit_impact
 
+    resolver_kwargs = {} if ticket_view is None else {"resolver": ticket_view.resolve}
     commits = (
-        commit_impact.referencing_commits(accepted_ids, tracker, str(repo_root), metrics=metrics)
+        commit_impact.referencing_commits(
+            accepted_ids, tracker, str(repo_root), metrics=metrics, **resolver_kwargs
+        )
         or []
     )
     if metrics is not None:
@@ -542,25 +582,21 @@ def _verify_with_duration_metrics(
     ref: str | None,
     code_root: str,
     metrics: dict[str, int] | None = None,
+    ticket_view: Any | None = None,
+    ticket_read_mode: str | None = None,
 ) -> dict:
-    """Run completion verification once and merge optional direct metrics."""
-    from rebar._commands import close_autoresume
+    """Compatibility seam for duration tests and transition-close monkeypatches."""
+    from rebar._commands.completion_verifier_run import run_close_verifier
 
-    if metrics is None:
-        return close_autoresume.verify_with_auto_resume(
-            ticket_id, ref=ref, repo_root=code_root, cfg_root=code_root
-        )
-    verifier_started_ns = time.monotonic_ns()
-    pre_verifier_started_ns = metrics.pop("_pre_verifier_started_ns", verifier_started_ns)
-    metrics["pre_verifier_total_ms"] = (verifier_started_ns - pre_verifier_started_ns) // 1_000_000
-    result = close_autoresume.verify_with_auto_resume(
-        ticket_id, ref=ref, repo_root=code_root, cfg_root=code_root
+    return run_close_verifier(
+        ticket_id,
+        ref=ref,
+        code_root=code_root,
+        metrics=metrics,
+        ticket_view=ticket_view,
+        ticket_read_mode=ticket_read_mode,
+        clock=time.monotonic_ns,
     )
-    metrics["verifier_call_ms"] = (time.monotonic_ns() - verifier_started_ns) // 1_000_000
-    result_metrics = result.get("metrics")
-    if isinstance(result_metrics, dict):
-        result_metrics.update(metrics)
-    return result
 
 
 def _optional_metrics_kwargs(
@@ -602,15 +638,8 @@ def _completion_precheck(
     so the optionality contract holds: core stays stdlib-only unless the gate is on AND a
     non-force close is attempted.
 
-    THE ``None`` RESULT HAS SEVERAL CAUSES, and leaving them out of this docstring is part of
-    what let bug 738a hide. A **disposition** close (a bug closed ``duplicate`` / ``not_a_bug`` /
-    ``escalated`` while naming a live replacement) skips the billable verifier — it never claimed to
-    implement its own criteria — but still returns a sign signal, built by
-    :mod:`rebar._commands.close_disposition`. It used to return ``None``, so the closure was
-    unsigned, and :func:`rebar.llm.completion.child_closure_findings` counts ANY unsigned closure as
-    uncertified and withholds the parent's signature. Read as "unsigned implies gate-off or forced",
-    which is what an earlier docstring said, that state looked like a force-close and was reopened
-    as one. The ``completion_expectation`` half of the pair now records each cause durably."""
+    Disposition closes skip the billable verifier but return their own deterministic sign signal;
+    ``completion_expectation`` records every unsigned or exempt cause durably."""
     # session_log / code_review are lifecycle-exempt — they cannot be transitioned, so
     # transition_core will refuse this close authoritatively. Skip the gate BEFORE the (billable)
     # verifier runs, so a doomed close attempt never fires an LLM call.
@@ -658,78 +687,48 @@ def _completion_precheck(
     if disposition is not _NO_DISPOSITION:
         return disposition, "disposition"
 
-    # NO usable replacement. A `duplicate`/`superseded` close cannot be rescued by the
-    # completion verifier — the work it would ask about lives on the replacement ticket — so
-    # falling through printed advice that could not be followed. Fail HERE, naming the one
-    # command that works. Scoped to the replacement-bearing classes (not the whole
-    # non-completion set): `not_a_bug` asserts there is no defect and `escalated` may point
-    # outside the tracker, so neither owes a link — since bug d54b they are reason-required
-    # instead (a live replacement still short-circuits first) and never reach this fallthrough.
-    # Deterministic and pre-LLM, so such a close never buys the wrong advice with a billable
-    # request.
+    # A duplicate/superseded close without a usable replacement cannot be verified as complete.
     _ensure_duplicate_close_is_linked(ticket_id, ticket_type, close_class, tracker)
 
-    # AC-checkbox completeness precheck (DET, pre-LLM): unchecked items block close (433c).
-    txn.ensure_ac_boxes_checked(ticket_id, tracker)
+    # Capture once before any completion-specific deterministic read. The same view is passed
+    # by identity through every auto-resume attempt and closed here after its receipt is sealed.
+    from rebar.llm.completion import capture_completion_ticket_view
 
-    # Attested-item validity precheck (DET, pre-LLM, bug 2f56-313f-6175-41b1): an
-    # [operator-attested] item citing exact repo path/symbol evidence (attestation
-    # laundering), or missing its complete `provenance:` continuation line, blocks the
-    # close BEFORE the verifier can accept the tag at face value (ADR-0043).
-    txn.ensure_attested_items_valid(ticket_id, tracker)
-
-    # Deterministic precheck BEFORE the billable LLM call (alongside the open-children guard):
-    # a ticket that records file_impact claims a concrete code change, so there MUST be a commit
-    # that references it (a `rebar-ticket: <id>` trailer). If none exists, the implementation has
-    # not landed and completion cannot be confirmed — fail fast (no LLM call).
-    # Credit the ticket's ENTIRE descendant subtree: a parent (epic/story) whose code was
-    # delivered by its children carries no commit referencing its OWN id, only the child ids.
-    # Accept a referencing commit for the ticket or any of its descendants (transitive).
-    metrics_kwargs = _optional_metrics_kwargs(metrics)
-    resolved_id, accepted_ids = _resolved_completion_scope(ticket_id, tracker, **metrics_kwargs)
-    _check_work_landed(ticket_id, resolved_id, accepted_ids, tracker, code_root, **metrics_kwargs)
-
+    ticket_view, ticket_read_mode = capture_completion_ticket_view(
+        ticket_id, code_root, fetch=False
+    )
     try:
-        # The billable verifier run, wrapped in the bounded auto-resume loop (ticket b5f8):
-        # an insufficiency-only FAIL (search exhaustion, nothing positively refuted) re-runs
-        # `llm.verify_completion` itself — the verdict cache seeds the credited PASSes — up
-        # to `verify.auto_resume_max` times while each attempt strictly grows the credited
-        # count. The `graph=False` / `source="attested"` / `ref` / `fetch=False` call-site
-        # rationale is documented on the helper, which imports `rebar.llm` LAZILY so the
-        # optionality contract holds. Extracted along this call seam so this function stays
-        # at its frozen complexity ceiling.
-        result = _verify_with_duration_metrics(
-            ticket_id, ref=ref, code_root=code_root, **metrics_kwargs
+        pinned_state = ticket_view.show_ticket(ticket_id) if ticket_view is not None else None
+        if pinned_state is not None:
+            ticket_type = str(pinned_state.get("ticket_type") or ticket_type)
+        state_kwargs = {} if pinned_state is None else {"ticket_state": pinned_state}
+        txn.ensure_ac_boxes_checked(ticket_id, tracker, **state_kwargs)
+        txn.ensure_attested_items_valid(ticket_id, tracker, **state_kwargs)
+        metrics_kwargs = _optional_metrics_kwargs(metrics)
+        view_kwargs = {} if ticket_view is None else {"ticket_view": ticket_view}
+        resolved_id, accepted_ids = _resolved_completion_scope(
+            ticket_id, tracker, **view_kwargs, **metrics_kwargs
         )
-    except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
-        from rebar.llm import failure as _failure
-
-        # Shape B (story blackbear): thread the classifier disposition mamba/preflight attached
-        # to the raised LLM error through to the process exit code. A retryable outage (429/5xx)
-        # → exit 11 ("transient — retry"), else the existing fail-closed exit 1. CommandError
-        # already carries `returncode` and transition.py returns it, so exit 11 propagates with
-        # no plumbing change. The sanitized diagnostic is also written to the session log.
-        _outcome = _failure.outcome_of(exc)
-        _failure.log_degrade(_outcome, gate="completion-verify", ticket_id=ticket_id)
-        _rc = 11 if (_outcome and _outcome.retryable) else 1
-        _hint = ""
-        if _outcome is not None:
-            _msg = _failure.message_for(
-                _outcome.resolution_class.value,
-                finish_reason=(_outcome.diagnostic or {}).get("finish_reason"),
-            )
-            if _msg:
-                _hint = f" [{_outcome.resolution_class.value}: {_msg}]"
-        # Neither a bounded-recovery failure nor a mid-run verifier failure (e.g. a step-budget
-        # exhaustion after minutes of real model calls) is an unavailable runtime, so the
-        # "install the extra / set a key" remedy is reserved for actual unavailability.
-        _remedy = _failure.close_gate_remedy(exc, _outcome)
-        raise CommandError(
-            f"Error: cannot close {ticket_id}: completion verification could not run "
-            f"({exc}).{_hint} {_remedy} "
-            'Override with --force="<reason>".',
-            returncode=_rc,
-        ) from None
+        _check_work_landed(
+            ticket_id,
+            resolved_id,
+            accepted_ids,
+            tracker,
+            code_root,
+            **view_kwargs,
+            **metrics_kwargs,
+        )
+        result = _verify_with_duration_metrics(
+            ticket_id,
+            ref=ref,
+            code_root=code_root,
+            ticket_view=ticket_view,
+            ticket_read_mode=ticket_read_mode,
+            **metrics_kwargs,
+        )
+    finally:
+        if ticket_view is not None:
+            ticket_view.close()
 
     if str(result.get("verdict", "")).upper() != "PASS":
         items = result.get("findings", []) or []
@@ -764,10 +763,15 @@ def _completion_precheck(
     # per-criterion `criteria[]` capture, mirroring the FAIL branch's emit. Best-effort:
     # persistence is observability and must NEVER affect the close outcome, so the emit is
     # wrapped and any exception logged and swallowed.
+    from rebar._commands.completion_bundle import has_atomic_basis
     from rebar.llm import completion_sidecar
 
     result.setdefault("ticket_id", resolved_id)
-    _emit_completion_sidecar(completion_sidecar, result, ticket_id, repo_root, is_pass=True)
+    # A fresh lazy PASS publishes its sidecar together with STATUS + SIGNATURE in the
+    # atomic close bundle. Every legacy/local/uncertifiable path retains the established
+    # best-effort early sidecar behavior.
+    if not has_atomic_basis(result):
+        _emit_completion_sidecar(completion_sidecar, result, ticket_id, repo_root, is_pass=True)
     # local source (opt-in back-out) verified + passed but is NEVER signed (epic
     # raze-vet-ditch S4: an unattested run produces no signature). Only an EXPLICIT local
     # verdict suppresses signing; the default close path is attested and signs (a verdict with

@@ -161,6 +161,9 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
 # push holds the lock. Writers reconverge with the longer default.
 _RECONVERGE_LOCK_TIMEOUT = 2
 _LOCAL_READ_CONTEXT = ContextVar("rebar_local_read_context", default=False)
+_TICKET_VIEW_CONTEXT: ContextVar[object | None] = ContextVar(
+    "rebar_completion_ticket_view", default=None
+)
 
 
 @contextmanager
@@ -171,6 +174,33 @@ def local_read_context() -> Iterator[None]:
         yield
     finally:
         _LOCAL_READ_CONTEXT.reset(token)
+
+
+def current_ticket_view() -> Any | None:
+    """The active immutable completion view, or ``None`` for ordinary live reads."""
+    return _TICKET_VIEW_CONTEXT.get()
+
+
+def reraise_pinned_read_failure(exc: Exception) -> None:
+    """Prevent best-effort callers from downgrading an immutable-view read failure."""
+    if current_ticket_view() is None:
+        return
+    from rebar._snapshot.ticket_view import PinnedTicketViewError
+
+    if isinstance(exc, PinnedTicketViewError) or getattr(exc, "error_code", "") == (
+        "pinned_ticket_read_failed"
+    ):
+        raise exc
+
+
+@contextmanager
+def use_ticket_view(view: object | None) -> Iterator[None]:
+    """Bind one immutable completion view for deterministic in-process ticket reads."""
+    token = _TICKET_VIEW_CONTEXT.set(view)
+    try:
+        yield
+    finally:
+        _TICKET_VIEW_CONTEXT.reset(token)
 
 
 def _sync_disabled(root: str | None = None) -> bool:

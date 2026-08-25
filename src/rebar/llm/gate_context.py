@@ -1,8 +1,9 @@
 """Gate read-root + snapshot-session context for the LLM agent-operations framework.
 
-The three ContextVars a running gate binds — the attested code read-root, the pinned
-ticket-store read-root, and the "am I inside a gate session" flag — plus their readers,
-their ``with``-scoped binders, and the ``assert_gated`` fail-closed guard. This is the
+The ContextVars a running gate binds — the attested code read-root, the pinned
+ticket-store read-root or lazy view, and the "am I inside a gate session" flag — plus
+their readers, their ``with``-scoped binders, and the ``assert_gated`` fail-closed guard.
+This is the
 gate EXECUTION context, a different concern from ``LLMConfig`` (which merely *consumes*
 it: ``from_env`` calls :func:`current_code_root` / :func:`current_tickets_root` to resolve
 ``repo_path`` / ``tickets_path`` (``llm/config.py``)). Its natural consumer seam already
@@ -54,6 +55,12 @@ import os
 from collections.abc import Iterator
 
 from rebar import config as _root_config
+from rebar._engine_support.reads import (
+    current_ticket_view as current_ticket_view,
+)
+from rebar._engine_support.reads import (
+    use_ticket_view as use_ticket_view,
+)
 
 # The active code read-root for the running gate (epic raze-vet-ditch S3). When a gate
 # runs in `attested` mode it materializes a snapshot at the client-pinned SHA and sets

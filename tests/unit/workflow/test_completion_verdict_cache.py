@@ -267,6 +267,30 @@ def test_still_valid_entries_load_and_seed_the_bank(store: Path) -> None:
     assert entry is not None and entry["met"] is True and entry.get("seeded") is True
 
 
+def test_pinned_cache_entries_do_not_cross_ticket_store_revisions(store: Path) -> None:
+    from rebar import config
+    from rebar._engine_support.reads import use_ticket_view
+    from rebar._snapshot.ticket_view import PinnedTicketView, tracker_head
+
+    repo = store
+    _write_and_commit(repo, "src/a.py", "a = 1\n")
+    tid = _seed_ticket(repo, impact=["src/a.py"])
+    tracker = str(config.tracker_dir(str(repo)))
+    with PinnedTicketView.at_oid(tracker, tracker_head(tracker)) as view_a:
+        with use_ticket_view(view_a):
+            ticket_a = view_a.show_ticket(tid)
+            _persist_pass(repo, tid)
+            assert set(
+                cvc.load_valid_pass_entries(tid, ticket_a, ["the fix works"], str(repo))
+            ) == {"the fix works"}
+
+    rebar.comment(tid, "advances only the ticket store", repo_root=str(repo))
+    with PinnedTicketView.at_oid(tracker, tracker_head(tracker)) as view_b:
+        with use_ticket_view(view_b):
+            ticket_b = view_b.show_ticket(tid)
+            assert cvc.load_valid_pass_entries(tid, ticket_b, ["the fix works"], str(repo)) == {}
+
+
 def test_in_scope_edit_invalidates_cached_pass(store: Path) -> None:
     """RED AC: a file under file_impact changes (ticket text unchanged) → blob sha rotates →
     the cached PASS is invalid; an unrelated commit does NOT invalidate."""
