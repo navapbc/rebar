@@ -20,6 +20,19 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _pinned_child_states(ticket_id: str, view) -> list[dict]:
+    """Read only the child fields that can affect closure certification."""
+    fields = ("title", "status", "archived", "last_reopened_at", "attestations")
+    states = [
+        {
+            "ticket_id": child_id,
+            **{field: view.field_value(child_id, field) for field in fields},
+        }
+        for child_id in view.direct_child_ids(ticket_id)
+    ]
+    return [state for state in states if not state.get("archived")]
+
+
 def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[dict]]:
     """Deterministic child-closure / certification gate — the "epic-level verdict trust" rule.
 
@@ -45,10 +58,19 @@ def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[
     certification — a read failure would have signed the parent as if it were childless. This
     mirrors ``plan_review.attest._attested_delivered``, which fails closed on the same error."""
     from rebar import _reads
+    from rebar._engine_support.reads import current_ticket_view
 
+    view = current_ticket_view()
     try:
-        children = _reads.list_tickets(parent=ticket_id, repo_root=repo_root)
+        children = (
+            _pinned_child_states(ticket_id, view)
+            if view is not None
+            else _reads.list_tickets(parent=ticket_id, repo_root=repo_root)
+        )
     except Exception as exc:
+        from rebar._engine_support.reads import reraise_pinned_read_failure
+
+        reraise_pinned_read_failure(exc)
         logger.warning(
             "child-closure enumeration failed for %s; withholding certification "
             "(the parent may still close on its own criteria, but UNSIGNED) rather than "
@@ -81,6 +103,11 @@ def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[
     # bug a3f5-5c19: one lazily-built child-index snapshot shared across every child's
     # compute_validity (whose completion branch fingerprints the child's material —
     # up to 5 full-store scans per stale child) instead of a scan per child.
+    # A lazy pinned view cannot answer that context's intentionally-unbounded global scan;
+    # its parent-bounded reads are already demand-cached and receipt-tracked, so use them
+    # directly and keep the stable-view contract fail-closed (never fall through to live).
+    if view is not None:
+        return _classify_children(children, repo_root)
     with material_child_index(repo_root=repo_root):
         return _classify_children(children, repo_root)
 
@@ -117,7 +144,32 @@ def _classify_children(children: list[dict], repo_root) -> tuple[list[dict], lis
         # compute_validity so a reopened/materially-edited closure no longer counts as a
         # validated closure (validity-on-read; records are never mutated).
         try:
-            sig = rebar.verify_signature(cid, kind="completion-verifier", repo_root=repo_root)
+            from rebar._engine_support.reads import current_ticket_view
+
+            view = current_ticket_view()
+            if view is None:
+                sig: dict[str, object] = dict(
+                    rebar.verify_signature(cid, kind="completion-verifier", repo_root=repo_root)
+                )
+            else:
+                from rebar import signing
+
+                attestations = c.get("attestations") or {}
+                record = (
+                    attestations.get("completion-verifier")
+                    if isinstance(attestations, dict)
+                    else None
+                )
+                sig = dict(
+                    signing.verify_attestation_record(
+                        record if isinstance(record, dict) else None,
+                        cid,
+                        kind="completion-verifier",
+                        repo_root=repo_root,
+                    )
+                )
+                sig["ticket_id"] = cid
+                sig["kind"] = "completion-verifier"
             if sig.get("verdict") == "certified":
                 from rebar.llm.plan_review.attest import compute_validity
 
@@ -127,7 +179,10 @@ def _classify_children(children: list[dict], repo_root) -> tuple[list[dict], lis
                 # Carry the REASON, not just the verdict: the verdict alone ("unsigned")
                 # tells a reader nothing about what to do next (bug 94a3).
                 valid, detail = False, f"signature: {sig.get('verdict')} — {sig.get('reason', '')}"
-        except Exception as exc:  # noqa: BLE001 — never let a signature read crash the verification: recorded in-band
+        except Exception as exc:  # noqa: BLE001 — live signature faults remain in-band
+            from rebar._engine_support.reads import reraise_pinned_read_failure
+
+            reraise_pinned_read_failure(exc)
             valid, detail = False, f"error: {exc}"
         if not valid:
             uncertified.append(
@@ -184,10 +239,19 @@ def build_child_closure_evidence(ticket_id: str, repo_root, uncertified: list[di
     Note: on the caller's LLM path ``blocking`` is necessarily empty (a non-empty ``blocking``
     short-circuited earlier), so only closure+certification is reported here."""
     from rebar import _reads
+    from rebar._engine_support.reads import current_ticket_view
 
     try:
-        children = _reads.list_tickets(parent=ticket_id, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — mirror child_closure_findings: an unreadable child set yields no block
+        view = current_ticket_view()
+        children = (
+            _pinned_child_states(ticket_id, view)
+            if view is not None
+            else _reads.list_tickets(parent=ticket_id, repo_root=repo_root)
+        )
+    except Exception as exc:  # noqa: BLE001 — live read failure keeps the legacy no-block evidence path
+        from rebar._engine_support.reads import reraise_pinned_read_failure
+
+        reraise_pinned_read_failure(exc)
         return ""
     total = len(children)
     if total == 0:

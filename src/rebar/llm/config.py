@@ -57,6 +57,7 @@ from rebar.llm.gate_context import (  # noqa: F401  (re-export: see above)
     in_gate_session,
     resolve_code_root,
     use_code_root,
+    use_ticket_view,
     use_tickets_root,
 )
 from rebar.llm.headers import resolve_headers
@@ -525,6 +526,8 @@ class LLMConfig:
     # `repo_path`), or `None` to read the in-place checkout's store (local mode). Set from
     # `current_tickets_root()` by `from_env`.
     tickets_path: str | None = None
+    # Concrete lazy view injection; unlike ContextVars this survives raw worker dispatch.
+    ticket_view: object | None = field(default=None, repr=False, compare=False)
     mcp_servers: dict = field(default_factory=dict)
     # Operator-configured request headers for gate LLM calls (ee8a). Default {} so an
     # unconfigured deployment is byte-unchanged. The `${env:...}`/`${run:...}` value
