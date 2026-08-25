@@ -127,6 +127,12 @@ are pre-approved on it: post them without asking. Everything else stays gated: a
 tracker is third-party and needs approval per the paragraph above, as does any own-tracker
 mutation beyond the prescribed writebacks (transitions, edits to others' tickets, bulk changes).
 
+**Routing.** When an MCP server is configured, run the rebar *tracker* ops this protocol uses —
+`search`/`list`, `link`, `comment`, `transition`/`reopen`, `set-file-impact`, and `review-plan` —
+through the MCP server; the local `rebar` CLI is the carve-out/fallback for local-code ops
+(reproductions, tests, `git`) and when no MCP server is configured. See the *Drive the tracker
+through the MCP server* umbrella in `AGENTS.md`.
+
 # Step 0 — Orient (before Phase 1, on both the full protocol and the fast path)
 
 Before you gather a single piece of evidence, spend two minutes establishing **whether this

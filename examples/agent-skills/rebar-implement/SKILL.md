@@ -80,6 +80,11 @@ Read the project's own documentation and configuration and let it govern the mec
   commit-message requirements (ticket trailer, DCO sign-off), and its verification commands.
 - **The rebar config and gates** — whether the plan-review claim gate and the
   completion-verifier close gate are enabled (they change what "claim" and "close" require).
+- **Whether an MCP server is configured** — when it is, route this skill's rebar *tracker* ops
+  (`claim`/`transition`/`create`/`comment`/`link`, `search`/`list`/`ready`/`next-batch`, and the
+  `review-plan` gate) through the MCP server; the local `rebar` CLI is the carve-out/fallback for
+  local-code ops (running gates/tests, `get-verify-commands`, `get-file-impact`) and when no MCP
+  server is configured. See the *Drive the tracker through the MCP server* umbrella in `AGENTS.md`.
 - **The verify commands** — `rebar get-verify-commands <id>` if set, otherwise the project's
   documented pre-flight (e.g. a `Makefile`'s `lint`/`typecheck`/`test` targets, which are
   typically CI's single source of truth).

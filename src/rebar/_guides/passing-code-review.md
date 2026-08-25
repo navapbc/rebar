@@ -130,7 +130,12 @@ rebar sign-review <id>            # only if the review PASSED but no attestation
 ```
 
 Then amend and re-push. The gate asks only whether an attested plan review **was completed**, never
-which machine certified it, so running the review locally satisfies it. Note the one thing that
+which machine certified it, so running the review locally satisfies it. When the rebar MCP server
+is configured, route the tracker ops here — `review-plan` (the signing run) and `sign-review` —
+through it; the read-only `review-plan <id> --status` currency check, `review-code`, and
+`verify-commit-ticket` are local-code ops and stay on the local `rebar` CLI (the carve-out/fallback),
+as does everything when no MCP server is configured — see the *Drive the tracker through the MCP
+server* umbrella in `AGENTS.md`. Note the one thing that
 still bites: attest *first, then* edit the plan and the attestation goes `stale-material` and blocks
 again — re-review after any plan edit. Only Gerrit runs this criterion; a local `review-code`
 preview never blocks on it. Details:

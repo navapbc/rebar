@@ -22,7 +22,11 @@ reference-and-summary — read **`AGENTS.md`** for the authoritative protocol.
   *before* editing, and `rebar transition <id> in_progress closed` when the acceptance criteria
   are met; record emergent work with `rebar link <new> <parent> discovered_from`. Gates are on:
   a passing `rebar review-plan` attestation is required to claim, and the completion verifier
-  runs on close (green CI is still required before you close).
+  runs on close (green CI is still required before you close). When the rebar MCP server is
+  configured, route these tracker ops (search / `ready` / `claim` / `transition` / `link` /
+  `review-plan`) through it; the local `rebar` CLI is the carve-out/fallback for local-code
+  ops and when no MCP server is configured — see the *Drive the tracker through the MCP
+  server* umbrella in `AGENTS.md`.
 - **Work in a fresh worktree** branched from current `origin/main`; run every command from
   inside it.
 - **Land through Gerrit** (never GitHub PRs): `git push gerrit HEAD:refs/for/main`; every commit
