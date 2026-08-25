@@ -19311,8 +19311,16 @@
       "updated_at": "2026-08-15T15:00:33Z"
     },
     "5f3b-55ec-38a5-4f3f": {
+      "baseline": {
+        "assignee": null,
+        "description": "",
+        "priority": "High",
+        "status": "Done",
+        "summary": "T3: delete jq reducer(s); route show + get-file-impact through Python reduce_ticket"
+      },
       "created_at": "2026-08-15T15:00:33Z",
       "jira_key": "REB-154",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:33Z"
     },
@@ -30615,7 +30623,7 @@
         },
         "description": "## Context / Problem\nLive completion runs directly attribute 135-235 seconds to full ticket-store materialization. The store has about 5,500 ticket directories and 132,000 tracked files, so donor hardlinks avoid blob duplication but still perform work proportional to the inode tree. We need evidence for a stable read-only completion environment that pins tracker state cheaply while close, sidecar, and signature mutations continue against the normal live store.\n\n## Approach\nUse the tracker commit OID as the immutable read identity, because Git already preserves an immutable tree and the current implementation already resolves that OID before creating a checkout. Prove the boundary with Git plumbing against the real tracker plus a standard-library disposable Git fixture. The experiments will read objects lazily or extract only named ticket directories; no full-store copy or production implementation is needed.\n\n## Scope\n- Read-only Git plumbing against the configured `.tickets-tracker` repository.\n- A temporary standard-library experiment harness under `tempfile.TemporaryDirectory`.\n- Ticket comments containing timestamped measurements and conclusions.\n- No repository source, test, guidance, or architecture-document edits.\n\n## Testing / Verification\n- Benchmark at least 30 invocations of `git rev-parse HEAD`, pinned `git ls-tree`, and batched `git cat-file` reads against the real tracker; record median, p90, and maximum wall time.\n- Extract one real ticket directory from a captured commit and compare canonical reduced-state hashes using `rebar.reducer.reduce_ticket`.\n- In a disposable Git fixture, capture revision A, commit a live mutation producing revision B, and assert reads through A remain byte-identical while B exposes the mutation.\n- In the fixture, run `git diff --name-only A..B` and semantic predicates for exact-ticket changes, new-child membership, unrelated changes, and non-ancestor history.\n- Record command output, timestamps, environment facts, and cleanup outcome as ticket comments.\n\n## Acceptance Criteria\n- [ ] [non-codebase] Revision-capture timing for at least 30 trials is recorded on this ticket; checked from the harness summary for `git rev-parse HEAD`.\n- [ ] [non-codebase] Pinned Git-tree lookup timing is recorded on this ticket; checked from the harness summaries for `git ls-tree` and `git cat-file`.\n- [ ] [non-codebase] A scoped pinned directory reduces to the same canonical target-state hash as the captured live directory; checked by the harness equality assertion.\n- [ ] [non-codebase] Pinned reads stay byte-identical after a later live commit; checked by the disposable revision-A/revision-B assertion.\n- [ ] [non-codebase] The live view exposes the later mutation; checked by the disposable revision-B assertion.\n- [ ] [non-codebase] Scoped extraction time, file count, and bytes are recorded on this ticket; checked by the harness summary.\n- [ ] [non-codebase] An exact ticket edit invalidates its recorded read dependency; checked by the validation harness exit status.\n- [ ] [non-codebase] A newly matching child invalidates the recorded child-query dependency; checked by the validation harness exit status.\n- [ ] [non-codebase] An unrelated ticket mutation leaves the relevant dependency set valid; checked by the validation harness exit status.\n- [ ] [non-codebase] A non-ancestor live revision fails closed; checked by the validation harness exit status.\n- [ ] [non-codebase] Primary-source OSS prior art and design gotchas are recorded on this ticket; checked by cited URLs in the research comment.\n- [ ] No repository files change; checked by `git status --short` in the dedicated worktree.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Experiment with a pinned read-only ticket view for completion verification"
       },
       "created_at": "2026-08-25T04:39:05Z",
@@ -52731,7 +52739,9 @@
     "1787628655058421001": "__rebar_unknown_comment_id__",
     "1787631452019841001": "__rebar_unknown_comment_id__",
     "1787631570528501001": "__rebar_unknown_comment_id__",
-    "1787631859391812001": "__rebar_unknown_comment_id__"
+    "1787631859391812001": "__rebar_unknown_comment_id__",
+    "1787638685741369001": "__rebar_unknown_comment_id__",
+    "1787639630165375001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
