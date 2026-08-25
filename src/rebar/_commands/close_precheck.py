@@ -751,11 +751,13 @@ def _completion_precheck(
         # the raise below still fires unconditionally. Supply the canonical id so the record
         # lands in the resolved ticket dir, and material=None (no fingerprint is computed on
         # the FAIL path).
-        from rebar.llm import completion_sidecar
+        from rebar.llm import completion_reconcile, completion_sidecar
 
         result.setdefault("ticket_id", resolved_id)
         _emit_completion_sidecar(completion_sidecar, result, ticket_id, repo_root, is_pass=False)
-        raise CommandError(message, returncode=1)
+        raise CommandError(
+            message, returncode=completion_reconcile.completion_fail_returncode(result)
+        )
     # PASS: persist the lossless PASS record to the durable, queryable sidecar (story e7e0)
     # BEFORE any sign/early-return, so EVERY PASS close — including the local (opt-in) and the
     # certifiable=False (force-closed-descendant) unsigned paths below — leaves the positive
