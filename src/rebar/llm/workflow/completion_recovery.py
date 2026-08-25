@@ -250,7 +250,10 @@ class CompletionAgentStep(_ex.AgentStepRunner):
                 [text for text in expected if id_by_text[text] in seeded], id_by_text
             )
             return manifest, tuple(id_by_text[text] for text in expected)
-        except Exception:  # noqa: BLE001 -- the manifest is a best-effort enhancement; any read/parse failure falls back to the pre-banking primary (never a new failure mode)
+        except Exception as exc:  # noqa: BLE001 -- non-ticket manifest faults remain best-effort
+            from rebar._engine_support.reads import reraise_pinned_read_failure
+
+            reraise_pinned_read_failure(exc)
             return "", ()
 
     def _recover(

@@ -108,6 +108,14 @@ def _reusable_attested_pass(ticket_id: str, *, ref: str | None, repo_root) -> di
     malformed, stale, or unreadable input returns ``None`` so the normal verifier runs.
     """
     try:
+        from rebar.llm.completion import _pinned_ticket_view_selection
+
+        # A previously recorded op-cert changed ticket state after its verifier receipt was
+        # captured, so it cannot drive the all-or-none close transaction. The experimental
+        # mode deliberately buys a fresh stable read instead of falling back to the legacy
+        # two/three-commit reuse tail.
+        if _pinned_ticket_view_selection(repo_root)[0]:
+            return None
         from rebar import _reads, signing
         from rebar._snapshot.repo_snapshot import resolve_ref
         from rebar.llm.plan_review import attest
@@ -190,7 +198,13 @@ def _reusable_attested_pass(ticket_id: str, *, ref: str | None, repo_root) -> di
 
 
 def verify_with_auto_resume(
-    ticket_id: str, *, ref: str | None, repo_root, cfg_root: str | None
+    ticket_id: str,
+    *,
+    ref: str | None,
+    repo_root,
+    cfg_root: str | None,
+    ticket_view: Any | None = None,
+    ticket_read_mode: str | None = None,
 ) -> dict[str, Any]:
     """Run ``llm.verify_completion`` with bounded auto-resume on insufficiency-only FAILs.
 
@@ -212,9 +226,15 @@ def verify_with_auto_resume(
 
     phase_metrics["verifier_wrapper_setup_ms"] = (monotonic_ns() - wrapper_started_ns) // 1_000_000
     phase_started_ns = monotonic_ns()
-    reused = _reusable_attested_pass(ticket_id, ref=ref, repo_root=repo_root)
+    reused = (
+        None
+        if ticket_view is not None
+        else _reusable_attested_pass(ticket_id, ref=ref, repo_root=repo_root)
+    )
     phase_metrics["verifier_reusable_lookup_ms"] = (monotonic_ns() - phase_started_ns) // 1_000_000
     if reused is not None:
+        if ticket_read_mode is not None:
+            reused["ticket_read_mode"] = ticket_read_mode
         return reused
 
     phase_started_ns = monotonic_ns()
@@ -224,6 +244,11 @@ def verify_with_auto_resume(
     phase_metrics["verifier_resume_config_ms"] = (monotonic_ns() - phase_started_ns) // 1_000_000
     phase_metrics["verifier_attempts_ms"] = 0
     phase_metrics["verifier_between_attempts_ms"] = 0
+    session_kwargs: dict[str, Any] = {}
+    if ticket_view is not None:
+        session_kwargs["ticket_view"] = ticket_view
+    if ticket_read_mode is not None:
+        session_kwargs["ticket_read_mode"] = ticket_read_mode
     while True:
         # graph=False: the close gate verifies THIS ticket's OWN completion criteria, NOT its
         # whole descendant subtree. Children are separate tickets gated on their own close; the
@@ -251,6 +276,7 @@ def verify_with_auto_resume(
             fetch=False,
             repo_root=repo_root,
             phase_metrics=phase_metrics,
+            **session_kwargs,
         )
         phase_metrics["verifier_attempts_ms"] += (monotonic_ns() - phase_started_ns) // 1_000_000
         phase_started_ns = monotonic_ns()
