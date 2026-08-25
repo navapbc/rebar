@@ -54,12 +54,18 @@ def current_push_mode() -> str | None:
 
 
 @contextlib.contextmanager
-def bound_signer(binding: OpcertBinding | None, *, push_mode: str = "off") -> Iterator[None]:
+def bound_signer(binding: OpcertBinding | None, *, push_mode: str | None = "off") -> Iterator[None]:
     """Bind ``binding`` (and its push policy) for the enclosed block, resetting on exit.
 
     When ``binding`` is ``None`` the push policy is left unbound too, so nesting an unbound
-    block inside a bound one does not silently disable pushes. The service always passes a
-    concrete signer with the default ``push_mode="off"`` (the gate never pushes)."""
+    block inside a bound one does not silently disable pushes. The trusted op-cert gate service
+    always passes a concrete signer with the default ``push_mode="off"`` (the gate never pushes).
+
+    ``push_mode=None`` binds the SIGNER without overriding the push policy — the enclosed block
+    signs from ``binding`` but the outbound push still falls back to the env/config default
+    (:func:`rebar.config.resolve_push_mode`). The on-box MCP server uses this: it must sign its
+    certified-op certs under the box environment AND still auto-push its ticket writes to the
+    shared store, unlike the store-read-only gate service."""
     push = push_mode if binding is not None else None
     bound_token = _BOUND.set(binding)
     push_token = _PUSH_MODE.set(push)

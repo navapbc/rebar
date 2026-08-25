@@ -688,6 +688,38 @@ def build_server(cfg=None):
     return mcp
 
 
+def compose_startup_opcert_binding(cfg):
+    """Compose the ONE startup op-cert signer this server signs its certified-op certs under, or
+    ``None`` when op-cert signing is not provisioned (the developer-local / stdio default).
+
+    The on-box deployment materializes the box environment's Ed25519 key OUTSIDE the app and wires
+    the mcp compose service with ``REBAR_OPCERT_ENV_ID`` (the pinned env_id) +
+    ``REBAR_IDENTITY_SIGNING_KEY`` (the bind-mounted key path). When BOTH are set this composes an
+    immutable :class:`~rebar.opcert_service.keyprov.OpcertSigner` from them — the SAME startup
+    composition the trusted op-cert gate service uses (validate + 0600 process-owned copy) — so
+    every cert the certified-op tools mint carries that env_id and verifies against the pinned
+    public key (:mod:`rebar.attest.trusted_env`). The binding is threaded context-locally around
+    serving (see :func:`rebar._mcp_health.run_mcp`); WITHOUT it the certified tools would sign the
+    principal from ``REBAR_OPCERT_ENV_ID`` but under the wrong (genesis) key, so the cert would
+    fail the required-environment verify.
+
+    Fail-closed: when both inputs are present but the key is invalid (missing / not 0600 /
+    encrypted / non-Ed25519), :func:`compose_signer` raises and startup aborts rather than serving
+    with an unusable signer. When EITHER input is absent the binding is skipped and signing keeps
+    its exact env/genesis behavior (regression-safe for the developer-local CLI / stdio path)."""
+    import os
+
+    raw_env_id = os.environ.get("REBAR_OPCERT_ENV_ID")  # read-via: identity-deployment-override
+    env_id = (raw_env_id or "").strip()
+    key_path = (cfg.identity.signing_key or "").strip()
+    if not env_id or not key_path:
+        return None
+    from rebar.opcert_service.config import OpcertServiceConfig
+    from rebar.opcert_service.keyprov import compose_signer
+
+    return compose_signer(OpcertServiceConfig(env_id=env_id, key_path=key_path))
+
+
 def main() -> None:
     # ``rebar-mcp`` takes no options — it speaks MCP-over-stdio. Respond to
     # ``--help`` / ``-h`` with a short usage and exit 0 instead of starting the
@@ -742,7 +774,15 @@ def main() -> None:
     server = build_server(cfg)
     from rebar._mcp_health import run_mcp
 
-    run_mcp(server, cfg.mcp)
+    # Compose the box's op-cert signer (fail-closed on a bad key) and hand it to run_mcp, which
+    # binds it context-locally INSIDE the serving thread so the certified-op tools mint certs
+    # under the box environment. None ⇒ unprovisioned (dev / stdio) ⇒ unchanged env/genesis path.
+    binding = compose_startup_opcert_binding(cfg)
+    try:
+        run_mcp(server, cfg.mcp, opcert_binding=binding)
+    finally:
+        if binding is not None:
+            binding.cleanup()
 
 
 if __name__ == "__main__":
