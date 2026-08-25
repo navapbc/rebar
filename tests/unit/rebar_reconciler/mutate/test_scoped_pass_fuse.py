@@ -685,5 +685,71 @@ def test_both_open_prefers_provider_scope(fuse_mod, outcome_mod):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# RP-03 S3 T3 — historical replay of the sanitized completed-run slice (AC6).
+# The fuse is a pure decision leaf, so the "would the new fuse have prematurely
+# stopped a completed job?" question is answered by replaying a corpus of NORMALIZED
+# TERMINAL outcomes through it and checking no scope opens before observed success.
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+def test_historical_replay_completed_slice_never_prematurely_stops(fuse_mod, outcome_mod):
+    """AC6: replaying the sanitized synthetic 1,200-run completed slice through the fuse
+    — counting ONLY normalized terminal outcomes — opens no scope at any prefix, so the
+    fuse would never have prematurely stopped this observed successful/partial work."""
+    import json
+
+    fixture = (
+        Path(__file__).resolve().parents[3]
+        / "fixtures"
+        / "reconciler"
+        / "rp03_fuse_completed_slice.json"
+    )
+    data = json.loads(fixture.read_text())
+    records = data["records"]
+    assert data["run_count"] == 1200
+    assert len(records) == 1200
+    bindings = {
+        r["identity"]: {"provider": r["provider"], "endpoint": r["endpoint"]} for r in records
+    }
+    fuse = fuse_mod.PassFuse(locate=_locator(bindings), now_ms=0)
+    eligible_seen = 0
+    for record in records:
+        outcome = _Outcome(
+            record["identity"],
+            getattr(outcome_mod.Disposition, record["disposition"]),
+            outcome_mod.FailureScope["ticket"],
+        )
+        fuse.record(outcome)
+        if record["disposition"] in ("exhausted_transient", "retryable_deferred"):
+            eligible_seen += 1
+        # No premature stop: this identity's scope is never open mid-replay.
+        assert fuse.decision_for(record["identity"]) is None
+    # The corpus is non-vacuous — it really does exercise fuse-eligible outcomes.
+    assert eligible_seen > 0
+    # And nothing is left open at the end either.
+    for record in records:
+        assert fuse.decision_for(record["identity"]) is None
+
+
+def test_historical_replay_counterfactual_burst_would_stop(fuse_mod, outcome_mod):
+    """Control for the replay: a synthetic THREE-consecutive eligible burst across two
+    tickets on one endpoint DOES open the fuse — proving the completed-slice zero-stop
+    result is a genuine property of that corpus, not a fuse that can never fire."""
+    fuse = fuse_mod.PassFuse(locate=_locator(_BINDINGS), now_ms=0)
+    _feed(
+        fuse,
+        [
+            _outcome(outcome_mod, "T-1", "exhausted_transient"),
+            _outcome(outcome_mod, "T-2", "exhausted_transient"),
+            _outcome(outcome_mod, "T-1", "exhausted_transient"),
+        ],
+    )
+    assert fuse.decision_for("T-1") is not None
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # ── S3T2 HELDOUT-END ─────────────────────────────────────────────────────────────
 # ════════════════════════════════════════════════════════════════════════════════

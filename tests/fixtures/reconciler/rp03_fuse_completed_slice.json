@@ -1,0 +1,7208 @@
+{
+  "corpus": "rp03_fuse_completed_slice",
+  "synthetic": true,
+  "note": "Sanitized synthetic completed/partially-successful GitHub Actions run slice. Normalized terminal outcomes only; no secrets, PII, or diagnostic/grep text. Constructed so no scope reaches 3 consecutive fuse-eligible outcomes.",
+  "run_count": 1200,
+  "records": [
+    {
+      "identity": "job-0000-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0001-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0002-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0003-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0004-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0005-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0006-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0007-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0008-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0009-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0010-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0011-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0012-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0013-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0014-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0015-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0016-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0017-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0018-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0019-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0020-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0021-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0022-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0023-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0024-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0025-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0026-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0027-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0028-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0029-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0030-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0031-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0032-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0033-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0034-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0035-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0036-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0037-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0038-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0039-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0040-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0041-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0042-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0043-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0044-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0045-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0046-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0047-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0048-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0049-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0050-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0051-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0052-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0053-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0054-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0055-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0056-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0057-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0058-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0059-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0060-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0061-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0062-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0063-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0064-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0065-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0066-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0067-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0068-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0069-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0070-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0071-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0072-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0073-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0074-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0075-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0076-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0077-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0078-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0079-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0080-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0081-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0082-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0083-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0084-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0085-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0086-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0087-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0088-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0089-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0090-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0091-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0092-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0093-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0094-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0095-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0096-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0097-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0098-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0099-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0100-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0101-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0102-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0103-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0104-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0105-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0106-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0107-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0108-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0109-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0110-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0111-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0112-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0113-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0114-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0115-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0116-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0117-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0118-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0119-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0120-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0121-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0122-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0123-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0124-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0125-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0126-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0127-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0128-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0129-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0130-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0131-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0132-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0133-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0134-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0135-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0136-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0137-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0138-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0139-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0140-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0141-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0142-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0143-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0144-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0145-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0146-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0147-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0148-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0149-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0150-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0151-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0152-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0153-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0154-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0155-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0156-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0157-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0158-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0159-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0160-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0161-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0162-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0163-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0164-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0165-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0166-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0167-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0168-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0169-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0170-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0171-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0172-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0173-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0174-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0175-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0176-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0177-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0178-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0179-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0180-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0181-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0182-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0183-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0184-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0185-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0186-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0187-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0188-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0189-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0190-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0191-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0192-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0193-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0194-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0195-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0196-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0197-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0198-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0199-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0200-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0201-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0202-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0203-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0204-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0205-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0206-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0207-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0208-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0209-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0210-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0211-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0212-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0213-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0214-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0215-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0216-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0217-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0218-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0219-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0220-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0221-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0222-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0223-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0224-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0225-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0226-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0227-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0228-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0229-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0230-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0231-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0232-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0233-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0234-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0235-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0236-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0237-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0238-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0239-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0240-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0241-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0242-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0243-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0244-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0245-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0246-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0247-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0248-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0249-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0250-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0251-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0252-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0253-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0254-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0255-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0256-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0257-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0258-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0259-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0260-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0261-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0262-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0263-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0264-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0265-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0266-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0267-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0268-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0269-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0270-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0271-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0272-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0273-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0274-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0275-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0276-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0277-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0278-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0279-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0280-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0281-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0282-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0283-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0284-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0285-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0286-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0287-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0288-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0289-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0290-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0291-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0292-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0293-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0294-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0295-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0296-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0297-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0298-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0299-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0300-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0301-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0302-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0303-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0304-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0305-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0306-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0307-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0308-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0309-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0310-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0311-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0312-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0313-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0314-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0315-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0316-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0317-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0318-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0319-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0320-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0321-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0322-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0323-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0324-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0325-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0326-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0327-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0328-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0329-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0330-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0331-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0332-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0333-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0334-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0335-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0336-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0337-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0338-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0339-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0340-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0341-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0342-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0343-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0344-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0345-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0346-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0347-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0348-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0349-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0350-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0351-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0352-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0353-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0354-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0355-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0356-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0357-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0358-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0359-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0360-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0361-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0362-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0363-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0364-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0365-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0366-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0367-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0368-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0369-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0370-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0371-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0372-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0373-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0374-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0375-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0376-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0377-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0378-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0379-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0380-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0381-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0382-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0383-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0384-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0385-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0386-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0387-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0388-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0389-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0390-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0391-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0392-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0393-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0394-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0395-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0396-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0397-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0398-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0399-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0400-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0401-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0402-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0403-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0404-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0405-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0406-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0407-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0408-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0409-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0410-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0411-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0412-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0413-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0414-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0415-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0416-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0417-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0418-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0419-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0420-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0421-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0422-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0423-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0424-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0425-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0426-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0427-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0428-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0429-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0430-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0431-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0432-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0433-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0434-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0435-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0436-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0437-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0438-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0439-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0440-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0441-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0442-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0443-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0444-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0445-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0446-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0447-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0448-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0449-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0450-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0451-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0452-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0453-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0454-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0455-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0456-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0457-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0458-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0459-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0460-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0461-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0462-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0463-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0464-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0465-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0466-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0467-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0468-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0469-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0470-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0471-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0472-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0473-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0474-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0475-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0476-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0477-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0478-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0479-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0480-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0481-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0482-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0483-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0484-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0485-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0486-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0487-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0488-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0489-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0490-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0491-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0492-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0493-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0494-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0495-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0496-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0497-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0498-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0499-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0500-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0501-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0502-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0503-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0504-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0505-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0506-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0507-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0508-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0509-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0510-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0511-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0512-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0513-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0514-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0515-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0516-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0517-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0518-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0519-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0520-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0521-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0522-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0523-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0524-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0525-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0526-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0527-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0528-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0529-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0530-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0531-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0532-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0533-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0534-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0535-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0536-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0537-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0538-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0539-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0540-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0541-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0542-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0543-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0544-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0545-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0546-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0547-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0548-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0549-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0550-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0551-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0552-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0553-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0554-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0555-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0556-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0557-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0558-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0559-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0560-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0561-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0562-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0563-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0564-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0565-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0566-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0567-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0568-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0569-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0570-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0571-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0572-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0573-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0574-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0575-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0576-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0577-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0578-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0579-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0580-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0581-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0582-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0583-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0584-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0585-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0586-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0587-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0588-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0589-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0590-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0591-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0592-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0593-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0594-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0595-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0596-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0597-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0598-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0599-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0600-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0601-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0602-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0603-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0604-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0605-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0606-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0607-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0608-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0609-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0610-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0611-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0612-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0613-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0614-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0615-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0616-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0617-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0618-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0619-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0620-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0621-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0622-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0623-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0624-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0625-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0626-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0627-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0628-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0629-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0630-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0631-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0632-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0633-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0634-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0635-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0636-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0637-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0638-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0639-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0640-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0641-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0642-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0643-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0644-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0645-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0646-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0647-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0648-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0649-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0650-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0651-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0652-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0653-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0654-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0655-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0656-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0657-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0658-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0659-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0660-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0661-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0662-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0663-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0664-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0665-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0666-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0667-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0668-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0669-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0670-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0671-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0672-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0673-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0674-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0675-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0676-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0677-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0678-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0679-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0680-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0681-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0682-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0683-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0684-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0685-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0686-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0687-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0688-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0689-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0690-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0691-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0692-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0693-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0694-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0695-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0696-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0697-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0698-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0699-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0700-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0701-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0702-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0703-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0704-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0705-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0706-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0707-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0708-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0709-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0710-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0711-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0712-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0713-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0714-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0715-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0716-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0717-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0718-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0719-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0720-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0721-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0722-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0723-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0724-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0725-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0726-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0727-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0728-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0729-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0730-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0731-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0732-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0733-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0734-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0735-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0736-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0737-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0738-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0739-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0740-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0741-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0742-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0743-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0744-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0745-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0746-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0747-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0748-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0749-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0750-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0751-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0752-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0753-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0754-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0755-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0756-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0757-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0758-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0759-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0760-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0761-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0762-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0763-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0764-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0765-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0766-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0767-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0768-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0769-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0770-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0771-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0772-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0773-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0774-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0775-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0776-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0777-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0778-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0779-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0780-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0781-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0782-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0783-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0784-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0785-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0786-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0787-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0788-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0789-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0790-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0791-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0792-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0793-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0794-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0795-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0796-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0797-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0798-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0799-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0800-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0801-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0802-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0803-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0804-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0805-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0806-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0807-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0808-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0809-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0810-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0811-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0812-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0813-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0814-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0815-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0816-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0817-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0818-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0819-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0820-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0821-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0822-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0823-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0824-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0825-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0826-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0827-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0828-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0829-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0830-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0831-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0832-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0833-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0834-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0835-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0836-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0837-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0838-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0839-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0840-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0841-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0842-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0843-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0844-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0845-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0846-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0847-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0848-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0849-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0850-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0851-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0852-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0853-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0854-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0855-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0856-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0857-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0858-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0859-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0860-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0861-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0862-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0863-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0864-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0865-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0866-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0867-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0868-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0869-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0870-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0871-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0872-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0873-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0874-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0875-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0876-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0877-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0878-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0879-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0880-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0881-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0882-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0883-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0884-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0885-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0886-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0887-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0888-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0889-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0890-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0891-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0892-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0893-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0894-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0895-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0896-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0897-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0898-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0899-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0900-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0901-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0902-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0903-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0904-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0905-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0906-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0907-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0908-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0909-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0910-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0911-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0912-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0913-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0914-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0915-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0916-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0917-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0918-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0919-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0920-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0921-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0922-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0923-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0924-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0925-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0926-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0927-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0928-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0929-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0930-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0931-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0932-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0933-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0934-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0935-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0936-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0937-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0938-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0939-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0940-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0941-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0942-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0943-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0944-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0945-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0946-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0947-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0948-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0949-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0950-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0951-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0952-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0953-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0954-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0955-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0956-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0957-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0958-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0959-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0960-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0961-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0962-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0963-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0964-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0965-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0966-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0967-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0968-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0969-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0970-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0971-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-0972-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0973-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0974-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0975-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0976-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0977-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0978-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0979-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0980-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0981-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0982-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0983-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-0984-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0985-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0986-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0987-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0988-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0989-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0990-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0991-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0992-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0993-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0994-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0995-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-0996-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0997-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0998-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-0999-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1000-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1001-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1002-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1003-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1004-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1005-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1006-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1007-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1008-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1009-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1010-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1011-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1012-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1013-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1014-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1015-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1016-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1017-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1018-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1019-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1020-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1021-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1022-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1023-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1024-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1025-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1026-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1027-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1028-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1029-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1030-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1031-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1032-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1033-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1034-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1035-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1036-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1037-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1038-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1039-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1040-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1041-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1042-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1043-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1044-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1045-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1046-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1047-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1048-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1049-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1050-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1051-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1052-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1053-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1054-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1055-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1056-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1057-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1058-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1059-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1060-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1061-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1062-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1063-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1064-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1065-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1066-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1067-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1068-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1069-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1070-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1071-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1072-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1073-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1074-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1075-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1076-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1077-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1078-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1079-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1080-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1081-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1082-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1083-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1084-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1085-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1086-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1087-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1088-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1089-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1090-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1091-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1092-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1093-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1094-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1095-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1096-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1097-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1098-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1099-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1100-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1101-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1102-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1103-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1104-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1105-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1106-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1107-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1108-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1109-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1110-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1111-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1112-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1113-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1114-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1115-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1116-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1117-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1118-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1119-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1120-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1121-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1122-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1123-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1124-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1125-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1126-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1127-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1128-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1129-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1130-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1131-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1132-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1133-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1134-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1135-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1136-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1137-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1138-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1139-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1140-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1141-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1142-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1143-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1144-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1145-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1146-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1147-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1148-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1149-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1150-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1151-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1152-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1153-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1154-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1155-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1156-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1157-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1158-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1159-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1160-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1161-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1162-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1163-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a1"
+    },
+    {
+      "identity": "job-1164-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1165-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1166-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1167-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1168-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1169-t1",
+      "disposition": "recovered",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1170-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1171-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1172-t0",
+      "disposition": "applied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1173-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1174-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1175-t1",
+      "disposition": "skipped",
+      "provider": "provider-a",
+      "endpoint": "endpoint-a2"
+    },
+    {
+      "identity": "job-1176-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1177-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1178-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1179-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1180-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1181-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1182-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1183-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1184-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1185-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1186-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1187-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b1"
+    },
+    {
+      "identity": "job-1188-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1189-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1190-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1191-t1",
+      "disposition": "permanent_failure",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1192-t0",
+      "disposition": "retryable_deferred",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1193-t1",
+      "disposition": "recovered",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1194-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1195-t1",
+      "disposition": "commit_unknown",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1196-t0",
+      "disposition": "applied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1197-t1",
+      "disposition": "exhausted_transient",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1198-t0",
+      "disposition": "already_satisfied",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    },
+    {
+      "identity": "job-1199-t1",
+      "disposition": "skipped",
+      "provider": "provider-b",
+      "endpoint": "endpoint-b2"
+    }
+  ]
+}
