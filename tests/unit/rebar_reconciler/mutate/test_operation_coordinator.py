@@ -842,6 +842,119 @@ def test_coordinate_and_fuse_all_applied_matches_coordinator(
         assert report.outcome_for(identity).fuse_decision is None
 
 
+# ── REROUTE surface HAPPY PATH (handed to the implementer) ───────────────────────
+#
+# The LIVE cutover wires three new ``batch_dispatch`` helpers into ``applier._apply_batch``:
+#   * ``make_guarded_execute(*, abort_check, recheck_drift, concurrency, repo_root,
+#     head_pin_cell, dispatch_fn)`` — builds the coordinator's injected ``execute``
+#     closure, hosting the per-mutation lost-lease ``abort_check()`` FIRST then the
+#     HEAD-drift recheck (threading the mutable head-pin cell), then delegating the
+#     physical op to ``dispatch_fn``. It is the SOLE side-effect channel.
+#   * ``make_coordinator_dispatch(*, ctx, outcomes_sink, dispatch=None)`` — builds the
+#     single-attempt ``dispatch_fn(plan, mutation)``: convert the typed mutation to the
+#     legacy batch dict, delegate ONE physical attempt to the per-call dispatch
+#     (``apply_handlers.dispatch_mutation`` by default — which stamps the
+#     ``rebar-id:<local_id>`` label), append the outcome dict to ``outcomes_sink``, and
+#     project the terminal HandlerResult onto an ``AtomicSignal``.
+#   * ``map_cutover_report(report)`` — project a ``CutoverReport`` onto the LIVE
+#     pass-tally block (applied/failed/deferred/skipped/recovered + degraded) that
+#     ``apply_planning.derive_pass_tally`` consumes.
+
+
+class _FakeHandlerResult:
+    """Stand-in for ``apply_handlers.HandlerResult``: an ``outcome`` dict (carrying an
+    ``error`` key when soft-failed) plus a ``soft_failed`` flag."""
+
+    def __init__(self, outcome, soft_failed=False):
+        self.outcome = outcome
+        self.soft_failed = soft_failed
+
+
+def test_make_guarded_execute_runs_abort_then_drift_then_dispatch(
+    batch_dispatch_mod, coordinator_mod
+):
+    """The guarded execute runs, in order: ``abort_check()`` (lost-lease checkpoint),
+    the HEAD-drift recheck (threading the mutable head-pin cell to its refreshed value),
+    then ``dispatch_fn`` — and returns ``dispatch_fn``'s ``AtomicSignal`` verbatim."""
+    order: list = []
+
+    def abort_check():
+        order.append("abort")
+
+    def recheck_drift(_concurrency, _repo_root, pin):
+        order.append(("drift", pin))
+        return pin + "-next"
+
+    def dispatch_fn(_plan, _mutation):
+        order.append("dispatch")
+        return coordinator_mod.AtomicSignal(status="applied")
+
+    cell = ["pin0"]
+    execute = batch_dispatch_mod.make_guarded_execute(
+        abort_check=abort_check,
+        recheck_drift=recheck_drift,
+        concurrency=object(),
+        repo_root="/repo",
+        head_pin_cell=cell,
+        dispatch_fn=dispatch_fn,
+    )
+    sig = execute(None, None)
+
+    assert [c if isinstance(c, str) else c[0] for c in order] == ["abort", "drift", "dispatch"]
+    assert order[1] == ("drift", "pin0")  # drift saw the pre-existing pin
+    assert cell[0] == "pin0-next"  # ...and the refreshed pin was threaded back
+    assert sig.status == "applied"
+
+
+def test_make_coordinator_dispatch_applies_and_records_outcome(
+    batch_dispatch_mod, coordinator_mod, mutation_mod
+):
+    """``make_coordinator_dispatch`` builds a ``dispatch_fn`` that converts the typed
+    mutation to a batch dict, delegates ONE physical attempt to the injected dispatch,
+    appends the returned outcome dict to the sink, and signals ``applied`` on success."""
+    sink: list = []
+    seen: list = []
+
+    def fake_dispatch(batch, _ctx):
+        seen.append(batch)
+        return _FakeHandlerResult({"action": batch["action"], "key": batch["key"], "result": "ok"})
+
+    dispatch_fn = batch_dispatch_mod.make_coordinator_dispatch(
+        ctx=object(), outcomes_sink=sink, dispatch=fake_dispatch
+    )
+    m = _mut(mutation_mod, "outbound", "update", "REB-9", {"changed_fields": {"summary": "x"}})
+    sig = dispatch_fn(None, m)
+
+    assert sig.status == "applied"
+    assert len(seen) == 1 and seen[0]["action"] == "update" and seen[0]["key"] == "REB-9"
+    assert len(sink) == 1 and sink[0]["key"] == "REB-9" and not sink[0].get("error")
+
+
+def test_map_cutover_report_projects_live_pass_tally(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """``map_cutover_report`` projects a clean all-applied ``CutoverReport`` onto the
+    LIVE pass-tally block the reconciler consumes: two applied, zero failed/deferred,
+    not degraded."""
+    plans = [
+        _plan(ticket_plan_mod, "T-1", [_mut(mutation_mod, "outbound", "update", "T-1")]),
+        _plan(ticket_plan_mod, "O-1", [_mut(mutation_mod, "outbound", "delete", "O-1")]),
+    ]
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=lambda _p, _m: coordinator_mod.AtomicSignal(status="applied"),
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    tally = batch_dispatch_mod.map_cutover_report(report)
+    assert tally["applied_count"] == 2
+    assert tally["failed_count"] == 0
+    assert tally["deferred_count"] == 0
+    assert tally["skipped_count"] == 0
+    assert tally["degraded"] is False
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # ── S3T3-CUTOVER HELDOUT-START ── edge + E2E oracle withheld from the implementer ──
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1244,4 +1357,140 @@ def test_coordinate_and_fuse_deduplicates_multiple_distinct_fuse_decisions(
 
 # ════════════════════════════════════════════════════════════════════════════════
 # ── S3T3-CUTOVER HELDOUT-END ──
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ── S3T3-REROUTE-HELDOUT-START ── guard-hosting edge oracle withheld from impl ──
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+def test_guarded_execute_abort_check_raises_before_any_dispatch(
+    batch_dispatch_mod, coordinator_mod
+):
+    """The lost-lease ``abort_check()`` runs FIRST: when it raises, ``dispatch_fn`` is
+    never reached, so no physical mutation issues on the coordinator route (AC preserve:
+    the same lost-lease guarantee the legacy ``_apply_batch`` loop gives)."""
+    dispatched: list = []
+
+    def abort_check():
+        raise RuntimeError("lease-lost")
+
+    def dispatch_fn(_plan, _mutation):
+        dispatched.append(1)
+        return coordinator_mod.AtomicSignal(status="applied")
+
+    execute = batch_dispatch_mod.make_guarded_execute(
+        abort_check=abort_check,
+        recheck_drift=lambda _c, _r, pin: pin,
+        concurrency=object(),
+        repo_root="/repo",
+        head_pin_cell=["pin0"],
+        dispatch_fn=dispatch_fn,
+    )
+    with pytest.raises(RuntimeError, match="lease-lost"):
+        execute(None, None)
+    assert dispatched == []
+
+
+def test_guarded_execute_hostile_drift_raises_before_dispatch(batch_dispatch_mod, coordinator_mod):
+    """A hostile HEAD-drift (``recheck_drift`` raising) aborts BEFORE the physical op —
+    ``dispatch_fn`` is never reached, so the coordinator route preserves the legacy
+    drift-abort contract; any earlier proven postconditions stay intact because no
+    replay occurs."""
+    dispatched: list = []
+
+    class _Drift(Exception):
+        pass
+
+    def recheck_drift(_c, _r, _pin):
+        raise _Drift("drift")
+
+    def dispatch_fn(_plan, _mutation):
+        dispatched.append(1)
+        return coordinator_mod.AtomicSignal(status="applied")
+
+    execute = batch_dispatch_mod.make_guarded_execute(
+        abort_check=None,
+        recheck_drift=recheck_drift,
+        concurrency=object(),
+        repo_root="/repo",
+        head_pin_cell=["pin0"],
+        dispatch_fn=dispatch_fn,
+    )
+    with pytest.raises(_Drift):
+        execute(None, None)
+    assert dispatched == []
+
+
+def test_make_coordinator_dispatch_maps_soft_failed_error_to_failed_signal(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, policy_mod
+):
+    """A per-mutation soft-failure (the handler recorded an ``error`` in its outcome)
+    projects onto a terminal, ticket-scoped, non-success AtomicSignal — so the
+    coordinator buckets it as ``failed`` (never masked as applied), and the outcome dict
+    still lands in the sink for the manifest failure count."""
+    sink: list = []
+
+    def fake_dispatch(batch, _ctx):
+        return _FakeHandlerResult(
+            {"action": batch["action"], "key": batch["key"], "error": "boom 500"},
+            soft_failed=True,
+        )
+
+    dispatch_fn = batch_dispatch_mod.make_coordinator_dispatch(
+        ctx=object(), outcomes_sink=sink, dispatch=fake_dispatch
+    )
+    m = _mut(mutation_mod, "outbound", "update", "REB-BAD", {"changed_fields": {"x": 1}})
+    sig = dispatch_fn(None, m)
+
+    # terminal + non-success: the policy maps it out of the applied/recovered set.
+    disp = policy_mod.status_to_disposition(sig.status)
+    assert not policy_mod.is_success(disp)
+    assert policy_mod.bucket_for(disp) == "failed"
+    assert len(sink) == 1 and sink[0]["error"] == "boom 500"
+
+
+def test_guarded_execute_wiring_adds_no_legacy_retry_nesting(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod, monkeypatch
+):
+    """AC5 (wiring half): routing migrated plans through the coordinator via the guarded
+    execute never re-enters the legacy ad-hoc ``dispatch_apply_phases._call_with_retry``
+    nesting — the cutover surface adds no second retry layer around the coordinator's own
+    RetryBudget. (The production ``dispatch_fn`` here is a fake, isolating the wiring.)"""
+    dap = _load("dispatch_apply_phases_reroute_test", "dispatch_apply_phases.py")
+    calls: list = []
+
+    def _spy(fn, *a, **k):
+        calls.append(fn)
+        return fn(*a, **k)
+
+    monkeypatch.setattr(dap, "_call_with_retry", _spy)
+
+    plans = [
+        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
+        for ident in ("T-1", "T-2")
+    ]
+    head_cell = ["pin0"]
+    dispatch_fn = batch_dispatch_mod.make_guarded_execute(
+        abort_check=None,
+        recheck_drift=lambda _c, _r, pin: pin,
+        concurrency=object(),
+        repo_root="/repo",
+        head_pin_cell=head_cell,
+        dispatch_fn=lambda _p, _m: coordinator_mod.AtomicSignal(status="applied"),
+    )
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=dispatch_fn,
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    assert report.tallies["applied"] == 2
+    assert calls == []  # the coordinator route nested no legacy retry wrapper
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ── S3T3-REROUTE-HELDOUT-END ──
 # ════════════════════════════════════════════════════════════════════════════════

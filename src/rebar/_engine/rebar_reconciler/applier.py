@@ -128,6 +128,7 @@ from rebar_reconciler.batch_dispatch import (  # noqa: E402
     _mutation_to_batch_dict,
     create_one,
     delete_one,
+    reroute_migrated_plans,
     update_one,
 )
 
@@ -494,6 +495,7 @@ def apply(
                 binding_store=binding_store,
                 abort_check=abort_check,
                 synced_fields_out=synced_fields_out,
+                ticket_plans=ticket_plans,
             )
     finally:
         if pending_bug_tickets and not is_dry_run:
@@ -542,6 +544,7 @@ def _apply_batch(
     binding_store=None,
     abort_check=None,
     synced_fields_out=None,
+    ticket_plans=None,
 ) -> Path:
     """Legacy batch dispatch: write a flat-JSON manifest for a list of dict mutations.
 
@@ -648,12 +651,22 @@ def _apply_batch(
     )
 
     # Pin HEAD before first mutation, then sequence — drift recheck → dispatch →
-    # record — one mutation at a time. The per-mutation step is extracted (see
-    # _apply_one) so this loop body stays shallow and the abort-on-drift contract
-    # reads at a glance.
+    # record — one mutation at a time (per-mutation step extracted: _apply_one).
     head_pin = concurrency.snapshot_head(repo_root)
-
+    # LIVE cutover (RP-03 S3 T3): reroute migrated non-create plans inside the drift try.
+    cutover_tally = None
     try:
+        cutover_tally, head_pin, mutations = reroute_migrated_plans(
+            ticket_plans=ticket_plans,
+            mutations=mutations,
+            ctx=ctx,
+            abort_check=abort_check,
+            recheck_drift=_recheck_drift,
+            concurrency=concurrency,
+            repo_root=repo_root,
+            head_pin=head_pin,
+            outcomes_sink=mutations_with_outcomes,
+        )
         for mutation in mutations:
             # Per-mutation lost-lease checkpoint (epic dust-troth-naval): raises if
             # the ref-lock heartbeat lost the lease. Defaults to None (no-op).
@@ -681,10 +694,12 @@ def _apply_batch(
 
     manifest = {
         "pass_id": pass_id,
-        "mutation_count": len(mutations),
+        "mutation_count": len(mutations_with_outcomes),
         "mutations": mutations_with_outcomes,
         "events": ctx.events_list,
     }
+    if cutover_tally is not None:
+        manifest["cutover_tally"] = cutover_tally
 
     snapshots_dir = repo_root / "bridge_state" / "snapshots"
     snapshots_dir.mkdir(parents=True, exist_ok=True)
