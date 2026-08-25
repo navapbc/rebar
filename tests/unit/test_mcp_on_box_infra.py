@@ -66,6 +66,20 @@ def test_compose_has_mcp_service_with_http_posture_env() -> None:
     assert "REBAR_MCP_AUTH_RESOURCE_SERVER_URL" in env
 
 
+def test_compose_mcp_advertises_a_non_empty_issuer_url() -> None:
+    """Regression (haughty-leisured-puffer): with auth enabled the server constructs
+    ``AuthSettings(issuer_url=...)`` which pydantic rejects when empty, so the compose
+    env MUST define a non-empty ``REBAR_MCP_AUTH_ISSUER_URL`` (it has no fallback to
+    ``RESOURCE_SERVER_URL``). Its absence crash-loops the container on a fresh deploy."""
+    doc = yaml.safe_load(_COMPOSE.read_text())
+    env = doc["services"]["mcp"]["environment"]
+    assert "REBAR_MCP_AUTH_ISSUER_URL" in env, (
+        "mcp service env omits REBAR_MCP_AUTH_ISSUER_URL; AuthSettings will fail to "
+        "construct on a fresh deploy"
+    )
+    assert str(env["REBAR_MCP_AUTH_ISSUER_URL"]).strip() != ""
+
+
 def test_compose_mcp_publishes_dedicated_loopback_port_8091() -> None:
     """AC3-adjacent: the service publishes ONLY on host loopback, on the dedicated
     port 8091 (not clashing with gerrit 8080 / opcert 8090)."""
