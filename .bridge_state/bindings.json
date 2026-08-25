@@ -18381,10 +18381,24 @@
     },
     "59b0-d1b9-ad94-4339": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\nCreate is the highest-risk operation: a timeout or local key-persistence failure can leave a real Jira issue without durable local identity, and replay can duplicate it. Existing write-ahead pending/keyed recovery contains many cases, but lifecycle writes occur across handlers rather than as plan intents. The new coordinator must use RP-02s single facade/recovery seam without inventing another identity owner.\n\n## Outcome\nMake the coordinator authoritative for outbound and inbound create plus their binding lifecycle intents. Preserve pre-create pending durability and index-lag grace. After Jira returns a key, attach the canonical `rebar-id:<local_id>` label first, attempt the optional entity property second, then persist/confirm through RP-02. If any containment/persistence step fails, safety-abort with the known key and never delete the successful Jira issue.\n\n## Plan\n1. Execute the plans pending-binding intent durably before any create call. A failure here makes zero provider calls and returns an item-scoped persistence failure.\n2. Send create once within the shared logical budget. On commit-unknown timeout, re-observe only through replay-safe identity/query seams and otherwise defer; never blind-replay.\n3. Once a key is returned, add the canonical label first. Treat the entity property as optional enrichment whose unsupported/permission failure is visible but cannot erase the label floor.\n4. Persist the known key and confirmation through the RP-02 facade/repository unit-of-work. On failure, return a typed known-key safety abort; later keyed/keyless recovery converges without a duplicate.\n5. Execute other lifecycle intents only after their remote postcondition is proven. Preserve create-before-link and hierarchy deferral, tombstone suppression, filtered/read-only behavior, and exact per-ticket tallies.\n\n## Testing (RED \u2192 GREEN)\n- Failure cuts run before pending save, during create disconnect/timeout, after returned key, during label/property, and during known-key live replacement. Oracles include provider call count, remote labels/properties, exact local bytes, terminal disposition, and next-pass recovery.\n- Duplicate probes run the whole crash/restart sequence twice for Cloud/DC fakes and assert one Jira issue.\n- Index-lag fixtures retain the three-miss plus 3600-second conjunction and keyed recovery performs zero search.\n- Dependency tests prove links/children wait for a proven create and independent tickets continue.\n\n## Compatibility / rollback\nCut over create as one operation family; never run legacy and coordinator creates together. Before contract removal, a flag can return future creates to legacy behavior. Rollback never deletes remote issues. The explicit approved behavior change is label-first/property-second containment before local confirmation; preview/stored mutation shape remains compatible.\n\n## Acceptance Criteria\n- [ ] A failed pre-create pending save produces zero Jira calls and an item-scoped persistence outcome.\n- [ ] After a returned Jira key, the canonical label is attempted before optional property and local confirmation; every failure reports the known key without deleting the issue.\n- [ ] Create timeout/connection-loss cases never blind-replay; observation or a deferred pending record prevents duplicate creation across restart.\n- [ ] Cloud/DC crash-restart fixtures produce exactly one remote issue and converge to one confirmed forward/reverse binding.\n- [ ] Keyed recovery performs no search; keyless negative search requires both three misses and 3600 seconds; per-entry recovery failure does not stop unrelated tickets.\n- [ ] Lifecycle intents execute only after proven remote postconditions, while tombstones, filters, read-only modes, hierarchy, and create-before-link rules remain effective.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "RP-03 S4 \u2014 Coordinate create and binding lifecycle with label-first containment"
       },
       "created_at": "2026-08-18T03:44:44Z",
@@ -41817,10 +41831,24 @@
     },
     "d04c-c184-0b00-4a8a": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\nCreate can leave a real Jira issue without durable local identity. The coordinator must preserve write-ahead pending state and must never blind-replay an ambiguous create.\n\n## Outcome\nCoordinate the pre-create pending lifecycle intent and one budgeted Cloud/DC create call. A pending-save failure makes zero provider calls; ambiguous completion re-observes only through replay-safe identity/query seams or defers.\n\n## Plan\n1. Execute the versioned pending-binding intent durably before any create call. Return item-scoped persistence failure on save error.\n2. Call create once through the shared logical budget. Do not wrap the compound legacy create path.\n3. On timeout/connection loss, search only by replay-safe identity/query evidence. Return recovered success when the exact issue is proven; otherwise retain pending state and defer.\n4. Record returned Jira key immediately in the typed outcome for downstream containment; never delete a successful remote issue.\n5. Implement Cloud/DC failure cuts before save, during create, and immediately after key return.\n\n## Testing\nStateful fakes assert local bytes, provider call counts, known-key outcome, ambiguity, and no remote delete.\n\n## Acceptance Criteria\n- [ ] Failed pending save produces zero Jira calls and an item-scoped persistence outcome.\n- [ ] One physical create invocation issues exactly one provider create call.\n- [ ] Timeout/connection loss never blind-replays.\n- [ ] Exact replay-safe observation may recover success; inconclusive observation retains pending state and defers.\n- [ ] A returned Jira key is preserved in every later failure outcome.\n- [ ] No failure path deletes a successfully created Jira issue.\n\n## Out of scope\nLabel/property containment, local confirmation, restart convergence, and family cutover.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "RP-03 S4 T1 \u2014 Coordinate durable pending intent and one create attempt"
       },
       "created_at": "2026-08-18T05:39:43Z",
@@ -47964,9 +47992,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "The mcp service in `infra/compose/docker-compose.yml` does not set `REBAR_MCP_AUTH_ISSUER_URL`. On a fresh deploy the container crash-loops before serving: `AuthSettings` (pydantic) raises a ValidationError because `issuer_url` is empty (`src/rebar/mcp_server.py` ~L609, `AuthSettings(issuer_url=mcp_cfg.auth_issuer_url, ...)`), and `/health` never comes up.\n\n## Root cause (surfaced by jackal live deploy)\nThe compose mcp `environment:` block sets `REBAR_MCP_AUTH_RESOURCE_SERVER_URL` (compose ~L347) but omits the sibling `REBAR_MCP_AUTH_ISSUER_URL`. `fetch-secrets.sh` does not inject it either, so the container boots with an empty issuer URL and fails auth-settings construction.\n\n## Live impact\nOn the prod box the endpoint only came up after a temporary `.env` hotfix appending `REBAR_MCP_AUTH_ISSUER_URL=https://rebar.solutions.navateam.com/mcp`. Autodeploy rsync from main will drop that hotfix and can re-crash the mcp container on the next blue-green tick.\n\n## Fix\nAdd to the mcp `environment:` block, mirroring how RESOURCE_SERVER_URL is set: `REBAR_MCP_AUTH_ISSUER_URL: \"${REBAR_MCP_AUTH_ISSUER_URL:-https://rebar.solutions.navateam.com/mcp}\"`\n\n## RED-first oracle\nA compose-assertion test that parses docker-compose.yml and asserts the mcp service environment defines a non-empty `REBAR_MCP_AUTH_ISSUER_URL` (fails today, passes after the fix). Note: `tests/interfaces/facades/test_mcp_auth.py` always sets `auth_issuer_url` explicitly, so unit tests never caught the compose omission \u2014 the gap is deploy config, not the auth code.\n\n## Acceptance Criteria\n- [ ] RED compose-assertion test proves the mcp service env omits a non-empty issuer URL, then passes after the fix.\n- [ ] docker-compose.yml mcp environment sets REBAR_MCP_AUTH_ISSUER_URL (default to the prod /mcp URL, overridable).\n- [ ] Lands via Gerrit (LLM-Review +1 AND Verified +1).",
+        "description": "The mcp service in `infra/compose/docker-compose.yml` does not set `REBAR_MCP_AUTH_ISSUER_URL`. On a fresh deploy the container crash-loops before serving: `AuthSettings` (pydantic) raises a ValidationError because `issuer_url` is empty (`src/rebar/mcp_server.py` ~L609, `AuthSettings(issuer_url=mcp_cfg.auth_issuer_url, ...)`), and `/health` never comes up.\n\n## Root cause (surfaced by jackal live deploy)\nThe compose mcp `environment:` block sets `REBAR_MCP_AUTH_RESOURCE_SERVER_URL` (compose ~L347) but omits the sibling `REBAR_MCP_AUTH_ISSUER_URL`. `fetch-secrets.sh` does not inject it either, so the container boots with an empty issuer URL and fails auth-settings construction.\n\n## Live impact\nOn the prod box the endpoint only came up after a temporary `.env` hotfix appending `REBAR_MCP_AUTH_ISSUER_URL=https://rebar.solutions.navateam.com/mcp`. Autodeploy rsync from main will drop that hotfix and can re-crash the mcp container on the next blue-green tick.\n\n## Fix\nAdd to the mcp `environment:` block, mirroring how RESOURCE_SERVER_URL is set: `REBAR_MCP_AUTH_ISSUER_URL: \"${REBAR_MCP_AUTH_ISSUER_URL:-https://rebar.solutions.navateam.com/mcp}\"`\n\n## RED-first oracle\nA compose-assertion test that parses docker-compose.yml and asserts the mcp service environment defines a non-empty `REBAR_MCP_AUTH_ISSUER_URL` (fails today, passes after the fix). Note: `tests/interfaces/facades/test_mcp_auth.py` always sets `auth_issuer_url` explicitly, so unit tests never caught the compose omission \u2014 the gap is deploy config, not the auth code.\n\n## Acceptance Criteria\n- [x] RED compose-assertion test proves the mcp service env omits a non-empty issuer URL, then passes after the fix.\n- [x] docker-compose.yml mcp environment sets REBAR_MCP_AUTH_ISSUER_URL (default to the prod /mcp URL, overridable).\n- [x] [operator-attested] Lands via Gerrit (LLM-Review +1 AND Verified +1).\n  provenance: environment=Gerrit main gate (rebar.solutions.navateam.com) + GitHub Actions Verified Gate; principal=rebar review bot + rebar CI bot; privilege_posture=production-equivalent; instrument=live-call \u2014 change 2222 (patchset 2, commit 799ba486196f) merged to main with LLM-Review+1 and Verified+1.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "mcp compose service omits REBAR_MCP_AUTH_ISSUER_URL -> AuthSettings crash-loop on fresh deploy"
       },
       "created_at": "2026-08-25T17:41:05Z",
@@ -53071,7 +53099,9 @@
     "1787685576087872001": "__rebar_unknown_comment_id__",
     "1787687016611340001": "__rebar_unknown_comment_id__",
     "1787687919973335001": "__rebar_unknown_comment_id__",
-    "1787689258446125001": "__rebar_unknown_comment_id__"
+    "1787689258446125001": "__rebar_unknown_comment_id__",
+    "1787695424075733001": "__rebar_unknown_comment_id__",
+    "1787695966816935001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
