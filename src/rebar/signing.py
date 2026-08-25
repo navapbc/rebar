@@ -174,34 +174,12 @@ def _sign_manifest_under_lock(
     :class:`SigningError`, recorded by callers as an in-band ``{signed: false}`` outcome. ``kind``
     is an UNSIGNED routing hint (authoritative kind is signed ``manifest[0]``); ``signer`` (story
     6f14) is an OPTIONAL startup op-cert binding forwarded to the mint (omit for env/genesis)."""
-    from rebar._commands._seam import (
-        CommandError,
-        append_event,
-        require_id,
-        require_not_ghost,
+    from rebar._commands._seam import CommandError, append_event
+
+    resolved, record = _prepare_manifest_event(
+        ticket_id, manifest, kind=kind, repo_root=repo_root, signer=signer
     )
-
-    if not ticket_id:
-        raise SigningError("Error: ticket_id must be non-empty")
-    steps = parse_manifest(manifest)
-
     tracker = config.tracker_dir(repo_root)
-    try:
-        resolved = require_id(ticket_id, tracker)
-        require_not_ghost(resolved, tracker)
-    except CommandError as exc:
-        raise SigningError(exc.message, exc.returncode) from None
-
-    # DEGRADE path: a missing/too-old ssh-keygen, or a key that cannot be (re)generated, raises a
-    # SigningError naming OpenSSH >= 8.9. Callers record it as an in-band {signed: false} outcome —
-    # no local op is wedged by signing itself (the gate that needs it blocks with the remediation).
-    try:
-        record = mint_opcert_record(resolved, steps, kind=kind, repo_root=repo_root, binding=signer)
-    except OpcertKeyUnavailable as exc:
-        raise SigningError(
-            f"{exc.message}. Install OpenSSH >= 8.9 and ensure the tracker directory is writable."
-        ) from None
-    record["signed_at"] = time.time_ns()
     try:
         append_event(
             resolved,
@@ -214,6 +192,36 @@ def _sign_manifest_under_lock(
     except CommandError as exc:
         raise SigningError(exc.message, exc.returncode) from None
     return {**record, "ticket_id": resolved}
+
+
+def _prepare_manifest_event(
+    ticket_id: str,
+    manifest,
+    *,
+    kind: str | None = None,
+    repo_root=None,
+    signer=None,
+) -> tuple[str, dict]:
+    """Mint, but do not append, one SIGNATURE event payload for a caller-owned transaction."""
+    from rebar._commands._seam import CommandError, require_id, require_not_ghost
+
+    if not ticket_id:
+        raise SigningError("Error: ticket_id must be non-empty")
+    steps = parse_manifest(manifest)
+    tracker = config.tracker_dir(repo_root)
+    try:
+        resolved = require_id(ticket_id, tracker)
+        require_not_ghost(resolved, tracker)
+    except CommandError as exc:
+        raise SigningError(exc.message, exc.returncode) from None
+    try:
+        record = mint_opcert_record(resolved, steps, kind=kind, repo_root=repo_root, binding=signer)
+    except OpcertKeyUnavailable as exc:
+        raise SigningError(
+            f"{exc.message}. Install OpenSSH >= 8.9 and ensure the tracker directory is writable."
+        ) from None
+    record["signed_at"] = time.time_ns()
+    return resolved, record
 
 
 def sign_manifest(
@@ -242,19 +250,32 @@ def _resolve_and_reduce(ticket_id: str, repo_root):
     secret). A key-less environment can only ever report unsigned/foreign_key — the honest
     answer. Returns ``(resolved_id, state, key)``; raises :class:`SigningError` (exit 1) when
     the ticket cannot be resolved."""
-    from rebar._engine_support import reads
-    from rebar._engine_support.resolver import resolve_ticket_id
-    from rebar.reducer import reduce_ticket
-
     if not ticket_id:
         raise SigningError("Error: ticket_id must be non-empty")
     tracker = str(config.tracker_dir(repo_root))
+    from rebar._engine_support import reads
+
+    view = reads.current_ticket_view()
+    if view is not None:
+        try:
+            state = view.show_ticket(ticket_id)
+        except Exception as exc:  # noqa: BLE001 -- pinned reads fail closed here
+            reads.reraise_pinned_read_failure(exc)
+            raise SigningError(f"Error: ticket '{ticket_id}' not found ({exc})") from None
+        resolved = str(state.get("ticket_id") or "")
+        if not resolved:
+            raise SigningError(f"Error: ticket '{ticket_id}' not found")
+        return resolved, state, signing_key(tracker, create_if_missing=False)
+
+    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar.reducer import reduce_ticket
+
     reads.ensure_fresh(tracker)
-    resolved = resolve_ticket_id(ticket_id, tracker)
-    if resolved is None:
+    resolved_id = resolve_ticket_id(ticket_id, tracker)
+    if resolved_id is None:
         raise SigningError(f"Error: ticket '{ticket_id}' not found")
-    state = reduce_ticket(os.path.join(tracker, resolved)) or {}
-    return resolved, state, signing_key(tracker, create_if_missing=False)
+    state = reduce_ticket(os.path.join(tracker, resolved_id)) or {}
+    return resolved_id, state, signing_key(tracker, create_if_missing=False)
 
 
 def most_recent_attestation(state: dict):

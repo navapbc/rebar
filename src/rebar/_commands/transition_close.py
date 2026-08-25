@@ -2,12 +2,11 @@
 
 :func:`close_ticket` is the locked-write-and-finalize half that
 :func:`rebar._commands.transition.transition_compute` calls once the plan-review
-gate and the parent-first cascade have run. It owns the close-path invariants in
-their LOAD-BEARING order (verify -> close -> sign): the unresolved-open-children
-structural guard, the completion-verification precheck (:func:`_completion_precheck`
-/ :func:`_verdict_manifest`, run OUTSIDE the write lock), the locked
-``txn.transition_core`` write, post-close signing of the PASS attestation, the
-force-close audit comment, and per-ticket scratch cleanup + best-effort push.
+gate and the parent-first cascade have run. It owns the unresolved-open-children
+guard and completion precheck outside the lock, then selects one publication tail:
+receipt-bearing PASSes publish sidecar + STATUS + SIGNATURE in one candidate commit;
+legacy/non-certifiable paths retain the STATUS-then-sign sequence. It also owns the
+force-close audit comment and per-ticket scratch cleanup + best-effort push.
 
 This module MUST NOT import :mod:`.transition` (no back-edge): the recursion into
 ``transition_compute`` lives in ``_cascade_parent_first``, which stays there, so the
@@ -24,7 +23,10 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from rebar import config
-from rebar._commands import scratch, txn
+from rebar._commands import (
+    scratch,
+    txn,  # noqa: F401 — historical monkeypatch seam
+)
 from rebar._commands._seam import CommandError
 
 # The completion-precheck cluster lives in close_precheck (ticket 74a3: module-size split
@@ -35,6 +37,7 @@ from rebar._commands.close_precheck import (  # noqa: F401 — re-exported compa
     _completion_precheck,
     _referencing_commit_exists,
 )
+from rebar._commands.completion_bundle import verdict_manifest as _verdict_manifest
 from rebar.graph._unblock import batch_close_operations
 
 logger = logging.getLogger(__name__)
@@ -127,54 +130,6 @@ def _material_drifted(verified_sha: object, fresh_sha: object) -> bool:
     (an unattested/local verdict, or a test's synthetic marker) is not comparable → NOT
     drift, so the normal sign-on-PASS path is preserved."""
     return _is_full_sha(verified_sha) and _is_full_sha(fresh_sha) and verified_sha != fresh_sha
-
-
-def _verdict_manifest(result: dict, ticket_id: str, repo_root=None) -> list[str]:
-    """Deterministic manifest (non-empty strings) of the verified PASS verdict, for signing.
-
-    The signature binds ``(ticket_id, manifest)``; the key fingerprint + head_sha on the record
-    provide attribution + freshness. Findings are failures-only, so a PASS has no per-criterion
-    list to itemize — the minimal core IS the attestation. Deterministic (no timestamps) so
-    re-signing the same verified state is reproducible.
-
-    On an attested verdict the manifest carries a ``verified-at-sha:<sha>`` step (epic
-    raze-vet-ditch S4) binding WHICH immutable commit was verified into the signed bytes —
-    via the manifest channel, so no ``_canonical_payload``/``PAYLOAD_VERSION`` change and no
-    prior signature is invalidated.
-
-    It also records the ticket's ``material: <fingerprint>`` (epic dark-acme-lumen) — the SAME
-    fingerprint plan-review signs (ticket_id/description/file_impact/children, and
-    file_impact_scope when it is an explicit ``none``) — so completion
-    validity-on-read can detect a material edit made after this verdict was signed, symmetric
-    with the plan-review claim gate. Omitted if the fingerprint can't be computed (then the
-    material check is simply skipped on read)."""
-    from rebar import signing as _signing
-
-    manifest = [
-        "completion-verifier: PASS",
-        f"ticket: {ticket_id}",
-        f"model: {result.get('model') or 'n/a'}",
-        f"runner: {result.get('runner') or 'n/a'}",
-        # Which rebar gate code produced this attestation (audit/provenance, epic
-        # jira-reb-596), symmetric with the plan-review manifest. NEVER read on validity.
-        _signing.rebar_version_step(_signing.gate_code_version()),
-    ]
-    try:
-        from rebar.llm.plan_review.attest import current_material_fingerprint
-
-        material = current_material_fingerprint(ticket_id, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — fingerprint is best-effort; absence just skips the material check on read
-        material = None
-    if material:
-        manifest.append(f"material: {material}")
-    sha = result.get("verified_at_sha")
-    if sha:
-        manifest.append(_signing.verified_at_sha_step(sha))
-    if result.get("disposition"):
-        from rebar._commands import close_disposition
-
-        return close_disposition.decorate_manifest(manifest, result)
-    return manifest
 
 
 def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None, *, signer=None) -> dict:
@@ -566,9 +521,9 @@ def close_ticket(
 ) -> dict:
     """Run the close tail and return ``{ticket_id, from, to, newly_unblocked, noop}``.
 
-    Owns the load-bearing close order verify -> close -> sign: structural and completion
-    checks run outside the write lock, then the locked write runs, and PASS signing follows
-    only after a confirmed close. Non-close transitions write directly; both paths push."""
+    Structural and completion checks run outside the write lock. A receipt-bearing PASS
+    publishes its three close artifacts together; other paths retain the established locked
+    STATUS write and optional post-close signature. Non-close transitions write directly."""
     close_metrics = _new_close_metrics()
     newly_unblocked: list[str] = []
     if target_status == "closed":
@@ -594,10 +549,9 @@ def close_ticket(
             )
 
     # Completion-verification close gate (opt-in; runs OUTSIDE the write lock since an LLM
-    # call must not serialize all writes). Ordering is verify -> close -> sign: the precheck
-    # runs the verifier and blocks (fail-closed) on FAIL / unavailable-LLM; on PASS it returns
-    # the manifest to sign AFTER a confirmed close (so a failed/raced close never leaves an
-    # orphan "certified" signature on an unclosed ticket). force_close skips both.
+    # call must not serialize all writes). The precheck blocks fail-closed on FAIL or an
+    # unavailable verifier. A receipt-bearing PASS is prepared for atomic publication; a
+    # legacy PASS keeps the post-close signing path. force_close skips both.
     #
     # `idea → closed` is a REJECT/DROP, not a completion: closing an undesigned idea
     # means "we won't pursue this," so there is nothing built to verify or attest.
@@ -614,7 +568,7 @@ def close_ticket(
     # Stays None on any path where no completion signature is in play (a non-close transition,
     # and `idea -> closed`), and is omitted from the payload entirely in that case.
     completion_signature: dict[str, object] | None = None
-    verified_result = None
+    verified_result: dict[str, Any] | None = None
     completion_expectation = ""
     plan_review_recheck = None
     if target_status == "closed" and current_status != "idea":
@@ -649,7 +603,7 @@ def close_ticket(
                 tracker=tracker,
             )
 
-        verified_result, completion_expectation = _completion_precheck(
+        precheck_result, completion_expectation = _completion_precheck(
             ticket_id,
             ticket_type,
             repo_root_str,
@@ -660,6 +614,11 @@ def close_ticket(
             ref=ref,
             metrics=close_metrics,
         )
+        if precheck_result is not None and not isinstance(precheck_result, dict):
+            raise CommandError(
+                "Error: completion precheck returned an invalid result shape", returncode=1
+            )
+        verified_result = precheck_result
     elif target_status == "closed":
         # `idea -> closed` is a reject/drop, not a completion: the gate never applied.
         completion_expectation = "not_applicable"
@@ -668,31 +627,25 @@ def close_ticket(
 
     env_id = _seam.env_id(config.tracker_dir(repo_root))
     author = _seam.author("Unknown")
-    # Locked write (exit 10 on optimistic-concurrency mismatch). transition_core stamps
-    # attribution + signs the STATUS event via the shared finalize seam (bug 0ba4), given repo_root.
-    txn.transition_core(
-        tracker,
-        ticket_id,
-        current_status,
-        target_status,
+    from rebar._commands import completion_bundle
+
+    completion_signature, atomic_close = completion_bundle._publish_close(
+        verified_result,
+        ticket_id=ticket_id,
+        tracker=tracker,
+        repo_root=repo_root,
+        ref=ref,
         env_id=env_id,
         author=author,
+        current_status=current_status,
+        target_status=target_status,
         close_class=close_class,
         close_reason=close_reason,
-        force_reason=force_close,
+        force_close=force_close,
         completion_expectation=completion_expectation,
-        repo_root=repo_root,
         pre_status_check=plan_review_recheck,
+        legacy_signer=_sign_completion_and_report,
     )
-
-    # PASS attestation: sign the verified verdict AFTER the close is confirmed. A crash in this
-    # (two-local-commit) window leaves closed-without-signature — the conservative direction
-    # (reads as "bypassed", never a false "validated"). Errors surface: we WANT a hard signal if
-    # the trustworthy record can't be written.
-    if target_status == "closed" and verified_result is not None:
-        completion_signature = _sign_completion_and_report(
-            verified_result, ticket_id, repo_root, ref
-        )
 
     # Blame-Hunt Advisory (ticket 555e): on a BUG close, draw a best-effort caused_by link
     # from the (now-closed) bug to the culprit change/ticket. An explicit --caused-by <id>
@@ -701,7 +654,14 @@ def close_ticket(
     # source, so we write the edge via the lower-level _write_link_event, which bypasses the
     # closed-source + cycle guards (a non-blocking, non-cycle relation on a closed source needs
     # neither). Best-effort: any resolve/write failure is swallowed and NEVER blocks the close.
-    if target_status == "closed":
+    atomic_delivery = str((atomic_close or {}).get("delivery", ""))
+    caused_by_safe = atomic_close is None or atomic_delivery in {
+        "pushed",
+        "pushed_after_ambiguous_ack",
+        "local_only",
+        "already_present",
+    }
+    if target_status == "closed" and caused_by_safe:
         _apply_caused_by(ticket_id, caused_by, tracker, repo_root_str, repo_root)
 
     # Reopen invalidation is NO LONGER a write-time mutation (epic dark-acme-lumen): attestation
@@ -755,11 +715,17 @@ def close_ticket(
     # txn.transition_core commits inline and does not go through write_and_push. Trigger
     # the same best-effort push so a trailing transition (the last write of a session)
     # isn't stranded (bug prone-octet-cheek).
-    from rebar._store import push
+    if atomic_close is None:
+        from rebar._store import push
 
-    push.push_after_commit(tracker)
+        push.push_after_commit(tracker)
 
-    _trigger_compaction(target_status, tracker, ticket_id, repo_root_str)
+    # A pending atomic delivery must not immediately launch another tracker mutation whose
+    # generic push recovery could merge past the receipt conflict this close just refused.
+    # The next healthy operation/scheduled sweep can trigger compaction after delivery is
+    # resolved; compaction is optional housekeeping, never part of close correctness.
+    if target_status != "closed" or caused_by_safe:
+        _trigger_compaction(target_status, tracker, ticket_id, repo_root_str)
 
     result: dict = {
         "ticket_id": ticket_id,
@@ -770,6 +736,8 @@ def close_ticket(
     }
     if completion_signature is not None:
         result["completion_signature"] = completion_signature
+    if atomic_close is not None:
+        result["atomic_close"] = atomic_close
     return result
 
 

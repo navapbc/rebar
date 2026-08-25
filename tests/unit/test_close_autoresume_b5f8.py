@@ -323,6 +323,22 @@ def test_resumption_keeps_the_pinned_ref_and_attested_source(monkeypatch):
         assert kwargs["fetch"] is False
 
 
+def test_resumption_reuses_the_same_caller_owned_ticket_session(monkeypatch):
+    calls, _ = _arm(monkeypatch, [_fail_insufficient(credited=1), _pass_verdict()])
+    ticket_view = object()
+
+    _ar.verify_with_auto_resume(
+        "res-0000",
+        ref="deadbeef",
+        repo_root=None,
+        cfg_root=None,
+        ticket_view=ticket_view,
+    )
+
+    assert len(calls) == 2
+    assert all(call["ticket_view"] is ticket_view for call in calls)
+
+
 # ── trail: per-attempt record on the verdict + in the close output ───────────────────────────
 
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from time import monotonic_ns
+from typing import Any
 
 from rebar.llm.completion_child_gate import (
     build_child_closure_evidence,
@@ -48,6 +49,7 @@ __all__ = [
     "COMPLETION_REMEDIATION_GUIDANCE",
     "INSUFFICIENT_EVIDENCE_REMEDIATION",
     "build_child_closure_evidence",
+    "capture_completion_ticket_view",
     "child_closure_findings",
     "completion_fail_returncode",
     "deterministic_child_failure",
@@ -74,6 +76,172 @@ _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
 # 250 default) but min-only against an explicit operator budget. Per-run step usage is logged
 # by the runner (`… steps=N/limit`) so a resize can be sized from observed headroom.
 _VERIFY_STEP_FLOOR_MAX = 960
+
+
+def _record_elapsed(metrics: dict[str, int] | None, key: str, started_ns: int) -> None:
+    if metrics is not None:
+        metrics[key] = metrics.get(key, 0) + (monotonic_ns() - started_ns) // 1_000_000
+
+
+def _pinned_ticket_view_selection(repo_root) -> tuple[bool, str | None]:
+    """Resolve the experimental read mode once, before either snapshot is captured.
+
+    The first rollout requires synchronous delivery because its receipt-aware remote
+    reconciliation is part of the close operation.  ``async`` cannot safely hand the
+    certified bundle to the generic background push path, and ``off`` cannot observe a
+    remote conflict.  Both therefore retain the legacy materialized path rather than
+    capturing a tickets OID and changing strategy midway through a run.
+    """
+    try:
+        from rebar import config as _root_config
+
+        requested = bool(
+            _root_config.compose_config(repo_root).verify.completion_pinned_ticket_view
+        )
+        if not requested:
+            return False, None
+        push_mode = _root_config.resolve_push_mode(repo_root)
+    except Exception:  # noqa: BLE001 — unreadable rollout config keeps the legacy path
+        return False, None
+    if push_mode != "always":
+        return False, f"materialized_push_{push_mode}"
+    return True, "lazy_pinned"
+
+
+def _capture_requested_ticket_view(
+    ticket_id: str, repo_root, *, fetch: bool
+) -> tuple[Any | None, str]:
+    """Capture the requested immutable store once, with the documented epic back-out."""
+    from rebar._snapshot.ticket_view import PinnedTicketView
+
+    ticket_view = PinnedTicketView.try_capture(repo_root, fetch=fetch)
+    if ticket_view is None:
+        return None, "materialized_unavailable"
+    try:
+        ticket_type = ticket_view.show_ticket(ticket_id).get("ticket_type")
+    except BaseException:
+        ticket_view.close()
+        raise
+    if ticket_type != "epic":
+        return ticket_view, "lazy_pinned"
+    ticket_view.close()
+    return None, "materialized_epic"
+
+
+def capture_completion_ticket_view(
+    ticket_id: str, repo_root, *, fetch: bool = False
+) -> tuple[Any | None, str | None]:
+    """Capture one caller-owned ticket session for completion-specific close checks."""
+    requested, mode = _pinned_ticket_view_selection(repo_root)
+    if not requested:
+        return None, mode
+    return _capture_requested_ticket_view(ticket_id, repo_root, fetch=fetch)
+
+
+def _resolve_completion_ticket_view(
+    handle: Any,
+    *,
+    lazy_requested: bool,
+    ticket_read_mode: str | None,
+    ticket_id: str,
+    repo_root,
+    fetch: bool,
+    phase_metrics: dict[str, int] | None,
+) -> tuple[Any, Any | None, str | None]:
+    """Choose the immutable ticket read root once and return its recorded disposition."""
+    from rebar.llm import gate_source
+
+    if not lazy_requested:
+        return handle, None, ticket_read_mode
+    if handle.source != gate_source.SOURCE_ATTESTED:
+        return handle, None, "materialized_local_source"
+
+    ticket_view, captured_mode = _capture_requested_ticket_view(ticket_id, repo_root, fetch=fetch)
+    if ticket_view is None:
+        materialized = gate_source.attach_materialized_tickets(
+            handle, repo_root=repo_root, fetch=fetch, phase_metrics=phase_metrics
+        )
+        return materialized, None, captured_mode
+    return handle, ticket_view, captured_mode
+
+
+def _attach_completion_read_basis(
+    result: dict,
+    ticket_view: Any,
+    *,
+    ticket_id: str,
+    code_sha: str,
+    repo_root,
+    phase_metrics: dict[str, int] | None,
+) -> None:
+    """Bind the verdict to the immutable ticket predicates actually consulted."""
+    from rebar._snapshot.ticket_view import CodeOID
+    from rebar.llm.plan_review.attest import current_material_fingerprint
+
+    # Computing material while the view is active records the root and direct-child
+    # membership. The full descendant closure is an explicit deterministic close dependency
+    # so a nested-ticket change cannot slip between the landing scan and publication.
+    result["material_fingerprint"] = current_material_fingerprint(ticket_id, repo_root=repo_root)
+    ticket_view.transitive_descendant_ids(ticket_id)
+    result["completion_read_basis"] = ticket_view.completion_basis(CodeOID(code_sha)).to_dict()
+    run_metrics = result.get("metrics")
+    if isinstance(run_metrics, dict):
+        run_metrics.update(ticket_view.metrics)
+    if phase_metrics is not None:
+        phase_metrics.update(ticket_view.metrics)
+
+
+def _run_completion_at_handle(
+    ticket_id: str,
+    *,
+    graph: bool | None,
+    repo_root,
+    config: LLMConfig | None,
+    runner: Runner | None,
+    phase_metrics: dict[str, int] | None,
+    handle: Any,
+    ticket_view: Any | None,
+    ticket_read_mode: str | None,
+) -> dict:
+    """Execute and annotate one verifier run inside its paired code/ticket read roots."""
+    from rebar.llm import gate_source
+
+    read_kwargs: dict[str, Any] = {"phase_metrics": phase_metrics}
+    if ticket_view is not None:
+        read_kwargs["ticket_view"] = ticket_view
+    read_context = gate_source.gate_read_root(handle, **read_kwargs)
+    with read_context:
+        started_ns = monotonic_ns()
+        resolved_config = gate_source.apply_handle(
+            config or LLMConfig.from_env(repo_root=repo_root), handle
+        )
+        if ticket_view is not None:
+            resolved_config = replace(resolved_config, ticket_view=ticket_view)
+        _record_elapsed(phase_metrics, "verifier_handle_apply_ms", started_ns)
+        result = _verify_completion_inner(
+            ticket_id,
+            graph=graph,
+            repo_root=repo_root,
+            config=resolved_config,
+            runner=runner,
+            verify_ref=handle.sha,
+            phase_metrics=phase_metrics,
+        )
+        started_ns = monotonic_ns()
+        if ticket_read_mode is not None:
+            result["ticket_read_mode"] = ticket_read_mode
+        if ticket_view is not None:
+            _attach_completion_read_basis(
+                result,
+                ticket_view,
+                ticket_id=ticket_id,
+                code_sha=handle.sha,
+                repo_root=repo_root,
+                phase_metrics=phase_metrics,
+            )
+        annotated = gate_source.annotate_result(result, handle)
+        _record_elapsed(phase_metrics, "verifier_annotation_ms", started_ns)
+        return annotated
 
 
 def verify_step_floor(criteria_count: int, verify_cfg, direct_children: int = 0) -> int:
@@ -131,6 +299,8 @@ def verify_completion(
     config: LLMConfig | None = None,
     runner: Runner | None = None,
     phase_metrics: dict[str, int] | None = None,
+    ticket_view: Any | None = None,
+    ticket_read_mode: str | None = None,
 ) -> dict:
     """Verify a ticket's completion requirements and return a ``completion_verdict`` dict.
 
@@ -148,62 +318,60 @@ def verify_completion(
     and ``citations`` resolved against the real repo. Raises :class:`LLMError` subclasses on
     missing deps/credentials or a failed/empty structured run.
     """
-    phase_started_ns = monotonic_ns() if phase_metrics is not None else 0
+    phase_started_ns = monotonic_ns()
     from rebar.llm import gate_source
 
-    if phase_metrics is not None:
-        phase_metrics["verifier_attempt_setup_ms"] = (
-            phase_metrics.get("verifier_attempt_setup_ms", 0)
-            + (monotonic_ns() - phase_started_ns) // 1_000_000
-        )
-        phase_started_ns = monotonic_ns()
-        handle = gate_source.resolve_gate_handle(
-            ref, source, repo_root, fetch=fetch, phase_metrics=phase_metrics
-        )
-        phase_metrics["verifier_handle_resolution_ms"] = (
-            phase_metrics.get("verifier_handle_resolution_ms", 0)
-            + (monotonic_ns() - phase_started_ns) // 1_000_000
-        )
-        read_context = gate_source.gate_read_root(handle, phase_metrics=phase_metrics)
+    if ticket_read_mode is None:
+        lazy_requested, ticket_read_mode = _pinned_ticket_view_selection(repo_root)
     else:
-        handle = gate_source.resolve_gate_handle(ref, source, repo_root, fetch=fetch)
-        read_context = gate_source.gate_read_root(handle)
-    with read_context:
-        phase_started_ns = monotonic_ns() if phase_metrics is not None else 0
-        resolved_config = gate_source.apply_handle(
-            config or LLMConfig.from_env(repo_root=repo_root), handle
+        lazy_requested = ticket_read_mode == "lazy_pinned"
+    if ticket_view is not None and not lazy_requested:
+        raise ValueError("a pinned ticket session requires completion_pinned_ticket_view")
+    owns_ticket_view = False
+    _record_elapsed(phase_metrics, "verifier_attempt_setup_ms", phase_started_ns)
+    phase_started_ns = monotonic_ns()
+    handle = gate_source.resolve_gate_handle(
+        ref,
+        source,
+        repo_root,
+        fetch=fetch,
+        phase_metrics=phase_metrics,
+        materialize_ticket_store=not lazy_requested,
+    )
+    _record_elapsed(phase_metrics, "verifier_handle_resolution_ms", phase_started_ns)
+    phase_started_ns = monotonic_ns()
+    if ticket_view is None:
+        handle, ticket_view, ticket_read_mode = _resolve_completion_ticket_view(
+            handle,
+            lazy_requested=lazy_requested,
+            ticket_read_mode=ticket_read_mode,
+            ticket_id=ticket_id,
+            repo_root=repo_root,
+            fetch=fetch,
+            phase_metrics=phase_metrics,
         )
-        if phase_metrics is not None:
-            phase_metrics["verifier_handle_apply_ms"] = (
-                phase_metrics.get("verifier_handle_apply_ms", 0)
-                + (monotonic_ns() - phase_started_ns) // 1_000_000
-            )
-            result = _verify_completion_inner(
-                ticket_id,
-                graph=graph,
-                repo_root=repo_root,
-                config=resolved_config,
-                runner=runner,
-                verify_ref=handle.sha,
-                phase_metrics=phase_metrics,
-            )
-            phase_started_ns = monotonic_ns()
-        else:
-            result = _verify_completion_inner(
-                ticket_id,
-                graph=graph,
-                repo_root=repo_root,
-                config=resolved_config,
-                runner=runner,
-                verify_ref=handle.sha,
-            )
-        annotated = gate_source.annotate_result(result, handle)
-        if phase_metrics is not None:
-            phase_metrics["verifier_annotation_ms"] = (
-                phase_metrics.get("verifier_annotation_ms", 0)
-                + (monotonic_ns() - phase_started_ns) // 1_000_000
-            )
-    return annotated
+        owns_ticket_view = ticket_view is not None
+    elif handle.source != gate_source.SOURCE_ATTESTED:
+        raise ValueError("a pinned ticket session requires an attested completion source")
+    else:
+        ticket_read_mode = "lazy_pinned"
+    if lazy_requested:
+        _record_elapsed(phase_metrics, "verifier_ticket_view_setup_ms", phase_started_ns)
+    try:
+        return _run_completion_at_handle(
+            ticket_id,
+            graph=graph,
+            repo_root=repo_root,
+            config=config,
+            runner=runner,
+            phase_metrics=phase_metrics,
+            handle=handle,
+            ticket_view=ticket_view,
+            ticket_read_mode=ticket_read_mode,
+        )
+    finally:
+        if owns_ticket_view and ticket_view is not None:
+            ticket_view.close()
 
 
 def _verify_completion_inner(
@@ -240,8 +408,7 @@ def _verify_completion_inner(
     # Resolve the ticket type once (one local read; no network). graph default depends on
     # ticket type (epics verify across children).
     root = _reads.show_ticket(ticket_id, repo_root=repo_root)
-    if graph is None:
-        graph = root.get("ticket_type") == "epic"
+    resolved_graph = root.get("ticket_type") == "epic" if graph is None else bool(graph)
 
     # Criteria-scaled PRIMARY step budget (epic 10ae/story 2948, lever 1). Compute the scaled
     # floor from the ticket's explicit criteria count, then apply it: it is AUTHORITATIVE over the
@@ -294,7 +461,7 @@ def _verify_completion_inner(
     if phase_metrics is None:
         return gate_dispatch.produce_completion_verdict(
             ticket_id,
-            graph=graph,
+            graph=resolved_graph,
             repo_root=repo_root,
             cfg=cfg,
             runner=runner,
@@ -307,7 +474,7 @@ def _verify_completion_inner(
     phase_started_ns = monotonic_ns()
     result = gate_dispatch.produce_completion_verdict(
         ticket_id,
-        graph=graph,
+        graph=resolved_graph,
         repo_root=repo_root,
         cfg=cfg,
         runner=runner,
