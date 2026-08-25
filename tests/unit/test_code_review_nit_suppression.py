@@ -1,20 +1,14 @@
-"""Impact-aware nit suppression (bug 2dfe: docs findings structurally unsurfaceable).
+"""Impact-aware nit suppression for documentation findings.
 
-The docs overlay tags every finding ``["docs"]``; routing marks ``docs`` nit_suppressed; and the
-post-Pass-3 partition in ``code_review_decide`` demoted EVERY docs-only advisory — so 100% of the
-overlay's verified-valid output was discarded, including findings with impact > 0. The fix makes
-the suppression impact-aware: a docs-only (all-nit-suppressed) advisory is dropped ONLY when its
-deterministic impact is 0; a finding with impact > 0 survives as a surfaced advisory. This module
-also pins the narrowed docs rubric: it must explicitly forbid absence speculation about files not
-shown in the diff.
+Bug 2dfe records why documentation findings with positive impact must remain visible. This module
+pins that decision behavior. Documentation rubric contracts live in
+``test_code_review_docs_overlay.py``.
 
 Proving command:
     .venv/bin/pytest tests/unit/test_code_review_nit_suppression.py -v
 """
 
 from __future__ import annotations
-
-from importlib import resources
 
 import pytest
 
@@ -114,25 +108,3 @@ def test_partition_mixes_impactful_and_zero_impact_docs_findings() -> None:
     assert out["surfaced"][0]["finding"] == "docs factual contradiction"
     assert len(out["dropped"]) == 1
     assert out["dropped"][0]["finding"] == "docs zero-impact nit"
-
-
-# ── narrowed docs rubric ──────────────────────────────────────────────────────────────────
-def _docs_rubric_text() -> str:
-    return resources.files("rebar.llm").joinpath("reviewers/code-review-docs.md").read_text("utf-8")
-
-
-def test_docs_rubric_forbids_absence_speculation() -> None:
-    text = _docs_rubric_text().lower()
-    assert "not shown in the diff" in text, (
-        "code-review-docs.md must explicitly forbid speculation about files not shown in the diff"
-    )
-    for phrase in ("must exist", "may be stale", "should be verified"):
-        assert phrase in text, f"rubric must name the forbidden speculation phrasing: {phrase!r}"
-
-
-def test_docs_rubric_requires_both_sides_in_diff() -> None:
-    text = _docs_rubric_text().lower()
-    assert "both sides" in text, (
-        "code-review-docs.md must restrict findings to inconsistencies where the diff shows "
-        "both sides"
-    )

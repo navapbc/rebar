@@ -1,14 +1,13 @@
-"""Eval solver — run a reviewer prompt against one dataset case (epic 6f2d / WS-EVAL).
+"""Run one reviewer prompt against one evaluation case.
 
-The three reviewers under eval (completion-verifier, ticket-quality, spec-alignment)
-are AGENTIC ops that read the rebar STORE (show_ticket / list_tickets) and the REPO
-(file tools), so — unlike the plan-review finders, which take inline plan text — they
-cannot be fed a bare string. This solver stands up a disposable, per-case rebar store
-+ fixture repo, seeds the case's synthetic ticket(s)/epic(s) and any fixture `files`,
-then runs the REAL op with an injected runner: a ``FakeRunner`` offline (tests), the
-live runner in the eval CI. It uses each op's existing ``repo_root`` + ``runner`` seams
-(no production-op changes), so the live agent's OWN show_ticket / file tools read the
-same disposable store the deterministic context assembly does.
+Agentic operations that read ticket and repository tools need a disposable case repository. The
+solver seeds synthetic tickets and any fixture ``files``, then reroots the injected runner so its
+tools and deterministic context share one repository. Code-review prompt cases keep their diff
+inline. When such a case supplies ``files``, the solver also uses a disposable repository for
+agentic file inspection. Cases without files retain checkout-rooted execution.
+
+The runner may be a ``FakeRunner`` in offline tests or a configured runner in evaluation CI.
+Production operation seams are reused without changing production gates.
 """
 
 from __future__ import annotations
@@ -280,16 +279,15 @@ def _rerooted(runner: Runner, root: str) -> Runner:
 def run_case(
     prompt_id: str, case: dict, *, runner: Runner, graph: bool = False, repo_root: str | None = None
 ) -> dict:
-    """Run one reviewer/criterion over one dataset ``case``; return its structured output.
+    """Run one reviewer or criterion over one dataset ``case``.
 
-    ``runner`` is a ``FakeRunner`` offline or the config/live runner in CI. A ``prompt_id`` that
-    names a plan-review criterion (built-in or activated project criterion, bare or
-    ``plan-review-<id>``) runs as its Pass-1 finder over ``case['input']`` (no store scaffolding);
-    ``plan-review-novelty`` runs the Pass-2 novelty sub-call over the case's
-    ``finding``/``prior_finding`` pair; the three agentic reviewers keep their disposable-store
-    path. ``repo_root`` (default ``config.repo_root()``) is the root the criterion
-    registry/overlay resolves against. Raises ``ValueError`` for an unknown, non-criterion
-    ``prompt_id``."""
+    ``runner`` is a ``FakeRunner`` offline or the configured runner in CI. A plan-review
+    criterion reads ``case['input']`` inline. ``plan-review-novelty`` reads the case's finding
+    pair inline. A code-review prompt reads ``case['diff']`` inline and enters a disposable
+    fixture repository only when ``files`` is nonempty. The operation reviewers retain their
+    disposable ticket and repository scaffolding. ``repo_root`` selects the criterion and overlay
+    registry. An unknown prompt or criterion raises ``ValueError``.
+    """
     from rebar.llm import completion, operations, spec_scan
 
     if repo_root is None:
@@ -315,11 +313,20 @@ def run_case(
     if cid is not None:
         return _run_criterion_case(cid, case, runner=runner, repo_root=repo_root)
 
-    # Code-review arm (story f93a): run ONE code-review prompt over the case's inline diff
-    # and return its NATIVE structured output — no disposable store / ticket scaffolding
-    # (like the criterion arm, the input is inline text). Checked before case_store so a
-    # code-review id never falls through to the agentic reviewers.
+    # Code-review arm for story f93a. Run ONE code-review prompt over the case's diff and
+    # return its NATIVE structured output. A fixture-backed case needs a disposable repo so
+    # the agent's filesystem tools see the declared files. Inline cases preserve the original
+    # checkout-rooted path. No ticket scaffolding is needed in either path.
     if _code_review_prompt_id(prompt_id, repo_root=repo_root) is not None:
+        if case.get("files"):
+            with case_store(case) as root:
+                root = str(pathlib.Path(root).resolve())
+                return _run_code_review_case(
+                    prompt_id,
+                    case,
+                    runner=_rerooted(runner, root),
+                    repo_root=root,
+                )
         return _run_code_review_case(prompt_id, case, runner=runner, repo_root=repo_root)
 
     # The code-reading gates snapshot a ref (default origin/main) unless source=local;
