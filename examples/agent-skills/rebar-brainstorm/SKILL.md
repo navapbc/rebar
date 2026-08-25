@@ -135,6 +135,8 @@ new-prohibition consumer scan, CI-trigger).
 
 **Establish the dependency graph before you review.** After creating the tickets, use `link` to record their parent and prerequisite relationships with `blocks` or `depends_on`. Plan review is dependency-scoped. A review pins the material from its direct dependencies. The claimability fast-fail returns unsigned `INDETERMINATE` when a ticket is not claimable. Its `coverage.llm_ran` is `false`, and its exit status is 2. This result defers the LLM verdict. It is not a PASS, a passing attestation, or a successful review verdict.
 
+**Routing.** When an MCP server is configured, run the tracker ops in this section — `create`, `link`, `ready`, and `review-plan` — through it; the local `rebar` CLI is the carve-out/fallback for local-code ops and when no MCP server is configured. See the *Drive the tracker through the MCP server* umbrella in `AGENTS.md`.
+
 Run the plan-review gate only on unblocked tickets. `rebar ready` identifies tickets whose blockers are closed. Review in dependency order, with prerequisites and children before their dependents. Never review a ticket and its dependencies in parallel. As dependencies close, review each newly claimable ticket in turn.
 
 If `rebar ready` returns an empty set after linking, inspect the graph for a cycle or an authoring error. Correct the links before proceeding. Do not force a review. For each reviewed ticket, run `rebar review-plan <id>`. Remediate every BLOCK and apply advisory findings that improve the plan before claiming. Reading the gate before authoring reduces later remediation.

@@ -32,6 +32,12 @@ it degrades to the deterministic floor (fewer advisories, the hard structural ch
 run). The claim gate itself **fails closed**: no valid attestation ⇒ the claim is blocked;
 `--force="<reason>"` is the audited escape hatch, not the normal path.
 
+> **Routing.** When the rebar MCP server is configured, run the tracker ops named here —
+> `review-plan`/`sign-review` and `claim`/`transition` — through it; the local `rebar` CLI is
+> the carve-out/fallback for local-code ops (the read-only `review-plan <id> --status` currency
+> check, `explain`, and the `clarity-check`/`check-ac` scorers) and when no MCP server is
+> configured. See the *Drive the tracker through the MCP server* umbrella in `AGENTS.md`.
+
 **Review in dependency order — dependencies before their dependents.** A review pins not just
 the ticket's own material but its **direct dependencies'** (children, `depends_on`/`blocks`
 prerequisites). If a dependency's plan changes after the review, the recorded PASS is

@@ -87,6 +87,13 @@ When driving rebar from an LLM client, prefer the `rebar-mcp` tools: reads such 
 writes such as `create_ticket`, `claim_ticket`, `transition_ticket`, `comment_ticket`,
 `link_tickets`, and `log_session` (writes are gated by `REBAR_MCP_READONLY`). The typed
 read tools advertise an `outputSchema` you can rely on.
+
+**When an MCP server is configured, route the tracker operations named throughout this guide
+(`search`/`list`/`ready`/`next-batch`, `create`/`claim`/`transition`/`comment`/`link`, and any
+enabled review gate) through these tools rather than the bare local `rebar` CLI.** The local
+CLI shown in the steps above is the carve-out/fallback: it stays the tool for local-code ops
+that need the checkout in hand (running tests, validation), and it is the fallback when no MCP
+server is configured.
 <!-- END rebar-usage -->
 
 ## Project-specific notes — PLACEHOLDER (optional)
