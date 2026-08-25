@@ -159,8 +159,13 @@ def _restamp_marker(record: dict[str, Any], entry: dict[str, Any] | None) -> dic
     """Authoritatively re-stamp the insufficiency marker from the BANK onto a finalizer echo.
 
     Model output never owns the marker: a bank entry carrying it stamps a still-unmet echo;
-    any model-minted marker over a bare bank entry (or a met=true record) is stripped."""
-    if record.get("met") is False and _entry_insufficient(entry):
+    any model-minted marker over a bare bank entry (or a met=true record) is stripped.
+
+    A ``met=false`` echo whose criterion has NO bank entry (``entry is None``) was never
+    evaluated — the abort truncated it before it could be banked — so it is stamped
+    insufficient, matching the omitted-criterion branch. Only a PRESENT, markerless bank entry
+    (a genuine banked refutation) stays bare."""
+    if record.get("met") is False and (entry is None or _entry_insufficient(entry)):
         record["evidence_sufficient"] = False
     else:
         record.pop("evidence_sufficient", None)

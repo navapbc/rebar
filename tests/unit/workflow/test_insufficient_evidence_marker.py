@@ -493,3 +493,78 @@ def test_finalizer_prompt_states_sufficiency_rule() -> None:
     lowered = text.casefold()
     assert "evidence_sufficient" in lowered
     assert "insufficient" in lowered
+
+
+# ── bug 2dcb-5468: a runaway/exhaustion-truncated run is a re-runnable FAULT, not a block ──
+#
+# Two seams left a truncated run masquerading as a blocking substantive FAIL (exit 1),
+# forcing --force. Both trace to ticket 1d71's own scope (the marker it introduced):
+#   Fix A — merge_finalizer_with_bank echoed a met=false for a criterion NEVER banked
+#     (entry is None = truncated / never evaluated) as a BARE refutation, popping the marker.
+#     The OMITTED-criterion branch already marks un-banked criteria insufficient
+#     (test_merge_placeholder_branch_carries_marker); the ECHO branch must be consistent.
+#     NB: keys on `entry is None` (never banked), NOT the bank-entry `truncated` evidence-cap
+#     flag — a present markerless entry is a GENUINE refutation and must stay bare.
+#   Fix B — an insufficiency-only FAIL (top-level evidence_sufficient=False, already derived
+#     by reconcile_verdict since 1d71) must dispose as the RETRYABLE exit-11 fault, not the
+#     fail-closed exit 1. Routed via the existing evidence_sufficient marker (NOT by
+#     overloading verdict_obtainable, whose schema is the no-criterion fault) through a single
+#     shared disposition helper both the close gate and the standalone verb call.
+
+
+def test_merge_unbanked_finalizer_echo_is_insufficiency_not_bare_refutation(tmp_path) -> None:
+    """A met=false the finalizer ECHOES for a criterion never banked (entry is None) is
+    insufficiency — an abort truncated the search before that criterion was evaluated, so
+    the tool-free finalizer's met=false rests on no gathered evidence."""
+    result = {
+        "verdict": "FAIL",
+        "criteria": [{"criterion": "Ship the fix", "met": False, "evidence": "echo"}],
+        "findings": [],
+    }
+    merged = cb.merge_finalizer_with_bank(
+        result, ["Ship the fix"], {}, id_by_text={"Ship the fix": "c00-aaaa"}
+    )
+    (record,) = merged["criteria"]
+    assert record["met"] is False
+    assert record["evidence_sufficient"] is False
+
+
+def test_merge_present_markerless_bank_entry_echo_stays_bare(tmp_path) -> None:
+    """A genuine refutation is NOT masked: a met=false echo over a PRESENT bank entry that
+    carries no insufficiency marker (real evidence gathered) stays a bare refutation."""
+    bank = _bank(tmp_path)
+    bank.make_record_tool()("c00-aaaa", False, "refuted")
+    result = {
+        "verdict": "FAIL",
+        "criteria": [{"criterion": "Ship the fix", "met": False, "evidence": "echo"}],
+        "findings": [],
+    }
+    merged = cb.merge_finalizer_with_bank(
+        result, ["Ship the fix"], bank.all(), id_by_text={"Ship the fix": "c00-aaaa"}
+    )
+    (record,) = merged["criteria"]
+    assert record["met"] is False and "evidence_sufficient" not in record
+
+
+def test_insufficiency_only_fail_disposition_is_retryable() -> None:
+    """An insufficiency-only FAIL (top-level evidence_sufficient=False) disposes as the
+    retryable exit-11 fault, not the fail-closed exit 1."""
+    from rebar.llm.completion import completion_fail_returncode
+
+    assert completion_fail_returncode({"verdict": "FAIL", "evidence_sufficient": False}) == 11
+
+
+def test_no_verdict_fault_disposition_stays_retryable() -> None:
+    """The pre-existing no-criterion fault (verdict_obtainable=False, bug 2a6f) still
+    disposes retryable — the new insufficiency path does not disturb it."""
+    from rebar.llm.completion import completion_fail_returncode
+
+    assert completion_fail_returncode({"verdict": "FAIL", "verdict_obtainable": False}) == 11
+
+
+def test_genuine_unmet_fail_disposition_stays_a_hard_block() -> None:
+    """Non-masking guard: a FAIL with a genuinely-refuted criterion (no top-level insufficiency
+    marker) stays the fail-closed exit-1 hard block."""
+    from rebar.llm.completion import completion_fail_returncode
+
+    assert completion_fail_returncode({"verdict": "FAIL"}) == 1

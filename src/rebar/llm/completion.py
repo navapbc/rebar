@@ -31,6 +31,7 @@ from rebar.llm.completion_child_gate import (
 from rebar.llm.completion_reconcile import (
     COMPLETION_REMEDIATION_GUIDANCE,
     INSUFFICIENT_EVIDENCE_REMEDIATION,
+    completion_fail_returncode,
     deterministic_child_failure,
     reconcile_verdict,
 )
@@ -48,6 +49,7 @@ __all__ = [
     "INSUFFICIENT_EVIDENCE_REMEDIATION",
     "build_child_closure_evidence",
     "child_closure_findings",
+    "completion_fail_returncode",
     "deterministic_child_failure",
     "reconcile_verdict",
     "verify_completion",

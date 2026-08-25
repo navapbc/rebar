@@ -273,6 +273,77 @@ def test_cli_default_signs_the_attestation(
     assert calls == []
 
 
+def _cli_fail(sha: str, *, insufficient: bool) -> dict:
+    """A standalone-verb FAIL verdict. ``insufficient`` marks an evidence-exhausted/truncated
+    run (top-level ``evidence_sufficient`` False, mirroring what ``reconcile_verdict`` stamps);
+    otherwise a positively-refuted criterion (no top-level marker)."""
+    result = {
+        "verdict": "FAIL",
+        "findings": [
+            {
+                "criterion": "U0",
+                "severity": "high",
+                "dimension": "completion",
+                "detail": (
+                    "insufficient evidence (search exhausted)"
+                    if insufficient
+                    else "positively refuted"
+                ),
+            }
+        ],
+        "criteria": [{"criterion": "U0", "met": False}],
+        "runner": "standalone-runner",
+        "model": "standalone-model",
+        "source": "attested",
+        "verified_at_sha": sha,
+        "signable": False,
+        "certifiable": True,
+        "target": {"kind": "ticket", "ticket_ids": ["t"]},
+    }
+    if insufficient:
+        result["evidence_sufficient"] = False
+    return result
+
+
+def _cli_fail_provider(monkeypatch: pytest.MonkeyPatch, sha: str, *, insufficient: bool) -> None:
+    def provider(ticket_id, *, graph=None, ref=None, source=None):
+        return _cli_fail(sha, insufficient=insufficient)
+
+    monkeypatch.setattr(rebar.llm, "verify_completion", provider)
+
+
+def test_cli_insufficiency_only_fail_returns_retryable_exit_11(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug 2dcb — end-to-end at the standalone ``verify-completion`` verb: an insufficiency-only
+    FAIL (top-level ``evidence_sufficient`` False) returns the RETRYABLE exit 11 via the shared
+    ``completion_fail_returncode`` helper, so a caller scripting the verb retries instead of
+    treating an exhausted/truncated search as ``criteria unmet``."""
+    _enable_gate(rebar_repo)
+    target = _git(rebar_repo, "rev-parse", "HEAD")
+    ticket = _make_ticket(rebar_repo)
+    _cli_fail_provider(monkeypatch, target, insufficient=True)
+
+    rc = _verify_completion([ticket, "--no-sign"])
+
+    assert rc == 11
+
+
+def test_cli_refutation_fail_returns_hard_block_exit_1(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control for bug 2dcb: a positively-refuted FAIL (no top-level insufficiency marker) stays
+    the hard-block exit 1 — the retryable exit 11 must not swallow a genuine criteria failure."""
+    _enable_gate(rebar_repo)
+    target = _git(rebar_repo, "rev-parse", "HEAD")
+    ticket = _make_ticket(rebar_repo)
+    _cli_fail_provider(monkeypatch, target, insufficient=False)
+
+    rc = _verify_completion([ticket, "--no-sign"])
+
+    assert rc == 1
+
+
 class _FakeMCP:
     """Collects decorated tool callables by name (mirrors the read/write registrar tests)."""
 

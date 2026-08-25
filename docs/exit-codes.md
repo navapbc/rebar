@@ -191,7 +191,7 @@ guarantee `2`).
 | `trusted-env` | 0 | — | — | no ticket id; maintains `.rebar/trusted_environments.yaml`; bad args → 2; error → 1 |
 | `verify-authorship` | 0 | — | — | back-compat alias for `verify-identity`; same codes: 0 = verified, 1 = not-verified, 2 = bad args |
 | `verify-commit-ticket` | 0 | — | — | no ticket id; 0 = commit has a valid rebar-ticket trailer, 1 = missing or invalid, 2 = bad args |
-| `verify-completion` | 0 | 1 | — | PASS → 0, ordinary FAIL → 1, nonretryable raised `LLMError` → 1, retryable raised `LLMError` → 11, `verdict_obtainable=false` → 11 |
+| `verify-completion` | 0 | 1 | — | PASS → 0, ordinary FAIL → 1, nonretryable raised `LLMError` → 1, retryable raised `LLMError` → 11, `verdict_obtainable=false` → 11, insufficiency-only FAIL (`evidence_sufficient=false`) → 11 |
 | `verify-identity` | 0 | — | — | authenticated-authorship merge gate; 0 = verified, 1 = not-verified, 2 = bad args |
 | `verify-opcert` | 0 | — | — | no ticket id; 0 = op-cert valid, 1 = invalid or not found, 2 = bad args |
 | `verify-signature` | 0 | — | — | no ticket id; certifies a manifest attestation (shape-aware: an asymmetric op-cert, or a legacy record); 0 = signature verified, 1 = not-verified (or, for a legacy HMAC record, a missing key), 2 = bad args |
@@ -242,7 +242,7 @@ Exit 11 distinguishes a retryable gate fault from a judgment about the reviewed 
 
 - **Review degradation.** `review-plan` and `review-code` return `11` when `coverage.retryable` is true. A nonretryable INDETERMINATE returns `2`.
 - **Raised completion errors.** `verify-completion` and the `close` completion gate inspect the raised `LLMError` outcome. A retryable outcome returns `11`. A nonretryable outcome fails closed with `1`.
-- **Unusable completion results.** Bounded recovery can return `verdict_obtainable=false` after it cannot obtain an itemized completion judgment. Both `verify-completion` and the `close` gate return `11` for that result. An ordinary completion FAIL remains `1` because it states that acceptance criteria are unmet.
+- **Unusable completion results.** Bounded recovery can return `verdict_obtainable=false` after it cannot obtain an itemized completion judgment, or a FAIL whose evidence search was truncated or exhausted before a criterion could be refuted (top-level `evidence_sufficient=false`, recorded by bug `2dcb-5468-b734-4b60`). Both `verify-completion` and the `close` gate return `11` for either result: the run could not produce a trustworthy verdict and is worth re-running. An ordinary completion FAIL — one that refuted the criteria on sufficient evidence (`evidence_sufficient` is not false) — remains `1` because it states that acceptance criteria are unmet.
 - **Consumer guidance.** Retry `11` after the indicated backoff. Treat every other nonzero code according to its documented contract. Consumers that treat every nonzero code as failure remain compatible.
 - **Other consumers.** Project CI does not invoke these gate commands. The Gerrit review bot consumes verdict dictionaries instead of CLI exit codes.
 - **Rollback.** Removing the mapping would restore the earlier `2` result for retryable review degradation and the earlier `1` result for retryable completion faults. The optional classifier fields require no data migration.

@@ -242,6 +242,39 @@ def test_auto_resume_max_zero_disables(monkeypatch):
     assert len(calls) == 1, "auto_resume_max=0 must disable resumption entirely"
 
 
+def test_close_gate_insufficiency_only_fail_disposes_as_retryable_exit_11(monkeypatch):
+    """Bug 2dcb — end-to-end at the CLOSE-gate call site (``_completion_precheck``'s generic
+    completion-FAIL raise): an insufficiency-only FAIL that exhausts the resume budget must
+    raise ``CommandError`` with the RETRYABLE ``returncode == 11`` (routed through the shared
+    ``completion_fail_returncode`` helper), NOT the generic hard-block exit 1. Before the fix
+    the close gate flattened this exhausted/truncated verdict into an exit-1 block that only
+    ``--force`` could bypass."""
+    _arm(monkeypatch, [_fail_insufficient(credited=1)], max_resumes=0)
+
+    with pytest.raises(CommandError) as caught:
+        _close()
+
+    assert caught.value.returncode == 11, (
+        "an insufficiency-only FAIL is a retryable verifier fault, not a criteria judgement — "
+        "the close gate must dispose it as exit 11"
+    )
+
+
+def test_close_gate_refutation_fail_stays_hard_block_exit_1(monkeypatch):
+    """Control for bug 2dcb: a GENUINELY refuted FAIL (a criterion positively unmet, top-level
+    ``evidence_sufficient`` not False) stays the hard-block ``returncode == 1`` — the retryable
+    exit 11 must never swallow a real acceptance-criteria failure."""
+    _arm(monkeypatch, [_fail_refuted()])
+
+    with pytest.raises(CommandError) as caught:
+        _close()
+
+    assert caught.value.returncode == 1, (
+        "a positively refuted FAIL states acceptance criteria are unmet and must remain a "
+        "hard block (exit 1), never the retryable exit 11"
+    )
+
+
 def test_zero_progress_stops_early_with_resumptions_remaining(monkeypatch):
     """Unchanged cache-credited count → the next re-run would be an identical spin (same
     seeded cache, same budget, same remainder); stop even though max allows more."""

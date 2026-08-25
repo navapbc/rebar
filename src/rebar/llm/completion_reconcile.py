@@ -126,6 +126,16 @@ def _insufficiency_only(result: dict) -> bool:
     return bool(records) and all(r.get("evidence_sufficient") is False for r in records)
 
 
+def completion_fail_returncode(result: dict) -> int:
+    """Exit code for a completion-verification FAIL: retryable (11) when the run is a FAULT —
+    either no criterion could be identified (`verdict_obtainable is False`, bug 2a6f) OR the
+    unmet set is insufficiency-only (`evidence_sufficient is False`: the bounded search
+    exhausted without positively refuting anything) — else a fail-closed hard block (1)."""
+    if result.get("verdict_obtainable") is False or result.get("evidence_sufficient") is False:
+        return 11
+    return 1
+
+
 def reconcile_verdict(result: dict) -> None:
     """Normalize the verdict and enforce the FAIL⇔findings invariant IN PLACE.
 
