@@ -185,6 +185,7 @@ def run_http_with_grace(
     *,
     grace_seconds: float = DEFAULT_SHUTDOWN_GRACE_SECONDS,
     poll_interval: float = 0.5,
+    opcert_binding: Any = None,
 ) -> None:
     """Serve the Streamable-HTTP app with an owned, bounded SIGTERM grace.
 
@@ -193,11 +194,19 @@ def run_http_with_grace(
     handler on the main thread (see :func:`make_sigterm_handler`).
     ``timeout_graceful_shutdown`` bounds uvicorn's own drain as a backstop. The main
     thread joins with a timeout so it stays responsive to the signal (a bare
-    ``join()`` would defer handler delivery)."""
+    ``join()`` would defer handler delivery).
+
+    ``opcert_binding`` (the box's startup op-cert signer, or ``None``) is bound
+    context-locally INSIDE the serving thread's target, not in the caller's thread:
+    a :class:`contextvars.ContextVar` set on the main thread is NOT inherited by the
+    background thread, so the binding must be entered where the request-handling event
+    loop actually runs. ``None`` is a transparent no-op (the unprovisioned path)."""
 
     import signal
 
     import uvicorn
+
+    from rebar._opcert_binding import bound_signer
 
     app = mcp.streamable_http_app()
     config = uvicorn.Config(
@@ -208,7 +217,14 @@ def run_http_with_grace(
         timeout_graceful_shutdown=int(grace_seconds),
     )
     server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, name="rebar-mcp-http")
+
+    def _serve() -> None:
+        # push_mode=None: sign under the box environment but leave the outbound push policy
+        # to env/config, so the box still auto-pushes its ticket writes to the shared store.
+        with bound_signer(opcert_binding, push_mode=None):
+            server.run()
+
+    thread = threading.Thread(target=_serve, name="rebar-mcp-http")
     thread.start()
 
     signal.signal(
@@ -222,9 +238,14 @@ def run_http_with_grace(
         thread.join(timeout=0.2)
 
 
-def run_mcp(server: Any, mcp_cfg: Any) -> None:
+def run_mcp(server: Any, mcp_cfg: Any, *, opcert_binding: Any = None) -> None:
     """Run ``server`` for the configured transport. HTTP uses the bounded-grace runner
-    above; stdio delegates to FastMCP's own run loop (no HTTP surface to drain)."""
+    above; stdio delegates to FastMCP's own run loop (no HTTP surface to drain).
+
+    ``opcert_binding`` (or ``None``) is the box's startup op-cert signer; it is threaded to
+    the serving thread so the certified-op tools mint certs under the box environment. HTTP
+    binds it inside the uvicorn thread target (:func:`run_http_with_grace`); stdio binds it
+    around ``server.run`` here (same thread). ``None`` is a transparent no-op."""
 
     if mcp_cfg.transport == "http":
         gauge = getattr(server, _GAUGE_ATTR, None)
@@ -240,6 +261,9 @@ def run_mcp(server: Any, mcp_cfg: Any) -> None:
                 "observe in-flight ops. Was build_server() used?"
             )
             gauge = InFlightGauge()
-        run_http_with_grace(server, gauge)
+        run_http_with_grace(server, gauge, opcert_binding=opcert_binding)
     else:
-        server.run(transport="stdio")
+        from rebar._opcert_binding import bound_signer
+
+        with bound_signer(opcert_binding, push_mode=None):
+            server.run(transport="stdio")

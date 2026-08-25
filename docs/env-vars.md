@@ -131,7 +131,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_MCP_READONLY` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_TRANSPORT` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_NO_SYNC` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_SYNC_PULL` |
-| `REBAR_OPCERT_ENV_ID` | `src/rebar/_opcert_signing.py`, `src/rebar/opcert_service/config.py` |  |
+| `REBAR_OPCERT_ENV_ID` | `src/rebar/_opcert_signing.py`, `src/rebar/mcp_server.py`, `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_GUARD` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_JOB_TIMEOUT_SECONDS` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_KEY_PATH` | `src/rebar/_opcert_signing.py`, `src/rebar/opcert_service/config.py` |  |
