@@ -115,6 +115,35 @@ not by withholding it from any surface but by the **absence of a signed attestat
 op records no certification, so a project that must keep force from circumventing a gate
 enforces it by checking for that certification in CI.
 
+## Drive the tracker through the MCP server (local-code ops are the carve-out)
+
+**When the rebar MCP server is configured, route rebar *tracker* operations through it, not
+ad-hoc local `rebar` CLI.** This covers the tracker reads and writes named throughout this
+guide — `search`/`list`/`show`/`ready`/`next-batch`, `create`/`edit`/`comment`/`link`,
+`claim`/`transition`/`reopen`, and the certified `review-plan`/`verify-completion` gate ops.
+The **carve-out is LOCAL-CODE ops** — anything that needs the checkout in hand: running tests,
+investigation, debugging, and validation (e.g. `rebar verify-commit-ticket`, a `rebar
+review-code` preview, `rebar explain`, and the read-only `rebar review-plan <id> --status`
+currency check) stay local. The local CLI also remains the fallback when **no** MCP server is
+configured (e.g. a bootstrap/dev checkout of rebar itself). This is the **umbrella** for every
+rebar guidance surface — this file, `docs/`, `templates/`, `.agents/rules/`, the packaged
+`rebar explain` guides, and the example skills: where any of them writes a `rebar <verb>` for a
+tracker op, that **names the operation** to invoke through the MCP server when it is available,
+not a mandate to shell out locally. The MCP read/write tool inventory is `docs/mcp-reference.md`;
+connecting a client is `docs/mcp-client-setup.md` (auth model: `docs/mcp-auth.md`).
+
+**Certified ops, and where their enforcement comes from.** rebar mints exactly **two**
+operation-certificate kinds (ADR 0049): **plan-review** (at claim) and **completion-verifier**
+(at close). Routed through the on-box MCP server they are signed under the box's registered
+trusted signing environment, so a project **can enforce** that a certified op was produced there.
+That enforcement is **enableable but currently deferred**: turning it on is a human operator step
+(set `verify.require_environment` + `verify.opcert_enforce_since` **together** at a deploy
+boundary) documented in `infra/runbooks/mcp-opcert-enforcement-flip.md`; the committed
+`rebar.toml` sets neither today, so environment-binding is **advisory**, not live (ADR 0104
+decision 3). **Code review is NOT an op-cert.** The certified code review is the Gerrit
+**`LLM-Review`** vote cast by the review-bot (a merge-gate vote — see the Git-workflow section),
+not a rebar operation certificate; there is **no** code-review op-cert kind.
+
 ## The parallel-agent workflow
 
 ```
