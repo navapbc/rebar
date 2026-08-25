@@ -1,12 +1,6 @@
 # Example agent skills
 
-This directory holds a small set of **agent skills** as worked examples of how an agentic
-development workflow can be built around rebar. Each is written in the `SKILL.md` format — a
-plain-Markdown skill file (a `name`/`description` front-matter block plus a protocol body).
-The format is portable: it started with Claude Code's Agent Skills and is now read by a
-growing set of coding-agent harnesses (for example Codex, Cursor, Copilot, and Gemini CLI),
-which each discover skills from their own tool-specific location. Because the format is
-shared, these examples are useful to any harness, not just one.
+This directory holds a small set of **agent skills** as worked examples of how an agentic development workflow can be built around rebar. Each uses the `SKILL.md` format. Its YAML frontmatter requires a `description` field and accepts an optional `name` field. The protocol follows the frontmatter. The format began with Claude Code's Agent Skills and is now read by a growing set of coding-agent harnesses such as Codex, Cursor, Copilot, and Gemini CLI. Each harness discovers skills from its own tool-specific location. Because the format is shared, these examples are useful to any harness.
 
 They are illustrative, not required: rebar does not depend on them, and you do not need them to
 use rebar. They exist to show one way an agent can plan, build, and track work with rebar as the
