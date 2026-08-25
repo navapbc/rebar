@@ -23,6 +23,7 @@ import contextlib
 import dataclasses
 from collections.abc import Iterator
 from dataclasses import replace
+from time import monotonic_ns
 
 from rebar._snapshot import (
     SOURCE_ATTESTED,
@@ -57,6 +58,10 @@ PROVENANCE_KEYS = ("source", "verified_at_sha", "signable")
 _UNPINNED = {"source": None, "verified_at_sha": None, "signable": False}
 
 
+def _record_phase(metrics: dict[str, int], key: str, started_ns: int) -> None:
+    metrics[key] = metrics.get(key, 0) + (monotonic_ns() - started_ns) // 1_000_000
+
+
 def default_ref(repo_root: str | None = None) -> str:
     """The default ``ref`` (``REBAR_GATE_REF`` > ``[snapshot].ref`` > ``origin/main``)."""
     from rebar import config as _root_config
@@ -79,48 +84,91 @@ def resolve_gate_handle(
     repo_root: str | None,
     *,
     fetch: bool = True,
+    phase_metrics: dict[str, int] | None = None,
 ) -> SnapshotHandle:
     """Resolve ``(ref, source)`` (applying the configured defaults for ``None``) to a
     :class:`SnapshotHandle`. Attested materializes/serves the pinned snapshot; local hands
     back the in-place checkout. Fail-closed errors (bad ref / missing credentials) propagate
     so an attested gate never silently reads the wrong tree."""
+    phase_started_ns = monotonic_ns() if phase_metrics is not None else 0
     resolved_ref = ref or default_ref(repo_root)
     resolved_source = source or default_source(repo_root)
+    if phase_metrics is not None:
+        _record_phase(phase_metrics, "verifier_handle_defaults_ms", phase_started_ns)
+        phase_started_ns = monotonic_ns()
     handle = acquire(resolved_ref, source_mode=resolved_source, repo_root=repo_root, fetch=fetch)
+    if phase_metrics is not None:
+        _record_phase(phase_metrics, "verifier_code_snapshot_ms", phase_started_ns)
+        phase_started_ns = monotonic_ns()
     # A gate reads material at `handle.sha` with the code of whatever build is running. When
     # that build PREDATES the pinned sha it can silently mis-handle newer material (the
     # motivating incident: a renamed config key read as an unknown one). Advisory only — the
     # call cannot raise and cannot alter the handle, the verdict, or the provenance stamp.
     build_drift.warn_if_behind(handle.sha, repo_root)
+    if phase_metrics is not None:
+        _record_phase(phase_metrics, "verifier_build_drift_ms", phase_started_ns)
+        phase_metrics.setdefault("verifier_ticket_snapshot_ms", 0)
+        phase_metrics.setdefault("verifier_snapshot_gc_ms", 0)
     if handle.source == SOURCE_ATTESTED:
         # The ticket store lives on the orphan `tickets` branch, so it is ABSENT from the
         # code snapshot — materialize a separate pinned copy and attach it so the agent's
         # rebar ticket tools read it (instead of erroring on the missing `.tickets-tracker`
         # in the code snapshot). Fail-closed errors propagate, like the code snapshot.
+        phase_started_ns = monotonic_ns() if phase_metrics is not None else 0
         tickets_root = materialize_tickets(repo_root=repo_root, fetch=fetch)
         handle = dataclasses.replace(handle, tickets_path=tickets_root)
+        if phase_metrics is not None:
+            _record_phase(phase_metrics, "verifier_ticket_snapshot_ms", phase_started_ns)
         # The attested resolution above is what POPULATES the snapshot store, so its tail is
         # where the operation-linked GC trigger lives (bug undamaged-epidermic-kakarikis):
         # one stamp `stat`, no ticket-store lock, the pass itself in a detached child.
         # Never raises — housekeeping must not fail the gate that triggered it.
+        phase_started_ns = monotonic_ns() if phase_metrics is not None else 0
         gc_trigger.maybe_gc(repo_root)
+        if phase_metrics is not None:
+            _record_phase(phase_metrics, "verifier_snapshot_gc_ms", phase_started_ns)
     return handle
 
 
 @contextlib.contextmanager
-def gate_read_root(handle: SnapshotHandle) -> Iterator[None]:
+def gate_read_root(
+    handle: SnapshotHandle, *, phase_metrics: dict[str, int] | None = None
+) -> Iterator[None]:
     """Run the block inside the gate's snapshot session (the safeguard marker, set for BOTH
     modes) and, in attested mode, activate the snapshot as the context-local code root.
     Local mode leaves the code root unset → configs read the in-place checkout, but the run
     is still marked as a deliberate gate session so :func:`config.assert_gated` passes."""
-    with gate_session():
-        if handle.source == SOURCE_ATTESTED:
-            # Activate BOTH the code root (file tools) and the pinned ticket-store root
-            # (rebar ticket tools), so every config rebuilt deep in the gate reads each.
-            with use_code_root(str(handle.path)), use_tickets_root(handle.tickets_path):
+    if phase_metrics is None:
+        with gate_session():
+            if handle.source == SOURCE_ATTESTED:
+                # Activate BOTH the code root (file tools) and the pinned ticket-store root
+                # (rebar ticket tools), so every config rebuilt deep in the gate reads each.
+                with use_code_root(str(handle.path)), use_tickets_root(handle.tickets_path):
+                    yield
+            else:
                 yield
-        else:
-            yield
+        return
+
+    phase_started_ns = monotonic_ns()
+    exit_started_ns = 0
+    try:
+        with gate_session():
+            if handle.source == SOURCE_ATTESTED:
+                with use_code_root(str(handle.path)), use_tickets_root(handle.tickets_path):
+                    _record_phase(phase_metrics, "verifier_snapshot_enter_ms", phase_started_ns)
+                    try:
+                        yield
+                    finally:
+                        exit_started_ns = monotonic_ns()
+            else:
+                _record_phase(phase_metrics, "verifier_snapshot_enter_ms", phase_started_ns)
+                try:
+                    yield
+                finally:
+                    exit_started_ns = monotonic_ns()
+    finally:
+        if exit_started_ns:
+            _record_phase(phase_metrics, "verifier_snapshot_exit_ms", exit_started_ns)
 
 
 def apply_handle(cfg: LLMConfig, handle: SnapshotHandle) -> LLMConfig:

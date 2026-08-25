@@ -60,8 +60,57 @@ DIRECT_PHASE_FIELDS = {
     "diff_validation": "diff_validation_ms",
 }
 
+VERIFIER_WRAPPER_PHASE_FIELDS = {
+    "verifier_wrapper_setup": "verifier_wrapper_setup_ms",
+    "verifier_reusable_lookup": "verifier_reusable_lookup_ms",
+    "verifier_resume_config": "verifier_resume_config_ms",
+    "verifier_attempts": "verifier_attempts_ms",
+    "verifier_between_attempts": "verifier_between_attempts_ms",
+    "verifier_wrapper_finalization": "verifier_wrapper_finalization_ms",
+    "verifier_wrapper_total": "verifier_wrapper_total_ms",
+}
+VERIFIER_WRAPPER_PARTITION_FIELDS = (
+    "verifier_wrapper_setup_ms",
+    "verifier_reusable_lookup_ms",
+    "verifier_resume_config_ms",
+    "verifier_attempts_ms",
+    "verifier_between_attempts_ms",
+    "verifier_wrapper_finalization_ms",
+)
+VERIFIER_ATTEMPT_PHASE_FIELDS = {
+    "verifier_attempt_setup": "verifier_attempt_setup_ms",
+    "verifier_handle_resolution": "verifier_handle_resolution_ms",
+    "verifier_snapshot_enter": "verifier_snapshot_enter_ms",
+    "verifier_inner_setup": "verifier_inner_setup_ms",
+    "verifier_dispatch": "verifier_dispatch_ms",
+    "verifier_annotation": "verifier_annotation_ms",
+    "verifier_snapshot_exit": "verifier_snapshot_exit_ms",
+}
+VERIFIER_HANDLE_PHASE_FIELDS = {
+    "verifier_handle_defaults": "verifier_handle_defaults_ms",
+    "verifier_code_snapshot": "verifier_code_snapshot_ms",
+    "verifier_build_drift": "verifier_build_drift_ms",
+    "verifier_ticket_snapshot": "verifier_ticket_snapshot_ms",
+    "verifier_snapshot_gc": "verifier_snapshot_gc_ms",
+}
+VERIFIER_DISPATCH_PHASE_FIELDS = {
+    "verifier_dispatch_setup": "verifier_dispatch_setup_ms",
+    "verifier_workflow": "verifier_workflow_ms",
+    "verifier_dispatch_finalization": "verifier_dispatch_finalization_ms",
+}
+VERIFIER_PHASE_FIELDS = {
+    **VERIFIER_WRAPPER_PHASE_FIELDS,
+    **VERIFIER_ATTEMPT_PHASE_FIELDS,
+    **VERIFIER_HANDLE_PHASE_FIELDS,
+    **VERIFIER_DISPATCH_PHASE_FIELDS,
+}
+
 PHASE_SOURCES = {
     **{phase: f"direct-sidecar-metric({field})" for phase, field in DIRECT_PHASE_FIELDS.items()},
+    **{phase: f"direct-sidecar-metric({field})" for phase, field in VERIFIER_PHASE_FIELDS.items()},
+    "unattributed_verifier": (
+        "arithmetic-residual(verifier_call_ms-minus-nonoverlapping-wrapper-partition)"
+    ),
     "legacy_uninstrumented": "unexplained-legacy-residual(no-causal-attribution)",
     "deterministic_verifier": "direct-sidecar-metric(det_ms)",
     "llm_verifier": "direct-sidecar-metric(llm_ms)",
@@ -76,6 +125,9 @@ CLOSE_WORKLOAD_FIELDS = (
     "distinct_references",
     "descendant_ids",
     "referencing_commits_found",
+    "verifier_attempt_count",
+    "verifier_resume_count",
+    "verifier_workflow_step_count",
 )
 
 
@@ -88,12 +140,31 @@ def close_workload_values(invocation: Invocation) -> dict[str, int | float | Non
     }
 
 
+def unattributed_verifier_ms(invocation: Invocation) -> float | None:
+    """Return only verifier-call time not covered by the top-level direct partition."""
+    event = invocation.event or {}
+    verifier_call_ms = event.get("verifier_call_ms")
+    partition_values = [event.get(field) for field in VERIFIER_WRAPPER_PARTITION_FIELDS]
+    numeric_partition = [value for value in partition_values if isinstance(value, (int, float))]
+    if not isinstance(verifier_call_ms, (int, float)) or len(numeric_partition) != len(
+        partition_values
+    ):
+        return None
+    gap_ms = verifier_call_ms - sum(numeric_partition)
+    tolerance_ms = min(len(partition_values), 10)
+    return max(0.0, gap_ms) if gap_ms > tolerance_ms else 0.0
+
+
 def close_phase_values(invocation: Invocation) -> dict[str, float | None]:
     """Return directly measured and residual close-phase durations in seconds."""
     event = invocation.event or {}
     direct_phases = {
         phase: value / 1000 if isinstance(value := event.get(field), (int, float)) else None
         for phase, field in DIRECT_PHASE_FIELDS.items()
+    }
+    verifier_phases = {
+        phase: value / 1000 if isinstance(value := event.get(field), (int, float)) else None
+        for phase, field in VERIFIER_PHASE_FIELDS.items()
     }
     directly_instrumented = all(value is not None for value in direct_phases.values())
     total_ms = event.get("total_ms")
@@ -112,6 +183,8 @@ def close_phase_values(invocation: Invocation) -> dict[str, float | None]:
     overhead = None
     if total is not None and det is not None and llm is not None:
         overhead = total - det - llm
+    unattributed_ms = unattributed_verifier_ms(invocation)
+    unattributed_verifier = unattributed_ms / 1000 if unattributed_ms is not None else None
     verdict_to_status = None
     if isinstance(verdict_at, (int, float)) and isinstance(status_at, (int, float)):
         verdict_to_status = status_at - verdict_at
@@ -133,6 +206,8 @@ def close_phase_values(invocation: Invocation) -> dict[str, float | None]:
     )
     return {
         **direct_phases,
+        **verifier_phases,
+        "unattributed_verifier": unattributed_verifier,
         "legacy_uninstrumented": legacy_uninstrumented,
         "deterministic_verifier": det,
         "llm_verifier": llm,
