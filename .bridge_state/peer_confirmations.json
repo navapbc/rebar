@@ -17594,8 +17594,6 @@
       "target_id": "f1fa-57d8-07cb-44af"
     },
     "7402-ddbf-bfbc-415a|4569-8552-6c7e-4610|blocks": {
-      "confirmed_at": 1786894607699252373,
-      "confirmed_pass": "2026-08-16T15-31-49",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014038879824,
       "link_id": "45009",
@@ -17605,8 +17603,6 @@
       "target_id": "4569-8552-6c7e-4610"
     },
     "7402-ddbf-bfbc-415a|476f-9751-c737-469a|depends_on": {
-      "confirmed_at": 1786894607699254887,
-      "confirmed_pass": "2026-08-16T15-31-49",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014032209854,
       "link_id": "45010",
