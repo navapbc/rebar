@@ -224,10 +224,114 @@ Auth is orthogonal to the existing gates: `REBAR_MCP_READONLY` (hide write tools
 tools). These are server-level capability gates; auth decides *who may call the server*
 at all.
 
-## 7. Explicitly out of scope (v1)
+## 7. AWS-specific deployment (the on-box `static` recipe)
+
+ADR 0050 deferred "how you actually stand one up on AWS"; [ADR
+0104](adr/0104-mcp-on-box.md) fills it for the Nava box. The shape is the §5 reverse-proxy
+recipe specialized to **an nginx `/mcp/` TLS edge in front of a loopback-bound `rebar-mcp`,
+authenticated by the `static` verifier with one bearer PAT per client** (Copilot, Codex,
+Claude). No Authorization Server is stood up — research confirmed all three clients accept a
+static bearer token in the `Authorization` header for a remote HTTP MCP server and none
+require OAuth/DCR, so `static` is the minimal verifier that serves all three.
+
+**App config (loopback bind, TLS acknowledged at the edge).** The infra slice sets exactly
+these keys — the external URL is `https://<box-host>/mcp/` (e.g.
+`https://rebar.solutions.navateam.com/mcp/`):
+
+```toml
+[tool.rebar.mcp]
+transport = "http"
+http_host = "127.0.0.1"                                      # loopback; nginx fronts it
+http_port = 8000                                             # the loopback port nginx proxies to
+http_path = "/mcp"                                           # app path (the edge maps /mcp/ → here)
+http_tls_at_edge = true                                      # TLS terminates at nginx
+http_allowed_hosts = "rebar.solutions.navateam.com:443"      # DNS-rebinding allowlist
+http_allowed_origins = "https://rebar.solutions.navateam.com"
+auth_enabled = true
+auth_strategies = "static"                                   # per-client bearer PATs
+auth_resource_server_url = "https://rebar.solutions.navateam.com/mcp/"  # the audience
+auth_static_tokens_file = "/etc/rebar/mcp-static-tokens.json"
+```
+
+**nginx `/mcp/` TLS edge** (the §5 pattern, specialized to the trailing-slash external URL —
+no `proxy` headers, since the `static` verifier reads the client's own bearer and nginx just
+forwards it). The external edge is `/mcp/` but the app serves `http_path = "/mcp"`. Use
+**exact-match** locations (`location = …`) so each external form is proxied to the app's `/mcp`
+deterministically — this avoids the prefix-`location` + URI-`proxy_pass` rewrite footgun (a
+prefix `location /mcp/` with `proxy_pass …/mcp` silently strips the trailing slash):
+
+```nginx
+# external https://<box>/mcp[/]  →  loopback app http_path /mcp (exact match, no prefix rewrite)
+location = /mcp/ {
+    proxy_pass http://127.0.0.1:8000/mcp;                   # host:port match http_host + http_port
+    proxy_set_header Host rebar.solutions.navateam.com;      # external host (in http_allowed_hosts)
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Authorization $http_authorization;      # forward the client bearer PAT
+}
+location = /mcp {                                            # same target for the no-slash form
+    proxy_pass http://127.0.0.1:8000/mcp;
+    proxy_set_header Host rebar.solutions.navateam.com;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Authorization $http_authorization;
+}
+```
+
+Keep `auth_resource_server_url` the **external** `…/mcp/` URL regardless of the upstream path —
+it drives the served RFC 9728 PRM `resource` and the `WWW-Authenticate` URL, not the proxy
+target (§5).
+
+**Per-client bearer PATs.** Each client presents its own PAT; the server holds only SHA-256
+digests (§3 `static`). The three PATs are delivered as box secrets and referenced by env-var
+**name** (`token_env`, never a literal) — env vars `MCP_CLIENT_PAT_COPILOT`,
+`MCP_CLIENT_PAT_CODEX`, `MCP_CLIENT_PAT_CLAUDE`. The full provisioning + operator-driven
+rotation model (SSM SecureStrings → on-box materialization → `static`-verifier restart) lives
+in [`../infra/runbooks/mcp-client-pats.md`](../infra/runbooks/mcp-client-pats.md); do not
+duplicate PATs anywhere else. A `mcp-static-tokens.json` with a record per populated client:
+
+```json
+{"tokens": [
+  {"name": "copilot", "client_id": "copilot", "scopes": [], "token_env": "MCP_CLIENT_PAT_COPILOT"},
+  {"name": "codex",   "client_id": "codex",   "scopes": [], "token_env": "MCP_CLIENT_PAT_CODEX"},
+  {"name": "claude",  "client_id": "claude",  "scopes": [], "token_env": "MCP_CLIENT_PAT_CLAUDE"}
+]}
+```
+
+**Certified ops on the box.** The two op-cert kinds minted via MCP — **plan-review** (claim)
+and **completion-verifier** (close) — are signed under the box's **existing** opcert signing
+environment (`REBAR_OPCERT_ENV_ID`, the UUID already pinned in
+`.rebar/trusted_environments.yaml`); no new `env_id` and no change to the single-valued
+`verify.require_environment` gate (ADR 0104 decision 3). So a cert minted through MCP is
+**enforceable-when-enabled** via that trusted environment. Enabling enforcement is a
+**deferred, human operator step** — set `verify.require_environment` +
+`verify.opcert_enforce_since` together at a deploy boundary, per
+[`../infra/runbooks/mcp-opcert-enforcement-flip.md`](../infra/runbooks/mcp-opcert-enforcement-flip.md);
+the committed `rebar.toml` sets neither, so environment-binding is **advisory today, not
+live**. **Code review is not an op-cert** — the certified code review is the Gerrit
+`LLM-Review` merge-gate vote, a separate mechanism.
+
+## 8. Connecting a client (copilot / codex / claude)
+
+A full walkthrough — copy-ready example configs, verification commands, and troubleshooting —
+is in **[`mcp-client-setup.md`](mcp-client-setup.md)** (example files under
+[`../examples/mcp-clients/`](../examples/mcp-clients/)). Each client references its PAT by
+env-var **name** only; no secret is written to a config file. The three config shapes:
+
+| Client | Config file | PAT reference | Endpoint |
+|---|---|---|---|
+| GitHub Copilot CLI | `~/.copilot/mcp-config.json` | `headers.Authorization` bearer, `$MCP_CLIENT_PAT_COPILOT` | `https://<box>/mcp/` |
+| Codex | `~/.codex/config.toml` (`[mcp_servers.rebar]`) | `bearer_token_env_var = "MCP_CLIENT_PAT_CODEX"` | `https://<box>/mcp/` |
+| Claude Code | project `.mcp.json` (or `~/.claude.json`), or `--header` | `headers.Authorization` bearer, `${MCP_CLIENT_PAT_CLAUDE}` | `https://<box>/mcp/` |
+
+> **Static-header gotcha (all clients, most visible in Claude Code).** A static
+> `Authorization` header takes **precedence** and does **not** fall back to OAuth if the
+> server rejects it — a wrong or expired PAT fails **hard** with a `401`, not a silent OAuth
+> retry. On a 401, re-export the correct PAT (rotation may have invalidated the old one) rather
+> than expecting an interactive login.
+
+## 9. Explicitly out of scope (v1)
 
 Deliberately deferred: running an Authorization Server or Dynamic Client Registration;
 per-tool / per-resource authorization; in-process rate-limiting / brute-force protection
-(front with your proxy); a positive-introspection cache; and AWS-specific deployment
-recipes. See [ADR 0050](adr/0050-mcp-optional-auth-resource-server.md) for the decision
-record and rationale.
+(front with your proxy); and a positive-introspection cache. See [ADR
+0050](adr/0050-mcp-optional-auth-resource-server.md) for the base decision and [ADR
+0104](adr/0104-mcp-on-box.md) for the now-filled AWS `static`-on-box recipe (§7).
