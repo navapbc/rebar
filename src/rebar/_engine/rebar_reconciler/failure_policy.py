@@ -160,3 +160,17 @@ def tally(outcomes) -> dict:
     for outcome in outcomes:
         counts[outcome.bucket] += 1
     return counts
+
+
+FUSE_ELIGIBLE_DISPOSITIONS: frozenset = frozenset(
+    {Disposition.exhausted_transient, Disposition.retryable_deferred}
+)
+
+
+def is_fuse_eligible(disposition) -> bool:
+    """True only for the two budget-exhaustion dispositions the shared RetryBudget
+    produces at its cap (exhausted_transient / retryable_deferred). All successes,
+    permanent failures, opaque commit-unknown, skipped, and S2 defer reasons are
+    excluded — physical attempts and absorbed first-attempt transients never reach
+    here as a disposition at all."""
+    return disposition in FUSE_ELIGIBLE_DISPOSITIONS
