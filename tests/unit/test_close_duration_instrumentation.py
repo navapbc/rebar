@@ -620,7 +620,11 @@ def test_completion_precheck_threads_one_collector_through_pass_and_sidecar(
         ref: str | None,
         code_root: str,
         metrics: dict[str, int] | None = None,
+        ticket_view=None,
+        ticket_read_mode: str | None = None,
     ) -> dict[str, object]:
+        assert ticket_view is None
+        assert ticket_read_mode is None
         calls["verify"].append((ticket_id, ref, code_root, metrics is outer_metrics))
         if metrics is not None:
             metrics["verifier_child"] = 17

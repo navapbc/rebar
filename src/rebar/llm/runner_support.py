@@ -4,9 +4,10 @@ A cohesive cluster of small, stateless helpers the ``PydanticAIRunner`` consumes
 that carry no runner state: the per-model tool-capability guard
 (``_check_tool_capability`` + its ``_TOOL_CAPABILITY_CHECKED`` cache), the fallback-chain
 capability intersection (``_intersect_capabilities``), the answering-candidate reader
-(``_answering_model``), and the read-only ticket gate (``_readonly_gate``). Split out of
-``runner.py`` so that module stays under the module-size cap while ``runner`` keeps
-re-exporting these names (tests import them from ``rebar.llm.runner``).
+(``_answering_model``), the read-only ticket gate (``_readonly_gate``), and success-path
+run-shape capture (``_merge_success_run_shape``). Split out of ``runner.py`` so that module
+stays under the module-size cap while ``runner`` keeps re-exporting these names (tests import
+them from ``rebar.llm.runner``).
 
 Leaf-friendly: heavy libraries (pydantic-ai) import INSIDE the function that needs them,
 never at module top, preserving the ``import rebar.llm`` stdlib-only contract.
@@ -14,10 +15,14 @@ never at module top, preserving the ``import rebar.llm`` stdlib-only contract.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from rebar.llm import usage_log
 from rebar.llm.capabilities import ModelCapabilities
 from rebar.llm.errors import LLMConfigError
+
+logger = logging.getLogger(__name__)
 
 # Agent-build invariants (story sorry-clay-anole) — static guards, checked ONCE per model,
 # never per call.
@@ -108,3 +113,29 @@ def _readonly_gate() -> bool:
     import rebar.config
 
     return rebar.config.mcp_readonly()
+
+
+def _merge_success_run_shape(
+    usage: dict,
+    run_messages: list[Any],
+    *,
+    request_limit: int,
+    tool_calls_limit: int,
+    call_label: str,
+) -> None:
+    """Merge the SUCCESS-path run shape into ``usage`` in place (bug aec1).
+
+    Records how the agent loop actually went on a clean run (the distinct-vs-total tool-call
+    ratio that separates a LOOP from genuine BREADTH), reusing the SAME reducer the failure
+    path uses. Only ``shape_only`` keys are merged — the reducer's token totals are a
+    message-derived APPROXIMATION and would corrupt the authoritative billable figures
+    ``_extract_usage`` already placed in ``usage``. Telemetry must never break the call path,
+    so any reducer failure is swallowed with a warning.
+    """
+    try:
+        shape = usage_log.run_shape(
+            run_messages, request_limit=request_limit, tool_calls_limit=tool_calls_limit
+        )
+        usage.update(usage_log.shape_only(shape))
+    except Exception as exc:  # noqa: BLE001 — telemetry must never break the call path
+        logger.warning("usage-log: run-shape capture failed for op=%s: %s", call_label, exc)
