@@ -280,3 +280,50 @@ def test_non_404_http_error_still_propagates(
         assert base <= delay < base + 1, (
             f"backoff {attempt} was {delay}, wanted [{base}, {base + 1})"
         )
+
+
+# ── RP-03 S3 T1: the coordinator's provider-neutral isolation of this same 404 ───────
+#
+# The production bug above is the raw-404 escape. S3 T1's ``failure_policy`` gives the
+# non-create coordinator a provider-neutral classification of exactly this status code
+# so a stale-binding 404 on an UPDATE is a ticket-scoped (isolatable) permanent failure,
+# while a 404 on a DELETE is idempotent already-gone success — never a broad abort. This
+# regression pins that mapping so the ticket-local-isolation contract (AC4) cannot
+# silently regress into a pass-fatal or over-broad failure.
+
+_FAILURE_POLICY_PATH = SCRIPTS_DIR / "rebar_reconciler" / "failure_policy.py"
+_OPERATION_OUTCOME_PATH = SCRIPTS_DIR / "rebar_reconciler" / "operation_outcome.py"
+
+
+@pytest.fixture(scope="module")
+def failure_policy_mod() -> Iterator[ModuleType]:
+    outcome_name = "operation_outcome_stale_binding_404"
+    _load_module(outcome_name, _OPERATION_OUTCOME_PATH)
+    name = "failure_policy_stale_binding_404"
+    mod = _load_module(name, _FAILURE_POLICY_PATH)
+    try:
+        yield mod
+    finally:
+        sys.modules.pop(name, None)
+        sys.modules.pop(outcome_name, None)
+
+
+def test_stale_binding_404_update_is_ticket_local_permanent(failure_policy_mod: ModuleType) -> None:
+    """The exact DIG-5305 scenario: a 404 on an ``update`` classifies as a ticket-scoped
+    permanent failure (``permanent`` status, ``ticket`` scope) so the coordinator isolates
+    the one ticket instead of aborting the pass or halting a broad scope."""
+    status, scope = failure_policy_mod.classify_http_error(404, "update")
+    assert status == "permanent"
+    assert scope.value == "ticket"
+    # A ticket scope is NOT broad — it cannot stop sibling tickets/endpoints.
+    assert not failure_policy_mod.is_broad_scope(scope)
+
+
+def test_already_gone_404_delete_is_idempotent_success(failure_policy_mod: ModuleType) -> None:
+    """A 404 on a ``delete`` is idempotent already-gone success (``already_satisfied``,
+    applied bucket) — the desired postcondition already holds."""
+    status, scope = failure_policy_mod.classify_http_error(404, "delete")
+    assert status == "already_satisfied"
+    assert scope.value == "ticket"
+    disposition = failure_policy_mod.status_to_disposition(status)
+    assert failure_policy_mod.bucket_for(disposition) == "applied"
