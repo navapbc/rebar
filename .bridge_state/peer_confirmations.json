@@ -12398,8 +12398,6 @@
       "target_id": "373f-8c1d-cef0-41bf"
     },
     "4b94-8734-b8f5-42b7|4fc1-dbde-6772-401f|depends_on": {
-      "confirmed_at": 1786866168539695245,
-      "confirmed_pass": "2026-08-16T07-34-19",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014031082973,
       "link_id": "49597",
@@ -12409,8 +12407,6 @@
       "target_id": "4fc1-dbde-6772-401f"
     },
     "4b94-8734-b8f5-42b7|ad16-30a7-adb6-454a|blocks": {
-      "confirmed_at": 1786866168539698011,
-      "confirmed_pass": "2026-08-16T07-34-19",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014038079215,
       "link_id": "49601",
