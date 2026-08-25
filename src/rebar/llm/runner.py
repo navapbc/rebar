@@ -50,6 +50,7 @@ from rebar.llm.runner_support import (
     _answering_model,
     _check_tool_capability,
     _intersect_capabilities,
+    _merge_success_run_shape,
     _readonly_gate,
 )
 from rebar.llm.structured_run import (
@@ -416,7 +417,9 @@ class PydanticAIRunner:
                 pai_tools.filesystem_tools(cfg.repo_path)
                 + pai_tools.grounding_tools(cfg.repo_path)
                 + pai_tools.rebar_tools(
-                    cfg.tickets_path or cfg.repo_path, allow_comment=allow_comment
+                    cfg.tickets_path or cfg.repo_path,
+                    allow_comment=allow_comment,
+                    ticket_view=cfg.ticket_view,
                 )
             )
             if req.extra_tools:
@@ -745,32 +748,6 @@ class PydanticAIRunner:
             ticket=req.target.get("ticket_id"),
         )
         return result
-
-
-def _merge_success_run_shape(
-    usage: dict,
-    run_messages: list[Any],
-    *,
-    request_limit: int,
-    tool_calls_limit: int,
-    call_label: str,
-) -> None:
-    """Merge the SUCCESS-path run shape into ``usage`` in place (bug aec1).
-
-    Records how the agent loop actually went on a clean run (the distinct-vs-total tool-call
-    ratio that separates a LOOP from genuine BREADTH), reusing the SAME reducer the failure
-    path uses. Only ``shape_only`` keys are merged — the reducer's token totals are a
-    message-derived APPROXIMATION and would corrupt the authoritative billable figures
-    ``_extract_usage`` already placed in ``usage``. Telemetry must never break the call path,
-    so any reducer failure is swallowed with a warning.
-    """
-    try:
-        shape = usage_log.run_shape(
-            run_messages, request_limit=request_limit, tool_calls_limit=tool_calls_limit
-        )
-        usage.update(usage_log.shape_only(shape))
-    except Exception as exc:  # noqa: BLE001 — telemetry must never break the call path
-        logger.warning("usage-log: run-shape capture failed for op=%s: %s", call_label, exc)
 
 
 def get_runner(config: LLMConfig, *, runtime=None, override: Runner | None = None) -> Runner:

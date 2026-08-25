@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+from collections.abc import Callable
 from fnmatch import fnmatch
 
 # Paths a change may touch WITHOUT being declared in a ticket's ``file_impact``.
@@ -168,6 +169,7 @@ def referencing_commits(
     repo_root: str,
     *,
     metrics: dict[str, int] | None = None,
+    resolver: Callable[[str], str | None] | None = None,
 ) -> list[str] | None:
     """SHAs of commits referencing ANY of ``ticket_ids``, newest first.
 
@@ -188,8 +190,7 @@ def referencing_commits(
     from rebar._engine_support.resolver import build_resolver_scan_index, resolve_ticket_id
 
     accepted = set(ticket_ids)
-    if metrics is not None:
-        git_started_ns = time.monotonic_ns()
+    git_started_ns = time.monotonic_ns() if metrics is not None else 0
     proc = subprocess.run(
         ["git", "-C", str(repo_root), "log", "--format=%H%x1f%B%x00"],
         capture_output=True,
@@ -206,18 +207,16 @@ def referencing_commits(
     # listing (O(unique_candidates x store)), which on a large store turns a
     # single close into tens of minutes. `None` (tracker unreadable) falls back
     # to per-call scanning, preserving behavior.
-    if metrics is not None:
-        index_started_ns = time.monotonic_ns()
-    scan_index = build_resolver_scan_index(tracker)
+    index_started_ns = time.monotonic_ns() if metrics is not None else 0
+    scan_index = build_resolver_scan_index(tracker) if resolver is None else None
     if metrics is not None:
         metrics["alias_index_build_ms"] = (time.monotonic_ns() - index_started_ns) // 1_000_000
     alias_index = scan_index.alias_to_dirs if scan_index is not None else None
     dir_names = scan_index.sorted_dir_names if scan_index is not None else None
     resolved_cache: dict[str, str | None] = {}
     found: list[str] = []
-    if metrics is not None:
-        commits_inspected = 0
-        resolution_started_ns = time.monotonic_ns()
+    commits_inspected = 0
+    resolution_started_ns = time.monotonic_ns() if metrics is not None else 0
     for entry in proc.stdout.split("\0"):
         sha, _, message = entry.partition("\x1f")
         sha = sha.strip()
@@ -227,8 +226,12 @@ def referencing_commits(
             commits_inspected += 1
         for ref in extract_ticket_refs(message):
             if ref not in resolved_cache:
-                resolved_cache[ref] = resolve_ticket_id(
-                    ref, tracker, quiet=True, alias_index=alias_index, dir_names=dir_names
+                resolved_cache[ref] = (
+                    resolver(ref)
+                    if resolver is not None
+                    else resolve_ticket_id(
+                        ref, tracker, quiet=True, alias_index=alias_index, dir_names=dir_names
+                    )
                 )
             if resolved_cache[ref] in accepted:
                 found.append(sha)

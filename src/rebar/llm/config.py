@@ -34,9 +34,9 @@ import json
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from importlib.util import find_spec
 
 from rebar import config as _root_config
+from rebar._optional import module_available as _module_available
 
 # The gate read-root / snapshot-session domain lives in `gate_context` (ticket b300 moved ~185
 # lines out of this file to clear the 800-line cap; see that module's docstring for why the cut
@@ -57,6 +57,7 @@ from rebar.llm.gate_context import (  # noqa: F401  (re-export: see above)
     in_gate_session,
     resolve_code_root,
     use_code_root,
+    use_ticket_view,
     use_tickets_root,
 )
 from rebar.llm.headers import resolve_headers
@@ -525,6 +526,8 @@ class LLMConfig:
     # `repo_path`), or `None` to read the in-place checkout's store (local mode). Set from
     # `current_tickets_root()` by `from_env`.
     tickets_path: str | None = None
+    # Concrete lazy view injection; unlike ContextVars this survives raw worker dispatch.
+    ticket_view: object | None = field(default=None, repr=False, compare=False)
     mcp_servers: dict = field(default_factory=dict)
     # Operator-configured request headers for gate LLM calls (ee8a). Default {} so an
     # unconfigured deployment is byte-unchanged. The `${env:...}`/`${run:...}` value
@@ -759,14 +762,6 @@ class LLMConfig:
                 DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS,
             ),
         )
-
-
-def _module_available(name: str) -> bool:
-    """True if an import-able module is installed, without importing it."""
-    try:
-        return find_spec(name) is not None
-    except (ImportError, ValueError):
-        return False
 
 
 def available_backends() -> dict:

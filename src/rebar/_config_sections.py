@@ -19,6 +19,7 @@ _SECTIONS: dict[str, dict] = {
         "max_ticket_description_chars": lambda v, k: _as_int(v, k, minimum=1),
         "enforce_plan_material_pins": lambda v, k: _as_bool(v, k),
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
+        "completion_pinned_ticket_view": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
         "suggest_duplicate_tickets": lambda v, k: _as_bool(v, k),

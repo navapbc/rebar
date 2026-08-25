@@ -229,38 +229,10 @@ def stage_and_commit(
     return 0
 
 
-def batch_stage_and_commit(
-    tracker: str | os.PathLike, items: Iterable[tuple[str, dict[str, Any]]]
-) -> int:
-    """Commit MANY events under ONE lock acquire + ONE ``git commit`` (all-or-nothing).
-
-    *items* is an iterable of ``(ticket_id, event)`` pairs. Every event is validated
-    and canonical-staged (the same byte contract as :func:`stage_and_commit`) BEFORE
-    the lock is taken; then, holding the single write lock (I5) exactly ONCE, each
-    staged temp is atomically renamed into its I2 path (``{ticket}/{ts}-{uuid}-{TYPE}
-    .json``), a single ``git add`` stages them all, and ONE ``git commit`` seals the
-    batch. Returns the number of events committed (``0`` for an empty batch — a no-op
-    that takes no lock and makes no commit).
-
-    **Batch atomicity is all-or-nothing per commit.** Because replay/dedup/union-merge
-    /compaction key off each event's UUID and NOT commit boundaries, collapsing N
-    commits into 1 is invisible to readers — but a *partial* batch is not. So any
-    failure (validation, rename, ``git add``, or a non-recoverable ``git commit``)
-    rolls the batch back completely: every already-renamed final is unstaged from the
-    index AND unlinked from the worktree, leaving the store exactly as it was. A
-    crash mid-batch (before the commit) leaves at most orphaned worktree files that
-    are never in any commit; the next writer's ``git add``/``commit`` only touches its
-    own paths, and a re-run re-emits the whole batch. The lock is NOT re-entrant, so
-    this MUST acquire it once and loop the renames inside — it never calls
-    :func:`stage_and_commit` per event.
-
-    Raises :class:`StoreError` (1), :class:`RebaseGuard` (75), or :class:`LockTimeout`
-    (1) with the exact bash stderr, same as the single-event path."""
-    tracker = _lock.canonical_tracker(tracker)
-    _ensure_initialized(tracker)
-
-    # Validate + stage every event up front (fail fast, before the lock). On any
-    # failure here, unlink the temps staged so far — nothing has been renamed yet.
+def _prepare_batch(
+    tracker: str, items: Iterable[tuple[str, dict[str, Any]]]
+) -> list[_staging.StagedEvent]:
+    """Validate and stage a batch, discarding every prior temp if one item fails."""
     prepared: list[_staging.StagedEvent] = []
     swept_stale = False
     try:
@@ -273,60 +245,103 @@ def batch_stage_and_commit(
         for staged in prepared:
             staged.discard()
         raise
+    return prepared
+
+
+def _commit_prepared_batch_under_lock(
+    tracker: str, prepared: list[_staging.StagedEvent], commit_msg: str
+) -> int:
+    """Promote and commit a prepared batch while the caller holds the unified write lock."""
+    _lock.check_no_rebase_in_progress(tracker)
+    relpaths = [staged.relative_path for staged in prepared]
+    renamed: list[_staging.StagedEvent] = []
+    try:
+        for staged in prepared:
+            try:
+                staged.promote()
+            except OSError as exc:
+                raise StoreError("Error: atomic rename failed", 1) from exc
+            renamed.append(staged)
+        add = _git_add(tracker, relpaths)
+        if add.returncode != 0:
+            add_err = (add.stderr or add.stdout).strip()
+            raise StoreError(
+                "Error: git commit failed while holding lock" + (f": {add_err}" if add_err else ""),
+                1,
+            )
+        commit = _git_commit(tracker, commit_msg)
+        if commit.returncode != 0:
+            healed, detail = _recover_from_unmerged(tracker, relpaths, commit_msg)
+            if not healed and detail is None:
+                healed = _recover_from_invalid_object(
+                    tracker, relpaths, commit_msg, commit.stderr or commit.stdout
+                )
+            if not healed:
+                git_err = (commit.stderr or commit.stdout).strip()
+                raise StoreError(
+                    detail
+                    or (
+                        "Error: git commit failed while holding lock"
+                        + (f": {git_err}" if git_err else "")
+                    ),
+                    1,
+                )
+    except BaseException:
+        _rollback_batch(tracker, renamed)
+        raise
+    return len(prepared)
+
+
+def batch_stage_and_commit_under_lock(
+    tracker: str | os.PathLike,
+    items: Iterable[tuple[str, dict[str, Any]]],
+    *,
+    commit_msg: str | None = None,
+) -> int:
+    """Commit a batch without acquiring the write lock; the caller MUST already hold it.
+
+    This is the composition seam for transactions that must re-read state and publish
+    several events in one critical section. Validation, canonical staging, rollback, git
+    recovery, and commit bytes are identical to :func:`batch_stage_and_commit`; only lock
+    ownership differs. Never call it from an unlocked write path.
+    """
+    tracker = _lock.canonical_tracker(tracker)
+    _ensure_initialized(tracker)
+    prepared = _prepare_batch(tracker, items)
+    if not prepared:
+        return 0
+    try:
+        message = commit_msg or f"ticket: batch {len(prepared)} events"
+        return _commit_prepared_batch_under_lock(tracker, prepared, message)
+    finally:
+        for staged in prepared:
+            staged.discard()
+
+
+def batch_stage_and_commit(
+    tracker: str | os.PathLike, items: Iterable[tuple[str, dict[str, Any]]]
+) -> int:
+    """Commit MANY events under ONE lock acquire + ONE ``git commit`` (all-or-nothing).
+
+    Events are validated and canonical-staged before lock acquisition. Under the unified
+    lock they are promoted, path-scoped into one commit, and rolled back as a unit on any
+    rename/index/commit fault. An empty batch is a no-op. The under-existing-lock variant
+    is :func:`batch_stage_and_commit_under_lock`.
+    """
+    tracker = _lock.canonical_tracker(tracker)
+    _ensure_initialized(tracker)
+    prepared = _prepare_batch(tracker, items)
 
     if not prepared:
         return 0
 
     commit_msg = f"ticket: batch {len(prepared)} events"
-    relpaths = [staged.relative_path for staged in prepared]
-    renamed: list[_staging.StagedEvent] = []  # already published
     try:
         with _lock.write_lock(tracker, dual_window=True, retries=_lock.write_path_retries()):
-            _lock.check_no_rebase_in_progress(tracker)  # raises RebaseGuard (75)
-            for staged in prepared:
-                try:
-                    staged.promote()  # atomic publish
-                except OSError as exc:
-                    _rollback_batch(tracker, renamed)
-                    raise StoreError("Error: atomic rename failed", 1) from exc
-                renamed.append(staged)
-            add = _git_add(tracker, relpaths)
-            if add.returncode != 0:
-                _rollback_batch(tracker, renamed)
-                add_err = (add.stderr or add.stdout).strip()
-                raise StoreError(
-                    "Error: git commit failed while holding lock"
-                    + (f": {add_err}" if add_err else ""),
-                    1,
-                )
-            commit = _git_commit(tracker, commit_msg)
-            if commit.returncode != 0:
-                healed, detail = _recover_from_unmerged(tracker, relpaths, commit_msg)
-                if not healed and detail is None:
-                    # Poisoned-index (vanished-object) self-heal — see stage_and_commit and
-                    # _recover_from_invalid_object (bug 4c1c / Mode D).
-                    healed = _recover_from_invalid_object(
-                        tracker, relpaths, commit_msg, commit.stderr or commit.stdout
-                    )
-                if not healed:
-                    _rollback_batch(tracker, renamed)
-                    git_err = (commit.stderr or commit.stdout).strip()
-                    raise StoreError(
-                        detail
-                        or (
-                            "Error: git commit failed while holding lock"
-                            + (f": {git_err}" if git_err else "")
-                        ),
-                        1,
-                    )
-    except (RebaseGuard, LockTimeout):
-        for staged in prepared:
-            staged.discard()
-        raise
+            return _commit_prepared_batch_under_lock(tracker, prepared, commit_msg)
     finally:
         for staged in prepared:
-            staged.discard()  # no-op once published
-    return len(prepared)
+            staged.discard()
 
 
 def write_and_push(

@@ -164,6 +164,15 @@ def test_stamp_mismatch_fails_loud_naming_the_stamp(tmp_path) -> None:
     # a None (not-comparable) stamp is never a mismatch.
     bank.preflight(cb.BankStamps("T-1", None, None))
 
+    pinned = cb.CriterionBank(
+        tmp_path / "pinned-bank",
+        cb.BankStamps("T-1", "mat-1", "tree-1", tickets_oid="a" * 40),
+    )
+    with pytest.raises(CompletionRecoveryError, match="tickets_oid"):
+        pinned.preflight(cb.BankStamps("T-1", "mat-1", "tree-1", tickets_oid="b" * 40))
+    with pytest.raises(CompletionRecoveryError, match="tickets_oid"):
+        pinned.preflight(cb.BankStamps("T-1", "mat-1", "tree-1"))
+
 
 def test_bank_read_failloud_on_bad_schema(tmp_path) -> None:
     bank = _bank(tmp_path)

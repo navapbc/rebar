@@ -373,6 +373,23 @@ def live_material_children(canonical_id: str, *, repo_root=None) -> list[dict]:
     enumeration answers from the shared one-scan snapshot instead of its own
     full-store scan (bug 3d57); BOTH paths filter through the same
     :func:`counts_as_plan_material_child` predicate."""
+    from rebar._engine_support.reads import current_ticket_view
+
+    view = current_ticket_view()
+    if view is not None:
+        # Material fingerprints observe membership plus the live/archived status predicate,
+        # not every field on every child. Recording full child states here would make an
+        # unrelated child comment invalidate a completion receipt and recreate contention.
+        return [
+            child
+            for child_id in view.direct_child_ids(canonical_id)
+            if counts_as_plan_material_child(
+                child := {
+                    "ticket_id": child_id,
+                    "status": view.field_value(child_id, "status"),
+                }
+            )
+        ]
     index_state = _material_child_index.get()
     if index_state is not None:
         return [
@@ -400,16 +417,39 @@ def current_plan_context(ticket_id: str, *, repo_root=None) -> Any:
     :mod:`material_diff` (bug 94a3), so the explainer diffs exactly the state the gate
     decided on rather than a second, independently-read one."""
     from rebar import _reads
+    from rebar._engine_support.reads import current_ticket_view
 
     from .det_floor import PlanContext
 
-    state = _reads.show_ticket(ticket_id, repo_root=repo_root)
+    view = current_ticket_view()
+    if view is None:
+        state = _reads.show_ticket(ticket_id, repo_root=repo_root)
+    else:
+        canonical = view.resolve(ticket_id)
+        if canonical is None:
+            return None
+        fields = (
+            "status",
+            "ticket_type",
+            "title",
+            "description",
+            "file_impact",
+            "file_impact_scope",
+            "no_file_impact_reason",
+        )
+        state = {
+            "ticket_id": canonical,
+            **{field: view.field_value(canonical, field) for field in fields},
+        }
     if state.get("status") == "deleted":
         return None
     canonical = state.get("ticket_id", ticket_id)
     try:
         kids = live_material_children(canonical, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — children enumeration is best-effort for the fingerprint
+    except Exception as exc:  # noqa: BLE001 — live fingerprinting keeps legacy best-effort
+        from rebar._engine_support.reads import reraise_pinned_read_failure
+
+        reraise_pinned_read_failure(exc)
         kids = []
     return PlanContext(
         ticket_id=canonical,
@@ -450,7 +490,10 @@ def current_material_fingerprint_impl(
             normalize_whitespace=normalize_whitespace,
             normalize_reason=normalize_reason,
         )
-    except Exception:
+    except Exception as exc:
+        from rebar._engine_support.reads import reraise_pinned_read_failure
+
+        reraise_pinned_read_failure(exc)
         # Cannot compute the current fingerprint → caller treats material as unknown
         # (the gate fails closed / re-review). Log so the cause is observable.
         logger.warning("could not compute material fingerprint for %s", ticket_id, exc_info=True)

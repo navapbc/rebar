@@ -291,6 +291,93 @@ def _stamp_close_metadata(
         status_data["completion_expectation"] = completion_expectation
 
 
+def prepare_transition_event_locked(
+    tracker_dir: str,
+    ticket_id: str,
+    current_status: str,
+    target_status: str,
+    *,
+    env_id: str,
+    author: str,
+    close_class: str = "",
+    close_reason: str = "",
+    force_reason: str = "",
+    completion_expectation: str = "",
+    repo_root=None,
+    pre_status_check: Callable[[Mapping[str, Any]], None] | None = None,
+    timestamp: int | None = None,
+    event_uuid: str | None = None,
+) -> dict[str, Any]:
+    """Re-read, validate, and compose a STATUS event while the caller holds the write lock."""
+    state = reduce_ticket(os.path.join(tracker_dir, ticket_id))
+    if state is None:
+        raise CommandError(
+            "Error: reducer returned no state (ticket may be corrupt or missing events)",
+            returncode=1,
+        )
+    ticket_type = str(state.get("ticket_type", ""))
+    if ticket_type in _NON_GRAPH_ARTIFACT_TYPES:
+        raise CommandError(
+            f"Error: {ticket_type} tickets are lifecycle-exempt and cannot be "
+            "transitioned (they are not claimed, transitioned, or closed)",
+            returncode=1,
+        )
+    actual_status = state.get("status", "")
+    if actual_status != current_status:
+        if actual_status == "archived":
+            hint = (
+                f"ticket transition {ticket_id} archived open  "
+                "(un-archive; archived is otherwise inescapable via transition)"
+            )
+        else:
+            hint = f"ticket transition {ticket_id} {actual_status} {target_status}"
+        raise ConcurrencyMismatch(
+            f'Error: current status is "{actual_status}", not "{current_status}". Re-run: {hint}'
+        )
+    refusal = close_class_refusal(
+        ticket_type,
+        close_class,
+        close_reason=close_reason,
+        force_close_reason=force_reason,
+        target_status=target_status,
+        from_idea=current_status == "idea",
+        ticket_id=ticket_id,
+        tracker=tracker_dir,
+    )
+    if refusal:
+        raise CommandError(f"Error: {refusal}", returncode=1)
+    ticket_dir_path = os.path.join(tracker_dir, ticket_id)
+    parent_status_uuid = _parent_status_uuid(ticket_dir_path)
+    status_data = {
+        "status": target_status,
+        "current_status": current_status,
+        "parent_status_uuid": parent_status_uuid,
+    }
+    if current_status == "open" and target_status == "in_progress":
+        _stamp_session(status_data)
+    _stamp_close_metadata(
+        status_data,
+        target_status,
+        close_class=close_class,
+        close_reason=close_reason,
+        force_reason=force_reason,
+        completion_expectation=completion_expectation,
+    )
+    event = {
+        "timestamp": timestamp if timestamp is not None else hlc.next_tick(tracker_dir, ticket_id),
+        "uuid": event_uuid or str(uuid.uuid4()),
+        "event_type": "STATUS",
+        "env_id": env_id,
+        "author": author,
+        "parent_status_uuid": parent_status_uuid,
+        "data": status_data,
+    }
+    if pre_status_check is not None:
+        pre_status_check(state)
+    finalize_event(event, ticket_id, "STATUS", status_data, tracker_dir, repo_root)
+    return event
+
+
 # raw-git-ok: locked store seam internal
 def transition_core(
     tracker_dir: str,
@@ -318,109 +405,22 @@ def transition_core(
     handle = _acquire_write_lock(tracker_dir)
     final_path = None
     try:
-        state = reduce_ticket(os.path.join(tracker_dir, ticket_id))
-        if state is None:
-            raise CommandError(
-                "Error: reducer returned no state (ticket may be corrupt or missing events)",
-                returncode=1,
-            )
-
-        # session_log / code_review artifacts are lifecycle-exempt: they have no
-        # workflow status to advance. Refuse transition authoritatively (before the
-        # concurrency check) so the message is clear regardless of current_status.
-        if state.get("ticket_type", "") in _NON_GRAPH_ARTIFACT_TYPES:
-            _t = state.get("ticket_type", "")
-            raise CommandError(
-                f"Error: {_t} tickets are lifecycle-exempt and cannot be "
-                "transitioned (they are not claimed, transitioned, or closed)",
-                returncode=1,
-            )
-
-        actual_status = state.get("status", "")
-        if actual_status != current_status:
-            if actual_status == "archived":
-                hint = (
-                    f"ticket transition {ticket_id} archived open  "
-                    "(un-archive; archived is otherwise inescapable via transition)"
-                )
-            else:
-                hint = f"ticket transition {ticket_id} {actual_status} {target_status}"
-            raise ConcurrencyMismatch(
-                f'Error: current status is "{actual_status}", not "{current_status}". '
-                f"Re-run: {hint}"
-            )
-
-        ticket_type = state.get("ticket_type", "")
-
-        # `idea → closed` is a reject/drop, not a completion: an undesigned idea has
-        # nothing built to verify or attest, so it bypasses the bug-close-reason guard
-        # below (mirrors the completion-precheck bypass in transition_close.close_ticket).
-        # The open-children structural guard is enforced elsewhere and is NOT relaxed for idea.
-        from_idea = current_status == "idea"
-
-        # Close-class guard (tickets ed13 + fc20 + bug d54b): a bug closing from a non-idea
-        # status REQUIRES a bounded ``--class <value>``; a non-bug close MAY carry one only from
-        # the ADMINISTRATIVE subset; a reason-required class (obsolete/wontfix, and — unless a
-        # live replacement link exists — not_a_bug/escalated) REQUIRES a reason. The shared rule
-        # (:func:`close_class_refusal`) is also run by the completion gate's pre-check so the
-        # two cannot drift, but THIS is the authoritative, gate-independent enforcement point:
-        # it runs on every close, forced or not, gate on or off. On success ``close_class``
-        # (and ``close_reason``) are folded onto the ``*->closed`` STATUS edge below
-        # (present-only, mirroring ``_stamp_session``).
-        refusal = close_class_refusal(
-            ticket_type,
-            close_class,
-            close_reason=close_reason,
-            force_close_reason=force_reason,
-            target_status=target_status,
-            from_idea=from_idea,
-            ticket_id=ticket_id,
-            tracker=tracker_dir,
-        )
-        if refusal:
-            raise CommandError(f"Error: {refusal}", returncode=1)
-
-        ticket_dir_path = os.path.join(tracker_dir, ticket_id)
-        parent_status_uuid = _parent_status_uuid(ticket_dir_path)
-
-        timestamp = hlc.next_tick(tracker_dir, ticket_id)
-        event_uuid = str(uuid.uuid4())
-        status_data = {
-            "status": target_status,
-            "current_status": current_status,
-            "parent_status_uuid": parent_status_uuid,
-        }
-        # Record the claiming session id on ANY open -> in_progress STATUS (bare
-        # transition too, incl. the parent-first cascade), mirroring claim (epic
-        # crust-fetch-stump, story 68ef). Absent -> key omitted -> byte-identical.
-        if current_status == "open" and target_status == "in_progress":
-            _stamp_session(status_data)
-        _stamp_close_metadata(
-            status_data,
+        event = prepare_transition_event_locked(
+            tracker_dir,
+            ticket_id,
+            current_status,
             target_status,
+            env_id=env_id,
+            author=author,
             close_class=close_class,
             close_reason=close_reason,
             force_reason=force_reason,
             completion_expectation=completion_expectation,
+            repo_root=repo_root,
+            pre_status_check=pre_status_check,
         )
-        event = {
-            "timestamp": timestamp,
-            "uuid": event_uuid,
-            "event_type": "STATUS",
-            "env_id": env_id,
-            "author": author,
-            "parent_status_uuid": parent_status_uuid,
-            "data": status_data,
-        }
-        if pre_status_check is not None:
-            pre_status_check(state)
-        # Attribution + write-time signing / the opt-in write-gate via the SHARED finalize seam
-        # (bug 0ba4) — the SAME signing path append_event uses, so a transition/close STATUS is
-        # signed identically to a CREATE/COMMENT. Placed BEFORE `final_path` is assigned so a
-        # require_authenticated refusal (CommandError) leaves nothing on disk to roll back.
-        finalize_event(event, ticket_id, "STATUS", status_data, tracker_dir, repo_root)
-
-        final_filename = event_append.event_filename(timestamp, event_uuid, "STATUS")
+        final_filename = event_append.event_filename(event["timestamp"], event["uuid"], "STATUS")
+        ticket_dir_path = os.path.join(tracker_dir, ticket_id)
         final_path = os.path.join(ticket_dir_path, final_filename)
         fsutil.atomic_write(final_path, canonical_str(event), encoding="utf-8")
 
@@ -555,17 +555,23 @@ def claim_core(
         handle.release()
 
 
-def ensure_ac_boxes_checked(ticket_id: str, tracker: str) -> None:
+def ensure_ac_boxes_checked(
+    ticket_id: str, tracker: str, *, ticket_state: Mapping[str, object] | None = None
+) -> None:
     """Fail the close (CommandError, exit 1) when unchecked ``- [ ]`` AC items remain.
 
     Deterministic, pre-LLM. Items whose text begins with ``[non-codebase]`` (the
     shared ADR-0043 tag) are exempt. Silently returns on any read / reduce failure so an
     unreadable ticket is never blocked here (other guards own that)."""
     try:
-        state = reduce_ticket(os.path.join(tracker, ticket_id))
+        state = (
+            ticket_state
+            if ticket_state is not None
+            else reduce_ticket(os.path.join(tracker, ticket_id))
+        )
         if not isinstance(state, dict):
             return
-        description = state.get("description", "") or ""
+        description = str(state.get("description", "") or "")
     except Exception:  # noqa: BLE001
         return
 
@@ -589,7 +595,9 @@ def ensure_ac_boxes_checked(ticket_id: str, tracker: str) -> None:
     )
 
 
-def ensure_attested_items_valid(ticket_id: str, tracker: str) -> None:
+def ensure_attested_items_valid(
+    ticket_id: str, tracker: str, *, ticket_state: Mapping[str, object] | None = None
+) -> None:
     """Fail the close (CommandError, exit 1) on an invalid ``[non-codebase]`` AC item.
 
     Deterministic, pre-LLM (bug 2f56-313f-6175-41b1). The completion verifier classifies
@@ -608,10 +616,14 @@ def ensure_attested_items_valid(ticket_id: str, tracker: str) -> None:
     Silently returns on any read / reduce failure so an unreadable ticket is never blocked
     here (other guards own that). ``--force`` bypasses it upstream, like every close precheck."""
     try:
-        state = reduce_ticket(os.path.join(tracker, ticket_id))
+        state = (
+            ticket_state
+            if ticket_state is not None
+            else reduce_ticket(os.path.join(tracker, ticket_id))
+        )
         if not isinstance(state, dict):
             return
-        description = state.get("description", "") or ""
+        description = str(state.get("description", "") or "")
     except Exception:  # noqa: BLE001
         return
 

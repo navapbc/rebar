@@ -43,7 +43,7 @@ from .completion_prefetch import _normalize_impact
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
 _ABSENT_BLOB_SENTINEL = "absent"
 _GIT_TIMEOUT_SECONDS = 30
 
@@ -71,12 +71,22 @@ def direct_children(ticket_id: str, repo_root: str | None) -> list[dict[str, Any
 
         kids = _reads.list_tickets(parent=ticket_id, repo_root=repo_root)
         return [kid for kid in kids if isinstance(kid, dict)]
-    except Exception:  # noqa: BLE001 -- sizing/seeding sites must never fail on enumeration
+    except Exception as exc:  # noqa: BLE001 -- live sizing remains best-effort
+        from rebar._engine_support.reads import reraise_pinned_read_failure
+
+        reraise_pinned_read_failure(exc)
         return []
 
 
 def direct_child_count(ticket_id: str, repo_root: str | None) -> int:
     return len(direct_children(ticket_id, repo_root))
+
+
+def _active_tickets_oid() -> str | None:
+    from rebar._engine_support.reads import current_ticket_view
+
+    view = current_ticket_view()
+    return getattr(getattr(view, "tickets_oid", None), "value", None)
 
 
 # ── scoped content fingerprint ──────────────────────────────────────────────────────
@@ -192,6 +202,7 @@ def persist_pass_verdicts(
         verified_ref_sha = sha_lines[0].strip() if sha_lines else None
         directory = cache_dir(repo_root, ticket_id)
         directory.mkdir(parents=True, exist_ok=True)
+        tickets_oid = _active_tickets_oid()
         written = 0
         for record in passing:
             entry = bank_entries.get(str(record.get("criterion_id") or ""))
@@ -210,6 +221,7 @@ def persist_pass_verdicts(
                 "truncated": bool(entry.get("truncated")),
                 "fingerprint": fingerprint,
                 "verified_ref_sha": verified_ref_sha,
+                "tickets_oid": tickets_oid,
             }
             tmp = directory / f"{criterion_cache_key(text)}.tmp"
             tmp.write_text(
@@ -246,6 +258,7 @@ def load_valid_pass_entries(
         )
         if fingerprint is None:
             return out
+        tickets_oid = _active_tickets_oid()
         for text in expected:
             key = criterion_cache_key(text)
             path = directory / f"{key}.json"
@@ -258,6 +271,8 @@ def load_valid_pass_entries(
             if entry.get("met") is not True or entry.get("criterion_text_hash") != key:
                 continue
             if entry.get("fingerprint") != fingerprint:
+                continue
+            if entry.get("tickets_oid") != tickets_oid:
                 continue
             out[text] = entry
     except Exception:  # reuse is best-effort; any fault re-verifies instead

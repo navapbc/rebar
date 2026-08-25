@@ -179,6 +179,76 @@ in attested mode `REBAR_ROOT` only locates the object DB to fetch from, and the 
 pinned SHA is the read root. Future maintainers must keep both surfaces in lockstep over these
 five ops and must not re-root the verified-code path back onto the server's working tree.
 
+### D8 — Completion may use a separate lazy ticket OID and receipt-checked close (experimental)
+
+The code tree and ticket store are independent histories, so completion now has distinct typed
+handles for them: `CodeOID` is resolved once from `--ref`, while `TicketsOID` pins the tracker
+commit. They are deliberately not interchangeable. With
+`verify.completion_pinned_ticket_view = true`, a non-epic attested completion run reads demanded
+ticket objects directly from the immutable ticket commit with `ls-tree`, batched `cat-file`, and
+the reducer's explicit-file input. It does not materialize the full ticket tree or write reducer
+caches. The small resolver index is process-local, bounded, and keyed by tracker path, ticket OID,
+and schema version; per-run files use a unique `run_id` and are deleted when the view closes.
+
+The view records a typed `ticket_read_receipt_v1` rather than guessing an allow-list in advance:
+
+| Receipt entry | What a later validation repeats |
+|---|---|
+| `exact` | Public reduced state of every demanded ticket |
+| `fields` | Presence and value digest for each deterministic field-only read |
+| `resolutions` / `negative` | ID, short-id, alias, prefix, and Jira-binding results, including not-found |
+| `direct_children` | Complete direct-child membership of each consulted parent |
+| `descendants` | Complete transitive descendant membership of each consulted root |
+| `inbound` / `outbound` | Consulted link edges in both directions |
+| `reachability` | Each relation-bounded graph-reachability answer |
+| `view_schema_version` | The lazy-view predicate vocabulary and replay semantics |
+| `reducer_schema_version` | The reducer semantics used for recorded state and field digests |
+
+Before publication, rebar proves the current ticket commit descends from the receipt's OID and
+replays those predicates there. An unrelated descendant commit remains valid; a changed demanded
+ticket, phantom child, reparent, relink, resolver change, new formerly-missing ticket, replay
+failure, or non-ancestor history rejects the verdict. A ticket requested late by an agent is
+loaded from the same pinned OID and extends the receipt; there is no fallback to live state.
+The caller captures this one OID before the completion-specific checkbox, attestation, hierarchy,
+file-impact, and commit-reference checks. Every verifier auto-resume attempt reuses the same view by
+identity, and criterion-bank/verdict-cache entries carry the same `tickets_oid`; evidence from a
+different tracker revision is never credited. An internal read that the lazy view has not modeled
+raises an unsupported-read error rather than reaching through to the live tracker.
+
+A receipt-bearing PASS uses one committed-store transaction for three events: the
+`COMPLETION_VERDICT` sidecar, closing `STATUS`, and completion `SIGNATURE`. Expensive LLM work,
+ticket reduction, certificate minting, receipt validation, and network delivery stay outside the
+ticket-store write lock. Under the lock, rebar compares tracker `HEAD`, re-reduces the root and
+close policies, assigns final HLC order and authorship, and makes one three-path Git commit in an
+isolated candidate repository. That candidate is an object-sharing local clone with a sparse
+checkout of only the ticket being closed, prepared before lock acquisition. Its index and `HEAD`
+are private: the shared tracker cannot expose or generically push a candidate that later fails
+remote receipt validation. Staging, index, or commit failure discards the candidate. Once the
+candidate is accepted, merging it into the shared tracker exposes all three paths together, so a
+reader sees none or all of the close artifacts.
+
+This is a default-off first rollout, limited to non-epic attested runs with `sync.push = "always"`.
+Epic completion retains its unbounded global bug screen, and `async`/`off` delivery retains the
+legacy materialized path; that selection is made before a ticket OID is captured and recorded as
+`ticket_read_mode`. Ordinary push and any non-fast-forward fetch/receipt check run after the local
+lock is released. A relevant independent-clone conflict discards the private candidate and leaves
+shared local and remote ticket history without the close. An unrelated remote descendant is
+merged, receipt-validated, and used as the base of a rebuilt candidate. No force ref update is
+used. Candidate imports and remote fetches live under UUID-private
+`refs/rebar/completion-{candidates,fetches}/…` refs, so parallel reviews never share a ref name.
+
+The same-tracker lock is the logical close-decision boundary: final receipt/status checks and HLC
+positions are fixed there. Visibility has a second, ordinary Git boundary — the later local or
+remote ref update — because the lock is intentionally never held across network I/O. A remote may
+accept the close just before its acknowledgement is lost; a fetch that proves the candidate is an
+ancestor reports `pushed_after_ambiguous_ack` instead of sending a duplicate. A failed immediate
+local merge, or a concurrent local commit that leaves shared `HEAD` ahead of the fetched remote,
+reports `pushed_local_pending`; the remote close is already durable and the remaining work is local
+delivery. An independent writer can always append a logically later event after publication. Such
+an event does not make the earlier atomic commit partial: a reopen or material edit makes its
+completion certificate stale through the existing validity-on-read rules. The precise mechanics
+are documented in [concurrency.md](../concurrency.md).
+
 ## Consequences
 
 - Code-reading gates verify a client-pinned, immutable, reproducible snapshot — never the
@@ -186,5 +256,8 @@ five ops and must not re-root the verified-code path back onto the server's work
 - The cache is regenerable/ephemeral (self-healing, reclaimable), not authoritative data;
   losing it costs only re-materialization.
 - `source=local` remains the documented back-out to the prior in-place read (never signs).
+- The lazy ticket view and bundled close are an explicit, default-off completion optimization;
+  disabling `verify.completion_pinned_ticket_view` restores the established materialized and
+  multi-write path without changing the gate's verdict policy.
 - New operational requirement: the server must be able to `fetch` from origin (credentials
   for private repos). Failures surface as descriptive, actionable, fail-closed errors.

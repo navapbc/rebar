@@ -355,6 +355,10 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         # PASS reached via resumption stays diagnosable from the durable record alone.
         if v.get("auto_resume_trail"):
             payload["auto_resume_trail"] = list(v["auto_resume_trail"])
+        if isinstance(v.get("completion_read_basis"), dict):
+            payload["completion_read_basis"] = dict(v["completion_read_basis"])
+        if v.get("ticket_read_mode"):
+            payload["ticket_read_mode"] = v["ticket_read_mode"]
         return payload
     payload = {
         "schema": SCHEMA,
@@ -391,4 +395,8 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         payload["auto_resume_trail"] = list(v["auto_resume_trail"])
     if metrics is not None:
         payload["metrics"] = dict(metrics)
+    if isinstance(v.get("completion_read_basis"), dict):
+        payload["completion_read_basis"] = dict(v["completion_read_basis"])
+    if v.get("ticket_read_mode"):
+        payload["ticket_read_mode"] = v["ticket_read_mode"]
     return payload

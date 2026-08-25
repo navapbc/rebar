@@ -1188,6 +1188,87 @@ code". That is why a finding reporting ticket evidence as missing means "not vis
 snapshot I read", not "does not exist": if you recorded the evidence after the run began, or the
 write has not committed, re-verify rather than recording it again.
 
+#### Experimental lazy ticket view and atomic close bundle
+
+`verify.completion_pinned_ticket_view = true` replaces the full ticket-tree copy for eligible
+completion runs with a demand reader at one immutable `tickets_oid`. Eligibility is fixed before
+capture: the run must be attested, non-epic, and use `sync.push = "always"`. Epics and the
+`async`/`off` push policies stay on the materialized path. The verdict and durable sidecar record
+the choice in `ticket_read_mode`; disabling the key is the back-out.
+
+The code and ticket pins remain separate:
+
+```text
+--ref ──> code_oid ──> immutable code tools
+tracker HEAD ──> tickets_oid ──> lazy ticket tools + deterministic ticket reads
+                                └─> read receipt ──> descendant validation before close
+```
+
+The receipt binds exact demanded ticket states, positive and negative reference resolution,
+field-only deterministic reads, direct children, transitive descendants, inbound and outbound
+links, and consulted relation reachability. It also carries lazy-view and reducer schema versions,
+so a process cannot replay old predicates under changed reduction semantics. A later ticket request
+loads from the original ticket OID and adds to that receipt.
+Before mutation, rebar requires current tracker history to descend from `tickets_oid` and repeats
+each recorded predicate. Unrelated ticket events can pass; relevant drift and any replay failure
+raise an exit-10 concurrency conflict and require a new completion run.
+
+The close caller captures that OID before its completion-specific checkbox, operator-attestation,
+descendant, file-impact, attached-commit, and commit-reference checks. It passes the same view
+object through every bounded verifier auto-resume. Criterion banks and cross-run verdict-cache
+entries are stamped with `tickets_oid`, so an attempt cannot reuse evidence from another tracker
+revision. Parent-bounded listing and ticket display are modeled; any other in-process ticket read
+fails closed as unsupported instead of silently consulting the live store. Resolver support is
+materialized only for the demanded reference, including every competitor needed to preserve
+ambiguous alias/short-id behavior, so read order cannot change reduction results.
+
+For a fresh certifiable PASS, close publication is one Git commit containing exactly a PASS
+`COMPLETION_VERDICT`, `STATUS in_progress -> closed`, and completion `SIGNATURE`, all bound to the
+same `(run_id, code_oid, tickets_oid, receipt_digest)`. Certificate preparation stays outside the
+write lock. Final tracker/status checks, HLC ordering, authorship, staging, and the single commit
+are inside it, but the commit is built in a cheap object-sharing sparse candidate repository whose
+`HEAD` and index are not the shared tracker's. A failure or relevant remote rejection discards that
+candidate and leaves no close for a later generic tracker push to leak. Retry of the same basis is
+idempotent when an equivalent signed bundle already exists.
+
+Lazy-view metrics live in the completion result's `metrics` object. The `atomic_close`
+command-result object reports `delivery`, `commit_oid`, `receipt_digest`, and transaction/delivery
+metrics:
+
+| Object | Metric | Boundary |
+|---|---|---|
+| completion `metrics` | `tickets_oid_capture_ms` | Capture the immutable ticket-store commit |
+| close phase metrics | `verifier_ticket_view_setup_ms` | Select/capture the lazy view or attach the materialized fallback |
+| completion `metrics` | `ticket_object_list_ms` / `ticket_object_read_ms` / `ticket_object_reads` | Lazy Git tree and object access |
+| completion `metrics` | `ticket_reduction_ms` | Uncached reduction of demanded tickets |
+| `atomic_close` | `atomic_close_receipt_validation_ms` | All pre-publication receipt replays |
+| `atomic_close` | `atomic_close_delivery_receipt_validation_ms` | Receipt replay during local/remote delivery reconciliation |
+| `atomic_close` | `atomic_close_prepare_ms` | Sidecar and completion-certificate preparation |
+| `atomic_close` | `atomic_close_candidate_prepare_ms` | Object-sharing sparse candidate setup outside the lock |
+| `atomic_close` | `atomic_close_lock_wait_ms` / `atomic_close_lock_hold_ms` | Local store-lock queue and critical section |
+| `atomic_close` | `atomic_close_commit_ms` / `atomic_close_events` | One three-event private candidate commit |
+| `atomic_close` | `atomic_close_push_ms` / `atomic_close_push_attempts` / `atomic_close_merges` | Post-lock delivery and bounded reconciliation |
+
+After a successful push acknowledgement, rebar fetches the branch through a run-unique private ref
+and proves that the fetched tip still contains the candidate commit before reporting publication.
+An immediate remote rewrite therefore fails closed rather than being mislabeled as a durable close.
+
+The private candidate commit is the all-or-none bundle; publication remains an ordinary Git ref
+update rather than a distributed transaction. Candidate imports and fetched remote tips use
+UUID-private refs. The first rollout revalidates a fetched remote OID before merging an unrelated
+non-fast-forward delta and never performs a force update. A relevant independent-clone change
+raises an exit-10 conflict and the candidate is deleted without moving shared `HEAD`. If a push
+acknowledgement is lost after acceptance, a reachability fetch reports
+`pushed_after_ambiguous_ack` and does not publish another bundle. If the following local
+fetch/merge fails, or a concurrent local commit leaves shared `HEAD` ahead of the fetched remote,
+`pushed_local_pending` means the remote close is durable and only local delivery remains.
+
+The tracker lock fixes final receipt/status checks and HLC order; the later Git ref update is the
+visibility boundary. It is intentionally not a lease over independent writers. A later ticket
+event is ordered after the bundle and may make the certificate stale through validity-on-read, but
+cannot make the earlier three-event commit partial. See
+[concurrency.md](concurrency.md#receipt-aware-completion-delivery-experimental) for the mechanics.
+
 **"No verdict obtainable" is a fault, not a verdict.** If the verifier returns a failure naming no
 criterion — a truncated or garbled structured turn — the gate no longer invents an `(unspecified)`
 criterion for it. It reports the run as a verifier fault and exits **11** (transient — retry). The

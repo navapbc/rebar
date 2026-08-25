@@ -73,15 +73,20 @@ def _install_hint(extra: str) -> str:
     return f"install it with:  pip install 'nava-rebar[{extra}]'{tail}"
 
 
+def module_available(name: str) -> bool:
+    """True if ``name`` is importable, without importing it."""
+    try:
+        return find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def extra_installed(extra: str) -> bool:
     """True if ``extra``'s probe module is importable — pure detection, no import."""
     probe = EXTRAS.get(extra, (None,))[0]
     if not probe:
         return False
-    try:
-        return find_spec(probe) is not None
-    except (ImportError, ValueError):
-        return False
+    return module_available(probe)
 
 
 def require_extra(extra: str) -> None:
