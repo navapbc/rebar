@@ -73,7 +73,12 @@ __all__ = [
     "coordinate_and_fuse",
     "create_one",
     "delete_one",
+    "make_coordinator_dispatch",
+    "make_guarded_execute",
+    "map_cutover_report",
+    "reroute_migrated_plans",
     "route_for",
+    "run_migrated_reroute",
     "update_one",
 ]
 
@@ -359,3 +364,156 @@ def build_pass_tally(report) -> dict:
         "degraded": bool(report.degraded),
         "buckets": dict(tallies),
     }
+
+
+# ── LIVE cutover wiring: guarded execute + coordinator dispatch (RP-03 S3 T3) ────
+#
+# These three helpers wire the S3 coordinator+fuse route into ``applier._apply_batch``
+# for the migrated non-create families. They preserve the legacy per-mutation guards:
+# the lost-lease ``abort_check()`` and the HEAD-drift ``recheck_drift`` run FIRST, in
+# that order, before every physical op — exactly as the legacy loop ran them. The
+# ``recheck_drift`` callable is INJECTED (not imported) because ``applier`` imports this
+# facade; importing it back would be a cycle.
+
+
+def make_guarded_execute(
+    *, abort_check, recheck_drift, concurrency, repo_root, head_pin_cell, dispatch_fn
+):
+    """Build the coordinator's injected ``execute(plan, mutation)`` closure.
+
+    Per physical op, IN ORDER: run the lost-lease ``abort_check()`` (when provided —
+    may raise, e.g. lost-lease, and that propagates); recheck HEAD drift, threading the
+    1-element mutable ``head_pin_cell`` to its refreshed pin (may raise HeadDriftError,
+    which propagates); then delegate the side effect to ``dispatch_fn`` and return its
+    coordinator ``AtomicSignal`` verbatim.
+    """
+
+    def execute(plan, mutation):
+        if abort_check is not None:
+            abort_check()
+        head_pin_cell[0] = recheck_drift(concurrency, repo_root, head_pin_cell[0])
+        return dispatch_fn(plan, mutation)
+
+    return execute
+
+
+def make_coordinator_dispatch(*, ctx, outcomes_sink, dispatch=None):
+    """Build the single-attempt ``dispatch_fn(plan, mutation)`` for the coordinator.
+
+    Convert the typed mutation to a legacy batch dict, delegate ONE physical attempt to
+    ``dispatch`` (defaulting to the lazily-loaded ``apply_handlers.dispatch_mutation``),
+    append the returned outcome dict to ``outcomes_sink``, and project the terminal
+    ``HandlerResult`` onto an ``AtomicSignal`` — ``permanent``/ticket scope when the
+    outcome carries a truthy ``error``, ``applied`` otherwise.
+    """
+
+    def dispatch_fn(_plan, mutation):
+        physical = dispatch
+        batch = _mutation_to_batch_dict(mutation)
+        if physical is None:
+            # Production route: preserve the pre-dispatch rebar-id label-write
+            # authorization guard (G6) that is resident in the legacy _apply_one but
+            # would otherwise be bypassed when the coordinator route replaces that loop.
+            # Load the guard from its OWNING leaf module (rebar_id_audit) rather than via
+            # applier so the same guard instance runs regardless of applier reload churn.
+            audit = lazy_load("rebar_reconciler.rebar_id_audit", "rebar_id_audit.py")
+            audit._audit_rebar_id_label_writes(
+                f"outbound_{batch.get('action', '')}", [audit._BatchAuditView(batch)]
+            )
+            apply_handlers = lazy_load("rebar_reconciler.apply_handlers", "apply_handlers.py")
+            physical = apply_handlers.dispatch_mutation
+        result = physical(batch, ctx)
+        outcomes_sink.append(result.outcome)
+        coordinator = lazy_load("rebar_reconciler.coordinator", "coordinator.py")
+        if result.outcome.get("error"):
+            outcome_mod = lazy_load("rebar_reconciler.operation_outcome", "operation_outcome.py")
+            return coordinator.AtomicSignal(
+                status="permanent", scope=outcome_mod.FailureScope.ticket
+            )
+        return coordinator.AtomicSignal(status="applied")
+
+    return dispatch_fn
+
+
+def map_cutover_report(report) -> dict:
+    """Project a :class:`CutoverReport` onto the LIVE pass-tally block the reconciler
+    consumes (applied/failed/deferred/skipped/recovered + degraded + raw buckets)."""
+    return build_pass_tally(report)
+
+
+def run_migrated_reroute(
+    *,
+    migrated_plans,
+    ctx,
+    abort_check,
+    recheck_drift,
+    concurrency,
+    repo_root,
+    head_pin,
+    outcomes_sink,
+):
+    """Route the migrated non-create plans through the coordinator+fuse cutover surface.
+
+    Wires ``make_coordinator_dispatch`` + ``make_guarded_execute`` (preserving the
+    abort→drift→dispatch guard order) into ``coordinate_and_fuse``, appends every physical
+    outcome dict to ``outcomes_sink``, and returns ``(cutover_tally, refreshed_head_pin)``
+    so the caller can thread the refreshed HEAD pin back into the legacy loop.
+    """
+    head_pin_cell = [head_pin]
+    dispatch_fn = make_coordinator_dispatch(ctx=ctx, outcomes_sink=outcomes_sink)
+    execute = make_guarded_execute(
+        abort_check=abort_check,
+        recheck_drift=recheck_drift,
+        concurrency=concurrency,
+        repo_root=repo_root,
+        head_pin_cell=head_pin_cell,
+        dispatch_fn=dispatch_fn,
+    )
+    report = coordinate_and_fuse(migrated_plans, execute=execute, locate=None, budget_factory=None)
+    return map_cutover_report(report), head_pin_cell[0]
+
+
+def reroute_migrated_plans(
+    *,
+    ticket_plans,
+    mutations,
+    ctx,
+    abort_check,
+    recheck_drift,
+    concurrency,
+    repo_root,
+    head_pin,
+    outcomes_sink,
+):
+    """Reroute fully-migrated non-create ticket plans through the cutover surface.
+
+    A plan is MIGRATED iff it has mutations and EVERY mutation's action routes to the
+    coordinator (``route_for(...) == COORDINATOR_ROUTE`` — a non-create family). When no
+    plan is migrated (including the common ``ticket_plans is None`` case) this is a pure
+    passthrough returning ``(None, head_pin, mutations)`` — the applier's legacy loop is
+    left untouched. Otherwise the migrated plans are executed via
+    :func:`run_migrated_reroute` (appending their outcome dicts to ``outcomes_sink``), the
+    migrated mutations' dicts are filtered out of ``mutations`` by ``(action, key)``, and
+    ``(cutover_tally, refreshed_head_pin, remaining_mutations)`` is returned.
+    """
+    migrated_plans = [
+        plan
+        for plan in (ticket_plans or [])
+        if plan.mutations
+        and all(route_for(m.action.value) == COORDINATOR_ROUTE for m in plan.mutations)
+    ]
+    if not migrated_plans:
+        return None, head_pin, mutations
+    cutover_tally, head_pin = run_migrated_reroute(
+        migrated_plans=migrated_plans,
+        ctx=ctx,
+        abort_check=abort_check,
+        recheck_drift=recheck_drift,
+        concurrency=concurrency,
+        repo_root=repo_root,
+        head_pin=head_pin,
+        outcomes_sink=outcomes_sink,
+    )
+    excluded = {(m.action.value, m.target) for plan in migrated_plans for m in plan.mutations}
+    remaining = [d for d in mutations if (d.get("action"), d.get("key")) not in excluded]
+    return cutover_tally, head_pin, remaining

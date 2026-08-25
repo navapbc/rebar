@@ -238,13 +238,22 @@ def _emit_mode_manifest(
         try:
             if manifest_path is not None and Path(manifest_path).exists():
                 try:
-                    outcomes = (
-                        json.loads(Path(manifest_path).read_text()).get("mutations", []) or []
-                    )
+                    manifest_data = json.loads(Path(manifest_path).read_text())
+                    outcomes = manifest_data.get("mutations", []) or []
                     tally = {
                         "applied_count": sum(1 for o in outcomes if not o.get("error")),
                         "failed_count": sum(1 for o in outcomes if o.get("error")),
                     }
+                    # RP-03 S3 T3: the coordinator route records fuse-held ``deferred`` and
+                    # data ``skipped`` buckets (+ the degraded exit signal) that the legacy
+                    # applied/failed pair cannot express. Merge them so derive_pass_tally
+                    # sees the full cutover disposition; absent → unchanged legacy tally.
+                    cutover = manifest_data.get("cutover_tally")
+                    if isinstance(cutover, dict):
+                        tally["deferred_count"] = int(cutover.get("deferred_count", 0))
+                        tally["skipped_count"] = int(cutover.get("skipped_count", 0))
+                        tally["recovered_count"] = int(cutover.get("recovered_count", 0))
+                        tally["degraded"] = bool(cutover.get("degraded", False))
                 except (OSError, ValueError, AttributeError):
                     # Unreadable/malformed manifest: fall through with tally=None so the
                     # caller keeps its previous conservative default rather than

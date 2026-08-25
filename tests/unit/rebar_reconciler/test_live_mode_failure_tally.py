@@ -432,3 +432,162 @@ def test_legacy_apply_tally_without_degraded_key_stays_converged(
     )
     rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="pass-legacy")
     assert rc == 0
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ── S3T3-REROUTE-E2E-HELDOUT-START ── live cutover reroute, withheld from impl ──
+#
+# These drive the REAL ``applier.apply`` non-create dispatch with a fake transport and
+# an explicit ``ticket_plans`` shadow set, pinning the OBSERVABLE cutover contract:
+#   * a migrated family (update) physically dispatches through the S3 coordinator route
+#     (``coordinate_and_fuse``) — NOT the legacy ``applier._apply_one`` batch loop
+#     (AC1/AC5: legacy per-mutation nesting unreachable for migrated families);
+#   * the ``rebar-id:<local_id>`` audit label is still stamped (G6 guard preserved);
+#   * the per-mutation lost-lease ``abort_check`` still gates each physical op (G6);
+#   * the cross-project (bug 626d) guard still fails the pass closed before any write.
+# ════════════════════════════════════════════════════════════════════════════════
+
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+
+def _rr_mods():
+    from rebar_reconciler import applier, mutation, ticket_plan
+
+    return applier, mutation, ticket_plan
+
+
+def _rr_outbound_update(mutation_mod, target, local_id, fields):
+    d = mutation_mod.MutationDirection
+    a = mutation_mod.MutationAction
+    return mutation_mod.Mutation(
+        direction=d.outbound,
+        action=a.update,
+        target=target,
+        payload={"changed_fields": dict(fields), "local_id": local_id},
+        provenance={"src": "outbound"},
+    )
+
+
+def _rr_mutate_plan(ticket_plan_mod, identity, muts):
+    return ticket_plan_mod.TicketPlan(
+        identity=identity,
+        mutations=tuple(muts),
+        diagnostics=(),
+        disposition=ticket_plan_mod.PlanDisposition("mutate"),
+        observation_version="ov-e2e",
+        payload={},
+        dependencies=(),
+        defer_reason=None,
+    )
+
+
+def _rr_manifest_outcomes(repo_root: Path, pass_id: str) -> list[dict]:
+    p = repo_root / "bridge_state" / "snapshots" / f"{pass_id}.manifest.json"
+    if not p.is_file():
+        return []
+    return json.loads(p.read_text(encoding="utf-8")).get("mutations", [])
+
+
+def test_live_reroute_migrated_update_dispatches_through_coordinator_not_legacy_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    applier, mutation_mod, ticket_plan_mod = _rr_mods()
+    m = _rr_outbound_update(mutation_mod, "DIG-100", "loc-100", {"summary": "x"})
+    plan = _rr_mutate_plan(ticket_plan_mod, "DIG-100", [m])
+
+    fake_client = MagicMock()
+    fake_client.update_issue.return_value = {"key": "DIG-100", "ok": True}
+    fake_client.search_issues.return_value = []
+
+    seen_apply_one: list = []
+    orig_apply_one = applier._apply_one
+
+    def spy_apply_one(mutation, ctx, sink):
+        seen_apply_one.append(mutation.get("key"))
+        return orig_apply_one(mutation, ctx, sink)
+
+    monkeypatch.setattr(applier, "_apply_one", spy_apply_one)
+
+    # G6: the pre-dispatch rebar-id label-write authorization guard must still fire on
+    # the coordinator route. The guard lives in its owning leaf module rebar_id_audit;
+    # the coordinator dispatch loads it from there, so spy on the source function.
+    from rebar_reconciler import rebar_id_audit
+
+    audited: list = []
+    orig_audit = rebar_id_audit._audit_rebar_id_label_writes
+
+    def spy_audit(leaf, views):
+        audited.append(leaf)
+        return orig_audit(leaf, views)
+
+    monkeypatch.setattr(rebar_id_audit, "_audit_rebar_id_label_writes", spy_audit)
+
+    pass_id = "reroute-e2e-happy"
+    with patch.object(applier, "_load_acli", return_value=fake_client):
+        applier.apply([m], pass_id, repo_root=tmp_path, ticket_plans=[plan])
+
+    # The physical write happened (coordinator route dispatched the update once)...
+    assert fake_client.update_issue.called, "the migrated update must physically dispatch"
+    # ...the rebar-id audit guard still ran for the migrated op (G6 preserved)...
+    assert "outbound_update" in audited, (
+        "the rebar-id label-write audit guard must still run on the coordinator route (G6)"
+    )
+    # ...and the migrated mutation did NOT traverse the legacy _apply_one batch loop.
+    assert "DIG-100" not in seen_apply_one, (
+        "a migrated family must not dispatch through the legacy per-mutation nesting (AC5)"
+    )
+    outcomes = _rr_manifest_outcomes(tmp_path, pass_id)
+    assert any(o.get("key") == "DIG-100" and not o.get("error") for o in outcomes), (
+        f"the coordinator route must record the applied outcome; got {outcomes}"
+    )
+
+
+def test_live_reroute_abort_check_stops_before_physical_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    applier, mutation_mod, ticket_plan_mod = _rr_mods()
+    m = _rr_outbound_update(mutation_mod, "DIG-101", "loc-101", {"summary": "y"})
+    plan = _rr_mutate_plan(ticket_plan_mod, "DIG-101", [m])
+
+    fake_client = MagicMock()
+    fake_client.search_issues.return_value = []
+
+    class _LeaseLost(Exception):
+        pass
+
+    def abort_check():
+        raise _LeaseLost("lease-lost")
+
+    pass_id = "reroute-e2e-abort"
+    with patch.object(applier, "_load_acli", return_value=fake_client):
+        with pytest.raises(_LeaseLost):
+            applier.apply(
+                [m], pass_id, repo_root=tmp_path, ticket_plans=[plan], abort_check=abort_check
+            )
+    assert not fake_client.update_issue.called, (
+        "a lost lease must abort BEFORE any physical mutation issues on the coordinator route"
+    )
+
+
+def test_live_reroute_cross_project_offender_fails_closed_before_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    applier, mutation_mod, ticket_plan_mod = _rr_mods()
+    m = _rr_outbound_update(mutation_mod, "OTHER-1", "loc-other", {"summary": "z"})
+    plan = _rr_mutate_plan(ticket_plan_mod, "OTHER-1", [m])
+
+    fake_client = MagicMock()
+    fake_client.search_issues.return_value = []
+
+    pass_id = "reroute-e2e-xproj"
+    with patch.object(applier, "_load_acli", return_value=fake_client):
+        with pytest.raises(applier.CrossProjectTargetError):
+            applier.apply([m], pass_id, repo_root=tmp_path, ticket_plans=[plan])
+    assert not fake_client.update_issue.called, (
+        "the cross-project (626d) guard must fail closed before any coordinator-route write"
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ── S3T3-REROUTE-E2E-HELDOUT-END ──
+# ════════════════════════════════════════════════════════════════════════════════
