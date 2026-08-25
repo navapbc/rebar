@@ -8,14 +8,14 @@ build-backend = "hatchling.build"
 # `rebar` itself is taken on PyPI (Eventbrite), so we publish under `nava-rebar`.
 name = "nava-rebar"
 version = "0.12.0"
-description = "Event-sourced ticket system with a Jira reconciler — CLI, Python library, and MCP server."
+description = "Rebar can block work until an AI plan review passes, require signed completion verification before close, and reconcile its event-sourced ticket record with Jira across CLI, Python, and MCP."
 readme = "README.md"
 # Floor is 3.11: the reconciler uses enum.StrEnum (new in 3.11) — see
 # rebar_reconciler/mutation.py. (Was previously declared
 # >=3.10, but that never actually worked; corrected here.)
 requires-python = ">=3.11"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "docs/licenses/adjective-adjective-animal-LICENSE.txt"]
 authors = [{ name = "Nava PBC", email = "hello@navapbc.com" }]
 maintainers = [{ name = "Joe Oakhart", email = "joeoakhart@navapbc.com" }]
 keywords = [
