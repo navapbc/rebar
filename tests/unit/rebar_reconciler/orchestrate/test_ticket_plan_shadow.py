@@ -978,3 +978,318 @@ def test_transitive_create_provider_cascade_blocks_dependent(planner_mod, mutati
     by2 = {p.identity: p for p in plans2}
     assert by2["REB-mid"].disposition.value == "mutate"
     assert by2["REB-leaf"].disposition.value == "mutate"
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# RP-03 S2 T3 — shadow plans through additive preview output + parity comparison.
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture(scope="module")
+def manifest_renderer_mod():
+    return _load("rebar_reconciler.manifest_renderer", "manifest_renderer.py")
+
+
+@pytest.fixture(scope="module")
+def apply_planning_mod():
+    return _load("rebar_reconciler.apply_planning", "apply_planning.py")
+
+
+@pytest.fixture(scope="module")
+def mode_mod_t3():
+    return _load("mode_t3_preview", "mode.py")
+
+
+def _deferred_plans(planner_mod, mutation_mod, *, extra_payload=None):
+    """A one-target corpus whose sole mutation depends on a create that never happens, so the
+    plan is dependency-deferred (disposition=defer, mutations emptied). Returns (legacy, plans)
+    where ``legacy`` is the raw mutation list the legacy differ would have emitted."""
+    payload = {"requires_create": ["REB-missing"]}
+    if extra_payload:
+        payload.update(extra_payload)
+    legacy = [_mk(mutation_mod, "outbound", "update", "REB-link", payload=payload)]
+    _obs, plans = _plan_pass(
+        planner_mod,
+        mutation_mod,
+        mutations=legacy,
+        local_snapshot={},
+        remote_snapshot={},
+        binding_view={},
+    )
+    return legacy, plans
+
+
+def _emit(apply_planning_mod, mode_mod, mutations, *, ticket_plans=None, route="preview"):
+    """Drive the real apply-planning manifest consumer in no-persist DRY_RUN/preview mode and
+    return the rendered manifest dict (its no-write RETURN payload)."""
+    action, value = apply_planning_mod._emit_mode_manifest(
+        mode_mod.Mode.DRY_RUN,
+        mode_mod,
+        list(mutations),
+        [],
+        "pass-preview",
+        None,
+        None,
+        False,
+        None,
+        route,
+        None,
+        ticket_plans=ticket_plans,
+    )
+    assert action == "RETURN"
+    return value
+
+
+# ── T3 HAPPY PATH — minimal executable spec of the additive surface. ─────────────
+
+
+def test_render_lifecycle_intents_is_versioned_section(
+    planner_mod, mutation_mod, manifest_renderer_mod
+):
+    """The renderer emits ONE versioned lifecycle-intents section keyed off the shadow plans:
+    a schema version, the observation version identity, and one entry per plan carrying its
+    identity/disposition/dependencies and derived intent kinds."""
+    _obs, plans = _plan_pass(planner_mod, mutation_mod, binding_view={})
+    section = manifest_renderer_mod.render_lifecycle_intents(plans)
+
+    # Versioned: a stable integer schema version + the pass observation version identity.
+    assert isinstance(section["schema_version"], int)
+    ov = plans[0].observation_version
+    assert section["observation_version"] == {
+        "pass_id": ov.pass_id,
+        "fingerprint": ov.fingerprint,
+    }
+    # One entry per plan, addressed by identity, exposing disposition + intent kinds.
+    by_identity = {e["identity"]: e for e in section["plans"]}
+    assert by_identity.keys() == {p.identity for p in plans}
+    for plan in plans:
+        entry = by_identity[plan.identity]
+        assert entry["disposition"] == plan.disposition.value
+        assert tuple(i["kind"] for i in entry["intents"]) == tuple(
+            i.kind.value for i in plan.intents
+        )
+
+
+def test_render_lifecycle_intents_empty_when_no_plans(manifest_renderer_mod):
+    """With no shadow plans the section is still well-formed and versioned (empty plan list,
+    null observation version) so legacy consumers can always read the key."""
+    section = manifest_renderer_mod.render_lifecycle_intents(())
+    assert isinstance(section["schema_version"], int)
+    assert section["observation_version"] is None
+    assert section["plans"] == []
+
+
+def test_compare_parity_matches_on_happy_corpus(planner_mod, mutation_mod):
+    """For a normal corpus every plan mutates and emits exactly the legacy mutations, so parity
+    matches with no deltas."""
+    legacy = _mutations(mutation_mod)
+    _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=legacy)
+    report = planner_mod.compare_parity(legacy, plans)
+    assert report.matched is True
+    assert report.deltas == ()
+    assert report.unexpected == ()
+
+
+def test_compare_parity_reports_identity_version_and_fields(planner_mod, mutation_mod):
+    """A deferred plan diverges from legacy: parity reports a delta that names the ticket
+    identity, the observation version, and the differing plan fields."""
+    legacy, plans = _deferred_plans(planner_mod, mutation_mod)
+    report = planner_mod.compare_parity(legacy, plans)
+    assert report.matched is False
+    assert report.deltas  # at least one delta
+    identities = {d.identity for d in report.deltas}
+    assert "REB-link" in identities
+    ov = plans[0].observation_version
+    for d in report.deltas:
+        assert d.observation_version == ov
+        assert isinstance(d.fields, tuple) and d.fields  # named differing fields present
+
+
+def test_emit_manifest_adds_lifecycle_section_without_touching_mutation_array(
+    planner_mod, mutation_mod, apply_planning_mod, mode_mod_t3
+):
+    """Threading shadow plans into the manifest consumer adds the ``lifecycle_intents`` section
+    while leaving the existing mutation array (``plan``) byte-for-byte unchanged."""
+    import json
+
+    legacy = _mutations(mutation_mod)
+    _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=legacy)
+
+    without = _emit(apply_planning_mod, mode_mod_t3, legacy)
+    with_plans = _emit(apply_planning_mod, mode_mod_t3, legacy, ticket_plans=plans)
+
+    assert "lifecycle_intents" not in without
+    assert "lifecycle_intents" in with_plans
+    assert json.dumps(with_plans["plan"]) == json.dumps(without["plan"])
+
+
+# ── T3 HELD OUT — the hard guarantees the impl must satisfy blind. ───────────────
+# HELDOUT-START
+
+
+def test_emit_manifest_section_is_purely_additive(
+    planner_mod, mutation_mod, apply_planning_mod, mode_mod_t3
+):
+    """The ONLY difference the shadow section makes to the manifest is the single new
+    top-level ``lifecycle_intents`` key: every other key (and its bytes) is identical."""
+    legacy = _mutations(mutation_mod)
+    _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=legacy)
+
+    without = _emit(apply_planning_mod, mode_mod_t3, legacy)
+    with_plans = _emit(apply_planning_mod, mode_mod_t3, legacy, ticket_plans=plans)
+
+    stripped = dict(with_plans)
+    stripped.pop("lifecycle_intents")
+    assert stripped == without
+
+
+def test_serialize_manifest_hash_unperturbed_by_shadow_section(
+    planner_mod, mutation_mod, apply_planning_mod, mode_mod_t3
+):
+    """The canonical ``serialize_manifest`` bytes + sha256 over the corpus mutations are a
+    golden invariant the additive preview section does not perturb: rendering the manifest
+    WITH shadow plans leaves the same mutations serializing to the same hash."""
+    legacy = _mutations(mutation_mod)
+    golden_text, golden_hash = mutation_mod.serialize_manifest(legacy)
+
+    # A LITERAL golden pin over the corpus: any change to the canonical manifest bytes/hash
+    # (whether from perturbing serialize_manifest itself or from the additive section leaking
+    # into it) breaks this constant — a runtime recompare alone would silently accept a
+    # deterministic perturbation.
+    GOLDEN_HASH = "e8d2bfad77db0336b2ee67af1b344ea6c7f5266a92205f0a583b294cf6ab61c9"
+    assert golden_hash == GOLDEN_HASH
+
+    _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=legacy)
+    _rendered = _emit(apply_planning_mod, mode_mod_t3, legacy, ticket_plans=plans)
+
+    after_text, after_hash = mutation_mod.serialize_manifest(legacy)
+    assert (after_text, after_hash) == (golden_text, golden_hash)
+    # sha256 hex digest shape — a stable, content-addressed identity.
+    assert after_hash == GOLDEN_HASH
+    assert len(golden_hash) == 64 and all(c in "0123456789abcdef" for c in golden_hash)
+
+
+def test_compare_parity_approved_delta_is_matched(planner_mod, mutation_mod):
+    """A divergence explicitly named as an approved delta (by ticket identity) is recorded but
+    does NOT fail parity; an unnamed one does."""
+    legacy, plans = _deferred_plans(planner_mod, mutation_mod)
+
+    unapproved = planner_mod.compare_parity(legacy, plans)
+    assert unapproved.matched is False
+    assert any(d.identity == "REB-link" for d in unapproved.unexpected)
+
+    approved = planner_mod.compare_parity(
+        legacy, plans, approved_identities=frozenset({"REB-link"})
+    )
+    assert approved.matched is True
+    assert approved.deltas  # the delta is still RECORDED
+    assert approved.unexpected == ()
+
+
+def test_parity_delta_fields_are_bounded_and_carry_no_secret(planner_mod, mutation_mod):
+    """AC7: a parity delta carries the identity, observation version and the differing plan
+    fields ONLY — bounded, structured strings, never the raw (possibly secret) payload."""
+    legacy, plans = _deferred_plans(
+        planner_mod, mutation_mod, extra_payload={"secret_token": "TOP-SECRET-XYZ"}
+    )
+    report = planner_mod.compare_parity(legacy, plans)
+    assert report.matched is False
+    blob = repr(report.deltas)
+    assert "TOP-SECRET-XYZ" not in blob
+    for d in report.deltas:
+        for f in d.fields:
+            assert isinstance(f, str)
+            assert len(f) <= 120  # bounded, not an unbounded dump
+            assert "TOP-SECRET-XYZ" not in f
+
+
+def test_lifecycle_section_excludes_raw_payload(planner_mod, mutation_mod, manifest_renderer_mod):
+    """The additive preview section exposes intent KIND/target/version — not the raw mutation
+    payload — so a secret in a mutation payload never leaks into the shadow section."""
+    muts = [
+        _mk(
+            mutation_mod,
+            "outbound",
+            "create",
+            "REB-c",
+            payload={"summary": "x", "secret_token": "TOP-SECRET-XYZ"},
+        )
+    ]
+    _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=muts, binding_view={})
+    section = manifest_renderer_mod.render_lifecycle_intents(plans)
+    assert "TOP-SECRET-XYZ" not in repr(section)
+
+
+def test_run_differs_attaches_matching_parity_report(monkeypatch, mutation_mod):
+    """E2E: run_differs computes a shadow-vs-legacy parity report from ctx.mutations (legacy)
+    vs ctx.ticket_plans (shadow) and attaches it. For a normal corpus it matches."""
+    run_differs_mod = _load("run_differs_parity_e2e", "run_differs.py")
+    seed = _mutations(mutation_mod)
+    ctx = _drive_run_differs(run_differs_mod, monkeypatch, seed_mutations=seed)
+
+    assert ctx.plan_parity is not None
+    assert ctx.plan_parity.matched is True
+    assert ctx.plan_parity.unexpected == ()
+    # Parity read the shadow version identity of this very pass.
+    for plan in ctx.ticket_plans:
+        assert plan.observation_version == ctx.observation.version
+
+
+def test_run_differs_parity_flags_deferred_divergence(monkeypatch, mutation_mod):
+    """E2E: when a seeded mutation depends on a create that never happens, the shadow plan
+    defers it (empties its mutation), so parity flags an unexpected delta naming that ticket
+    and the pass observation version — without disturbing the authoritative ctx.mutations."""
+    run_differs_mod = _load("run_differs_parity_defer_e2e", "run_differs.py")
+    seed = [
+        _mk(
+            mutation_mod,
+            "outbound",
+            "update",
+            "REB-link",
+            payload={"requires_create": ["REB-missing"]},
+        )
+    ]
+    ctx = _drive_run_differs(run_differs_mod, monkeypatch, seed_mutations=seed)
+
+    # Authoritative legacy mutation list is untouched.
+    assert len(list(ctx.mutations)) == 1
+    assert ctx.plan_parity.matched is False
+    flagged = {d.identity for d in ctx.plan_parity.unexpected}
+    assert "REB-link" in flagged
+    for d in ctx.plan_parity.unexpected:
+        assert d.observation_version == ctx.observation.version
+
+
+def test_parity_and_lifecycle_render_perform_zero_io(
+    planner_mod, mutation_mod, manifest_renderer_mod
+):
+    """AC6: parity comparison and the additive lifecycle render touch no repository/provider/
+    subprocess/clock seam. Poison every such seam for the duration and assert they still
+    produce their deterministic results."""
+    import subprocess
+    import time
+    from unittest import mock
+
+    legacy = _mutations(mutation_mod)
+    _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=legacy)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("parity/preview touched a forbidden I/O / clock seam")
+
+    with (
+        mock.patch.object(time, "time", _boom),
+        mock.patch.object(time, "time_ns", _boom),
+        mock.patch.object(subprocess, "run", _boom),
+        mock.patch.object(subprocess, "Popen", _boom),
+        mock.patch.object(Path, "write_text", _boom),
+        mock.patch.object(Path, "read_text", _boom),
+        mock.patch.object(Path, "open", _boom),
+    ):
+        report = planner_mod.compare_parity(legacy, plans)
+        section = manifest_renderer_mod.render_lifecycle_intents(plans)
+
+    assert report.matched is True
+    assert {e["identity"] for e in section["plans"]} == {p.identity for p in plans}
+
+
+# HELDOUT-END

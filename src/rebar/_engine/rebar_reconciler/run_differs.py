@@ -295,6 +295,10 @@ def run_differs(ctx: Any) -> None:
         limits={"max_changes": getattr(ctx, "max_changes", None)},
         mutations=typed_mutations,
     )
+    # Additive parity check (RP-03 S2 T3): a PURE comparison of the shadow plans against
+    # the same filtered legacy mutations, recorded on ctx for downstream reporting. No
+    # I/O — ``compare_parity`` is a pure function of its frozen inputs.
+    ctx.plan_parity = ticket_planner.compare_parity(typed_mutations, ctx.ticket_plans)
 
 
 def _run_differs_invariants(ctx: Any) -> tuple[bool, set[str], list]:

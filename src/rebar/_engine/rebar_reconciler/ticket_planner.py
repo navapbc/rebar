@@ -48,6 +48,8 @@ PlanDisposition = _ticket_plan_mod.PlanDisposition
 IntentKind = _ticket_plan_mod.IntentKind
 DeferReason = _ticket_plan_mod.DeferReason
 LifecycleIntent = _ticket_plan_mod.LifecycleIntent
+ParityDelta = _ticket_plan_mod.ParityDelta
+ParityReport = _ticket_plan_mod.ParityReport
 # Modes that perform NO writes (canonical ``mode.MODE_CAPS == 0``: ``reconcile-check`` /
 # ``dry-run``). A mutation planned under one of these is mode-capped (``safety_aborted``)
 # pre-effect. The WRITE-ENABLED modes — ``bootstrap-strict``, ``bootstrap-throttle`` (finite
@@ -345,3 +347,77 @@ def _decide_plan(
     if _dependency_blocked(deps, available):
         return PlanDisposition.defer, DeferReason.dependency_deferred, (), (), ()
     return PlanDisposition.mutate, None, (), muts, _derive_intents(muts, target, version)
+
+
+def _mutation_triples(mutations: Sequence[Any]) -> set[tuple[str, str, str]]:
+    """The ``(target, direction, action)`` identity triples of ``mutations`` that carry a
+    ``.target`` attribute (legacy dict mutations without one are skipped)."""
+    return {
+        (m.target, m.direction.value, m.action.value)
+        for m in mutations
+        if getattr(m, "target", None) is not None
+    }
+
+
+def _disposition_deltas(ticket_plans: Sequence[Any]) -> list[Any]:
+    """One ParityDelta per non-``mutate`` plan, recording its disposition and defer reason
+    as bounded, structured markers (never a raw payload — AC7)."""
+    deltas: list[Any] = []
+    for plan in ticket_plans:
+        if plan.disposition.value == "mutate":
+            continue
+        defer = plan.defer_reason.value if plan.defer_reason else "none"
+        deltas.append(
+            ParityDelta(
+                identity=plan.identity,
+                observation_version=plan.observation_version,
+                kind="disposition_" + plan.disposition.value,
+                fields=(
+                    f"disposition={plan.disposition.value}",
+                    f"defer_reason={defer}",
+                ),
+            )
+        )
+    return deltas
+
+
+def _triple_deltas(triples: set[tuple[str, str, str]], kind: str, version: Any) -> list[Any]:
+    """One ParityDelta per triple (sorted for deterministic ordering) with the given
+    ``kind`` and a single bounded ``direction/action`` field."""
+    return [
+        ParityDelta(
+            identity=target,
+            observation_version=version,
+            kind=kind,
+            fields=(f"{direction}/{action}",),
+        )
+        for target, direction, action in sorted(triples)
+    ]
+
+
+def compare_parity(
+    legacy_mutations: Sequence[Any],
+    ticket_plans: Sequence[Any],
+    *,
+    approved_identities: frozenset[str] = frozenset(),
+) -> Any:
+    """Purely compare the shadow ``ticket_plans`` against the legacy mutation list.
+
+    Emits a ``ParityReport`` whose deltas record (a) every plan that did NOT resolve to
+    ``mutate``, (b) legacy mutations dropped by the shadow layer, and (c) mutations the
+    shadow layer added. Delta ``fields`` are bounded, structured strings only — never a
+    raw mutation payload or provenance (AC7). PURE: no I/O, no clock.
+    """
+    version = ticket_plans[0].observation_version if ticket_plans else None
+    legacy_set = _mutation_triples(legacy_mutations)
+    shadow_set = {
+        (m.target, m.direction.value, m.action.value)
+        for plan in ticket_plans
+        for m in plan.mutations
+    }
+    deltas = _disposition_deltas(ticket_plans)
+    deltas += _triple_deltas(legacy_set - shadow_set, "mutation_dropped", version)
+    deltas += _triple_deltas(shadow_set - legacy_set, "mutation_added", version)
+    deltas_t = tuple(deltas)
+    unexpected = tuple(d for d in deltas_t if d.identity not in approved_identities)
+    return ParityReport(deltas=deltas_t, unexpected=unexpected, matched=not unexpected)

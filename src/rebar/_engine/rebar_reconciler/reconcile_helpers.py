@@ -640,6 +640,15 @@ def _accepts_client(fn: Any) -> bool:
     )
 
 
+def _accepts_ticket_plans(fn: Any) -> bool:
+    """Whether ``fn`` accepts ``ticket_plans`` (RP-03 S2 T3) — mirrors ``_accepts_client``."""
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "ticket_plans" or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+
+
 def _write_facade_enabled() -> bool:
     """Whether the reconciler write facade (AC1 runtime threading) is ON.
 

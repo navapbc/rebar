@@ -369,6 +369,7 @@ def apply(
     route: str | None = None,
     abort_check=None,
     synced_fields_out=None,
+    ticket_plans=None,
 ):
     """Polymorphic dispatch entry point.
 
@@ -525,6 +526,7 @@ def apply(
             max_changes,
             route,
             inbound_applied_count + len(outbound_list) if route == "sync" and persist else None,
+            ticket_plans=ticket_plans,
         )
         if action == "RETURN":
             return value

@@ -206,3 +206,51 @@ def render_throttle(
         "applied_count": len(applied_list),
         "deferred_count": len(deferred_list),
     }
+
+
+_LIFECYCLE_INTENTS_SCHEMA_VERSION = 1
+
+
+def _observation_version_dict(ov: Any) -> dict | None:
+    """Render an ObservationVersion as ``{"pass_id", "fingerprint"}`` (or None)."""
+    if ov is None:
+        return None
+    return {"pass_id": ov.pass_id, "fingerprint": ov.fingerprint}
+
+
+def _lifecycle_plan_entry(plan: Any) -> dict:
+    """One plan's lifecycle-intents entry: identity, disposition, defer reason,
+    dependencies, and each intent's KIND / target / version ONLY. The raw intent /
+    mutation ``payload`` is deliberately excluded — payloads may carry secrets."""
+    return {
+        "identity": plan.identity,
+        "disposition": plan.disposition.value,
+        "defer_reason": plan.defer_reason.value if plan.defer_reason else None,
+        "dependencies": list(plan.dependencies),
+        "intents": [
+            {
+                "kind": i.kind.value,
+                "target": i.target,
+                "version": {
+                    "pass_id": i.version.pass_id,
+                    "fingerprint": i.version.fingerprint,
+                },
+            }
+            for i in plan.intents
+        ],
+    }
+
+
+def render_lifecycle_intents(ticket_plans: Iterable[Any]) -> dict:
+    """Render an additive, versioned lifecycle-intents section for the shadow plans.
+
+    Exposes each plan's disposition / dependencies and its intents' KIND / target /
+    version — never the raw payload (no secret leakage). Pure, JSON-serializable, no I/O.
+    """
+    plans = list(ticket_plans)
+    ov = plans[0].observation_version if plans else None
+    return {
+        "schema_version": _LIFECYCLE_INTENTS_SCHEMA_VERSION,
+        "observation_version": _observation_version_dict(ov),
+        "plans": [_lifecycle_plan_entry(p) for p in plans],
+    }
