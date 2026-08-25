@@ -50,6 +50,16 @@ def _rebar_error(message: str):
     return RebarError(message, returncode=1, stderr=message)
 
 
+def _reject_unmodeled_pinned_read(operation: str) -> None:
+    if ticket_reads.current_ticket_view() is None:
+        return
+    from rebar._snapshot.ticket_view import UnsupportedPinnedQuery
+
+    raise UnsupportedPinnedQuery(
+        f"pinned completion session does not model the {operation} read; refusing live fallback"
+    )
+
+
 def show_ticket(ticket_id: str, *, repo_root=None, include_inbound: bool = False) -> dict:
     """Compiled ticket state (alias/short-id aware). A missing/unresolvable id, a
     ticket that fails to reduce, or one with no CREATE/SNAPSHOT raises
@@ -58,6 +68,19 @@ def show_ticket(ticket_id: str, *, repo_root=None, include_inbound: bool = False
     ``include_inbound=True`` additionally derives the computed ``inbound_deps``
     key (inbound edges + source status — see ``reads.inbound_deps_state``);
     off by default so internal hot paths keep the stored-record-only cost."""
+    view = ticket_reads.current_ticket_view()
+    if view is not None:
+        try:
+            return view.show_ticket(ticket_id, include_inbound=include_inbound)
+        except Exception as exc:  # noqa: BLE001 -- pinned reads fail closed here
+            from rebar._snapshot.ticket_view import PinnedTicketNotFound
+
+            err = _rebar_error(f"rebar show failed (exit 1): {exc}")
+            if isinstance(exc, PinnedTicketNotFound):
+                err.error_code = "ticket_not_found"
+            else:
+                err.error_code = "pinned_ticket_read_failed"
+            raise err from None
     tracker = _tracker(repo_root)
     _fresh(tracker)
     try:
@@ -79,6 +102,9 @@ def list_by_query(query: ticket_reads.TicketQuery, *, repo_root=None) -> list[di
     :func:`list_tickets` shim below both build a query via
     :meth:`TicketQuery.from_library` and hand it to this one entry), so the
     tracker-resolution + freshness + ``list_states`` plumbing lives ONCE."""
+    view = ticket_reads.current_ticket_view()
+    if view is not None:
+        return view.list_by_query(query)
     tracker = _tracker(repo_root)
     _fresh(tracker)
     return ticket_reads.list_states(tracker, query)
@@ -126,6 +152,7 @@ def list_tickets(
 
 def deps(ticket_id: str, *, repo_root=None) -> dict:
     """Dependency graph (archived target or unknown id raises ``RebarError``)."""
+    _reject_unmodeled_pinned_read("deps")
     tracker = _tracker(repo_root)
     _fresh(tracker)
     try:
@@ -136,6 +163,7 @@ def deps(ticket_id: str, *, repo_root=None) -> dict:
 
 def ready(*, sort: str | None = None, repo_root=None) -> Any:
     """Tickets ready to work (no epic filter from the library entrypoint)."""
+    _reject_unmodeled_pinned_read("ready")
     tracker = _tracker(repo_root)
     _fresh(tracker)
     return ticket_reads.ready_states(tracker, sort=sort or "")
@@ -144,6 +172,7 @@ def ready(*, sort: str | None = None, repo_root=None) -> Any:
 def next_batch(epic_id: str, *, repo_root=None, limit: int = 0) -> dict:
     """Conflict-aware parallel batch under an epic (Tier C, in-process). A missing
     epic raises ``RebarError`` (the subprocess path's exit-1 contract)."""
+    _reject_unmodeled_pinned_read("next-batch")
     from rebar._engine_support import next_batch as _nb
 
     tracker = _tracker(repo_root)
@@ -165,6 +194,7 @@ def search(
     full: bool = False,
     repo_root=None,
 ) -> list:
+    _reject_unmodeled_pinned_read("search")
     tracker = _tracker(repo_root)
     _fresh(tracker)
     return ticket_reads.search_state(
@@ -181,6 +211,7 @@ def search(
 
 def recent_session_logs(*, limit: int = 5, repo_root=None) -> list[dict]:
     """The ``limit`` newest ``session_log`` tickets, newest first (by created_at)."""
+    _reject_unmodeled_pinned_read("recent-session-logs")
     tracker = _tracker(repo_root)
     _fresh(tracker)
     return ticket_reads.recent_session_logs_state(tracker, limit=limit)

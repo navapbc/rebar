@@ -34,7 +34,13 @@ from rebar._snapshot import (
 )
 from rebar._snapshot.repo_snapshot import DEFAULT_REF, materialize_tickets
 from rebar.llm import build_drift
-from rebar.llm.config import LLMConfig, gate_session, use_code_root, use_tickets_root
+from rebar.llm.config import (
+    LLMConfig,
+    gate_session,
+    use_code_root,
+    use_ticket_view,
+    use_tickets_root,
+)
 
 __all__ = [
     "PROVENANCE_KEYS",
@@ -42,6 +48,7 @@ __all__ = [
     "SOURCE_LOCAL",
     "annotate_result",
     "apply_handle",
+    "attach_materialized_tickets",
     "copy_provenance",
     "default_ref",
     "default_source",
@@ -85,6 +92,7 @@ def resolve_gate_handle(
     *,
     fetch: bool = True,
     phase_metrics: dict[str, int] | None = None,
+    materialize_ticket_store: bool = True,
 ) -> SnapshotHandle:
     """Resolve ``(ref, source)`` (applying the configured defaults for ``None``) to a
     :class:`SnapshotHandle`. Attested materializes/serves the pinned snapshot; local hands
@@ -109,7 +117,22 @@ def resolve_gate_handle(
         _record_phase(phase_metrics, "verifier_build_drift_ms", phase_started_ns)
         phase_metrics.setdefault("verifier_ticket_snapshot_ms", 0)
         phase_metrics.setdefault("verifier_snapshot_gc_ms", 0)
-    if handle.source == SOURCE_ATTESTED:
+    if handle.source == SOURCE_ATTESTED and materialize_ticket_store:
+        handle = attach_materialized_tickets(
+            handle, repo_root=repo_root, fetch=fetch, phase_metrics=phase_metrics
+        )
+    return handle
+
+
+def attach_materialized_tickets(
+    handle: SnapshotHandle,
+    *,
+    repo_root: str | None,
+    fetch: bool,
+    phase_metrics: dict[str, int] | None = None,
+) -> SnapshotHandle:
+    """Attach the legacy full ticket snapshot to an already-resolved code handle."""
+    if handle.source == SOURCE_ATTESTED and handle.tickets_path is None:
         # The ticket store lives on the orphan `tickets` branch, so it is ABSENT from the
         # code snapshot — materialize a separate pinned copy and attach it so the agent's
         # rebar ticket tools read it (instead of erroring on the missing `.tickets-tracker`
@@ -132,7 +155,10 @@ def resolve_gate_handle(
 
 @contextlib.contextmanager
 def gate_read_root(
-    handle: SnapshotHandle, *, phase_metrics: dict[str, int] | None = None
+    handle: SnapshotHandle,
+    *,
+    phase_metrics: dict[str, int] | None = None,
+    ticket_view=None,
 ) -> Iterator[None]:
     """Run the block inside the gate's snapshot session (the safeguard marker, set for BOTH
     modes) and, in attested mode, activate the snapshot as the context-local code root.
@@ -143,7 +169,11 @@ def gate_read_root(
             if handle.source == SOURCE_ATTESTED:
                 # Activate BOTH the code root (file tools) and the pinned ticket-store root
                 # (rebar ticket tools), so every config rebuilt deep in the gate reads each.
-                with use_code_root(str(handle.path)), use_tickets_root(handle.tickets_path):
+                with (
+                    use_code_root(str(handle.path)),
+                    use_tickets_root(handle.tickets_path),
+                    use_ticket_view(ticket_view),
+                ):
                     yield
             else:
                 yield
@@ -154,7 +184,11 @@ def gate_read_root(
     try:
         with gate_session():
             if handle.source == SOURCE_ATTESTED:
-                with use_code_root(str(handle.path)), use_tickets_root(handle.tickets_path):
+                with (
+                    use_code_root(str(handle.path)),
+                    use_tickets_root(handle.tickets_path),
+                    use_ticket_view(ticket_view),
+                ):
                     _record_phase(phase_metrics, "verifier_snapshot_enter_ms", phase_started_ns)
                     try:
                         yield
