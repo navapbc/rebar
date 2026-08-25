@@ -742,3 +742,506 @@ def test_e2e_blocked_prereq_plan_is_deferred_by_coordinator(
 # ════════════════════════════════════════════════════════════════════════════════
 # ── T3 HELDOUT-END ──
 # ════════════════════════════════════════════════════════════════════════════════
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# RP-03 S3 T3 — cut over non-create routing (selector + coordinate_and_fuse).
+#
+# These pin the OBSERVABLE contract of the cutover surface added to
+# ``rebar_reconciler.batch_dispatch``:
+#   * ``route_for(action, overrides=None)`` — the internal per-family selector whose
+#     six non-create families default to the ``coordinator`` route with ``legacy`` as
+#     the internal rollback value (AC1; never dual-send: exactly one route returned).
+#   * ``coordinate_and_fuse(ticket_plans, *, execute, locate, budget_factory, now_ms,
+#     cooldown_ms)`` — runs the S3 T1 coordinator then the S3 T2 fuse over its
+#     normalized terminal outcomes, projecting the five AC buckets, attaching a
+#     ``FuseDecision`` (exact scope / reason / retry_not_before) to remaining matching
+#     work once a scope opens while independent scopes continue (AC2/AC3/AC4/AC5),
+#     and exposing an exact 5-bucket tally + a degraded flag.
+#   * ``build_pass_tally(report)`` — projects the 5-bucket report onto the
+#     applied/failed/deferred/skipped/recovered counts the LIVE pass tally consumes.
+# Assertions are OBSERVABLE ONLY (route strings / bucket strings / decision fields /
+# counts).
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture(scope="module")
+def batch_dispatch_mod():
+    return _load("batch_dispatch_t3_test", "batch_dispatch.py")
+
+
+# Two tickets on endpoint-a of provider jira, a third on endpoint-b, plus an
+# independent github endpoint — mirrors the fuse oracle's binding shape.
+_T3_BINDINGS = {
+    "T-1": {"provider": "jira", "endpoint": "https://a.example"},
+    "T-2": {"provider": "jira", "endpoint": "https://a.example"},
+    "T-3": {"provider": "jira", "endpoint": "https://a.example"},
+    "T-4": {"provider": "jira", "endpoint": "https://a.example"},
+    "O-1": {"provider": "github", "endpoint": "https://z.example"},
+}
+
+
+def _t3_locate(bindings):
+    def locate(identity):
+        return bindings.get(identity, {})
+
+    return locate
+
+
+def _always_transient(coordinator_mod):
+    """An execute adapter whose every physical invocation signals a transient — so the
+    coordinator's RetryBudget exhausts it to ``exhausted_transient`` (fuse-eligible)."""
+
+    def execute(_plan, _mutation):
+        return coordinator_mod.AtomicSignal(status="transient")
+
+    return execute
+
+
+# ── HAPPY PATH (handed to the implementer) ───────────────────────────────────────
+
+
+def test_route_for_defaults_to_coordinator_for_non_create_families(batch_dispatch_mod):
+    """AC1: every non-create family defaults to the ``coordinator`` route; ``create``
+    (and any unrecognized action) stays ``legacy``. Exactly one route per family."""
+    bd = batch_dispatch_mod
+    for family in ("update", "delete", "probe", "clean_label", "repair_property", "conflict"):
+        assert family in bd.NON_CREATE_FAMILIES
+        assert bd.route_for(family) == "coordinator"
+    assert bd.route_for("create") == "legacy"
+    assert bd.route_for("totally-unknown") == "legacy"
+
+
+def test_coordinate_and_fuse_all_applied_matches_coordinator(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """Happy path: when every plan applies, ``coordinate_and_fuse`` reproduces the
+    coordinator's five-bucket tally exactly, opens no fuse, and is not degraded."""
+    plans = [
+        _plan(ticket_plan_mod, "T-1", [_mut(mutation_mod, "outbound", "update", "T-1")]),
+        _plan(ticket_plan_mod, "O-1", [_mut(mutation_mod, "outbound", "delete", "O-1")]),
+    ]
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=_ScriptedExecutor(coordinator_mod, {}),
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    assert report.tallies == {
+        "applied": 2,
+        "recovered": 0,
+        "deferred": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
+    assert report.fuse_decisions == ()
+    assert report.degraded is False
+    for identity in ("T-1", "O-1"):
+        assert report.outcome_for(identity).bucket == "applied"
+        assert report.outcome_for(identity).fuse_decision is None
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ── S3T3-CUTOVER HELDOUT-START ── edge + E2E oracle withheld from the implementer ──
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+def test_route_for_override_flips_one_family_without_dual_send(batch_dispatch_mod):
+    """AC1: an ``overrides`` map flips a single family to its ``legacy`` rollback value
+    and returns exactly that one route; every other family keeps ``coordinator`` (no
+    dual-send — one active route per family)."""
+    bd = batch_dispatch_mod
+    overrides = {"delete": "legacy"}
+    assert bd.route_for("delete", overrides) == "legacy"
+    assert bd.route_for("update", overrides) == "coordinator"
+    assert bd.route_for("probe", overrides) == "coordinator"
+
+
+def test_route_for_rejects_unknown_route_value(batch_dispatch_mod):
+    """A route value that is neither ``coordinator`` nor ``legacy`` is rejected — the
+    selector can only ever yield one of the two known routes."""
+    with pytest.raises(ValueError):
+        batch_dispatch_mod.route_for("update", {"update": "shadow"})
+
+
+def test_coordinate_and_fuse_opens_endpoint_and_defers_remaining(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """AC3/AC5: three tickets on one endpoint that each exhaust the retry budget open
+    that endpoint's fuse; the fourth matching ticket is DEFERRED with the exact fuse
+    scope / reason / retry_not_before, while the independent github ticket applies."""
+    plans = [
+        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
+        for ident in ("T-1", "T-2", "T-3", "T-4")
+    ]
+    plans.append(_plan(ticket_plan_mod, "O-1", [_mut(mutation_mod, "outbound", "update", "O-1")]))
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=_always_transient_or_apply(coordinator_mod),
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+        cooldown_ms=60000,
+    )
+    # O-1 is on an independent endpoint/provider — never touched by the jira fuse.
+    o1 = report.outcome_for("O-1")
+    assert o1.bucket == "applied"
+    assert o1.fuse_decision is None
+    # T-1..T-3 tripped the fuse and are themselves failed (they exhausted the budget).
+    for ident in ("T-1", "T-2", "T-3"):
+        assert report.outcome_for(ident).bucket == "failed"
+    # T-4 is the remaining matching work once the endpoint opened → deferred, carrying
+    # the exact endpoint decision.
+    t4 = report.outcome_for("T-4")
+    assert t4.bucket == "deferred"
+    assert t4.fuse_decision is not None
+    assert t4.fuse_decision.scope == "endpoint"
+    assert t4.fuse_decision.reason
+    assert t4.fuse_decision.retry_not_before == "1970-01-01T00:01:00Z"
+    # exactly one endpoint decision surfaced.
+    assert len(report.fuse_decisions) == 1
+    assert report.fuse_decisions[0].scope == "endpoint"
+    assert report.degraded is True
+
+
+def test_coordinate_and_fuse_independent_provider_never_conflated(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """AC3: a failing endpoint opening its fuse leaves an unrelated provider's ticket
+    fully applied — scopes are isolated, never conflated."""
+    plans = [
+        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
+        for ident in ("T-1", "T-2", "T-3")
+    ]
+    plans.append(_plan(ticket_plan_mod, "O-1", [_mut(mutation_mod, "outbound", "update", "O-1")]))
+
+    # O-1 applies; the T-* all exhaust.
+    def execute(plan, mutation):
+        if plan.identity == "O-1":
+            return coordinator_mod.AtomicSignal(status="applied")
+        return coordinator_mod.AtomicSignal(status="transient")
+
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=execute,
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    assert report.outcome_for("O-1").bucket == "applied"
+    assert report.outcome_for("O-1").fuse_decision is None
+
+
+def test_coordinate_and_fuse_success_under_open_scope_is_not_deferred(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """A same-scope SUCCESS arriving after the fuse opened re-closes the scope and is
+    reported as applied (never deferred) — proven health beats an open fuse."""
+    # T-1..T-3 exhaust and open endpoint-a; T-4 (sorted last) then APPLIES.
+    plans = [
+        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
+        for ident in ("T-1", "T-2", "T-3", "T-4")
+    ]
+
+    def execute(plan, mutation):
+        if plan.identity == "T-4":
+            return coordinator_mod.AtomicSignal(status="applied")
+        return coordinator_mod.AtomicSignal(status="transient")
+
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=execute,
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    t4 = report.outcome_for("T-4")
+    assert t4.bucket == "applied"
+    assert t4.fuse_decision is None
+
+
+def test_coordinate_and_fuse_permanent_failure_under_open_scope_is_not_masked(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """AC4 integrity: an open scope defers only remaining RETRYABLE (fuse-eligible)
+    work — a genuine ``permanent_failure`` on a later matching ticket keeps its own
+    ``failed`` bucket and is NEVER masked as ``deferred``, so a real failure still
+    drives the degraded exit."""
+    # T-1..T-3 exhaust the budget and open endpoint-a; T-4 then hits a PERMANENT error.
+    plans = [
+        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
+        for ident in ("T-1", "T-2", "T-3", "T-4")
+    ]
+
+    def execute(plan, mutation):
+        if plan.identity == "T-4":
+            return coordinator_mod.AtomicSignal(status="permanent")
+        return coordinator_mod.AtomicSignal(status="transient")
+
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=execute,
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    t4 = report.outcome_for("T-4")
+    assert t4.bucket == "failed"
+    assert t4.fuse_decision is None
+    # the permanent failure is a real failure → the pass is degraded.
+    assert report.degraded is True
+
+
+def test_build_pass_tally_projects_five_buckets(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """AC4: ``build_pass_tally`` projects the five-bucket report onto the pass-tally
+    shape — applied_count folds recovered into applied successes, failed_count is the
+    failed bucket, and the deferred/skipped/recovered counts are exact."""
+    plans = [
+        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
+        for ident in ("T-1", "T-2", "T-3", "T-4")
+    ]
+    plans.append(_plan(ticket_plan_mod, "O-1", [_mut(mutation_mod, "outbound", "update", "O-1")]))
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=_always_transient_or_apply(coordinator_mod),
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    tally = batch_dispatch_mod.build_pass_tally(report)
+    # O-1 applied → applied_count 1; T-1..T-3 failed → failed_count 3; T-4 deferred.
+    assert tally["applied_count"] == 1
+    assert tally["failed_count"] == 3
+    assert tally["deferred_count"] == 1
+    assert tally["skipped_count"] == 0
+    assert tally["recovered_count"] == 0
+    assert tally["buckets"]["failed"] == 3
+
+
+def test_build_pass_tally_folds_recovered_into_applied(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """AC4: a RECOVERED outcome (a transient healed within budget) folds into
+    ``applied_count`` yet is still separately reported as ``recovered_count`` — the
+    fold is exercised with a NONZERO recovered bucket so a regression that drops it is
+    caught."""
+    plans = [
+        _plan(ticket_plan_mod, "T-1", [_mut(mutation_mod, "outbound", "update", "T-1")]),
+        _plan(ticket_plan_mod, "O-1", [_mut(mutation_mod, "outbound", "delete", "O-1")]),
+    ]
+    # T-1's update is auto-healed → the coordinator reports RECOVERED; O-1 applies.
+    script = {("T-1", "update"): coordinator_mod.AtomicSignal(status="recovered")}
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=_ScriptedExecutor(coordinator_mod, script),
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    tally = batch_dispatch_mod.build_pass_tally(report)
+    assert tally["recovered_count"] == 1
+    # applied_count folds the recovered success in with the plain applied one.
+    assert tally["applied_count"] == 2
+    assert tally["failed_count"] == 0
+    assert tally["buckets"]["recovered"] == 1
+    assert tally["buckets"]["applied"] == 1
+
+
+def _always_transient_or_apply(coordinator_mod):
+    def execute(plan, mutation):
+        if plan.identity == "O-1":
+            return coordinator_mod.AtomicSignal(status="applied")
+        return coordinator_mod.AtomicSignal(status="transient")
+
+    return execute
+
+
+def test_e2e_coordinate_and_fuse_consumes_real_plan_pass(
+    batch_dispatch_mod, coordinator_mod, planner_mod, mutation_mod, budget_mod
+):
+    """E2E: ``coordinate_and_fuse`` consumes the ACTUAL immutable plans produced by the
+    S2 ``ticket_planner.plan_pass`` and tallies them into the five buckets with no fuse
+    trip when every plan applies."""
+    d = mutation_mod.MutationDirection
+    a = mutation_mod.MutationAction
+    mutations = [
+        mutation_mod.Mutation(
+            direction=d.outbound,
+            action=a.update,
+            target="REB-10",
+            payload={"summary": "x"},
+            provenance={"src": "outbound"},
+        ),
+        mutation_mod.Mutation(
+            direction=d.outbound,
+            action=a.delete,
+            target="REB-11",
+            payload={},
+            provenance={"src": "outbound"},
+        ),
+    ]
+    _observation, plans = planner_mod.plan_pass(
+        pass_id="pass-t3-e2e",
+        local_snapshot={"REB-10": {}, "REB-11": {}},
+        remote_snapshot={},
+        binding_view={},
+        mode="live",
+        selection={"kind": "all", "ids": []},
+        limits={"max_changes": 100},
+        mutations=mutations,
+    )
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=_ScriptedExecutor(coordinator_mod, {}),
+        locate=lambda _i: {},
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    assert report.tallies["applied"] == 2
+    assert report.tallies["failed"] == 0
+    assert report.degraded is False
+    assert report.fuse_decisions == ()
+
+
+def test_route_for_rejects_override_for_create_family(batch_dispatch_mod):
+    """AC1: the per-family selector governs ONLY the six non-create families. An
+    override that tries to route ``create`` (deliberately excluded) onto the coordinator
+    is rejected, so a create can never be silently mis-routed through the non-create
+    path."""
+    with pytest.raises(ValueError):
+        batch_dispatch_mod.route_for("create", {"create": "coordinator"})
+    # a legitimate non-create override is still honored.
+    assert batch_dispatch_mod.route_for("update", {"update": "legacy"}) == "legacy"
+
+
+def test_cutover_defer_failure_scope_is_the_enum_not_a_string(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod, outcome_mod
+):
+    """The deferred (fuse-held) path carries ``failure_scope`` as the SAME
+    ``FailureScope`` enum member the record path uses — not the raw scope string — so
+    every ``CutoverOutcome.failure_scope`` is one consistent type."""
+    plans = [
+        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
+        for ident in ("T-1", "T-2", "T-3", "T-4")
+    ]
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=_always_transient(coordinator_mod),
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    t4 = report.outcome_for("T-4")
+    assert t4.bucket == "deferred"
+    # value-based equality (str-Enums compare by value across module instances).
+    assert t4.failure_scope == outcome_mod.FailureScope.endpoint
+    assert t4.failure_scope.value == "endpoint"
+    # not a bare string.
+    assert not isinstance(t4.failure_scope, str) or hasattr(t4.failure_scope, "value")
+
+
+def test_build_pass_tally_carries_exact_degraded_flag(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """AC4: ``build_pass_tally`` surfaces the exact ``degraded`` exit signal — True when
+    a fuse opened (even with zero failures), False for a clean all-applied pass."""
+    clean = [
+        _plan(ticket_plan_mod, "O-1", [_mut(mutation_mod, "outbound", "update", "O-1")]),
+    ]
+    clean_report = batch_dispatch_mod.coordinate_and_fuse(
+        clean,
+        execute=lambda _p, _m: coordinator_mod.AtomicSignal(status="applied"),
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    assert batch_dispatch_mod.build_pass_tally(clean_report)["degraded"] is False
+
+    opened = [
+        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
+        for ident in ("T-1", "T-2", "T-3", "T-4")
+    ]
+    opened_report = batch_dispatch_mod.coordinate_and_fuse(
+        opened,
+        execute=_always_transient(coordinator_mod),
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    assert batch_dispatch_mod.build_pass_tally(opened_report)["degraded"] is True
+
+
+def test_coordinate_and_fuse_degraded_when_fuse_opens_without_any_failure(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """A fuse can open purely on budget-deferred (``retryable_deferred``) outcomes: four
+    tickets on one endpoint each blow the cumulative-sleep cap, so the ``failed`` bucket
+    stays empty yet the fuse opens — the report is degraded and the tally has zero
+    failures with a nonzero deferred count."""
+    over = budget_mod.MAX_CUMULATIVE_SLEEP_MS + 5000
+    plans = [
+        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
+        for ident in ("T-1", "T-2", "T-3", "T-4")
+    ]
+
+    def execute(_plan, _mutation):
+        return coordinator_mod.AtomicSignal(
+            status="transient", scope=coordinator_mod.FailureScope.ticket, provider_delay_ms=over
+        )
+
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=execute,
+        locate=_t3_locate(_T3_BINDINGS),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    assert report.tallies["failed"] == 0
+    assert report.tallies["deferred"] == 4
+    assert report.degraded is True
+    assert len(report.fuse_decisions) >= 1
+
+
+def test_coordinate_and_fuse_deduplicates_multiple_distinct_fuse_decisions(
+    batch_dispatch_mod, coordinator_mod, mutation_mod, ticket_plan_mod, budget_mod
+):
+    """When two DIFFERENT endpoints each open their own fuse, both distinct
+    ``FuseDecision``s surface exactly once, in first-seen order — the id()-dedup keeps
+    each endpoint's single decision without collapsing the two."""
+    bindings = {
+        "A-1": {"provider": "jira", "endpoint": "https://a.example"},
+        "A-2": {"provider": "jira", "endpoint": "https://a.example"},
+        "A-3": {"provider": "jira", "endpoint": "https://a.example"},
+        "A-4": {"provider": "jira", "endpoint": "https://a.example"},
+        "B-1": {"provider": "github", "endpoint": "https://b.example"},
+        "B-2": {"provider": "github", "endpoint": "https://b.example"},
+        "B-3": {"provider": "github", "endpoint": "https://b.example"},
+        "B-4": {"provider": "github", "endpoint": "https://b.example"},
+    }
+    # endpoint-a (jira) tickets first (open A), then endpoint-b (github) tickets (open B).
+    # Two separate providers so each opens its OWN endpoint decision (no provider-scope
+    # cross-open that would carry a null endpoint).
+    order = ["A-1", "A-2", "A-3", "A-4", "B-1", "B-2", "B-3", "B-4"]
+    plans = [
+        _plan(ticket_plan_mod, ident, [_mut(mutation_mod, "outbound", "update", ident)])
+        for ident in order
+    ]
+    report = batch_dispatch_mod.coordinate_and_fuse(
+        plans,
+        execute=_always_transient(coordinator_mod),
+        locate=_t3_locate(bindings),
+        budget_factory=_budget_factory(budget_mod),
+        now_ms=0,
+    )
+    endpoints = [d.endpoint for d in report.fuse_decisions]
+    # exactly two distinct endpoint decisions, endpoint-a seen before endpoint-b.
+    assert endpoints == ["https://a.example", "https://b.example"]
+    assert all(d.scope == "endpoint" for d in report.fuse_decisions)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ── S3T3-CUTOVER HELDOUT-END ──
+# ════════════════════════════════════════════════════════════════════════════════

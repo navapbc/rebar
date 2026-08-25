@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -142,6 +143,56 @@ def _batch_failure_count(manifest_path) -> int:
     except (OSError, ValueError, AttributeError):
         return 0
     return sum(1 for outcome in outcomes if isinstance(outcome, dict) and outcome.get("error"))
+
+
+def derive_pass_tally(nowrite_plan, apply_tally, manifest_path, mutation_count: int) -> dict:
+    """Derive the truthful applied/failed/deferred/skipped counts + degraded flag for a
+    pass, from whichever source is authoritative (no-write plan, out-of-band apply_tally,
+    or the on-disk manifest). Pure/fail-open: an unreadable manifest degrades to the
+    computed ``(mutation_count, 0)`` default.
+
+    Consumer-side complement to :func:`_emit_mode_manifest` (the tally producer). RP-03
+    S3 T3: the cutover pass-tally (batch_dispatch.build_pass_tally) carries the fuse-held
+    ``deferred`` and data ``skipped`` buckets the legacy applied/failed pair cannot
+    express, plus an explicit ``degraded`` exit signal (any failure OR an opened fuse).
+    They default to 0/False so every pre-cutover apply_tally/manifest shape is unchanged.
+    """
+    tally = {"applied": mutation_count, "failed": 0, "deferred": 0, "skipped": 0, "degraded": False}
+    if nowrite_plan is not None:
+        tally["applied"] = 0
+        return tally
+    if apply_tally is not None:
+        # Bug c903: LIVE deletes its manifest, so the counts arrive out-of-band from
+        # _emit_mode_manifest (read immediately before the unlink). Without this the tally
+        # fell through to the (mutation_count, 0) default, which made mutation_failures
+        # structurally 0 in the only mode production runs — leaving __main__'s
+        # `if failures > 0` unreachable and printing "applied N of N" while it failed.
+        tally["applied"] = int(apply_tally.get("applied_count", 0))
+        tally["failed"] = int(apply_tally.get("failed_count", 0))
+        tally["deferred"] = int(apply_tally.get("deferred_count", 0))
+        tally["skipped"] = int(apply_tally.get("skipped_count", 0))
+        tally["degraded"] = bool(apply_tally.get("degraded", False))
+        return tally
+    if manifest_path is not None:
+        try:
+            manifest_data = json.loads(Path(manifest_path).read_text())
+            # Two manifest shapes coexist (bug 85a1 follow-up): the legacy/LIVE flat
+            # ``mutations`` list (each outcome with no ``error`` key is applied), and the
+            # asymmetric/BOOTSTRAP shape carrying an explicit ``applied_count`` — prefer
+            # the latter when present (it is the authoritative tally).
+            if "applied_count" in manifest_data:
+                tally["applied"] = int(manifest_data["applied_count"])
+                tally["failed"] = int(manifest_data.get("failed_count", 0))
+            else:
+                outcomes = manifest_data.get("mutations", []) or []
+                tally["applied"] = sum(1 for o in outcomes if not o.get("error"))
+                tally["failed"] = sum(1 for o in outcomes if o.get("error"))
+        except Exception as exc:  # noqa: BLE001 — fail-open: fall back to computed count, log only
+            print(
+                f"reconcile: manifest tally read failed ({exc}) — falling back to computed count",
+                file=sys.stderr,
+            )
+    return tally
 
 
 def _emit_mode_manifest(

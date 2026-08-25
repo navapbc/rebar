@@ -192,3 +192,243 @@ def test_live_failure_reaches_a_non_zero_exit_end_to_end(
         "e534's 'fail loud at the END', and the link that was dead in production. "
         f"tally={tally} result={result} rc={rc}"
     )
+
+
+# RP-03 S3 T3 — the non-create CUTOVER tally drives the SAME degraded-exit machinery.
+#
+# The cutover replaces the legacy compound-replay tally with ``batch_dispatch``'s
+# five-bucket projection (applied/failed/deferred/skipped/recovered). AC4 requires the
+# EXACT applied/failed/deferred/skipped/recovered tallies plus the nonzero degraded-pass
+# exit to be preserved. These tests prove the cutover tally flows through the EXISTING
+# ``_persist_and_log`` → ``run_pass`` seam (a LIVE dict return routed to
+# ``ctx.apply_tally``) and still exits non-zero when a mutation failed — no change to the
+# reconcile pipeline itself.
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+class _T3Clock:
+    def now(self) -> int:
+        return 0
+
+    def sleep_ms(self, ms: int) -> None: ...
+
+
+def _t3_budget_factory():
+    from rebar_reconciler import retry_budget as rb
+
+    def factory():
+        return rb.RetryBudget(clock=_T3Clock(), jitter=lambda: 0.0)
+
+    return factory
+
+
+def _t3_plan(identity: str, action: str):
+    from rebar_reconciler import mutation as m
+    from rebar_reconciler import ticket_plan as tp
+
+    mut = m.Mutation(
+        direction=m.MutationDirection.outbound,
+        action=getattr(m.MutationAction, action),
+        target=identity,
+        payload={},
+        provenance={"src": "outbound"},
+    )
+    return tp.TicketPlan(
+        identity=identity,
+        mutations=(mut,),
+        diagnostics=(),
+        disposition=tp.PlanDisposition.mutate,
+        observation_version="ov-1",
+        payload={},
+        dependencies=(),
+        defer_reason=None,
+    )
+
+
+def _t3_cutover_report():
+    """A cutover report with one applied and one budget-exhausted (failed) plan."""
+    from rebar_reconciler import batch_dispatch, coordinator
+
+    def execute(plan, _mutation):
+        if plan.identity == "OK-1":
+            return coordinator.AtomicSignal(status="applied")
+        return coordinator.AtomicSignal(status="transient")
+
+    plans = [_t3_plan("OK-1", "update"), _t3_plan("BAD-1", "delete")]
+    return batch_dispatch.coordinate_and_fuse(
+        plans,
+        execute=execute,
+        locate=lambda _i: {"provider": "jira", "endpoint": "https://a.example"},
+        budget_factory=_t3_budget_factory(),
+        now_ms=0,
+    )
+
+
+def test_cutover_five_bucket_tally_is_exact() -> None:
+    """AC4: ``build_pass_tally`` over the cutover report yields the exact five buckets."""
+    from rebar_reconciler import batch_dispatch
+
+    tally = batch_dispatch.build_pass_tally(_t3_cutover_report())
+    assert tally["applied_count"] == 1
+    assert tally["failed_count"] == 1
+    assert tally["deferred_count"] == 0
+    assert tally["skipped_count"] == 0
+    assert tally["recovered_count"] == 0
+
+
+def test_cutover_tally_reaches_a_non_zero_exit_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC4: the cutover's five-bucket tally, threaded through the EXISTING LIVE seam
+    (``ctx.apply_tally`` → ``_persist_and_log`` → ``run_pass``), preserves the nonzero
+    degraded-pass exit — a failed mutation still makes the pass loud."""
+    from rebar_reconciler import __main__ as reconciler_main
+    from rebar_reconciler import batch_dispatch
+
+    tally = batch_dispatch.build_pass_tally(_t3_cutover_report())
+
+    class _Logger:
+        def log(self, *a: Any, **k: Any) -> None: ...
+        def close(self, *a: Any, **k: Any) -> None: ...
+        def sync_pass_end(self, *a: Any, **k: Any) -> None: ...
+
+    ctx = reconcile._PassContext(pass_id="pass-t3", repo_root=tmp_path)
+    ctx.persist = True
+    ctx.mutations = [{"action": "update"}, {"action": "delete"}]
+    ctx.curr_path = tmp_path / "curr.json"
+    ctx.curr_path.write_text("{}")
+    ctx.prev_path = tmp_path / "prev.json"
+    ctx.sync_logger = _Logger()
+    ctx.manifest_path = None
+    ctx.nowrite_plan = None
+    ctx.apply_tally = tally
+    monkeypatch.setattr(reconcile, "_save_and_commit_bindings", lambda *a, **k: None, raising=False)
+    result = reconcile._persist_and_log(ctx)
+    assert result["mutation_failures"] == 1
+    assert result["mutations_applied"] == 1
+
+    applier_stub = types.SimpleNamespace(
+        RescheduleError=type("_R", (Exception,), {}), EXIT_RESCHEDULE=75
+    )
+    reconcile_stub = types.SimpleNamespace(reconcile_once=lambda *a, **k: result)
+    monkeypatch.setattr(
+        reconciler_main,
+        "_try_load_step",
+        lambda name: {"reconcile": reconcile_stub, "applier": applier_stub}.get(name),
+    )
+    rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="pass-t3")
+    assert rc == 1
+
+
+def _t3_degraded_deferred_report():
+    """A cutover report where the fuse OPENS on budget-deferred (retryable_deferred)
+    outcomes only: four plans on ONE endpoint each exhaust the cumulative-sleep budget,
+    so the ``failed`` bucket stays empty yet the fuse opens — a degraded pass."""
+    from rebar_reconciler import batch_dispatch, coordinator
+    from rebar_reconciler import retry_budget as rb
+
+    over = rb.MAX_CUMULATIVE_SLEEP_MS + 5000
+
+    def execute(_plan, _mutation):
+        return coordinator.AtomicSignal(
+            status="transient", scope=coordinator.FailureScope.ticket, provider_delay_ms=over
+        )
+
+    plans = [_t3_plan(f"D-{i}", "update") for i in range(4)]
+    return batch_dispatch.coordinate_and_fuse(
+        plans,
+        execute=execute,
+        locate=lambda _i: {"provider": "jira", "endpoint": "https://a.example"},
+        budget_factory=_t3_budget_factory(),
+        now_ms=0,
+    )
+
+
+def test_cutover_deferred_only_pass_is_degraded_and_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC4: a degraded pass with ZERO failures (the fuse opened, so matching work was
+    safety-deferred) must still exit non-zero. The tally carries ``degraded=True`` with
+    ``failed_count == 0``; threaded through the LIVE seam it drives an OPERATIONAL exit."""
+    from rebar_reconciler import __main__ as reconciler_main
+    from rebar_reconciler import batch_dispatch
+
+    report = _t3_degraded_deferred_report()
+    tally = batch_dispatch.build_pass_tally(report)
+    assert tally["failed_count"] == 0
+    assert tally["deferred_count"] == 4
+    assert tally["degraded"] is True
+
+    class _Logger:
+        def log(self, *a: Any, **k: Any) -> None: ...
+        def close(self, *a: Any, **k: Any) -> None: ...
+        def sync_pass_end(self, *a: Any, **k: Any) -> None: ...
+
+    ctx = reconcile._PassContext(pass_id="pass-t3d", repo_root=tmp_path)
+    ctx.persist = True
+    ctx.mutations = [{"action": "update"}] * 4
+    ctx.curr_path = tmp_path / "curr.json"
+    ctx.curr_path.write_text("{}")
+    ctx.prev_path = tmp_path / "prev.json"
+    ctx.sync_logger = _Logger()
+    ctx.manifest_path = None
+    ctx.nowrite_plan = None
+    ctx.apply_tally = tally
+    monkeypatch.setattr(reconcile, "_save_and_commit_bindings", lambda *a, **k: None, raising=False)
+    result = reconcile._persist_and_log(ctx)
+    assert result["mutation_failures"] == 0
+    assert result["mutations_deferred"] == 4
+    assert result["degraded"] is True
+
+    applier_stub = types.SimpleNamespace(
+        RescheduleError=type("_R", (Exception,), {}), EXIT_RESCHEDULE=75
+    )
+    reconcile_stub = types.SimpleNamespace(reconcile_once=lambda *a, **k: result)
+    monkeypatch.setattr(
+        reconciler_main,
+        "_try_load_step",
+        lambda name: {"reconcile": reconcile_stub, "applier": applier_stub}.get(name),
+    )
+    rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="pass-t3d")
+    assert rc == 1
+
+
+def test_legacy_apply_tally_without_degraded_key_stays_converged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-cutover apply_tally (no ``deferred_count`` / ``degraded`` keys) is unchanged:
+    the new fields default to 0 / absent so a clean legacy pass stays converged."""
+    from rebar_reconciler import __main__ as reconciler_main
+
+    class _Logger:
+        def log(self, *a: Any, **k: Any) -> None: ...
+        def close(self, *a: Any, **k: Any) -> None: ...
+        def sync_pass_end(self, *a: Any, **k: Any) -> None: ...
+
+    ctx = reconcile._PassContext(pass_id="pass-legacy", repo_root=tmp_path)
+    ctx.persist = True
+    ctx.mutations = [{"action": "update"}]
+    ctx.curr_path = tmp_path / "curr.json"
+    ctx.curr_path.write_text("{}")
+    ctx.prev_path = tmp_path / "prev.json"
+    ctx.sync_logger = _Logger()
+    ctx.manifest_path = None
+    ctx.nowrite_plan = None
+    ctx.apply_tally = {"applied_count": 1, "failed_count": 0}
+    monkeypatch.setattr(reconcile, "_save_and_commit_bindings", lambda *a, **k: None, raising=False)
+    result = reconcile._persist_and_log(ctx)
+    assert result["mutations_deferred"] == 0
+    assert result["mutations_skipped"] == 0
+    assert "degraded" not in result
+
+    applier_stub = types.SimpleNamespace(
+        RescheduleError=type("_R", (Exception,), {}), EXIT_RESCHEDULE=75
+    )
+    reconcile_stub = types.SimpleNamespace(reconcile_once=lambda *a, **k: result)
+    monkeypatch.setattr(
+        reconciler_main,
+        "_try_load_step",
+        lambda name: {"reconcile": reconcile_stub, "applier": applier_stub}.get(name),
+    )
+    rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="pass-legacy")
+    assert rc == 0
