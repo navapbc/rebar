@@ -110,6 +110,34 @@ class LifecycleIntent:
         return hash((self.kind, self.target, self.version))
 
 
+@dataclass(frozen=True, slots=True)
+class ParityDelta:
+    """One bounded, structured difference between the legacy mutation list and the
+    shadow plans for a single identity.
+
+    ``fields`` carries ONLY bounded, structured strings (direction/action pairs or
+    ``disposition=``/``defer_reason=`` markers) — never a raw mutation payload or
+    provenance, which may contain secrets (AC7)."""
+
+    identity: str
+    observation_version: Any
+    kind: str
+    fields: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ParityReport:
+    """The result of comparing shadow plans against the legacy mutation list.
+
+    ``deltas`` is every observed difference; ``unexpected`` is the subset whose
+    identity is not pre-approved; ``matched`` is ``True`` exactly when
+    ``unexpected`` is empty."""
+
+    deltas: tuple[ParityDelta, ...]
+    unexpected: tuple[ParityDelta, ...]
+    matched: bool
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class TicketPlan:
     """A frozen, per-ticket plan derived purely from one pass's observation."""

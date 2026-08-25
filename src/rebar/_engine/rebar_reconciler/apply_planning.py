@@ -156,6 +156,7 @@ def _emit_mode_manifest(
     max_changes: int | None = None,
     route: str | None = None,
     attempted_count: int | None = None,
+    ticket_plans=None,
 ):
     """Render + write the mode-specific manifest; return an (action, value) sentinel.
 
@@ -252,6 +253,15 @@ def _emit_mode_manifest(
         }
         for m in deferred_for_manifest
     ]
+
+    # Additive shadow layer (RP-03 S2 T3): when the pure ticket plans are threaded
+    # through, expose their versioned lifecycle-intents section. This is the ONLY key
+    # added — every existing key/byte (including ``plan``) stays identical, so a None
+    # ``ticket_plans`` yields byte-for-byte today's manifest.
+    if ticket_plans is not None:
+        rendered_with_meta["lifecycle_intents"] = renderer_mod.render_lifecycle_intents(
+            ticket_plans
+        )
 
     # No-write contract (cap-0 modes, persist=False): produce the full
     # computed plan as a dict and RETURN it WITHOUT writing any manifest file.

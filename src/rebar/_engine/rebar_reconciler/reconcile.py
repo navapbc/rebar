@@ -75,6 +75,7 @@ _write_prev_snapshot_key_set = _helpers._write_prev_snapshot_key_set
 # the ``reconcile._advance_baselines`` import in the A3 oracle both keep resolving.
 _accepts_synced_fields_out = _helpers._accepts_synced_fields_out
 _accepts_client = _helpers._accepts_client
+_accepts_ticket_plans = _helpers._accepts_ticket_plans
 _advance_baselines = _helpers._advance_baselines
 _advance_peer_parent = _helpers._advance_peer_parent
 # RP-04 S3 (AC1/AC6): the runtime-binding cluster lives in reconcile_helpers (no back-edge
@@ -497,29 +498,26 @@ def _apply_mutations(ctx: _PassContext) -> None:
     # Bug c903: LIVE returns its applied/failed tally here instead of a Path.
     apply_tally: dict | None = None
     try:
-        # Backward compatibility: tests stub applier.apply with a signature
-        # that does not accept the `mode` kwarg. Only pass it when caller
-        # actually supplied a target_mode (i.e., when cap enforcement is
-        # requested).
-        # Only forward abort_check when set, so tests that stub applier.apply with
-        # a narrower signature are unaffected (epic dust-troth-naval).
+        # Each optional kwarg below is forwarded ONLY when the resolved applier accepts
+        # it (narrow test stubs use fixed signatures; an unexpected kwarg would raise
+        # TypeError and abort the pass). mode is likewise only passed when target_mode is
+        # set (cap enforcement requested). Refs: abort_check epic dust-troth-naval,
+        # synced_fields_out bug e6e9, client RP-04 S3 AC1, ticket_plans RP-03 S2 T3.
         _abort_kw = {"abort_check": ctx.abort_check} if ctx.abort_check is not None else {}
-        # Bug e6e9: forwarded ONLY when the resolved applier accepts it, mirroring the
-        # narrow-signature tolerance the abort_check kwarg above already needs — tests
-        # stub applier.apply with fixed signatures, and an unexpected kwarg would turn a
-        # baseline refinement into a TypeError that aborts the pass.
         _synced_kw = (
             {"synced_fields_out": ctx.synced_fields}
             if _accepts_synced_fields_out(applier.apply)
             else {}
         )
-        # AC1: forward the composed runtime's captured transport as client= so the applier
-        # skips ambient _load_acli. Forwarded ONLY when present (compose succeeded / facade
-        # ON) AND the resolved applier accepts it, mirroring the narrow-signature tolerance
-        # above so a stubbed applier.apply is never handed an unexpected kwarg.
         _client_kw = (
             {"client": ctx.runtime_transport}
             if ctx.runtime_transport is not None and _accepts_client(applier.apply)
+            else {}
+        )
+        _ticket_plans_kw = (
+            {"ticket_plans": getattr(ctx, "ticket_plans", None)}
+            if getattr(ctx, "ticket_plans", None) is not None
+            and _accepts_ticket_plans(applier.apply)
             else {}
         )
         if target_mode is None:
@@ -547,6 +545,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
                 **_abort_kw,
                 **_synced_kw,
                 **_client_kw,
+                **_ticket_plans_kw,
             )
     finally:
         # In no-write mode, apply() returns the computed plan dict instead of
