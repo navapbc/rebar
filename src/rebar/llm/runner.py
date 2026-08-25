@@ -414,7 +414,9 @@ class PydanticAIRunner:
                 pai_tools.filesystem_tools(cfg.repo_path)
                 + pai_tools.grounding_tools(cfg.repo_path)
                 + pai_tools.rebar_tools(
-                    cfg.tickets_path or cfg.repo_path, allow_comment=allow_comment
+                    cfg.tickets_path or cfg.repo_path,
+                    allow_comment=allow_comment,
+                    ticket_view=cfg.ticket_view,
                 )
             )
             if req.extra_tools:

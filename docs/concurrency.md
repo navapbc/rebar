@@ -312,6 +312,55 @@ Set **`REBAR_LOCK_RETRIES`** to override the opted-in count (default `2`, clampe
 write). `REBAR_LOCK_RETRIES=0` restores the historical single-budget fail-fast for CI
 or ops that prefer to fail immediately over waiting.
 
+#### The certified completion-close bundle (experimental)
+
+When `verify.completion_pinned_ticket_view` selects the experimental completion path, one
+existing-lock transaction builds three events in one private candidate commit: PASS
+`COMPLETION_VERDICT`, closing `STATUS`, and completion `SIGNATURE`. This is a specialization of I5,
+not a second event format: `event_append.batch_stage_and_commit_under_lock` reuses the canonical
+validation, staging, index, commit, and rollback machinery while the completion transaction owns
+the shared-store lock. The candidate repository is a `--shared` local clone with a sparse checkout
+of only the ticket directory. It is prepared before lock acquisition and has its own index and
+`HEAD`, so generic shared-tracker pushes cannot publish a rejected candidate.
+
+The critical section intentionally contains only state that must be decided against the final
+committed tracker OID:
+
+| Outside the write lock | Inside the write lock |
+|---|---|
+| LLM verification and code reads | Compare tracker `HEAD` with the validated receipt OID |
+| Lazy ticket reads and receipt construction | Re-reduce root status and close/plan policy |
+| Receipt replay against a candidate descendant | Assign final HLC order and event authorship |
+| Sparse candidate-repository setup | Stage three event paths and make one private commit |
+| Sidecar normalization and completion-certificate minting | Verify the candidate parent is still the validated OID |
+| Fetch, push, and non-fast-forward retry | Roll back all staged paths on a local failure |
+
+Final event UUIDs are run-unique, and the immutable read basis is
+`(run_id, code_oid, tickets_oid, receipt_digest)`. A tracker advance between replay and lock
+acquisition causes bounded revalidation; relevant drift aborts before any bundle path is visible.
+The same `tickets_oid` also scopes completion-specific deterministic prechecks, all verifier
+auto-resume attempts, and criterion-bank/verdict-cache reuse. Unsupported lazy-view reads abort;
+they never fall back to the changing shared checkout.
+After the lock is released, rebar ordinarily pushes the candidate commit itself, not shared
+`HEAD`. A non-fast-forward rejection fetches and replays the receipt. Relevant drift deletes the
+candidate and raises exit 10 while shared `HEAD` remains unchanged; unrelated drift is merged and
+the candidate is rebuilt on that descendant. Local-only stores import the candidate through a
+run-unique private ref and merge it under the same lock. Candidate imports and remote fetches use
+UUID-private `refs/rebar/completion-candidates/…` and `refs/rebar/completion-fetches/…` refs, so
+parallel runs never overwrite a shared temporary ref. Same-tracker processes therefore serialize
+the final merge, one same-ticket basis wins, and a loser can recognize the equivalent signed close.
+
+There are deliberately two boundaries. The same-tracker lock fixes the logical close decision —
+final receipt/status checks and HLC order — but the local or remote Git ref update publishes that
+decision. The lock is never held across network I/O, and no force update is used. An independent
+writer may append a later event immediately after publication; a reopen or material edit then makes
+the certificate stale through validity-on-read rather than retroactively splitting the bundle. If
+a remote push succeeds but its acknowledgement is lost, a private-ref fetch proves whether the
+candidate reached the remote and reports `pushed_after_ambiguous_ack` without another push. If the
+following local fetch/merge fails, or a concurrent local writer leaves shared `HEAD` ahead of the
+fetched remote, `pushed_local_pending` records pending *local synchronization/delivery*; the remote
+close is already durable and the private-candidate safety condition has been met.
+
 ### I6 — No NEW cross-client lock; no shared mutable index
 Cross-client coordination is **only** git merge-as-union + optimistic
 concurrency. No feature may require a lock spanning clients/machines, nor a
@@ -556,6 +605,49 @@ The failed-push resilience and non-fast-forward fetch+merge+retry behind these
 modes are covered by
 `tests/integration/test_concurrency_regression.py::test_failed_push_never_drops_local_commit`
 and `tests/unit/test_push_retry_stash_pop.py`.
+
+#### Receipt-aware completion delivery (experimental)
+
+The bundled completion path never places an unvalidated close on the shared tracker `HEAD` and
+never hands one to generic non-fast-forward recovery. Before taking the write lock it creates a
+run-unique, object-sharing sparse clone at the validated ticket OID. Under the lock it rechecks
+shared `HEAD` and root status, then makes the three-event commit only in that private repository.
+After releasing the lock it pushes the candidate commit itself. Generic local writers continue to
+see the pre-close shared `HEAD` until publication is safe. Both candidate import and remote fetch
+use UUID-named refs under `refs/rebar/`; ref cleanup uses an expected-old OID guard.
+
+On rejection rebar performs an ordinary fetch, pins the fetched remote OID, and validates the
+verifier's ticket-read receipt against it. A proven unrelated descendant is merge-as-union
+reconciled under the local write lock and the candidate is rebuilt, with at most three complete
+attempts. A non-ancestor or relevant ticket, hierarchy, link, negative-read, or resolver change
+raises exit 10 and deletes the candidate. Neither local shared `HEAD` nor the remote then contains
+the close, so a later generic push has nothing unsafe to leak. No force refspec or force push is
+attempted.
+
+Local-only stores import the candidate through a UUID-named private ref, merge it under the normal
+write lock, and delete the ref. Parallel runs therefore do not share candidate indexes, worktrees,
+paths, or refs. A transport error after remote acceptance is ambiguous until the private fetch
+proves reachability; success is then `delivery=pushed_after_ambiguous_ack`, and the candidate is not
+published twice. If the immediate local fetch/merge fails, or a concurrent local commit means the
+merged shared `HEAD` is intentionally ahead of the remote, the remote close is already durable;
+`delivery=pushed_local_pending` records only the remaining local synchronization/delivery. This is
+the unavoidable post-publication half of an ordinary Git remote update, not an unvalidated close
+stranded on shared local history.
+
+Even a zero-exit push is followed by a private-ref fetch and an ancestor check. If the remote branch
+was rewritten between acknowledgement and that observation, publication is reported as a conflict,
+not success.
+
+The receipt protects the decision up to publication; it is not a distributed lease on future
+ticket state. After either the local-only merge or the remote ref update, another writer may append
+a later event. That later event is ordered after the three-event bundle and can make the completion
+certificate stale (notably on reopen or material edit), but it cannot expose a mixed sidecar,
+status, and signature from the earlier commit.
+
+The experiment still requires `sync.push = "always"`: `async` cannot carry receipt-aware retry
+state, and `off` deliberately suppresses remote observation. Selection retains the legacy path for
+both modes, and a mid-run policy change discards the private candidate and aborts. The ordinary
+event store remains available and unchanged when the default-off switch is disabled.
 
 `rebar import` uses `off` internally for its whole run and pushes once at the end,
 so a bulk import pays one round-trip rather than one per event; it still does one

@@ -115,6 +115,14 @@ verify.max_ticket_description_chars = 8000   # blocking plan-review and completi
 verify.require_completion_verification_for_close = false  # gate work-ticket close on a PASS completion
                                              # verdict (signed onto the ticket); fail-closed. ON for
                                              # this project's rebar.toml.
+verify.completion_pinned_ticket_view = false # experimental, non-epic completion path: lazily read
+                                             # demanded tickets at one immutable tickets OID and
+                                             # atomically commit PASS sidecar + closed STATUS +
+                                             # completion SIGNATURE. Requires attested source and
+                                             # sync.push="always"; async/off retain the established
+                                             # materialized path. Default-off back-out. A private,
+                                             # object-sharing sparse candidate keeps rejected remote
+                                             # closes off shared HEAD; see docs/concurrency.md.
 verify.auto_resume_max             = 2       # bounded auto-resume for the completion close gate
                                              # (ticket b5f8): when a close FAILs on pure evidence-
                                              # search exhaustion (every unmet criterion carries the

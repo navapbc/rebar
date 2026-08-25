@@ -260,7 +260,9 @@ def _normalize_ticket_ref(ticket_id: str) -> str:
     return ref
 
 
-def rebar_tools(repo_path: str | None, *, allow_comment: bool) -> list[Callable]:
+def rebar_tools(
+    repo_path: str | None, *, allow_comment: bool, ticket_view: Any | None = None
+) -> list[Callable]:
     """Least-privilege rebar ticket tools (WS-D3): ``show_ticket`` always;
     ``comment_ticket`` only when ``allow_comment``. Nothing else — no create/edit/
     transition/claim/sign."""
@@ -274,9 +276,13 @@ def rebar_tools(repo_path: str | None, *, allow_comment: bool) -> list[Callable]
         from rebar import _reads
 
         try:
-            return json.dumps(
-                _reads.show_ticket(_normalize_ticket_ref(ticket_id), repo_root=repo_path)
+            ref = _normalize_ticket_ref(ticket_id)
+            state = (
+                ticket_view.show_ticket(ref)
+                if ticket_view is not None
+                else _reads.show_ticket(ref, repo_root=repo_path)
             )
+            return json.dumps(state)
         except Exception as exc:  # noqa: BLE001 — agent-tool boundary: surface the error to the LLM as a tool-result string, never crash the agent loop
             return f"Error: {exc}"
 
