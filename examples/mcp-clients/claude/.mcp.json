@@ -1,0 +1,29 @@
+{
+  "$comment": [
+    "Claude Code project MCP entry for the rebar MCP server (epic jira-reb-3527 'Enable",
+    "MCP on AWS', ADR 0104 / deft-evolutive-mosasaur — nginx /mcp/ TLS edge + 'static'",
+    "bearer verifier + per-client PATs).",
+    "",
+    "Copy this file to your project's .mcp.json (or ~/.claude.json), then export the PAT",
+    "before launching Claude Code:",
+    "  export MCP_CLIENT_PAT_CLAUDE=\"$(…your rebar claude PAT…)\"",
+    "Claude Code expands ${MCP_CLIENT_PAT_CLAUDE} from the environment, so NO secret is",
+    "stored in this file. Equivalent one-liner:",
+    "  claude mcp add --transport http rebar https://rebar.solutions.navateam.com/mcp/ \\",
+    "    --header \"Authorization: Bearer ${MCP_CLIENT_PAT_CLAUDE}\"",
+    "",
+    "GOTCHA: a static Authorization header takes precedence and does NOT fall back to OAuth",
+    "if the server rejects it — a wrong/expired PAT fails HARD with a 401, not a silent",
+    "OAuth retry. The PAT is the value from the gitignored mcp-clients.local.json (see",
+    "mcp-clients.local.example.json and docs/mcp-client-setup.md). Verify: claude mcp list"
+  ],
+  "mcpServers": {
+    "rebar": {
+      "type": "http",
+      "url": "https://rebar.solutions.navateam.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${MCP_CLIENT_PAT_CLAUDE}"
+      }
+    }
+  }
+}
