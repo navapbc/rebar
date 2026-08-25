@@ -46,6 +46,7 @@ These pages explain supported use of rebar without requiring knowledge of its im
 - **[llm-example-configs.md](llm-example-configs.md)**. Complete configuration examples for supported LLM provider combinations.
 - **[manifest-signing.md](manifest-signing.md)**. User-facing attestation signing and verification behavior.
 - **[mcp-auth.md](mcp-auth.md)**. OAuth 2.1 resource server authentication for MCP over HTTP.
+- **[mcp-client-setup.md](mcp-client-setup.md)**. Wire the copilot, codex, and claude MCP clients to the remote rebar MCP endpoint with a static bearer PAT.
 - **[mcp-reference.md](mcp-reference.md)**. Generated MCP tool inventory and schema reference.
 - **[output-schemas.md](output-schemas.md)**. Machine-readable output contracts for CLI operations.
 - **[s3-backend.md](s3-backend.md)**. Optional S3 ticket store setup and operating constraints.

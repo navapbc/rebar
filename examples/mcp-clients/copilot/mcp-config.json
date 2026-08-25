@@ -1,0 +1,25 @@
+{
+  "$comment": [
+    "Copilot CLI remote-HTTP MCP entry for the rebar MCP server (epic jira-reb-3527",
+    "'Enable MCP on AWS', ADR 0104 / deft-evolutive-mosasaur — nginx /mcp/ TLS edge +",
+    "'static' bearer verifier + per-client PATs).",
+    "",
+    "Copy this file to ~/.copilot/mcp-config.json (or merge the 'rebar' entry into your",
+    "existing mcpServers map), then export the PAT before launching Copilot:",
+    "  export MCP_CLIENT_PAT_COPILOT=\"$(…your rebar copilot PAT…)\"",
+    "The Copilot CLI expands $MCP_CLIENT_PAT_COPILOT from the environment at connect time,",
+    "so NO secret is stored in this file. The PAT is the value from the gitignored",
+    "mcp-clients.local.json (see mcp-clients.local.example.json + docs/mcp-client-setup.md).",
+    "Verify with:  copilot mcp get rebar"
+  ],
+  "mcpServers": {
+    "rebar": {
+      "type": "http",
+      "url": "https://rebar.solutions.navateam.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer $MCP_CLIENT_PAT_COPILOT"
+      },
+      "tools": ["*"]
+    }
+  }
+}

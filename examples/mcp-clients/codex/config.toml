@@ -1,0 +1,19 @@
+# Codex remote-HTTP MCP entry for the rebar MCP server.
+#
+# Epic jira-reb-3527 "Enable MCP on AWS", ADR 0104 / deft-evolutive-mosasaur — the rebar
+# MCP server sits behind an nginx /mcp/ TLS edge with a `static` bearer verifier and a
+# per-client PAT.
+#
+# Merge this [mcp_servers.rebar] table into ~/.codex/config.toml (or a trusted project's
+# .codex/config.toml), then export the PAT before launching Codex:
+#   export MCP_CLIENT_PAT_CODEX="$(…your rebar codex PAT…)"
+# `bearer_token_env_var` names the env var Codex reads at connect time and sends as
+# `Authorization: Bearer <PAT>`, so NO secret is stored in this file. The PAT is the value
+# from the gitignored mcp-clients.local.json (see mcp-clients.local.example.json and
+# docs/mcp-client-setup.md).
+#
+# Verify with:  codex mcp list   (or: codex mcp get rebar)
+
+[mcp_servers.rebar]
+url = "https://rebar.solutions.navateam.com/mcp/"
+bearer_token_env_var = "MCP_CLIENT_PAT_CODEX"
