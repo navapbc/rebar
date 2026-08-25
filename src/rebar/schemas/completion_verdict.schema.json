@@ -18,7 +18,7 @@
     },
     "evidence_sufficient": {
       "type": "boolean",
-      "description": "OPTIONAL framework-derived marker (never trusted from model output; `reconcile_verdict` re-derives it from the per-criterion markers). Present and `false` ONLY on a FAIL whose every unmet criterion carries the per-criterion `evidence_sufficient: false` marker — i.e. the bounded evidence search was exhausted without finding evidence and NOTHING was positively refuted. Insufficiency, not refutation: like `verdict_obtainable` it rides ALONGSIDE the PASS/FAIL vocabulary, so `verdict` stays `FAIL`, every fail-closed consumer still blocks, and only message rendering and the recorded evidence class change. Absent on every other verdict.",
+      "description": "OPTIONAL framework-derived marker (never trusted from model output; `reconcile_verdict` re-derives it from the per-criterion markers). Present and `false` ONLY on a FAIL whose every unmet criterion carries the per-criterion `evidence_sufficient: false` marker — i.e. the bounded evidence search was exhausted without finding evidence and NOTHING was positively refuted. Insufficiency, not refutation: like `verdict_obtainable` it rides ALONGSIDE the PASS/FAIL vocabulary, so `verdict` stays `FAIL`. Consistent with the `verdict_obtainable` fault, the close gate and the `verify-completion` verb dispose a FAIL carrying this marker as the RETRYABLE exit-11 fault (the bounded evidence search exhausted without positively refuting anything — re-run to retry) rather than a hard block. Absent on every other verdict.",
       "const": false
     },
     "findings": {
