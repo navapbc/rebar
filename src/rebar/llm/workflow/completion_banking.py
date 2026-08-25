@@ -56,7 +56,7 @@ EVIDENCE_CAP_CHARS = 3_000
 
 # Schema version stamped on every bank entry so a format change is a loud read failure, not
 # a silent misread.
-BANK_SCHEMA_VERSION = 1
+BANK_SCHEMA_VERSION = 2
 
 # Batch caps keyed on the resolved verifier class SLOT (model_classes vocabulary). Research
 # ground: FARA-style whole-rubric 12-15 is frontier-only; mid-tier caps at 6-8. An
@@ -256,13 +256,13 @@ def resolve_verifier_slot(model: str | None, slots: Any | None = None) -> str:
     try:
         from rebar.llm.model_classes import CLASS_NAMES, load_class_slots, resolve_class
 
-        slots = slots if slots is not None else load_class_slots()
+        resolved_slots: Any = slots if slots is not None else load_class_slots()
         for name in CLASS_NAMES:
             try:
-                resolved = resolve_class(name, slots)
+                resolved = resolve_class(name, resolved_slots)
             except Exception:  # noqa: BLE001 — a misconfigured slot is skipped, not fatal
                 continue
-            slot_model = getattr(slots.get(name), "model", None)
+            slot_model = getattr(resolved_slots.get(name), "model", None)
             if model and (resolved == model or (slot_model and slot_model in model)):
                 return name
     except Exception:  # noqa: BLE001 — config unreadable → conservative standard cap
@@ -348,6 +348,7 @@ class BankStamps:
     ticket_id: str
     material_fingerprint: str | None
     tree_sha: str | None
+    tickets_oid: str | None = None
 
 
 def resolve_bank_stamps(ticket_id: str, repo_root: str | None) -> BankStamps:
@@ -364,12 +365,20 @@ def resolve_bank_stamps(ticket_id: str, repo_root: str | None) -> BankStamps:
         from rebar.llm.plan_review.attest import current_material_fingerprint
 
         material = current_material_fingerprint(ticket_id, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — fingerprint is best-effort provenance
+    except Exception as exc:  # noqa: BLE001 — live fingerprint provenance is best-effort
+        from rebar._engine_support.reads import reraise_pinned_read_failure
+
+        reraise_pinned_read_failure(exc)
         material = None
+    from rebar._engine_support.reads import current_ticket_view
+
+    view = current_ticket_view()
+    tickets_oid = getattr(getattr(view, "tickets_oid", None), "value", None)
     return BankStamps(
         ticket_id=str(ticket_id),
         material_fingerprint=material,
         tree_sha=_resolve_tree_sha(repo_root),
+        tickets_oid=tickets_oid,
     )
 
 
@@ -396,6 +405,8 @@ def _stamp_mismatch(stored: BankStamps, fresh: BankStamps) -> str | None:
     side of material/tree is not-comparable (never a mismatch); ticket id must always match."""
     if stored.ticket_id != fresh.ticket_id:
         return "ticket_id"
+    if stored.tickets_oid != fresh.tickets_oid:
+        return "tickets_oid"
     if (
         stored.material_fingerprint is not None
         and fresh.material_fingerprint is not None
@@ -484,6 +495,7 @@ class CriterionBank:
             "ticket_id": self._stamps.ticket_id,
             "material_fingerprint": self._stamps.material_fingerprint,
             "tree_sha": self._stamps.tree_sha,
+            "tickets_oid": self._stamps.tickets_oid,
         }
         if evidence_sufficient is False:
             entry["evidence_sufficient"] = False
