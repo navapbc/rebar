@@ -718,46 +718,14 @@ def _persist_and_log(ctx: _PassContext) -> dict:
     # with the prior contract.
     # No-write (cap-0) mode: nothing is applied, so the tally is (0, 0) and the
     # computed plan comes from the in-memory rendered dict (no manifest file).
-    mutations_applied = len(mutations)
-    mutation_failures = 0
-    if nowrite_plan is not None:
-        mutations_applied = 0
-        mutation_failures = 0
-    elif apply_tally is not None:
-        # Bug c903: LIVE deletes its manifest, so the counts arrive out-of-band from
-        # _emit_mode_manifest (read immediately before the unlink). Without this branch
-        # the tally fell through to the (len(mutations), 0) default below, which made
-        # `mutation_failures` structurally 0 in the only mode production runs — leaving
-        # __main__'s `if failures > 0: return 1` unreachable and printing "applied N of
-        # N" while mutations failed.
-        mutations_applied = int(apply_tally.get("applied_count", 0))
-        mutation_failures = int(apply_tally.get("failed_count", 0))
-    elif manifest_path is not None:
-        try:
-            manifest_data = json.loads(Path(manifest_path).read_text())
-            # Two manifest shapes coexist (bug 85a1 follow-up):
-            #   1. Legacy/LIVE — written by _apply_batch with a flat
-            #      ``mutations`` list of outcome dicts; each outcome with no
-            #      ``error`` key counts as applied.
-            #   2. Asymmetric/BOOTSTRAP — written by manifest_renderer when
-            #      mode caps are in effect (bootstrap-strict/throttle/dry-run).
-            #      Carries an explicit ``applied_count`` integer and direction
-            #      totals; no flat ``mutations`` list.
-            # Detect the asymmetric shape via the presence of ``applied_count``
-            # and prefer it when present (it's the authoritative apply tally).
-            # Otherwise fall back to the legacy outcomes-list count.
-            if "applied_count" in manifest_data:
-                mutations_applied = int(manifest_data["applied_count"])
-                mutation_failures = int(manifest_data.get("failed_count", 0))
-            else:
-                outcomes = manifest_data.get("mutations", []) or []
-                mutations_applied = sum(1 for o in outcomes if not o.get("error"))
-                mutation_failures = sum(1 for o in outcomes if o.get("error"))
-        except Exception as exc:  # noqa: BLE001 — fail-open: fall back to computed count, log only
-            print(
-                f"reconcile: manifest tally read failed ({exc}) — falling back to computed count",
-                file=sys.stderr,
-            )
+    from rebar_reconciler.apply_planning import derive_pass_tally
+
+    tally = derive_pass_tally(nowrite_plan, apply_tally, manifest_path, len(mutations))
+    mutations_applied = tally["applied"]
+    mutation_failures = tally["failed"]
+    mutations_deferred = tally["deferred"]
+    mutations_skipped = tally["skipped"]
+    pass_degraded = tally["degraded"]
 
     # Story 9622: pending-binding recovery failures (set by run_differs on ctx) are
     # surfaced as a tally — observability-only, NOT an exit gate (recovery is
@@ -770,6 +738,8 @@ def _persist_and_log(ctx: _PassContext) -> dict:
         mutations_computed=len(mutations),
         mutations_applied=mutations_applied,
         mutation_failures=mutation_failures,
+        mutations_deferred=mutations_deferred,
+        mutations_skipped=mutations_skipped,
         recovery_failures=recovery_failures,
     )
     sync_logger.close()
@@ -779,9 +749,16 @@ def _persist_and_log(ctx: _PassContext) -> dict:
         "mutation_count": len(mutations),
         "mutations_applied": mutations_applied,
         "mutation_failures": mutation_failures,
+        "mutations_deferred": mutations_deferred,
+        "mutations_skipped": mutations_skipped,
         "recovery_failures": recovery_failures,
         "manifest_path": str(manifest_path) if manifest_path is not None else None,
     }
+    # RP-03 S3 T3: a degraded cutover pass (any failure OR an opened fuse) must exit
+    # non-zero even when its ``failed`` bucket is empty; surface the flag for __main__'s
+    # exit gate. Only a cutover apply_tally sets it, so every legacy path stays converged.
+    if pass_degraded:
+        result["degraded"] = True
     # No-write (cap-0) mode: surface the COMPUTED plan in the result so callers
     # (rebar.reconcile / MCP) receive the detailed mutation plan even though no
     # manifest file was written (ticket yaw-plait-doe).

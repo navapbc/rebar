@@ -475,6 +475,14 @@ def run_pass_result(
             result,
             canonical_message=f"ERROR: reconcile completed with {failures} mutation failures",
         )
+    # RP-03 S3 T3: a degraded cutover pass with no failures (its fuse opened, so matching
+    # work was safety-deferred rather than converged) must still exit non-zero.
+    if result.get("degraded"):
+        return PassResult(
+            _Disposition.OPERATIONAL_FAILURE,
+            result,
+            canonical_message="ERROR: reconcile completed degraded (fuse opened)",
+        )
     return PassResult(_Disposition.CONVERGED, result)
 
 
