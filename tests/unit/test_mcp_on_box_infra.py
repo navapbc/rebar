@@ -26,6 +26,7 @@ _NGINX = _REPO / "infra" / "nginx" / "rebar.conf.template"
 _SEED = _REPO / "infra" / "nginx" / "mcp-upstream.conf"
 _MATERIALIZE = _REPO / "infra" / "scripts" / "materialize-mcp-upstream.sh"
 _COMPOSE_UP = _REPO / "infra" / "scripts" / "compose-up.sh"
+_AUTODEPLOY = _REPO / "infra" / "scripts" / "autodeploy.sh"
 
 # The app's bounded SIGTERM grace, single-sourced in the module — the compose
 # stop_grace_period must cover it.
@@ -190,3 +191,49 @@ def test_compose_up_wires_the_mcp_upstream_materialize_call() -> None:
     # non-fatal pattern: guarded by `if ! bash ...; then WARN`.
     pattern = r"if\s+!\s+bash\s+\"\$\{REPO_ROOT\}/infra/scripts/materialize-mcp-upstream\.sh\""
     assert re.search(pattern, text)
+
+
+def test_mcp_bluegreen_refreshes_ssm_secrets_before_starting_the_new_container() -> None:
+    """The mcp deploy path must re-materialize its SSM-sourced secrets, like the bot path does.
+
+    `mcp` consumes two artifacts that are rsync-EXCLUDED and SSM-materialized -- the `.env`
+    (`mcp_run_new --env-file`) and `mcp-static-tokens.json` (`mcp_run_new -v`). Nothing else in a
+    deploy regenerates either, and populating an SSM SecureString advances no git ref, so without
+    an explicit `fetch-secrets.sh` call a rotated credential NEVER reaches a new container.
+
+    This is not theoretical. On 2026-08-25 three MCP client PATs were populated in SSM at 16:42Z;
+    the on-disk tokens file was still `{"tokens": []}` two minutes later, and every blue-green
+    container failed closed at `_mcp_auth.py` ("static tokens file ... defines no tokens") until
+    an operator ran `fetch-secrets.sh` by hand. The blue-green retry loop burned nine attempts
+    into a 900s backoff and held the `rebar-autodeploy-errors` alarm in ALARM
+    (bug receptive-houndy-nilgai). The review-bot path had this call all along.
+
+    Pinned here rather than in the fail-open direction on purpose: the call must sit BEFORE the
+    new container is started, so a failure aborts while the OLD container is still serving.
+    """
+    script = _AUTODEPLOY.read_text(encoding="utf-8")
+
+    start = script.index('if changed "$MCP_PATHS"; then')
+    block = script[start:]
+
+    assert "fetch-secrets.sh" in block, (
+        "the mcp blue-green block never calls fetch-secrets.sh, so an SSM secret rotation "
+        "cannot reach a new mcp container (receptive-houndy-nilgai)"
+    )
+
+    # It must run BEFORE the container is launched, otherwise the new container has already
+    # bind-mounted the stale file by the time the secrets are refreshed. Match the INVOCATION,
+    # not the bare name: the surrounding comments mention `mcp_run_new` while explaining which
+    # artifacts it mounts, and a bare-name search matches that prose instead of the call site.
+    invocation = re.search(r"^\s*if\s+!\s+mcp_run_new\b", block, re.MULTILINE)
+    assert invocation, "could not locate the mcp_run_new invocation in the blue-green block"
+    assert block.index("fetch-secrets.sh") < invocation.start(), (
+        "fetch-secrets.sh must run BEFORE mcp_run_new starts the replacement container"
+    )
+
+    # Fail-fast, matching the bot path: an SSM error aborts the deploy rather than proceeding
+    # with stale secrets.
+    assert "mcp-secrets-fetch-failed" in block, (
+        "a fetch-secrets failure in the mcp path must abort the deploy with a named error, "
+        "so the old container keeps serving instead of being replaced using stale secrets"
+    )
