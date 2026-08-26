@@ -53,6 +53,7 @@
         "'invalid_ticket_type'",
         "'llm_unavailable'",
         "'show_failed'",
+        "'store_uninitialized'",
         "'ticket_not_found'",
         "'tracker_root_unresolved'"
       ]

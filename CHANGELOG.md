@@ -10,6 +10,24 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+### Changed
+
+- **Library and MCP reads now ERROR on an ABSENT ticket store instead of reporting it as an
+  empty one.** `rebar.list_tickets` / `search` / `ready` / `recent_session_logs` / `deps` /
+  `next_batch` (and the MCP tools that delegate to them) previously returned `[]` when the
+  tracker directory did not exist, which is indistinguishable from a store that exists and
+  holds no tickets; `show_ticket` reported the misleading `Ticket '<id>' not found`. They now
+  raise `RebarError` carrying the new `store_uninitialized` error code. This matches what the
+  CLI reads (`reads_cli.py`) and the library WRITE path (`event_prepare._ensure_initialized`)
+  have always done — only library reads were silent. **Migration:** a caller that relied on the
+  empty-list degrade should catch `RebarError` and branch on
+  `rebar.error_code_for(exc) == "store_uninitialized"`; an INITIALIZED-but-empty store still
+  returns `[]` unchanged, so only the missing-store case is affected. A deployed MCP server
+  with no store had been answering every tracker query "no tickets" for weeks because of this.
+- **New error code `store_uninitialized`** in `rebar.KNOWN_ERROR_CODES`, so the fault above is
+  machine-readable over the MCP envelope rather than requiring message-text matching.
+
+
 ### Added
 
 - **Config-driven reconciler mapping seam (`[tool.rebar.mapping]`).** The reconciler's
