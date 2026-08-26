@@ -100,7 +100,16 @@ RUN set -eux; \
       echo '    git config --global "credential.${MCP_TICKETS_URL}.helper" \'; \
       echo "      '!f() { echo username=x-access-token; echo \"password=\$MCP_TICKETS_PAT\"; }; f'"; \
       echo '    git config --global "credential.${MCP_TICKETS_URL}.useHttpPath" false'; \
-      echo '    if [ ! -d "${REBAR_TRACKER_DIR}/.git" ]; then'; \
+      echo '    # A `.git` directory is NOT proof of a usable clone. A container removed'; \
+      echo '    # mid-clone (which is exactly what the 120s health rollback did, repeatedly)'; \
+      echo '    # leaves a PERSISTENT volume holding orphaned objects, an empty refs/heads'; \
+      echo '    # and HEAD dangling at refs/heads/.invalid. Skipping on mere existence made'; \
+      echo '    # that state permanent: every later container inherited the poisoned volume,'; \
+      echo '    # served an empty tracker, and never re-cloned. Require a resolvable HEAD.'; \
+      echo '    if ! git -C "${REBAR_TRACKER_DIR}" rev-parse --verify -q HEAD >/dev/null 2>&1; then'; \
+      echo '      [ -e "${REBAR_TRACKER_DIR}/.git" ] && \\'; \
+      echo '        echo "mcp: unusable tickets store (no resolvable HEAD) — re-cloning" >&2'; \
+      echo '      rm -rf "${REBAR_TRACKER_DIR}"/.[!.]* "${REBAR_TRACKER_DIR}"/* 2>/dev/null || true'; \
       echo '      git clone --single-branch --branch tickets "${MCP_TICKETS_URL}" "${REBAR_TRACKER_DIR}" || \'; \
       echo '        echo "mcp: tickets store clone deferred (deploy canary)" >&2'; \
       echo '    fi'; \

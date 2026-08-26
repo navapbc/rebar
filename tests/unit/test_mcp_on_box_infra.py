@@ -408,3 +408,37 @@ def test_mcp_entrypoint_still_execs_the_server_last() -> None:
     tail = [ln for ln in body.splitlines() if "echo '" in ln and "$@" in ln]
     assert tail, "entrypoint must still exec the command"
     assert 'exec "$@"' in tail[-1], "exec must be the LAST action in the entrypoint"
+
+
+def test_mcp_entrypoint_reclones_an_unusable_store_rather_than_trusting_dot_git() -> None:
+    """A `.git` directory is not proof of a usable clone — and the volume PERSISTS.
+
+    The 120s health rollback removed containers mid-clone, repeatedly. Each removal left the
+    named volume holding orphaned objects, an empty `refs/heads`, and HEAD dangling at
+    `refs/heads/.invalid` — 1.5 GB of nothing. Because the entrypoint skipped cloning whenever
+    `.git` merely EXISTED, every later container inherited that poisoned volume, served an
+    empty tracker, and never re-cloned. It could not self-heal.
+
+    Worse, the store then reads as PRESENT, so the absent-store guard does not fire: the server
+    is back to answering `[]` for a tracker that has no tickets and no connection to origin —
+    the exact silent-empty failure this whole effort removed, reintroduced by a broken store
+    rather than a missing one.
+
+    Require a RESOLVABLE HEAD before trusting the clone, and clear the directory before
+    re-cloning so a partial one cannot poison the retry.
+    """
+    text = _DOCKERFILE.read_text(encoding="utf-8")
+    body = text[text.index("echo '#!/bin/sh'") :]
+
+    assert "rev-parse --verify -q HEAD" in body, (
+        "the clone-skip guard must require a resolvable HEAD, not merely that .git exists — "
+        "a container removed mid-clone leaves a .git that is not a usable store"
+    )
+    # And the retry must start clean, or the partial objects survive into the new clone.
+    guard_at = body.index("rev-parse --verify -q HEAD")
+    clone_at = body.index("git clone --single-branch --branch tickets")
+    rm_at = body.index('rm -rf "${REBAR_TRACKER_DIR}"')
+    assert guard_at < rm_at < clone_at, (
+        "order must be: verify HEAD -> clear the directory -> clone; clearing after the clone "
+        "would delete the fresh store, and cloning without clearing inherits the partial one"
+    )
