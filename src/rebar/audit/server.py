@@ -18,12 +18,15 @@ CLI arm turns the resulting ``ModuleNotFoundError`` (raised when it calls ``serv
 from __future__ import annotations
 
 import html
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import rebar
 from rebar.audit.page import build_context
 from rebar.audit.read import audit_trail
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from fastapi import FastAPI
@@ -81,9 +84,23 @@ def _has_audit_data(trail: dict[str, Any]) -> bool:
 def _audited_tickets(repo_root: str | None = None) -> list[dict[str, Any]]:
     """Enumerate the tickets that have audit data, newest-first as ``list_tickets`` returns
     them. Each entry is ``{"id": str, "title": str}``. Best-effort: ``audit_trail`` never
-    raises, so a single ticket's read failure degrades to "no audit data" (excluded)."""
+    raises, so a single ticket's read failure degrades to "no audit data" (excluded).
+
+    The enumeration itself is best-effort for the same reason. Library reads now raise on an
+    ABSENT store rather than reporting it as an empty one (bug
+    antelopine-limivorous-chinchilla), which is right for a driving agent but wrong here: this
+    is a read-only web index, and a server pointed at a repo with no tracker should render an
+    empty page, not return 500. The uninitialized store is caught and degraded; every OTHER
+    failure still propagates, so a genuinely broken store is not silently blanked."""
     out: list[dict[str, Any]] = []
-    for ticket in rebar.list_tickets(repo_root=repo_root):
+    try:
+        tickets = rebar.list_tickets(repo_root=repo_root)
+    except rebar.RebarError as exc:
+        if "not initialized" not in str(exc):
+            raise
+        logger.warning("audit index: no ticket store at this repo root; rendering empty index")
+        return out
+    for ticket in tickets:
         raw_id = ticket.get("ticket_id") or ticket.get("id")
         if not raw_id:
             continue
