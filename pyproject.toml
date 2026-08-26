@@ -79,7 +79,7 @@ Changelog = "https://github.com/navapbc/rebar/blob/main/CHANGELOG.md"
 Security = "https://github.com/navapbc/rebar/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.28.1,<2", "pyjwt[crypto]>=2.10,<3"]
+mcp = ["mcp>=1.28.1,<2", "pyjwt[crypto]>=2.13.0,<3"]
 # Review-bot webhook receiver (epic d251 / story S2). OPTIONAL — never required by
 # core rebar. A thin FastAPI ASGI app (src/rebar/review_bot/) that receives Gerrit
 # webhooks and imports the review kernel as a library (see docs/adr/0007). The
@@ -165,10 +165,10 @@ tracing = [
 # behind guard_import(..., extra="grounding"); a non-adopting client pays nothing.
 grounding = [
     "tree-sitter>=0.21",
-    "tree-sitter-language-pack>=0.2",
+    "tree-sitter-language-pack>=1.15.7",
 ]
 # Code-health metrics use lizard in-process; scc and jscpd are external CLIs.
-metrics = ["lizard>=1.23"]
+metrics = ["lizard>=1.24.0"]
 # Jira Data Center Markdown-to-wiki rendering (story 271c, epic 708d). OPTIONAL —
 # never required by core rebar. `pypandoc-binary` BUNDLES the pandoc executable in its
 # wheel (unlike bare `pypandoc`, which needs a system pandoc), so the DC render path is
@@ -209,7 +209,7 @@ grounding-t2 = [
 # required by core rebar; only operators using the S3 backend install it. The >=0.3.2 floor
 # is the first release carrying the IfNoneMatch per-ref lock that prevents the
 # multiple-bundles corruption.
-s3 = ["git-remote-s3>=0.3.2"]
+s3 = ["git-remote-s3>=0.4.2"]
 dev = [
     "pytest>=8",
     "mcp>=1.28.1,<2",
@@ -224,7 +224,7 @@ dev = [
     # the pre-commit hook, and CI all run the IDENTICAL ruff: ruff changes format/lint
     # rules between releases, so an unpinned floor lets local and CI drift (green here,
     # red there). Bump deliberately (and in lock-step with the pre-commit usage).
-    "ruff==0.16.3",
+    "ruff==0.16.4",
     # Provider wrapper shell is checked identically on every developer and CI host.
     # shellcheck-py 0.11.0.1 packages the upstream ShellCheck 0.11.0 binary.
     "shellcheck-py==0.11.0.1",
@@ -288,7 +288,7 @@ dev = [
     # conflicts fork, because `[eval]` -> inspect-ai -> aiobotocore capped boto3 < 1.40.62;
     # dropping the unused inspect-ai dependency (ticket 9fb3) removed the diamond, so dev and
     # bedrock now resolve together with no declared conflict.
-    "botocore>=1.43.0",
+    "botocore>=1.43.78",
     "boto3>=1.43.0",
 ]
 
