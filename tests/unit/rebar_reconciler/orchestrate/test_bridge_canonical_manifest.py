@@ -10,7 +10,87 @@ from unittest.mock import MagicMock
 import pytest
 
 from rebar_reconciler import __main__ as reconciler_main
-from rebar_reconciler import applier
+from rebar_reconciler import applier, manifest_renderer
+from rebar_reconciler.mutation import (
+    Mutation,
+    MutationAction,
+    MutationDirection,
+    serialize_manifest,
+)
+from rebar_reconciler.operation_outcome import (
+    DelaySource,
+    Disposition,
+    FailureScope,
+    OperationOutcome,
+    ReplaySafety,
+    bound_diagnostics,
+)
+
+# REB-3115 S5 T2 AC1 — the sealed versioned outcomes are ADDITIVE: the canonical
+# mutation array, its bytes, and its hash are UNCHANGED. The canonical hash lives in
+# ``mutation.serialize_manifest`` (sorted array of
+# ``{direction, action, target, payload, provenance}``) and the new ``render_pass_outcomes``
+# section never participates in it.
+_CANONICAL_MUTATIONS = (
+    (
+        MutationDirection.outbound,
+        MutationAction.update,
+        "DIG-41",
+        {"summary": "s", "priority": "High"},
+        {"local_id": "local-41"},
+    ),
+    (
+        MutationDirection.outbound,
+        MutationAction.create,
+        "local-42",
+        {"summary": "new"},
+        {"local_id": "local-42"},
+    ),
+    (
+        MutationDirection.inbound,
+        MutationAction.clean_label,
+        "DIG-7",
+        {"label": "x"},
+        {"local_id": "local-7"},
+    ),
+)
+_CANONICAL_MUTATION_HASH = "ad5bfa390730c7aa763d8187c8dde666d4429cead32f8228a0e53a7e6699f83d"
+
+
+def _canonical_mutation_set() -> list[Mutation]:
+    return [Mutation(d, a, t, dict(p), dict(prov)) for d, a, t, p, prov in _CANONICAL_MUTATIONS]
+
+
+def test_canonical_mutation_hash_is_a_byte_stable_golden() -> None:
+    """AC1: the canonical mutation-array hash over a fixed mutation set is a pinned golden —
+    the sealed additive outcomes section must never perturb these bytes."""
+    _text, digest = serialize_manifest(_canonical_mutation_set())
+    assert digest == _CANONICAL_MUTATION_HASH
+
+
+def test_rendering_pass_outcomes_leaves_the_canonical_mutation_hash_identical() -> None:
+    """AC1: rendering the additive versioned outcomes section is a pure sibling projection —
+    computing it before/after does not change the canonical mutation-array bytes or hash."""
+    muts = _canonical_mutation_set()
+    _text_before, digest_before = serialize_manifest(muts)
+
+    outcome = OperationOutcome(
+        logical_id="local-41",
+        disposition=Disposition.applied,
+        failure_scope=FailureScope.none,
+        replay_safety=ReplaySafety.safe,
+        invocation_count=1,
+        request_count=1,
+        delay_source=DelaySource.none,
+        provider_delay_ms=None,
+        retry_not_before=None,
+        diagnostics=bound_diagnostics([]),
+    )
+    section = manifest_renderer.render_pass_outcomes([outcome])
+    assert section["outcomes"][0]["logical_id"] == "local-41"
+
+    _text_after, digest_after = serialize_manifest(_canonical_mutation_set())
+    assert digest_after == digest_before == _CANONICAL_MUTATION_HASH
 
 
 def test_preview_bypasses_advisory_lock_and_forwards_existing_route(
