@@ -546,7 +546,10 @@ def test_secrets_fetch_failure_aborts_before_touching_the_live_upstream(
     assert "mcp-secrets-fetch-failed" in result.stdout + result.stderr, (
         f"the abort must name the secrets refresh, not masquerade as a generic failure\n{ctx}"
     )
-    assert not any("run-d" in c for c in cmds), (
+    # Match the docker stub's real log shape (`run --name ...`). An earlier version of this
+    # assertion looked for a "run-d" token that the stub never emits, so it passed vacuously
+    # no matter what the script did — it proved nothing.
+    assert not any(c.startswith("run ") and "rebar-mcp-" in c for c in cmds), (
         f"no replacement container may be started against unrefreshed secrets\n{ctx}"
     )
 
@@ -973,4 +976,104 @@ def test_shared_src_change_triggers_both_targets(tmp_path: Path) -> None:
     )
     assert any("compose-build-mcp" in c for c in cmds), (
         f"a shared src/rebar change must ALSO build mcp — independently\n{ctx}"
+    )
+
+
+# ── the mcp block must be reachable when the bot block DEFERS (carefree-swift-scallop) ──
+# The mcp block documents itself as "INDEPENDENT of the review-bot block above", but it sits
+# AFTER that block's `exit 0`. The fixture git stub below deliberately reports a SHARED
+# `src/rebar` change, so BOTH `changed "$BOT_PATHS"` and `changed "$MCP_PATHS"` match — the
+# real-world case. The module's other stub only ever echoes `Dockerfile.mcp`, which makes the
+# bot block unreachable and is exactly why this coupling regressed unnoticed.
+_GIT_STUB_SHARED_SRC = r"""
+args=("$@"); sub=""
+for ((i=0; i<${#args[@]}; i++)); do
+  case "${args[i]}" in -C) ((i++)) ;; -*) ;; *) sub="${args[i]}"; break ;; esac
+done
+case "$sub" in
+  remote) echo "https://github.com/navapbc/rebar.git"; exit 0 ;;
+  fetch) exit 0 ;;
+  rev-parse) cat "__TARGET_FILE__"; exit 0 ;;
+  checkout) exit 0 ;;
+  # `changed()` passes the queried path list after `--`, so answer ONLY when the caller asked
+  # about the path we are pretending changed. A stub that echoes unconditionally makes every
+  # `changed` call true, which silently defeats the very distinction these tests rest on.
+  diff) case "$*" in *__MATCH__*) echo "__CHANGED__" ;; esac; exit 0 ;;
+  *) exit 0 ;;
+esac
+"""
+
+
+def _mcp_box_shared_change(box: dict, in_flight: int) -> None:
+    """Point the box at a SHARED src/rebar change with the review-bot `in_flight` busy."""
+    bin_dir: Path = box["bin_dir"]  # type: ignore[assignment]
+    target_file: Path = box["target_file"]  # type: ignore[assignment]
+    stub = _GIT_STUB_SHARED_SRC.replace("__MATCH__", "src/rebar").replace(
+        "__CHANGED__", "src/rebar/_reads.py"
+    )
+    _stub(bin_dir, "git", stub.replace("__TARGET_FILE__", str(target_file)))
+    # The bot's drain signal: autodeploy reads in_flight from the bot /health on port 8000.
+    (box["dstate"] / "health-8000").write_text(f'{{"in_flight":{in_flight}}}')  # type: ignore[operator]
+
+
+def test_bot_deferral_still_reaches_the_mcp_blue_green_deploy(mcp_box: dict[str, object]) -> None:
+    """A busy review-bot must not silently skip the mcp deploy.
+
+    `autodeploy.sh` defers the review-bot redeploy while a review is in flight — correct, since
+    that path stop-and-drains and would kill the review. But the deferral `exit 0`s the whole
+    SCRIPT, and the mcp blue-green block sits after it, so a shared `src/rebar` change (which
+    matches BOTH triggers) never deploys the mcp service while the bot is busy.
+
+    That is not a theoretical ordering nit. With a single-worker review bot, `in_flight > 0` is
+    the normal steady state under any pipelining, so ~100% of ticks defer: two commits merged
+    at 06:47Z were still not running 40 minutes later, and one of them was the mcp deploy fix
+    itself. The mcp path is a pointer-swap that never kills an in-flight op (that is the stated
+    reason it exists), so it has no reason to wait on the bot's drain.
+    """
+    _mcp_box_shared_change(mcp_box, in_flight=2)
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+
+    result = _run(mcp_box)
+    cmds = _commands(mcp_box)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    # The bot deferral itself must still happen — this fix must not disable the drain gate.
+    assert "AUTODEPLOY_DEFERRED" in result.stdout + result.stderr, (
+        f"the review-bot drain gate must still defer while a review is in flight\n{ctx}"
+    )
+    # ...and the mcp deploy must proceed regardless.
+    assert any(c.startswith("run ") and "rebar-mcp-" in c for c in cmds), (
+        f"a bot deferral must NOT skip the mcp blue-green deploy — the mcp block is documented "
+        f"as independent and never kills an in-flight op\n{ctx}"
+    )
+    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+        f"the mcp upstream must be flipped to the newly deployed container\n{ctx}"
+    )
+
+
+def test_bot_deferral_is_unaffected_when_only_bot_paths_changed(
+    mcp_box: dict[str, object],
+) -> None:
+    """The drain gate keeps its behaviour when there is no mcp work to do.
+
+    Guards the opposite over-correction: the fix must scope the deferral to the bot block, not
+    remove it. With the bot busy and nothing matching MCP_PATHS, the tick must still defer and
+    must not deploy anything.
+    """
+    bin_dir: Path = mcp_box["bin_dir"]  # type: ignore[assignment]
+    target_file: Path = mcp_box["target_file"]  # type: ignore[assignment]
+    # A path in BOT_PATHS but NOT in MCP_PATHS, so the bot block runs and the mcp block does not.
+    bot_only = _GIT_STUB_SHARED_SRC.replace("__MATCH__", "Dockerfile.reviewbot").replace(
+        "__CHANGED__", "infra/compose/Dockerfile.reviewbot"
+    )
+    _stub(bin_dir, "git", bot_only.replace("__TARGET_FILE__", str(target_file)))
+    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":1}')  # type: ignore[operator]
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    before = upstream.read_bytes()
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert upstream.read_bytes() == before, (
+        f"nothing matching MCP_PATHS changed, so the upstream must be untouched\n{ctx}"
     )
