@@ -224,6 +224,14 @@ def mcp_box(tmp_path: Path) -> dict[str, object]:
     (deploy_repo / "infra" / "compose").mkdir(parents=True)
     (deploy_repo / "infra" / "scripts").mkdir(parents=True)
     (deploy_repo / "infra" / "compose" / ".env").write_text("PREEXISTING=1\n")
+    # The mcp deploy path re-materializes its SSM-sourced secrets before starting the new
+    # container (receptive-houndy-nilgai), so the fake box must carry the script the real box
+    # has -- same stub the bot-path fixtures use. Without it the deploy aborts at
+    # `mcp-secrets-fetch-failed` before any of the blue-green assertions are reached.
+    (deploy_repo / "infra" / "scripts" / "fetch-secrets.sh").write_text(
+        "#!/usr/bin/env bash\nexit 0\n"
+    )
+    (deploy_repo / "infra" / "scripts" / "fetch-secrets.sh").chmod(0o755)
     mirror = tmp_path / "mirror"
     (mirror / ".git").mkdir(parents=True)
 
@@ -504,6 +512,45 @@ def test_unhealthy_new_container_leaves_old_upstream_current(mcp_box: dict[str, 
     )
 
 
+def test_secrets_fetch_failure_aborts_before_touching_the_live_upstream(
+    mcp_box: dict[str, object],
+) -> None:
+    """An SSM failure must abort the mcp deploy with the OLD container still serving.
+
+    The mcp path re-materializes its SSM-sourced secrets before starting the replacement
+    container (receptive-houndy-nilgai: three PATs were rotated into SSM, nothing regenerated
+    the on-disk tokens file, and every new container failed closed on the stale copy). This
+    pins the ORDERING that makes that safe: if the refresh fails, the deploy stops while the
+    old container is still live, rather than replacing a working container using stale
+    secrets or leaving the endpoint down.
+    """
+    deploy_repo = Path(mcp_box["env"]["DEPLOY_REPO"])  # type: ignore[index]
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    before = upstream.read_bytes()
+
+    # Make the refresh fail the way an unreachable SSM would.
+    fetch = deploy_repo / "infra" / "scripts" / "fetch-secrets.sh"
+    fetch.write_text("#!/usr/bin/env bash\nexit 1\n")
+    fetch.chmod(0o755)
+
+    result = _run(mcp_box)
+    cmds = _commands(mcp_box)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert upstream.read_bytes() == before, (
+        f"a secrets-refresh failure must leave the OLD include byte-identical\n{ctx}"
+    )
+    assert "nginx-reload" not in cmds, (
+        f"the upstream must never be flipped when the secrets refresh failed\n{ctx}"
+    )
+    assert "mcp-secrets-fetch-failed" in result.stdout + result.stderr, (
+        f"the abort must name the secrets refresh, not masquerade as a generic failure\n{ctx}"
+    )
+    assert not any("run-d" in c for c in cmds), (
+        f"no replacement container may be started against unrefreshed secrets\n{ctx}"
+    )
+
+
 def test_nginx_reload_failure_restores_the_previous_upstream(tmp_path: Path) -> None:
     """If `nginx -s reload` fails the flip, the previous include must be restored byte-identical
     and the new container removed."""
@@ -518,6 +565,11 @@ def test_nginx_reload_failure_restores_the_previous_upstream(tmp_path: Path) -> 
     (deploy_repo / "infra" / "compose").mkdir(parents=True)
     (deploy_repo / "infra" / "scripts").mkdir(parents=True)
     (deploy_repo / "infra" / "compose" / ".env").write_text("X=1\n")
+    # Same reason as the mcp_box fixture: the deploy path re-materializes SSM secrets first.
+    (deploy_repo / "infra" / "scripts" / "fetch-secrets.sh").write_text(
+        "#!/usr/bin/env bash\nexit 0\n"
+    )
+    (deploy_repo / "infra" / "scripts" / "fetch-secrets.sh").chmod(0o755)
     mirror = tmp_path / "mirror"
     (mirror / ".git").mkdir(parents=True)
     cmd_log = tmp_path / "cmd-log"
