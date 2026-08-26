@@ -98,8 +98,15 @@ def delete_one(mutation: dict, client: TicketTransport) -> None:
     # The "close = transition to Closed" model belongs to a different bridge
     # surface that we don't use here — delete the Jira issue directly to
     # achieve the desired post-state ("issue gone from Jira").
+    #
+    # REB-3115 S5 T1: the obsolete whole-operation ``_call_with_retry`` wrapper is
+    # removed — retry is OWNED by the adapter, not duplicated here. The DC transport
+    # retries connection errors internally (``_with_connection_retry``); the Cloud
+    # transport deliberately issues a delete SINGLE-ATTEMPT (a delete is non-idempotent
+    # on a timeout, so a whole-operation retry could re-issue a delete that already
+    # landed). Call the transport directly and keep the 404-is-success tolerance.
     try:
-        _call_with_retry(client.delete_issue, mutation.get("key"))
+        client.delete_issue(mutation["key"])
     except JiraAPIError as exc:
         if is_not_found(exc):
             return  # already-gone is the goal of a delete mutation

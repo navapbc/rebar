@@ -178,14 +178,20 @@ def _make_inbound_update_mutation_with_rebar_id_label(mut_mod):
     )
 
 
-def test_apply_raises_for_unauthorized_rebar_id_label_mutation(applier, mut_mod, errors_mod):
+def test_apply_raises_for_unauthorized_rebar_id_label_mutation(applier, errors_mod):
     """BEHAVIORAL GREEN: apply() with inbound_update + rebar-id-* label mutation raises
     RebarIdLabelWriteError.
 
     After wiring _audit_rebar_id_label_writes into apply(), this call must raise.
     (Before wiring: this test fails — that is the RED state.)
     """
-    mut = _make_inbound_update_mutation_with_rebar_id_label(mut_mod)
+    # apply() selects typed dispatch by an isinstance check against the CANONICAL
+    # mutation module (sys.modules['rebar_reconciler.mutation']); REB-3115 S5 T1 removed
+    # the class-name/duck-typed fallback. Build the Mutation from that same canonical
+    # module so it is the declared type apply() dispatches — not a forked identity loaded
+    # under a private key.
+    canonical_mut = sys.modules.get("rebar_reconciler.mutation") or applier._load_mutation_module()
+    mut = _make_inbound_update_mutation_with_rebar_id_label(canonical_mut)
     # Use applier.RebarIdLabelWriteError to avoid importlib module-identity mismatch.
     with pytest.raises(applier.RebarIdLabelWriteError):
         applier.apply(mut, client=None)

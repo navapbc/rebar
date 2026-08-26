@@ -19,7 +19,7 @@ import importlib.util
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 # ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
 # _loader.py). Import it normally when package context exists, else bootstrap it
@@ -75,6 +75,19 @@ def _load_mutation_module():
     if _MutationModule is None:
         _MutationModule = lazy_load(_MUTATION_KEY, "mutation.py")
     return _MutationModule
+
+
+@runtime_checkable
+class MutationShape(Protocol):
+    """Declared shape of a typed Mutation (REB-3115 S5 T1): a typed Mutation carries
+    ``direction`` and ``action`` attributes. Dispatch recognizes typed mutations through
+    this explicit declared protocol rather than class identity, so it stays correct across
+    the reconciler's dual mutation module keys (a class-identity ``isinstance`` would miss
+    cross-loaded Mutations). A batch dict lacks these attributes and routes to the batch path.
+    """
+
+    direction: object
+    action: object
 
 
 def _load_errors_module():
