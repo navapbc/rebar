@@ -17,7 +17,9 @@ optionality wiring — are preserved, now checked against the reusable that owns
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -1203,6 +1205,105 @@ def test_platform_compat_suite_covers_the_core_os_sensitive_seams() -> None:
         "(a rename, or a fragment edit) silently removes its platform coverage from CI on a green "
         "build. Restore the match or update the fragment list deliberately."
     )
+
+
+def _render_default_suite_body(body: str, os_name: str, python_version: str, temp: str) -> str:
+    """Resolve the GitHub ``${{ ... }}`` expressions in the default-suite run body for one cell.
+
+    The Verified gate never hands this text to a shell verbatim — Actions resolves the
+    expressions first — so to execute the lane's REAL exit-code logic under bash we resolve the
+    same handful of expressions ourselves. An unrecognised expression raises rather than passing
+    an unrendered ``${{...}}`` to bash, so a newly-added expression cannot silently slip past
+    this oracle.
+    """
+
+    def resolve(match: re.Match[str]) -> str:
+        inner = " ".join(match.group(1).split())
+        if inner == "matrix.os == 'macos-latest' && '3' || '4'":
+            return "3" if os_name == "macos-latest" else "4"
+        if inner == "runner.temp":
+            return temp
+        if inner == "matrix.os":
+            return os_name
+        if inner == (
+            "!startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' "
+            "&& '--cov=rebar --cov-report=term-missing:skip-covered' || ''"
+        ):
+            return (
+                "--cov=rebar --cov-report=term-missing:skip-covered"
+                if (not os_name.startswith("macos") and python_version == "3.13")
+                else ""
+            )
+        raise AssertionError(f"unrendered workflow expression: {match.group(0)!r}")
+
+    return re.sub(r"\$\{\{(.*?)\}\}", resolve, body)
+
+
+def test_macos_default_suite_lane_passes_when_platform_compat_collects_nothing(
+    tmp_path: Path,
+) -> None:
+    """A stale-tree macOS cell (0 platform_compat nodes -> pytest rc 5) must not fail the gate.
+
+    The Verified gate runs THIS workflow from trusted main against the raw patchset tree
+    (reusable-workflow ref binding). A patchset whose tree predates the ``tests/conftest.py``
+    platform_compat auto-marker (story omphacite-desertlike-coney) carries zero nodes with that
+    mark, so the
+    macOS selection ``-m "platform_compat and not external"`` collects nothing and pytest exits
+    5. That is a provenance artifact, not a defect in the change — the ubuntu cells (whole-suite,
+    marker-independent) still fully exercise it — so the macOS lane must treat an empty
+    collection as pass. Every OTHER cell selects the whole suite, where rc 5 is a real
+    empty-suite failure that MUST stay red. This runs the lane's real shell with a stub
+    ``pytest`` that exits 5, per cell.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(_read(_BAT_YML))
+    steps = workflow["jobs"]["test"]["steps"]
+    body = next(step for step in steps if step.get("name", "").startswith("Run the default suite"))[
+        "run"
+    ]
+
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir()
+    stub = stub_bin / "pytest"
+    stub.write_text("#!/usr/bin/env bash\nexit 5\n", encoding="utf-8")
+    stub.chmod(0o755)
+
+    def run_lane(os_name: str, python_version: str) -> int:
+        rendered = _render_default_suite_body(body, os_name, python_version, str(tmp_path))
+        marks = (
+            "platform_compat and not external"
+            if os_name == "macos-latest"
+            else "not integration and not external"
+        )
+        proc = subprocess.run(
+            ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", rendered],
+            env={
+                "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+                "DEFAULT_SUITE_MARKS": marks,
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return proc.returncode
+
+    assert run_lane("macos-latest", "3.13") == 0, (
+        "the macOS default-suite lane still FAILS when the platform_compat selection collects "
+        "nothing (pytest rc 5). A patchset whose tree predates the conftest auto-marker has no "
+        "platform_compat nodes, so this spuriously blocks Verified even though the ubuntu cells "
+        "fully test the change. Tolerate rc 5 on the macOS cell only."
+    )
+    for ubuntu_cell in (
+        ("ubuntu-latest", "3.11"),
+        ("ubuntu-latest", "3.12"),
+        ("ubuntu-latest", "3.13"),
+    ):
+        assert run_lane(*ubuntu_cell) == 5, (
+            f"the {ubuntu_cell} default-suite lane must still FAIL on an empty collection "
+            "(rc 5): there the selection is the whole suite, so nothing collected is a real "
+            "broken-suite signal and must not be masked."
+        )
 
 
 def test_optionality_suite_still_runs_in_the_default_selection() -> None:
