@@ -120,6 +120,18 @@ Side-effect-free stdlib `argparse` factories define each command grammar. Runtim
 
 ADR 0100 remains the historical rationale for this boundary, including the canonical, compatibility, hidden, and retired spelling taxonomy. The implementation preserves its stdlib-only startup and pre-operation help invariants.
 
+### Implemented reconciler operation coordination (RP-03)
+
+[ADR 0103](adr/0103-reconciler-operation-coordination.md) records the operation-coordination boundary implemented by epic RP-03 (`unfearful-dejected-verdin`). The outbound mutate path is a one-way dependency chain — **planner → coordinator → adapter** — and each layer depends only on the one below it, never upward:
+
+- **Planner.** The differ/planning layer produces provider-neutral `TicketPlan`s (the desired-state deltas arbitrated by the snapshot, three-way-merge, and echo-suppression contracts of ADRs 0004/0026/0029). It decides *what* the desired state is and emits typed mutations; it holds no retry, fuse, or transport knowledge.
+- **Coordinator.** `rebar_reconciler.batch_dispatch.coordinate_and_fuse` (over `rebar_reconciler.coordinator.coordinate`) owns *how* one logical operation is invoked: the single bounded `retry_budget.RetryBudget` (at most three physical invocations and 15s cumulative sleep), the observe-before-replay decision after an ambiguous commit, and the pass fuse that contains same-scope failure. It routes each `(direction, action)` to exactly one typed owner (`route_for`) with no dual-send and no class-name/duck dispatch, and projects results onto the five-bucket `CutoverReport`.
+- **Adapter.** The provider adapter (`adapters/jira`, `adapters/jira_datacenter`) performs a single physical, as-atomic-as-the-provider-allows operation and reports a provider-neutral `AtomicSignal`/`OperationOutcome`. It owns venue serialization (Cloud ADF vs DC wiki on the description path; summary is venue-agnostic) but **no retry policy, no fuse, and no cross-operation state**.
+
+**Versioned output.** One logical operation resolves to one `operation_outcome.OperationOutcome` — a frozen, provider-neutral value with a stable `logical_id` across physical invocations, bounded and allowlisted diagnostics (routed through the ADR 0041 sanitization seam), and canonical bytes produced only through the `rebar._store.canonical` seam, so equivalent outcomes serialize byte-identically. Outcomes carry an additive, versioned envelope; the eleven `Disposition` values project onto the five stable pass buckets (`applied, recovered, deferred, failed, skipped`) that sum exactly to the mutation count. Adding a field is additive and never changes existing mutation bytes or the canonical hash.
+
+**Future adapter obligations.** A new provider adapter joining this boundary must: expose each supported mutation as a single typed operation returning a provider-neutral signal (no whole-operation retry loop of its own, no `_best_effort` write-swallowing); support the observe step so an ambiguous commit can be resolved by re-observation rather than blind replay (`ReplaySafety.forbidden` for `commit_unknown`); never delete remote work to undo a partial pass (rollback is code/routing reversion plus re-observation); and leave the retry budget, fuse, and pass tally to the coordinator. These obligations are enforced behaviourally by the route census (`tests/unit/rebar_reconciler/mutate/test_coordinator_route_census.py`) and the portable, credential-free Cloud/DC coordinator interface suite (`tests/interfaces/store/test_reconciler_coordinator.py`).
+
 ### Two writers, one store
 
 rebar's git-backed event store has **two independent writers** that must not be
