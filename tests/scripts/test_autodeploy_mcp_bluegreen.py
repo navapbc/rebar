@@ -551,6 +551,84 @@ def test_secrets_fetch_failure_aborts_before_touching_the_live_upstream(
     )
 
 
+def test_storeless_container_is_not_promoted_when_a_store_is_expected(
+    mcp_box: dict[str, object],
+) -> None:
+    """A container that is UP but has no ticket store must not take the upstream.
+
+    A 200 from /health used to mean only "the process is listening", so a container serving
+    NO store passed the readiness gate identically to a healthy one -- which is how a
+    storeless deployment went unobserved for weeks (mobile-groovy-badger). The gate now reads
+    the `store` object /health reports.
+    """
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    before = upstream.read_bytes()
+    # New container comes up healthy, but reports a store it was SUPPOSED to have and lacks.
+    (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
+        '{"in_flight":0,"store":{"path":"/var/gerrit/site/mcp-tickets",'
+        '"present":false,"expected":true}}'
+    )
+
+    result = _run(mcp_box)
+    cmds = _commands(mcp_box)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp-store-missing" in result.stdout + result.stderr, (
+        f"a storeless container must be refused by name, not silently promoted\n{ctx}"
+    )
+    assert upstream.read_bytes() == before, (
+        f"the OLD upstream must stay live and byte-identical\n{ctx}"
+    )
+    assert "nginx-reload" not in cmds, f"the upstream must not be flipped\n{ctx}"
+    assert any("rm-f" in c for c in cmds), f"the refused container must be removed\n{ctx}"
+
+
+def test_storeless_container_IS_promoted_when_no_store_is_expected(
+    mcp_box: dict[str, object],
+) -> None:
+    """The safety property: absence is only a fault for a deployment that declared a store.
+
+    This is the half that makes the gate landable on a box with no store yet. Gating on
+    `present` alone would refuse to promote a perfectly good container and take the endpoint
+    down in order to report a non-problem.
+    """
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
+        '{"in_flight":0,"store":{"path":"/app/.tickets-tracker","present":false,"expected":false}}'
+    )
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp-store-missing" not in result.stdout + result.stderr, (
+        f"a deployment that never declared a store must not be blocked by the gate\n{ctx}"
+    )
+    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+        f"the healthy container must still be promoted\n{ctx}"
+    )
+
+
+def test_health_without_a_store_field_still_promotes(mcp_box: dict[str, object]) -> None:
+    """Mixed-version safety: an OLDER container's /health predates the `store` field.
+
+    It reports neither key, so the gate must treat it as not-expected and promote. Without
+    this, the first deploy after the field is added would refuse every container still
+    running the previous image.
+    """
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}')  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp-store-missing" not in result.stdout + result.stderr, (
+        f"a /health that predates the store field must not be blocked\n{ctx}"
+    )
+    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+        f"the container must still be promoted\n{ctx}"
+    )
+
+
 def test_nginx_reload_failure_restores_the_previous_upstream(tmp_path: Path) -> None:
     """If `nginx -s reload` fails the flip, the previous include must be restored byte-identical
     and the new container removed."""
@@ -773,6 +851,13 @@ def _parse_compose_mcp_env_and_volumes() -> tuple[dict[str, str], list[str]]:
     return env, volumes
 
 
+# Compose env keys that are carried into the blue-green container by `--env-file` alone.
+# Their compose spelling is `${KEY:-}` — compose resolves that from the project-dir .env,
+# but a bare `docker run` does NOT, so re-spelling them as `-e` would overwrite the real
+# value with an empty string.
+_ENV_FILE_ONLY = frozenset({"MCP_TICKETS_PAT"})
+
+
 def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> None:
     """`mcp_run_new` must reproduce the compose `mcp:` service env/mounts EXACTLY. /health is
     auth-independent (mounted outside the auth middleware), so it cannot catch a wrong
@@ -795,17 +880,34 @@ def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> N
     assert len(volumes) >= 2, f"compose parse must recover both :ro secret mounts (got {volumes})"
 
     for key, value in env.items():
+        if key in _ENV_FILE_ONLY:
+            # Deliberately NOT spelled as `-e` here: its value lives only in the
+            # SSM-materialized .env, and the deploy shell does not interpolate from that
+            # file, so a `-e KEY=${KEY:-}` would resolve EMPTY and CLOBBER the .env value.
+            # `--env-file` (asserted below) is the carrier; pin the exclusion so a future
+            # edit that adds the flag has to come here and re-reason about it.
+            assert f"-e {key}=" not in run_line, (
+                f"`{key}` must reach the container via --env-file, not `-e` (an `-e` with an "
+                f"un-interpolated compose default would blank the .env value)\n{ctx}"
+            )
+            continue
         assert f"-e {key}={value}" in run_line, (
             f"docker run must carry compose env `{key}={value}`\n{ctx}"
         )
-    # both secret mounts, read-only, by their in-container path.
+    # The secret mounts, read-only, by their in-container path; plus the persistent named
+    # data volumes (no :ro suffix) by their `name:path` pair.
     for vol in volumes:
         parts = vol.split(":")
-        assert parts[-1] == "ro", f"compose mcp volume must be read-only: {vol}"
-        container_path = parts[-2]
-        assert f"{container_path}:ro" in run_line, (
-            f"docker run must bind-mount `{container_path}` read-only (compose parity)\n{ctx}"
-        )
+        if parts[-1] == "ro":
+            container_path = parts[-2]
+            assert f"{container_path}:ro" in run_line, (
+                f"docker run must bind-mount `{container_path}` read-only (compose parity)\n{ctx}"
+            )
+        else:
+            assert len(parts) == 2, f"unrecognised compose mcp volume spec: {vol}"
+            assert vol in run_line, (
+                f"docker run must mount the named volume `{vol}` (compose parity)\n{ctx}"
+            )
     assert "--env-file" in run_line and ".env" in run_line, (
         f"docker run must load the .env env-file\n{ctx}"
     )
