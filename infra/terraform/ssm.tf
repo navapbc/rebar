@@ -66,6 +66,14 @@ locals {
     "/rebar/prod/mcp-client-pat-copilot",
     "/rebar/prod/mcp-client-pat-codex",
     "/rebar/prod/mcp-client-pat-claude",
+    # The MCP server's ticket-store PAT. A fine-grained GitHub PAT with contents:write on the
+    # tickets repo ONLY — the mcp container's entrypoint uses it (via a URL-scoped git credential
+    # helper materialized from the container .env, see fetch-secrets.sh's mcp-tickets-pat ->
+    # MCP_TICKETS_PAT mapping) to clone the `tickets` branch into REBAR_TRACKER_DIR and push the
+    # ticket events its tools write. OPTIONAL at the container boundary: fetch-secrets.sh reads it
+    # via get_param_optional and a blank slot only DEFERS the clone (the container still boots).
+    # Operator populates this SecureString.
+    "/rebar/prod/mcp-tickets-pat",
   ]
 }
 

@@ -59,8 +59,11 @@ git -C "$DIR" config user.name "$NAME"
 # this bot wrote was stamped author "Unknown"/author_id null — and `_seam` gates signing on
 # `if author_id and signing_key`, so a null author_id ALSO skipped signing entirely, before the
 # key was ever consulted. 8880 events were written unsigned and unattributed this way.
-# --global is correct HERE (unlike the repo-local line above): this container is dedicated to
-# the review bot, so there is no other clone for a global identity to leak into.
+# --global is correct HERE (unlike the repo-local line above), and the invariant that makes it
+# correct is ONE CLONE PER CONTAINER -- not "this is the review bot". This script is now reused
+# by the mcp container for its own ticket store (it takes the target dir as $1), which likewise
+# holds exactly one clone, so there is still nothing for a global identity to leak into. State
+# it that way so the next caller can check the property rather than infer it from the name.
 git config --global user.email "$EMAIL"
 git config --global user.name "$NAME"
 

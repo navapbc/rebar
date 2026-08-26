@@ -27,6 +27,7 @@ _SEED = _REPO / "infra" / "nginx" / "mcp-upstream.conf"
 _MATERIALIZE = _REPO / "infra" / "scripts" / "materialize-mcp-upstream.sh"
 _COMPOSE_UP = _REPO / "infra" / "scripts" / "compose-up.sh"
 _AUTODEPLOY = _REPO / "infra" / "scripts" / "autodeploy.sh"
+_FETCH_SECRETS = _REPO / "infra" / "scripts" / "fetch-secrets.sh"
 
 # The app's bounded SIGTERM grace, single-sourced in the module — the compose
 # stop_grace_period must cover it.
@@ -237,3 +238,124 @@ def test_mcp_bluegreen_refreshes_ssm_secrets_before_starting_the_new_container()
         "a fetch-secrets failure in the mcp path must abort the deploy with a named error, "
         "so the old container keeps serving instead of being replaced using stale secrets"
     )
+
+
+# --------------------------------------------------------------------------- ticket store
+
+# The MCP tools read AND WRITE a rebar ticket store, but `.dockerignore` excludes
+# `.tickets-tracker` (and `.git`), so one can never be baked into the image. Without an
+# explicitly configured tracker dir the path resolved to the WORKDIR and every tool failed
+# "/app/.tickets-tracker not found". These pin the provisioning wiring that fixes it:
+# a persistent external volume, the tracker-dir env pointing at it, and an entrypoint that
+# clones the `tickets` branch there and converges it into a WRITABLE store.
+#
+# Deliberately NOT pinned: any "fails when the PAT is missing" behaviour. The posture is
+# SOFT by design — no PAT (or a failed clone) defers provisioning and the container still
+# boots, exactly like the review-bot's deploy canary.
+
+_MCP_TICKETS_DIR = "/var/gerrit/site/mcp-tickets"
+_MCP_TICKETS_VOLUME = "gerrit_mcp_tickets"
+
+
+def test_compose_mcp_mounts_the_tracker_volume_and_points_rebar_at_it() -> None:
+    """The `mcp` service mounts the persistent ticket store and sets REBAR_TRACKER_DIR to
+    that same in-container path, so the tools do not fall back to the WORKDIR."""
+    doc = yaml.safe_load(_COMPOSE.read_text())
+    svc = doc["services"]["mcp"]
+    assert svc["environment"]["REBAR_TRACKER_DIR"] == _MCP_TICKETS_DIR
+    assert f"{_MCP_TICKETS_VOLUME}:{_MCP_TICKETS_DIR}" in svc["volumes"]
+
+
+def test_compose_mcp_passes_the_tickets_pat_through() -> None:
+    """The clone credential reaches the container as MCP_TICKETS_PAT (blank is fine)."""
+    doc = yaml.safe_load(_COMPOSE.read_text())
+    assert "MCP_TICKETS_PAT" in doc["services"]["mcp"]["environment"]
+
+
+def test_compose_declares_the_mcp_tickets_volume_external() -> None:
+    """external:true so `docker compose down -v` cannot destroy accumulated ticket events."""
+    doc = yaml.safe_load(_COMPOSE.read_text())
+    assert doc["volumes"][_MCP_TICKETS_VOLUME]["external"] is True
+
+
+def test_compose_up_creates_the_mcp_tickets_site_subdir() -> None:
+    """SITE_SUBDIRS is the single source of truth for the external volumes; config-check.sh
+    check 5 diffs it against the compose file, so a compose volume without this entry fails
+    CI (the incident-2731 drift class)."""
+    text = _COMPOSE_UP.read_text()
+    m = re.search(r'^SITE_SUBDIRS="([^"]*)"', text, re.MULTILINE)
+    assert m, "SITE_SUBDIRS assignment not found"
+    assert "mcp-tickets" in m.group(1).split()
+
+
+def test_dockerfile_mcp_entrypoint_provisions_the_ticket_store() -> None:
+    """The image ships an ENTRYPOINT that clones the `tickets` branch into the tracker dir
+    and converges it into a writable store via the SHARED review-bot ensure script."""
+    text = _DOCKERFILE.read_text()
+    assert re.search(r"^ENTRYPOINT\s+\[", text, re.MULTILINE), "no ENTRYPOINT declared"
+    assert f"REBAR_TRACKER_DIR={_MCP_TICKETS_DIR}" in text
+    assert "git clone --single-branch --branch tickets" in text
+    # Reused, not forked: the review-bot's converge script, invoked with the target dir.
+    assert "reviewbot-ensure-tickets.sh" in text
+    # ...and the server is still the container's command.
+    assert 'CMD ["rebar-mcp"]' in text
+
+
+def test_autodeploy_mcp_run_new_mounts_the_same_ticket_store() -> None:
+    """Blue-green containers bypass compose (`docker run`), so the volume + tracker dir must
+    be spelled out there too or a deployed container serves a store that does not exist."""
+    script = _AUTODEPLOY.read_text(encoding="utf-8")
+    start = script.index("mcp_run_new() {")
+    body = script[start : script.index("\n}", start)]
+    assert f"REBAR_TRACKER_DIR={_MCP_TICKETS_DIR}" in body
+    assert f"{_MCP_TICKETS_VOLUME}:{_MCP_TICKETS_DIR}" in body
+
+
+def test_fetch_secrets_materializes_the_mcp_tickets_pat() -> None:
+    """The PAT is read from the SSM leaf via the OPTIONAL helper (blank ⇒ clone deferred)
+    and emitted into the generated .env the mcp container reads."""
+    text = _FETCH_SECRETS.read_text()
+    assert "get_param_optional mcp-tickets-pat" in text
+    assert "MCP_TICKETS_PAT=${mcp_tickets_pat}" in text
+
+
+def test_mcp_tickets_pat_falls_back_to_the_reviewbot_credential() -> None:
+    """An empty dedicated slot must not leave the mcp store unprovisioned.
+
+    Both credentials do the same thing against the same target -- clone and push the
+    `tickets` branch of the same repo. Without this fallback the endpoint keeps reporting an
+    uninitialized store purely for want of a second copy of an equivalent secret already
+    sitting in SSM.
+
+    Two properties are pinned, and the ORDER matters: the dedicated slot is read first so it
+    still wins when set (an operator can scope mcp separately later with no code change), and
+    the fallback must be read AFTER `reviewbot_tickets_pat` is assigned, or it would silently
+    substitute an empty string and look like it worked.
+    """
+    script = _FETCH_SECRETS.read_text(encoding="utf-8")
+
+    assert 'mcp_tickets_pat="$(get_param_optional mcp-tickets-pat)"' in script, (
+        "the dedicated slot must remain the preferred source"
+    )
+    assert '[ -z "${mcp_tickets_pat}" ] && [ -n "${reviewbot_tickets_pat}" ]' in script, (
+        "an empty dedicated slot must fall back to the review-bot tickets PAT"
+    )
+    assert script.index('reviewbot_tickets_pat="$(get_param_optional') < script.index(
+        '[ -z "${mcp_tickets_pat}" ]'
+    ), "the fallback must come AFTER reviewbot_tickets_pat is read, or it substitutes empty"
+
+
+def test_static_tokens_have_no_such_fallback() -> None:
+    """The auth boundary stays fail-closed -- the store fallback must not spread to it.
+
+    A missing bearer store must never result in serving an unauthenticated endpoint; a
+    missing ticket clone is a soft degrade. Different risks, deliberately different postures.
+    This pins that the convenience added for the latter was not copied to the former.
+    """
+    script = _FETCH_SECRETS.read_text(encoding="utf-8")
+
+    for client in ("copilot", "codex", "claude"):
+        assert f'[ -z "${{mcp_pat_{client}}}" ] &&' not in script, (
+            f"mcp-client-pat-{client} must NOT gain a fallback; the static-token file is an "
+            "auth boundary and fails closed by design"
+        )
