@@ -640,9 +640,16 @@ jobs:
           # Repository-policy tests inspect this immutable checkout's text/AST, so their
           # result cannot vary by OS or Python. Keep them in the existing primary Ubuntu
           # 3.13 process (which also owns coverage) and omit only their duplicate executions
-          # from the other three cells. Both expression branches are intentionally non-empty
-          # shell strings; this changes no job, runner, setup, collection, or fixture session.
-          DEFAULT_SUITE_MARKS: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' && 'not integration and not external' || 'not integration and not external and not repo_policy' }}
+          # from the other Ubuntu cells. macOS runs ONLY the platform_compat subset (story
+          # ci-runtime-round2): the macOS runner is ~3.7x slower per test (process-spawn +
+          # git-store fixture overhead), and its unique value is platform behaviour, not test
+          # breadth — the CPU-bound policy/AST scanners are equal/faster on Linux, so running
+          # the full suite there only lengthened the gate's critical path. The platform_compat
+          # subset (flock/mkdir lock, atomic rename, gtimeout, cross-process git contention) +
+          # the integration tier below preserve full macOS platform coverage on cheap fixtures.
+          # All three non-empty branches are intentional shell strings; this changes no runner,
+          # setup, or fixture session, only which nodes each cell selects.
+          DEFAULT_SUITE_MARKS: ${{ matrix.os == 'macos-latest' && 'platform_compat and not external' || (matrix.python-version == '3.13' && 'not integration and not external' || 'not integration and not external and not repo_policy') }}
         # The per-test HANG GUARD lives in [tool.pytest.ini_options] (`timeout = 300`,
         # `timeout_method = "thread"`, story bold-abeyant-indri) — NOT on this command line.
         # timeout-minutes above only bounds the whole job, so a single deadlocked test stays

@@ -185,6 +185,37 @@ def pytest_configure(config: pytest.Config) -> None:
 
 _EXTERNAL_DIR = _REPO_ROOT / "tests" / "external"
 
+# Path fragments (matched against each item's repo-relative POSIX path) that select
+# the OS-sensitive tests forming the reduced macOS compatibility suite (story
+# ci-runtime-round2). The full suite runs on Linux; macOS runs only `platform_compat`
+# + the `integration` tier (which already exercises cross-process locking end-to-end),
+# because the macOS runner is ~3.7x slower per test (process-spawn + git-store fixture
+# overhead) yet its unique value is platform behaviour, not extra test breadth. The
+# seams whose behaviour genuinely differs between Darwin and Linux: advisory/stale file
+# locking (flock/fcntl/mkdir), atomic directory/rename semantics, subprocess timeout
+# (gtimeout vs timeout), and cross-process git contention. Keyed on path (not per-file
+# markers) so the selection lives in ONE reviewable place.
+_PLATFORM_COMPAT_PATH_FRAGMENTS = (
+    "/store/",  # store lock / atomic-rename / merge-recovery (unit + interfaces)
+    "test_lock",  # advisory / stale / retry / age-ceiling / holder-labelling lock tests
+    "test_write_lock",
+    "test_stamped_lock",
+    "_ref_lock",
+    "test_timeout_budget",
+    "test_snapshot",
+    "test_repo_snapshot",
+    "test_fetch_common_dir_coordination",
+    "_store_concurrency",
+    "test_git_contention",
+    "test_event_append_index_lock",
+    "test_atomic_ticket_dir_create",
+    "test_stale_lock_reclaim",
+)
+
+
+def _is_platform_compat_path(relative_posix: str) -> bool:
+    return any(fragment in relative_posix for fragment in _PLATFORM_COMPAT_PATH_FRAGMENTS)
+
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Confine the ``external`` tier to tests/external/ (bug 4a48-6dd5-aef3-4c8e).
@@ -200,6 +231,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         NOT under tests/external/ — a live/billable test must never hide in
         another tier. This is the one unambiguous confinement rule; it does not
         require a tier marker on the many existing non-external tests.
+
+    Also auto-applies the ``platform_compat`` marker by path (the reduced macOS
+    compatibility suite; see ``_PLATFORM_COMPAT_PATH_FRAGMENTS``).
     """
     misplaced: list[str] = []
     for item in items:
@@ -212,6 +246,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker("external")
         elif item.get_closest_marker("external") is not None:
             misplaced.append(f"{item.nodeid} ({test_path})")
+        if test_path.is_relative_to(_REPO_ROOT) and _is_platform_compat_path(
+            test_path.relative_to(_REPO_ROOT).as_posix()
+        ):
+            item.add_marker("platform_compat")
 
     if misplaced:
         listing = "\n  ".join(misplaced)

@@ -1152,12 +1152,14 @@ def test_repo_policy_nodes_run_only_in_the_existing_primary_cell() -> None:
         if isinstance(value, str) and _DEFAULT_SELECTION in value and "repo_policy" in value
     )
     expression = re.fullmatch(
-        r"\$\{\{\s*matrix\.os == 'ubuntu-latest'\s*&&\s*"
+        r"\$\{\{\s*matrix\.os == 'macos-latest'\s*&&\s*"
+        r"'(?P<macos>[^']+)'\s*\|\|\s*\(\s*"
         r"matrix\.python-version == '3\.13'\s*&&\s*"
-        r"'(?P<primary>[^']+)'\s*\|\|\s*'(?P<non_primary>[^']+)'\s*\}\}",
+        r"'(?P<primary>[^']+)'\s*\|\|\s*'(?P<non_primary>[^']+)'\s*\)\s*\}\}",
         selector_expression,
     )
     assert expression is not None
+    assert expression.group("macos") == "platform_compat and not external"
     assert expression.group("primary") == _DEFAULT_SELECTION
     assert expression.group("non_primary") == f"{_DEFAULT_SELECTION} and not repo_policy"
     assert f'pytest -m "${selector_key}"' in default_step["run"]
@@ -1170,6 +1172,37 @@ def test_repo_policy_nodes_run_only_in_the_existing_primary_cell() -> None:
         step for step in steps if step.get("name", "").startswith("Run the integration tier")
     )
     assert "pytest -m integration" in integration_step["run"]
+
+
+# Core OS-sensitive files that MUST remain in the reduced macOS compatibility suite
+# (story ci-runtime-round2). macOS runs ONLY `-m "platform_compat and not external"` +
+# the integration tier; if pattern drift in tests/conftest.py's platform_compat
+# auto-marking (or a file rename) silently drops these, the macOS cell would go green
+# while testing NONE of the platform behaviour it exists to protect (file locking,
+# atomic rename, timeout, cross-process git contention). This guard fails loudly first.
+_PLATFORM_COMPAT_CORE_MODULES = (
+    "tests/unit/store/test_stamped_lock.py",
+    "tests/unit/test_lock_stale_reclaim.py",
+    "tests/unit/test_timeout_budget.py",
+    "tests/unit/test_repo_snapshot.py",
+    "tests/interfaces/store/test_event_append_index_lock.py",
+    "tests/interfaces/store/test_atomic_ticket_dir_create_021d.py",
+)
+
+
+def test_platform_compat_suite_covers_the_core_os_sensitive_seams() -> None:
+    """The macOS compat subset must actually collect its load-bearing platform tests."""
+    node_ids = _collect_node_ids(_PLATFORM_COMPAT_CORE_MODULES, "platform_compat and not external")
+    missing = [
+        p for p in _PLATFORM_COMPAT_CORE_MODULES if not any(n.startswith(p) for n in node_ids)
+    ]
+    assert not missing, (
+        f"platform-sensitive test file(s) {missing} collect NOTHING under "
+        '-m "platform_compat and not external". macOS runs only this subset + the integration '
+        "tier, so a file that stops matching tests/conftest.py's _PLATFORM_COMPAT_PATH_FRAGMENTS "
+        "(a rename, or a fragment edit) silently removes its platform coverage from CI on a green "
+        "build. Restore the match or update the fragment list deliberately."
+    )
 
 
 def test_optionality_suite_still_runs_in_the_default_selection() -> None:

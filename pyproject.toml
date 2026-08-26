@@ -682,4 +682,5 @@ markers = [
     "allow_network: opt out of the network guard for a test",
     "benchmark: performance benchmark (informational; not a pass/fail gate)",
     "e2e: faithful round-trip tests that drive the real bpmn-io libraries via a Node harness (tests/e2e); self-skips when Node/npm is unavailable",
+    "platform_compat: OS-sensitive tests (file locking, atomic rename, timeout/gtimeout, path semantics, cross-process concurrency) that form the reduced macOS compatibility suite; auto-applied by tests/conftest.py by path (story ci-runtime-round2). The full suite runs on Linux; macOS runs only this subset + the integration tier.",
 ]
