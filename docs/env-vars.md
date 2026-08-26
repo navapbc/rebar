@@ -64,6 +64,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_FRONTIER_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_FRONTIER_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_FRONTIER_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
+| `REBAR_LLM_HEADERS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MAX_STEPS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MAX_TOKENS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MCP_SERVERS` | `src/rebar/llm/config.py` |  |
@@ -177,7 +178,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_165 variables._
+_166 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -193,12 +194,12 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/config.py:601` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:78` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:329` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:384` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:398` — `_llm_str_source(<non-literal>)`
-- `src/rebar/llm/config.py:407` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:427` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:617` — `_llm_str(<non-literal>)`
+- `src/rebar/llm/config.py:330` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:385` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:399` — `_llm_str_source(<non-literal>)`
+- `src/rebar/llm/config.py:408` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:428` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:622` — `_llm_str(<non-literal>)`
 - `src/rebar/opcert_service/config.py:72` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:228` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:238` — `os.environ.get(<non-literal>)`
