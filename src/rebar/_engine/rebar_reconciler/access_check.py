@@ -11,10 +11,62 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-JQL_RETRY_COUNT = 6
-JQL_RETRY_SLEEP = 5
+JQL_RETRY_COUNT = 10
+JQL_RETRY_SLEEP = 3
+JQL_RETRY_SLEEP_MAX = 30
 
 logger = logging.getLogger(__name__)
+
+
+def _int_from_env(src: dict[str, str] | Any, key: str, default: int) -> int:
+    """Parse a positive int env override; fall back to ``default`` when unset/invalid."""
+    raw = src.get(key)  # read-via: jql-visibility-backoff-knob
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = int(str(raw).strip())
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _float_from_env(src: dict[str, str] | Any, key: str, default: float) -> float:
+    """Parse a positive float env override; fall back to ``default`` when unset/invalid."""
+    raw = src.get(key)  # read-via: jql-visibility-backoff-knob
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = float(str(raw).strip())
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _jql_backoff_delays(retries: int, base: float, cap: float) -> list[float]:
+    """The between-attempt sleep schedule: ``min(base * 2**k, cap)`` for k in 0..retries-2.
+
+    A capped-exponential backoff — the visibility poll for a Jira Cloud search index that
+    is eventually consistent, NOT a transient-error retry. ``retries`` attempts yield
+    ``retries - 1`` sleeps (a create + property write land synchronously; only the JQL
+    search may lag). Mirrors the capped-exponential shape used by the acli retry floor
+    (``_errors.MAX_BACKOFF_S``).
+    """
+    return [min(base * (2**k), cap) for k in range(max(retries - 1, 0))]
+
+
+def _resolve_jql_backoff(env: dict[str, str] | None) -> tuple[int, float, float]:
+    """Resolve the JQL visibility-poll backoff from env, at CALL time (defaults otherwise).
+
+    ``JIRA_PROBE_JQL_RETRIES`` (attempts), ``JIRA_PROBE_JQL_SLEEP`` (base seconds), and
+    ``JIRA_PROBE_JQL_SLEEP_MAX`` (cap seconds) let an operator widen the wait for a slower
+    index without a code change; a missing / non-numeric / non-positive value falls back
+    to the module default.
+    """
+    src = os.environ if env is None else env
+    retries = _int_from_env(src, "JIRA_PROBE_JQL_RETRIES", JQL_RETRY_COUNT)
+    base = _float_from_env(src, "JIRA_PROBE_JQL_SLEEP", JQL_RETRY_SLEEP)
+    cap = _float_from_env(src, "JIRA_PROBE_JQL_SLEEP_MAX", JQL_RETRY_SLEEP_MAX)
+    return retries, base, cap
 
 
 def _step(
@@ -171,16 +223,18 @@ def run_access_check(
 
             current_step = "STEP_JQL_SEARCH"
             jql = f'labels="{label}"'
+            retries, base, cap = _resolve_jql_backoff(env)
+            delays = _jql_backoff_delays(retries, base, cap)
             results: list[Any] = []
-            for attempt in range(JQL_RETRY_COUNT):
+            for attempt in range(retries):
                 invalidate = getattr(client, "invalidate_search_cache", None)
                 if callable(invalidate):
                     invalidate(jql)
                 results = client.search_issues(jql)
                 if results:
                     break
-                if attempt < JQL_RETRY_COUNT - 1:
-                    sleep_fn(JQL_RETRY_SLEEP)
+                if attempt < retries - 1:
+                    sleep_fn(delays[attempt])
             if results:
                 _step(steps, lines, current_step, True)
             else:
