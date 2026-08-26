@@ -362,9 +362,11 @@ mcp_run_new() {
     -e REBAR_MCP_ALLOW_LLM=1 \
     -e "REBAR_OPCERT_ENV_ID=${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}" \
     -e REBAR_IDENTITY_SIGNING_KEY=/run/secrets/opcert-ed25519-key \
+    -e "REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets" \
     -p "127.0.0.1:${2}:8091" \
     -v "$COMPOSE_DIR/mcp-static-tokens.json:/run/secrets/mcp-static-tokens.json:ro" \
     -v "$COMPOSE_DIR/opcert-ed25519-key:/run/secrets/opcert-ed25519-key:ro" \
+    -v "gerrit_mcp_tickets:/var/gerrit/site/mcp-tickets" \
     "$MCP_IMAGE:$TARGET" >/dev/null 2>&1
 }
 
@@ -690,6 +692,7 @@ if changed "$MCP_PATHS"; then
     docker rm -f "$mcp_newname" >/dev/null 2>&1 || true
     record_backoff_failure; exit 1
   fi
+
 
   # 6. ATOMICALLY flip the /mcp/ upstream to the new container. The cutover is DONE at the reload;
   #    it never waits on the OLD backend's in-flight ops. On failure restore the previous include

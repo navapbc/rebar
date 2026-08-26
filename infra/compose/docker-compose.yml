@@ -358,6 +358,17 @@ services:
       # tools sign under, materialized outside the app and bind-mounted below.
       REBAR_OPCERT_ENV_ID: "${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}"
       REBAR_IDENTITY_SIGNING_KEY: "/run/secrets/opcert-ed25519-key"
+      # The rebar ticket store the MCP tools read AND WRITE. Nothing bakes a store into the
+      # image (.dockerignore excludes .tickets-tracker and .git), so without this the path
+      # resolved to the WORKDIR and every tool failed "/app/.tickets-tracker not found".
+      # The entrypoint (Dockerfile.mcp) clones the `tickets` branch here on first boot and
+      # converges it into a writable store; the named volume below makes it persistent.
+      REBAR_TRACKER_DIR: "/var/gerrit/site/mcp-tickets"
+      # Fine-grained GitHub PAT (contents:write on the tickets repo) the entrypoint feeds to a
+      # URL-scoped git credential helper for the clone + auto-push. Materialized from SSM into
+      # the .env by fetch-secrets.sh; BLANK IS FINE — the clone is simply deferred and the
+      # container still boots (soft failure posture).
+      MCP_TICKETS_PAT: "${MCP_TICKETS_PAT:-}"
     ports:
       # Publish on host loopback for the HOST nginx /mcp proxy. Host port 8091 (Gerrit owns
       # 8080, review-bot REVIEW_BOT_PORT, opcert 8090); container port is fixed 8091.
@@ -375,6 +386,10 @@ services:
       # posture: no bearer store, no MCP endpoint).
       - ./mcp-static-tokens.json:/run/secrets/mcp-static-tokens.json:ro
       - ./opcert-ed25519-key:/run/secrets/opcert-ed25519-key:ro
+      # The persistent ticket store (REBAR_TRACKER_DIR above) — an external named volume so a
+      # `docker compose down -v` does not destroy accumulated ticket events. Created by
+      # compose-up.sh from its SITE_SUBDIRS list, alongside the other gerrit_* volumes.
+      - gerrit_mcp_tickets:/var/gerrit/site/mcp-tickets
     # Liveness: the container HEALTHCHECK in Dockerfile.mcp hits loopback /health; declare
     # it here too so `docker compose ps` reflects health and a redeploy waits on it.
     healthcheck:
@@ -413,4 +428,8 @@ volumes:
   # /var/gerrit/site/reviewbot-tickets — the persistent tickets worktree for code_review artifacts
   # (story limestone-unethical-zebrafinch); created by compose-up.sh alongside the others.
   gerrit_reviewbot_tickets:
+    external: true
+  # /var/gerrit/site/mcp-tickets — the persistent rebar ticket store the MCP tools read and
+  # write; created by compose-up.sh alongside the others.
+  gerrit_mcp_tickets:
     external: true

@@ -16,6 +16,7 @@
 #   /rebar/prod/github-oauth-client-id     -> GITHUB_OAUTH_CLIENT_ID     (WS8, OPTIONAL)
 #   /rebar/prod/github-oauth-client-secret -> GITHUB_OAUTH_CLIENT_SECRET (WS8, OPTIONAL)
 #   /rebar/prod/reviewbot-tickets-pat      -> REVIEWBOT_TICKETS_PAT      (data capture, OPTIONAL)
+#   /rebar/prod/mcp-tickets-pat            -> MCP_TICKETS_PAT            (MCP ticket store, OPTIONAL)
 #   /rebar/prod/mcp-client-pat-copilot     -> MCP_CLIENT_PAT_COPILOT     (MCP static auth, OPTIONAL)
 #   /rebar/prod/mcp-client-pat-codex       -> MCP_CLIENT_PAT_CODEX       (MCP static auth, OPTIONAL)
 #   /rebar/prod/mcp-client-pat-claude      -> MCP_CLIENT_PAT_CLAUDE      (MCP static auth, OPTIONAL)
@@ -92,6 +93,11 @@ github_oauth_client_secret="$(get_param_optional github-oauth-client-secret)"
 # until the operator populates the SSM slot; the container boots either way, and the code_review
 # artifact push (story limestone-unethical-zebrafinch) starts working once it is set.
 reviewbot_tickets_pat="$(get_param_optional reviewbot-tickets-pat)"
+# OPTIONAL: the fine-grained GitHub PAT (contents:write on the tickets repo) the mcp
+# container's entrypoint feeds to a URL-scoped git credential helper so it can clone the
+# `tickets` branch into REBAR_TRACKER_DIR and auto-push the events its tools write. Blank is
+# fine: the clone is simply deferred and the container still boots (soft failure posture).
+mcp_tickets_pat="$(get_param_optional mcp-tickets-pat)"
 
 # OPTIONAL: the Rebar Bot ed25519 authorship signing key (story 245e). A multi-line
 # OpenSSH PEM key cannot live in a single-line .env value, so materialize it to a 0600
@@ -195,6 +201,7 @@ chmod 600 "${tmp}"
   echo "GITHUB_OAUTH_CLIENT_ID=${github_oauth_client_id}"
   echo "GITHUB_OAUTH_CLIENT_SECRET=${github_oauth_client_secret}"
   echo "REVIEWBOT_TICKETS_PAT=${reviewbot_tickets_pat}"
+  echo "MCP_TICKETS_PAT=${mcp_tickets_pat}"
   # Path (not the key material) to the materialized bot signing key; empty ⇒ unsigned.
   echo "REBAR_IDENTITY_SIGNING_KEY=${signing_key_path}"
   # Per-client MCP bearer PATs (blank ⇒ that client's record was omitted from the tokens file).
