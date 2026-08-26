@@ -214,7 +214,11 @@ def test_mcp_bluegreen_refreshes_ssm_secrets_before_starting_the_new_container()
     """
     script = _AUTODEPLOY.read_text(encoding="utf-8")
 
-    start = script.index('if changed "$MCP_PATHS"; then')
+    # Anchor on the mcp gate by its PATH LIST, not the whole expression: the gate now reads
+    # `changed_range "$mcp_deployed" "$TARGET" "$MCP_PATHS"` because the mcp path tracks its own
+    # component state, and pinning the exact call shape made this test fail on a rename that
+    # changed nothing it cares about.
+    start = script.index('"$MCP_PATHS"; then')
     block = script[start:]
 
     assert "fetch-secrets.sh" in block, (
