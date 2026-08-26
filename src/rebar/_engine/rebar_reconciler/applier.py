@@ -65,6 +65,7 @@ from rebar_reconciler.apply_base import (  # noqa: E402
     _MUTATION_KEY,
     ApplyResult,
     DirectionMismatchError,
+    MutationShape,
     RebarIdLabelWriteError,
     StatusMappingError,
     UnknownActionError,
@@ -341,6 +342,7 @@ __all__ = [
     "_load_manifest_renderer",
     "_load_mapping",
     "_load_mode_module",
+    "_load_mutation_module",
     "_mode_sort_key",
     "_normalize_adf_body",
     "_read_latest_status",
@@ -386,12 +388,8 @@ def apply(
     (and by the typed / dry-run / no-write paths, which issue no batch writes), so the
     caller sees an empty map and falls back to today's fetch-only advance.
     """
-    mut_mod = _load_mutation_module()
-    if isinstance(mutations, mut_mod.Mutation) or (
-        type(mutations).__name__ == "Mutation"
-        and hasattr(mutations, "direction")
-        and hasattr(mutations, "action")
-    ):
+    # REB-3115 S5 T1: typed single-mutation dispatch via explicit declared protocol.
+    if isinstance(mutations, MutationShape):
         return _apply_typed(
             mutations, client=client, repo_root=repo_root, binding_store=binding_store
         )
@@ -408,11 +406,6 @@ def apply(
     # _apply_typed per-mutation; outbound/untyped go to the legacy _apply_batch.
     mutations_list = list(mutations_input)
 
-    def _looks_like_mutation(m) -> bool:
-        if isinstance(m, mut_mod.Mutation):
-            return True
-        return type(m).__name__ == "Mutation" and hasattr(m, "direction") and hasattr(m, "action")
-
     def _direction_of(m) -> str:
         d = getattr(m, "direction", None)
         return str(getattr(d, "value", d) or "")
@@ -420,7 +413,7 @@ def apply(
     inbound_typed: list = []
     outbound_or_untyped: list = []
     for m in mutations_list:
-        if _looks_like_mutation(m) and _direction_of(m) == "inbound":
+        if isinstance(m, MutationShape) and _direction_of(m) == "inbound":
             inbound_typed.append(m)
         else:
             outbound_or_untyped.append(m)
@@ -478,7 +471,8 @@ def apply(
     # Outbound (or untyped dict): normalize typed Mutations to dicts so
     # _apply_batch can iterate, then route through the legacy batch path.
     outbound_list = [
-        _mutation_to_batch_dict(m) if _looks_like_mutation(m) else m for m in outbound_or_untyped
+        _mutation_to_batch_dict(m) if isinstance(m, MutationShape) else m
+        for m in outbound_or_untyped
     ]
     if suppression.suppressed_pairs:
         outbound_list = [
