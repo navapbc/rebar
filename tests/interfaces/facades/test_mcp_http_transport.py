@@ -326,10 +326,13 @@ def test_health_reports_in_flight_gauge_idle_inflight_and_contrast():
         after = client.get("/health").json()
         with gauge.track("list_tickets"):
             trivial = client.get("/health").json()
-    assert idle == {"in_flight": 0}
+    assert idle["in_flight"] == 0
+    # /health also reports store reachability now, so a container with no ticket
+    # store is distinguishable from a healthy one (mobile-groovy-badger).
+    assert "store" in idle and "present" in idle["store"]
     assert isinstance(inflight["in_flight"], int) and inflight["in_flight"] == 1
-    assert after == {"in_flight": 0}
-    assert trivial == {"in_flight": 0}  # a trivial read never moves the gauge
+    assert after["in_flight"] == 0
+    assert trivial["in_flight"] == 0  # a trivial read never moves the gauge
 
 
 def test_health_is_unauthenticated_even_with_auth_enabled(tmp_path):
@@ -344,7 +347,8 @@ def test_health_is_unauthenticated_even_with_auth_enabled(tmp_path):
         health = client.get("/health")
         mcp = client.post("/mcp", json=INIT_REQUEST, headers=MCP_HEADERS)
     assert health.status_code == 200
-    assert health.json() == {"in_flight": 0}
+    assert health.json()["in_flight"] == 0
+    assert "store" in health.json()
     assert mcp.status_code == 401  # the MCP endpoint still enforces the bearer
 
 
@@ -485,14 +489,14 @@ def test_wired_server_moves_gauge_for_a_really_registered_certified_tool():
     wrapped = server._tool_manager.get_tool("review_plan").fn  # the production wrapper
     app = server.streamable_http_app()
     with TestClient(app, base_url="http://127.0.0.1:8000") as client:
-        assert client.get("/health").json() == {"in_flight": 0}
+        assert client.get("/health").json()["in_flight"] == 0
         worker = threading.Thread(target=wrapped)
         worker.start()
         assert started.wait(timeout=5)
-        assert client.get("/health").json() == {"in_flight": 1}  # via the real endpoint
+        assert client.get("/health").json()["in_flight"] == 1  # via the real endpoint
         release.set()
         worker.join(timeout=5)
-        assert client.get("/health").json() == {"in_flight": 0}
+        assert client.get("/health").json()["in_flight"] == 0
 
 
 def test_drain_then_exit_waits_for_gauge_then_exits_within_bound():

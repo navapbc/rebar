@@ -33,7 +33,6 @@ import rebar
 # so the per-cluster registrars can share them WITHOUT importing this module (which
 # would form an import cycle). Re-exported here for back-compat: existing callers
 # import e.g. ``rebar.mcp_server.NextBatchOut`` / ``ValidateReportOut`` directly.
-from rebar._deprecations import RemovedInputError
 from rebar._mcp_llm import register_llm_tools
 from rebar._mcp_models import (
     BridgeAccessCheckOut,
@@ -745,28 +744,10 @@ def main() -> None:
 
     install_stderr_handler("rebar")
 
-    # Best-effort ensure-sweep at boot (epic odd-vortex-elbow / WS3): converge a store
-    # that is behind the idempotent registry. run_ensures acquires + RELEASES its own
-    # store write lock internally (a SHORT budget so a contended lock skips rather
-    # than delays boot) — it is NOT held across build_server().run(), which runs under
-    # no lock. Log-and-continue: a missing store / import / sweep error never aborts boot.
-    try:
-        import os
+    # Boot store sweep + the no-store warning; see _mcp_health.run_startup_store_sweep.
+    from rebar._mcp_health import run_startup_store_sweep
 
-        from rebar import config as _config
-        from rebar._store import ensures as _ensures
-
-        _tracker = str(_config.tracker_dir())
-        if os.path.isdir(_tracker):
-            _ensures.run_ensures(_tracker, timeout=5, attempts=1)
-    except RemovedInputError:
-        # A removed, still-set, load-bearing input must fail MCP startup hard rather
-        # than be swallowed into a silent boot. BaseException already skips the broad
-        # ``except Exception`` below; this explicit re-raise makes the intent loud and
-        # survives a future widening of the handler.
-        raise
-    except Exception:
-        logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
+    run_startup_store_sweep()
 
     # Load config once; a malformed config (ConfigError) may propagate and fail startup
     # (fail-closed). The transport selection drives both build_server and run().
