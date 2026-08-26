@@ -11,6 +11,15 @@ volume. This suite drives the reconciler against the two REAL Cloud projects **R
 
 This suite must NEVER write to Jira Cloud. That invariant is enforced three ways:
 
+> **Scope note.** This READ-ONLY cardinal rule is *suite-scoped* to this S3 rehearsal. The
+> RP-03 create-coordinator's outbound WRITE paths (create / binding-lifecycle /
+> commit-unknown / fuse) are proven against live Cloud by the sibling **bounded,
+> self-cleaning** mutation suite `tests/external/live_jira_cloud_mutation/` (workflow lane
+> `jira-cloud-mutation-probe`), which mutates exactly one uniquely-labelled throwaway issue
+> per test and deletes it in a `finally` (with a run-scoped label sweep as a crash
+> backstop). The two suites are complementary: this one proves the read paths write
+> nothing; that one proves the write paths land and self-clean.
+
 1. **Structurally** — `conftest.py::readonly_jira_guard` (autouse) monkeypatches every
    mutating method on the Cloud transport class (`create_issue`, `update_issue`,
    `add_label`, `set_entity_property`, `transition_issue_by_name`, `delete_issue`, …) to

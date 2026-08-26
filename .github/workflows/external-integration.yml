@@ -779,6 +779,144 @@ jobs:
         run: |
           aws s3 rm "s3://${REBAR_REHEARSAL_S3_BUCKET}/cloud-s3-rehearsal/" --recursive || true
 
+  # ── the bounded, self-cleaning live-Cloud coordinator MUTATION lane ───────────────────
+  #
+  # Exercises the RP-03 create-coordinator's create / binding-lifecycle / commit-unknown /
+  # fuse against REAL Jira Cloud — the mutating counterpart to the read-only
+  # `jira-cloud-s3-rehearsal` lane, and the CI evidence for the epic's Live-External AC.
+  #
+  # SHARED-PROD SAFETY. Every write is bounded to a SINGLE throwaway issue, uniquely
+  # labelled with `${REBAR_PROBE_RUN_LABEL}` (`rebar-id:cloudprobe-<run_id>`, unique per
+  # run). The module deletes that issue in a `finally` and sweeps the label itself; the
+  # always-run teardown step below is a backstop that re-sweeps the SAME run-scoped label
+  # on failure/cancel, so a crashed run can never leak. The label is run-scoped (never the
+  # bare `rebar-id:` prefix), so a concurrent run is never clobbered.
+  #
+  # It RUNS (does not skip) whenever the repo's live Jira Cloud creds are present, and the
+  # module enrols in the all-skip canary (tests/external/conftest.py) so a collected but
+  # skipped Cloud lane FAILS the run rather than reporting green.
+  jira-cloud-mutation-probe:
+    name: jira Cloud coordinator mutation probe (bounded, self-cleaning, real Cloud)
+    if: ${{ vars.JIRA_URL != '' }}
+    runs-on: ubuntu-latest
+    # Whole-job ceiling: pytest's --timeout is PER-TEST only, so a hung non-pytest step
+    # (acli auth, a slow Cloud create) would otherwise run to the Actions 6-hour default.
+    # The widened JQL visibility backoff waits up to ~195s per search, so 45m leaves
+    # generous headroom for install + acli download + the bounded lifecycle.
+    timeout-minutes: 45
+    env:
+      # Run-scoped teardown label: unique per run, keyed on by BOTH the module's own
+      # finally-sweep and the always-run teardown step below.
+      REBAR_PROBE_RUN_LABEL: rebar-id:cloudprobe-${{ github.run_id }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
+        with:
+          enable-cache: true
+
+      - name: Install rebar
+        run: |
+          uv sync --locked --extra dev
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      - name: Cache acli binary
+        id: cache-acli
+        uses: actions/cache@v6
+        with:
+          path: ~/.acli
+          key: acli-${{ runner.os }}-${{ vars.ACLI_VERSION || 'unset' }}
+
+      - name: Download + verify + install acli
+        if: steps.cache-acli.outputs.cache-hit != 'true'
+        env:
+          ACLI_VERSION: ${{ vars.ACLI_VERSION }}
+          ACLI_SHA256: ${{ vars.ACLI_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACLI_VERSION:-}" ] || [ "$ACLI_VERSION" = "latest" ]; then
+            echo "::error::ACLI_VERSION repo variable is unset or 'latest'. Pin a specific version (e.g. 1.3.14-stable) and set ACLI_SHA256 to its digest."
+            exit 1
+          fi
+          mkdir -p ~/.acli
+          curl -sSL "https://acli.atlassian.com/linux/${ACLI_VERSION}/acli_${ACLI_VERSION}_linux_amd64.tar.gz" -o ~/.acli/acli.tar.gz
+          if [ -n "${ACLI_SHA256:-}" ]; then
+            echo "${ACLI_SHA256}  $HOME/.acli/acli.tar.gz" | sha256sum -c --strict
+          else
+            echo "::warning::ACLI_SHA256 unset — proceeding without checksum verification. Set it to: $(sha256sum ~/.acli/acli.tar.gz | awk '{print $1}')"
+          fi
+          tar xzf ~/.acli/acli.tar.gz -C ~/.acli/ --strip-components=1
+          chmod +x ~/.acli/acli
+          rm -f ~/.acli/acli.tar.gz
+
+      - name: Add acli to PATH and authenticate
+        env:
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo ln -sf "$HOME/.acli/acli" /usr/local/bin/acli
+          echo "$JIRA_API_TOKEN" | acli jira auth login \
+            --site "$JIRA_URL" \
+            --email "$JIRA_USER" \
+            --token
+
+      - name: Preflight the six-step capability probe (bridge check-access)
+        env:
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_PROJECT: ${{ vars.JIRA_PROJECT }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: rebar bridge check-access
+
+      - name: Drive the bounded live-Cloud coordinator lifecycle
+        env:
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_PROJECT: ${{ vars.JIRA_PROJECT }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          # The external tier is inert unless opted in (tests/external/conftest.py).
+          REBAR_RUN_EXTERNAL: "1"
+        # -rA surfaces the PASSED module's captured stdout (the bounded create/bind/fuse
+        # evidence). Per-test hang guard; the JQL visibility backoff can wait ~195s, so
+        # 1800s exceeds it with margin. --timeout-method=thread is load-bearing (the
+        # default signal method cannot fire while blocked in a subprocess call).
+        run: >-
+          pytest -m external tests/external/live_jira_cloud_mutation -q -rA --durations=25
+          --timeout=1800 --timeout-method=thread
+          -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
+
+      # Backstop for the module's own finally-sweep: on cancel or a step-level
+      # failure/timeout the module's teardown may not unwind, leaking the throwaway issue.
+      # This re-sweeps the SAME run-scoped label via acli — best-effort, and scoped to this
+      # run only so a concurrent probe is never touched. `--yes` is REQUIRED: the non-TTY
+      # runner has no stdin, so an interactive delete confirmation would hang (bug 3256).
+      - name: Sweep any leaked throwaway Cloud issues
+        if: ${{ failure() || cancelled() }}
+        env:
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          set +e
+          hits="$(acli jira workitem search --jql "labels = \"${REBAR_PROBE_RUN_LABEL}\"" --json 2>/dev/null)"
+          keys="$(printf '%s' "$hits" | python3 -c 'import json,sys; d=json.load(sys.stdin); rows=d.get("issues", d) if isinstance(d, dict) else d; rows=rows if isinstance(rows, list) else []; print("\n".join(str(r.get("key") or r.get("id")) for r in rows if isinstance(r, dict) and (r.get("key") or r.get("id"))))' 2>/dev/null)"
+          for key in $keys; do
+            echo "sweeping leaked issue $key"
+            acli jira workitem delete --key "$key" --yes || true
+          done
+
   pandoc-corpus-replay:
     name: Pandoc corpus replay (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
