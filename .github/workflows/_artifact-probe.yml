@@ -45,7 +45,9 @@ jobs:
     steps:
       - name: Checkout branch head (push/PR lane)
         if: inputs.gerrit-refspec == ''
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
       - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
         if: inputs.gerrit-refspec != ''
         uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
@@ -55,7 +57,7 @@ jobs:
           gerrit-url: ${{ inputs.gerrit-url }}
       - name: Record the checked-out commit
         run: echo "REBAR_EXPECTED_COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
           cache: 'pip'
@@ -64,6 +66,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           REBAR_BUILD_COMMIT="$REBAR_EXPECTED_COMMIT" python -m build
+      - name: Validate package metadata (twine check)
+        # Catches malformed/unrenderable package metadata (long_description, classifiers,
+        # missing fields) BEFORE it can reach a release — mainstream Python packaging hygiene.
+        # --strict fails on warnings so a metadata regression reddens the gate, not just PyPI.
+        run: |
+          python -m pip install --upgrade twine
+          twine check --strict dist/*
       - name: Probe the built wheel (no source tree on the path)
         run: |
           python -m venv /tmp/wheel-probe

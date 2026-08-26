@@ -17,14 +17,29 @@ sources = src tests scripts
 # target refuses to run on a mismatched version so generated output is reproducible.
 GIT_CLIFF_VERSION := 2.13.1
 
-# Release supply-chain lint (story 08a8): under `make lint`, zizmor (installed via the [dev]
-# extra) audits release.yml, and actionlint validates ALL workflows (bug 8002 — an invalid
+# Supply-chain lint (story 08a8; scope widened in epic 5664 S1): under `make lint`, zizmor
+# (installed via the [dev] extra) audits release.yml + the Gerrit Verified-gate vote path (see
+# ZIZMOR_WORKFLOWS below), and actionlint validates ALL workflows (bug 8002 — an invalid
 # workflow that release.yml-only actionlint would miss took the reconcile bridge down for ~2d).
 # actionlint is a standalone Go binary; when it is not already on PATH (CI ubuntu), the
 # `actionlint-bin` target installs a PINNED version verified against a hard-coded SHA-256
 # into a repo-local, git-ignored bin. Bump the pin + digest together (they are checked with
 # `sha256sum -c --strict`, so a wrong digest fails the install loudly).
 RELEASE_WORKFLOW := .github/workflows/release.yml
+# Zizmor audit scope (epic 5664 S1): the release workflow PLUS the Gerrit Verified-gate
+# vote-casting critical path — gerrit-verify.yaml (the workflow that casts the Verified vote)
+# and ALL five reusables it calls that check out code / build artifacts (_build-and-test.yml,
+# _mutation.yml, _optionality.yml, _artifact-probe.yml, _eval-discipline.yml). Widening beyond
+# release.yml closes the gap where the workflows that actually gate every change were unaudited
+# for pinning/credential-persistence/template-injection issues. Keep the set to the vote path
+# (not all workflows) so the audit surface stays proportional to risk.
+ZIZMOR_WORKFLOWS := $(RELEASE_WORKFLOW) \
+	.github/workflows/gerrit-verify.yaml \
+	.github/workflows/_build-and-test.yml \
+	.github/workflows/_mutation.yml \
+	.github/workflows/_optionality.yml \
+	.github/workflows/_artifact-probe.yml \
+	.github/workflows/_eval-discipline.yml
 ACTIONLINT_VERSION := 1.7.12
 ACTIONLINT_SHA256_LINUX_AMD64 := 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 LOCAL_BIN := .tools/bin
@@ -199,7 +214,7 @@ format:  ## MUTATES: auto-fix lint + format the code (the ONLY rewriting target)
 	ruff check --fix $(sources)
 	ruff format $(sources)
 
-lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (release.yml) + actionlint (all workflows) + DCO identity consistency. The gate CI runs.
+lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (release.yml + Verified-gate vote path) + actionlint (all workflows) + DCO identity consistency. The gate CI runs.
 	ruff check $(sources)
 	ruff format --check $(sources)
 	@# Shrink-only function-complexity ratchet (story c9f7): C901 over src/rebar only,
@@ -240,8 +255,9 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# whose frontmatter fails to parse or whose description exceeds 1024 chars, so gate it.
 	python scripts/check_skill_frontmatter.py
 	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
-	@# zizmor stays scoped to release.yml (widening the security audit is separate work);
-	@# actionlint below validates ALL workflows. zizmor is a cross-platform pip tool (in [dev]).
+	@# zizmor audits the release workflow + the Verified-gate vote path ($(ZIZMOR_WORKFLOWS),
+	@# widened in epic 5664 S1); actionlint below validates ALL workflows. zizmor is a
+	@# cross-platform pip tool (in [dev]).
 	@# Online/offline split (bug 7a03): with NO GitHub token in the environment zizmor drops to
 	@# offline mode and prints a "running in offline mode" WARN while skipping its five
 	@# token-backed audits (impostor-commit, ref-confusion, known-vulnerable-actions,
@@ -251,9 +267,9 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# five live-metadata audits execute. Detect a token here rather than in CI so both invoke
 	@# one Makefile — the portability contract (an offline local fallback, online in CI).
 	@if [ -n "$${GH_TOKEN:-$${GITHUB_TOKEN:-$${ZIZMOR_GITHUB_TOKEN:-}}}" ]; then \
-		zizmor $(RELEASE_WORKFLOW); \
+		zizmor $(ZIZMOR_WORKFLOWS); \
 	else \
-		zizmor --offline $(RELEASE_WORKFLOW); \
+		zizmor --offline $(ZIZMOR_WORKFLOWS); \
 	fi
 	@# actionlint validates ALL workflows — the context-availability / parse-error class (e.g.
 	@# the reconcile-bridge `runner`-in-job-env startup failure, bug 8002) that release.yml-only
