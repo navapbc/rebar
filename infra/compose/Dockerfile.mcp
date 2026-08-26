@@ -80,41 +80,12 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # container), so it is not exercised by the in-repo unit tests.
 ENV REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets \
     MCP_TICKETS_URL=https://github.com/navapbc/rebar.git
-RUN set -eux; \
-    { \
-      echo '#!/bin/sh'; \
-      echo 'set -e'; \
-      echo '# Provision the store in the BACKGROUND and exec the server immediately.'; \
-      echo '# The `tickets` branch is ~200k commits; cloning it takes far longer than the'; \
-      echo '# 120s blue-green readiness deadline (autodeploy MCP_HEALTH_TIMEOUT). Doing it'; \
-      echo '# before exec meant the server never bound a port, /health never answered, and'; \
-      echo '# EVERY deploy was rolled back (bug unfit-beneficial-whimbrel). The review-bot'; \
-      echo '# entrypoint this was modelled on has no such readiness gate, which is why the'; \
-      echo '# same shape is safe there and not here.'; \
-      echo '#'; \
-      echo '# Degrading honestly while the clone runs is the read guard tracker reads raise'; \
-      echo '# store_uninitialized until the store is converged, rather than reporting [] and'; \
-      echo '# passing an absent store off as an empty one.'; \
-      echo 'provision_store() {'; \
-      echo '  if [ -n "${MCP_TICKETS_PAT:-}" ]; then'; \
-      echo '    git config --global "credential.${MCP_TICKETS_URL}.helper" \'; \
-      echo "      '!f() { echo username=x-access-token; echo \"password=\$MCP_TICKETS_PAT\"; }; f'"; \
-      echo '    git config --global "credential.${MCP_TICKETS_URL}.useHttpPath" false'; \
-      echo '    if [ ! -d "${REBAR_TRACKER_DIR}/.git" ]; then'; \
-      echo '      git clone --single-branch --branch tickets "${MCP_TICKETS_URL}" "${REBAR_TRACKER_DIR}" || \'; \
-      echo '        echo "mcp: tickets store clone deferred (deploy canary)" >&2'; \
-      echo '    fi'; \
-      echo '  fi'; \
-      echo '  # Converge the (possibly freshly-cloned) worktree into a WRITABLE rebar store:'; \
-      echo '  # repo-local git identity + the `.env-id` marker. Idempotent.'; \
-      echo '  sh /app/infra/scripts/reviewbot-ensure-tickets.sh "${REBAR_TRACKER_DIR}" || \'; \
-      echo '    echo "mcp: tickets store ensure deferred (see logs)" >&2'; \
-      echo '  echo "mcp: tickets store provisioning finished" >&2'; \
-      echo '}'; \
-      echo 'provision_store &'; \
-      echo 'exec "$@"'; \
-    } > /usr/local/bin/mcp-entrypoint.sh; \
-    chmod +x /usr/local/bin/mcp-entrypoint.sh
+# The entrypoint is a REAL FILE (infra/scripts/mcp-entrypoint.sh), installed onto PATH the
+# same way Dockerfile.reviewbot installs reviewbot-ensure-tickets.sh. It used to be echoed
+# into existence inside this RUN block, which made it unexecutable outside a container and
+# so untestable — the only available assertions were greps over this Dockerfile's source.
+# As a file it is driven directly by tests/unit/test_mcp_entrypoint_provisioning.py.
+RUN install -m 0755 /app/infra/scripts/mcp-entrypoint.sh /usr/local/bin/mcp-entrypoint.sh
 
 # Boot the MCP server. Transport is HTTP via the env above (main() -> run_mcp).
 ENTRYPOINT ["/usr/local/bin/mcp-entrypoint.sh"]
