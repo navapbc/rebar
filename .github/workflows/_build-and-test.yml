@@ -686,7 +686,7 @@ jobs:
             -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal \
             -q -p no:cacheprovider --durations=25 \
             --basetemp="${{ runner.temp }}/rebar-basetemp" \
-            ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }} || rc=$?
+            ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' && '--cov=rebar --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml' || '' }} || rc=$?
           # pytest rc 5 = "no tests collected". On the macOS platform_compat cell this is a
           # LEGITIMATE outcome for any patchset whose tree predates the conftest
           # auto-marker (story omphacite-desertlike-coney): that marker is
@@ -703,6 +703,53 @@ jobs:
             rc=0
           fi
           exit "$rc"
+
+      - name: Diff coverage on changed lines (report-only; Gerrit Verified lane)
+        if: ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' }}
+        shell: bash
+        env:
+          # Route the Gerrit refspec through env (not direct ${{ }} interpolation into the run
+          # block) so it cannot expand into attacker-controllable shell — the same
+          # template-injection remedy used for the mutation shard input.
+          GERRIT_REFSPEC: ${{ inputs.gerrit-refspec }}
+        # OSS-aligned coverage signal (epic soupy-bilineate-whiteeye, story S4): report line
+        # coverage on the lines THIS change touches, reusing the coverage.xml the default-suite
+        # step already emits on this cell — no extra test run, no material added hot-path
+        # latency (the epic's central constraint). NON-BLOCKING by design: a diff-coverage dip
+        # is surfaced to the author, never a merge gate. The enforcing coverage check stays the
+        # whole-tree branch-coverage floor (`fail_under` in [tool.coverage.report], pyproject).
+        #
+        # Diff-coverage is a PRE-MERGE signal, and rebar's pre-merge lane is Gerrit: the
+        # meaningful comparison is the patchset vs its PARENT (HEAD^) — deepened by one like the
+        # pip-audit dependency-map gate above, since a shallow patchset checkout has no parent
+        # object. The post-merge push/branch lane has no proposed diff (the change is already in
+        # main) AND its actions/checkout is shallow with no origin/main tracking ref, so there is
+        # nothing to compare and no reliable base — this step SKIPS there rather than erroring on
+        # an unresolvable ref. Because the Verified gate binds this workflow from trusted main
+        # (not the patchset), the step first runs against the NEXT change's patchset after it
+        # lands. diff-cover is a report TOOL, not a project dependency — installed ad hoc with
+        # `uv pip install` into the same `.venv`, kept out of the lock, exactly like pip-audit.
+        run: |
+          set -uo pipefail
+          if [ -z "$GERRIT_REFSPEC" ]; then
+            echo "::notice::diff-coverage is a pre-merge signal reported on the Gerrit Verified lane (patchset vs its parent); the post-merge branch lane has no proposed diff and no reliable base — skipping."
+            exit 0
+          fi
+          if [ ! -f coverage.xml ]; then
+            echo "::notice::coverage.xml absent (patchset predates the diff-coverage step) — skipping"
+            exit 0
+          fi
+          uv pip install --quiet diff-cover
+          # Compare against the patchset's PARENT (HEAD^), deepening by one first because a
+          # shallow patchset checkout has no parent object (mirrors the pip-audit gate above).
+          git rev-parse --verify -q 'HEAD^' >/dev/null 2>&1 || git fetch --deepen=1 || true
+          # --fail-under=0 keeps it strictly report-only (belt: `|| true`). The markdown report
+          # lands in the step summary so the author sees uncovered changed lines at a glance.
+          # `--format markdown:<path>` is the non-deprecated spelling (the older
+          # `--markdown-report` warns and is slated for removal); flag spellings + HEAD^
+          # commit-ish support were confirmed against diff-cover's --help before landing.
+          diff-cover coverage.xml --compare-branch='HEAD^' --fail-under=0 \
+            --format "markdown:${GITHUB_STEP_SUMMARY:-/dev/null}" || true
 
       - name: Run the integration tier (concurrency + reconciler; network-guarded)
         # These need no live services (mocked acli / local git), so they run in CI

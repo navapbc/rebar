@@ -90,7 +90,7 @@ _DOCUMENTATION_GATE_SIGNATURES = {
     "MCP reference drift gate": "scripts/gen_mcp_reference.py",
 }
 
-_COVERAGE_FLAGS = "--cov=rebar --cov-report=term-missing:skip-covered"
+_COVERAGE_FLAGS = "--cov=rebar --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml"
 
 
 def _expanded_test_matrix(workflow: dict[str, Any]) -> list[tuple[str, str]]:
@@ -107,7 +107,8 @@ def _expanded_test_matrix(workflow: dict[str, Any]) -> list[tuple[str, str]]:
 def _coverage_flags_by_cell(run: str, cells: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
     expression = re.search(
         r"\$\{\{\s*(?P<condition>[^}]*?)\s*&&\s*'(?P<truthy>--cov=rebar "
-        r"--cov-report=term-missing:skip-covered)'\s*\|\|\s*'(?P<falsy>[^']*)'\s*\}\}",
+        r"--cov-report=term-missing:skip-covered --cov-report=xml:coverage\.xml)'"
+        r"\s*\|\|\s*'(?P<falsy>[^']*)'\s*\}\}",
         run,
     )
     assert expression is not None, (
@@ -1235,10 +1236,11 @@ def _render_default_suite_body(body: str, os_name: str, python_version: str, tem
             return os_name
         if inner == (
             "!startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' "
-            "&& '--cov=rebar --cov-report=term-missing:skip-covered' || ''"
+            "&& '--cov=rebar --cov-report=term-missing:skip-covered "
+            "--cov-report=xml:coverage.xml' || ''"
         ):
             return (
-                "--cov=rebar --cov-report=term-missing:skip-covered"
+                "--cov=rebar --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml"
                 if (not os_name.startswith("macos") and python_version == "3.13")
                 else ""
             )
