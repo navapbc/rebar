@@ -203,12 +203,19 @@ LEGACY_ROUTE = "legacy"
 def route_for(action, overrides=None) -> str:
     """Select EXACTLY ONE route for a mutation family (never dual-send).
 
-    Every family in :data:`NON_CREATE_FAMILIES` defaults to
-    :data:`COORDINATOR_ROUTE`; any other action (``create``, unknown strings)
-    stays on :data:`LEGACY_ROUTE`. An optional ``overrides`` mapping flips a single
-    family; a route value that is not exactly ``coordinator`` or ``legacy`` raises
-    ``ValueError``.
+    ``create`` is governed by the SINGLE ``create_route`` selector (S4 T3 cutover):
+    it is decided by ONE rollback toggle, so overrides never apply to it. Every
+    family in :data:`NON_CREATE_FAMILIES` defaults to :data:`COORDINATOR_ROUTE`; any
+    other action (unknown strings) stays on :data:`LEGACY_ROUTE`. An optional
+    ``overrides`` mapping flips a single non-create family; a route value that is not
+    exactly ``coordinator`` or ``legacy`` raises ``ValueError``.
     """
+    if action == "create":
+        # ONE selector, ONE legacy rollback value, no dual-send. Loaded lazily by file
+        # path (mirroring coordinate_and_fuse) so importing this facade never imports
+        # create_route at module scope (no cycle).
+        create_route_mod = lazy_load("rebar_reconciler.create_route", "create_route.py")
+        return create_route_mod.create_route()  # overrides do not apply to create
     default = COORDINATOR_ROUTE if action in NON_CREATE_FAMILIES else LEGACY_ROUTE
     if overrides is None or action not in overrides:
         return default
@@ -537,7 +544,10 @@ def reroute_migrated_plans(
         plan
         for plan in (ticket_plans or [])
         if plan.mutations
-        and all(route_for(m.action.value) == COORDINATOR_ROUTE for m in plan.mutations)
+        and all(
+            m.action.value in NON_CREATE_FAMILIES and route_for(m.action.value) == COORDINATOR_ROUTE
+            for m in plan.mutations
+        )
     ]
     if not migrated_plans:
         return None, mutations

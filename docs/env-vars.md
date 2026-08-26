@@ -144,6 +144,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_PLAN_REVIEW_BUDGET` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_PREVIEW_TIMEOUT` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_RECONCILER_CONFLICT_PARENT_ID` | `src/rebar/_engine/rebar_reconciler/apply_inbound.py` |  |
+| `REBAR_RECONCILER_CREATE_ROUTE` | `src/rebar/_engine/rebar_reconciler/create_route.py` |  |
 | `REBAR_RECONCILER_FAIL_SILENT_NOOP` | `src/rebar/_engine/rebar_reconciler/apply_handlers.py` |  |
 | `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/_engine/rebar_reconciler/_pass_lock_lifecycle.py` |  |
 | `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py` |  |
@@ -177,7 +178,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_165 variables._
+_166 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

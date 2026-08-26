@@ -8,6 +8,13 @@ original create exception.
 
 These tests target the typed-mutation leaf, not the legacy ``create_one``
 helper (covered separately by ``test_applier_rollback.py``).
+
+S4 T3 cutover (2863-c335): the create+delete-rollback behavior these tests pin
+is now the LEGACY path, reached ONLY under the ``REBAR_RECONCILER_CREATE_ROUTE``
+rollback toggle. The default is the coordinated write-ahead composition that NEVER
+deletes a created issue (bug 387d). Every test here pins the LEGACY selector so it
+exercises the rollback path it documents; the coordinated default is proven in
+``mutate/test_create_operation_coordinator.py``.
 """
 
 from __future__ import annotations
@@ -22,6 +29,12 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "mutation.py"
+
+
+@pytest.fixture(autouse=True)
+def _force_legacy_route(monkeypatch):
+    """Pin the LEGACY create route so the delete-rollback path under test is active."""
+    monkeypatch.setenv("REBAR_RECONCILER_CREATE_ROUTE", "legacy")
 
 
 def _load_module(name: str, path: Path):

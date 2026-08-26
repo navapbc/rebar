@@ -92,6 +92,7 @@ def create_one(
     repo_root: Path | None = None,
     binding_store=None,
     comment_errors: list[str] | None = None,
+    create_core: Callable[..., dict | None] | None = None,
 ) -> dict | None:
     """Create a Jira issue from the mutation's fields, with budget guard and JQL dedup.
 
@@ -198,130 +199,22 @@ def create_one(
             _ticket_data["ticket_type"] = _issuetype
         else:
             _ticket_data["ticket_type"] = "Task"
-    # Write-ahead (story 9622): persist a durable pending record BEFORE create so
-    # the create->label window is recoverable. A persist failure is item-scoped
-    # FATAL — skip the create rather than run it without the record recovery keys on.
-    if binding_store is not None and local_id:
-        try:
-            binding_store.bind_pending(local_id)
-            binding_store.save()
-        except Exception as persist_err:
-            raise BindingPersistError(
-                f"write-ahead bind_pending persist failed for {local_id!r}; "
-                f"create skipped: {persist_err!r}"
-            ) from persist_err
-
-    result = _call_with_retry(client.create_issue, _ticket_data)
-
-    # Write identity markers so the issue can be re-discovered by dedup JQL
-    # and by inbound consumers that inspect entity properties.
+    # MIDDLE core (S4 T3 cutover, REB-3115): route the create->contain write-ahead
+    # sequence through the SELECTED core. ``create_core`` is the coordinated composition
+    # injected by ``apply_handlers.handle_create`` when the ``create_route`` selector is
+    # the coordinator; ``None`` selects the legacy write-ahead core (the rollback value).
+    # EXACTLY ONE runs, never both (AC6, no dual-send). A boolean ``or`` selection adds
+    # ZERO McCabe branch here. Both cores share the same signature, RAISE on failure
+    # exactly as the inline legacy code did, and return the create-response dict on
+    # success; a ``None`` return is the coordinated ``commit_unknown`` DEFER (the mutation
+    # was appended to ``deferred_creates`` by the injected core) — the postlude below
+    # skips (``jira_key`` is empty) and ``return result`` hands back None, mirroring the
+    # budget-defer contract.
+    core = create_core or _legacy_create_core
+    result = core(
+        local_id, _ticket_data, client=client, binding_store=binding_store, repo_root=repo_root
+    )
     jira_key = result.get("key", "") if isinstance(result, dict) else ""
-    if jira_key:
-        try:
-            # Write-ahead step 3: record the key on the still-pending entry and
-            # persist it BEFORE the rebar-id label, so a crash here recovers
-            # deterministically. Inside the try so a persist failure rolls back.
-            if binding_store is not None and local_id:
-                try:
-                    binding_store.record_pending_key(local_id, jira_key)
-                    # Capture the IMMUTABLE numeric id in the SAME write (bug 7c26).
-                    # A project move re-keys the issue; the id is the only handle that
-                    # survives it, and this create response is where it is known. A
-                    # separate call so the shared write-ahead signatures stay untouched;
-                    # getattr-guarded so a store predating it is a no-op, not a
-                    # persist-floor failure that would skip the create.
-                    _record_id = getattr(binding_store, "record_jira_id", None)
-                    if _record_id is not None:
-                        _record_id(local_id, result.get("id", ""))
-                    binding_store.save()
-                except Exception as persist_err:
-                    raise BindingPersistError(
-                        f"write-ahead record_pending_key persist failed for "
-                        f"{local_id!r} (key {jira_key!r}): {persist_err!r}"
-                    ) from persist_err
-            # Wrap identity writes in _call_with_retry so transient 5xx/429
-            # absorb the same retry budget as create_issue above. Without this,
-            # a single transient failure here triggers the unnecessary rollback
-            # branch (delete_issue + BRIDGE_ALERT) even though the underlying
-            # condition would have cleared on retry.
-            _call_with_retry(client.add_label, jira_key, f"rebar-id:{local_id}")
-            _call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)
-            if binding_store is not None and local_id:
-                binding_store.bind_confirm(local_id, jira_key)
-        except Exception as write_err:
-            # DO NOT DELETE THE CREATED ISSUE (bug 387d). This used to call
-            # `client.delete_issue(jira_key)`, destroying a successfully-created issue
-            # because LABELLING it failed — inverting the cost, since a
-            # created-but-unlabelled issue is recoverable and a deleted one is not.
-            #
-            # The trigger is ordinary: Jira returns "Field 'x' cannot be set. It is not on
-            # the appropriate screen, or unknown" when the field is off the Create/Edit
-            # screen, when the workflow property jira.permission.createclone.denied is set
-            # (nothing to do with screens), or when a value is malformed on a field that IS
-            # on the screen.
-            #
-            # Retaining is SAFE because the write-ahead above already recorded the key
-            # (`record_pending_key` + `save`), leaving a KEYED-pending binding — exactly the
-            # state `recover_pending_bindings`' keyed branch is built for: it retro-attaches
-            # the label + property and confirms, with NO Jira search, so it is deterministic
-            # and cannot duplicate. The rollback was solving a problem the write-ahead
-            # protocol had already solved, and destroying data to do it.
-            #
-            # It also fixes a second symptom: the rollback never unbound, so the deleted key
-            # stayed in a keyed-pending binding and every later pass retried `add_label`
-            # against a dead issue — stranding the local ticket permanently.
-            # Emit BRIDGE_ALERT for identity-write rollback so the event is
-            # surfaced in the tickets-tracker for observability.  # tickets-boundary-ok
-            try:
-                import time as _time
-                import uuid as _uuid
-
-                from rebar._store.canonical import canonical_str
-                from rebar.config import reconciler_repo_root as _owned_repo_root
-
-                _alert_root = (repo_root or _owned_repo_root()) / ".tickets-tracker"
-                # F7: defensive guard — if local_id is falsy the alert directory
-                # would resolve to .tickets-tracker root and pollute it. Prefer
-                # the jira_key, falling back to a uuid so the alert always lands
-                # under a non-root subdirectory.
-                _alert_dir_key = local_id or jira_key or f"unknown-{_uuid.uuid4()}"
-                _ts = _time.time_ns()
-                _alert_uuid = str(_uuid.uuid4())
-                _alert_name = f"{_ts}-{_alert_uuid}-BRIDGE_ALERT.json"
-                _alert_event = {
-                    "event_type": "BRIDGE_ALERT",
-                    "timestamp": _ts,
-                    "uuid": _alert_uuid,
-                    "ticket_id": local_id,
-                    "jira_key": jira_key,
-                    "data": {
-                        "reason": (
-                            "identity-write failed after create; Jira issue RETAINED and "
-                            "left keyed-pending for retro-attach on the next pass"
-                        ),
-                        "tag": "create-identity-write-failed",
-                    },
-                }
-                # Ticket 021d: publish the directory and this first alert together with one
-                # rename. The old shape mkdir'd the directory before serialising the alert,
-                # so a failure in between left an empty directory that fsck reports as
-                # MISSING_CREATE + FOREIGN_STORE_PATH — and this is an error path, the very
-                # place an interruption is most likely.
-                from rebar._store import staging as _staging
-
-                _staged = _staging.stage_event(
-                    str(_alert_root),
-                    _alert_dir_key,
-                    _alert_name,
-                    canonical_str(_alert_event).encode("utf-8"),
-                )
-                try:
-                    _staged.promote()
-                finally:
-                    _staged.discard()  # no-op once published
-            except Exception:  # noqa: BLE001 — alert-write failure must not mask the original error (write_err is re-raised below)
-                pass  # alert write failure must not mask original error
-            raise write_err
 
     # Bug 85a1 (PR #87e4 follow-up): propagate user-supplied labels/comments
     # from the mutation payload after the identity-write block. The fix was
@@ -403,6 +296,134 @@ def create_one(
                     )
 
     return result
+
+
+def _emit_create_identity_alert(local_id: str, jira_key: str, repo_root: Path | None) -> None:
+    """Emit a BRIDGE_ALERT recording an identity-write failure AFTER a create landed.
+
+    Extracted verbatim from ``create_one``'s post-create rollback branch (bug 387d /
+    ticket 021d). The created Jira issue is NEVER deleted: the write-ahead protocol has
+    already recorded the key (keyed-pending), so recovery retro-attaches the remaining
+    label/property deterministically with no Jira search. This helper only publishes the
+    observability alert; the caller re-raises the original write error. Shared by the
+    legacy write-ahead core here and the coordinated core in ``create_route`` so both
+    routes emit byte-identical alerts. An alert-write failure is swallowed so it can
+    never mask the original error.
+    """
+    try:
+        import time as _time
+        import uuid as _uuid
+
+        from rebar._store import staging as _staging
+        from rebar._store.canonical import canonical_str
+        from rebar.config import reconciler_repo_root as _owned_repo_root
+
+        _alert_root = (repo_root or _owned_repo_root()) / ".tickets-tracker"
+        # F7: defensive guard — if local_id is falsy the alert directory would resolve to
+        # .tickets-tracker root and pollute it. Prefer the jira_key, falling back to a uuid
+        # so the alert always lands under a non-root subdirectory.
+        _alert_dir_key = local_id or jira_key or f"unknown-{_uuid.uuid4()}"
+        _ts = _time.time_ns()
+        _alert_uuid = str(_uuid.uuid4())
+        _alert_name = f"{_ts}-{_alert_uuid}-BRIDGE_ALERT.json"
+        _alert_event = {
+            "event_type": "BRIDGE_ALERT",
+            "timestamp": _ts,
+            "uuid": _alert_uuid,
+            "ticket_id": local_id,
+            "jira_key": jira_key,
+            "data": {
+                "reason": (
+                    "identity-write failed after create; Jira issue RETAINED and "
+                    "left keyed-pending for retro-attach on the next pass"
+                ),
+                "tag": "create-identity-write-failed",
+            },
+        }
+        # Ticket 021d: publish the directory and this first alert together with one rename,
+        # so an interruption never leaves an empty directory fsck reports as MISSING_CREATE
+        # + FOREIGN_STORE_PATH.
+        _staged = _staging.stage_event(
+            str(_alert_root),
+            _alert_dir_key,
+            _alert_name,
+            canonical_str(_alert_event).encode("utf-8"),
+        )
+        try:
+            _staged.promote()
+        finally:
+            _staged.discard()  # no-op once published
+    except Exception:  # noqa: BLE001 — alert-write failure must not mask the original error
+        pass  # alert write failure must not mask original error
+
+
+def _legacy_create_core(
+    local_id: str,
+    ticket_data: dict,
+    *,
+    client: TicketTransport,
+    binding_store=None,
+    repo_root: Path | None = None,
+) -> dict:
+    """The legacy write-ahead create->contain MIDDLE core (the rollback value).
+
+    Extracted verbatim from ``create_one`` so its host drops below its frozen McCabe
+    ceiling and the coordinated route can slot an alternate core into the same seam.
+    Sequence (story 9622 / bug 387d): bind_pending+save → create_issue (via
+    ``_call_with_retry``) → record_pending_key(+record_jira_id)+save → add_label →
+    set_entity_property → bind_confirm. RAISES exactly as the inline code did —
+    ``BindingPersistError`` on a persist-floor failure, and on a post-create identity
+    write failure it emits the BRIDGE_ALERT (NEVER deleting the issue) and re-raises the
+    original error. Returns the ``create_issue`` response dict on success.
+    """
+    if binding_store is not None and local_id:
+        try:
+            binding_store.bind_pending(local_id)
+            binding_store.save()
+        except Exception as persist_err:
+            raise BindingPersistError(
+                f"write-ahead bind_pending persist failed for {local_id!r}; "
+                f"create skipped: {persist_err!r}"
+            ) from persist_err
+
+    result = _call_with_retry(client.create_issue, ticket_data)
+
+    jira_key = result.get("key", "") if isinstance(result, dict) else ""
+    if jira_key:
+        try:
+            if binding_store is not None and local_id:
+                _legacy_record_key(binding_store, local_id, jira_key, result)
+            _call_with_retry(client.add_label, jira_key, f"rebar-id:{local_id}")
+            _call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)
+            if binding_store is not None and local_id:
+                binding_store.bind_confirm(local_id, jira_key)
+        except Exception as write_err:
+            _emit_create_identity_alert(local_id, jira_key, repo_root)
+            raise write_err
+    return result
+
+
+def _legacy_record_key(binding_store, local_id: str, jira_key: str, result) -> None:
+    """Write-ahead step 3: record the key (and immutable id) on the still-pending entry.
+
+    Persisted BEFORE the rebar-id label so a crash recovers deterministically. Raises
+    ``BindingPersistError`` on a persist failure so the caller's rollback branch runs.
+    """
+    try:
+        binding_store.record_pending_key(local_id, jira_key)
+        # Capture the IMMUTABLE numeric id in the SAME write (bug 7c26). A project move
+        # re-keys the issue; the id is the only handle that survives it, and this create
+        # response is where it is known. getattr-guarded so a store predating it is a
+        # no-op, not a persist-floor failure that would skip the create.
+        _record_id = getattr(binding_store, "record_jira_id", None)
+        if _record_id is not None:
+            _record_id(local_id, result.get("id", ""))
+        binding_store.save()
+    except Exception as persist_err:
+        raise BindingPersistError(
+            f"write-ahead record_pending_key persist failed for "
+            f"{local_id!r} (key {jira_key!r}): {persist_err!r}"
+        ) from persist_err
 
 
 def _is_illegal_transition_400(exc: Exception) -> bool:
