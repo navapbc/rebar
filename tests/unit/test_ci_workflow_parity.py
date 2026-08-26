@@ -90,7 +90,7 @@ _DOCUMENTATION_GATE_SIGNATURES = {
     "MCP reference drift gate": "scripts/gen_mcp_reference.py",
 }
 
-_COVERAGE_FLAGS = "--cov=rebar --cov-report=term-missing:skip-covered"
+_COVERAGE_FLAGS = "--cov=rebar --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml"
 
 
 def _expanded_test_matrix(workflow: dict[str, Any]) -> list[tuple[str, str]]:
@@ -107,7 +107,8 @@ def _expanded_test_matrix(workflow: dict[str, Any]) -> list[tuple[str, str]]:
 def _coverage_flags_by_cell(run: str, cells: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
     expression = re.search(
         r"\$\{\{\s*(?P<condition>[^}]*?)\s*&&\s*'(?P<truthy>--cov=rebar "
-        r"--cov-report=term-missing:skip-covered)'\s*\|\|\s*'(?P<falsy>[^']*)'\s*\}\}",
+        r"--cov-report=term-missing:skip-covered --cov-report=xml:coverage\.xml)'"
+        r"\s*\|\|\s*'(?P<falsy>[^']*)'\s*\}\}",
         run,
     )
     assert expression is not None, (
@@ -209,6 +210,54 @@ def test_matrix_keeps_every_test_tier_but_collects_coverage_once() -> None:
         ("macos-latest", "3.13"): "",
     }
     assert _COVERAGE_FLAGS not in integration_steps[0]["run"]
+
+
+def test_diff_coverage_step_present_gated_to_the_gerrit_coverage_cell_and_pinned() -> None:
+    """The diff-coverage report step (epic soupy-bilineate-whiteeye S4) must exist in the
+    shared reusable, be gated to the SAME single cell that emits coverage.xml (non-macOS,
+    3.13), use the NON-deprecated ``--format markdown:`` spelling, stay strictly report-only,
+    and pin the ad-hoc diff-cover install. Without this assertion the step could silently drop,
+    change cells (so it runs where no coverage.xml exists), regress to the deprecated
+    ``--markdown-report`` flag, or float its version — none of which any other test catches."""
+    import yaml
+
+    workflow = yaml.safe_load(_read(_BAT_YML))
+    steps = workflow["jobs"]["test"]["steps"]
+    diff_steps = [
+        s for s in steps if s.get("name", "").startswith("Diff coverage on changed lines")
+    ]
+    assert len(diff_steps) == 1, (
+        "the reusable must define exactly one 'Diff coverage on changed lines' step; found "
+        f"{len(diff_steps)}"
+    )
+    step = diff_steps[0]
+
+    # Gated to the ONE cell that emits coverage.xml — the non-macOS 3.13 cell — so it never
+    # runs where its input is absent. The condition set must match the coverage-flags gate.
+    condition = step.get("if", "")
+    predicates = {p.strip() for p in re.sub(r"^\$\{\{|\}\}$", "", condition).strip().split("&&")}
+    assert predicates == {"!startsWith(matrix.os, 'macos')", "matrix.python-version == '3.13'"}, (
+        f"diff-coverage step must be gated to the non-macOS 3.13 coverage cell; got {condition!r}"
+    )
+
+    run = step["run"]
+    # Inspect only executable lines (drop shell comments, which mention the deprecated flag).
+    run_code = "\n".join(line for line in run.splitlines() if not line.lstrip().startswith("#"))
+    # Non-deprecated report spelling (the older --markdown-report warns and is slated for
+    # removal); confirmed against diff-cover --help before landing.
+    assert '--format "markdown:' in run_code or "--format markdown:" in run_code, (
+        "diff-coverage must use the non-deprecated `--format markdown:<path>` spelling"
+    )
+    assert "--markdown-report" not in run_code, (
+        "the deprecated --markdown-report flag must not return"
+    )
+    # Strictly report-only: never a merge gate.
+    assert "--fail-under=0" in run_code
+    # The ad-hoc install is version-pinned (supply-chain hygiene; report-only tool, no
+    # latest-version rationale, unlike the deliberately-floating pip-audit scanner).
+    assert re.search(r"uv pip install --quiet ['\"]diff-cover==[0-9]", run_code), (
+        "the ad-hoc diff-cover install must be version-pinned"
+    )
 
 
 def test_mutation_gate_uses_one_reusable_in_both_lanes_and_votes() -> None:
@@ -1235,10 +1284,11 @@ def _render_default_suite_body(body: str, os_name: str, python_version: str, tem
             return os_name
         if inner == (
             "!startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' "
-            "&& '--cov=rebar --cov-report=term-missing:skip-covered' || ''"
+            "&& '--cov=rebar --cov-report=term-missing:skip-covered "
+            "--cov-report=xml:coverage.xml' || ''"
         ):
             return (
-                "--cov=rebar --cov-report=term-missing:skip-covered"
+                "--cov=rebar --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml"
                 if (not os_name.startswith("macos") and python_version == "3.13")
                 else ""
             )
