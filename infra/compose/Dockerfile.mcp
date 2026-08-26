@@ -84,20 +84,34 @@ RUN set -eux; \
     { \
       echo '#!/bin/sh'; \
       echo 'set -e'; \
-      echo 'if [ -n "${MCP_TICKETS_PAT:-}" ]; then'; \
-      echo '  git config --global "credential.${MCP_TICKETS_URL}.helper" \'; \
-      echo "    '!f() { echo username=x-access-token; echo \"password=\$MCP_TICKETS_PAT\"; }; f'"; \
-      echo '  git config --global "credential.${MCP_TICKETS_URL}.useHttpPath" false'; \
-      echo '  if [ ! -d "${REBAR_TRACKER_DIR}/.git" ]; then'; \
-      echo '    git clone --single-branch --branch tickets "${MCP_TICKETS_URL}" "${REBAR_TRACKER_DIR}" || \'; \
-      echo '      echo "mcp: tickets store clone deferred (deploy canary)" >&2'; \
+      echo '# Provision the store in the BACKGROUND and exec the server immediately.'; \
+      echo '# The `tickets` branch is ~200k commits; cloning it takes far longer than the'; \
+      echo '# 120s blue-green readiness deadline (autodeploy MCP_HEALTH_TIMEOUT). Doing it'; \
+      echo '# before exec meant the server never bound a port, /health never answered, and'; \
+      echo '# EVERY deploy was rolled back (bug unfit-beneficial-whimbrel). The review-bot'; \
+      echo '# entrypoint this was modelled on has no such readiness gate, which is why the'; \
+      echo '# same shape is safe there and not here.'; \
+      echo '#'; \
+      echo '# Degrading honestly while the clone runs is the read guard tracker reads raise'; \
+      echo '# store_uninitialized until the store is converged, rather than reporting [] and'; \
+      echo '# passing an absent store off as an empty one.'; \
+      echo 'provision_store() {'; \
+      echo '  if [ -n "${MCP_TICKETS_PAT:-}" ]; then'; \
+      echo '    git config --global "credential.${MCP_TICKETS_URL}.helper" \'; \
+      echo "      '!f() { echo username=x-access-token; echo \"password=\$MCP_TICKETS_PAT\"; }; f'"; \
+      echo '    git config --global "credential.${MCP_TICKETS_URL}.useHttpPath" false'; \
+      echo '    if [ ! -d "${REBAR_TRACKER_DIR}/.git" ]; then'; \
+      echo '      git clone --single-branch --branch tickets "${MCP_TICKETS_URL}" "${REBAR_TRACKER_DIR}" || \'; \
+      echo '        echo "mcp: tickets store clone deferred (deploy canary)" >&2'; \
+      echo '    fi'; \
       echo '  fi'; \
-      echo 'fi'; \
-      echo '# Converge the (possibly freshly-cloned) tickets worktree into a writable rebar'; \
-      echo '# store: repo-local git identity + the `.env-id` store marker. Idempotent — a'; \
-      echo '# no-op when the clone is deferred or already converged; never blocks boot.'; \
-      echo 'sh /app/infra/scripts/reviewbot-ensure-tickets.sh "${REBAR_TRACKER_DIR}" || \'; \
-      echo '  echo "mcp: tickets store ensure deferred (see logs)" >&2'; \
+      echo '  # Converge the (possibly freshly-cloned) worktree into a WRITABLE rebar store:'; \
+      echo '  # repo-local git identity + the `.env-id` marker. Idempotent.'; \
+      echo '  sh /app/infra/scripts/reviewbot-ensure-tickets.sh "${REBAR_TRACKER_DIR}" || \'; \
+      echo '    echo "mcp: tickets store ensure deferred (see logs)" >&2'; \
+      echo '  echo "mcp: tickets store provisioning finished" >&2'; \
+      echo '}'; \
+      echo 'provision_store &'; \
       echo 'exec "$@"'; \
     } > /usr/local/bin/mcp-entrypoint.sh; \
     chmod +x /usr/local/bin/mcp-entrypoint.sh

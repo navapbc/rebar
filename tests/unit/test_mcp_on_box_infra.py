@@ -359,3 +359,52 @@ def test_static_tokens_have_no_such_fallback() -> None:
             f"mcp-client-pat-{client} must NOT gain a fallback; the static-token file is an "
             "auth boundary and fails closed by design"
         )
+
+
+def test_mcp_entrypoint_does_not_block_boot_on_the_tickets_clone() -> None:
+    """The store clone must NOT run before `exec` — it cannot finish inside the health gate.
+
+    The `tickets` branch is ~200k commits. The blue-green readiness deadline is
+    `MCP_HEALTH_TIMEOUT` (120s, `infra/scripts/autodeploy.sh`). Cloning before `exec` meant the
+    server never bound a port, `/health` never answered, and EVERY deploy was rolled back with
+    `mcp-unhealthy` — the endpoint kept serving stale code while `main` moved on
+    (bug unfit-beneficial-whimbrel).
+
+    The pattern was copied from `Dockerfile.reviewbot`, which clones at entrypoint too. That is
+    safe THERE because the review-bot has no blue-green readiness gate. The lesson this test
+    pins is that a blocking entrypoint step and a readiness deadline cannot coexist.
+
+    Asserted structurally on the Dockerfile rather than by running a container: the provisioning
+    must be backgrounded (`&`) and `exec "$@"` must not be preceded by a blocking `git clone`.
+    """
+    text = _DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "provision_store &" in text, (
+        "store provisioning must be BACKGROUNDED so the server execs immediately; a synchronous "
+        "clone cannot complete inside the 120s blue-green health deadline"
+    )
+    # The clone must live inside the backgrounded function, not on the straight-line path
+    # between the shebang and `exec`.
+    # Anchor at the START of the generated script, not at the `> /usr/local/bin/...`
+    # redirect, which appears AFTER every echo line.
+    body = text[text.index("echo '#!/bin/sh'") :]
+    clone_at = body.index("git clone --single-branch --branch tickets")
+    background_at = body.index("provision_store &")
+    exec_at = body.index('exec "$@"')
+    assert clone_at < background_at < exec_at, (
+        "the clone must be defined inside provision_store (which is then backgrounded) and "
+        "`exec` must follow the backgrounding, so boot never waits on the clone"
+    )
+
+
+def test_mcp_entrypoint_still_execs_the_server_last() -> None:
+    """Backgrounding must not have cost us PID-1 semantics.
+
+    `exec "$@"` must remain the final action so the server replaces the shell and receives
+    SIGTERM directly — the container's stop_grace_period and the in-flight drain depend on it.
+    """
+    text = _DOCKERFILE.read_text(encoding="utf-8")
+    body = text[text.index("echo '#!/bin/sh'") :]
+    tail = [ln for ln in body.splitlines() if "echo '" in ln and "$@" in ln]
+    assert tail, "entrypoint must still exec the command"
+    assert 'exec "$@"' in tail[-1], "exec must be the LAST action in the entrypoint"
