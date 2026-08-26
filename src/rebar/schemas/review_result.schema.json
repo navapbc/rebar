@@ -28,7 +28,7 @@
     },
     "runner": { "type": "string", "description": "Execution backend that produced this result: 'pydantic_ai', 'fake'." },
     "model": { "type": ["string", "null"], "description": "Model id used (when applicable; null for non-LLM/fake runners)." },
-    "trace_id": { "type": ["string", "null"], "description": "Langfuse trace id, when tracing is enabled; null otherwise." },
+    "trace_id": { "type": ["string", "null"], "description": "Per-gate-run correlation id (32 lowercase hex, W3C trace-id shape); null for deterministic or fallback verdicts and standalone ops." },
     "summary": { "type": "string", "description": "Optional reviewer-written summary of the review." }
   }
 }

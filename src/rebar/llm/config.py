@@ -549,6 +549,11 @@ class LLMConfig:
     overlap_drain: str = DEFAULT_OVERLAP_DRAIN
     overlap_drain_batch: int = DEFAULT_OVERLAP_DRAIN_BATCH
     overlap_drain_gate_budget_ms: int = DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS
+    # Per-gate-run correlation identity minted by `rebar.llm.run_identity` at the gate_dispatch
+    # run boundaries; all None outside a gate run, so a standalone op is byte-unchanged.
+    trace_id: str | None = None
+    ticket_id: str | None = None
+    operation: str | None = None
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
