@@ -674,12 +674,29 @@ jobs:
         # SOURCES are subprocess ceilings, not durations; a test that must genuinely run longer
         # carries a plain `@pytest.mark.timeout(N)` with a reason (never func_only — the budget
         # deliberately covers fixture setup/teardown too, bug 797b-bbc4-01cf-42d5).
-        run: >-
-          pytest -m "$DEFAULT_SUITE_MARKS"
-          -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
-          -q -p no:cacheprovider --durations=25
-          --basetemp="${{ runner.temp }}/rebar-basetemp"
-          ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }}
+        run: |
+          rc=0
+          pytest -m "$DEFAULT_SUITE_MARKS" \
+            -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal \
+            -q -p no:cacheprovider --durations=25 \
+            --basetemp="${{ runner.temp }}/rebar-basetemp" \
+            ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }} || rc=$?
+          # pytest rc 5 = "no tests collected". On the macOS platform_compat cell this is a
+          # LEGITIMATE outcome for any patchset whose tree predates the conftest
+          # auto-marker (story omphacite-desertlike-coney): that marker is
+          # applied at COLLECTION time, but the Verified gate runs THIS workflow from trusted
+          # main against the raw patchset tree (reusable-workflow ref binding), so a pre-marker
+          # tree carries zero platform_compat nodes and the selection matches nothing. Such a
+          # patchset is still fully exercised by the ubuntu cells (whole-suite selection, which
+          # is marker-independent), and a CURRENT-tree marker regression is caught on ubuntu by
+          # test_platform_compat_suite_covers_the_core_os_sensitive_seams. So treat an empty
+          # collection as pass HERE ONLY; on every other cell the selection is the whole suite,
+          # where rc 5 is a real empty-suite failure that must stay red.
+          if [ "$rc" -eq 5 ] && [ "${{ matrix.os }}" = "macos-latest" ]; then
+            echo "::notice::macOS platform_compat subset selected 0 tests (patchset predates the conftest auto-marker); treating an empty collection as pass — see step comment."
+            rc=0
+          fi
+          exit "$rc"
 
       - name: Run the integration tier (concurrency + reconciler; network-guarded)
         # These need no live services (mocked acli / local git), so they run in CI
