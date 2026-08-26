@@ -227,3 +227,71 @@ def resolve_headers(
         f"[tool.rebar.llm].headers: expected a table or a JSON string, got "
         f"{type(file_value).__name__}"
     )
+
+
+# The ``${run:KEY}`` placeholders left behind by :func:`substitute`. Only the key is captured;
+# the key vocabulary is re-checked against :data:`RUN_KEYS` so a placeholder that reached this
+# seam without passing config resolution (a hand-built mapping, a future caller) still fails
+# loudly rather than being delivered verbatim.
+_RUN_PLACEHOLDER_RE = re.compile(r"\$\{" + RUN_NAMESPACE + r":([^}]*)\}")
+
+
+def resolve_run_headers(
+    headers: Mapping[str, str], *, run: Mapping[str, str | None]
+) -> dict[str, str]:
+    """The finished headers for ONE call: ``${run:...}`` resolved against this run's identity.
+
+    Returns a FRESH dict every call, never ``headers`` itself. That copy is load-bearing, not
+    hygiene: at the pinned pydantic-ai the Chat Completions path reads
+    ``model_settings.get('extra_headers', {})`` with no copy and then ``setdefault``s a
+    ``User-Agent`` onto it (upstream issue 6866, fixed by PR 6868 after this pin), so handing
+    over the config's own mapping would pollute it across calls and leak a version string into
+    the recorded header-name set.
+
+    ``run`` maps each :data:`RUN_KEYS` name to this run's value, or ``None`` where there is no
+    such value. Three dispositions, deliberately different:
+
+    * an UNKNOWN key raises :class:`~rebar.llm.errors.LLMConfigError` naming it — the same
+      config-time error, restated here because this seam accepts mappings that never passed
+      through :func:`resolve_headers`;
+    * an ABSENT substituend (``None`` or empty) OMITS the whole header. Only the two gate
+      boundaries mint an identity, so ``review-code`` and every standalone op legitimately have
+      no ticket or trace; an empty correlation header pollutes the gateway and raising would
+      break those ops merely because headers are configured globally. Observability must never
+      fail an operation. Sibling headers with no placeholder are unaffected;
+    * a PRESENT substituend is substituted, and the finished header is then RE-VALIDATED. A
+      value that was a clean placeholder at config time is not proven safe until the run value
+      has landed in it, so :func:`validate_header` runs again on the resolved text — the same
+      substitute-then-validate ordering the module docstring states, applied to this second seam.
+    """
+    resolved: dict[str, str] = {}
+    for name, value in headers.items():
+        substituted = _substitute_run(value, name=name, run=run)
+        if substituted is None:
+            continue  # an absent substituend drops the header — see the docstring
+        validate_header(name, substituted)
+        resolved[name] = substituted
+    return resolved
+
+
+def _substitute_run(value: str, *, name: str, run: Mapping[str, str | None]) -> str | None:
+    """One header value with its ``${run:...}`` placeholders replaced, or ``None`` when any
+    substituend is absent (the caller drops such a header entirely)."""
+    absent = False
+
+    def _one(match: re.Match[str]) -> str:
+        nonlocal absent
+        key = match.group(1)
+        if key not in RUN_KEYS:
+            raise LLMConfigError(
+                f"llm.headers[{name!r}]: unknown ${{run:...}} key {key!r}; expected one of "
+                f"{sorted(RUN_KEYS)}"
+            )
+        run_value = run.get(key)
+        if not run_value:
+            absent = True
+            return ""
+        return run_value
+
+    substituted = _RUN_PLACEHOLDER_RE.sub(_one, value)
+    return None if absent else substituted

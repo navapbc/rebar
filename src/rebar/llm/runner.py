@@ -509,16 +509,15 @@ class PydanticAIRunner:
                 if self._model_override
                 else cache_settings_for(caps, execution_mode=req.execution_mode)
             )
-            # Provider provenance (story S5/343b): stamp WHAT actually ran — resolved
-            # provider/model, the endpoint host (None for the first-class/no-custom-base_url
-            # path), and the effective capability record — onto the verdict, additively,
-            # alongside the existing `model` string. Built from the SAME `caps` already
-            # resolved above (never recomputed — see capabilities.provenance_for's docstring).
+            # Provider provenance (story S5/343b): what each field records, and why `caps` is
+            # carried through rather than recomputed, is in `capabilities.provenance_for`.
             # Web access (bug 129e). Resolved ONCE here so the capability actually attached and
             # the provenance that attests it cannot disagree. The ONLY thing that can withdraw it
             # is the injected-test-model path (`model_override`): a test double has no provider to
             # search with, and every model_override test pins the byte-identical wire shape. It is
             # NOT withdrawn for any real provider — that prefix-shaped withdrawal is the bug.
+            # `header_names` records the configured header NAMES only — never their values, which
+            # would otherwise become durable in a signed verdict (see `provenance_for`).
             web_requested = bool(req.web) and not self._model_override
             provider_provenance = provenance_for(
                 provider=_provider_name,
@@ -528,6 +527,7 @@ class PydanticAIRunner:
                 web=web_requested,
                 bedrock_region_name=cfg.bedrock_region_name,
                 bedrock_region_source=cfg.bedrock_region_source,
+                header_names=sorted(cfg.headers),
             )
             if fallback_targets:
                 # A verdict produced by a fallback must not attest the primary. The ordered

@@ -44,6 +44,7 @@ from rebar.llm.errors import (
     StructuredOutputError,
     UnretryableOutputError,
 )
+from rebar.llm.headers import resolve_run_headers
 from rebar.llm.run_failure import (
     FailureContext,
     _write_parse_failure_artifact,
@@ -335,6 +336,25 @@ def _exhausted_output_retries(
     return UnretryableOutputError(str(exc))
 
 
+def extra_headers_for(cfg: LLMConfig) -> dict[str, str] | None:
+    """The operator's resolved request headers for this call, or ``None`` to send none.
+
+    Attached ONLY when ``cfg.base_url`` is set: a configured intermediary is the only topology
+    in which operator headers mean anything (they are inert against a first-class provider
+    endpoint), and the gate stops an operator's internal values reaching a public one. With no
+    ``base_url``, no configured headers, or every header dropped for an absent ``${run:...}``
+    substituend, this returns ``None`` and the caller omits the key ENTIRELY — an unconfigured
+    operator's ``model_settings`` stays byte-identical, rather than gaining an empty mapping.
+
+    The mapping is freshly built per call by ``headers.resolve_run_headers`` and is never
+    ``cfg.headers`` itself; see that function for why the copy is load-bearing at this pin.
+    """
+    if not cfg.base_url or not cfg.headers:
+        return None
+    run = {"trace_id": cfg.trace_id, "ticket_id": cfg.ticket_id, "operation": cfg.operation}
+    return resolve_run_headers(cfg.headers, run=run) or None
+
+
 def build_model_settings(
     cfg: LLMConfig,
     req: RunRequest,
@@ -410,6 +430,12 @@ def build_model_settings(
         temperature = cfg.temperature
     if temperature is not None and caps.supports_temperature:
         model_settings["temperature"] = float(temperature)
+    # Operator-configured request headers (story 26ae). All of the gating, resolution and
+    # re-validation lives in the helper so this stays a single branch; `extra_headers` is a base
+    # ModelSettings field, riding alongside the cache flags exactly like `max_tokens` above.
+    extra_headers = extra_headers_for(cfg)
+    if extra_headers is not None:
+        model_settings["extra_headers"] = extra_headers
     return model_settings
 
 

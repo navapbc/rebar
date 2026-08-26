@@ -560,6 +560,7 @@ def provenance_for(
     web: bool = False,
     bedrock_region_name: str | None = None,
     bedrock_region_source: str | None = None,
+    header_names: list[str] | None = None,
 ) -> dict:
     """The ``provider_provenance`` record for a signed gate verdict (story S5/343b).
 
@@ -608,6 +609,13 @@ def provenance_for(
     by the SAME ``from_env`` pass that produced the value — so a ``[tool.rebar.llm]`` pin is
     labeled ``repo-config`` (and a CLI override ``cli``), never blanket-labeled as the env var.
 
+    OPERATOR HEADERS (story 26ae). ``header_names`` records WHICH request headers the operator
+    configured, as a sorted list under ``header_names`` — NAMES ONLY, never values. This record
+    is written into signed verdicts and sidecars, and a header value is operator-supplied
+    material that may carry a token or an internal identifier, so it must never become durable;
+    a name is enough to audit what was attached. The key is ABSENT when no headers are
+    configured, so every existing provenance record is byte-unchanged.
+
     Security: the host is read via ``urlparse(base_url).hostname``, never ``.netloc`` — the
     latter retains embedded credentials (``user:secret@host``), and no credential material may
     appear in a signed record."""
@@ -615,7 +623,7 @@ def provenance_for(
 
     endpoint_host = urlparse(base_url).hostname if base_url else None
     via_gateway = provider in _GATEWAY_PROVIDER_NAMES
-    record = {
+    record: dict[str, Any] = {
         "provider": provider,
         "model": model,
         "endpoint_host": endpoint_host,
@@ -631,6 +639,8 @@ def provenance_for(
             "web_access": web_access_provenance(caps, web=web),
         },
     }
+    if header_names:
+        record["header_names"] = sorted(header_names)
     if provider == "bedrock":
         from rebar.llm.bedrock_model import resolve_bedrock_region
 
