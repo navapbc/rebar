@@ -560,6 +560,84 @@ def test_secrets_fetch_failure_aborts_before_touching_the_live_upstream(
     )
 
 
+def test_storeless_container_is_not_promoted_when_a_store_is_expected(
+    mcp_box: dict[str, object],
+) -> None:
+    """A container that is UP but has no ticket store must not take the upstream.
+
+    A 200 from /health used to mean only "the process is listening", so a container serving
+    NO store passed the readiness gate identically to a healthy one -- which is how a
+    storeless deployment went unobserved for weeks (mobile-groovy-badger). The gate now reads
+    the `store` object /health reports.
+    """
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    before = upstream.read_bytes()
+    # New container comes up healthy, but reports a store it was SUPPOSED to have and lacks.
+    (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
+        '{"in_flight":0,"store":{"path":"/var/gerrit/site/mcp-tickets",'
+        '"present":false,"expected":true}}'
+    )
+
+    result = _run(mcp_box)
+    cmds = _commands(mcp_box)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp-store-missing" in result.stdout + result.stderr, (
+        f"a storeless container must be refused by name, not silently promoted\n{ctx}"
+    )
+    assert upstream.read_bytes() == before, (
+        f"the OLD upstream must stay live and byte-identical\n{ctx}"
+    )
+    assert "nginx-reload" not in cmds, f"the upstream must not be flipped\n{ctx}"
+    assert any("rm-f" in c for c in cmds), f"the refused container must be removed\n{ctx}"
+
+
+def test_storeless_container_IS_promoted_when_no_store_is_expected(
+    mcp_box: dict[str, object],
+) -> None:
+    """The safety property: absence is only a fault for a deployment that declared a store.
+
+    This is the half that makes the gate landable on a box with no store yet. Gating on
+    `present` alone would refuse to promote a perfectly good container and take the endpoint
+    down in order to report a non-problem.
+    """
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
+        '{"in_flight":0,"store":{"path":"/app/.tickets-tracker","present":false,"expected":false}}'
+    )
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp-store-missing" not in result.stdout + result.stderr, (
+        f"a deployment that never declared a store must not be blocked by the gate\n{ctx}"
+    )
+    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+        f"the healthy container must still be promoted\n{ctx}"
+    )
+
+
+def test_health_without_a_store_field_still_promotes(mcp_box: dict[str, object]) -> None:
+    """Mixed-version safety: an OLDER container's /health predates the `store` field.
+
+    It reports neither key, so the gate must treat it as not-expected and promote. Without
+    this, the first deploy after the field is added would refuse every container still
+    running the previous image.
+    """
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}')  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp-store-missing" not in result.stdout + result.stderr, (
+        f"a /health that predates the store field must not be blocked\n{ctx}"
+    )
+    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+        f"the container must still be promoted\n{ctx}"
+    )
+
+
 def test_nginx_reload_failure_restores_the_previous_upstream(tmp_path: Path) -> None:
     """If `nginx -s reload` fails the flip, the previous include must be restored byte-identical
     and the new container removed."""
