@@ -171,7 +171,9 @@ def test_mutating_reconciler_records_success_before_releasing_lock(
     assert rc == 0
     payload = _ref_payload(remote, LAST_PASS_REF)
     assert payload is not None
-    assert payload["schema_version"] == 1
+    # RP-03 S5 T2 advanced the durable last-pass write schema 1 -> 2 (additive; readers
+    # still accept schema 1). A freshly written record therefore carries version 2.
+    assert payload["schema_version"] == 2
     assert payload["environment_id"] == "reconciler"
     assert payload["outcome"] == "success"
     assert payload["failure_kind"] is None

@@ -743,3 +743,285 @@ def test_live_reroute_reraises_non_404_httperror_fail_fast(
 # ════════════════════════════════════════════════════════════════════════════════
 # ── S3T3-REROUTE-E2E-HELDOUT-END ──
 # ════════════════════════════════════════════════════════════════════════════════
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# REB-3115 S5 T2 — proven-state advancement + exact mixed-pass tallies (AC3/AC4/AC5)
+# ════════════════════════════════════════════════════════════════════════════════
+# The reconcile pass must advance cursor / baseline / binding state ONLY for a proven
+# postcondition. Deferred / failed / skipped / commit_unknown work is NOT counted as
+# applied and stays eligible for the next pass, and the mixed-pass five-bucket tally
+# (applied / recovered / deferred / failed / skipped) plus the process exit are EXACT.
+
+
+class _StubBindingStore:
+    """A minimal binding store recording which bindings had a baseline advanced.
+
+    ``set_baseline`` / ``merge_baseline`` are the two ADR-0026 advance seams; a binding
+    only reaches them when its postcondition is PROVEN — the pass-start fetch for
+    untouched fields, and the confirmed-landed ``synced_fields`` overlay for our own
+    writes. A soft-failed / deferred write contributes to neither, so it must never
+    appear in ``advanced`` / ``overlaid``.
+    """
+
+    def __init__(self, bindings: dict) -> None:
+        self._bindings = bindings
+        self.advanced: list[str] = []
+        self.overlaid: list[str] = []
+        self.saved = False
+
+    def all_bindings(self) -> dict:
+        return self._bindings
+
+    def set_baseline(self, local_id: str, _value) -> None:
+        self.advanced.append(local_id)
+
+    def merge_baseline(self, local_id: str, _value) -> None:
+        self.overlaid.append(local_id)
+
+    def save(self) -> None:
+        self.saved = True
+
+
+def test_baseline_advances_only_for_proven_confirmed_writes() -> None:
+    """AC3: the confirmed-landed ``synced_fields`` overlay advances the baseline ONLY for a
+    binding whose write PROVABLY landed. A deferred/failed binding — absent from
+    ``synced_fields`` — gets no overlay, so it stays eligible for the next pass."""
+    store = _StubBindingStore(
+        {
+            "loc-applied": {"state": "confirmed", "jira_key": "DIG-1"},
+            "loc-deferred": {"state": "confirmed", "jira_key": "DIG-2"},
+        }
+    )
+    # Only the applied binding confirmedly landed a write this pass.
+    synced_fields = {"loc-applied": {"summary": "landed"}}
+    # Neither key is in the pass-start fetch window (so set_baseline is not the mechanism
+    # under test here — only the proven-write overlay is).
+    reconcile._advance_baselines(store, {}, synced_fields)
+
+    assert store.overlaid == ["loc-applied"], (
+        "only a proven confirmed write advances the baseline; a deferred/failed binding "
+        f"must not be overlaid and stays eligible next pass. got {store.overlaid!r}"
+    )
+    assert "loc-deferred" not in store.overlaid
+
+
+def _persist_tally(tmp_path: Path, monkeypatch, apply_tally: dict) -> dict:
+    class _Logger:
+        def __init__(self) -> None:
+            self.events: list = []
+
+        def log(self, event: str, **k: Any) -> None:
+            self.events.append((event, k))
+
+        def close(self, *a: Any, **k: Any) -> None: ...
+        def sync_pass_end(self, *a: Any, **k: Any) -> None: ...
+
+    ctx = reconcile._PassContext(pass_id="pass-mixed", repo_root=tmp_path)
+    ctx.persist = True
+    ctx.mutations = [{"action": "update"}] * (
+        apply_tally.get("applied_count", 0)
+        + apply_tally.get("failed_count", 0)
+        + apply_tally.get("deferred_count", 0)
+        + apply_tally.get("skipped_count", 0)
+    )
+    ctx.curr_path = tmp_path / "curr.json"
+    ctx.curr_path.write_text("{}")
+    ctx.prev_path = tmp_path / "prev.json"
+    ctx.sync_logger = _Logger()
+    ctx.manifest_path = None
+    ctx.nowrite_plan = None
+    ctx.apply_tally = apply_tally
+    monkeypatch.setattr(reconcile, "_save_and_commit_bindings", lambda *a, **k: None, raising=False)
+    return reconcile._persist_and_log(ctx)
+
+
+def test_mixed_pass_tally_is_exact_including_recovered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC5: a mixed cutover pass surfaces EXACT, DISJOINT applied / recovered / deferred /
+    failed / skipped counts that sum to ``mutation_count``.
+
+    The production tally (``batch_dispatch.build_pass_tally``) FOLDS recovered into
+    ``applied_count`` (``applied_count = applied + recovered`` — a legacy-consumer
+    contract pinned by ``test_build_pass_tally_folds_recovered_into_applied``), so the
+    apply_tally reconcile receives already carries recovered inside ``applied_count``.
+    ``reconcile`` must subtract it back out so ``recovered`` is surfaced explicitly and
+    NOT double-counted in ``mutations_applied``. Here 4 pure-applied + 5 recovered arrive
+    as ``applied_count`` 9; the exact reported applied count is 4."""
+    result = _persist_tally(
+        tmp_path,
+        monkeypatch,
+        {
+            # production-folded shape: 4 pure applied + 5 recovered == applied_count 9
+            "applied_count": 9,
+            "failed_count": 2,
+            "deferred_count": 3,
+            "skipped_count": 1,
+            "recovered_count": 5,
+            "degraded": True,
+        },
+    )
+    assert result["mutations_applied"] == 4, (
+        "recovered must be un-folded out of applied — mutations_applied is PURE applied"
+    )
+    assert result["mutation_failures"] == 2
+    assert result["mutations_deferred"] == 3
+    assert result["mutations_skipped"] == 1
+    assert result["mutations_recovered"] == 5
+    assert result["degraded"] is True
+    # Exact tallies (AC5): the five DISJOINT buckets sum to the computed mutation count.
+    assert (
+        result["mutations_applied"]
+        + result["mutations_recovered"]
+        + result["mutation_failures"]
+        + result["mutations_deferred"]
+        + result["mutations_skipped"]
+    ) == result["mutation_count"]
+
+
+def test_reconcile_unfolds_the_real_build_pass_tally_fold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC5 end-to-end: drive the REAL producer (``build_pass_tally``) into the REAL
+    reconcile tally so the fold/un-fold pair is proven to compose, not a synthetic shape.
+
+    A ``CutoverReport`` with 3 applied + 2 recovered projects (via the production
+    ``build_pass_tally``) to ``applied_count`` 5 with ``recovered_count`` 2; reconcile must
+    report ``mutations_applied`` 3 and ``mutations_recovered`` 2 — disjoint, summing to
+    ``mutation_count``."""
+    from rebar_reconciler import batch_dispatch
+
+    report = batch_dispatch.CutoverReport(
+        outcomes=(),
+        tallies={"applied": 3, "recovered": 2, "deferred": 1, "failed": 0, "skipped": 0},
+        fuse_decisions=(),
+        degraded=False,
+    )
+    apply_tally = batch_dispatch.build_pass_tally(report)
+    assert apply_tally["applied_count"] == 5, "guard: production folds recovered into applied"
+    assert apply_tally["recovered_count"] == 2
+
+    result = _persist_tally(tmp_path, monkeypatch, apply_tally)
+
+    assert result["mutations_applied"] == 3
+    assert result["mutations_recovered"] == 2
+    assert result["mutations_deferred"] == 1
+    assert result["mutation_failures"] == 0
+    assert result["mutations_skipped"] == 0
+    assert (
+        result["mutations_applied"]
+        + result["mutations_recovered"]
+        + result["mutation_failures"]
+        + result["mutations_deferred"]
+        + result["mutations_skipped"]
+    ) == result["mutation_count"]
+
+
+def test_commit_unknown_deferred_work_is_not_counted_applied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC4: ``commit_unknown`` folds into the ``deferred`` bucket (failure_policy) — it is
+    NOT counted as applied, so it remains eligible for the next pass. A pass whose only
+    non-applied work is a single deferred commit_unknown still surfaces it as deferred and
+    keeps ``applied`` exact."""
+    result = _persist_tally(
+        tmp_path,
+        monkeypatch,
+        {
+            "applied_count": 1,
+            "failed_count": 0,
+            "deferred_count": 1,  # the commit_unknown mutation, folded to deferred
+            "skipped_count": 0,
+            "recovered_count": 0,
+            "degraded": False,
+        },
+    )
+    assert result["mutations_applied"] == 1, "commit_unknown must not be counted as applied"
+    assert result["mutations_deferred"] == 1, "commit_unknown stays eligible as deferred work"
+
+
+# ── last_pass: persist EXACT deferred/failed/recovered pass semantics (additive). ──
+
+
+def _last_pass_mod() -> Any:
+    from rebar_reconciler import last_pass
+
+    return last_pass
+
+
+def _git_repo(tmp_path: Path) -> Path:
+    import subprocess
+
+    repo = tmp_path / "lp_repo"
+    repo.mkdir()
+    for args in (
+        ["init", "-q", "."],
+        ["config", "user.email", "t@example.com"],
+        ["config", "user.name", "tester"],
+        ["commit", "-q", "--allow-empty", "-m", "init"],
+    ):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    return repo
+
+
+def test_last_pass_persists_exact_disposition_tally_additively(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC2/AC5: the durable last-pass witness carries the EXACT deferred/failed/recovered
+    pass disposition as an ADDITIVE, versioned block — the existing outcome/failure_kind
+    fields are untouched so an older reader still validates the record."""
+    last_pass = _last_pass_mod()
+    repo = _git_repo(tmp_path)
+    monkeypatch.setenv("REBAR_ENV_ID", "reconciler")
+
+    record = last_pass.publish(
+        repo,
+        pass_id="pass-disp",
+        outcome="failure",
+        failure_kind="operational_failure",
+        outcome_tally={
+            "applied": 4,
+            "recovered": 5,
+            "deferred": 3,
+            "failed": 2,
+            "skipped": 1,
+        },
+        degraded=True,
+    )
+
+    # additive block present and exact
+    assert record["outcome"] == "failure"
+    assert record["failure_kind"] == "operational_failure"
+    assert record["outcome_tally"] == {
+        "applied": 4,
+        "recovered": 5,
+        "deferred": 3,
+        "failed": 2,
+        "skipped": 1,
+    }
+    assert record["degraded"] is True
+
+    # the persisted witness re-reads and re-validates (round-trips through the ref).
+    snap = last_pass.snapshot(repo, target_environment_id="reconciler")
+    assert snap["outcome_tally"]["deferred"] == 3
+    assert snap["outcome_tally"]["recovered"] == 5
+
+
+def test_last_pass_reads_a_legacy_record_without_the_additive_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC (old readers work): a record published WITHOUT the additive disposition block is
+    still valid and readable — the new fields default to null rather than failing
+    validation."""
+    last_pass = _last_pass_mod()
+    repo = _git_repo(tmp_path)
+    monkeypatch.setenv("REBAR_ENV_ID", "reconciler")
+
+    record = last_pass.publish(repo, pass_id="pass-legacy", outcome="success")
+    assert record["outcome"] == "success"
+    assert record.get("outcome_tally") is None
+
+    snap = last_pass.snapshot(repo, target_environment_id="reconciler")
+    assert snap["verdict"] in {"HEALTHY", "NEVER_RUN", "RUNNING", "PAUSED"}
+    assert snap.get("outcome_tally") is None

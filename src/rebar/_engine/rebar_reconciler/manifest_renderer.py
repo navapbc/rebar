@@ -254,3 +254,128 @@ def render_lifecycle_intents(ticket_plans: Iterable[Any]) -> dict:
         "observation_version": _observation_version_dict(ov),
         "plans": [_lifecycle_plan_entry(p) for p in plans],
     }
+
+
+# ── REB-3115 S5 T2 — the sealed, additive, versioned pass-outcomes section ───────
+#
+# ``render_pass_outcomes`` folds a pass's proven logical-operation outcomes into ONE
+# additive, versioned section exposing every named lifecycle / retry / fuse / outcome
+# field (AC2): disposition, failure scope, replay safety, logical + physical attempts,
+# delay source / value, the retry budget envelope, ``retry_not_before``, per-outcome fuse
+# state, and the exact five-bucket pass tally + degraded exit signal.
+#
+# It NEVER participates in the canonical mutation array or its hash (AC1): it is a pure
+# sibling projection the caller adds as a separate top-level key. Every field is redacted
+# and every collection is bounded (AC6): diagnostics run through the ADR-0041 sanitizer +
+# 8-entry bound (``operation_outcome.bound_diagnostics``), and the outcomes / fuse-state
+# lists are capped with an honest truncation count. Duck-typed over both
+# ``OperationOutcome`` (the rich per-op record) and the coordinator's
+# ``TicketOutcome`` / ``CutoverOutcome`` so either surface composes.
+
+_PASS_OUTCOMES_SCHEMA_VERSION = 1
+_MAX_PASS_OUTCOMES = 1000
+_OUTCOME_BUCKETS: tuple[str, ...] = ("applied", "recovered", "deferred", "failed", "skipped")
+
+# The retry-budget bounds are single-sourced in retry_budget.py; surfaced here so the
+# rendered ``budget`` envelope names the caps a consumer measures consumption against. A
+# best-effort import keeps this leaf pure/standalone-loadable — an absent module degrades
+# the caps to ``None`` rather than raising.
+try:  # pragma: no cover - trivial import guard
+    from rebar_reconciler.retry_budget import MAX_CUMULATIVE_SLEEP_MS, MAX_INVOCATIONS
+except ImportError:  # pragma: no cover - standalone/partial load
+    MAX_INVOCATIONS = None
+    MAX_CUMULATIVE_SLEEP_MS = None
+
+
+def _enum_value(value: Any, default: str | None = None) -> str | None:
+    """Return an enum member's ``.value`` (or a plain string), else *default*."""
+    if value is None:
+        return default
+    return str(getattr(value, "value", value))
+
+
+def _bounded_diagnostics(raw: Any) -> list[dict]:
+    """Redact + bound a diagnostics collection via the operation_outcome seam (AC6)."""
+    from rebar_reconciler.operation_outcome import bound_diagnostics
+
+    return [dict(entry) for entry in bound_diagnostics(raw or ())]
+
+
+def _fuse_decision_dict(decision: Any) -> dict | None:
+    """Render a ``FuseDecision`` as its five named fields (or ``None`` when unfused)."""
+    if decision is None:
+        return None
+    return {
+        "scope": _enum_value(getattr(decision, "scope", None)),
+        "reason": getattr(decision, "reason", None),
+        "retry_not_before": getattr(decision, "retry_not_before", None),
+        "provider": getattr(decision, "provider", None),
+        "endpoint": getattr(decision, "endpoint", None),
+    }
+
+
+def _pass_outcome_entry(outcome: Any) -> dict:
+    """One outcome's entry carrying every named lifecycle/retry/fuse field (AC2).
+
+    Read duck-typed so an ``OperationOutcome`` (``logical_id`` + full attempt/delay detail)
+    and a coordinator ``CutoverOutcome`` (``identity`` + attached ``fuse_decision``) both
+    render; absent fields default to their neutral value rather than raising."""
+    logical_id = getattr(outcome, "logical_id", None) or getattr(outcome, "identity", "")
+    invocations = int(getattr(outcome, "invocation_count", 0) or 0)
+    requests = int(getattr(outcome, "request_count", 0) or 0)
+    return {
+        "logical_id": str(logical_id),
+        "disposition": _enum_value(getattr(outcome, "disposition", None), ""),
+        "failure_scope": _enum_value(getattr(outcome, "failure_scope", None), "none"),
+        "replay_safety": _enum_value(getattr(outcome, "replay_safety", None), "not_applicable"),
+        "logical_attempts": invocations,
+        "physical_attempts": requests,
+        "delay_source": _enum_value(getattr(outcome, "delay_source", None), "none"),
+        "delay_value_ms": getattr(outcome, "provider_delay_ms", None),
+        "budget": {
+            "max_invocations": MAX_INVOCATIONS,
+            "max_cumulative_sleep_ms": MAX_CUMULATIVE_SLEEP_MS,
+            "invocations_used": invocations,
+            "requests_used": requests,
+        },
+        "retry_not_before": getattr(outcome, "retry_not_before", None),
+        "fuse": _fuse_decision_dict(getattr(outcome, "fuse_decision", None)),
+        "diagnostics": _bounded_diagnostics(getattr(outcome, "diagnostics", ())),
+    }
+
+
+def _pass_tally_dict(tally: Any) -> dict[str, int]:
+    """Project a tally mapping onto the five canonical buckets, 0-filled and exact."""
+    source = tally or {}
+    return {bucket: int(source.get(bucket, 0) or 0) for bucket in _OUTCOME_BUCKETS}
+
+
+def render_pass_outcomes(
+    outcomes: Iterable[Any],
+    *,
+    fuse_decisions: Iterable[Any] = (),
+    tally: Any = None,
+    degraded: bool = False,
+    observation_version: Any = None,
+) -> dict:
+    """Render the additive, versioned pass-outcomes section (REB-3115 S5 T2).
+
+    Pure and JSON-serializable: identical inputs render byte-identical output. Additive —
+    the caller attaches the result as a NEW top-level manifest/log key and the canonical
+    mutation array is untouched (AC1). Version-tagged so a legacy reader can ignore it.
+    Redacts every diagnostic and bounds every collection (AC6).
+    """
+    all_outcomes = list(outcomes)
+    kept = all_outcomes[:_MAX_PASS_OUTCOMES]
+    all_fuse = list(fuse_decisions)
+    return {
+        "schema_version": _PASS_OUTCOMES_SCHEMA_VERSION,
+        "observation_version": _observation_version_dict(observation_version),
+        "tally": _pass_tally_dict(tally),
+        "degraded": bool(degraded),
+        "outcomes": [_pass_outcome_entry(o) for o in kept],
+        "outcomes_truncated": max(0, len(all_outcomes) - len(kept)),
+        "fuse_state": [
+            _fuse_decision_dict(d) for d in all_fuse[:_MAX_PASS_OUTCOMES] if d is not None
+        ],
+    }

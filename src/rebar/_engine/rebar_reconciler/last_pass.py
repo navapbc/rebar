@@ -15,12 +15,22 @@ import os
 import sys
 import tempfile
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from time import sleep as _sleep
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+# Older witnesses (schema 1, before the additive disposition block) still validate and
+# read — the additive fields default to null rather than failing an older reader.
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
+_OUTCOME_TALLY_BUCKETS: tuple[str, ...] = (
+    "applied",
+    "recovered",
+    "deferred",
+    "failed",
+    "skipped",
+)
 LAST_PASS_REF = "refs/reconciler/last-pass"
 DETAIL_RELATIVE = Path(".tickets-tracker/.bridge_state/last-pass.json")
 HEALTHY_VERDICTS = frozenset({"HEALTHY", "PAUSED", "RUNNING"})
@@ -103,9 +113,18 @@ def _parse_completed_at(value: Any) -> dt.datetime:
     return parsed
 
 
+def _normalized_outcome_tally(raw: Any) -> dict[str, int] | None:
+    """Project a raw tally onto the five canonical buckets (0-filled), or None."""
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise LastPassError("last-pass outcome_tally must be a mapping or null")
+    return {b: int(raw.get(b, 0) or 0) for b in _OUTCOME_TALLY_BUCKETS}
+
+
 def _validate_record(doc: Any) -> dict[str, Any]:
-    if not isinstance(doc, dict) or doc.get("schema_version") != SCHEMA_VERSION:
-        raise LastPassError("last-pass ref does not contain schema version 1")
+    if not isinstance(doc, dict) or doc.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
+        raise LastPassError("last-pass ref does not contain a supported schema version")
     for name in ("pass_id", "environment_id", "outcome", "completed_at"):
         if not isinstance(doc.get(name), str) or not doc[name]:
             raise LastPassError(f"last-pass field {name!r} must be a non-empty string")
@@ -119,10 +138,15 @@ def _validate_record(doc: Any) -> dict[str, Any]:
     fence = doc.get("lock_fence")
     if fence is not None and (not isinstance(fence, int) or isinstance(fence, bool) or fence < 0):
         raise LastPassError("last-pass lock_fence must be a non-negative integer or null")
+    degraded = doc.get("degraded")
+    if degraded is not None and not isinstance(degraded, bool):
+        raise LastPassError("last-pass degraded must be a boolean or null")
     _parse_completed_at(doc["completed_at"])
     normalized = dict(doc)
     normalized.setdefault("failure_kind", None)
     normalized.setdefault("lock_fence", None)
+    normalized["outcome_tally"] = _normalized_outcome_tally(doc.get("outcome_tally"))
+    normalized.setdefault("degraded", None)
     return normalized
 
 
@@ -266,6 +290,8 @@ def publish(
     outcome: str,
     failure_kind: str | None = None,
     lock_fence: int | None = None,
+    outcome_tally: Mapping[str, Any] | None = None,
+    degraded: bool | None = None,
     detail: dict[str, Any] | None = None,
     sleep_fn: Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
@@ -282,6 +308,8 @@ def publish(
         "failure_kind": failure_kind,
         "completed_at": _utc_now(),
         "lock_fence": lock_fence,
+        "outcome_tally": _normalized_outcome_tally(outcome_tally),
+        "degraded": None if degraded is None else bool(degraded),
     }
     ref_lock = _load_ref_lock()
     remote = _remote(repo_root)
@@ -319,6 +347,8 @@ def publish_process_result(
     exit_code: int,
     *,
     failure_kind: str | None = None,
+    outcome_tally: Mapping[str, Any] | None = None,
+    degraded: bool | None = None,
 ) -> dict[str, Any]:
     """Publish a process result while its heartbeat and pass lock remain live."""
     outcome = "success" if exit_code == 0 else "failure"
@@ -334,6 +364,8 @@ def publish_process_result(
         outcome=outcome,
         failure_kind=None if outcome == "success" else semantic_failure,
         lock_fence=current_lock_fence(repo_root, pass_id),
+        outcome_tally=outcome_tally,
+        degraded=degraded,
         detail={"process_exit_code": exit_code},
     )
 
