@@ -215,6 +215,57 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _reconcile.clear_stop()
 
 
+def _event_revision(event: Any) -> str | None:
+    """The revision sha the QUEUED event describes, or ``None`` if the payload lacks one."""
+    patch_set = event.get("patchSet") if isinstance(event, dict) else None
+    revision = patch_set.get("revision") if isinstance(patch_set, dict) else None
+    return str(revision) if revision else None
+
+
+def _current_revision(event: dict, cfg: ReceiverConfig) -> str | None:
+    """The change's CURRENT revision sha per Gerrit, or ``None`` when it cannot be determined.
+
+    Bug daa7 (``oozy-darkish-merganser``): the worker is serial and a review takes 15–45
+    minutes, so a queued event is routinely obsolete by the time it is dequeued — the bot
+    would clone, run the multi-pass LLM review, and vote ONE PATCHSET BEHIND (observed live on
+    changes 2226/2231/2232). ``GerritClient.get_change_event`` already asks Gerrit for
+    ``?o=CURRENT_REVISION``; this wraps it for the webhook path, which never asked.
+
+    NEVER RAISES. Any failure — a malformed event, a missing field, a Gerrit blip, an auth
+    error — returns ``None``, which the caller treats as "unknown" and FAILS OPEN (reviews the
+    event anyway). Swallowing a real review because Gerrit hiccupped would be worse than the
+    staleness this guards against."""
+    try:
+        change = event.get("change") if isinstance(event, dict) else None
+        change_id = change.get("id") if isinstance(change, dict) else None
+        if not change_id:
+            return None
+        # Imported inside the function to keep the module's lazy-import style (the client
+        # pulls the REST stack; nothing here needs it until a review is actually dequeued).
+        from rebar.review_bot.gerrit_client import GerritClient
+
+        current = GerritClient(cfg).get_change_event(str(change_id))
+        return _event_revision(current)
+    except Exception:  # noqa: BLE001 — fail open: an unknown revision must not skip a review
+        logger.warning("review-bot worker: current-revision lookup failed; reviewing anyway")
+        return None
+
+
+async def _superseded_by(event: Any, cfg: ReceiverConfig) -> str | None:
+    """The change's current revision when it has SUPERSEDED the queued event's, else ``None``.
+
+    ``None`` means "review it": either the revisions match, the event carries no revision, or
+    the lookup could not answer (fail open — see :func:`_current_revision`). The lookup is a
+    blocking REST call, so it runs off the event loop."""
+    queued = _event_revision(event)
+    if queued is None:
+        return None
+    current = await asyncio.to_thread(_current_revision, event, cfg)
+    if current is None or current == queued:
+        return None
+    return current
+
+
 async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
     """Drain the review queue, running one review→vote per event under a bounded timeout.
 
@@ -244,6 +295,26 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
             # A manual /rerun enqueues the event with a _rebar_force marker so the
             # voter bypasses the dedup + existing-vote short-circuits and re-reviews.
             force = bool(event.pop("_rebar_force", False)) if isinstance(event, dict) else False
+            # Staleness guard (bug daa7). Before any clone/LLM work, ask Gerrit whether the
+            # revision this event describes is still the change's CURRENT one; if the author
+            # has since pushed a new patchset, DISCARD the event rather than spend 15–45
+            # minutes reviewing — and voting on — a superseded patchset. A stale ``-1`` cites
+            # findings the author already fixed, which prompts a re-push that enqueues ANOTHER
+            # review (self-amplifying), and on the single worker that time is stolen from
+            # current work, head-of-line blocking unrelated contributors.
+            #
+            # FORCED and MANUAL-RERUN events bypass the check: both are built FROM the current
+            # revision by construction, so re-asking can only introduce a race that drops a
+            # deliberately requested review. Fail-open otherwise (``_superseded_by`` returns
+            # ``None`` when Gerrit cannot answer) — a blip must never silently swallow a review.
+            superseded_by = (
+                None
+                if force or (isinstance(event, dict) and event.get("type") == "manual-rerun")
+                else await _superseded_by(event, cfg)
+            )
+            if superseded_by is not None:
+                _discard_superseded(event, superseded_by)
+                continue
             await asyncio.wait_for(
                 _voter.review_and_vote(event, config=cfg, force=force),
                 timeout=review_timeout,
@@ -274,6 +345,33 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
             logger.exception("review-bot worker: review_and_vote raised")
         finally:
             queue.task_done()
+
+
+def _discard_superseded(event: Any, current_revision: str) -> None:
+    """Record the discard of a superseded event as a countable ``VOTER_ERROR`` marker.
+
+    Observability parity with the timeout-abandon path: a silent skip is indistinguishable
+    from a lost event when a change sits at ``LLM-Review = --``, so the discard is emitted on
+    the same greppable marker that feeds ``rebar/host:voter_errors``."""
+    change = event.get("change") if isinstance(event, dict) else None
+    change_id = change.get("id") if isinstance(change, dict) else None
+    queued_revision = _event_revision(event)
+    _voter._voter_error(
+        change_id=change_id,
+        revision_id=queued_revision,
+        error=(
+            f"queued revision {queued_revision} was superseded by current revision "
+            f"{current_revision} before the review started — discarded without reviewing "
+            "(a newer patchset-created event covers the current revision)"
+        ),
+    )
+    logger.info(
+        "review-bot worker: discarding superseded event for change %s (queued revision %s, "
+        "current revision %s)",
+        change_id,
+        queued_revision,
+        current_revision,
+    )
 
 
 # Configure rebar's structured logging (the _emit() INFO events) so they reach stdout→journald.
