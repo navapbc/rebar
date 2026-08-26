@@ -24,6 +24,8 @@ Design notes:
 from __future__ import annotations
 
 import contextlib
+import logging
+import os
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -107,17 +109,102 @@ def instrument_certified_tools(mcp: Any, gauge: InFlightGauge) -> None:
         tool.fn = _wrap_tool_fn(tool.fn, gauge, name)
 
 
+def store_status() -> dict[str, Any]:
+    """Whether this server can actually reach a ticket store — ``{path, present, expected}``.
+
+    ``/health`` used to report only ``in_flight``, so a container with NO ticket store at all
+    passed both the container HEALTHCHECK and the blue-green readiness gate. That is how a
+    deployed server spent weeks answering every tracker query as though the store were merely
+    empty (bugs kilted-nuclear-bronco / mobile-groovy-badger) with nothing in the pipeline able
+    to notice.
+
+    ``expected`` is the load-bearing field, and it is why this reports rather than fails.
+    A missing store is only a FAULT for a deployment that declared it has one; for a deployment
+    that never configured a tracker dir it is just a fact about that deployment. Keying the
+    readiness gate on ``present AND expected`` means this can ship to a box that currently has
+    no store without marking a working container unhealthy, and becomes strict on its own the
+    moment a tracker dir is configured — no flag day, no second change.
+
+    Never raises: a health probe that can fail is worse than one that reports a degraded
+    field, so a resolution error is reported as ``present: False`` with the error text.
+    """
+    from rebar import config as _config
+
+    expected = False
+    path = ""
+    try:
+        # `expected` is deliberately read from the ENV OVERRIDE alone, not from the parsed
+        # config. Two reasons: a health probe must not be able to fail (or block) on config
+        # parsing, and `check_config_ownership` reserves `load_config` to approved seams. The
+        # deployment surface that matters here sets REBAR_TRACKER_DIR explicitly
+        # (infra/compose/docker-compose.yml), so this covers it. A project that instead
+        # declares a non-default `tracker.dir` in config reports expected=False and simply
+        # does not get the strict readiness gate -- it degrades to the old behaviour rather
+        # than misreporting.
+        expected = bool(_config.tracker_dir_override())
+        path = str(_config.tracker_dir())
+    except Exception as exc:  # noqa: BLE001 - see docstring: the probe never raises
+        return {"path": path, "present": False, "expected": expected, "error": str(exc)}
+    return {"path": path, "present": os.path.isdir(path), "expected": expected}
+
+
+def run_startup_store_sweep() -> None:
+    """Best-effort ensure-sweep at boot, and say so when there is no store.
+
+    Lives here rather than in ``mcp_server`` because it is the same concern as
+    :func:`store_status`: what this server can see of its ticket store at startup, and
+    whether that is reportable. (Extracting it also keeps ``mcp_server`` under the
+    module-size cap, which this function's own logging pushed it over.)
+
+    Converges a store that is behind the idempotent registry. ``run_ensures`` acquires and
+    RELEASES its own store write lock internally (a SHORT budget, so a contended lock skips
+    rather than delays boot) — it is NOT held across ``build_server().run()``, which runs
+    under no lock. Log-and-continue: a missing store, an import error, or a sweep failure
+    never aborts boot.
+    """
+    from rebar._deprecations import RemovedInputError
+
+    try:
+        from rebar import config as _config
+        from rebar._store import ensures as _ensures
+
+        tracker = str(_config.tracker_dir())
+        if os.path.isdir(tracker):
+            _ensures.run_ensures(tracker, timeout=5, attempts=1)
+        else:
+            # Log-and-continue is the right posture (a missing store must not abort boot),
+            # but combined with a /health probe that could not see the store it meant a
+            # container serving NO tracker was indistinguishable from a healthy one, and
+            # nothing in the pipeline ever reported it (bug mobile-groovy-badger). One line
+            # naming the path is the difference between a silent misconfiguration and a
+            # greppable one.
+            logging.getLogger("rebar").warning(
+                "startup: no ticket store at %s — tracker tools will report the store as "
+                "uninitialized until it is provisioned",
+                tracker,
+            )
+    except RemovedInputError:
+        # A removed, still-set, load-bearing input must fail MCP startup hard rather than be
+        # swallowed into a silent boot.
+        raise
+    except Exception:
+        logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
+
+
 def register_health_route(mcp: Any, gauge: InFlightGauge) -> None:
-    """Register ``GET /health`` returning JSON ``{"in_flight": <int>}``.
+    """Register ``GET /health`` returning ``{"in_flight": <int>, "store": {...}}``.
 
     Uses FastMCP's ``custom_route`` so the route lives on the Starlette app OUTSIDE the
-    auth and transport-security middleware — an unauthenticated probe gets 200."""
+    auth and transport-security middleware — an unauthenticated probe gets 200.
+
+    The status code stays 200 even with no store: see :func:`store_status` for why the
+    signal is a field rather than a failure."""
 
     from starlette.responses import JSONResponse
 
     @mcp.custom_route("/health", methods=["GET"])
     async def _health(_request: Any) -> Any:  # pragma: no cover - thin adapter
-        return JSONResponse({"in_flight": gauge.value})
+        return JSONResponse({"in_flight": gauge.value, "store": store_status()})
 
 
 def wire_health(mcp: Any, gauge: InFlightGauge | None = None) -> InFlightGauge:
