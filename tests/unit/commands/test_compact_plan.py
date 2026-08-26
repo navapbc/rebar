@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 import rebar
 from rebar._commands import compact as _compact
@@ -257,11 +258,11 @@ def test_the_snapshot_envelope_and_rename_back_appear_only_in_compact_plan() -> 
     no test happens to execute must still fail here. That is what makes the consolidation
     durable — the class (one copy fixed, its twin left broken) cannot re-enter by imitation."""
     offenders: list[str] = []
-    for path in sorted(_SRC_REBAR.rglob("*.py")):
-        if path == _OWNER:
+    for module in parsed_python_files(_SRC_REBAR):
+        if module.path == _OWNER:
             continue
-        for why in compact_plan.offending_lines(path.read_text(encoding="utf-8")):
-            offenders.append(f"{path.relative_to(_SRC_REBAR)}:{why}")
+        for why in compact_plan.offending_lines(module.source):
+            offenders.append(f"{module.path.relative_to(_SRC_REBAR)}:{why}")
     assert offenders == [], (
         "a compaction construct leaked outside rebar._commands.compact_plan — route the new "
         f"site through the planner, or mark it `# compact-plan-ok: <reason>`: {offenders}"
@@ -271,9 +272,9 @@ def test_the_snapshot_envelope_and_rename_back_appear_only_in_compact_plan() -> 
 def test_exactly_one_snapshot_envelope_builder_under_src() -> None:
     """The definition-count guard, for the case the atoms are renamed rather than copied."""
     defs = [
-        path.relative_to(_SRC_REBAR)
-        for path in sorted(_SRC_REBAR.rglob("*.py"))
-        if "def build_snapshot_event(" in path.read_text(encoding="utf-8")
+        module.path.relative_to(_SRC_REBAR)
+        for module in parsed_python_files(_SRC_REBAR)
+        if "def build_snapshot_event(" in module.source
     ]
     assert defs == [_OWNER.relative_to(_SRC_REBAR)], f"more than one envelope builder: {defs}"
 

@@ -30,6 +30,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from _tree_scan import parsed_python_files
+
 # Reuse the S2 oracle harness (imported by basename; tests/unit is on sys.path in this suite).
 from test_rp01_s2_bounded_op_oracle import (
     _VALID,
@@ -58,9 +60,9 @@ _DISPATCH_MODULES = frozenset({"structured_run.py", "runner.py"})
 # ─────────────────────────────── AC-1: single-sourced dispatch ──────────────────────────────
 
 
-def _py_sources() -> list[pathlib.Path]:
+def _parsed_sources():
     roots = [_REPO_ROOT / "src" / "rebar", _REPO_ROOT / "scripts"]
-    return [p for root in roots if root.exists() for p in root.rglob("*.py")]
+    return [m for root in roots if root.exists() for m in parsed_python_files(root)]
 
 
 def _code_names(tree: ast.AST) -> set[str]:
@@ -84,13 +86,12 @@ def test_structured_dispatch_is_single_sourced_no_consumer_bypasses_the_facade()
     without editing each consumer. A new consumer that called the private stack directly (or a
     resurrected bespoke scheduler in a third module) would appear here as an offender."""
     offenders: dict[str, set[str]] = {}
-    for path in _py_sources():
-        if path.name in _DISPATCH_MODULES:
+    for module in _parsed_sources():
+        if module.path.name in _DISPATCH_MODULES:
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        hit = _INTERNAL_IMPL & _code_names(tree)
+        hit = _INTERNAL_IMPL & _code_names(module.tree)
         if hit:
-            offenders[str(path.relative_to(_REPO_ROOT))] = hit
+            offenders[str(module.path.relative_to(_REPO_ROOT))] = hit
     assert not offenders, (
         "structured-output dispatch must stay single-sourced through the runner facade; "
         f"these modules reach into the private one-operation stack: {offenders}"
@@ -217,13 +218,9 @@ def _structured_consumer_files() -> set[str]:
     """AST census: every file constructing a ``RunRequest(...)`` whose EFFECTIVE ``mode``
     resolves to ``"structured"`` — multi-line constructions and computed modes included."""
     found: set[str] = set()
-    for path in _py_sources():
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except SyntaxError:
-            continue
-        if _scope_constructs_structured(tree, {}):
-            found.add(path.name)
+    for module in _parsed_sources():
+        if _scope_constructs_structured(module.tree, {}):
+            found.add(module.path.name)
     return found
 
 

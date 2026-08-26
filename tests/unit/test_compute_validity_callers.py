@@ -6,18 +6,19 @@ import ast
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 from rebar.llm.plan_review import attest
 
 
 def _trees_with_parents():
     root = Path(__file__).resolve().parents[2] / "src" / "rebar"
-    for path in root.rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for module in parsed_python_files(root):
+        tree = module.tree
         for parent in ast.walk(tree):
             for child in ast.iter_child_nodes(parent):
                 child.parent = parent
-        yield path, tree
+        yield module.path, tree
 
 
 def _validity_calls(tree: ast.AST) -> list[ast.Call]:

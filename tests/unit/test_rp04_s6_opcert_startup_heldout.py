@@ -21,6 +21,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 import rebar
 from rebar.attest import dsse
@@ -286,11 +287,11 @@ def test_opcert_service_source_has_no_boto3_or_ssm(tmp_path):
         "AWS_DEFAULT_REGION",
     )
     offenders = []
-    for py in _OPCERT_PKG.rglob("*.py"):
-        text = py.read_text(encoding="utf-8")
+    for module in parsed_python_files(_OPCERT_PKG):
+        text = module.source
         for needle in banned:
             if needle in text:
-                offenders.append(f"{py.name}: {needle}")
+                offenders.append(f"{module.path.name}: {needle}")
     assert not offenders, f"opcert_service must be AWS-free after cutover: {offenders}"
 
 

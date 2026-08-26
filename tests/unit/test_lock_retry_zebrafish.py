@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 from rebar._commands import txn
 from rebar._store import lock as _lock
@@ -249,8 +250,8 @@ def _opt_in_sites() -> dict[str, int]:
     rots the moment anything above it moves."""
     root = Path(__file__).resolve().parents[2] / "src" / "rebar"
     found: dict[str, int] = {}
-    for path in root.rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for module in parsed_python_files(root):
+        tree = module.tree
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -258,7 +259,7 @@ def _opt_in_sites() -> dict[str, int]:
             if name not in {"acquire", "write_lock"}:
                 continue
             if any(kw.arg == "retries" for kw in node.keywords):
-                found[path.name] = found.get(path.name, 0) + 1
+                found[module.path.name] = found.get(module.path.name, 0) + 1
     return found
 
 

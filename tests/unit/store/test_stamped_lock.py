@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 import rebar
 
@@ -336,12 +337,12 @@ def _acquire_offenders() -> list[str]:
     offenders: list[str] = []
     from rebar._store.stamped_lock import _offending_source
 
-    for path in sorted(_SRC_REBAR.rglob("*.py")):
-        if path.resolve() == _OWNER.resolve():
+    for module in parsed_python_files(_SRC_REBAR):
+        if module.path.resolve() == _OWNER.resolve():
             continue  # the owner is exempt: refactoring INSIDE it cannot fail the guard
-        why = _offending_source(path.read_text(encoding="utf-8"))
+        why = _offending_source(module.source)
         if why:
-            offenders.append(f"{path.relative_to(_SRC_REBAR.parent)}: {why}")
+            offenders.append(f"{module.path.relative_to(_SRC_REBAR.parent)}: {why}")
     return offenders
 
 

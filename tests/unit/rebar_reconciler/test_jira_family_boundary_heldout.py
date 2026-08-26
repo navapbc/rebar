@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 _SRC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine"
 _REC = _SRC / "rebar_reconciler"
@@ -142,10 +143,6 @@ def _violations(source: str, package: str) -> list[str]:
     return problems
 
 
-def _engine_modules() -> list[Path]:
-    return sorted(p for p in _REC.rglob("*.py") if "__pycache__" not in p.parts)
-
-
 # ---------------------------------------------------------------------------
 # 1–2. the permitted import graph
 # ---------------------------------------------------------------------------
@@ -163,8 +160,10 @@ def test_jira_family_package_exists() -> None:
 def test_import_graph_contract_holds_for_every_engine_module() -> None:
     """The acyclic, one-direction seam: shared layer <- concrete backends."""
     all_problems: list[str] = []
-    for path in _engine_modules():
-        all_problems.extend(_violations(path.read_text(), _package_of(path)))
+    for module in parsed_python_files(_REC):
+        if "__pycache__" in module.path.parts:
+            continue
+        all_problems.extend(_violations(module.source, _package_of(module.path)))
     assert not all_problems, "import contract violated:\n  " + "\n  ".join(all_problems)
 
 
@@ -172,10 +171,9 @@ def test_shared_layer_reaches_for_no_cloud_vendor_module() -> None:
     """Explicit form of the epic's AC: grep-level proof over jira_family/ alone."""
     family = _ADAPTERS / "jira_family"
     offenders = []
-    for path in sorted(family.rglob("*.py")):
-        text = path.read_text()
+    for module in parsed_python_files(family):
         for forbidden in (*_FORBIDDEN_IN_FAMILY, "acli"):
-            for node in ast.walk(ast.parse(text)):
+            for node in ast.walk(module.tree):
                 names: list[str] = []
                 if isinstance(node, ast.Import):
                     names = [a.name for a in node.names]
@@ -184,7 +182,7 @@ def test_shared_layer_reaches_for_no_cloud_vendor_module() -> None:
                 for name in names:
                     tail = name.split(".")[-1]
                     if tail == forbidden or (forbidden == "acli" and tail.startswith("acli")):
-                        offenders.append(f"{path.name} imports {name}")
+                        offenders.append(f"{module.path.name} imports {name}")
     assert not offenders, "jira_family/ imports Cloud vendor modules: " + "; ".join(offenders)
 
 
@@ -275,10 +273,10 @@ def test_identity_module_left_no_shim_behind() -> None:
 def _modules_defining_map(*, keys: set[str], value_sample: str) -> list[str]:
     """Modules under adapters/ that assign a dict LITERAL containing ``keys``."""
     hits: list[str] = []
-    for path in sorted(_ADAPTERS.rglob("*.py")):
-        if "__pycache__" in path.parts:
+    for module in parsed_python_files(_ADAPTERS):
+        if "__pycache__" in module.path.parts:
             continue
-        for node in ast.walk(ast.parse(path.read_text())):
+        for node in ast.walk(module.tree):
             value = None
             if isinstance(node, ast.Assign):
                 value = node.value
@@ -289,7 +287,7 @@ def _modules_defining_map(*, keys: set[str], value_sample: str) -> list[str]:
             literal_keys = {k.value for k in value.keys if isinstance(k, ast.Constant)}
             literal_values = {v.value for v in value.values if isinstance(v, ast.Constant)}
             if keys <= literal_keys and value_sample in literal_values:
-                hits.append(str(path.relative_to(_ADAPTERS)))
+                hits.append(str(module.path.relative_to(_ADAPTERS)))
     return hits
 
 
@@ -435,9 +433,9 @@ def test_relocated_value_map_module_loads_by_path() -> None:
     load mode, since it is now what the by-path parity test reads."""
     family = _ADAPTERS / "jira_family"
     candidates = [
-        p
-        for p in sorted(family.rglob("*.py"))
-        if p.name != "__init__.py" and "LOCAL_STATUS_TO_JIRA" in p.read_text()
+        module.path
+        for module in parsed_python_files(family)
+        if module.path.name != "__init__.py" and "LOCAL_STATUS_TO_JIRA" in module.source
     ]
     assert candidates, "no module under jira_family/ defines the status map"
     target = candidates[0]

@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 import yaml
+from _tree_scan import parsed_python_files
 
 from rebar.llm.config import LLMConfig, infer_provider, resolve_model
 
@@ -181,9 +182,9 @@ def test_the_superseded_equality_rule_has_no_production_consumers() -> None:
     """
     src = _REPO_ROOT / "src" / "rebar"
     callers = sorted(
-        f"{path.relative_to(_REPO_ROOT)}:{i}"
-        for path in src.rglob("*.py")
-        for i, line in enumerate(path.read_text().splitlines(), 1)
+        f"{module.relative}:{i}"
+        for module in parsed_python_files(src)
+        for i, line in enumerate(module.source.splitlines(), 1)
         if "resolve_verifier_model(" in line and "def resolve_verifier_model" not in line
     )
     assert callers == [], f"resolve_verifier_model called from: {callers}"

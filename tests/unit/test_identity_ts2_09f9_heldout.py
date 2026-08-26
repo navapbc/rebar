@@ -21,6 +21,7 @@ import uuid as _uuid
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 import rebar
 from rebar._commands._seam import tracker_dir
@@ -312,11 +313,11 @@ def test_hlc_epoch_surface_absent() -> None:
     # Epoch record fields written as dict keys (the fold building an epoch-based record).
     banned_record_fields = ['"added_epoch"', '"revoked_epoch"']
     hits: list[str] = []
-    for path in root.rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
+    for module in parsed_python_files(root):
+        text = module.source
         for sym in banned_functions + banned_record_fields:
             if sym in text:
-                hits.append(f"{path}: {sym}")
+                hits.append(f"{module.path}: {sym}")
     assert not hits, f"HLC-epoch surface still present: {hits}"
 
 
@@ -324,8 +325,8 @@ def test_hlc_epoch_surface_absent() -> None:
 def test_reducer_stays_pure() -> None:
     reducer_dir = _src_root() / "reducer"
     offenders: list[str] = []
-    for path in reducer_dir.rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
+    for module in parsed_python_files(reducer_dir):
+        text = module.source
         if "import subprocess" in text or "merge-base" in text or "--diff-filter" in text:
-            offenders.append(str(path))
+            offenders.append(str(module.path))
     assert not offenders, f"reducer must stay pure (no git/subprocess): {offenders}"

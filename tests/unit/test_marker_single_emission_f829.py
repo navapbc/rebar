@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 REPO_SRC = Path(__file__).resolve().parents[2] / "src"
 
@@ -103,8 +104,8 @@ def test_no_token_prefixed_marker_string_reaches_a_logger_call() -> None:
     metric. The stderr ``print`` is the single sanctioned line-start emission."""
     assignment = re.compile(r"^\s*(\w+)\s*=\s*[\"']([A-Z][A-Z0-9_]{2,}) [\"']\s*\+")
     violations: list[str] = []
-    for path in sorted(REPO_SRC.rglob("*.py")):
-        lines = path.read_text(encoding="utf-8").splitlines()
+    for module in parsed_python_files(REPO_SRC):
+        lines = module.source.splitlines()
         for i, line in enumerate(lines):
             m = assignment.match(line)
             if not m:
@@ -113,7 +114,7 @@ def test_no_token_prefixed_marker_string_reaches_a_logger_call() -> None:
             logger_call = re.compile(rf"logger\.\w+\(\s*{re.escape(var)}\s*[),]")
             for j in range(i + 1, min(i + 12, len(lines))):
                 if logger_call.search(lines[j]):
-                    violations.append(f"{path.relative_to(REPO_SRC)}:{j + 1} ({token})")
+                    violations.append(f"{module.path.relative_to(REPO_SRC)}:{j + 1} ({token})")
                     break
     assert not violations, (
         "token-prefixed marker line passed to a logger call (dual line-start emission; "

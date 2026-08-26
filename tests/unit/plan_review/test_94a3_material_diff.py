@@ -19,6 +19,7 @@ These tests pin the diagnostic contract:
 from __future__ import annotations
 
 import pytest
+from _tree_scan import parsed_python_files
 
 from rebar.llm.plan_review import attest, relation_snapshot
 from rebar.llm.plan_review.attest import compute_validity
@@ -197,9 +198,9 @@ def test_the_fixed_enumeration_is_gone_from_the_source_tree() -> None:
 
     root = Path(__file__).resolve().parents[3] / "src" / "rebar"
     offenders = sorted(
-        p.name
-        for p in root.rglob("*.py")
-        if "description/AC/file_impact/children" in p.read_text(encoding="utf-8")
+        module.path.name
+        for module in parsed_python_files(root)
+        if "description/AC/file_impact/children" in module.source
     )
     assert offenders == ["material_diff.py"]
 

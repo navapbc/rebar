@@ -38,6 +38,7 @@ from types import MappingProxyType
 from typing import Any, NamedTuple
 
 import pytest
+from _tree_scan import parsed_python_files
 
 from rebar.llm import config as llm_config
 from rebar.llm.config import LLMConfig
@@ -397,8 +398,9 @@ def _ast_index() -> _AstIndex:
     functions_by_name: dict[str, list[_FunctionSite]] = {}
     calls_by_name: dict[str, list[_CallSite]] = {}
 
-    for path in sorted(_SRC.rglob("*.py")):
-        tree = _parsed(path)
+    for module in parsed_python_files(_SRC):
+        path = module.path
+        tree = module.tree
         parents: dict[ast.AST, ast.AST] = {}
         for node in ast.walk(tree):
             for child in ast.iter_child_nodes(node):

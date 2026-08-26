@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 pytestmark = pytest.mark.unit
 
@@ -31,14 +32,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TESTS_DIR = _REPO_ROOT / "tests"
 
 
-def _tests_rooted_imports(source: str, path: Path) -> list[str]:
-    """Return ``"<file>:<line>: <module>"`` for every ``tests``-rooted import in *source*.
+def _tests_rooted_imports(tree: ast.AST, rel: Path) -> list[str]:
+    """Return ``"<file>:<line>: <module>"`` for every ``tests``-rooted import in *tree*.
 
     AST-based (not textual) so prose in docstrings and comments cannot produce a false hit.
     """
     hits: list[str] = []
-    tree = ast.parse(source, filename=str(path))
-    rel = path.relative_to(_REPO_ROOT)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -64,8 +63,8 @@ def test_no_tests_rooted_imports_anywhere_under_tests() -> None:
     which ``tests/conftest.py`` guarantees is importable.
     """
     offenders: list[str] = []
-    for path in sorted(_TESTS_DIR.rglob("*.py")):
-        offenders.extend(_tests_rooted_imports(path.read_text(encoding="utf-8"), path))
+    for module in parsed_python_files(_TESTS_DIR):
+        offenders.extend(_tests_rooted_imports(module.tree, module.relative))
 
     assert offenders == [], (
         "`tests.`-rooted imports resolve only when the repository root is on sys.path, "

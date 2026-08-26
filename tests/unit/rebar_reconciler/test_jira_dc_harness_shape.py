@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _tree_scan import parsed_python_files
 
 _REPO = Path(__file__).resolve().parents[3]
 _HARNESS = _REPO / "tests" / "external" / "live_jira_dc"
@@ -275,10 +276,10 @@ def test_no_harness_module_carries_the_integration_marker() -> None:
     auto-applies it to everything under that tree, so such a test could never fail.
     """
     offenders = []
-    for path in sorted(_HARNESS.rglob("*.py")):
-        text = path.read_text()
+    for module in parsed_python_files(_HARNESS):
+        text = module.source
         if re.search(r"mark\.integration|pytestmark\s*=.*integration", text):
-            offenders.append(path.name)
+            offenders.append(module.path.name)
     assert not offenders, (
         f"these harness modules carry the `integration` marker and would run in "
         f"per-commit CI without Docker: {offenders}"

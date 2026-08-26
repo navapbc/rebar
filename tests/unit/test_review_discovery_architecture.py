@@ -24,6 +24,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 from rebar import schemas
 
@@ -144,13 +145,7 @@ def _trace_debug_keys_in_output(schema: dict) -> set[str]:
 
 
 def _iter_llm_sources() -> list[tuple[Path, ast.AST]]:
-    out: list[tuple[Path, ast.AST]] = []
-    for path in _LLM.rglob("*.py"):
-        try:
-            out.append((path, ast.parse(path.read_text(encoding="utf-8", errors="replace"))))
-        except SyntaxError:
-            continue
-    return out
+    return [(module.path, module.tree) for module in parsed_python_files(_LLM)]
 
 
 # ── AC3(a): direct-routing-reader prohibition ───────────────────────────────────

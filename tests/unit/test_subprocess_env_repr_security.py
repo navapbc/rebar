@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from _nested_pytest import run_nested_pytest
 from _subprocess_env import subprocess_env
+from _tree_scan import parsed_python_files
 
 pytestmark = pytest.mark.unit
 
@@ -66,13 +67,11 @@ def _raw_env_nodes(tree: ast.AST, relative_path: str = "<memory>") -> list[ast.A
 def _raw_env_audit_sites() -> tuple[list[str], set[tuple[str, str]]]:
     offenders: list[str] = []
     active_exclusions: set[tuple[str, str]] = set()
-    for path in sorted(_TESTS_ROOT.rglob("*.py")):
-        if path == _BOUNDARY_MODULE:
+    for module in parsed_python_files(_TESTS_ROOT):
+        if module.path == _BOUNDARY_MODULE:
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        relative = path.relative_to(_REPO_ROOT)
-        hits, excluded = _raw_env_audit(tree, relative.as_posix())
-        offenders.extend(f"{relative}:{node.lineno}" for node in hits)
+        hits, excluded = _raw_env_audit(module.tree, module.relative.as_posix())
+        offenders.extend(f"{module.relative}:{node.lineno}" for node in hits)
         active_exclusions.update(excluded)
     return offenders, active_exclusions
 
@@ -82,7 +81,10 @@ def _raw_env_sites() -> list[str]:
 
 
 def _boundary_unwrap_nodes(source: str) -> list[ast.AST]:
-    tree = ast.parse(source)
+    return _boundary_unwrap_nodes_from_tree(ast.parse(source))
+
+
+def _boundary_unwrap_nodes_from_tree(tree: ast.AST) -> list[ast.AST]:
     factory_names = {"subprocess_env"}
     boundary_module_names: set[str] = set()
     for node in ast.walk(tree):
@@ -155,12 +157,13 @@ def _boundary_unwrap_nodes(source: str) -> list[ast.AST]:
 
 def _boundary_unwrap_sites() -> list[str]:
     offenders: list[str] = []
-    for path in sorted(_TESTS_ROOT.rglob("*.py")):
-        if path == _BOUNDARY_MODULE:
+    for module in parsed_python_files(_TESTS_ROOT):
+        if module.path == _BOUNDARY_MODULE:
             continue
-        source = path.read_text(encoding="utf-8")
-        relative = path.relative_to(_REPO_ROOT)
-        offenders.extend(f"{relative}:{node.lineno}" for node in _boundary_unwrap_nodes(source))
+        offenders.extend(
+            f"{module.relative}:{node.lineno}"
+            for node in _boundary_unwrap_nodes_from_tree(module.tree)
+        )
     return offenders
 
 

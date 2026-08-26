@@ -22,6 +22,7 @@ import types
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 from rebar import _proc
 
@@ -45,13 +46,13 @@ def test_the_detached_spawn_signature_appears_only_in_proc() -> None:
     to execute must still fail here. This is what makes the consolidation durable — the class
     (one omission, replicated by imitation) cannot re-enter by copy-paste."""
     offenders: list[str] = []
-    for path in sorted(_SRC_REBAR.rglob("*.py")):
-        if path == Path(_proc.__file__).resolve():
+    for module in parsed_python_files(_SRC_REBAR):
+        if module.path == Path(_proc.__file__).resolve():
             continue
-        text = path.read_text(encoding="utf-8")
+        text = module.source
         for token in _SIGNATURE_TOKENS:
             if token in text:
-                offenders.append(f"{path.relative_to(_SRC)}: {token}")
+                offenders.append(f"{module.path.relative_to(_SRC)}: {token}")
     assert offenders == [], (
         "the detached-rebar-child spawn signature leaked outside _proc.py — route the new "
         f"site through rebar._proc.spawn_detached instead: {offenders}"

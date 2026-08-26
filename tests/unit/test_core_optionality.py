@@ -20,6 +20,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+from _tree_scan import parsed_python_files
+
 import rebar
 
 # The heavy stack gated behind extras. None may be imported by the lean runtime or
@@ -121,11 +123,12 @@ def _is_heavy(name: str | None) -> bool:
 
 def test_no_core_module_imports_heavy_stack_at_module_scope() -> None:
     offenders: list[str] = []
-    for py in _SRC.rglob("*.py"):
+    for module in parsed_python_files(_SRC):
+        py = module.path
         # _engine ships as reconciler subprocess data (stdlib-only); skip caches.
         if "_engine" in py.parts or "__pycache__" in py.parts:
             continue
-        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        tree = module.tree
         for node in _module_scope_imports(tree):
             names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module]
             for n in names:

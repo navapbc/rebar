@@ -705,20 +705,18 @@ def _production_all_bindings_callers() -> set[str]:
     """
     import ast
 
+    from _tree_scan import parsed_python_files
+
     root = _Path(__file__).resolve().parents[4] / "src" / "rebar"
     callers: set[str] = set()
-    for path in root.rglob("*.py"):
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:  # pragma: no cover — a parse failure is its own gate's problem
-            continue
-        for node in ast.walk(tree):
+    for module in parsed_python_files(root):
+        for node in ast.walk(module.tree):
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "all_bindings"
             ):
-                callers.add(path.relative_to(root).as_posix())
+                callers.add(module.path.relative_to(root).as_posix())
                 break
     return callers
 

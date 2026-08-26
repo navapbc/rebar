@@ -26,6 +26,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 _REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "rebar_reconciler"
 _ADAPTERS = _REC / "adapters"
@@ -181,12 +182,12 @@ def test_exactly_one_real_map_fields_to_remote_and_it_is_shared() -> None:
     logic: list[str] = []
     stubs: list[str] = []
     delegations: list[str] = []
-    for path in sorted(_REC.rglob("*.py")):
-        if "__pycache__" in path.parts:
+    for module in parsed_python_files(_REC):
+        if "__pycache__" in module.path.parts:
             continue
-        for node in ast.walk(ast.parse(path.read_text())):
+        for node in ast.walk(module.tree):
             if isinstance(node, ast.FunctionDef) and node.name == "map_fields_to_remote":
-                rel = str(path.relative_to(_REC))
+                rel = str(module.path.relative_to(_REC))
                 if _is_protocol_stub(node):
                     stubs.append(rel)
                 elif _is_pure_delegation(node):
@@ -226,13 +227,13 @@ _ADF_ALLOWLIST = {
 
 def test_adf_entry_points_are_referenced_only_from_allowlisted_modules() -> None:
     offenders: list[str] = []
-    for path in sorted(_REC.rglob("*.py")):
-        if "__pycache__" in path.parts:
+    for module in parsed_python_files(_REC):
+        if "__pycache__" in module.path.parts:
             continue
-        rel = str(path.relative_to(_REC))
+        rel = str(module.path.relative_to(_REC))
         if rel in _ADF_ALLOWLIST:
             continue
-        text = path.read_text()
+        text = module.source
         if "fit_text_to_adf_limit" in text or "_load_adf" in text:
             offenders.append(rel)
     assert not offenders, (
@@ -250,10 +251,10 @@ def test_the_shared_layer_names_no_adf_entry_point_at_all() -> None:
         root = _ADAPTERS / package
         if not root.is_dir():
             continue
-        for path in sorted(root.rglob("*.py")):
-            text = path.read_text()
+        for module in parsed_python_files(root):
+            text = module.source
             for name in ("fit_text_to_adf_limit", "_load_adf", "text_to_adf", "adf_to_text"):
                 assert name not in text, (
-                    f"{package}/{path.name} names the Cloud ADF entry point {name!r} — "
+                    f"{package}/{module.path.name} names the Cloud ADF entry point {name!r} — "
                     f"the shared layer must receive rich-text behaviour as a codec"
                 )

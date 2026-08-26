@@ -298,6 +298,8 @@ import ast  # noqa: E402
 import pathlib  # noqa: E402
 import re  # noqa: E402
 
+from _tree_scan import parsed_python_files  # noqa: E402
+
 import rebar  # noqa: E402
 
 _SRC = pathlib.Path(rebar.__file__).resolve().parent
@@ -335,15 +337,12 @@ def _fit_then_wire_offenders() -> list[str]:
     reason is MANDATORY, so the exception argues for itself in review.
     """
     offenders: list[str] = []
-    for path in sorted(_SRC.rglob("*.py")):
-        rel = path.relative_to(_SRC).as_posix()
+    for module in parsed_python_files(_SRC):
+        rel = module.path.relative_to(_SRC).as_posix()
         if rel == _OWNER:  # the owner may refactor freely; uniqueness is about COPIES
             continue
-        try:
-            text = path.read_text(encoding="utf-8")
-            tree = ast.parse(text)
-        except (OSError, SyntaxError):  # pragma: no cover - unparseable is not duplication
-            continue
+        text = module.source
+        tree = module.tree
         lines = text.splitlines()
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

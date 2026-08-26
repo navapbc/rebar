@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 from _nested_pytest import run_nested_pytest
+from _tree_scan import parsed_python_files
 
 pytestmark = pytest.mark.unit
 
@@ -79,10 +80,10 @@ def _bare_environ_sites() -> list[str]:
     offenders: list[str] = []
     # No self-exclusion: this module's offender shapes are string literals parsed at run
     # time, not live asserts, so the audit polices its own source too.
-    for path in sorted(_TESTS_ROOT.rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        relative = path.relative_to(_REPO_ROOT)
-        offenders.extend(f"{relative}:{node.lineno}" for node in _bare_environ_nodes(tree))
+    for module in parsed_python_files(_TESTS_ROOT):
+        offenders.extend(
+            f"{module.relative}:{node.lineno}" for node in _bare_environ_nodes(module.tree)
+        )
     return offenders
 
 

@@ -16,6 +16,7 @@ import ast
 import pathlib
 
 import pytest
+from _tree_scan import parsed_python_files
 
 import rebar._deprecations as dep
 from rebar._deprecations import REGISTRY, Deprecation, warn_deprecated
@@ -120,13 +121,12 @@ def _is_deprecation_emission(node: ast.AST) -> bool:
 
 def _scan_emission_sites() -> list[str]:
     sites: list[str] = []
-    for py in _SRC_ROOT.rglob("*.py"):
-        if py.name in _EMISSION_ALLOWLIST:
+    for module in parsed_python_files(_SRC_ROOT):
+        if module.path.name in _EMISSION_ALLOWLIST:
             continue
-        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
-        for node in ast.walk(tree):
+        for node in ast.walk(module.tree):
             if _is_deprecation_emission(node):
-                rel = py.relative_to(_SRC_ROOT)
+                rel = module.path.relative_to(_SRC_ROOT)
                 sites.append(f"{rel}:{node.lineno}")
     return sites
 

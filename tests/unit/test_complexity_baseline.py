@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 import tomllib
 import yaml
+from _tree_scan import parsed_python_files
 
 pytestmark = pytest.mark.unit
 
@@ -159,11 +160,11 @@ def test_pyproject_per_file_ignores_have_no_c901():
 
 def test_src_rebar_has_no_inline_c901_noqa():
     offenders = []
-    for py in (REPO_ROOT / "src" / "rebar").rglob("*.py"):
-        for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
+    for module in parsed_python_files(REPO_ROOT / "src" / "rebar"):
+        for i, line in enumerate(module.source.splitlines(), 1):
             low = line.lower()
             if "noqa" in low and "c901" in low:
-                offenders.append(f"{py}:{i}")
+                offenders.append(f"{module.path}:{i}")
     assert offenders == [], f"inline C901 noqa found: {offenders}"
 
 

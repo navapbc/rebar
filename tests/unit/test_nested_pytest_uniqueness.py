@@ -12,6 +12,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from _tree_scan import parsed_python_files
+
 _TESTS_DIR = Path(__file__).resolve().parents[1]
 _OWNER = _TESTS_DIR / "_nested_pytest.py"
 _ESCAPE_MARKER = "# nested-pytest-ok:"
@@ -86,9 +88,9 @@ def test_the_helper_itself_carries_the_only_launch() -> None:
 
 def test_the_helper_is_defined_exactly_once() -> None:
     definitions = [
-        path
-        for path in sorted(_TESTS_DIR.rglob("*.py"))
-        if any(line.startswith("def run_nested_pytest") for line in path.read_text().splitlines())
+        module.path
+        for module in parsed_python_files(_TESTS_DIR)
+        if any(line.startswith("def run_nested_pytest") for line in module.source.splitlines())
     ]
 
     assert definitions == [_OWNER]

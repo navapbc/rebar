@@ -14,6 +14,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from _tree_scan import parsed_python_files
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ENGINE = REPO_ROOT / "src" / "rebar" / "_engine"
 RECON = ENGINE / "rebar_reconciler"
@@ -49,12 +51,12 @@ def _imported_top_names(tree: ast.AST) -> set[str]:
 
 def test_reconciler_inward_engine_deps_are_reducer_and_event_append_only() -> None:
     offenders: dict[str, set[str]] = {}
-    for py in sorted(RECON.rglob("*.py")):
-        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+    for module in parsed_python_files(RECON):
+        tree = module.tree
         engine_imports = _imported_top_names(tree) & ENGINE_MODULES
         disallowed = engine_imports - ALLOWED
         if disallowed:
-            offenders[str(py.relative_to(REPO_ROOT))] = disallowed
+            offenders[str(module.relative)] = disallowed
     assert not offenders, (
         "reconciler files import engine modules outside the allowed seams "
         f"({sorted(ALLOWED)}): {offenders}"

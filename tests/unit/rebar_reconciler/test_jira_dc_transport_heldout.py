@@ -283,14 +283,17 @@ def test_the_dc_package_does_not_import_the_cloud_acli_transport() -> None:
     import ast
     from pathlib import Path
 
+    from _tree_scan import parsed_python_files
+
     root = (
         Path(__file__).resolve().parents[3]
         / "src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter"
     )
     assert root.is_dir(), "the jira_datacenter package does not exist"
 
-    for path in sorted(root.rglob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text())):
+    for module in parsed_python_files(root):
+        mod_name = module.path.name
+        for node in ast.walk(module.tree):
             names: list[str] = []
             if isinstance(node, ast.Import):
                 names = [a.name for a in node.names]
@@ -298,5 +301,5 @@ def test_the_dc_package_does_not_import_the_cloud_acli_transport() -> None:
                 names = [node.module]
             for name in names:
                 assert "acli" not in name.split(".")[-1], (
-                    f"{path.name} imports {name} — DC must not depend on the Cloud ACLI transport"
+                    f"{mod_name} imports {name} — DC must not depend on the Cloud ACLI transport"
                 )

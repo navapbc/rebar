@@ -27,6 +27,7 @@ import pathlib
 import re
 
 import pytest
+from _tree_scan import parsed_python_files
 
 import rebar
 from rebar._commands import close_disposition, close_precheck
@@ -262,14 +263,11 @@ def _replacement_walk_offenders() -> list[str]:
     exception argues for itself in review instead of being a silent opt-out.
     """
     offenders: list[str] = []
-    for path in sorted(_SRC.rglob("*.py")):
-        rel = path.relative_to(_SRC).as_posix()
+    for module in parsed_python_files(_SRC):
+        rel = module.path.relative_to(_SRC).as_posix()
         if rel == _OWNER:  # the owner may refactor freely; uniqueness is about COPIES
             continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:  # pragma: no cover - unreadable file is not a duplication signal
-            continue
+        text = module.source
         if not all(atom in text for atom in _WALK_ATOMS):
             continue
         excused = False

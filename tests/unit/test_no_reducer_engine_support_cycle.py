@@ -18,6 +18,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from _tree_scan import parsed_python_files
+
 import rebar
 
 _SRC = Path(rebar.__file__).resolve().parent
@@ -55,14 +57,13 @@ def _targets(node: ast.Import | ast.ImportFrom) -> list[str]:
 
 def test_reducer_has_no_module_scope_engine_support_import() -> None:
     offenders: list[str] = []
-    for py in _REDUCER.rglob("*.py"):
-        if "__pycache__" in py.parts:
+    for module in parsed_python_files(_REDUCER):
+        if "__pycache__" in module.path.parts:
             continue
-        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
-        for node in _module_scope_imports(tree):
+        for node in _module_scope_imports(module.tree):
             for name in _targets(node):
                 if name == _FORBIDDEN_PREFIX or name.startswith(_FORBIDDEN_PREFIX + "."):
-                    offenders.append(f"{py.relative_to(_SRC.parent)}: import {name}")
+                    offenders.append(f"{module.path.relative_to(_SRC.parent)}: import {name}")
     assert not offenders, (
         "reducer is the low-level replay layer and must not import _engine_support at "
         "MODULE scope (it closes the reducer ↔ _engine_support cycle). Keep the import "

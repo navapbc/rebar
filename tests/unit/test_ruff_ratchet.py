@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 import tomllib
+from _tree_scan import parsed_python_files
 
 pytestmark = pytest.mark.unit
 
@@ -129,9 +130,9 @@ def test_no_src_uses_datetime_UTC_token() -> None:
     # target-version stays py310, where datetime.UTC does not exist; require the
     # datetime.timezone.utc spelling everywhere under src/rebar.
     offenders = [
-        str(path.relative_to(REPO_ROOT))
-        for path in sorted(SRC_REBAR.rglob("*.py"))
-        if "datetime.UTC" in path.read_text(encoding="utf-8")
+        str(module.relative)
+        for module in parsed_python_files(SRC_REBAR)
+        if "datetime.UTC" in module.source
     ]
     assert not offenders, (
         "the literal token `datetime.UTC` is forbidden under src/rebar (target-version is "

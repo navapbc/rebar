@@ -26,6 +26,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from _tree_scan import parsed_python_files
 
 from rebar._store import event_append, git_outcome, push_classify, push_recovery, sync
 from rebar._store.git_outcome import GitKind
@@ -469,12 +470,12 @@ def test_marker_strings_live_only_in_the_owner_module() -> None:
     belongs to ``git_outcome.py``; anything else needs a reasoned escape."""
     offenders: dict[str, list[tuple[int, str]]] = {}
     for rel in GUARD_A_DIRS:
-        for path in sorted((SRC / rel).rglob("*.py")):
-            if path.relative_to(SRC).as_posix() == MARKER_OWNER:
+        for module in parsed_python_files(SRC / rel):
+            if module.path.relative_to(SRC).as_posix() == MARKER_OWNER:
                 continue
-            hits = marker_violations(path.read_text(encoding="utf-8"))
+            hits = marker_violations(module.source)
             if hits:
-                offenders[path.relative_to(SRC).as_posix()] = hits
+                offenders[module.path.relative_to(SRC).as_posix()] = hits
     assert not offenders, f"git marker strings outside {MARKER_OWNER}: {offenders}"
 
 
@@ -546,8 +547,8 @@ def timeout_constructions(source: str) -> list[int]:
 def test_synthetic_timeout_is_constructed_only_in_the_owner() -> None:
     """Guard B. Exactly one construction in the store, and it is the shared runner's."""
     found = {
-        path.relative_to(SRC).as_posix(): timeout_constructions(path.read_text(encoding="utf-8"))
-        for path in sorted((SRC / "_store").rglob("*.py"))
+        module.path.relative_to(SRC).as_posix(): timeout_constructions(module.source)
+        for module in parsed_python_files(SRC / "_store")
     }
     owner = [p for p, lines in found.items() if lines and p.endswith(TIMEOUT_OWNER)]
     others = {p: lines for p, lines in found.items() if lines and not p.endswith(TIMEOUT_OWNER)}

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _tree_scan import ParsedModule, parsed_python_files
 
 from rebar_reconciler import outbound_field_diff as _ofd
 from rebar_reconciler._backend import OutboundMapper
@@ -202,15 +203,15 @@ def test_compute_update_fields_threads_the_resolver_to_the_mapper() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _reconciler_sources() -> list[Path]:
-    return sorted(_REC.rglob("*.py"))
+def _reconciler_sources() -> tuple[ParsedModule, ...]:
+    return parsed_python_files(_REC)
 
 
 def test_no_module_discovers_the_resolver_by_getattr() -> None:
     """No ``getattr(x, "_assignee_resolver", ...)`` anywhere in the reconciler."""
     offenders: list[str] = []
-    for path in _reconciler_sources():
-        for node in ast.walk(ast.parse(path.read_text())):
+    for module in _reconciler_sources():
+        for node in ast.walk(module.tree):
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
@@ -219,7 +220,7 @@ def test_no_module_discovers_the_resolver_by_getattr() -> None:
                 and isinstance(node.args[1], ast.Constant)
                 and node.args[1].value == "_assignee_resolver"
             ):
-                offenders.append(f"{path.name}:{node.lineno}")
+                offenders.append(f"{module.path.name}:{node.lineno}")
     assert not offenders, f"resolver still discovered by getattr at {offenders}"
 
 
@@ -231,8 +232,8 @@ def test_no_module_injects_the_resolver_as_an_attribute() -> None:
     check is deliberately keyed on attribute ASSIGNMENT rather than the bare name.
     """
     offenders: list[str] = []
-    for path in _reconciler_sources():
-        for node in ast.walk(ast.parse(path.read_text())):
+    for module in _reconciler_sources():
+        for node in ast.walk(module.tree):
             targets = (
                 node.targets
                 if isinstance(node, ast.Assign)
@@ -242,16 +243,16 @@ def test_no_module_injects_the_resolver_as_an_attribute() -> None:
             )
             for target in targets:
                 if isinstance(target, ast.Attribute) and target.attr == "_assignee_resolver":
-                    offenders.append(f"{path.name}:{node.lineno}")
+                    offenders.append(f"{module.path.name}:{node.lineno}")
     assert not offenders, f"resolver still injected as an attribute at {offenders}"
 
 
 def test_no_attr_defined_type_ignore_remains_for_the_resolver() -> None:
     """The dependency is on the contract now, so mypy can see it — no suppression needed."""
     offenders = [
-        f"{path.name}:{i}"
-        for path in _reconciler_sources()
-        for i, line in enumerate(path.read_text().splitlines(), start=1)
+        f"{module.path.name}:{i}"
+        for module in _reconciler_sources()
+        for i, line in enumerate(module.source.splitlines(), start=1)
         if "_assignee_resolver" in line and "type: ignore[attr-defined]" in line
     ]
     assert not offenders, offenders

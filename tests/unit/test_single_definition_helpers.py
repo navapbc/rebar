@@ -20,6 +20,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 import rebar
 
@@ -29,14 +30,10 @@ _SRC = Path(rebar.__file__).resolve().parent
 def _definitions(name: str) -> list[str]:
     """Every top-level or nested ``def <name>`` under ``src/rebar``, as path:line."""
     found: list[str] = []
-    for path in sorted(_SRC.rglob("*.py")):
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:  # pragma: no cover - a syntactically broken file is CI's problem
-            continue
-        for node in ast.walk(tree):
+    for module in parsed_python_files(_SRC):
+        for node in ast.walk(module.tree):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name:
-                found.append(f"{path.relative_to(_SRC.parent)}:{node.lineno}")
+                found.append(f"{module.path.relative_to(_SRC.parent)}:{node.lineno}")
     return found
 
 

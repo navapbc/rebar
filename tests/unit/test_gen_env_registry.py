@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 pytestmark = pytest.mark.unit
 
@@ -250,15 +251,8 @@ def _defined_function_names(root: Path) -> set[str]:
     matching what ``_unregistered_helpers`` already considers a definition.
     """
     names: set[str] = set()
-    for py in sorted(root.rglob("*.py")):
-        try:
-            tree = ast.parse(py.read_text(encoding="utf-8"))
-        except (SyntaxError, OSError):
-            # Same skip set as the generator's own census. Independence here is about not
-            # REUSING its function, not about disagreeing on which files are readable: an
-            # unreadable file must drop out of BOTH sides, or the oracle reports a stale
-            # row the generator would never raise on.
-            continue
+    for module in parsed_python_files(root):
+        tree = module.tree
         names.update(
             node.name
             for node in ast.walk(tree)

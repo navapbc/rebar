@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 import rebar
 
@@ -199,13 +200,13 @@ def _tracker_sibling_offenders() -> list[str]:
     from rebar._store.paths import _offending_line
 
     offenders: list[str] = []
-    for path in sorted(_SRC_REBAR.rglob("*.py")):
-        if path.resolve() == _OWNER.resolve():
+    for module in parsed_python_files(_SRC_REBAR):
+        if module.path.resolve() == _OWNER.resolve():
             continue  # the owner is exempt: refactoring INSIDE it cannot fail the guard
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        for lineno, line in enumerate(module.source.splitlines(), start=1):
             why = _offending_line(line)
             if why:
-                offenders.append(f"{path.relative_to(_SRC_REBAR.parent)}:{lineno}: {why}")
+                offenders.append(f"{module.path.relative_to(_SRC_REBAR.parent)}:{lineno}: {why}")
     return offenders
 
 
@@ -224,9 +225,9 @@ def test_exactly_one_rebar_dir_definition_under_src() -> None:
     """The story's first acceptance criterion, asserted rather than left to a manual grep:
     ``grep -rn "def _rebar_dir" src/rebar`` returns only ``_store/paths.py``."""
     found = [
-        f"{path.relative_to(_SRC_REBAR.parent)}:{lineno}"
-        for path in sorted(_SRC_REBAR.rglob("*.py"))
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        f"{module.path.relative_to(_SRC_REBAR.parent)}:{lineno}"
+        for module in parsed_python_files(_SRC_REBAR)
+        for lineno, line in enumerate(module.source.splitlines(), start=1)
         if line.startswith("def _rebar_dir")
     ]
     assert len(found) <= 1, f"more than one _rebar_dir definition survives: {found}"

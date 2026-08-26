@@ -25,6 +25,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 from rebar._store import merge_recovery, sync
 
@@ -222,12 +223,12 @@ def test_the_quarantine_mover_lives_only_in_the_owner_module() -> None:
     """The guard. Every quarantine relocation under ``src/rebar`` belongs to
     ``merge_recovery.py``; a second copy needs a reasoned escape marker."""
     offenders = {}
-    for path in sorted(SRC.rglob("*.py")):
-        if path.relative_to(SRC).as_posix() == QUARANTINE_OWNER:
+    for module in parsed_python_files(SRC):
+        if module.path.relative_to(SRC).as_posix() == QUARANTINE_OWNER:
             continue
-        hits = quarantine_move_violations(path.read_text(encoding="utf-8"))
+        hits = quarantine_move_violations(module.source)
         if hits:
-            offenders[path.relative_to(SRC).as_posix()] = hits
+            offenders[module.path.relative_to(SRC).as_posix()] = hits
     assert not offenders, f"quarantine movers outside {QUARANTINE_OWNER}: {offenders}"
 
 

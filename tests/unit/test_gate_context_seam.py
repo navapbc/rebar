@@ -23,6 +23,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from _tree_scan import parsed_python_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONFIG = REPO_ROOT / "src" / "rebar" / "llm" / "config.py"
@@ -106,19 +107,15 @@ def test_no_src_consumer_is_repointed_at_the_new_module() -> None:
     new module — the patch stops taking effect and its test passes while asserting nothing. Only
     `config.py` itself may import from `gate_context`."""
     offenders: list[str] = []
-    for path in _SRC.rglob("*.py"):
-        if path == _GATE_CONTEXT or path == _CONFIG:
+    for module in parsed_python_files(_SRC):
+        if module.path == _GATE_CONTEXT or module.path == _CONFIG:
             continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:  # pragma: no cover - not our concern here
-            continue
-        for node in ast.walk(tree):
+        for node in ast.walk(module.tree):
             if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("gate_context"):
-                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+                offenders.append(f"{module.path.relative_to(REPO_ROOT)}:{node.lineno}")
             elif isinstance(node, ast.Import):
                 if any(a.name.endswith("gate_context") for a in node.names):
-                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+                    offenders.append(f"{module.path.relative_to(REPO_ROOT)}:{node.lineno}")
     assert offenders == [], (
         f"these repoint at gate_context instead of going through rebar.llm.config: {offenders}"
     )

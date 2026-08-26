@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from _subprocess_env import subprocess_env
+from _tree_scan import parsed_python_files
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SRC = REPO_ROOT / "src" / "rebar"
@@ -186,8 +187,8 @@ def test_every_cli_literal_is_a_known_code() -> None:
 
     literals: set[str] = set()
     pat = re.compile(r"""error_envelope\(\s*["']([a-z_]+)["']""")
-    for path in SRC.rglob("*.py"):
-        literals.update(pat.findall(path.read_text(encoding="utf-8")))
+    for module in parsed_python_files(SRC):
+        literals.update(pat.findall(module.source))
 
     assert literals, "expected to find error_envelope literal call sites"
     unknown = literals - rebar.KNOWN_ERROR_CODES
