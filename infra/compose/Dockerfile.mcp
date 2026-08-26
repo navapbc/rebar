@@ -56,5 +56,52 @@ EXPOSE 8091
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=4).status==200 else 1)"
 
+# ---------------------------------------------------------------------------
+# Ticket-store provisioning entrypoint (mirrors Dockerfile.reviewbot's data-capture
+# entrypoint, story limestone-unethical-zebrafinch).
+#
+# The MCP tools read AND WRITE the rebar ticket store, and nothing else in the image or
+# the compose service populates one: `.dockerignore` excludes `.tickets-tracker` (and
+# `.git`), so the store can never be baked in. With no tracker dir configured the path
+# resolved to the WORKDIR and every tool failed "/app/.tickets-tracker not found".
+#
+# Before the server starts, materialize a PERSISTENT, FULL READ-WRITE tracker on the
+# mounted volume:
+#   1. Configure a PER-URL (not --global) git credential helper for the tickets remote that
+#      echoes username=x-access-token / password=$MCP_TICKETS_PAT — so the fine-grained
+#      contents:write PAT never lands on disk or inside a remote URL.
+#   2. Clone the `tickets` branch ONCE into $REBAR_TRACKER_DIR (single-branch), so writes
+#      accumulate + auto-push instead of living in an ephemeral dir.
+#   3. Converge that clone into a WRITABLE rebar store via the SHARED ensure script
+#      (repo-local git identity + the git-ignored `.env-id` store marker, through rebar's
+#      idempotent ensure-registry). Reused, not forked, from the review-bot.
+# FAILURE POSTURE IS SOFT: no PAT, or a failed clone/ensure, must NOT stop the container
+# booting — the live clone is a DEPLOY-STEP CANARY (it needs the real SSM PAT + a running
+# container), so it is not exercised by the in-repo unit tests.
+ENV REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets \
+    MCP_TICKETS_URL=https://github.com/navapbc/rebar.git
+RUN set -eux; \
+    { \
+      echo '#!/bin/sh'; \
+      echo 'set -e'; \
+      echo 'if [ -n "${MCP_TICKETS_PAT:-}" ]; then'; \
+      echo '  git config --global "credential.${MCP_TICKETS_URL}.helper" \'; \
+      echo "    '!f() { echo username=x-access-token; echo \"password=\$MCP_TICKETS_PAT\"; }; f'"; \
+      echo '  git config --global "credential.${MCP_TICKETS_URL}.useHttpPath" false'; \
+      echo '  if [ ! -d "${REBAR_TRACKER_DIR}/.git" ]; then'; \
+      echo '    git clone --single-branch --branch tickets "${MCP_TICKETS_URL}" "${REBAR_TRACKER_DIR}" || \'; \
+      echo '      echo "mcp: tickets store clone deferred (deploy canary)" >&2'; \
+      echo '  fi'; \
+      echo 'fi'; \
+      echo '# Converge the (possibly freshly-cloned) tickets worktree into a writable rebar'; \
+      echo '# store: repo-local git identity + the `.env-id` store marker. Idempotent — a'; \
+      echo '# no-op when the clone is deferred or already converged; never blocks boot.'; \
+      echo 'sh /app/infra/scripts/reviewbot-ensure-tickets.sh "${REBAR_TRACKER_DIR}" || \'; \
+      echo '  echo "mcp: tickets store ensure deferred (see logs)" >&2'; \
+      echo 'exec "$@"'; \
+    } > /usr/local/bin/mcp-entrypoint.sh; \
+    chmod +x /usr/local/bin/mcp-entrypoint.sh
+
 # Boot the MCP server. Transport is HTTP via the env above (main() -> run_mcp).
+ENTRYPOINT ["/usr/local/bin/mcp-entrypoint.sh"]
 CMD ["rebar-mcp"]

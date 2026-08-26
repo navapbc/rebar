@@ -773,6 +773,13 @@ def _parse_compose_mcp_env_and_volumes() -> tuple[dict[str, str], list[str]]:
     return env, volumes
 
 
+# Compose env keys that are carried into the blue-green container by `--env-file` alone.
+# Their compose spelling is `${KEY:-}` — compose resolves that from the project-dir .env,
+# but a bare `docker run` does NOT, so re-spelling them as `-e` would overwrite the real
+# value with an empty string.
+_ENV_FILE_ONLY = frozenset({"MCP_TICKETS_PAT"})
+
+
 def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> None:
     """`mcp_run_new` must reproduce the compose `mcp:` service env/mounts EXACTLY. /health is
     auth-independent (mounted outside the auth middleware), so it cannot catch a wrong
@@ -795,17 +802,34 @@ def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> N
     assert len(volumes) >= 2, f"compose parse must recover both :ro secret mounts (got {volumes})"
 
     for key, value in env.items():
+        if key in _ENV_FILE_ONLY:
+            # Deliberately NOT spelled as `-e` here: its value lives only in the
+            # SSM-materialized .env, and the deploy shell does not interpolate from that
+            # file, so a `-e KEY=${KEY:-}` would resolve EMPTY and CLOBBER the .env value.
+            # `--env-file` (asserted below) is the carrier; pin the exclusion so a future
+            # edit that adds the flag has to come here and re-reason about it.
+            assert f"-e {key}=" not in run_line, (
+                f"`{key}` must reach the container via --env-file, not `-e` (an `-e` with an "
+                f"un-interpolated compose default would blank the .env value)\n{ctx}"
+            )
+            continue
         assert f"-e {key}={value}" in run_line, (
             f"docker run must carry compose env `{key}={value}`\n{ctx}"
         )
-    # both secret mounts, read-only, by their in-container path.
+    # The secret mounts, read-only, by their in-container path; plus the persistent named
+    # data volumes (no :ro suffix) by their `name:path` pair.
     for vol in volumes:
         parts = vol.split(":")
-        assert parts[-1] == "ro", f"compose mcp volume must be read-only: {vol}"
-        container_path = parts[-2]
-        assert f"{container_path}:ro" in run_line, (
-            f"docker run must bind-mount `{container_path}` read-only (compose parity)\n{ctx}"
-        )
+        if parts[-1] == "ro":
+            container_path = parts[-2]
+            assert f"{container_path}:ro" in run_line, (
+                f"docker run must bind-mount `{container_path}` read-only (compose parity)\n{ctx}"
+            )
+        else:
+            assert len(parts) == 2, f"unrecognised compose mcp volume spec: {vol}"
+            assert vol in run_line, (
+                f"docker run must mount the named volume `{vol}` (compose parity)\n{ctx}"
+            )
     assert "--env-file" in run_line and ".env" in run_line, (
         f"docker run must load the .env env-file\n{ctx}"
     )
