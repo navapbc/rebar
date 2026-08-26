@@ -30,8 +30,25 @@ from rebar._engine_support import reads as ticket_reads
 
 def _tracker(repo_root: str | os.PathLike[str] | None) -> str:
     """Tracker dir, honoring REBAR_TRACKER_DIR
-    then repo-root (matches the shared resolver's repo_root-based contract)."""
-    return str(config.tracker_dir(repo_root))
+    then repo-root (matches the shared resolver's repo_root-based contract).
+
+    Read-side mirror of the write path's ``event_prepare._ensure_initialized``:
+    an ABSENT tracker dir raises ``RebarError`` (exit 1) with the same wording the
+    CLI reads and the write path use, instead of silently reducing to an empty
+    result (the reducer's ``except OSError`` swallows ``FileNotFoundError`` one
+    layer down). Every library/MCP read funnels through here, so they all inherit
+    the guard. An EXISTING but empty store is NOT an error — it still reads ``[]``."""
+    tracker = str(config.tracker_dir(repo_root))
+    if not os.path.isdir(tracker):
+        err = _rebar_error("Error: ticket system not initialized. Run 'ticket init' first.")
+        # Carry a distinct code from the stable vocabulary rather than leaving callers to
+        # sniff the message. This IS the api-compat answer to the behaviour change: a
+        # consumer that previously read `[]` can branch on `store_uninitialized`
+        # specifically, instead of on `command_failed` (which would conflate it with every
+        # other read failure) or on wording defined in four different modules.
+        err.error_code = "store_uninitialized"
+        raise err
+    return tracker
 
 
 def _fresh(tracker: str) -> None:

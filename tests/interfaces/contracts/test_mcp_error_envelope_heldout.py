@@ -112,6 +112,11 @@ def test_cross_interface_agreement_missing_ticket(tmp_path: Path) -> None:
 
     root = _fresh_tracker(tmp_path)
     missing = "abcd-1234-5678-9abc"
+    # The CLI and MCP arms below are both scoped to `root`; without this the in-process
+    # library arm reads whatever ambient REBAR_ROOT/cwd it lands in, so the three
+    # interfaces were never actually compared against the SAME store. It passed only
+    # because a read against a NON-EXISTENT tracker also surfaced as "ticket_not_found".
+    _pin(root)
 
     # library
     try:

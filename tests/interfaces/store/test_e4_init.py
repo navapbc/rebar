@@ -184,9 +184,20 @@ def test_library_write_errors_without_init(fresh_repo: Path) -> None:
     assert not _tracker(fresh_repo).exists()
 
 
-def test_library_read_returns_empty_without_init(fresh_repo: Path) -> None:
-    # Reads do not init; they return empty (no silent creation).
-    assert rebar.list_tickets(repo_root=str(fresh_repo)) == []
+def test_library_read_errors_without_init_and_creates_nothing(fresh_repo: Path) -> None:
+    """Reads do not init — and no longer pretend an ABSENT store is an EMPTY one.
+
+    This file's invariant is that the store is never created without an explicit init, and
+    that is unchanged and still asserted below. What changed is the second, incidental half
+    of the old assertion: the read used to return `[]`, which is indistinguishable from a
+    store that exists and holds no tickets. A deployed MCP server with no store answered
+    every tracker query "no tickets" for weeks because of it (bug
+    antelopine-limivorous-chinchilla), so the read now names the fault, exactly as the write
+    directly above already did. The no-silent-creation guarantee is the assertion that
+    carries this test; it is deliberately kept.
+    """
+    with pytest.raises(rebar.RebarError, match="not initialized"):
+        rebar.list_tickets(repo_root=str(fresh_repo))
     assert not _tracker(fresh_repo).exists()
 
 
