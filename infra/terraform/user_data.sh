@@ -22,6 +22,9 @@ dnf install -y nvme-cli || true
 # Nitro/Graviton presents EBS volumes as /dev/nvme*n1, NOT the /dev/sdf we asked
 # for in the attachment. We match by the EBS volume id. AWS encodes the volume
 # id (minus dashes) in the NVMe controller serial number.
+# Terraform's templatefile() substitutes ${data_volume_id} before this script is
+# ever executed. ShellCheck lints the UNRENDERED template and cannot know that.
+# shellcheck disable=SC2154
 VOL_NODASH=$(echo "${data_volume_id}" | tr -d '-')
 
 DATA_DEV=""
@@ -85,6 +88,10 @@ chmod 600 "$ENV_FILE"
 
 # param name -> env var key. (Brace expansions below are escaped as $${...}
 # because they survive templatefile to run in bash.)
+# PARAMS is consumed below as $${!PARAMS[@]} / $${PARAMS[$name]}, which templatefile
+# reduces to ${!PARAMS[@]} / ${PARAMS[$name]}. ShellCheck reads the escaped pre-render
+# form and so cannot see the use.
+# shellcheck disable=SC2034
 declare -A PARAMS=(
   ["/rebar/prod/gerrit-admin-password"]="GERRIT_ADMIN_PASSWORD"
   ["/rebar/prod/gerrit-ssh-host-ed25519-key"]="GERRIT_SSH_HOST_ED25519_KEY"
@@ -101,6 +108,9 @@ declare -A PARAMS=(
   # OAuth params before OAuth is even in use.
 )
 
+# After rendering, "$${!PARAMS[@]}" becomes "${!PARAMS[@]}" — one word per key.
+# ShellCheck sees the pre-render literal and wrongly reports a single-iteration loop.
+# shellcheck disable=SC2066
 for name in "$${!PARAMS[@]}"; do
   key="$${PARAMS[$name]}"
   value=$(aws ssm get-parameter --region "$REGION" --name "$name" \
