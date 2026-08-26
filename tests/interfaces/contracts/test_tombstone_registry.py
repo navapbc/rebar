@@ -262,26 +262,46 @@ def test_docs_config_md_documents_tombstones() -> None:
     assert "rebar config validate" in text
 
 
-# ── AC6 structural guard: every broad except in mcp_server has a RemovedInputError re-raise ──
+# ── AC6 structural guard: every broad except on the MCP BOOT PATH re-raises RemovedInputError ──
 def test_mcp_server_broad_excepts_guard_removed_input_error() -> None:
     """A reproducible source-reading check (not a hand grep): every
-    `except Exception` / `except BaseException` in mcp_server.py must have an
+    `except Exception` / `except BaseException` on the MCP BOOT PATH must have an
     `except RemovedInputError: raise` guard immediately above it, so a retired
     error-class input fails the MCP server hard instead of being swallowed by the
-    boot/request broad handler."""
-    src = Path(rebar.__file__).resolve().parent / "mcp_server.py"
-    lines = src.read_text(encoding="utf-8").splitlines()
-    broad = [
-        i
-        for i, ln in enumerate(lines)
-        if ln.lstrip().startswith(("except Exception", "except BaseException"))
-    ]
-    assert broad, "expected at least one broad except in mcp_server.py"
-    for i in broad:
-        # Scan the few lines immediately above for `except RemovedInputError:` + `raise`.
-        window = lines[max(0, i - 8) : i]
-        joined = "\n".join(window)
-        assert "except RemovedInputError:" in joined and "raise" in joined, (
-            f"broad except at mcp_server.py:{i + 1} lacks a RemovedInputError re-raise guard "
-            f"immediately above it"
-        )
+    boot/request broad handler.
+
+    Scoped to the boot path as a SET of modules rather than to `mcp_server.py` alone: the
+    boot store-sweep moved into `_mcp_health.py` (same concern as `store_status`, and the
+    extraction kept `mcp_server.py` under the module-size cap). The `total_broad` assertion
+    below is what caught that move instead of letting this check pass vacuously against a
+    file that no longer holds the handler — so it is kept, now over the union.
+    """
+    pkg = Path(rebar.__file__).resolve().parent
+    sources = [pkg / "mcp_server.py", pkg / "_mcp_health.py"]
+
+    total_broad = 0
+    for src in sources:
+        lines = src.read_text(encoding="utf-8").splitlines()
+        broad = [
+            i
+            for i, ln in enumerate(lines)
+            if ln.lstrip().startswith(("except Exception", "except BaseException"))
+        ]
+        total_broad += len(broad)
+        for i in broad:
+            # Scan upward for the guard, but STOP at the previous broad except: a plain
+            # fixed-size window lets two broad handlers sit close enough to share one guard,
+            # so an UNGUARDED handler passes on its neighbour's evidence. Bound the window at
+            # the preceding broad except so each one must carry its own.
+            prev_broad = max([b for b in broad if b < i], default=-1)
+            window = lines[max(0, i - 12, prev_broad + 1) : i]
+            joined = "\n".join(window)
+            assert "except RemovedInputError:" in joined and "raise" in joined, (
+                f"broad except at {src.name}:{i + 1} lacks a RemovedInputError re-raise guard "
+                f"immediately above it"
+            )
+    assert total_broad, (
+        "expected at least one broad except across the MCP boot path "
+        f"({', '.join(s.name for s in sources)}); if the handler moved again, extend this "
+        "list rather than letting the check pass vacuously"
+    )
