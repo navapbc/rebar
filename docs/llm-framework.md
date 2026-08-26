@@ -429,6 +429,7 @@ for the future code-review op's "deterministic reviewer-selection rules."
 | `REBAR_LLM_ALLOW_LOCAL_PROXY` | off | permit an inherited loopback `ANTHROPIC_BASE_URL` instead of bypassing it |
 | `REBAR_LLM_REPO_PATH` | repo root | repo the read-only file tools see |
 | `REBAR_LLM_MCP_SERVERS` | `{}` | JSON of MCP servers (pydantic-ai MCP server / toolset shape) |
+| `REBAR_LLM_HEADERS` | `{}` | JSON of request headers for gate LLM calls; attached only with `REBAR_LLM_BASE_URL` set (see §"Gateway observability") |
 | `ANTHROPIC_API_KEY` | — | model credentials for the **direct-Anthropic** path only; not required for Bedrock or a local server |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | — | OTLP trace sink only (auto-enabled when both keys present + the `[tracing]` extra); never used for prompt text |
 | `REBAR_MCP_ALLOW_LLM` | off | gate the billable MCP LLM tools (they make live, billable calls) |
@@ -1035,6 +1036,52 @@ A `PASS` whose signature failed to *persist* is recoverable without paying for t
 again: `rebar.llm.resign_plan_review(tid)` (CLI `rebar sign-review <id>`) re-signs from the
 recorded `REVIEW_RESULT` sidecar with **no LLM call**, and refuses if the plan changed since
 the review or the recorded verdict was not a signable `PASS`.
+
+## Gateway observability (`llm.headers`)
+
+When gate traffic runs through an OpenAI-compatible gateway (`llm.base_url`) that reports to an
+observability backend, `llm.headers` labels it. rebar ships **no gateway vendor's header name**
+in code or defaults — the examples below are documentation, not a supported-vendor list, and a
+test asserts no vendor header literal exists under `src/rebar/llm/`. Point the keys at whatever
+your gateway reads.
+
+**LiteLLM proxy:**
+
+```toml
+[tool.rebar.llm.headers]
+"x-litellm-trace-id"   = "${run:trace_id}"
+"x-litellm-session-id" = "${run:ticket_id}"
+```
+
+**Helicone:**
+
+```toml
+[tool.rebar.llm.headers]
+"Helicone-Session-Id"         = "${run:ticket_id}"
+"Helicone-Property-Rebar-Op"  = "${run:operation}"
+"Helicone-Auth"               = "${env:HELICONE_KEY}"
+```
+
+An internal gateway works the same way — the grammar, not the names, is what rebar provides.
+Full key reference (layers, precedence, the closed `${run:…}` vocabulary, the `$$` escape, the
+rejected header names) is in [config.md](config.md#llm-framework-llm--optional-agents-extra-toolrebarllm).
+
+**Underscores are stripped by nginx.** Header names containing `_` are dropped by default
+(`underscores_in_headers off`), so a gateway whose documented header is the underscore form —
+LiteLLM also accepts `langfuse_trace_id` — can silently never receive it when nginx sits in
+front. Prefer the hyphenated form, and if a header appears to vanish, test the hop chain before
+suspecting rebar.
+
+**Not every provider carries them.** At the pinned pydantic-ai, `extra_headers` is **inert on
+Bedrock** — `pydantic_ai/models/bedrock.py` references it zero times, despite `settings.py`
+listing Bedrock as supported. rebar's Bedrock path takes no `base_url`, so the `base_url` gate
+already excludes it and behaviour is unaffected; but an operator on Bedrock gets no correlation
+headers and should not expect them.
+
+**What is recorded.** A signed verdict's `provider_provenance` carries `header_names` — the
+sorted **names** of the configured headers. **Values are never recorded**, and never appear in
+logs or diagnostics. Put a credential in a header value only via `${env:VAR}`, so it lives in the
+environment rather than in a committed config file.
 
 ## Deployment notes
 

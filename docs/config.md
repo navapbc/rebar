@@ -393,6 +393,7 @@ llm_retry_max_attempts = 4           # env REBAR_LLM_RETRY_MAX_ATTEMPTS; transpo
 llm_retry_max_wait_s   = 60          # env REBAR_LLM_RETRY_MAX_WAIT_S; caps the Retry-After / backoff wait
 llm_tool_timeout_s     = 120         # env REBAR_LLM_TOOL_TIMEOUT_S; per-tool timeout (bounds async/MCP tools)
 mcp_servers    = {}                  # env REBAR_LLM_MCP_SERVERS (JSON); a TOML inline table in-file
+headers        = {}                  # env REBAR_LLM_HEADERS (JSON); a TOML inline table in-file
 ```
 
 **Pin the region beside region-scoped Bedrock model pins.** A repo whose `[tool.rebar.llm]`
@@ -437,6 +438,50 @@ parse failure writes ONE JSON artifact there (the raw reply plus `model`, `contr
 raised error. The write is **best-effort** (any I/O error is swallowed and never masks the
 original parse error) and **self-limiting** — the directory is rotated to keep the newest 20
 files, evicting the oldest.
+
+**`llm.headers`** (env `REBAR_LLM_HEADERS`, CLI `rebar -c llm.headers=<json>`) — request
+headers attached to every gate LLM call, for labelling traffic that runs through a gateway.
+**Default `{}` = off**; unconfigured deployments are byte-unchanged. It resolves across the same
+three layers as `mcp_servers`, with the same precedence — but **not** its error handling.
+`mcp_servers` degrades malformed JSON to `{}` silently; `headers` raises `LLMConfigError`
+naming the layer, in every layer, because silently discarding headers leaves an operator with an
+unattributed gateway and no signal. The file layer accepts a native TOML table or a JSON string;
+a value that is neither, or JSON parsing to a non-object, is likewise a hard error.
+
+Header **values** carry a closed placeholder grammar:
+
+| form | resolved | notes |
+|---|---|---|
+| `${env:VAR}` | at config load | an unset variable is a hard error naming it — keeps a gateway credential out of committed config |
+| `${run:trace_id}` | at call time | the per-gate-run correlation id (32 lowercase hex) |
+| `${run:ticket_id}` | at call time | the ticket the gate run is about |
+| `${run:operation}` | at call time | exactly `review-plan` or `verify-completion` |
+| `$$` | — | a literal `$` anywhere, so `$${VAR}` yields `${VAR}` unsubstituted |
+
+Those four `${run:...}` keys are the whole vocabulary. An unrecognized namespace (`${foo:bar}`),
+a missing colon (`${envVAR}`), an unclosed `${…}`, or an unknown run key are all hard errors —
+never silently-accepted literals, since passing placeholder text through as a header value is a
+silent misconfiguration in a feature whose purpose is attribution.
+
+**Substitution runs before validation**, and that ordering is a security contract: an
+environment variable whose value contains CR/LF must not be able to smuggle an injected header
+past a check applied to the literal `${env:VAR}` text. Validation re-runs after `${run:…}`
+substitution for the same reason.
+
+**Rejected outright** (a named `LLMConfigError`): the header names `authorization`, `x-api-key`,
+`cookie`, `host` and `proxy-authorization`, case-insensitively and by exact name — so
+`x-authorization-context` is fine — plus any value containing CR, LF or NUL. The rejection names
+**`llm.api_key`** as the supported credential channel: the denylist redirects to a first-class
+field rather than merely forbidding.
+
+Headers attach **only when `llm.base_url` is set**. A configured intermediary is the only
+topology in which they mean anything, and gating stops an operator's internal correlation values
+reaching a public provider endpoint. A header whose `${run:…}` value is absent — any operation
+outside a gate run, including `review-code`, which opens no gate scope and has no ticket — is
+**omitted entirely** rather than sent empty; sibling headers without placeholders still go.
+
+Header **names** are recorded in the signed verdict's `provider_provenance` under
+`header_names`; **values are never recorded**, and never reach logs or diagnostics.
 
 ### LLM failure taxonomy (the resolution-disposition vocabulary)
 
