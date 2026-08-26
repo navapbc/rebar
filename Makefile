@@ -254,6 +254,16 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# Agent Skills SKILL.md frontmatter (ticket db04): Copilot CLI silently drops a skill
 	@# whose frontmatter fails to parse or whose description exceeds 1024 chars, so gate it.
 	python scripts/check_skill_frontmatter.py
+	@# ShellCheck over standalone *.sh (ticket fe4e-54a5-3c3a-4901). Workflow `run:` blocks
+	@# are ALREADY linted — actionlint (below) embeds ShellCheck for .github/workflows/** —
+	@# but no gate covered standalone scripts, of which this repo has 35.
+	@# Severity is `warning`, and that is load-bearing rather than incidental: the motivating
+	@# defect is SC2115 (`rm -rf "$$dir"/*` expanding to `rm -rf /*` when the var is empty),
+	@# which ShellCheck emits at `warning`. A gate at `-S error` runs GREEN over that exact
+	@# line — the one that wiped /opt/homebrew and /Applications on a contributor workstation.
+	@# ShellCheck ships via `shellcheck-py`, pinned exactly in pyproject's [dev] extra, so it
+	@# is a REQUIRED tool here and the gate FAILS (never skips) when it is absent.
+	python scripts/check_shellcheck.py
 	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
 	@# zizmor audits the release workflow + the Verified-gate vote path ($(ZIZMOR_WORKFLOWS),
 	@# widened in epic 5664 S1); actionlint below validates ALL workflows. zizmor is a

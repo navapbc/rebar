@@ -72,12 +72,12 @@ git config --global user.name "$NAME"
 # deliberately narrow exception is the epoch reclaim migration: a clean pre-epoch clone
 # may adopt the rewritten remote tip, but only when it had no local-only history before the
 # fetch.  Keep the snapshots as commit ids; never reset to a moving tracking ref.
-LOCAL_HEAD="$(git -C "$DIR" rev-parse --verify HEAD^{commit} 2>/dev/null || true)"
-PRIOR_REMOTE="$(git -C "$DIR" rev-parse --verify refs/remotes/origin/tickets^{commit} 2>/dev/null || true)"
+LOCAL_HEAD="$(git -C "$DIR" rev-parse --verify "HEAD^{commit}" 2>/dev/null || true)"
+PRIOR_REMOTE="$(git -C "$DIR" rev-parse --verify "refs/remotes/origin/tickets^{commit}" 2>/dev/null || true)"
 if ! git -C "$DIR" fetch --quiet origin "+refs/heads/tickets:refs/remotes/origin/tickets"; then
 	echo "reviewbot-ensure-tickets: tickets fetch failed; remote unavailable and convergence deferred; preserving local HEAD ${LOCAL_HEAD:-unreadable}" >&2
 else
-	PINNED_REMOTE="$(git -C "$DIR" rev-parse --verify refs/remotes/origin/tickets^{commit} 2>/dev/null || true)"
+	PINNED_REMOTE="$(git -C "$DIR" rev-parse --verify "refs/remotes/origin/tickets^{commit}" 2>/dev/null || true)"
 	if [ -z "$PINNED_REMOTE" ]; then
 		echo "reviewbot-ensure-tickets: tickets remote ref is unreadable after fetch; manual intervention required; preserving local HEAD ${LOCAL_HEAD:-unreadable}" >&2
 	else

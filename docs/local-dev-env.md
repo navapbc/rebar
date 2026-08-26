@@ -127,15 +127,15 @@ hook did not land — so the gate is never silently absent.
 
 ### The commit gate needs the dev tools on `PATH` (activate the venv before committing)
 
-The hooks run `make lint` (ruff) and `make typecheck` (mypy), which invoke the **bare**
-`ruff` / `mypy` resolved from `PATH` — the same commands CI runs, so the hook, `make`, and CI
-never drift. That means the shell you `git commit` from must have the project venv **active**
+The hooks run `make lint` (ruff, shellcheck) and `make typecheck` (mypy), which invoke the
+**bare** `ruff` / `shellcheck` / `mypy` resolved from `PATH` — the same commands CI runs, so
+the hook, `make`, and CI never drift. That means the shell you `git commit` from must have the project venv **active**
 (or the `[dev]` tools otherwise on `PATH`). `make install` into an activated venv puts them
 there; the canonical setup above (`source .venv/bin/activate`) satisfies this.
 
 - **Symptom when the venv is NOT active:** a hook fails with `make: mypy: No such file or
-  directory` (or `ruff`) — even though your code is clean. It is an environment problem, not a
-  code problem. (A split env where only *one* tool leaked onto the global `PATH` makes this
+  directory` (or `ruff`), or `check_shellcheck` reports shellcheck missing — even though your
+  code is clean. It is an environment problem, not a code problem. (A split env where only *one* tool leaked onto the global `PATH` makes this
   look especially confusing: `make lint` passes but `make typecheck` fails, or vice-versa.)
 - **Fix:** `source .venv/bin/activate` before committing, or run the commit with the venv bin
   prepended: `PATH="$PWD/.venv/bin:$PATH" git commit …`.
