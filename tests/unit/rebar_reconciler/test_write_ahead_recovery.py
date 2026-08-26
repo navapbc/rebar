@@ -200,3 +200,100 @@ def test_bind_pending_persist_failure_skips_create(dispatch, tmp_path):
         dispatch.create_one(mutation, client, repo_root=tmp_path, binding_store=store)
 
     client.create_issue.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# S4 T3 (2863-c335): the coordinated create route preserves the write-ahead
+# protocol AND its deterministic keyed recovery (AC2).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(scope="module")
+def route_mod():
+    return _load("create_route_wa_test", "create_route.py")
+
+
+class _RecordingClient:
+    """A client that records the ORDER of create/label/property calls."""
+
+    def __init__(self):
+        self.order: list[str] = []
+
+    def create_issue(self, payload):
+        self.order.append("create_issue")
+        return {"key": "DIG-900", "id": "10900"}
+
+    def add_label(self, key, label):
+        self.order.append("add_label")
+
+    def set_entity_property(self, key, name, value):
+        self.order.append("set_entity_property")
+
+    def search_issues(self, jql):
+        self.order.append("search_issues")
+        return []
+
+
+def test_coordinated_path_preserves_write_ahead_order(route_mod, binding_store_mod, tmp_path):
+    """The coordinated write-ahead route records the key on the STILL-pending entry and
+    persists it BEFORE the label, then confirms LAST — the canonical order."""
+    store = binding_store_mod.BindingStore(tmp_path)
+    client = _RecordingClient()
+    mutation = type(
+        "M", (), {"payload": {"local_id": "wa-coord", "summary": "s"}, "target": "wa-coord"}
+    )()
+
+    outcome = route_mod.run_coordinated_outbound_create(
+        mutation, client=client, binding_store=store
+    )
+
+    assert outcome.confirmed is True
+    assert outcome.dependents_released is True
+    assert outcome.known_key == "DIG-900"
+    # Canonical order: create BEFORE label, property AFTER label, no search on the
+    # happy path (the key is captured from the create response).
+    assert client.order == ["create_issue", "add_label", "set_entity_property"]
+    # The binding is confirmed forward + reverse.
+    assert store.get_jira_key("wa-coord") == "DIG-900"
+    assert store.get_local_id("DIG-900") == "wa-coord"
+
+
+def test_coordinated_abort_leaves_keyed_pending_recovered_without_search(
+    route_mod, binding_store_mod, tmp_path
+):
+    """AC2: when the coordinated route aborts AFTER recording the key (label write
+    fails), it leaves a KEYED-pending binding and NEVER deletes; the subsequent
+    recovery confirms it with ZERO Jira search."""
+    store = binding_store_mod.BindingStore(tmp_path)
+
+    class _LabelFails:
+        def create_issue(self, payload):
+            return {"key": "DIG-901", "id": "10901"}
+
+        def add_label(self, key, label):
+            raise RuntimeError("field off screen")
+
+        def set_entity_property(self, key, name, value):
+            raise AssertionError("must not reach property after label failure")
+
+        def search_issues(self, jql):  # pragma: no cover - must not be called
+            raise AssertionError("keyed recovery must not search")
+
+    mutation = type("M", (), {"payload": {"local_id": "wa-abort"}, "target": "wa-abort"})()
+    outcome = route_mod.run_coordinated_outbound_create(
+        mutation, client=_LabelFails(), binding_store=store
+    )
+
+    assert outcome.disposition.value == "safety_aborted"
+    assert outcome.dependents_released is False
+    assert outcome.known_key == "DIG-901"
+    # A keyed-pending binding remains (key recorded, NOT confirmed) — no delete.
+    assert store.get_jira_key("wa-abort") == "DIG-901"
+
+    # Deterministic keyed recovery: confirm + retro-attach with NO search.
+    recovery_client = MagicMock()
+    recovered = store.recover_pending_bindings(recovery_client)
+    assert recovered == 1
+    recovery_client.search_issues.assert_not_called()
+    recovery_client.add_label.assert_called_once_with("DIG-901", "rebar-id:wa-abort")
+    assert "wa-abort" not in store.pending_bindings()

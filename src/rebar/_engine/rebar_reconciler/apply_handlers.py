@@ -33,6 +33,7 @@ module imports only *downward* (batch_dispatch / pass_io); it never imports
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import sys
@@ -40,11 +41,28 @@ import time
 import urllib.error
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
 
 from rebar_reconciler import peer_state
 from rebar_reconciler._backend import BackendAssigneeNotFoundError
 from rebar_reconciler.batch_dispatch import create_one, delete_one, update_one
+
+try:
+    from rebar_reconciler._loader import lazy_load
+except ImportError:  # standalone load without package context
+    _loader_key = "rebar_reconciler._loader"
+    if _loader_key not in sys.modules:
+        _loader_spec = importlib.util.spec_from_file_location(
+            _loader_key, Path(__file__).parent / "_loader.py"
+        )
+        assert _loader_spec is not None and _loader_spec.loader is not None
+        _loader_mod = importlib.util.module_from_spec(_loader_spec)
+        sys.modules[_loader_key] = _loader_mod
+        _loader_spec.loader.exec_module(_loader_mod)
+    lazy_load = sys.modules[_loader_key].lazy_load
 from rebar_reconciler.pass_io import (
     _load_alert_store,
     _load_conflict_resolver,
@@ -139,6 +157,35 @@ def _soft_fail_stale_binding_404(
     return HandlerResult(outcome, soft_failed=True)
 
 
+def _select_create_core(mutation: dict, ctx: BatchApplyContext):
+    """Consume the SINGLE ``create_route`` selector for the live batch path.
+
+    Returns the coordinated create core (a thin adapter binding this mutation's
+    ``deferred_creates`` + ``mutation`` so the ``commit_unknown`` defer can reach them)
+    when the route is the coordinator, and ``None`` (the legacy write-ahead core) when
+    the route is legacy. EXACTLY ONE route, decided at call time, no dual-send (AC6).
+    Loaded via the package's ``lazy_load`` idiom (like ``route_for``) so the handler
+    module never imports ``create_route`` at module scope.
+    """
+    create_route_mod = lazy_load("rebar_reconciler.create_route", "create_route.py")
+    if create_route_mod.create_route() == create_route_mod.LEGACY_ROUTE:
+        return None
+    coordinated = create_route_mod._coordinated_create_core
+
+    def _core(local_id, ticket_data, *, client: TicketTransport, binding_store, repo_root):
+        return coordinated(
+            local_id,
+            ticket_data,
+            client=client,
+            binding_store=binding_store,
+            repo_root=repo_root,
+            deferred_creates=ctx.deferred_creates,
+            mutation=mutation,
+        )
+
+    return _core
+
+
 def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     """Dispatch an outbound CREATE via ``create_one`` and assemble its outcome."""
     outcome = dict(mutation)
@@ -147,6 +194,9 @@ def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     # outcome rather than reporting a clean error=None, mirroring the update-path
     # handling below (bug 6afc).
     comment_errors: list[str] = []
+    # S4 T3 cutover (REB-3115): route the create->contain MIDDLE core through the ONE
+    # create_route selector — the SINGLE consumption point for the live batch path.
+    create_core = _select_create_core(mutation, ctx)
     try:
         result = create_one(
             mutation,
@@ -157,6 +207,7 @@ def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
             repo_root=ctx.repo_root,
             binding_store=ctx.binding_store,
             comment_errors=comment_errors,
+            create_core=create_core,
         )
     except urllib.error.HTTPError as exc:
         # Bug 449f-f9bf-be90-47fe: a 404 from the create leaf (e.g. a POST against a

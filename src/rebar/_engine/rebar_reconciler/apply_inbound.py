@@ -120,13 +120,23 @@ def _apply_inbound_create(
         fields, payload, jira_key, local_id, repo_root
     )
     _inbound_create_write_status_event(fields, raw_labels, tracker_dir, local_id)
+    # Coordinated confirmation gate (S4 T3): the local<->jira binding is confirmed
+    # (bind_confirm) BEFORE any dependent link/child is released, exactly as the
+    # coordinated create composition gates dependents on a confirmed containment
+    # (AC5). There is no remote create to double-send on the inbound side, so the
+    # materialization sequence is route-invariant; the selector is consulted here for
+    # symmetry with the outbound cutover (AC6) and surfaced for observability. The
+    # retired/dedup short-circuits above run FIRST and produce zero early effects.
+    from rebar_reconciler.create_route import create_route
+
+    route = create_route()
     _inbound_create_record_binding(mutation, binding_store, local_id, jira_key)
     _inbound_create_writeback_jira(client, jira_key, local_id, tracker_dir)
 
     return ApplyResult(
         mutation.direction,
         mutation.action,
-        {"local_id": local_id, "create_event": str(create_path)},
+        {"local_id": local_id, "create_event": str(create_path), "create_route": route},
     )
 
 

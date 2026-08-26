@@ -371,3 +371,65 @@ def test_the_cloud_path_is_unaffected_beyond_the_deferral(store) -> None:
         "a ticket past the grace window was still suppressed — the deferral is unbounded, "
         "which is a permanent silent omission rather than a delay"
     )
+
+
+# ---------------------------------------------------------------------------
+# S4 T3 (2863-c335): AC3 — the keyless negative unbind requires BOTH thresholds
+# (three corroborating misses AND the 3600s index-lag grace), and the coordinated
+# create route prevents an index-lag duplicate.
+# ---------------------------------------------------------------------------
+
+
+def test_ac3_aged_entry_needs_three_misses_not_fewer(store) -> None:
+    """AC3, grace-satisfied half: an entry older than the 3600s grace still is NOT
+    unbound before the miss count is corroborated (fewer than three misses)."""
+    store.bind_pending("t1")
+    store._data["bindings"]["t1"]["created_at"] = "2000-01-01T00:00:00Z"  # past grace
+    client = _LaggingIndexClient()
+
+    # Two misses (below _MISSES_BEFORE_UNBIND = 3) must NOT unbind, despite the grace.
+    store.recover_pending_bindings(client)
+    store.recover_pending_bindings(client)
+    assert store.is_pending("t1"), "unbound before three corroborating misses"
+
+    # The third miss corroborates absence → now (and only now) it unbinds.
+    store.recover_pending_bindings(client)
+    assert not store.is_bound("t1")
+
+
+def test_ac3_young_entry_never_unbinds_regardless_of_misses(store) -> None:
+    """AC3, misses-satisfied half: many misses inside the 3600s grace window must NOT
+    unbind — the grace threshold is independently required."""
+    store.bind_pending("t1")  # created now → inside grace
+    client = _LaggingIndexClient()
+    for _ in range(10):
+        store.recover_pending_bindings(client)
+    assert store.is_pending("t1"), "unbound on miss count alone, ignoring the grace window"
+
+
+def test_ac3_coordinated_route_defers_within_grace_no_duplicate(store) -> None:
+    """AC3 duplicate-prevention through the coordinated path: while a keyless-pending
+    binding is inside the grace window the create is SUPPRESSED (deferred), so a lagging
+    index cannot cause a second issue."""
+    store.bind_pending("dc-orphan")  # keyless-pending, freshly created → within grace
+    assert store.is_keyless_pending_within_grace("dc-orphan") is True
+
+    from rebar_reconciler.dispatch_one import create_one
+
+    client = _LaggingIndexClient()
+    deferred: list = []
+    mutation = {
+        "local_id": "dc-orphan",
+        "action": "create",
+        "fields": {"summary": "s", "issuetype": {"name": "Task"}},
+    }
+    result = create_one(
+        mutation,
+        client,
+        deferred_creates=deferred,
+        repo_root=store._repo_root if hasattr(store, "_repo_root") else None,
+        binding_store=store,
+    )
+    assert result is None  # deferred, not created
+    assert client.created == []  # NO physical create while inside the grace window
+    assert deferred == [mutation]

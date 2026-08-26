@@ -96,6 +96,40 @@ def _apply_outbound_create(
     if client is None:
         # Stub path: preserved for tests that don't exercise the I/O leaf.
         return ApplyResult(mutation.direction, mutation.action, {})
+    from rebar_reconciler.create_route import (
+        LEGACY_ROUTE,
+        create_route,
+        run_coordinated_outbound_create,
+    )
+
+    # ONE selector, ONE path — never both (AC6, no dual-send).
+    if create_route() == LEGACY_ROUTE:
+        return _apply_outbound_create_legacy(mutation, client)
+
+    # Coordinated write-ahead path (default): NEVER deletes on a post-create failure
+    # (bug 387d). The composition captures the returned key, contains it in order, and
+    # gates dependents on a confirmed containment (AC5).
+    outcome = run_coordinated_outbound_create(
+        mutation, client=client, binding_store=_kwargs.get("binding_store")
+    )
+    payload = {
+        "coordinated": True,
+        "disposition": getattr(outcome.disposition, "value", str(outcome.disposition)),
+        "bucket": outcome.bucket,
+        "known_key": outcome.known_key,
+        "confirmed": outcome.confirmed,
+        "dependents_released": outcome.dependents_released,
+    }
+    return ApplyResult(mutation.direction, mutation.action, payload)
+
+
+def _apply_outbound_create_legacy(mutation, client: TicketTransport) -> ApplyResult:
+    """Legacy create leaf: single create + delete-rollback on failure.
+
+    Preserved verbatim behind the ``REBAR_RECONCILER_CREATE_ROUTE`` rollback toggle
+    (the LEGACY value). This is the create+delete path the coordinated write-ahead
+    composition replaces by default; it is retained ONLY as the rollback escape hatch.
+    """
     payload = dict(mutation.payload)
     try:
         _call_with_retry(client.create_issue, payload)
