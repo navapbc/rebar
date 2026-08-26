@@ -59,6 +59,7 @@ from rebar.llm.gate_context import (  # noqa: F401  (re-export: see above)
     use_code_root,
     use_tickets_root,
 )
+from rebar.llm.headers import resolve_headers
 
 DEFAULT_MODEL = "claude-opus-4-8"
 # The decisive non-frontier model used by the gate VERIFIERS (plan-review Pass-2 verify and
@@ -525,6 +526,10 @@ class LLMConfig:
     # `current_tickets_root()` by `from_env`.
     tickets_path: str | None = None
     mcp_servers: dict = field(default_factory=dict)
+    # Operator-configured request headers for gate LLM calls (ee8a). Default {} so an
+    # unconfigured deployment is byte-unchanged. The `${env:...}`/`${run:...}` value
+    # grammar, its resolution, and the safety denylist live in `rebar.llm.headers`.
+    headers: dict[str, str] = field(default_factory=dict)
     langfuse: LangfuseConfig = field(default_factory=LangfuseConfig)
     # Cross-ticket overlap detection (epic only-crave-art) — proposition-count bounds
     # for the Cupid ticket-digest op (ee3d).
@@ -665,6 +670,12 @@ class LLMConfig:
             repo_path=repo_path,
             tickets_path=tickets_path,
             mcp_servers=mcp_servers,
+            # Same three-layer precedence as mcp_servers above, but every failure is LOUD
+            # (LLMConfigError naming the layer) rather than degrading to {}. The ambient
+            # reads happen HERE (the approved seam); headers.py is env-pure — see its docstring.
+            headers=resolve_headers(
+                table, cli, env_json=os.environ.get("REBAR_LLM_HEADERS"), env=os.environ
+            ),
             langfuse=LangfuseConfig.from_env(),
             overlap_propositions_min=_llm_int(
                 table,
