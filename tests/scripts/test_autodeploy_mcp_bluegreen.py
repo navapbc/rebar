@@ -501,9 +501,14 @@ def test_unhealthy_new_container_leaves_old_upstream_current(mcp_box: dict[str, 
     ), f"a failed deploy must not advance deployed-sha\n{ctx}"
 
     # Retry on a healthy tick flips it (the SHA-keyed backoff window has since elapsed).
+    # An mcp failure records the mcp-SCOPED backoff (see test_mcp_failure_on_a_deferred_tick_
+    # does_not_backoff_the_bot for why it must not touch the shared one), so clearing that is
+    # what models elapsed time here; the shared file is cleared too so this stays a faithful
+    # "no backoff is in effect" precondition regardless of which path wrote one.
     (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}')  # type: ignore[operator]
     (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
     (mcp_box["state"] / "deploy-backoff").unlink(missing_ok=True)  # type: ignore[operator]
+    (mcp_box["state"] / "mcp-deploy-backoff").unlink(missing_ok=True)  # type: ignore[operator]
     result2 = _run(mcp_box)
     ctx2 = f"rc={result2.returncode}\n{result2.stdout}\n{result2.stderr}"
     assert result2.returncode == 0, f"a healthy retry must succeed\n{ctx2}"
@@ -546,7 +551,10 @@ def test_secrets_fetch_failure_aborts_before_touching_the_live_upstream(
     assert "mcp-secrets-fetch-failed" in result.stdout + result.stderr, (
         f"the abort must name the secrets refresh, not masquerade as a generic failure\n{ctx}"
     )
-    assert not any("run-d" in c for c in cmds), (
+    # Match the docker stub's real log shape (`run --name ...`). An earlier version of this
+    # assertion looked for a "run-d" token that the stub never emits, so it passed vacuously
+    # no matter what the script did — it proved nothing.
+    assert not any(c.startswith("run ") and "rebar-mcp-" in c for c in cmds), (
         f"no replacement container may be started against unrefreshed secrets\n{ctx}"
     )
 
@@ -997,4 +1005,210 @@ def test_shared_src_change_triggers_both_targets(tmp_path: Path) -> None:
     )
     assert any("compose-build-mcp" in c for c in cmds), (
         f"a shared src/rebar change must ALSO build mcp — independently\n{ctx}"
+    )
+
+
+# ── the mcp block must be reachable when the bot block DEFERS (carefree-swift-scallop) ──
+# The mcp block documents itself as "INDEPENDENT of the review-bot block above", but it sits
+# AFTER that block's `exit 0`. The fixture git stub below deliberately reports a SHARED
+# `src/rebar` change, so BOTH `changed "$BOT_PATHS"` and `changed "$MCP_PATHS"` match — the
+# real-world case. The module's other stub only ever echoes `Dockerfile.mcp`, which makes the
+# bot block unreachable and is exactly why this coupling regressed unnoticed.
+_GIT_STUB_SHARED_SRC = r"""
+args=("$@"); sub=""
+for ((i=0; i<${#args[@]}; i++)); do
+  case "${args[i]}" in -C) ((i++)) ;; -*) ;; *) sub="${args[i]}"; break ;; esac
+done
+case "$sub" in
+  remote) echo "https://github.com/navapbc/rebar.git"; exit 0 ;;
+  fetch) exit 0 ;;
+  rev-parse) cat "__TARGET_FILE__"; exit 0 ;;
+  checkout) exit 0 ;;
+  # `changed()` passes the queried path list after `--`, so answer ONLY when the caller asked
+  # about the path we are pretending changed. A stub that echoes unconditionally makes every
+  # `changed` call true, which silently defeats the very distinction these tests rest on.
+  # RANGE-AWARE: `changed_range` asks about <from>..<to>. Report a change only when the two
+  # differ — otherwise a component already at the target still looks dirty and the caller
+  # redeploys forever. (`changed` passes the global DEPLOYED..TARGET; the mcp path passes its
+  # own component marker, which is the whole point of the state file.)
+  # RANGE-AWARE: `changed_range` asks about <from>..<to>. Report a change only when the two
+  # actually differ — otherwise a component already at the target still looks dirty and the
+  # caller redeploys on every tick. Scan for the two positional args that follow
+  # `--name-only`; the argv also carries `-C <dir>` and the subcommand ahead of them.
+  diff)
+    _from=""; _to=""
+    _seen=0
+    for _a in "$@"; do
+      case "$_a" in
+        --name-only) _seen=1; continue ;;
+        --) break ;;
+      esac
+      if [ "$_seen" = 1 ]; then
+        if [ -z "$_from" ]; then _from="$_a"; else [ -z "$_to" ] && _to="$_a"; fi
+      fi
+    done
+    [ -n "$_from" ] && [ "$_from" = "$_to" ] && exit 0
+    case "$*" in *__MATCH__*) echo "__CHANGED__" ;; esac
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+"""
+
+
+def _mcp_box_shared_change(box: dict, in_flight: int) -> None:
+    """Point the box at a SHARED src/rebar change with the review-bot `in_flight` busy."""
+    bin_dir: Path = box["bin_dir"]  # type: ignore[assignment]
+    target_file: Path = box["target_file"]  # type: ignore[assignment]
+    stub = _GIT_STUB_SHARED_SRC.replace("__MATCH__", "src/rebar").replace(
+        "__CHANGED__", "src/rebar/_reads.py"
+    )
+    _stub(bin_dir, "git", stub.replace("__TARGET_FILE__", str(target_file)))
+    # The bot's drain signal: autodeploy reads in_flight from the bot /health on port 8000.
+    (box["dstate"] / "health-8000").write_text(f'{{"in_flight":{in_flight}}}')  # type: ignore[operator]
+
+
+def test_bot_deferral_still_reaches_the_mcp_blue_green_deploy(mcp_box: dict[str, object]) -> None:
+    """A busy review-bot must not silently skip the mcp deploy.
+
+    `autodeploy.sh` defers the review-bot redeploy while a review is in flight — correct, since
+    that path stop-and-drains and would kill the review. But the deferral `exit 0`s the whole
+    SCRIPT, and the mcp blue-green block sits after it, so a shared `src/rebar` change (which
+    matches BOTH triggers) never deploys the mcp service while the bot is busy.
+
+    That is not a theoretical ordering nit. With a single-worker review bot, `in_flight > 0` is
+    the normal steady state under any pipelining, so ~100% of ticks defer: two commits merged
+    at 06:47Z were still not running 40 minutes later, and one of them was the mcp deploy fix
+    itself. The mcp path is a pointer-swap that never kills an in-flight op (that is the stated
+    reason it exists), so it has no reason to wait on the bot's drain.
+    """
+    _mcp_box_shared_change(mcp_box, in_flight=2)
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+
+    result = _run(mcp_box)
+    cmds = _commands(mcp_box)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    # The bot deferral itself must still happen — this fix must not disable the drain gate.
+    assert "AUTODEPLOY_DEFERRED" in result.stdout + result.stderr, (
+        f"the review-bot drain gate must still defer while a review is in flight\n{ctx}"
+    )
+    # ...and the mcp deploy must proceed regardless.
+    assert any(c.startswith("run ") and "rebar-mcp-" in c for c in cmds), (
+        f"a bot deferral must NOT skip the mcp blue-green deploy — the mcp block is documented "
+        f"as independent and never kills an in-flight op\n{ctx}"
+    )
+    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+        f"the mcp upstream must be flipped to the newly deployed container\n{ctx}"
+    )
+
+
+def test_bot_deferral_is_unaffected_when_only_bot_paths_changed(
+    mcp_box: dict[str, object],
+) -> None:
+    """The drain gate keeps its behaviour when there is no mcp work to do.
+
+    Guards the opposite over-correction: the fix must scope the deferral to the bot block, not
+    remove it. With the bot busy and nothing matching MCP_PATHS, the tick must still defer and
+    must not deploy anything.
+    """
+    bin_dir: Path = mcp_box["bin_dir"]  # type: ignore[assignment]
+    target_file: Path = mcp_box["target_file"]  # type: ignore[assignment]
+    # A path in BOT_PATHS but NOT in MCP_PATHS, so the bot block runs and the mcp block does not.
+    bot_only = _GIT_STUB_SHARED_SRC.replace("__MATCH__", "Dockerfile.reviewbot").replace(
+        "__CHANGED__", "infra/compose/Dockerfile.reviewbot"
+    )
+    _stub(bin_dir, "git", bot_only.replace("__TARGET_FILE__", str(target_file)))
+    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":1}')  # type: ignore[operator]
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    before = upstream.read_bytes()
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    # Liveness anchor FIRST: without it this test passes just as happily if the tick never
+    # ran, exited early, or never reached the drain gate at all — an absence assertion alone
+    # cannot tell "correctly did nothing" from "did nothing because it crashed".
+    assert "AUTODEPLOY_DEFERRED" in result.stdout + result.stderr, (
+        f"the docstring claims the tick still defers — assert it, do not assume it\n{ctx}"
+    )
+    assert upstream.read_bytes() == before, (
+        f"nothing matching MCP_PATHS changed, so the upstream must be untouched\n{ctx}"
+    )
+
+
+def test_repeated_deferred_ticks_do_not_redeploy_mcp_every_time(
+    mcp_box: dict[str, object],
+) -> None:
+    """A deferred tick that DID deploy mcp must not redeploy it on the next tick.
+
+    Letting the mcp block run past a bot deferral fixed one bug and exposed another: the
+    deferral exits before the `deployed-sha` advance (correctly — the BOT has not deployed),
+    so the next tick still computes an mcp delta and cuts over again. With a chronically busy
+    bot that is a rebuild + container swap every ~2 minutes, indefinitely.
+
+    One `deployed-sha` cannot represent two components' completion, so the mcp path needs its
+    own state. This asserts the second tick is a no-op for mcp while the bot keeps deferring.
+    """
+    _mcp_box_shared_change(mcp_box, in_flight=2)
+
+    first = _run(mcp_box)
+    first_cmds = _commands(mcp_box)
+    assert any(c.startswith("run ") and "rebar-mcp-" in c for c in first_cmds), (
+        f"tick 1 must deploy mcp\nrc={first.returncode}\n{first.stdout}\n{first.stderr}"
+    )
+
+    # Second tick: bot still busy, nothing new merged.
+    (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
+    second = _run(mcp_box)
+    second_cmds = _commands(mcp_box)
+    ctx = f"rc={second.returncode}\ncmds={second_cmds}\n{second.stdout}\n{second.stderr}"
+
+    # Liveness anchor: tick 2 must actually have RUN and deferred. Without this the two
+    # absence assertions below would be satisfied by a tick that died before the mcp gate,
+    # which is the opposite of what this test claims to prove.
+    assert "AUTODEPLOY_DEFERRED" in second.stdout + second.stderr, (
+        f"tick 2 must still reach the drain gate and defer (bot is still busy)\n{ctx}"
+    )
+    assert not any(c.startswith("run ") and "rebar-mcp-" in c for c in second_cmds), (
+        f"tick 2 must NOT redeploy mcp — it is already at the target; a busy bot would "
+        f"otherwise cause a rebuild + cutover on every timer tick\n{ctx}"
+    )
+    assert "nginx-reload" not in second_cmds, f"tick 2 must not flip the upstream again\n{ctx}"
+
+
+def test_mcp_failure_on_a_deferred_tick_does_not_backoff_the_bot(
+    mcp_box: dict[str, object],
+) -> None:
+    """An mcp deploy failure must not suppress the REVIEW-BOT's next deploy.
+
+    `record_backoff_failure` writes one shared `deploy-backoff` keyed on the global `$TARGET`,
+    and the top-level gate exits the whole script while it is in effect. Making the mcp block
+    reachable on a deferred tick therefore handed the mcp path a way to throttle the BOT: the
+    bot is already being held back by the drain gate, and an unrelated mcp failure would now
+    also backoff the very component that never ran.
+
+    The two paths deploy independently and already track completion independently
+    (`mcp-deployed-sha`); their failure state must be independent too.
+    """
+    _mcp_box_shared_change(mcp_box, in_flight=2)
+    state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
+    # Make the NEW mcp container fail its readiness probe, so the mcp block takes its
+    # fatal path on a tick where the bot only deferred.
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert "AUTODEPLOY_DEFERRED" in result.stdout + result.stderr, (
+        f"precondition: the bot must have deferred on this tick\n{ctx}"
+    )
+    assert "mcp-unhealthy" in result.stdout + result.stderr, (
+        f"precondition: the mcp deploy must have failed on this tick\n{ctx}"
+    )
+
+    global_backoff = state / "deploy-backoff"
+    written = global_backoff.read_text().strip() if global_backoff.exists() else ""
+    assert not written, (
+        "an mcp failure must NOT write the SHARED deploy-backoff: that file gates the whole "
+        f"script, so it would suppress the review-bot deploy too. got {written!r}\n{ctx}"
     )
