@@ -306,6 +306,12 @@ def test_close_phase_values_reports_direct_verifier_hierarchy_and_unattributed_t
         "verifier_snapshot_gc_ms": 2_000,
         "verifier_dispatch_setup_ms": 5_000,
         "verifier_workflow_ms": 50_000,
+        "verifier_precheck_context_ms": 12_000,
+        "verifier_completion_agent_ms": 32_000,
+        "verifier_verdict_reconcile_ms": 3_000,
+        "verifier_no_llm_passthrough_ms": 0,
+        "verifier_unclassified_workflow_steps_ms": 1_000,
+        "verifier_workflow_residual_ms": 2_000,
         "verifier_dispatch_finalization_ms": 5_000,
         "verifier_attempt_count": 2,
         "verifier_resume_count": 1,
@@ -317,6 +323,7 @@ def test_close_phase_values_reports_direct_verifier_hierarchy_and_unattributed_t
 
     assert {
         "unattributed_verifier_ms": probe.unattributed_verifier_ms(invocation),
+        "unattributed_workflow_ms": probe.unattributed_workflow_ms(invocation),
         "wrapper": {
             key: phases.get(key)
             for key in (
@@ -357,7 +364,14 @@ def test_close_phase_values_reports_direct_verifier_hierarchy_and_unattributed_t
             key: phases.get(key)
             for key in (
                 "verifier_dispatch_setup",
-                "verifier_workflow",
+                "verifier_workflow_total",
+                "verifier_precheck_context",
+                "verifier_completion_agent",
+                "verifier_verdict_reconcile",
+                "verifier_no_llm_passthrough",
+                "verifier_unclassified_workflow_steps",
+                "verifier_workflow_residual",
+                "unattributed_workflow",
                 "verifier_dispatch_finalization",
             )
         },
@@ -371,6 +385,7 @@ def test_close_phase_values_reports_direct_verifier_hierarchy_and_unattributed_t
         },
     } == {
         "unattributed_verifier_ms": pytest.approx(10_000),
+        "unattributed_workflow_ms": pytest.approx(0),
         "wrapper": {
             "verifier_wrapper_setup": pytest.approx(1),
             "verifier_reusable_lookup": pytest.approx(2),
@@ -400,7 +415,14 @@ def test_close_phase_values_reports_direct_verifier_hierarchy_and_unattributed_t
         },
         "dispatch": {
             "verifier_dispatch_setup": pytest.approx(5),
-            "verifier_workflow": pytest.approx(50),
+            "verifier_workflow_total": pytest.approx(50),
+            "verifier_precheck_context": pytest.approx(12),
+            "verifier_completion_agent": pytest.approx(32),
+            "verifier_verdict_reconcile": pytest.approx(3),
+            "verifier_no_llm_passthrough": pytest.approx(0),
+            "verifier_unclassified_workflow_steps": pytest.approx(1),
+            "verifier_workflow_residual": pytest.approx(2),
+            "unattributed_workflow": pytest.approx(0),
             "verifier_dispatch_finalization": pytest.approx(5),
         },
         "workload": {
@@ -712,7 +734,16 @@ def test_summary_reports_direct_timings_workload_and_legacy_residual(
         "verifier_ticket_snapshot": ("verifier_ticket_snapshot_ms", 300),
         "verifier_snapshot_gc": ("verifier_snapshot_gc_ms", 100),
         "verifier_dispatch_setup": ("verifier_dispatch_setup_ms", 300),
-        "verifier_workflow": ("verifier_workflow_ms", 1_500),
+        "verifier_workflow_total": ("verifier_workflow_ms", 1_500),
+        "verifier_precheck_context": ("verifier_precheck_context_ms", 300),
+        "verifier_completion_agent": ("verifier_completion_agent_ms", 900),
+        "verifier_verdict_reconcile": ("verifier_verdict_reconcile_ms", 100),
+        "verifier_no_llm_passthrough": ("verifier_no_llm_passthrough_ms", 0),
+        "verifier_unclassified_workflow_steps": (
+            "verifier_unclassified_workflow_steps_ms",
+            0,
+        ),
+        "verifier_workflow_residual": ("verifier_workflow_residual_ms", 200),
         "verifier_dispatch_finalization": ("verifier_dispatch_finalization_ms", 200),
     }
     workload_counts = {
@@ -767,7 +798,7 @@ def test_summary_reports_direct_timings_workload_and_legacy_residual(
     legacy = subprocess.run(command, check=True, capture_output=True, text=True)
 
     expected_direct_lines = {
-        f"{phase}\tsource=direct-sidecar-metric({field})\tn=1\t"
+        f"{phase}\tsource={probe.PHASE_SOURCES[phase]}\tn=1\t"
         f"p50/p90/p99={milliseconds / 1000:.3f}/{milliseconds / 1000:.3f}/"
         f"{milliseconds / 1000:.3f}"
         for phase, (field, milliseconds) in direct_timings.items()
@@ -780,6 +811,12 @@ def test_summary_reports_direct_timings_workload_and_legacy_residual(
         "unattributed_verifier\t"
         "source=arithmetic-residual(verifier_call_ms-minus-nonoverlapping-wrapper-partition)\t"
         "n=1\tp50/p90/p99=1.000/1.000/1.000"
+    )
+    expected_direct_lines.add(
+        "unattributed_workflow\t"
+        "source=arithmetic-gap(workflow-total-minus-complete-workflow-partition; "
+        "tolerance=1ms)\t"
+        "n=1\tp50/p90/p99=0.000/0.000/0.000"
     )
     expected_legacy_line = (
         "legacy_uninstrumented\t"

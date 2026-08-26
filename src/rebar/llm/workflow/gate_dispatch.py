@@ -65,6 +65,12 @@ from rebar.llm.workflow.plan_review_recovery import (  # noqa: F401
     _recover_plan_review_verify_failure,
     _validate_gate_step_ids,
 )
+from rebar.llm.workflow.completion_metrics import (  # noqa: F401
+    _add_phase,
+    _attach_completion_metrics,
+    _sum_run_consumption,
+    attach_completion_workflow_phases,
+)
 
 
 def _gate_doc(name: str, repo_root) -> dict[str, Any]:
@@ -630,69 +636,6 @@ def _consumed_diagnostic(rec: Any) -> dict[str, Any] | None:
 
 
 # ── completion ──────────────────────────────────────────────────────────────────────
-def _sum_run_consumption(rec_steps: list[Any]) -> dict[str, Any] | None:
-    """Aggregate a completion run's CONSUMPTION from the workflow recorder's step records.
-
-    Reads the agentic ``verify`` step's ``_usage`` (the runner stamps the consumed
-    ``requests``/``tool_calls`` there) and the per-step ``duration_ms`` the interpreter records
-    (agent-step wall-clock → ``llm_ms``; the deterministic precheck/reconcile → ``det_ms``).
-    Returns None when NO agentic step recorded usage — a deterministic short-circuit ran no LLM,
-    so there is genuinely nothing consumed and the caller must omit the block rather than emit
-    zeros that lie. Tolerant of untimed/partial records (a missing field contributes 0)."""
-    requests = 0
-    tool_calls = 0
-    llm_ms = 0.0
-    det_ms = 0.0
-    llm_calls = 0
-    saw_usage = False
-    for s in rec_steps:
-        if not isinstance(s, dict) or s.get("status") != "succeeded":
-            continue
-        dur = s.get("duration_ms")
-        outputs = s.get("outputs")
-        outputs = outputs if isinstance(outputs, dict) else {}
-        if s.get("kind") == "agent":
-            llm_calls += 1
-            if isinstance(dur, (int, float)):
-                llm_ms += dur
-            usage = outputs.get("_usage")
-            if isinstance(usage, dict) and usage:
-                saw_usage = True
-                requests += int(usage.get("requests") or 0)
-                tool_calls += int(usage.get("tool_calls") or 0)
-        elif isinstance(dur, (int, float)):
-            det_ms += dur
-    if not saw_usage:
-        return None
-    return {
-        "requests": requests,
-        "tool_calls": tool_calls,
-        "llm_calls": llm_calls,
-        "llm_ms": round(llm_ms, 1),
-        "det_ms": round(det_ms, 1),
-    }
-
-
-def _attach_completion_metrics(verdict: dict[str, Any], rec: Any, total_ms: float) -> None:
-    """Reinstate a ``metrics`` block on the completion verdict (df94), reaching parity with the
-    plan-review sidecar's ``metrics`` (``_attach_plan_review_metrics``): the run's CONSUMED
-    ``requests``/``tool_calls`` and its wall-clock ``total_ms``, so a completion FAIL is no
-    longer the blind gate that records only its ceiling. The counters come from the agentic
-    ``verify`` step's ``_usage`` via the recorder; ``total_ms`` is measured around the whole run.
-
-    A deterministic short-circuit (child-closure FAIL) runs NO LLM step, so ``_sum_run_consumption``
-    returns None and the block is OMITTED gracefully (no lying zeros). Mutates
-    ``verdict['metrics']`` in place; never raises inside the gate."""
-    consumed = _sum_run_consumption(getattr(rec, "steps", []) or [])
-    if consumed is None:
-        return
-    verdict["metrics"] = {**consumed, "total_ms": round(total_ms, 1)}
-
-
-def _add_phase(metrics: dict[str, int], key: str, elapsed_ns: int) -> None:
-    metrics[key] = metrics.get(key, 0) + elapsed_ns // 1_000_000
-
-
 def produce_completion_verdict(
     ticket_id: str,
     *,
@@ -770,7 +713,9 @@ def produce_completion_verdict(
         )
     total_ms = round((time.monotonic() - _t_total) * 1000, 1)
     if phase_metrics is not None:
-        _add_phase(phase_metrics, "verifier_workflow_ms", monotonic_ns() - workflow_started_ns)
+        attach_completion_workflow_phases(
+            phase_metrics, recorder.steps, monotonic_ns() - workflow_started_ns
+        )
         finalization_started_ns = monotonic_ns()
     verdict = res.terminal_output
     if res.status != "succeeded" or not isinstance(verdict, dict) or "verdict" not in verdict:

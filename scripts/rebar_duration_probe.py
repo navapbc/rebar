@@ -94,9 +94,19 @@ VERIFIER_HANDLE_PHASE_FIELDS = {
     "verifier_ticket_snapshot": "verifier_ticket_snapshot_ms",
     "verifier_snapshot_gc": "verifier_snapshot_gc_ms",
 }
+VERIFIER_WORKFLOW_PHASE_FIELDS = {
+    "verifier_precheck_context": "verifier_precheck_context_ms",
+    "verifier_completion_agent": "verifier_completion_agent_ms",
+    "verifier_verdict_reconcile": "verifier_verdict_reconcile_ms",
+    "verifier_no_llm_passthrough": "verifier_no_llm_passthrough_ms",
+    "verifier_unclassified_workflow_steps": "verifier_unclassified_workflow_steps_ms",
+    "verifier_workflow_residual": "verifier_workflow_residual_ms",
+}
+VERIFIER_WORKFLOW_PARTITION_FIELDS = tuple(VERIFIER_WORKFLOW_PHASE_FIELDS.values())
 VERIFIER_DISPATCH_PHASE_FIELDS = {
     "verifier_dispatch_setup": "verifier_dispatch_setup_ms",
-    "verifier_workflow": "verifier_workflow_ms",
+    "verifier_workflow_total": "verifier_workflow_ms",
+    **VERIFIER_WORKFLOW_PHASE_FIELDS,
     "verifier_dispatch_finalization": "verifier_dispatch_finalization_ms",
 }
 VERIFIER_PHASE_FIELDS = {
@@ -109,6 +119,28 @@ VERIFIER_PHASE_FIELDS = {
 PHASE_SOURCES = {
     **{phase: f"direct-sidecar-metric({field})" for phase, field in DIRECT_PHASE_FIELDS.items()},
     **{phase: f"direct-sidecar-metric({field})" for phase, field in VERIFIER_PHASE_FIELDS.items()},
+    "verifier_workflow_total": "direct-sidecar-aggregate(verifier_workflow_ms)",
+    "verifier_precheck_context": (
+        "direct-workflow-step(precheck: closure checks + ticket context/prefetch assembly)"
+    ),
+    "verifier_completion_agent": (
+        "direct-workflow-step(verify: model + tools + bounded recovery/finalizer)"
+    ),
+    "verifier_verdict_reconcile": (
+        "direct-workflow-step(reconcile: normalize + citations + verdict invariants)"
+    ),
+    "verifier_no_llm_passthrough": (
+        "direct-workflow-step(passthrough: deterministic no-LLM verdict)"
+    ),
+    "verifier_unclassified_workflow_steps": (
+        "direct-workflow-step(unrecognized step_id; telemetry mapping required)"
+    ),
+    "verifier_workflow_residual": (
+        "arithmetic-residual(workflow-total-minus-timed-leaves; validation/routing/recording)"
+    ),
+    "unattributed_workflow": (
+        "arithmetic-gap(workflow-total-minus-complete-workflow-partition; tolerance=1ms)"
+    ),
     "unattributed_verifier": (
         "arithmetic-residual(verifier_call_ms-minus-nonoverlapping-wrapper-partition)"
     ),
@@ -157,6 +189,20 @@ def unattributed_verifier_ms(invocation: Invocation) -> float | None:
     return max(0.0, gap_ms) if gap_ms > tolerance_ms else 0.0
 
 
+def unattributed_workflow_ms(invocation: Invocation) -> float | None:
+    """Return workflow time outside the complete recorded-step + residual partition."""
+    event = invocation.event or {}
+    workflow_ms = event.get("verifier_workflow_ms")
+    partition_values = [event.get(field) for field in VERIFIER_WORKFLOW_PARTITION_FIELDS]
+    numeric_partition = [value for value in partition_values if isinstance(value, (int, float))]
+    if not isinstance(workflow_ms, (int, float)) or len(numeric_partition) != len(
+        partition_values
+    ):
+        return None
+    gap_ms = workflow_ms - sum(numeric_partition)
+    return max(0.0, gap_ms) if gap_ms > 1 else 0.0
+
+
 def close_phase_values(invocation: Invocation) -> dict[str, float | None]:
     """Return directly measured and residual close-phase durations in seconds."""
     event = invocation.event or {}
@@ -187,6 +233,8 @@ def close_phase_values(invocation: Invocation) -> dict[str, float | None]:
         overhead = total - det - llm
     unattributed_ms = unattributed_verifier_ms(invocation)
     unattributed_verifier = unattributed_ms / 1000 if unattributed_ms is not None else None
+    workflow_gap_ms = unattributed_workflow_ms(invocation)
+    unattributed_workflow = workflow_gap_ms / 1000 if workflow_gap_ms is not None else None
     verdict_to_status = None
     if isinstance(verdict_at, (int, float)) and isinstance(status_at, (int, float)):
         verdict_to_status = status_at - verdict_at
@@ -210,6 +258,7 @@ def close_phase_values(invocation: Invocation) -> dict[str, float | None]:
         **direct_phases,
         **verifier_phases,
         "unattributed_verifier": unattributed_verifier,
+        "unattributed_workflow": unattributed_workflow,
         "legacy_uninstrumented": legacy_uninstrumented,
         "deterministic_verifier": det,
         "llm_verifier": llm,
