@@ -84,6 +84,12 @@ def test_auto_resume_aggregates_direct_phases_and_preserves_final_consumption(
                 "verifier_snapshot_gc_ms": 0,
                 "verifier_dispatch_setup_ms": 1,
                 "verifier_workflow_ms": 2,
+                "verifier_precheck_context_ms": 1,
+                "verifier_completion_agent_ms": 1,
+                "verifier_verdict_reconcile_ms": 0,
+                "verifier_no_llm_passthrough_ms": 0,
+                "verifier_unclassified_workflow_steps_ms": 0,
+                "verifier_workflow_residual_ms": 0,
                 "verifier_dispatch_finalization_ms": 0,
                 "verifier_workflow_step_count": 2,
             }
@@ -128,6 +134,12 @@ def test_auto_resume_aggregates_direct_phases_and_preserves_final_consumption(
             "verifier_snapshot_gc_ms": 0,
             "verifier_dispatch_setup_ms": 2,
             "verifier_workflow_ms": 4,
+            "verifier_precheck_context_ms": 2,
+            "verifier_completion_agent_ms": 2,
+            "verifier_verdict_reconcile_ms": 0,
+            "verifier_no_llm_passthrough_ms": 0,
+            "verifier_unclassified_workflow_steps_ms": 0,
+            "verifier_workflow_residual_ms": 0,
             "verifier_dispatch_finalization_ms": 0,
             "verifier_workflow_step_count": 4,
             "verifier_wrapper_setup_ms": 0,
@@ -422,6 +434,12 @@ def test_completion_inner_separates_setup_from_dispatch(
         if isinstance(metrics := kwargs.get("phase_metrics"), dict):
             metrics["verifier_dispatch_setup_ms"] = 2
             metrics["verifier_workflow_ms"] = 4
+            metrics["verifier_precheck_context_ms"] = 1
+            metrics["verifier_completion_agent_ms"] = 2
+            metrics["verifier_verdict_reconcile_ms"] = 0
+            metrics["verifier_no_llm_passthrough_ms"] = 0
+            metrics["verifier_unclassified_workflow_steps_ms"] = 0
+            metrics["verifier_workflow_residual_ms"] = 1
             metrics["verifier_dispatch_finalization_ms"] = 1
             metrics["verifier_workflow_step_count"] = 3
         clock.advance_ms(7)
@@ -459,6 +477,12 @@ def test_completion_inner_separates_setup_from_dispatch(
             "verifier_dispatch_ms": 7,
             "verifier_dispatch_setup_ms": 2,
             "verifier_workflow_ms": 4,
+            "verifier_precheck_context_ms": 1,
+            "verifier_completion_agent_ms": 2,
+            "verifier_verdict_reconcile_ms": 0,
+            "verifier_no_llm_passthrough_ms": 0,
+            "verifier_unclassified_workflow_steps_ms": 0,
+            "verifier_workflow_residual_ms": 1,
             "verifier_dispatch_finalization_ms": 1,
             "verifier_workflow_step_count": 3,
         },
@@ -489,17 +513,28 @@ def test_completion_dispatch_times_existing_work_and_preserves_consumption(
         recorder = kwargs["recorder"]
         recorder.steps.extend(
             [
-                {"status": "succeeded", "kind": "operation", "duration_ms": 2},
                 {
+                    "step_id": "precheck",
+                    "status": "succeeded",
+                    "kind": "operation",
+                    "duration_ms": 2,
+                },
+                {
+                    "step_id": "verify",
                     "status": "succeeded",
                     "kind": "agent",
                     "duration_ms": 4,
                     "outputs": {"_usage": {"requests": 5, "tool_calls": 7}},
                 },
-                {"status": "succeeded", "kind": "operation", "duration_ms": 1},
+                {
+                    "step_id": "reconcile",
+                    "status": "succeeded",
+                    "kind": "operation",
+                    "duration_ms": 1,
+                },
             ]
         )
-        clock.advance_ms(4)
+        clock.advance_ms(10)
         return SimpleNamespace(
             status="succeeded", terminal_output={"verdict": "PASS", "findings": []}
         )
@@ -548,8 +583,39 @@ def test_completion_dispatch_times_existing_work_and_preserves_consumption(
         },
         "phases": {
             "verifier_dispatch_setup_ms": 6,
-            "verifier_workflow_ms": 4,
+            "verifier_workflow_ms": 10,
+            "verifier_precheck_context_ms": 2,
+            "verifier_completion_agent_ms": 4,
+            "verifier_verdict_reconcile_ms": 1,
+            "verifier_no_llm_passthrough_ms": 0,
+            "verifier_unclassified_workflow_steps_ms": 0,
+            "verifier_workflow_residual_ms": 3,
             "verifier_dispatch_finalization_ms": 5,
             "verifier_workflow_step_count": 3,
         },
+    }
+
+
+def test_completion_workflow_partition_exposes_short_circuit_and_unknown_steps() -> None:
+    metrics: dict[str, int] = {}
+
+    gate_dispatch.attach_completion_workflow_phases(
+        metrics,
+        [
+            {"step_id": "precheck", "duration_ms": 2.4},
+            {"step_id": "passthrough", "duration_ms": 1.1},
+            {"step_id": "future-step", "duration_ms": 1.2},
+            {"step_id": "decide"},
+        ],
+        6_000_000,
+    )
+
+    assert metrics == {
+        "verifier_precheck_context_ms": 2,
+        "verifier_completion_agent_ms": 0,
+        "verifier_verdict_reconcile_ms": 0,
+        "verifier_no_llm_passthrough_ms": 1,
+        "verifier_unclassified_workflow_steps_ms": 1,
+        "verifier_workflow_residual_ms": 2,
+        "verifier_workflow_ms": 6,
     }
