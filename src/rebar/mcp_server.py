@@ -759,6 +759,18 @@ def main() -> None:
         _tracker = str(_config.tracker_dir())
         if os.path.isdir(_tracker):
             _ensures.run_ensures(_tracker, timeout=5, attempts=1)
+        else:
+            # Say so. Log-and-continue is the right posture (a missing store must not abort
+            # boot), but combined with a /health probe that could not see the store it meant
+            # a container serving NO tracker was indistinguishable from a healthy one, and
+            # nothing in the pipeline ever reported it (bug mobile-groovy-badger). One line
+            # naming the path is the difference between a silent misconfiguration and a
+            # greppable one.
+            logging.getLogger("rebar").warning(
+                "startup: no ticket store at %s — tracker tools will report the store as "
+                "uninitialized until it is provisioned",
+                _tracker,
+            )
     except RemovedInputError:
         # A removed, still-set, load-bearing input must fail MCP startup hard rather
         # than be swallowed into a silent boot. BaseException already skips the broad

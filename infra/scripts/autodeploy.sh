@@ -693,6 +693,32 @@ if changed "$MCP_PATHS"; then
     record_backoff_failure; exit 1
   fi
 
+  # 5b. A 200 from /health used to mean only "the process is up". A container serving NO ticket
+  #     store passed this gate identically to a healthy one, which is how a storeless mcp
+  #     deployment went unobserved for weeks (mobile-groovy-badger). /health now reports
+  #     {"store": {"present": ..., "expected": ...}}; refuse to promote a container that was
+  #     SUPPOSED to have a store and does not.
+  #
+  #     Gated on `expected`, NOT on `present` alone, and that is the whole point: a deployment
+  #     that never configured a tracker dir legitimately has no store, so requiring one
+  #     unconditionally would refuse to promote a perfectly good container and take the endpoint
+  #     down to report a non-problem. Keying on `expected` makes this INERT until a tracker dir
+  #     is configured and strict the moment one is — no flag day. An older container whose
+  #     /health predates the `store` field reports neither key and is treated as not-expected,
+  #     so a mixed-version deploy cannot be blocked by this.
+  mcp_store="$(curl -fsS -m 3 "http://127.0.0.1:${mcp_newport}/health" 2>/dev/null \
+    | python3 -c 'import json,sys
+try:
+    st = json.load(sys.stdin).get("store") or {}
+except Exception:
+    st = {}
+print("missing" if st.get("expected") and not st.get("present") else "ok")' 2>/dev/null || echo ok)"
+  if [ "$mcp_store" = "missing" ]; then
+    err mcp-store-missing "new mcp container $mcp_newname is healthy but reports NO ticket store while one is configured; removing it, leaving the OLD upstream live"
+    docker rm -f "$mcp_newname" >/dev/null 2>&1 || true
+    record_backoff_failure; exit 1
+  fi
+
 
   # 6. ATOMICALLY flip the /mcp/ upstream to the new container. The cutover is DONE at the reload;
   #    it never waits on the OLD backend's in-flight ops. On failure restore the previous include
