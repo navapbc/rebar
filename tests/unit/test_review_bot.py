@@ -2953,3 +2953,129 @@ def test_voter_votes_when_the_cloned_tree_is_the_voted_revision(monkeypatch, tmp
     assert res["status"] == "voted"
     assert res["vote_value"] == 1
     assert g.votes and g.votes[0][1] == change_sha and g.votes[0][2] == 1
+
+
+# ── the queue must not spend a review on a superseded patchset (oozy-darkish-merganser) ──
+def _drive_worker(appmod, events, cfg, timeout=10):
+    """Run `_worker` over `events` until the queue drains, then cancel it."""
+    import contextlib
+
+    async def drive():
+        queue: asyncio.Queue = asyncio.Queue()
+        for ev in events:
+            queue.put_nowait(ev)
+        worker = asyncio.create_task(appmod._worker(queue, cfg))
+        try:
+            await queue.join()
+        finally:
+            worker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await worker
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=timeout))
+
+
+def test_worker_discards_a_superseded_revision_before_reviewing_it(monkeypatch, tmp_path):
+    """A queued event whose revision is no longer current must be dropped BEFORE the review.
+
+    The worker is serial (WORKER_COUNT = 1) and a review takes tens of minutes, so a queued
+    event is routinely obsolete by the time it is dequeued: the bot clones, runs the LLM, and
+    votes on a tree the author already replaced. Observed on changes 2226/2231/2232 — the bot
+    voted consistently one patchset behind, e.g. PS7 uploaded 05:59 and the vote landed on PS6
+    at 06:10. The cost is not just the wasted review: on ONE worker that time is stolen from
+    current work, and the `-1` that lands cites findings the author already fixed, prompting a
+    re-push that enqueues yet another review. The failure amplifies itself.
+
+    Discarding is safe: the newer patchset fired its own webhook, so an event for the current
+    revision is already queued behind this one.
+    """
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    reviewed: list[str] = []
+
+    async def fake_review_and_vote(event, *, config, force=False):
+        reviewed.append(event["patchSet"]["revision"])
+        return {"status": "voted"}
+
+    monkeypatch.setattr(appmod._voter, "review_and_vote", fake_review_and_vote)
+    markers: list[dict] = []
+    monkeypatch.setattr(appmod._voter, "_voter_error", lambda **f: markers.append(f))
+    # The change has moved on to "new_rev"; the queued event still describes "old_rev".
+    monkeypatch.setattr(appmod, "_current_revision", lambda event, cfg: "new_rev", raising=False)
+
+    _drive_worker(appmod, [_event(revision="old_rev")], _cfg(tmp_path))
+
+    assert reviewed == [], (
+        "a superseded revision must be discarded BEFORE the clone/LLM work, not reviewed"
+    )
+    assert markers, "the discard must emit a countable marker, not vanish silently"
+
+
+def test_worker_reviews_the_current_revision(monkeypatch, tmp_path):
+    """The discard must not swallow live work: a current revision is reviewed normally."""
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    reviewed: list[str] = []
+
+    async def fake_review_and_vote(event, *, config, force=False):
+        reviewed.append(event["patchSet"]["revision"])
+        return {"status": "voted"}
+
+    monkeypatch.setattr(appmod._voter, "review_and_vote", fake_review_and_vote)
+    monkeypatch.setattr(appmod._voter, "_voter_error", lambda **f: None)
+    monkeypatch.setattr(appmod, "_current_revision", lambda event, cfg: "cur", raising=False)
+
+    _drive_worker(appmod, [_event(revision="cur")], _cfg(tmp_path))
+
+    assert reviewed == ["cur"], "the current revision must still be reviewed"
+
+
+def test_worker_fails_open_when_the_current_revision_cannot_be_read(monkeypatch, tmp_path):
+    """A Gerrit read error must never silently swallow a review.
+
+    Failing CLOSED here would be worse than the bug: a transient blip would drop reviews with
+    no vote and no retry signal. Unknown-current means review it.
+    """
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    reviewed: list[str] = []
+
+    async def fake_review_and_vote(event, *, config, force=False):
+        reviewed.append(event["patchSet"]["revision"])
+        return {"status": "voted"}
+
+    monkeypatch.setattr(appmod._voter, "review_and_vote", fake_review_and_vote)
+    monkeypatch.setattr(appmod._voter, "_voter_error", lambda **f: None)
+    monkeypatch.setattr(appmod, "_current_revision", lambda event, cfg: None, raising=False)
+
+    _drive_worker(appmod, [_event(revision="whatever")], _cfg(tmp_path))
+
+    assert reviewed == ["whatever"], (
+        "an unreadable current revision must FAIL OPEN (review it), never drop the event"
+    )
+
+
+def test_worker_does_not_discard_a_forced_rerun(monkeypatch, tmp_path):
+    """A manual rerun is built from the current revision by construction — never drop it."""
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    reviewed: list[bool] = []
+
+    async def fake_review_and_vote(event, *, config, force=False):
+        reviewed.append(force)
+        return {"status": "voted"}
+
+    monkeypatch.setattr(appmod._voter, "review_and_vote", fake_review_and_vote)
+    monkeypatch.setattr(appmod._voter, "_voter_error", lambda **f: None)
+    # Even with the check reporting the event as stale, a forced rerun must run.
+    monkeypatch.setattr(appmod, "_current_revision", lambda event, cfg: "other", raising=False)
+
+    ev = _event(revision="old_rev")
+    ev["_rebar_force"] = True
+    _drive_worker(appmod, [ev], _cfg(tmp_path))
+
+    assert reviewed == [True], "a forced rerun must bypass the staleness check"
