@@ -23394,8 +23394,6 @@
       "target_id": "373f-8c1d-cef0-41bf"
     },
     "9ce8-8ff1-0832-4825|4fc1-dbde-6772-401f|blocks": {
-      "confirmed_at": 1786866168539718309,
-      "confirmed_pass": "2026-08-16T07-34-19",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014038126456,
       "link_id": "49598",
