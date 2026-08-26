@@ -3,7 +3,7 @@
 - **Status:** Accepted (finalized by RP-03 S5 T3 `a735-052e-8eca-4aeb`; supersedes the
   provisional status once the observe-before-replay step was validated end-to-end against
   portable verified-fake Cloud and Data Center passes in
-  `tests/interfaces/store/test_reconciler_coordinator.py`)
+  `tests/unit/rebar_reconciler/mutate/test_reconciler_coordinator.py`)
 - **Date:** 2026-08-24 (finalized 2026-08-26)
 
 ## Context
@@ -96,7 +96,7 @@ retryable work eligible without ever re-invoking a non-idempotent write. `commit
 to `ReplaySafety.forbidden` and is therefore `failed`, never `deferred` — an ambiguous commit
 is never blindly replayed. Deferral, failure, skip, and `commit_unknown` are all disjoint from
 applied, so the buckets sum to the mutation count (the exact-tally invariant validated by the
-coordinator interface suite and `test_live_mode_failure_tally`).
+coordinator suite and `test_live_mode_failure_tally`).
 
 ## Fuse and containment — scope isolation, open, and reset
 
@@ -141,7 +141,7 @@ issues **no** `delete_issue` against the remote: an issue already created in Jir
 by observation, never destroyed to "undo" a partially-applied pass. This no-remote-delete
 invariant is proven behaviourally by the route census (`test_coordinator_route_census.py`, the
 `delete_issue`-call-count assertions) and the create/rollback scenarios of the coordinator
-interface suite. The observe-before-replay step was validated end-to-end against portable
+suite. The observe-before-replay step was validated end-to-end against portable
 verified-fake Cloud and Data Center passes, so the earlier provisional caveat is resolved.
 
 ## S1 lifecycle boundary — S3 owns production cutover
