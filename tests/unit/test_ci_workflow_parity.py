@@ -546,6 +546,7 @@ def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard(
     )
     select_lines = executable_lines(select_steps[0].get("run")) if len(select_steps) == 1 else []
     driver_run = str(driver_steps[0].get("run", "")) if len(driver_steps) == 1 else ""
+    driver_env = (driver_steps[0].get("env") or {}) if len(driver_steps) == 1 else {}
     artifact = artifact_steps[0] if len(artifact_steps) == 1 else {}
     outputs = selector.get("outputs") or {}
     strategy = mutation.get("strategy") or {}
@@ -579,8 +580,15 @@ def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard(
         "mutation_checkout": checkout_contract(mutation_steps),
         "driver_step_count": len(driver_steps),
         "one_matrix_shard": driver_run.count("--shard") == 1
-        and "${{ matrix.shard }}" in driver_run
-        and "--all-shards" not in driver_run,
+        and "--all-shards" not in driver_run
+        # The shard value flows through `env:` rather than being interpolated directly into the
+        # run block (zizmor template-injection hardening, epic 5664 S1): some env key must carry
+        # `${{ matrix.shard }}` and be referenced as `$KEY`/`${KEY}` in the run.
+        and any(
+            normalized_expression(str(value)) == "matrix.shard"
+            and (f"${key}" in driver_run or f"${{{key}}}" in driver_run)
+            for key, value in driver_env.items()
+        ),
         "per_shard_artifact": normalized_expression(artifact.get("if")) == "always()"
         and "${{ matrix.shard }}" in str((artifact.get("with") or {}).get("name", "")),
         "reusable_secret_paths": secret_paths(workflow),
