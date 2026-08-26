@@ -1,7 +1,10 @@
 # ADR 0103 — Reconciler logical-operation coordination (single retry budget + observe-before-replay)
 
-- **Status:** Proposed (provisional — ticket `7bc2-5203-d5f4-4a4a`, epic RP-03)
-- **Date:** 2026-08-24
+- **Status:** Accepted (finalized by RP-03 S5 T3 `a735-052e-8eca-4aeb`; supersedes the
+  provisional status once the observe-before-replay step was validated end-to-end against
+  portable verified-fake Cloud and Data Center passes in
+  `tests/interfaces/store/test_reconciler_coordinator.py`)
+- **Date:** 2026-08-24 (finalized 2026-08-26)
 
 ## Context
 
@@ -72,6 +75,48 @@ ownership in the reconciler.
   decision; the value module owns outcome identity, diagnostics bounding, and canonical
   serialization; the store seam owns canonical bytes. No provider adapter owns retry policy.
 
+## Failure taxonomy — eleven dispositions projected onto five buckets
+
+One logical operation resolves to exactly one `operation_outcome.Disposition`, and the
+reconciler projects that eleven-value vocabulary onto the five provider-neutral pass buckets
+(`failure_policy.OUTCOME_BUCKETS` = `applied, recovered, deferred, failed, skipped`) so the
+pass tally is exact and byte-stable:
+
+| Disposition | Bucket | Meaning |
+|---|---|---|
+| `applied`, `already_satisfied` | `applied` | the desired state now holds (a write, or a no-op that was already satisfied) |
+| `recovered` | `recovered` | an ambiguous commit was *observed* to already hold the desired state — folded into applied successes yet counted separately |
+| `retryable_deferred`, `dependency_deferred`, `scope_deferred` | `deferred` | eligible next pass — budget remains, a dependency is unmet, or a fuse scope is open |
+| `commit_unknown`, `permanent_failure`, `exhausted_transient`, `safety_aborted` | `failed` | not applied and driving a degraded exit (an ambiguous non-replayable commit, a terminal provider error, budget exhaustion, or an aborted safety precondition) |
+| `skipped` | `skipped` | intentionally not attempted this pass |
+
+`recovered` and the three `*_deferred` values are the outcomes that make the bounded retry
+*safe*: recovered is the observe-before-replay success, and the deferred values keep genuinely
+retryable work eligible without ever re-invoking a non-idempotent write. `commit_unknown` maps
+to `ReplaySafety.forbidden` and is therefore `failed`, never `deferred` — an ambiguous commit
+is never blindly replayed. Deferral, failure, skip, and `commit_unknown` are all disjoint from
+applied, so the buckets sum to the mutation count (the exact-tally invariant validated by the
+coordinator interface suite and `test_live_mode_failure_tally`).
+
+## Fuse and containment — scope isolation, open, and reset
+
+A run of same-scope exhaustion opens a **pass fuse** (`pass_fuse.PassFuse`) at the narrowest
+`operation_outcome.FailureScope` that explains the failures — `ticket`, `endpoint`, `tenant`,
+`provider`, or `global` — never wider. Containment is by scope key:
+
+- **Only fuse-eligible work is deferred.** `failure_policy.FUSE_ELIGIBLE_DISPOSITIONS` is
+  `{exhausted_transient, retryable_deferred}`; once a scope is open, remaining *matching,
+  retryable* work is `deferred` carrying the exact `fuse_decision` (scope, reason, and a
+  concrete `retry_not_before` derived from the cooldown). A genuine `permanent_failure` under
+  an open scope keeps its own `failed` bucket and is **never masked** as deferred, so a real
+  failure still drives the degraded exit.
+- **Independent scopes are never conflated.** An open `endpoint`/`provider` fuse leaves an
+  unrelated provider's or endpoint's operations fully `applied`; the fuse keys on the located
+  binding, so cross-scope work is untouched.
+- **Reset on proven health.** A same-scope SUCCESS arriving after the fuse opened re-closes
+  that scope and is reported `applied` (not deferred) — observed health beats a stale open
+  fuse, so the fuse cannot wedge a scope that has recovered within the pass.
+
 ## Consequences
 
 - Non-idempotent ticket writes are retried under a single bounded budget with a safe
@@ -87,8 +132,17 @@ ownership in the reconciler.
 The contract is a leaf value module plus a stateless budget/decision module with no
 migration and no persisted schema change. Rollback is reverting the two modules and this
 ADR (and its index row); no data conversion is required, because outcomes are computed,
-not stored under a new schema. This ADR is **provisional** and may be superseded once the
-observe step is validated against live Data Center non-idempotency behaviour.
+not stored under a new schema.
+
+**Rollback never deletes remote work.** Backing the coordinator route out is a code/routing
+reversion followed by remote **re-observation** — the next pass re-reads current provider
+state and reconciles toward the desired state. A rollback (and the create path it governs)
+issues **no** `delete_issue` against the remote: an issue already created in Jira is recovered
+by observation, never destroyed to "undo" a partially-applied pass. This no-remote-delete
+invariant is proven behaviourally by the route census (`test_coordinator_route_census.py`, the
+`delete_issue`-call-count assertions) and the create/rollback scenarios of the coordinator
+interface suite. The observe-before-replay step was validated end-to-end against portable
+verified-fake Cloud and Data Center passes, so the earlier provisional caveat is resolved.
 
 ## S1 lifecycle boundary — S3 owns production cutover
 
