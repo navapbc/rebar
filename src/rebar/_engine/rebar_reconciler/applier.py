@@ -386,12 +386,13 @@ def apply(
     (and by the typed / dry-run / no-write paths, which issue no batch writes), so the
     caller sees an empty map and falls back to today's fetch-only advance.
     """
-    mut_mod = _load_mutation_module()
-    if isinstance(mutations, mut_mod.Mutation) or (
-        type(mutations).__name__ == "Mutation"
-        and hasattr(mutations, "direction")
-        and hasattr(mutations, "action")
-    ):
+    # REB-3115 S5 T1: typed single-mutation dispatch is selected by a TYPED isinstance
+    # check ONLY — the class-name/duck-typed fallback that predated the single-identity
+    # regime is removed (it invited future bypass of the typed owner). Resolve Mutation
+    # from the currently-registered canonical module so isinstance binds to the class the
+    # caller constructed even when a test reloads mutation.py under _MUTATION_KEY.
+    mut_mod = sys.modules.get(_MUTATION_KEY) or _load_mutation_module()
+    if isinstance(mutations, mut_mod.Mutation):
         return _apply_typed(
             mutations, client=client, repo_root=repo_root, binding_store=binding_store
         )
@@ -409,9 +410,8 @@ def apply(
     mutations_list = list(mutations_input)
 
     def _looks_like_mutation(m) -> bool:
-        if isinstance(m, mut_mod.Mutation):
-            return True
-        return type(m).__name__ == "Mutation" and hasattr(m, "direction") and hasattr(m, "action")
+        # TYPED check only (REB-3115 S5 T1 removed the duck-typed fallback).
+        return isinstance(m, mut_mod.Mutation)
 
     def _direction_of(m) -> str:
         d = getattr(m, "direction", None)
