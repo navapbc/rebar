@@ -251,12 +251,14 @@ class FakeRunner:
             payload = _findings.validate_structured(dict(self._structured), req.output_schema)
             # Zeroed `_usage` so callers reading it off the run result (story 2948
             # successor-spend inheritance) see the real runner's key — a fake reports zero.
-            return {**payload, "runner": self.name, "model": None, "trace_id": None, "_usage": {}}
+            # trace_id off `req.config` (rebar.llm.run_identity); structured mode = the verifier.
+            tid = req.config.trace_id
+            return {**payload, "runner": self.name, "model": None, "trace_id": tid, "_usage": {}}
         return _findings.finalize_findings(
             self._findings,
             runner=self.name,
             model=None,
-            trace_id=None,
+            trace_id=req.config.trace_id,
             target=req.target,
             reviewers=req.reviewers,
             summary=self._summary,
@@ -716,7 +718,8 @@ class PydanticAIRunner:
             runner=self.name,
             model=ran_model,
             provider_provenance=provider_provenance,
-            trace_id=None,
+            # trace_id off `req.config`, not `cfg` (the runner-instance policy copy).
+            trace_id=req.config.trace_id,
             target=req.target,
             reviewers=req.reviewers,
             repo_path=cfg.repo_path,

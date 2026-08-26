@@ -38,6 +38,7 @@ from typing import Any, NamedTuple
 from rebar.llm.code_review.finalize import _attach_code_review_metrics  # noqa: F401
 from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.gate_error_sidecar import emit_gate_error
+from rebar.llm.run_identity import with_identity
 from rebar.llm.workflow.completion_metrics import (  # noqa: F401
     _add_phase,
     _attach_completion_metrics,
@@ -170,7 +171,7 @@ def produce_plan_review_verdict(
             # the verdict coverage instead of only in the logs. Additive observability — see
             # rebar.llm.step_failures.
             collect_step_failures(),
-            gate_config(cfg),
+            gate_config(with_identity(cfg, ctx.ticket_id, "review-plan")),
             focused_inputs(list(prerequisite_blocks or [])),
             # Mid-run cancellation (story 2c89): a run-scoped token the seam probes
             # (plan_review_verify_inputs / plan_review_coach_inputs) and the Pass-1 chunk
@@ -702,7 +703,7 @@ def produce_completion_verdict(
     _t_total = time.monotonic()
     # collect_step_failures wraps the WHOLE run so the reconcile op's drain can see failures
     # from the verify agent step; see completion_reconcile for where the tally lands.
-    with gate_config(cfg), collect_step_failures():
+    with gate_config(with_identity(cfg, ticket_id, "verify-completion")), collect_step_failures():
         res = _ex.run_workflow(
             doc,
             {"ticket_id": ticket_id, "graph": bool(graph)},
