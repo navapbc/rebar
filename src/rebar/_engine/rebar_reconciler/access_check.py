@@ -11,10 +11,34 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-JQL_RETRY_COUNT = 6
-JQL_RETRY_SLEEP = 5
-
 logger = logging.getLogger(__name__)
+
+
+def _jql_backoff_delays(retries: int, base: float, cap: float) -> list[float]:
+    """The between-attempt sleep schedule: ``min(base * 2**k, cap)`` for k in 0..retries-2.
+
+    A capped-exponential backoff — the visibility poll for a Jira Cloud search index that
+    is eventually consistent, NOT a transient-error retry. ``retries`` attempts yield
+    ``retries - 1`` sleeps (a create + property write land synchronously; only the JQL
+    search may lag). Mirrors the capped-exponential shape used by the acli retry floor
+    (``_errors.MAX_BACKOFF_S``).
+    """
+    return [min(base * (2**k), cap) for k in range(max(retries - 1, 0))]
+
+
+def _resolve_jql_backoff(env: dict[str, str] | None) -> tuple[int, float, float]:
+    """Resolve the JQL visibility-poll backoff through the owned config seam.
+
+    The env reads live in ``config.resolve_jql_backoff`` (the reconciler's config
+    composition root, which owns the env-read category); this credential-boundary module
+    delegates rather than reading the operator knobs itself. Imported lazily (like
+    ``config``'s own lazy imports) so importing this module does not eager-import the
+    engine ``config`` package — an eager top-level import defeats the test-suite's
+    shadow-package compensation.
+    """
+    from rebar_reconciler import config as _config
+
+    return _config.resolve_jql_backoff(env)
 
 
 def _step(
@@ -171,16 +195,18 @@ def run_access_check(
 
             current_step = "STEP_JQL_SEARCH"
             jql = f'labels="{label}"'
+            retries, base, cap = _resolve_jql_backoff(env)
+            delays = _jql_backoff_delays(retries, base, cap)
             results: list[Any] = []
-            for attempt in range(JQL_RETRY_COUNT):
+            for attempt in range(retries):
                 invalidate = getattr(client, "invalidate_search_cache", None)
                 if callable(invalidate):
                     invalidate(jql)
                 results = client.search_issues(jql)
                 if results:
                     break
-                if attempt < JQL_RETRY_COUNT - 1:
-                    sleep_fn(JQL_RETRY_SLEEP)
+                if attempt < retries - 1:
+                    sleep_fn(delays[attempt])
             if results:
                 _step(steps, lines, current_step, True)
             else:

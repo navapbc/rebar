@@ -263,8 +263,8 @@ def test_probe_exits_1_on_property_read_mismatch_and_still_cleans_up() -> None:
 
 
 @pytest.mark.scripts
-def test_probe_retries_jql_search_three_times() -> None:
-    """search_issues is called exactly 3 times when it always returns empty list."""
+def test_probe_retries_jql_search_with_capped_exponential_backoff() -> None:
+    """search_issues is retried on the default capped-exponential schedule when empty."""
     test_uuid = "retry-uuid-5555"
     issue_key = "DIG-9999"
 
@@ -298,15 +298,18 @@ def test_probe_retries_jql_search_three_times() -> None:
         module_suffix="t4",
     )
 
-    # search_issues must be called exactly _JQL_RETRY_COUNT times (one per attempt
-    # when every attempt returns empty). The probe constant is 6; this assertion
-    # tracks the source constant rather than a hard-coded literal that drifts.
-    assert client_mock.search_issues.call_count == 6, (
-        f"Expected search_issues called 6 times (_JQL_RETRY_COUNT), got "
+    # search_issues must be called exactly JIRA_PROBE_JQL_RETRIES times (one per attempt
+    # when every attempt returns empty). The default is now 10 attempts (was 6); this
+    # tracks the widened default schedule rather than a hard-coded literal that drifts.
+    assert client_mock.search_issues.call_count == 10, (
+        f"Expected search_issues called 10 times (JIRA_PROBE_JQL_RETRIES), got "
         f"{client_mock.search_issues.call_count}"
     )
-    # The LOGICAL schedule: one JQL_RETRY_SLEEP between each pair of attempts. This
-    # doubles as the guard — if the seam is ever bound early again, or the retry
-    # stops going through it, `delays` is empty and this fails instead of the test
-    # quietly going slow. It is a schedule assertion, not a wall-clock budget.
-    assert delays == [5, 5, 5, 5, 5], f"expected five 5s logical delays, got {delays}"
+    # The LOGICAL schedule: a capped-exponential backoff min(base * 2**k, cap) with
+    # defaults base=3s, cap=30s over the nine between-attempt gaps. This doubles as the
+    # guard — if the seam is ever bound early again, or the retry stops going through it,
+    # `delays` is empty and this fails instead of the test quietly going slow. It is a
+    # schedule assertion, not a wall-clock budget.
+    assert delays == [3, 6, 12, 24, 30, 30, 30, 30, 30], (
+        f"expected the capped-exponential schedule, got {delays}"
+    )

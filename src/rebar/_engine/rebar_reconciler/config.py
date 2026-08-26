@@ -2,7 +2,63 @@
 
 from __future__ import annotations
 
+import os
+from typing import Any
+
 EXCLUDED_FIELDS: tuple[str, ...] = ("local_id", "rebar-id")
+
+# --------------------------------------------------------------------------- #
+# JQL visibility-poll backoff knobs (owned env-read seam).
+# --------------------------------------------------------------------------- #
+# The STEP_JQL_SEARCH visibility wait in access_check is a capped-exponential backoff
+# tunable by three operator env knobs. Those env reads live HERE — the reconciler's
+# config composition root, which owns the env-read category — so access_check (a
+# credential boundary that does NOT own generic knob reads) stays free of ambient
+# knob reads and needs no ``# read-via:`` suppression marker.
+
+JQL_RETRY_COUNT = 10
+JQL_RETRY_SLEEP = 3
+JQL_RETRY_SLEEP_MAX = 30
+
+
+def _int_from_env(src: dict[str, str] | Any, key: str, default: int) -> int:
+    """Parse a positive int env override; fall back to ``default`` when unset/invalid."""
+    raw = src.get(key)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = int(str(raw).strip())
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _float_from_env(src: dict[str, str] | Any, key: str, default: float) -> float:
+    """Parse a positive float env override; fall back to ``default`` when unset/invalid."""
+    raw = src.get(key)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = float(str(raw).strip())
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def resolve_jql_backoff(env: dict[str, str] | None = None) -> tuple[int, float, float]:
+    """Resolve the JQL visibility-poll backoff from env, at CALL time (defaults otherwise).
+
+    ``JIRA_PROBE_JQL_RETRIES`` (attempts), ``JIRA_PROBE_JQL_SLEEP`` (base seconds), and
+    ``JIRA_PROBE_JQL_SLEEP_MAX`` (cap seconds) let an operator widen the wait for a slower
+    index without a code change; a missing / non-numeric / non-positive value falls back
+    to the module default.
+    """
+    src = os.environ if env is None else env
+    retries = _int_from_env(src, "JIRA_PROBE_JQL_RETRIES", JQL_RETRY_COUNT)
+    base = _float_from_env(src, "JIRA_PROBE_JQL_SLEEP", JQL_RETRY_SLEEP)
+    cap = _float_from_env(src, "JIRA_PROBE_JQL_SLEEP_MAX", JQL_RETRY_SLEEP_MAX)
+    return retries, base, cap
+
 
 # Local ticket types that are NEVER synced to Jira. session_log and code_review
 # tickets are verbose, local, agent-facing artifacts with no place in a Jira project,
