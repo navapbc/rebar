@@ -89,7 +89,7 @@ def _claim_gate_reason(check: Mapping[str, object]) -> str:
     return f"{reason} ({verdict}; targets: {', '.join(stale_ids)})"
 
 
-def gate_enabled(cfg_root: str, attr: str, *, ticket_id: str, gate_label: str) -> GateState:
+def gate_enabled(cfg_root: str | None, attr: str, *, ticket_id: str, gate_label: str) -> GateState:
     """Resolve an opt-in ``verify.<attr>`` gate flag, ERRORING on an unreadable config.
 
     ``attr`` is a ``VerifyConfig`` attribute name (e.g.
@@ -271,7 +271,7 @@ def close_plan_review_gate_check(
         }
 
 
-def _plan_review_gate_applies(cfg_root: str, ticket_type: str, *, ticket_id: str) -> bool:
+def _plan_review_gate_applies(cfg_root: str | None, ticket_type: str, *, ticket_id: str) -> bool:
     """Whether the plan-review START-WORK gate applies to this ticket at all: the
     ``verify.require_plan_review_for_claim`` flag is on (ERRORING on an unreadable
     config, via :func:`gate_enabled`) AND the ticket type is not exempt.
@@ -362,7 +362,9 @@ def log_description_cap_warning(warning: object) -> str | None:
     return log_advisory_warning(warning)
 
 
-def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reason: str) -> None:
+def plan_review_precheck(
+    ticket_id: str, cfg_root: str | None, repo_root, *, force_reason: str
+) -> None:
     """The plan-review gate guarding the START of work on a ticket — the single
     method both ``claim`` and ``transition open -> in_progress`` call.
 
@@ -376,9 +378,14 @@ def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reas
     the attestation is absent/stale/wrong. Returns ``None`` (allow) when the gate is
     off, the ticket is exempt, the bypass reason is set, or the attestation is valid.
 
-    ``cfg_root`` is the REPO root (parent of the tracker), where ``.rebar/config.conf``
-    lives. Consolidated here (out of ``claim.py``) so the claim and transition entry
-    points enforce IDENTICAL requirements before code is touched.
+    ``cfg_root`` is the repo root whose ``rebar.toml`` / ``.rebar/`` the gate flag is read
+    from; ``None`` means "discover", the same contract every other config reader uses. It is
+    NOT the tracker's parent: ``REBAR_TRACKER_DIR`` relocating the store is supported, and
+    inferring the root from the tracker silently resolved an empty config there — which for a
+    gate flag means the gate reads as DISABLED and stops applying.
+
+    Consolidated here (out of ``claim.py``) so the claim and transition entry points enforce
+    IDENTICAL requirements before code is touched.
     """
     from rebar import config
     from rebar._commands._seam import CommandError
