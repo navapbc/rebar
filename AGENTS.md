@@ -194,6 +194,7 @@ restated here:
   moving base ref silently makes an attestation stale — how to check currency cheaply with
   `rebar review-plan <id> --status` (read-only, no LLM) instead of re-running the review →
   `docs/plan-review-gate.md`.
+- **Gate duration expectations:** Expect `review-plan` to take 15 to 20 minutes and a completion-verifier-gated close to take 9 to 11 minutes.
 - **Plan-review criteria reference** — the generated per-criterion registry (one section per
   criterion, the reviewer's detection detail), the per-ticket structural quality gates, and
   the `.rebar/criteria_routing.json` overlay → `docs/plan-review-criteria-guide.md` (and
