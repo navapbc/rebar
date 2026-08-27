@@ -30,6 +30,47 @@ export MCP_CLIENT_PAT_CLAUDE="…"    # from mcp-clients.local.json → clients.
 Every client config below references these env vars **by name** — no PAT literal is ever written
 to a config file.
 
+### Make the export DURABLE — a bare `export` is not setup
+
+The `export` lines above set the variable in **one shell process only**. It is persisted
+nowhere: it dies when that shell exits, and a client launched from any *other* shell — a new
+terminal tab, an editor's integrated terminal, a login shell started tomorrow — sees the variable
+unset. The client then authenticates with nothing, the server returns `401`, and the client
+**silently omits `rebar` from its tool list**. Nothing in the client says "your PAT was missing";
+the server simply is not there. Treat a one-off `export` as a *test*, never as setup.
+
+Pick one durable delivery mechanism and use it for all three variables:
+
+- **Shell rc file (simplest).** Append the `export` lines to the rc file that runs for the shells
+  you actually launch clients from — `~/.zshrc` on a default macOS zsh, `~/.bashrc`/`~/.bash_profile`
+  on bash. Open a **new** shell afterwards and confirm with `printenv MCP_CLIENT_PAT_CODEX` (which
+  prints the value — do this only on a screen you are willing to expose). The file now contains the
+  PAT in cleartext, so `chmod 600` it and never place it in a repo or a dotfiles repository.
+- **Your secret manager (preferred where you have one).** Keep the PAT in the manager and have the
+  rc file *fetch* it, so no cleartext secret lands on disk — e.g.
+  `export MCP_CLIENT_PAT_CODEX="$(op read op://Private/rebar-codex-pat/credential)"` (1Password CLI),
+  or the equivalent `pass`/`gopass`/`security find-generic-password` call. Rotation then happens in
+  one place.
+
+Whichever you choose: **never commit the value**, and never paste it into a client config file, a
+ticket, a commit message, or a chat transcript. The configs below deliberately reference the
+variable **by name** so that the secret has exactly one home.
+
+### Check the wiring with `rebar doctor`
+
+`rebar doctor` reads each client's config and reports two faults that both end in the same
+symptom (`rebar` missing from the tool list):
+
+- **`pat-unresolvable`** — the config names a bearer env var that is unset or empty in the current
+  environment. This is what a transient `export` looks like after the shell that held it exits.
+- **`stale-pat-env-name`** — the config names a bearer env var that is **not** the canonical name
+  for that client (the canonical names are exactly the three above). This fires even when the
+  misnamed variable *is* set, because the operator who exports the canonical name and the config
+  that reads a different one never meet.
+
+Fixing only one of the two can leave the server omitted, so `doctor` reports them independently.
+Findings name **variables only** — no credential value is ever read into the report.
+
 The endpoint is the external TLS URL, e.g. `https://rebar.solutions.navateam.com/mcp/` (substitute
 your box host). The server binds loopback behind the nginx `/mcp/` TLS edge; see
 [mcp-auth.md §5](mcp-auth.md#5-behind-a-proxy-tls-at-the-edge).

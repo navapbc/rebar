@@ -7,6 +7,10 @@
 # Merge this [mcp_servers.rebar] table into ~/.codex/config.toml (or a trusted project's
 # .codex/config.toml), then export the PAT before launching Codex:
 #   export MCP_CLIENT_PAT_CODEX="$(…your rebar codex PAT…)"
+# That bare `export` is TRANSIENT — it dies with the shell it was typed in, and a Codex
+# launched from any other shell then drops this server. Persist it (shell rc file or your
+# secret manager) as docs/mcp-client-setup.md "Make the export DURABLE" describes, and check
+# the wiring with `rebar doctor`.
 # `bearer_token_env_var` names the env var Codex reads at connect time and sends as
 # `Authorization: Bearer <PAT>`, so NO secret is stored in this file. The PAT is the value
 # from the gitignored mcp-clients.local.json (see mcp-clients.local.example.json and
