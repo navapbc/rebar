@@ -2,8 +2,8 @@
 
 Records which tracker projects a store syncs and which repos each project's
 tickets belong to. Persisted as JSON at
-``.tickets-tracker/.bridge_state/projects.json`` on the tickets branch,  # tickets-boundary-ok
-beside the binding store.
+``<store>/.bridge_state/projects.json`` on the tickets branch, beside the binding
+store (``<store>`` is the RESOLVED, relocatable tracker directory).
 
 The record shape::
 
@@ -12,11 +12,13 @@ The record shape::
 The ``projects`` key set IS the store's sync list. ``legacy_default`` is the
 project pre-epic tickets (those with no ``bridge_project`` field) resolve to.
 
-Importable standalone: the READ path is stdlib only (no ``rebar.*`` imports), takes
-``repo_root`` and derives paths directly, mirroring ``binding_store`` — that is what the
-engine reconciler's read-only importers rely on. The WRITE path (``_write_record``, only
-ever reached from the ``rebar._lib_ops`` library layer) lazily imports the shared
-``rebar._store`` seams (``fsutil.atomic_write``) rather than hand-rolling the write.
+Importable standalone: the READ path keeps its MODULE level stdlib only, taking
+``repo_root`` and resolving the store through a function-body ``rebar.config`` import
+(an absolute import that resolves even under a by-path spec load), mirroring
+``binding_store`` — that is what the engine reconciler's read-only importers rely on.
+The WRITE path (``_write_record``, only reached from the ``rebar._lib_ops`` library
+layer) lazily imports the shared ``rebar._store`` seams (``fsutil.atomic_write``)
+rather than hand-rolling the write.
 """
 
 from __future__ import annotations
@@ -44,7 +46,12 @@ class Mapping:
 
 
 def _projects_path(repo_root: Path) -> Path:
-    return repo_root / ".tickets-tracker" / ".bridge_state" / "projects.json"  # tickets-boundary-ok
+    """The record path under the RESOLVED store (``REBAR_TRACKER_DIR`` > ``tracker.dir`` >
+    the default name under ``repo_root``) — the store is relocatable, so composing the
+    default name would read/write a directory the operator never configured."""
+    from rebar.config import tracker_dir as _resolve_store
+
+    return _resolve_store(repo_root) / ".bridge_state" / "projects.json"
 
 
 def load_mapping(repo_root: str | os.PathLike[str]) -> Mapping:

@@ -41,6 +41,10 @@ if TYPE_CHECKING:
 
 _CLOUD_BACKEND = "jira"
 _DC_BACKEND = "jira-datacenter"
+# Consumed only by _resolve_tracker_dir below, as the fallback when the captured config
+# snapshot carries no tracker.dir. Every relocation (the env override is folded into
+# tracker.dir by config composition; an absolute value relocates) is applied there.
+# tickets-boundary-ok: the absent-key default INSIDE the reconciler's own resolver
 _DEFAULT_TRACKER_DIR = ".tickets-tracker"
 _DEFAULT_TRACKER_BRANCH = "tickets"
 _DEFAULT_COMMENT_MAX_CHARS = 32767

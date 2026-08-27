@@ -250,6 +250,10 @@ def _missing_tracker_result(tracker: str, fmt: str) -> int | None:
     # Dir-mismatch hint: the configured tracker.dir is absent, but a default-named
     # store still exists alongside → tracker.dir was changed without migrating.
     repo_guess = os.path.dirname(os.path.realpath(tracker))
+    # The resolved store is `tracker`; this branch exists to warn that tracker.dir was
+    # pointed AWAY from the default while a store still sits at the default name, so it
+    # must name the default literally — resolving it would compare `tracker` to itself.
+    # tickets-boundary-ok: the default name as the COMPARISON SUBJECT, not a store lookup
     legacy = os.path.join(repo_guess, ".tickets-tracker")
     mismatch_hint = ""
     if os.path.realpath(legacy) != os.path.realpath(tracker) and os.path.isdir(legacy):

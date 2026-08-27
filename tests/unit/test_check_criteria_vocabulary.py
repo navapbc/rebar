@@ -309,6 +309,9 @@ def test_make_lint_rejects_live_vocabulary_through_guard(tmp_path: Path) -> None
     # Ticket 6818-615f-555e-4bb9 wired the destructive-test-exec gate into `make lint`
     # ahead of the guard under test, so it needs a stub here for the same reason.
     (scripts / "check_destructive_test_exec.py").write_text("", encoding="utf-8")
+    # Bug 0514-92e0-e6c4-4304 wired the tickets-store boundary gate into `make lint`
+    # ahead of the guard under test, so it needs a stub here for the same reason.
+    (scripts / "check_tickets_boundary.py").write_text("", encoding="utf-8")
     _write(tmp_path, "src/rebar/live.py", _legacy_heading())
 
     stub_bin = tmp_path / "bin"

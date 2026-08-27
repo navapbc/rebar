@@ -317,10 +317,13 @@ def _emit_create_identity_alert(local_id: str, jira_key: str, repo_root: Path | 
         from rebar._store import staging as _staging
         from rebar._store.canonical import canonical_str
         from rebar.config import reconciler_repo_root as _owned_repo_root
+        from rebar.config import tracker_dir as _resolve_store
 
-        _alert_root = (repo_root or _owned_repo_root()) / ".tickets-tracker"
+        # RESOLVED, not composed: the store is RELOCATABLE, so a relocated deployment must
+        # get its alert written into the CONFIGURED store, not an unconfigured repo-root dir.
+        _alert_root = _resolve_store(repo_root or _owned_repo_root())
         # F7: defensive guard — if local_id is falsy the alert directory would resolve to
-        # .tickets-tracker root and pollute it. Prefer the jira_key, falling back to a uuid
+        # the store root and pollute it. Prefer the jira_key, falling back to a uuid
         # so the alert always lands under a non-root subdirectory.
         _alert_dir_key = local_id or jira_key or f"unknown-{_uuid.uuid4()}"
         _ts = _time.time_ns()

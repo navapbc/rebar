@@ -232,11 +232,14 @@ def _run_reconcile_check(repo_root: Path) -> int:
 
         jira_snapshot = fetcher.compute_snapshot(pass_id, repo_root)
 
-        # Load local tickets from .tickets-tracker. Bug ad39: the event-sourced
-        # store has no per-ticket ticket.json — the compiled ticket lives in
-        # <id>/.cache.json["state"]. rc_mod.load_local_tickets reads that (the
-        # old ticket.json read loaded nothing → all bindings reported orphaned).
-        tracker_dir = repo_root / ".tickets-tracker"  # tickets-boundary-ok
+        # Load local tickets from the RESOLVED store (it is RELOCATABLE, so composing
+        # the default name under repo_root would diagnose the wrong directory). Bug
+        # ad39: the event-sourced store has no per-ticket ticket.json — the compiled
+        # ticket lives in <id>/.cache.json["state"]. rc_mod.load_local_tickets reads
+        # that (the old ticket.json read loaded nothing → all bindings orphaned).
+        from rebar.config import tracker_dir as _resolve_store
+
+        tracker_dir = _resolve_store(repo_root)
         local_tickets: list[dict] = rc_mod.load_local_tickets(tracker_dir)
 
         # Load binding store. BindingStore lives in binding_store.py — not in
@@ -503,9 +506,12 @@ def _dry_run_enumeration_exit(request) -> int | None:
         return None
     repo_root = request.repo_root
     from rebar.config import reconciler_repo_root as _owned_repo_root
+    from rebar.config import tracker_dir as _resolve_store
 
     resolved_root = repo_root if repo_root is not None else _owned_repo_root()
-    tickets_dir = resolved_root / ".tickets-tracker"
+    # RESOLVED, not composed: enumerating a hardcoded repo-root directory would list
+    # nothing (or the wrong tree) on a deployment whose store has been relocated.
+    tickets_dir = _resolve_store(resolved_root)
     if not tickets_dir.is_dir():
         return 0
     for entry in sorted(tickets_dir.iterdir()):

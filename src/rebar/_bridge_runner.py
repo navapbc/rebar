@@ -170,14 +170,18 @@ def _classified_result(returncode: int, stderr: str) -> tuple[str, int]:
     return "operational_failure", 1
 
 
-def _delivery_command(environ: Mapping[str, str]) -> tuple[str, ...]:
+def _delivery_command(environ: Mapping[str, str], root: Path) -> tuple[str, ...]:
+    """The delivery child's argv. ``--tracker`` carries the RESOLVED ABSOLUTE store path
+    (``rebar.config.tracker_dir``): the child runs with ``cwd=root``, so the relative
+    default name this used to pass silently delivered to ``<root>/.tickets-tracker`` on
+    any deployment whose store has been relocated."""
     return (
         sys.executable,
         "-m",
         "rebar._store.push",
         "commit-and-push",
         "--tracker",
-        ".tickets-tracker",
+        str(config.tracker_dir(root)),
         "--message",
         f"chore: sync events from rebar reconciler [run {environ['BRIDGE_RUN_ID']}]",
         "--strict",
@@ -251,7 +255,9 @@ def run_bridge(
     delivery_environ = _child_env.project_child_env(active_environ, relationship="unrelated")
     delivery_environ["REBAR_SYNC_PUSH"] = "always"
     try:
-        delivered = _run(_delivery_command(active_environ), root=root, environ=delivery_environ)
+        delivered = _run(
+            _delivery_command(active_environ, root), root=root, environ=delivery_environ
+        )
     except subprocess.TimeoutExpired:
         stderr += f"Bridge delivery failed: timed out after {TIMEOUT_SECONDS} seconds\n"
         return _result(

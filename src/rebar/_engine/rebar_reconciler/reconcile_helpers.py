@@ -4,16 +4,15 @@
 These are the leaf helpers that a reconcile pass leans on but which carry no
 back-edge to the ``reconcile_once`` spine: the status-preflight scan and its
 ``StatusMappingError`` marker, the binding-store commit-back, the ticket-CLI
-reader, the filter-scope set
-builders, the no-write plan renderer, and the ``_NoOpSyncLogger`` cap-0 stand-in.
+reader, the filter-scope set builders, the no-write plan renderer, and the
+``_NoOpSyncLogger`` cap-0 stand-in.
 
-Loader convention: like every sibling in this package (and mirrored by
-reconcile.py / run_differs.py), this module loads its own siblings (``config.py``,
-``alert_store.py``) by file path via the
-local ``_load`` helper (``importlib.util.spec_from_file_location``), so it resolves
-both under the real package and when a single module is loaded standalone in tests.
-It imports NOTHING from reconcile.py; reconcile.py loads this module once and
-re-exports these names for attribute-access and back-compat.
+Loader convention: like every sibling in this package (and mirrored by reconcile.py /
+run_differs.py), this module loads its own siblings (``config.py``, ``alert_store.py``) by file
+path via the local ``_load`` helper (``importlib.util.spec_from_file_location``), so it resolves
+both under the real package and when a single module is loaded standalone in tests. It imports
+NOTHING from reconcile.py; reconcile.py loads this module once and re-exports these names for
+attribute-access and back-compat.
 """
 
 from __future__ import annotations
@@ -223,15 +222,17 @@ def _commit_binding_store_snapshot(
         True  — commit succeeded (or nothing to commit — bindings already current).
         False — a subprocess error occurred; bindings persisted to filesystem only.
 
-    Degrades gracefully: any subprocess error (git not available, tickets branch
-    not checked out, no bindings path, etc.) is caught and logged to stderr;
-    the reconciler pass continues and the next GHA commit-back will persist the
-    bindings as normal.  The caller must NOT abort on False — commit failure
-    must never break the sync pass.
+    Degrades gracefully: any subprocess error (git not available, tickets branch not
+    checked out, no bindings path, etc.) is caught and logged to stderr; the reconciler
+    pass continues and the next GHA commit-back will persist the bindings as normal. The
+    caller must NOT abort on False — commit failure must never break the sync pass.
     """
-    git_adapter = _load("rebar_reconciler.git_adapter", "git_adapter.py")
+    from rebar.config import tracker_dir as _resolve_store
 
-    tracker_dir = repo_root / git_adapter.TRACKER_DIR
+    git_adapter = _load("rebar_reconciler.git_adapter", "git_adapter.py")
+    # RESOLVED, not composed (the store is RELOCATABLE): git_adapter.TRACKER_DIR stays the
+    # committed-TREE label used for the pathspec below, but the ON-DISK root is resolved.
+    tracker_dir = _resolve_store(repo_root)
     # Stage the live, retired, and GET-rotation binding state files. The
     # absence-lifecycle GC writes bindings-retired.json; a retirement-only pass
     # must also be committed (else a soft-deleted binding is silently lost on

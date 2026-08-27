@@ -117,6 +117,10 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
     try:
         name = compose_config(root=repo_root).tracker.dir
     except ConfigError:
+        # A relocated store never reaches this branch: REBAR_TRACKER_DIR returned above
+        # and an absolute tracker.dir returns verbatim below — only an unparseable
+        # config lands here, and then no configured directory exists to honour.
+        # tickets-boundary-ok: the ConfigError-only default INSIDE the read-path resolver
         name = ".tickets-tracker"  # malformed config never breaks a read's path resolution
     if os.path.isabs(name):
         # An absolute configured dir relocates the store (EV-3b) — like the env

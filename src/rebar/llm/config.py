@@ -314,6 +314,10 @@ def denied_paths(root: str) -> tuple[str, ...]:
     candidates = [
         os.path.join(root, ".git"),
         os.path.join(root, ".bridge_state"),
+        # The CONFIGURED store is appended just below via _root_config.tracker_dir(root),
+        # so relocation IS honoured; keeping the default name too can only deny MORE
+        # paths, never fewer, so it cannot leave a relocated store unprotected.
+        # tickets-boundary-ok: a denylist SUPERSET entry, not a store lookup
         os.path.join(root, ".tickets-tracker"),
     ]
     try:
