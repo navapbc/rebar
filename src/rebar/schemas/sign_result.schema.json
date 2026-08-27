@@ -9,7 +9,7 @@
   "properties": {
     "manifest": { "type": "array", "items": { "type": "string" } },
     "algorithm": { "type": "string", "description": "The op-cert scheme id ('sshsig')." },
-    "signed_at": { "type": "integer" },
+    "signed_at": { "type": ["integer", "string"], "description": "When the manifest was signed. Nanoseconds since the Unix epoch (UTC), from `time.time_ns()`. WIRE FORM: emitted as a JSON STRING of decimal digits ONLY \u2014 no sign, no thousands separators, no decimal point, no units suffix (e.g. \"1787856371950409998\") \u2014 whenever the value falls outside JavaScript's safe-integer range (|n| > Number.MAX_SAFE_INTEGER = 2**53-1 = 9007199254740991). That is a correctness measure for RFC 8259 \u00a76 interoperability, NOT a formatting preference. CONSUMING IT: parse as an arbitrary-precision integer \u2014 `int(x)` in Python, `BigInt(x)` in JavaScript. Do NOT use `Number(x)`, and do not rely on a plain `JSON.parse` of the older numeric form: IEEE-754 binary64 rounds it SILENTLY, with no error \u2014 the real stored value 1787856371950409998 comes back from `JSON.parse` as 1787856371950410000. INVARIANT: the instant is unchanged and the conversion is lossless \u2014 the decimal digits are identical to the integer form; only the JSON type differs." },
     "ticket_id": { "type": "string" },
     "envelope": { "type": "string", "description": "Encoded rebar.opcert.v1 DSSE envelope (the asymmetric op-cert record)." },
     "principal": { "type": "string", "description": "The DSSE principal (environment id) the op-cert was signed under." },

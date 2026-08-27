@@ -127,7 +127,8 @@ class TicketState(TypedDict):
     alias: NotRequired[str | None]
     description: NotRequired[str | None]
     author: NotRequired[str | None]
-    created_at: NotRequired[int | None]
+    created_at: NotRequired[int | str | None]
+    updated_at: NotRequired[int | str | None]
     env_id: NotRequired[str | None]
     comments: NotRequired[list[Comment]]
     deps: NotRequired[list[Dep]]
@@ -140,10 +141,10 @@ class TicketState(TypedDict):
     bridge_alerts: NotRequired[list[Any]]
     reverts: NotRequired[list[Any]]
     attestations: NotRequired[dict[str, Any]]
-    last_reopened_at: NotRequired[int | None]
+    last_reopened_at: NotRequired[int | str | None]
     preconditions_summary: NotRequired[dict[str, Any]]
     source_id: NotRequired[str | None]
-    source_created_at: NotRequired[int | None]
+    source_created_at: NotRequired[int | str | None]
     source_author: NotRequired[str | None]
     source_env: NotRequired[str | None]
     creation_channel: NotRequired[CreationChannel]
@@ -286,7 +287,7 @@ class SignResult(TypedDict):
 
     manifest: list[str]
     algorithm: str
-    signed_at: int
+    signed_at: int | str
     ticket_id: str
     envelope: str
     principal: str
@@ -304,7 +305,7 @@ class VerifySignatureResult(TypedDict):
     step_count: int
     algorithm: str | None
     key_id: str | None
-    signed_at: int | None
+    signed_at: int | str | None
     head_sha: str | None
     verified: bool
     verdict: Literal[

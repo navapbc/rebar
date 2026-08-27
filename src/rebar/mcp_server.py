@@ -667,10 +667,12 @@ def build_server(cfg=None):
         logger=logger,
     )
 
-    # Install the structured-error guard BEFORE tool registration (ticket 8a31)
-    from rebar._mcp_errors import install_error_guard
+    # Install the structured-error guard BEFORE tool registration (ticket 8a31), then the
+    # JS-safe-integer result guard (bug 6fe7). Both rebind `mcp.tool` and compose.
+    from rebar._mcp_errors import install_error_guard, install_js_safe_guard
 
     install_error_guard(mcp)
+    install_js_safe_guard(mcp)
 
     # Registration order matches the original in-line definition order (reads, then
     # the always-registered LLM tools, then the READONLY-gated writes).
