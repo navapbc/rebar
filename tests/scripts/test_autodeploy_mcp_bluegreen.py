@@ -19,6 +19,7 @@ bytes, and the countable journal markers — never internal structure.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -501,9 +502,14 @@ def test_unhealthy_new_container_leaves_old_upstream_current(mcp_box: dict[str, 
     ), f"a failed deploy must not advance deployed-sha\n{ctx}"
 
     # Retry on a healthy tick flips it (the SHA-keyed backoff window has since elapsed).
+    # An mcp failure records the mcp-SCOPED backoff (see test_mcp_failure_on_a_deferred_tick_
+    # does_not_backoff_the_bot for why it must not touch the shared one), so clearing that is
+    # what models elapsed time here; the shared file is cleared too so this stays a faithful
+    # "no backoff is in effect" precondition regardless of which path wrote one.
     (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}')  # type: ignore[operator]
     (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
     (mcp_box["state"] / "deploy-backoff").unlink(missing_ok=True)  # type: ignore[operator]
+    (mcp_box["state"] / "mcp-deploy-backoff").unlink(missing_ok=True)  # type: ignore[operator]
     result2 = _run(mcp_box)
     ctx2 = f"rc={result2.returncode}\n{result2.stdout}\n{result2.stderr}"
     assert result2.returncode == 0, f"a healthy retry must succeed\n{ctx2}"
@@ -546,7 +552,10 @@ def test_secrets_fetch_failure_aborts_before_touching_the_live_upstream(
     assert "mcp-secrets-fetch-failed" in result.stdout + result.stderr, (
         f"the abort must name the secrets refresh, not masquerade as a generic failure\n{ctx}"
     )
-    assert not any("run-d" in c for c in cmds), (
+    # Match the docker stub's real log shape (`run --name ...`). An earlier version of this
+    # assertion looked for a "run-d" token that the stub never emits, so it passed vacuously
+    # no matter what the script did — it proved nothing.
+    assert not any(c.startswith("run ") and "rebar-mcp-" in c for c in cmds), (
         f"no replacement container may be started against unrefreshed secrets\n{ctx}"
     )
 
@@ -1000,6 +1009,12 @@ def test_shared_src_change_triggers_both_targets(tmp_path: Path) -> None:
     )
 
 
+# ── the mcp block must be reachable when the bot block DEFERS (carefree-swift-scallop) ──
+# The mcp block documents itself as "INDEPENDENT of the review-bot block above", but it sits
+# AFTER that block's `exit 0`. The fixture git stub below deliberately reports a SHARED
+# `src/rebar` change, so BOTH `changed "$BOT_PATHS"` and `changed "$MCP_PATHS"` match — the
+# real-world case. The module's other stub only ever echoes `Dockerfile.mcp`, which makes the
+# bot block unreachable and is exactly why this coupling regressed unnoticed.
 _GIT_STUB_SHARED_SRC = r"""
 args=("$@"); sub=""
 for ((i=0; i<${#args[@]}; i++)); do
@@ -1087,16 +1102,30 @@ def test_bot_deferral_still_reaches_the_mcp_blue_green_deploy(mcp_box: dict[str,
         f"the mcp upstream must be flipped to the newly deployed container\n{ctx}"
     )
 
-    # A DEFERRED tick now runs PAST the old `exit 0` for the first time, so pin that it still
-    # records nothing: deployed-sha unadvanced and the deferral EPISODE carried forward.
+    # A DEFERRED tick now reaches the footer for the first time, so it must be pinned that it
+    # still records NOTHING as complete: the bot has not deployed, and the tick as a whole is
+    # not a deploy of $TARGET. Without this, letting control past the old `exit 0` would
+    # silently start stamping completion for a component that never ran.
     state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
     assert (state / "deployed-sha").read_text().strip() == _DEPLOYED, (
         f"a deferred tick must NOT advance deployed-sha — it is not a complete deploy\n{ctx}"
+    )
+    bot_marker = state / "bot-deployed-sha"
+    assert not (bot_marker.exists() and bot_marker.read_text().strip() == _TARGET), (
+        "a deferred tick must NOT stamp bot-deployed-sha: the bot deliberately did not deploy, "
+        f"and recording it as done would drop that pending change permanently\n{ctx}"
     )
     # The deferral EPISODE must carry forward. The footer clears $DEFER_FILE to end an episode
     # that concluded in a deploy; a deferred tick has not deployed, so clearing it here would
     # reset the DEPLOY_DEFER_MAX bound on every tick and the bound could never be reached --
     # the gate would defer forever instead of eventually recreating the container.
+    # ...but mcp DID deploy, so its OWN marker must advance. That asymmetry — one component
+    # complete, the other not, on the same tick — is the whole point of per-component markers.
+    mcp_marker = state / "mcp-deployed-sha"
+    assert mcp_marker.exists() and mcp_marker.read_text().strip() == _TARGET, (
+        "mcp deployed on this tick, so mcp-deployed-sha MUST advance even though the tick as a "
+        f"whole is incomplete; otherwise the next tick redeploys mcp needlessly\n{ctx}"
+    )
     assert (state / "deploy-defer").exists(), (
         "a deferred tick must NOT clear the deferral-episode file: that resets the "
         f"DEPLOY_DEFER_MAX bound, so a permanently busy bot would defer forever\n{ctx}"
@@ -1175,6 +1204,298 @@ def test_repeated_deferred_ticks_do_not_redeploy_mcp_every_time(
         f"otherwise cause a rebuild + cutover on every timer tick\n{ctx}"
     )
     assert "nginx-reload" not in second_cmds, f"tick 2 must not flip the upstream again\n{ctx}"
+
+
+def test_mcp_failure_on_a_deferred_tick_does_not_backoff_the_bot(
+    mcp_box: dict[str, object],
+) -> None:
+    """An mcp deploy failure must not suppress the REVIEW-BOT's next deploy.
+
+    `record_backoff_failure` writes one shared `deploy-backoff` keyed on the global `$TARGET`,
+    and the top-level gate exits the whole script while it is in effect. Making the mcp block
+    reachable on a deferred tick therefore handed the mcp path a way to throttle the BOT: the
+    bot is already being held back by the drain gate, and an unrelated mcp failure would now
+    also backoff the very component that never ran.
+
+    The two paths deploy independently and already track completion independently
+    (`mcp-deployed-sha`); their failure state must be independent too.
+    """
+    _mcp_box_shared_change(mcp_box, in_flight=2)
+    state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
+    # Make the NEW mcp container fail its readiness probe, so the mcp block takes its
+    # fatal path on a tick where the bot only deferred.
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert "AUTODEPLOY_DEFERRED" in result.stdout + result.stderr, (
+        f"precondition: the bot must have deferred on this tick\n{ctx}"
+    )
+    assert "mcp-unhealthy" in result.stdout + result.stderr, (
+        f"precondition: the mcp deploy must have failed on this tick\n{ctx}"
+    )
+
+    global_backoff = state / "deploy-backoff"
+    written = global_backoff.read_text().strip() if global_backoff.exists() else ""
+    assert not written, (
+        "an mcp failure must NOT write the SHARED deploy-backoff: that file gates the whole "
+        f"script, so it would suppress the review-bot deploy too. got {written!r}\n{ctx}"
+    )
+
+
+def test_a_failed_mcp_deploy_does_not_redeploy_the_bot_every_tick(
+    mcp_box: dict[str, object],
+) -> None:
+    """A review-bot that already deployed must not be redeployed because MCP failed.
+
+    Completion is recorded ONCE, at the footer, for BOTH components. An mcp failure exits
+    the tick before that footer, so a review-bot that deployed successfully seconds earlier
+    is never recorded as done — and the next tick, diffing from the stale global sha, deploys
+    it again. The bot path stop-and-drains, so each needless redeploy KILLS an in-flight
+    review (bug 34cd, the very thing the drain gate exists to prevent).
+
+    Before the mcp path got its own backoff this was masked: an mcp failure wrote the SHARED
+    backoff, and the top-level gate exited the next tick outright, so the bot never got as
+    far as redeploying. Scoping the backoff to mcp — correctly — removed that accidental
+    cover and exposed the real defect underneath: one completion marker cannot represent two
+    independently-deploying components. The bot needs its own, exactly as mcp now has one.
+    """
+    _mcp_box_shared_change(mcp_box, in_flight=0)  # bot is IDLE -> it deploys this tick
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # ...and mcp then FAILS
+
+    first = _run(mcp_box)
+    first_cmds = _commands(mcp_box)
+    ctx1 = f"rc={first.returncode}\ncmds={first_cmds}\n{first.stdout}\n{first.stderr}"
+
+    # Liveness anchors: BOTH halves of the precondition must really have happened.
+    assert any("compose-up-" in c for c in first_cmds), (
+        f"precondition: the review-bot must have deployed on tick 1\n{ctx1}"
+    )
+    assert "mcp-unhealthy" in first.stdout + first.stderr, (
+        f"precondition: the mcp deploy must have failed on tick 1\n{ctx1}"
+    )
+
+    # Second tick: nothing new merged. The bot is already at the target.
+    (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
+    second = _run(mcp_box)
+    second_cmds = _commands(mcp_box)
+    ctx2 = f"rc={second.returncode}\ncmds={second_cmds}\n{second.stdout}\n{second.stderr}"
+
+    # Liveness anchor: prove tick 2 actually RAN and got PAST the review-bot gate. The bot
+    # block precedes the mcp block, so the mcp gate reporting its open backoff window is
+    # positive evidence the tick reached and cleared the bot gate — without which the
+    # absence assertion below would be satisfied by a tick that died before ever getting there.
+    assert "mcp backoff active" in second.stdout + second.stderr, (
+        f"tick 2 must run through the bot gate and on to the mcp gate\n{ctx2}"
+    )
+    assert not any("compose-up-" in c or "compose-build-" in c for c in second_cmds), (
+        "tick 2 must NOT redeploy the review-bot: it already deployed this exact target on "
+        "tick 1. Redeploying stop-and-drains the container and kills any review in flight, "
+        f"and against a repeatedly-failing mcp it would do so on EVERY tick.\n{ctx2}"
+    )
+
+
+def test_mcp_backoff_throttles_only_mcp_and_lets_the_bot_deploy(
+    mcp_box: dict[str, object],
+) -> None:
+    """An open mcp backoff window must throttle mcp WITHOUT holding back the review-bot.
+
+    This is the half the shared backoff could not express: its gate sat at the TOP of the
+    script and exited outright, so "throttle this component" and "stop everything" were the
+    same action. Scoping the backoff to mcp means the bot still gets its turn on the same tick.
+
+    Tick 1 defers the bot (a review is in flight) and fails mcp, which opens the mcp window
+    while leaving the bot's delta undeployed. Tick 2 then runs with the bot IDLE, so the bot
+    has real pending work: it must deploy, while mcp stays skipped. Asserting the BOT
+    deployed is what makes this non-vacuous -- an earlier version ran tick 2 with the bot
+    still busy, so the tick exited at the deferral guard regardless of anything mcp did and
+    the assertions proved nothing about the backoff.
+    """
+    _mcp_box_shared_change(mcp_box, in_flight=2)  # bot busy -> defers, its delta stays pending
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # type: ignore[operator]
+
+    first = _run(mcp_box)
+    ctx1 = f"rc={first.returncode}\n{first.stdout}\n{first.stderr}"
+    assert "mcp-unhealthy" in first.stdout + first.stderr, (
+        f"precondition: tick 1 must fail the mcp deploy and open the backoff window\n{ctx1}"
+    )
+    state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
+    assert (state / "mcp-deploy-backoff").exists(), f"tick 1 must record the mcp backoff\n{ctx1}"
+
+    # Tick 2: bot now IDLE (so its still-pending delta can deploy), mcp health restored.
+    # The mcp window is still open (BACKOFF_BASE=60s), so mcp must be skipped ANYWAY --
+    # that is what makes it a backoff rather than a retry.
+    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}')  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}')  # type: ignore[operator]
+    (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
+    second = _run(mcp_box)
+    second_cmds = _commands(mcp_box)
+    ctx = f"rc={second.returncode}\ncmds={second_cmds}\n{second.stdout}\n{second.stderr}"
+
+    assert "mcp backoff active" in second.stdout + second.stderr, (
+        f"tick 2 must reach the mcp gate and report the open backoff window\n{ctx}"
+    )
+    # The load-bearing assertion: the OTHER component still deployed on this tick.
+    assert any("compose-up-" in c for c in second_cmds), (
+        "the review-bot must still deploy while mcp is backing off -- if it does not, the mcp "
+        f"backoff has stopped the whole tick, which is the coupling this change removes\n{ctx}"
+    )
+    assert not any(c.startswith("run ") and "rebar-mcp-" in c for c in second_cmds), (
+        f"tick 2 must NOT start a new mcp container while the backoff window is open\n{ctx}"
+    )
+    assert "nginx-reload" not in second_cmds, (
+        f"a skipped mcp deploy must not touch the live upstream\n{ctx}"
+    )
+
+
+def test_mcp_failure_keeps_the_deploy_failed_metric_and_names_the_component(
+    mcp_box: dict[str, object],
+) -> None:
+    """The mcp-scoped recorder must keep emitting `deploy_failed`, tagged `component=mcp`.
+
+    Splitting the backoff state deliberately did NOT split the metric: existing CloudWatch
+    alarming keys on the `deploy_failed` reason, and renaming it for the mcp path would have
+    silently stopped those alarms from firing on half the deploy pipeline. The `component=`
+    marker is what lets an operator tell the two paths apart without a new metric name.
+    """
+    _mcp_box_shared_change(mcp_box, in_flight=2)
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    errors = _markers(result, "AUTODEPLOY_ERROR")
+    ctx = f"rc={result.returncode}\nerrors={errors}\n{result.stdout}\n{result.stderr}"
+
+    payloads = [json.loads(ln.split(" ", 1)[1]) for ln in errors]
+    failed = [p for p in payloads if p.get("reason") == "deploy_failed"]
+    assert failed, (
+        "an mcp deploy failure must still emit the `deploy_failed` reason — existing alarms "
+        f"key on it, and a renamed metric would stop them firing for the mcp path\n{ctx}"
+    )
+    assert any("component=mcp" in (p.get("detail") or "") for p in failed), (
+        "the deploy_failed detail must name the failing component, or an operator cannot "
+        f"tell an mcp failure from a review-bot failure on a shared metric\n{ctx}"
+    )
+
+
+def test_bot_backoff_tick_does_not_record_the_bot_as_deployed(
+    mcp_box: dict[str, object],
+) -> None:
+    """A bot SKIPPED by its backoff window must not be marked deployed at the footer.
+
+    The backoff gate skips the review-bot without setting `bot_deferred`, so the tick runs on
+    to the success footer and stamps $TARGET into BOTH deployed-sha and bot-deployed-sha --
+    recording a deploy that never happened. The next tick then diffs from that stamped sha,
+    sees no pending bot delta, and skips the change PERMANENTLY: the pending review-bot
+    change is silently dropped and only a NEW target ever rescues it.
+
+    Deferral already gets this right (`bot_deferred=1` -> exit before the footer). A backoff
+    skip is the same situation -- the bot did not deploy -- and must be recorded the same way.
+    """
+    bin_dir: Path = mcp_box["bin_dir"]  # type: ignore[assignment]
+    target_file: Path = mcp_box["target_file"]  # type: ignore[assignment]
+    state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
+
+    # A BOT-only pending change (not in MCP_PATHS), and the bot is IDLE so nothing defers.
+    bot_only = _GIT_STUB_SHARED_SRC.replace("__MATCH__", "Dockerfile.reviewbot").replace(
+        "__CHANGED__", "infra/compose/Dockerfile.reviewbot"
+    )
+    _stub(bin_dir, "git", bot_only.replace("__TARGET_FILE__", str(target_file)))
+    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}')  # type: ignore[operator]
+
+    # The bot's backoff window is OPEN for this exact target (a prior bot deploy failed).
+    (state / "deploy-backoff").write_text(f"{_TARGET} 1 {int(time.time()) + 600}\n")
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    # Liveness anchor: the tick must actually have reached the bot gate and reported the skip.
+    assert "backoff active" in result.stdout + result.stderr, (
+        f"precondition: the tick must reach the bot gate and skip on the open window\n{ctx}"
+    )
+
+    recorded = (
+        (state / "bot-deployed-sha").read_text().strip()
+        if (state / "bot-deployed-sha").exists()
+        else ""
+    )
+    assert recorded != _TARGET, (
+        "a bot that was SKIPPED by its backoff window must not be recorded as deployed at "
+        f"$TARGET -- doing so makes the next tick see no pending bot delta and drop the "
+        f"change permanently. bot-deployed-sha={recorded!r}\n{ctx}"
+    )
+
+
+def test_mcp_backoff_tick_does_not_record_mcp_as_deployed(
+    mcp_box: dict[str, object],
+) -> None:
+    """An mcp SKIPPED by its backoff window must not be marked deployed at the footer.
+
+    Exact mirror of test_bot_backoff_tick_does_not_record_the_bot_as_deployed, for the other
+    component. The mcp gate skips on an open window without marking the tick incomplete, so
+    the footer stamps $TARGET into mcp-deployed-sha for a deploy that never ran. The next tick
+    diffs from that stamped sha, computes no mcp delta, and drops the mcp change PERMANENTLY.
+
+    Both components record completion independently; both must therefore record INcompletion
+    independently too. Fixing only the bot side left this half live.
+    """
+    _mcp_box_shared_change(mcp_box, in_flight=0)  # bot idle -> it deploys, nothing defers
+    state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
+    # mcp's own backoff window is OPEN for this exact target (a prior mcp deploy failed).
+    (state / "mcp-deploy-backoff").write_text(f"{_TARGET} 1 {int(time.time()) + 600}\n")
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp backoff active" in result.stdout + result.stderr, (
+        f"precondition: the tick must reach the mcp gate and skip on the open window\n{ctx}"
+    )
+    recorded = (
+        (state / "mcp-deployed-sha").read_text().strip()
+        if (state / "mcp-deployed-sha").exists()
+        else ""
+    )
+    assert recorded != _TARGET, (
+        "mcp was SKIPPED by its backoff window, so it must not be recorded as deployed at "
+        f"$TARGET -- that makes the next tick see no pending mcp delta and drop the change "
+        f"permanently. mcp-deployed-sha={recorded!r}\n{ctx}"
+    )
+
+
+def test_an_open_bot_backoff_with_no_pending_delta_is_not_reported_as_a_skip(
+    mcp_box: dict[str, object],
+) -> None:
+    """An open bot-backoff window with NOTHING to deploy is a plain no-op tick.
+
+    This is the case that motivated testing the delta BEFORE the backoff window. With the
+    old ordering the gate consulted the window first, so a tick with no bot work at all
+    still logged a backoff skip -- and, worse, could not distinguish "skipped with work
+    pending" (which must block the footer) from "nothing to do" (which must not).
+    """
+    bin_dir: Path = mcp_box["bin_dir"]  # type: ignore[assignment]
+    target_file: Path = mcp_box["target_file"]  # type: ignore[assignment]
+    state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
+
+    # An MCP-only change: nothing under BOT_PATHS is pending.
+    mcp_only = _GIT_STUB_SHARED_SRC.replace("__MATCH__", "Dockerfile.mcp").replace(
+        "__CHANGED__", "infra/compose/Dockerfile.mcp"
+    )
+    _stub(bin_dir, "git", mcp_only.replace("__TARGET_FILE__", str(target_file)))
+    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}')  # type: ignore[operator]
+    # ...while the BOT's backoff window happens to be open.
+    (state / "deploy-backoff").write_text(f"{_TARGET} 1 {int(time.time()) + 600}\n")
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    # Liveness anchor: the tick ran far enough to do its mcp work.
+    assert "mcp sources changed" in result.stdout + result.stderr, (
+        f"precondition: the tick must run and reach the mcp block\n{ctx}"
+    )
+    assert "review-bot backoff active" not in result.stdout + result.stderr, (
+        "with no pending bot delta there is nothing for the backoff window to hold back, so "
+        f"the tick must not report a bot backoff skip\n{ctx}"
+    )
 
 
 def test_a_complete_tick_advances_the_mcp_marker_even_when_mcp_was_a_no_op(
