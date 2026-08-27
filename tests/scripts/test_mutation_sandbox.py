@@ -166,6 +166,11 @@ def test_probe_prefers_seatbelt_then_bwrap_then_none(monkeypatch):
     monkeypatch.setattr(
         sb.shutil, "which", lambda n: "/usr/bin/sandbox-exec" if n == "sandbox-exec" else None
     )
+    # Stub the capability probe, symmetric with `_bwrap_works` below. Without this the
+    # test passes on macOS only by accident — `/usr/bin/sandbox-exec` really exists
+    # there, so the real binary runs and enforces — while on Linux the path is absent,
+    # `_seatbelt_works()` returns False, and `probe()` yields None.
+    monkeypatch.setattr(sb, "_seatbelt_works", lambda: True)
     sb.probe.cache_clear()
     assert sb.probe() == sb.SEATBELT
 
@@ -190,6 +195,77 @@ def test_bwrap_present_but_unable_to_namespace_is_not_offered(monkeypatch):
     monkeypatch.setattr(sb, "_bwrap_works", lambda: False)
     sb.probe.cache_clear()
     assert sb.probe() is None
+
+
+def test_seatbelt_present_but_not_enforcing_is_not_offered(monkeypatch):
+    """Presence on PATH is not capability — the same rule `bwrap` is held to.
+
+    `sandbox-exec` is Apple-DEPRECATED. A future macOS shipping it as a non-enforcing
+    stub would satisfy `shutil.which` while denying nothing, so a PATH-only probe would
+    report the sandbox available and every mutation run would proceed effectively
+    UNSANDBOXED — on the platform the 2026-08-26 incident actually happened on, and
+    without the abort the fail-closed design promises.
+    """
+    monkeypatch.setattr(
+        sb.shutil, "which", lambda n: "/usr/bin/sandbox-exec" if n == "sandbox-exec" else None
+    )
+    monkeypatch.setattr(sb, "_seatbelt_works", lambda: False)
+    sb.probe.cache_clear()
+    assert sb.probe() is None
+
+
+def test_seatbelt_probe_observes_denial_not_just_exit_status(tmp_path, monkeypatch):
+    """The probe must confirm a write was DENIED, not merely that the child ran.
+
+    A stub `sandbox-exec` that execs its argument verbatim exits 0 while enforcing
+    nothing. Keying on exit status alone would accept it.
+    """
+    stub = tmp_path / "sandbox-exec"
+    stub.write_text(
+        "#!/bin/sh\n"
+        # Mimic `sandbox-exec -f <profile> <cmd>...`: drop the flag pair, run the rest.
+        'while [ "$1" = "-f" ] || [ "$1" = "-p" ]; do shift 2; done\n'
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    monkeypatch.setattr(sb.shutil, "which", lambda n: str(stub) if n == "sandbox-exec" else None)
+    assert sb._seatbelt_works() is False, (
+        "a non-enforcing sandbox-exec that exits 0 must NOT be reported as a mechanism"
+    )
+
+
+def test_seatbelt_probe_accepts_a_mechanism_that_denies_the_write(tmp_path, monkeypatch):
+    """The enforcing case: the child ran AND the write did not land.
+
+    The `@live` tests cover this with the real Seatbelt, but they skip wherever
+    `probe()` finds no mechanism — every Linux cell — so without this the `return True`
+    branch is exercised on no gating lane.
+    """
+    stub = tmp_path / "sandbox-exec"
+    # Emit the liveness marker and perform no write, which is what a real deny looks
+    # like from the outside.
+    stub.write_text(f"#!/bin/sh\necho {sb._PROBE_MARKER}\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+    monkeypatch.setattr(sb.shutil, "which", lambda n: str(stub) if n == "sandbox-exec" else None)
+    assert sb._seatbelt_works() is True
+
+
+def test_seatbelt_probe_rejects_a_mechanism_that_never_launches(tmp_path, monkeypatch):
+    """A launch failure must not read as a successful denial.
+
+    A `sandbox-exec` that cannot start writes nothing, so the probe's target file is
+    absent — indistinguishable from a real denial unless the probe also confirms the
+    child RAN. Without that second signal a broken mechanism reports as working, which
+    is the failure this whole module exists to prevent.
+    """
+    stub = tmp_path / "sandbox-exec"
+    stub.write_text("#!/bin/sh\necho 'sandbox-exec: broken' >&2\nexit 1\n", encoding="utf-8")
+    stub.chmod(0o755)
+    monkeypatch.setattr(sb.shutil, "which", lambda n: str(stub) if n == "sandbox-exec" else None)
+    assert sb._seatbelt_works() is False, (
+        "a sandbox-exec that never launched must NOT be reported as enforcing"
+    )
 
 
 def test_no_unshare_fallback_is_offered(monkeypatch):
