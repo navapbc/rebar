@@ -902,6 +902,20 @@ def test_manifest_timeout_policy_drives_generated_mutmut_config(tmp_path: Path) 
     def mutmut_run_concurrency(
         function_name: str,
     ) -> tuple[tuple[tuple[str, str | None], ...], ...]:
+        def argv_tuple(argument: ast.expr) -> ast.Tuple | None:
+            # The argv reaches _run either as a literal tuple, or wrapped by the OS
+            # sandbox (ticket e668-b496-e264-4283) as
+            # `mutation_sandbox.wrap(<tuple>, allow=..., profile_dir=...)`. Look
+            # through the wrapper so the --max-children assertion below keeps its
+            # teeth instead of silently matching nothing.
+            if isinstance(argument, ast.Tuple):
+                return argument
+            if isinstance(argument, ast.Call) and argument.args:
+                inner = argument.args[0]
+                if isinstance(inner, ast.Tuple):
+                    return inner
+            return None
+
         calls = []
         for node in ast.walk(driver_functions[function_name]):
             if not (
@@ -909,12 +923,14 @@ def test_manifest_timeout_policy_drives_generated_mutmut_config(tmp_path: Path) 
                 and isinstance(node.func, ast.Name)
                 and node.func.id == "_run"
                 and node.args
-                and isinstance(node.args[0], ast.Tuple)
             ):
+                continue
+            argv = argv_tuple(node.args[0])
+            if argv is None:
                 continue
             literal_args = tuple(
                 element.value
-                for element in node.args[0].elts
+                for element in argv.elts
                 if isinstance(element, ast.Constant) and isinstance(element.value, str)
             )
             if literal_args[:3] != ("-m", "mutmut", "run"):

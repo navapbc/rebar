@@ -23,6 +23,14 @@ from typing import cast
 
 import tomllib
 
+# Sibling-module import: scripts/ is not a package, so a bare `import
+# mutation_sandbox` resolves only when this file is RUN as a script. The
+# import-walk gate (ticket 37b9) imports every scripts/*.py as a module, where
+# that shape raises ModuleNotFoundError — and tests/scripts/conftest.py inserts
+# scripts/ process-wide, so a subset test run hides it. Use the documented insert.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mutation_sandbox
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / ".github" / "mutation-shards.toml"
 RESULT_RE = re.compile(r"^\s*(\S+): (.+?)\s*$")
@@ -576,12 +584,27 @@ def execute_shard(root: Path, shard: Shard, artifact_dir: Path, label: str) -> R
         "no:randomly",
         f"--basetemp={basetemp}",
     )
-    clean = _run(clean_args, cwd=root, env=env)
+    # Sandbox BOTH shard-test-executing subprocesses. The baseline pytest below and the
+    # `mutmut run` further down are the only two that execute shard code; `mutmut
+    # results`/`show` are reporting and touch no test code. Sandboxing only the baseline
+    # would leave `mutmut run` — the path the 2026-08-26 incident took — unprotected.
+    sandbox_allow = (root, basetemp, Path(sys.prefix))
+    env = mutation_sandbox.sandbox_env(env)
+    clean = _run(
+        mutation_sandbox.wrap(clean_args, allow=sandbox_allow, profile_dir=artifact_dir, env=env),
+        cwd=root,
+        env=env,
+    )
     (artifact_dir / f"{label}-clean.txt").write_text(clean.stdout + clean.stderr, encoding="utf-8")
     if clean.returncode:
         raise GateError("baseline-test", f"{label}/{shard.name}: selected clean tests failed")
     mutation = _run(
-        (sys.executable, "-m", "mutmut", "run", "--max-children", "1"),
+        mutation_sandbox.wrap(
+            (sys.executable, "-m", "mutmut", "run", "--max-children", "1"),
+            allow=sandbox_allow,
+            profile_dir=artifact_dir,
+            env=env,
+        ),
         cwd=root,
         env=env,
     )
