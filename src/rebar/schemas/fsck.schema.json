@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/fsck.schema.json",
   "title": "Fsck",
-  "description": "Result of `rebar fsck --output json`: {issues, fixed, issue_count}. Each issue has a `kind` (corrupt, corrupt_create, missing_create, snapshot_inconsistent, orphan_event, warn, push_pending, …) and a detail; per-ticket kinds also carry ticket_id (and filename). `fixed` lists auto-repaired items. Exit 0 = clean, 1 = issues (unchanged).",
+  "description": "Result of `rebar fsck --output json`: {issues, fixed, issue_count}. Each issue has a `kind` (corrupt, corrupt_create, missing_create, snapshot_inconsistent, orphan_event, warn, push_pending, …) and a detail; per-ticket kinds also carry ticket_id (and filename). `fixed` lists auto-repaired items. Exit 0 = clean, 1 = issues (unchanged). The optional `returncode` carries that completed run's exit code as data (0 or 1) for structured surfaces (the library `fsck_report()` / MCP `fsck` tool); the CLI's own `--output json` payload omits it.",
   "type": "object",
   "additionalProperties": true,
   "required": ["issues", "fixed", "issue_count"],
@@ -22,6 +22,10 @@
       }
     },
     "fixed": { "type": "array", "items": { "type": "string" } },
-    "issue_count": { "type": "integer", "minimum": 0 }
+    "issue_count": { "type": "integer", "minimum": 0 },
+    "returncode": {
+      "type": "integer",
+      "description": "Exit code of the COMPLETED fsck run carried as data: 0 = clean, 1 = issues found. Optional — emitted by structured surfaces (library `fsck_report()`, MCP `fsck`), absent from the CLI's `--output json`."
+    }
   }
 }

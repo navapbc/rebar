@@ -133,7 +133,13 @@ def _check_create_events(
                 f"STATUS_FORK_RESOLVED: {ticket_id} — concurrent claim/status race resolved "
                 f"(dropped uuid={last.get('dropped_uuid')})"
             )
-            issues += 1
+            # Reported but NEVER counted — so it cannot drive fsck's exit code.
+            # The reducer ALREADY resolved the race deterministically; nothing is
+            # broken and there is nothing to repair. ``status_fork_resolutions`` is
+            # permanent derived state that survives compaction, so counting it would
+            # pin a busy store's fsck exit at 1 forever. Same report-only class as
+            # PUSH_PENDING (fsck_tracker_health.py) and TRACKER_DIRTY_TMP_EVENT,
+            # both ``is_issue=False``; documented in docs/user-guide.md.
     return lines, issues, signed_total, unsigned_total
 
 

@@ -22,6 +22,7 @@ MODEL_SCHEMAS: dict[str, str] = {
     "BridgeFsckOut": "bridge_fsck",
     "BridgeRunOut": "bridge_run",
     "BridgeStatusOut": "bridge_status",
+    "FsckOut": "fsck",
     "SignResultOut": "sign_result",
     "VerifySignatureResultOut": "verify_signature_result",
     "GroundingInfoOut": "grounding_info",

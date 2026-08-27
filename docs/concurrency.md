@@ -397,7 +397,9 @@ skew-independent key), **never by timestamp alone**.
 raced (e.g. both claimed the same open ticket) and one lost. This is now discoverable
 rather than silent: the reducer records each resolution in pure derived state
 (`status_fork_resolutions`, rebuilt identically on every replay), which `fsck` reports as
-a `STATUS_FORK_RESOLVED` finding and `show`/`list` surface as a field. Separately, a
+a `STATUS_FORK_RESOLVED` finding and `show`/`list` surface as a field — the finding is
+reported but **never counted**, so it does not fail `fsck`'s exit code (the race is
+already resolved; there is nothing to repair). Separately, a
 `claim` whose post-push merge reveals another clone already owns the ticket (the merged
 `assignee` — the ownership authority — is not the claimant) exits **10** ("claim lost on
 cross-clone merge") so the losing agent stops instead of duplicating work; when no merge

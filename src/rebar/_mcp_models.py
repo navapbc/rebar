@@ -247,6 +247,18 @@ try:
         binding_drift: dict
         store_integrity: list[dict]
 
+    class FsckOut(_Out):
+        """Structured ``fsck`` report (mirrors ``schemas/fsck.schema.json``).
+
+        ``returncode`` carries the COMPLETED run's exit code as data (0 = clean,
+        1 = issues found); it is absent from the CLI's own ``--output json`` payload,
+        hence optional here."""
+
+        issues: list[dict]
+        fixed: list[str]
+        issue_count: int
+        returncode: int | None = None
+
     class BridgeRunOut(_Out):
         route: Literal["preview", "run", "sync"]
         state: Literal[
@@ -397,6 +409,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]
     CreateResultOut = ClaimResultOut = GateResultOut = None  # type: ignore[assignment,misc]
     BridgeFsckOut = None  # type: ignore[assignment,misc]
+    FsckOut = None  # type: ignore[assignment,misc]
     BridgeRunOut = BridgeStatusOut = BridgeControlOut = None  # type: ignore[assignment,misc]
     BridgeAccessStepOut = BridgeAccessCheckOut = None  # type: ignore[assignment,misc]
     SignResultOut = VerifySignatureResultOut = None  # type: ignore[assignment,misc]

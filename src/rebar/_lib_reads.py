@@ -354,6 +354,86 @@ def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) ->
     return out.getvalue()
 
 
+def fsck_report(*, recover: bool = False, report_only: bool = False, repo_root=None) -> dict:
+    """Run the same in-process fsck as :func:`fsck`, but return the CANONICAL
+    structured report (``schemas.FSCK``) instead of the human text — and, crucially,
+    WITHOUT collapsing "the diagnosis is: N findings" into "the tool failed".
+
+    fsck is a DIAGNOSTIC: exit ``0`` (clean) and exit ``1`` (issues found) are BOTH
+    completed runs. This function therefore returns a ``dict`` for both, carrying the
+    completed run's exit code as DATA in ``returncode``; only a code outside ``(0, 1)``
+    — or exit 1 with NO findings, which is unreachable for a real scan and so means the
+    store could not be read at all — raises
+    :class:`RebarError`, preserving today's failure behaviour for genuine execution
+    failures.
+
+    Returns ``{"issues": [...], "fixed": [...], "issue_count": int, "returncode": int}``.
+    The non-recover path asks the CLI for ``--output=json`` so the shape comes from the
+    CLI's own transform (text and JSON cannot drift); the recover path has no JSON mode,
+    so its captured text goes through that SAME shared transform.
+    """
+    import contextlib
+    import io
+    import json as _json
+
+    from rebar._commands import fsck as _fsck_mod
+
+    out, err = io.StringIO(), io.StringIO()
+    if recover:
+        from rebar._commands import fsck_recover as _fr
+
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = _fr.fsck_recover_cli([], repo_root=repo_root)
+        raw = _fsck_mod._transform_json(out.getvalue())
+    else:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = _fsck_mod.fsck_cli(["--output=json"], repo_root=repo_root, no_mutate=report_only)
+        raw = out.getvalue()
+
+    if rc not in (0, 1):
+        raise RebarError(
+            f"rebar fsck failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",
+            returncode=rc,
+            stderr=err.getvalue(),
+        )
+    try:
+        payload = _json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError("fsck JSON payload is not an object")
+    except (ValueError, TypeError) as exc:
+        # Unparseable stdout means the run did not produce a report at all — an
+        # execution failure, not a clean/dirty diagnosis. Never fake an empty report.
+        raise RebarError(
+            f"rebar fsck produced no parseable JSON report (exit {rc}): {exc}",
+            returncode=rc,
+            stderr=err.getvalue(),
+        ) from exc
+    payload.setdefault("issues", [])
+    payload.setdefault("fixed", [])
+    payload.setdefault("issue_count", len(payload["issues"]))
+    if rc == 1 and not payload["issues"]:
+        # Exit 1 with NO reported findings is unreachable for a real scan, so it can
+        # only mean the scan never happened. The exit code is derived from _scan's
+        # COUNTED tally, while ``issues`` is every uppercase ``KIND:`` line the text
+        # report emitted — a strict SUPERSET of the counted ones (_commands/fsck.py
+        # _transform_json). So exit 1 implies >= 1 counted issue, hence >= 1 KIND line,
+        # hence a non-empty ``issues``. The empty case is the uninitialized/unscannable
+        # store, which _missing_tracker_result renders as exit 1 plus a payload
+        # byte-identical to a clean one (_commands/fsck.py, json branch) with its real
+        # diagnostic on the TEXT path only. Fail closed rather than hand back a
+        # fabricated clean report for a store that was never read.
+        detail = (err.getvalue() or out.getvalue()).strip()
+        raise RebarError(
+            "rebar fsck could not scan the store (exit 1 with no findings — an "
+            "uninitialized or unreadable tracker, not a clean store)"
+            + (f": {detail}" if detail else ""),
+            returncode=rc,
+            stderr=err.getvalue(),
+        )
+    payload["returncode"] = rc
+    return payload
+
+
 # NOTE: the deprecated ``rebar.list_epics()`` library function (DE7), the CLI
 # ``list-epics`` command, and the MCP ``list_epics`` tool were all removed pre-1.0
 # (the last two in ticket 5899). Compose the primitives directly instead::

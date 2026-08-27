@@ -52,6 +52,7 @@ CANONICAL: dict[str, str] = {
     "check_ac": schemas.GATE_RESULT,
     "quality_check": schemas.GATE_RESULT,
     "validate": schemas.VALIDATE_REPORT,
+    "fsck": schemas.FSCK,
     "get_file_impact": schemas.FILE_IMPACT,
     "get_verify_commands": schemas.VERIFY_COMMANDS,
     "create_ticket": schemas.CREATE_RESULT,
@@ -97,8 +98,6 @@ EXEMPT_GENERIC: dict[str, str] = {
     "attach_commits": "returns the small {ticket_id, attached} receipt of a union-add "
     "write (how many SHAs were recorded); there is no canonical schema for it, and the "
     "durable shape consumers read is the ticket's `commits` list, not this ack",
-    "fsck": "MCP fsck returns a human summary string; the canonical `fsck` schema "
-    "describes the CLI/library `--output json` shape, not the MCP string",
     "render_workflow": "workflow engine (WS-I): returns a Mermaid flowchart as a "
     "string (a read-only render); no canonical structured shape.",
 }
@@ -292,6 +291,7 @@ def _call_args(name: str, s: dict) -> dict:
         "check_ac": {"ticket_id": s["task"]},
         "quality_check": {"ticket_id": s["task"]},
         "validate": {},
+        "fsck": {},
         "get_file_impact": {"ticket_id": s["task"]},
         "get_verify_commands": {"ticket_id": s["task"]},
         "create_ticket": {"ticket_type": "task", "title": "Made by MCP"},
