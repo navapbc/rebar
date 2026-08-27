@@ -38,6 +38,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -72,11 +73,64 @@ def probe() -> str | None:
 
     Cached: the probe spawns a subprocess and the answer cannot change mid-run.
     """
-    if shutil.which("sandbox-exec"):
+    if shutil.which("sandbox-exec") and _seatbelt_works():
         return SEATBELT
     if shutil.which("bwrap") and _bwrap_works():
         return BWRAP
     return None
+
+
+def _seatbelt_works() -> bool:
+    """True when sandbox-exec actually DENIES a write — not merely when it runs.
+
+    `sandbox-exec` is Apple-deprecated, so its enforcement is an external capability
+    that can disappear under us. A non-enforcing stub satisfies `shutil.which` and
+    exits 0 while denying nothing, and a PATH-only check would report the sandbox
+    available and run every mutation UNSANDBOXED — the same flaw that disqualified
+    `unshare` and that `_bwrap_works` exists to avoid on Linux.
+
+    The probe requires BOTH signals: the child printed its liveness marker (so it
+    really ran and reached the write) AND the file is absent (so the write was
+    denied). Absence alone is not denial — a sandbox that failed to launch leaves the
+    file absent too, and reading that as success is exactly the false pass this probe
+    must not have.
+    """
+    exe = shutil.which("sandbox-exec")
+    if exe is None:
+        return False
+    marker = "seatbelt-probe-ran"
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "probe.txt"
+            profile = Path(tmp) / "probe.sb"
+            # An empty allow-list: every write is denied except the /dev literals the
+            # builder always re-permits, which is what carries the marker to stdout.
+            profile.write_text(build_seatbelt_profile(()), encoding="utf-8")
+            proc = subprocess.run(
+                [exe, "-f", str(profile), "/bin/sh", "-c", f"echo {marker}; echo x > {target}"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            ran = marker in (proc.stdout or "")
+            denied = not target.exists()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if not ran:
+        logger.warning(
+            "sandbox-exec is installed but the probe child never ran (%s); treating "
+            "the sandbox as unavailable rather than trusting an unverified mechanism.",
+            (proc.stderr or "").strip() or f"exit {proc.returncode}",
+        )
+        return False
+    if not denied:
+        logger.warning(
+            "sandbox-exec is installed but did NOT deny a write; treating the sandbox "
+            "as unavailable rather than trusting a mechanism that does not enforce."
+        )
+        return False
+    return True
 
 
 def _bwrap_works() -> bool:

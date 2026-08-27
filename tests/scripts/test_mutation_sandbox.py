@@ -192,6 +192,61 @@ def test_bwrap_present_but_unable_to_namespace_is_not_offered(monkeypatch):
     assert sb.probe() is None
 
 
+def test_seatbelt_present_but_not_enforcing_is_not_offered(monkeypatch):
+    """Presence on PATH is not capability — the same rule `bwrap` is held to.
+
+    `sandbox-exec` is Apple-DEPRECATED. A future macOS shipping it as a non-enforcing
+    stub would satisfy `shutil.which` while denying nothing, so a PATH-only probe would
+    report the sandbox available and every mutation run would proceed effectively
+    UNSANDBOXED — on the platform the 2026-08-26 incident actually happened on, and
+    without the abort the fail-closed design promises.
+    """
+    monkeypatch.setattr(
+        sb.shutil, "which", lambda n: "/usr/bin/sandbox-exec" if n == "sandbox-exec" else None
+    )
+    monkeypatch.setattr(sb, "_seatbelt_works", lambda: False)
+    sb.probe.cache_clear()
+    assert sb.probe() is None
+
+
+def test_seatbelt_probe_observes_denial_not_just_exit_status(tmp_path, monkeypatch):
+    """The probe must confirm a write was DENIED, not merely that the child ran.
+
+    A stub `sandbox-exec` that execs its argument verbatim exits 0 while enforcing
+    nothing. Keying on exit status alone would accept it.
+    """
+    stub = tmp_path / "sandbox-exec"
+    stub.write_text(
+        "#!/bin/sh\n"
+        # Mimic `sandbox-exec -f <profile> <cmd>...`: drop the flag pair, run the rest.
+        'while [ "$1" = "-f" ] || [ "$1" = "-p" ]; do shift 2; done\n'
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    monkeypatch.setattr(sb.shutil, "which", lambda n: str(stub) if n == "sandbox-exec" else None)
+    assert sb._seatbelt_works() is False, (
+        "a non-enforcing sandbox-exec that exits 0 must NOT be reported as a mechanism"
+    )
+
+
+def test_seatbelt_probe_rejects_a_mechanism_that_never_launches(tmp_path, monkeypatch):
+    """A launch failure must not read as a successful denial.
+
+    A `sandbox-exec` that cannot start writes nothing, so the probe's target file is
+    absent — indistinguishable from a real denial unless the probe also confirms the
+    child RAN. Without that second signal a broken mechanism reports as working, which
+    is the failure this whole module exists to prevent.
+    """
+    stub = tmp_path / "sandbox-exec"
+    stub.write_text("#!/bin/sh\necho 'sandbox-exec: broken' >&2\nexit 1\n", encoding="utf-8")
+    stub.chmod(0o755)
+    monkeypatch.setattr(sb.shutil, "which", lambda n: str(stub) if n == "sandbox-exec" else None)
+    assert sb._seatbelt_works() is False, (
+        "a sandbox-exec that never launched must NOT be reported as enforcing"
+    )
+
+
 def test_no_unshare_fallback_is_offered(monkeypatch):
     # `unshare --mount` denies nothing without a read-only remount, and unprivileged
     # CLONE_NEWUSER is disabled on hardened hosts — it can probe present yet not enforce.
