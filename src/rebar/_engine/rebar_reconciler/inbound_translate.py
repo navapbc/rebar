@@ -152,17 +152,18 @@ def _event_meta() -> tuple[int, str, str, str]:
 
 
 def _resolve_tracker_dir(repo_root: Path | None) -> Path:
-    """Resolve the .tickets-tracker directory. Honours the REBAR_TRACKER_DIR override."""
-    from rebar.config import tracker_dir_override
+    """The RESOLVED ticket store. Delegates to ``rebar.config.tracker_dir``, the single
+    resolver for the FULL precedence: the ``REBAR_TRACKER_DIR`` env override wins
+    verbatim, else the configured ``tracker.dir`` (absolute relocates the store, relative
+    is a dir name under the root). The hand-rolled body this replaced honoured only the
+    env override, so a store relocated by the ``tracker.dir`` KEY was silently missed."""
+    from rebar.config import tracker_dir
 
-    override = tracker_dir_override()
-    if override:
-        return Path(override)
     if repo_root is None:
         from rebar.config import reconciler_repo_root as _owned_repo_root
 
         repo_root = _owned_repo_root()
-    return Path(repo_root) / ".tickets-tracker"  # tickets-boundary-ok
+    return tracker_dir(repo_root)
 
 
 def _read_latest_status(tracker_dir: Path, ticket_id: str) -> str:

@@ -258,6 +258,15 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# only: it cannot stop a mutation at runtime (see ticket e668-b496-e264-4283 for
 	@# the OS sandbox), so it is defence in depth, not the control.
 	python scripts/check_destructive_test_exec.py
+	@# Tickets-store boundary gate (bug 0514-92e0-e6c4-4304). The store is RELOCATABLE
+	@# (`REBAR_TRACKER_DIR`, or an absolute `tracker.dir` — EV-3b), but 13 shipped call
+	@# sites composed `repo_root / ".tickets-tracker"` instead of resolving it, so the
+	@# deployed MCP server's `bridge_status` read a directory nobody configured while the
+	@# same server served 2763 tickets from the real store. Flags PATH COMPOSITION only —
+	@# docstrings, comments, error text and argparse help are untouched — and sanction is
+	@# `# tickets-boundary-ok: <reason>`, the reason MANDATORY: the bare marker was already
+	@# a documented convention that nothing enforced, and 7 of the 13 defects carried one.
+	python scripts/check_tickets_boundary.py
 	@# DCO sign-off identity consistency (story 35d2): contributor-facing guidance must not
 	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
 	python scripts/check_dco_identity.py

@@ -579,10 +579,10 @@ def materialize(
         raise
 
 
-# The directory name the materialized ticket store sits under, so a root materialized by
-# :func:`materialize_tickets` resolves through ``config.tracker_dir(<root>)`` (which defaults
-# to ``.tickets-tracker`` under the root). The ``tickets`` branch tree's top level IS the
-# tracker contents (the per-ticket event dirs), so we write that tree there verbatim.
+# The dir the materialized store sits under — deliberately the DEFAULT name so a root made by
+# :func:`materialize_tickets` resolves through ``config.tracker_dir(<that root>)`` onto it (the
+# ``tickets`` tree's top level IS the tracker contents). Relocation moves the OPERATOR's store.
+# tickets-boundary-ok: names a dir in the snapshot root this module creates, not the live store
 _TRACKER_DIRNAME = ".tickets-tracker"
 
 

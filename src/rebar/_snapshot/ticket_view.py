@@ -70,6 +70,10 @@ class PinnedTicketView:
             "ticket_object_reads": 0,
         }
         self._tmp = tempfile.mkdtemp(prefix=f"rebar-ticket-view-{self.run_id[:8]}-")
+        # A private, throwaway view root that no operator configures and nothing outside
+        # this object reads: honouring a relocation here would point the scratch view at
+        # the LIVE store, which is the opposite of what this line must do.
+        # tickets-boundary-ok: a scratch dir inside the mkdtemp() created on the line above
         self._temp_tracker = Path(self._tmp) / ".tickets-tracker"
         self._temp_tracker.mkdir()
         self._objects = TicketObjectStore(self.tracker, self.tickets_oid, self.metrics)

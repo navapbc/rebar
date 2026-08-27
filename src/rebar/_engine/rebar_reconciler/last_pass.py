@@ -1,7 +1,7 @@
 """Durable last-pass publication and bridge status snapshots.
 
 ``refs/reconciler/last-pass`` is the small authoritative witness.  A matching
-``.tickets-tracker/.bridge_state/last-pass.json`` may add local detail, but is
+``<store>/.bridge_state/last-pass.json`` may add local detail, but is
 never allowed to replace or contradict the ref record.  Status reads the pause,
 live lease, and completion witnesses once and applies one shared verdict order.
 """
@@ -32,7 +32,9 @@ _OUTCOME_TALLY_BUCKETS: tuple[str, ...] = (
     "skipped",
 )
 LAST_PASS_REF = "refs/reconciler/last-pass"
-DETAIL_RELATIVE = Path(".tickets-tracker/.bridge_state/last-pass.json")
+# Relative to the RESOLVED store root, NOT the repo root: the store is RELOCATABLE
+# (``REBAR_TRACKER_DIR`` / ``tracker.dir``), so join it onto ``_store_dir(repo_root)``.
+DETAIL_IN_STORE = Path(".bridge_state/last-pass.json")
 HEALTHY_VERDICTS = frozenset({"HEALTHY", "PAUSED", "RUNNING"})
 _ZERO_OID = "0" * 40
 
@@ -53,6 +55,15 @@ def _load_ref_lock():
     sys.modules[key] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _store_dir(repo_root: Path) -> Path:
+    """The RESOLVED ticket store for ``repo_root`` — ``REBAR_TRACKER_DIR`` >
+    ``tracker.dir`` > the default name under the root (``rebar.config.tracker_dir``).
+    Every local witness path below is joined onto THIS, never onto a hardcoded name."""
+    from rebar.config import tracker_dir
+
+    return tracker_dir(repo_root)
 
 
 def _remote(repo_root: Path) -> str | None:
@@ -86,7 +97,7 @@ def resolve_environment_id(repo_root: Path, explicit: str | None = None) -> str:
         if not value:
             raise LastPassError("REBAR_ENV_ID is set but empty")
         return value
-    path = repo_root / ".tickets-tracker" / ".env-id"
+    path = _store_dir(repo_root) / ".env-id"
     try:
         value = path.read_text(encoding="utf-8").strip()
     except OSError as exc:
@@ -167,7 +178,7 @@ def _read_record(
 def _read_matching_detail(
     repo_root: Path, record: dict[str, Any] | None
 ) -> tuple[str, dict[str, Any] | None]:
-    path = repo_root / DETAIL_RELATIVE
+    path = _store_dir(repo_root) / DETAIL_IN_STORE
     try:
         decoded = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -265,7 +276,7 @@ def snapshot(
 
 
 def _write_detail(repo_root: Path, record: dict[str, Any], detail: dict[str, Any] | None) -> None:
-    path = repo_root / DETAIL_RELATIVE
+    path = _store_dir(repo_root) / DETAIL_IN_STORE
     path.parent.mkdir(parents=True, exist_ok=True)
     document = {**(detail or {}), **record}
     fd, temporary = tempfile.mkstemp(prefix="last-pass-", suffix=".json", dir=path.parent)

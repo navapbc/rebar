@@ -1,7 +1,8 @@
 """Local binding store for Jira bidirectional sync.
 
 Maps local ticket IDs ↔ Jira issue keys.  Persisted as JSON at
-`.tickets-tracker/.bridge_state/bindings.json` on the tickets branch.  # tickets-boundary-ok
+`<store>/.bridge_state/bindings.json` on the tickets branch, where `<store>` is the
+RESOLVED (relocatable) tracker directory.
 
 Neither persistence nor lifecycle policy is implemented here.  ``BindingRepository``
 (RP-02 S1) owns the four state files — live store, retired sidecar, GET-rotation sidecar,
@@ -597,6 +598,14 @@ class BindingStore:
 
 
 def load_binding_store(repo_root: Path) -> BindingStore:
-    """Entry point for the reconciler orchestrator — call at pass start."""
-    tracker_dir = repo_root / ".tickets-tracker"  # tickets-boundary-ok
-    return BindingStore(tracker_dir)
+    """Entry point for the reconciler orchestrator — call at pass start.
+
+    The store is RELOCATABLE, so the binding state directory is RESOLVED through
+    ``rebar.config.tracker_dir`` (``REBAR_TRACKER_DIR`` > ``tracker.dir`` > the default
+    ``.tickets-tracker`` under the repo root) rather than composed from the default
+    name — otherwise a relocated deployment would read and write bindings in a
+    directory the operator never configured.
+    """
+    from rebar.config import tracker_dir as _resolve_tracker_dir
+
+    return BindingStore(_resolve_tracker_dir(repo_root))

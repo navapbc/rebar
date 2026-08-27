@@ -70,8 +70,12 @@ __all__ = [
 TICKETS_BRANCH = "tickets"  # short name / ``<branch>:<path>`` spec + ``rev-parse`` target
 TICKETS_REF = f"refs/heads/{TICKETS_BRANCH}"  # fully-qualified ref for ``update-ref``
 
-# The tickets orphan-branch worktree, relative to ``<repo_root>``. The binding-store
-# commit-back stages its state files here.  # tickets-boundary-ok
+# The tickets orphan-branch worktree name. The binding-store commit-back stages its
+# state files under this COMMITTED-TREE label.
+# Relocating the ON-DISK store (REBAR_TRACKER_DIR / tracker.dir) does not rename this
+# entry in the committed `tickets` tree, so the pathspec built from it stays correct;
+# consumers resolve the on-disk root separately via config.tracker_dir().
+# tickets-boundary-ok: a committed-TREE pathspec label, never an on-disk store path
 TRACKER_DIR = ".tickets-tracker"
 # The bridge-state subdirectory (under ``TRACKER_DIR``) holding the binding stores.
 BRIDGE_STATE_DIR = ".bridge_state"

@@ -339,6 +339,29 @@ marker from `# tickets-boundary-ok`: that convention sanctions
 boundary-crossing *reads/layout* knowledge of `.tickets-tracker`, while
 `# raw-git-ok` sanctions raw git *writes*.
 
+## The tickets-store boundary gate
+
+The ticket store is **relocatable** — `config.tracker_dir()` resolves it through
+the `REBAR_TRACKER_DIR` override and the `tracker.dir` key, where an absolute
+value relocates the store outright (EV-3b). Code that instead *composes*
+`repo_root / ".tickets-tracker"` silently ignores that configuration and works
+against a directory the operator never named.
+
+CI enforces this with the **tickets-boundary gate**
+(`scripts/check_tickets_boundary.py`, bug 0514): a string literal naming the
+store fails the build when it appears in a path-composing position — a `/` join,
+an `os.path.join` argument, a `Path(...)` argument, or a name bound to the bare
+dir name. It is AST-based, so docstrings, comments, error text, and argparse help
+are excluded structurally; only composition is a violation.
+
+Sanction is `# tickets-boundary-ok: <reason>`, and **the reason is mandatory**.
+The bare marker predates the gate and was documented but unenforced, so it had
+been applied as a rubber stamp: seven of the thirteen defects the gate was
+written to drain carried one. A reasonless marker therefore gets its own
+diagnostic rather than being reported as unmarked. Legitimate sanctioned shapes
+are the default name inside a resolver, and a path built inside a temp or
+snapshot directory the code itself just created — never the configured store.
+
 ## Module-size policy
 
 rebar is built to be edited by agents, which read a unit whole. The balance is

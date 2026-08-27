@@ -45,6 +45,13 @@ def _load(name: str, relpath: str):
     return lazy_load(name, relpath)
 
 
+def _tracker_dir(repo_root: Path) -> Path:
+    """The RELOCATABLE store, RESOLVED: env > ``tracker.dir`` > default under the root."""
+    from rebar.config import tracker_dir
+
+    return tracker_dir(repo_root)
+
+
 # ---------------------------------------------------------------------------
 # Leaf-helper re-exports. reconcile_helpers.py holds the pure pass-support
 # utilities that carry no back-edge to the reconcile_once spine (status
@@ -307,15 +314,11 @@ def _load_snapshots(ctx: _PassContext) -> None:
     snapshots_dir = repo_root / "bridge_state" / "snapshots"
     snapshots_dir.mkdir(parents=True, exist_ok=True)
 
-    # Read previous snapshot from the tickets-tracker directory (persisted  # tickets-boundary-ok
-    # between GHA runs via the commit-back step). The earlier approach wrote
-    # prev.json to bridge_state/snapshots/ on the main-branch worktree, but
-    # that filesystem is ephemeral — every GHA run starts fresh, so
-    # prev_snapshot was always {} and the differ re-derived all 2050+
-    # inbound_create mutations on every pass. Writing to the tracker dir  # tickets-boundary-ok
-    # ensures the snapshot survives between runs because the workflow's
-    # commit-back step commits everything under that directory.  # tickets-boundary-ok
-    tracker_dir = repo_root / ".tickets-tracker"  # tickets-boundary-ok
+    # Previous snapshot: kept in the ticket store so it survives between GHA runs (the
+    # commit-back step commits that directory; bridge_state/snapshots/ on the main-branch
+    # worktree was ephemeral, so the differ re-derived every mutation each pass). RESOLVED,
+    # not composed — this also seeds ``ctx.tracker_dir`` (consumed by run_differs).
+    tracker_dir = _tracker_dir(repo_root)
     prev_dir = tracker_dir / ".bridge_state"
     prev_dir.mkdir(parents=True, exist_ok=True)
     prev_path = prev_dir / "prev_snapshot.json"
@@ -447,13 +450,12 @@ def _apply_mutations(ctx: _PassContext) -> None:
 
     # Story 21dd: the reconciler's outbound apply publishes ticket writes externally
     # (and to Jira), so fail CLOSED on a store this rebar cannot interpret BEFORE any
-    # mutation. Guarded by `persist` so dry-run / cap-0 preview passes (which write
-    # nothing) are excluded. The reconciler resolves the store directly, so use the
-    # `.tickets-tracker` boundary here — not config.tracker_dir().
+    # mutation. Guarded by `persist` so dry-run / cap-0 previews are excluded. RESOLVED,
+    # not composed: a repo-root path would compat-check an unconfigured directory.
     if persist:
         from rebar._store.compat import check_store_compat
 
-        check_store_compat(repo_root / ".tickets-tracker")  # tickets-boundary-ok — Finding 2
+        check_store_compat(_tracker_dir(repo_root))
 
     # -------------------------------------------------------------------
     # Post-filter: when filter_local_ids is set, discard mutations that

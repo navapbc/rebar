@@ -637,14 +637,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(raw)
 
-    # Resolve tracker path: explicit arg > env override > repo root default
-    from rebar.config import tracker_dir_override
-
-    _override = tracker_dir_override()
+    # Resolve tracker path: explicit arg > the full config resolver (env override >
+    # the ``tracker.dir`` key > the default name under the detected repo root).
     if args.tickets_tracker:
         tracker_path = Path(args.tickets_tracker)
-    elif _override:
-        tracker_path = Path(_override)
     else:
         # Fall back to repo root detection
         try:
@@ -659,8 +655,12 @@ def main(argv: list[str] | None = None) -> int:
             repo_root = Path(result.stdout.strip())
         except Exception:  # noqa: BLE001 — git rev-parse fallback: an unresolvable repo root defaults to cwd
             repo_root = Path.cwd()
-        # fsck walks the tracker directly by design.
-        tracker_path = repo_root / ".tickets-tracker"  # tickets-boundary-ok
+        # fsck walks the tracker directly by design, but the store is RELOCATABLE:
+        # the previous branch honoured only the env override, so a store relocated by
+        # the ``tracker.dir`` KEY was audited at the wrong path.
+        from rebar.config import tracker_dir as _resolve_store
+
+        tracker_path = _resolve_store(repo_root)
 
     # --repair is the ONE writing mode, and it lives in its own module so the
     # audit functions above keep their read-only (L9) boundary. It consumes

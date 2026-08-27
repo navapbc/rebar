@@ -151,6 +151,10 @@ def tracker_dir(root: str | os.PathLike[str] | None = None) -> Path:
         # Locating the store must not be coupled to config validity (it was env-only
         # before): a malformed config falls back to the default name. The fail-closed
         # gates (close/verify) surface the ConfigError via their own load_config.
+        # Relocation is applied BY THIS FUNCTION: REBAR_TRACKER_DIR already returned
+        # above, and an absolute tracker.dir is returned verbatim below. Only a config
+        # that will not parse reaches here, and then there is no configured value.
+        # tickets-boundary-ok: the ConfigError-only default INSIDE tracker_dir() itself
         name = ".tickets-tracker"
     return Path(name) if os.path.isabs(name) else repo_root(root) / name
 

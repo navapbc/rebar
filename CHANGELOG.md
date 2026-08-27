@@ -28,6 +28,29 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   machine-readable over the MCP envelope rather than requiring message-text matching.
 
 
+### Fixed
+
+- **A RELOCATED ticket store is now honoured by the reconciler, bridge, and snapshot paths.**
+  `config.tracker_dir()` has always documented the store as relocatable — `REBAR_TRACKER_DIR`
+  wins verbatim, and an absolute `tracker.dir` relocates the store (EV-3b) — but 13 shipped
+  call sites composed `repo_root/.tickets-tracker` directly and ignored that configuration.
+  The most visible symptom was `bridge_status` failing with *"cannot read local environment id
+  from `<repo_root>/.tickets-tracker/.env-id`"* on a deployment whose store is elsewhere and
+  demonstrably healthy. All 13 now resolve the store through the single seam.
+  **No behaviour change for the default in-tree layout**, where the resolver returns exactly
+  the path these sites used to compose.
+  A new `make lint` gate (`scripts/check_tickets_boundary.py`) rejects new store-path
+  composition so the drained sites cannot quietly regrow; sanction an intentional
+  boundary-crossing path with `# tickets-boundary-ok: <reason>` (the reason is mandatory).
+
+  **Operator note — a relocated deployment may hold an inert stale directory.** Before this
+  fix, the MUTATING reconciler paths (`BRIDGE_ALERT` publication and the bridge sync mapping)
+  wrote under `<repo_root>/.tickets-tracker` even when the store lived elsewhere. This release
+  performs **no migration**: after the fix nothing reads that location, so any residue is inert
+  rather than divergent, and deleting a directory rebar no longer interprets is left to you.
+  If your store is relocated, check for a stale `<repo_root>/.tickets-tracker/` and remove it
+  once `bridge_status` reports healthy.
+
 ### Added
 
 - **Config-driven reconciler mapping seam (`[tool.rebar.mapping]`).** The reconciler's
