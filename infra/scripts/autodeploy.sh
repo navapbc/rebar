@@ -377,6 +377,7 @@ mcp_run_new() {
     --restart always \
     --stop-timeout "$MCP_STOP_GRACE" \
     --env-file "$COMPOSE_DIR/.env" \
+    -e FORWARDED_ALLOW_IPS='*' \
     -e REBAR_MCP_TRANSPORT=http \
     -e REBAR_MCP_HTTP_HOST=0.0.0.0 \
     -e REBAR_MCP_HTTP_PORT=8091 \
