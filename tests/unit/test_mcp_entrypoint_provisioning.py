@@ -511,3 +511,44 @@ def test_a_failing_credential_helper_config_does_not_abort_provisioning(
     )
     assert "could not install the tickets credential helper" in run.stderr
     assert run.returncode != 0, "the failure must surface in the exit status"
+
+
+def test_the_code_root_is_provisioned_so_attested_gates_can_resolve_main(tmp_path: Path) -> None:
+    """The entrypoint must provision a CODE repository, not just the tickets store.
+
+    Every attested-source gate — `review_plan`, `verify_completion`, `review_code`,
+    `reconcile` — resolves a ref against the repo root. The image cannot supply one:
+    `.dockerignore` excludes `.git` and `Dockerfile.mcp` does a plain `COPY . /app`, so `/app`
+    is a source copy with no object DB and `origin/main` cannot resolve. The gates fail with
+    `cannot resolve ref 'origin/main' to a commit in '.'`, which means NO attestation can be
+    earned through the deployed server and no task/story/epic can close through it without a
+    force — the one thing agents are forbidden to use.
+
+    `source: "local"` runs today, which is what isolates the fault: the gate CODE is fine, the
+    repository is missing. So the fix is to provision one, and this asserts the provisioning
+    actually executes rather than that the script contains a line that would.
+
+    The tracker is healthy here (`head_resolves=True`) so no tickets re-clone fires — any
+    clone observed is the CODE clone, which keeps the assertion unambiguous.
+    """
+    code = tmp_path / "code"
+    run = _provision(tmp_path, head_resolves=True, env={"MCP_CODE_DIR": str(code)})
+
+    assert run.ran_to_completion, (
+        f"precondition: provisioning must run to completion\nrc={run.returncode}\n{run.stderr}"
+    )
+
+    main_clones = [c for c in run.git_calls if c.startswith("clone ") and "--branch main" in c]
+    assert main_clones, (
+        "the entrypoint must clone the CODE side (branch main) so the attested gates have a "
+        f"repository to resolve origin/main against. git calls seen: {run.git_calls}\n"
+        f"{run.stderr}"
+    )
+    assert str(code) in main_clones[0], (
+        f"the code clone must land in MCP_CODE_DIR ({code}), not somewhere else: {main_clones[0]!r}"
+    )
+    contents = sorted(p.name for p in code.iterdir()) if code.exists() else "<absent>"
+    assert (code / ".git").is_dir(), (
+        "MCP_CODE_DIR must end up an actual repository (a .git dir), not a source copy — "
+        f"that is the whole defect. contents: {contents}"
+    )
