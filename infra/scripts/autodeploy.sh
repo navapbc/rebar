@@ -507,7 +507,14 @@ if changed "$CONFIG_PATHS"; then
 fi
 
 # ── review-bot: rebuild + restart ONLY on a source change ─────────────────────
-if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
+# Set when the review-bot deploy DEFERRED this tick. The deferral must scope to the BOT block,
+# not terminate the script: the mcp block below is documented as independent of this one and is
+# a pointer-swap that never kills an in-flight op, so it has no reason to wait on the bot drain.
+bot_deferred=0
+# Hoisted into a function purely so the deferral can `return` — autodeploy.sh is a linear
+# oneshot with no enclosing loop, so `continue` is unavailable. The wrapper keeps the body's
+# indentation unchanged, so this stays a few hunks instead of re-indenting fifty lines.
+deploy_review_bot() {
   # ── drain gate: never recreate the container mid-review (bug 34cd) ───────────
   # `docker compose up -d` STOPS the running container, and uvicorn's shutdown drains only
   # the webhook QUEUE (app.py waits on queue.join()) — the backfill reconciler's inline
@@ -541,7 +548,10 @@ if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
       marker AUTODEPLOY_DEFERRED review-in-flight \
         "target=$TARGET in_flight=$inflight deferred_for=${waited}s bound=${DEPLOY_DEFER_MAX}s"
       log "review-bot busy ($inflight review(s) in flight); DEFERRING the deploy of $TARGET (${waited}s of the ${DEPLOY_DEFER_MAX}s bound used); deployed-sha unchanged; retrying on the next timer tick"
-      exit 0
+      # Leave the BOT path only: no rm -f "$DEFER_FILE" (the episode continues), no rebuild,
+      # deployed-sha not advanced — but the mcp block below still runs.
+      bot_deferred=1
+      return 0
     fi
     # Bound exhausted: recreate anyway, but make the kill COUNTABLE. Without this marker the
     # interruption is unobservable — which is the whole reason a fully live-locked gate could
@@ -612,6 +622,9 @@ if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
   fi
   prune_docker_caches
   log "review-bot redeployed + healthy"
+}
+if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
+  deploy_review_bot
 fi
 
 # ── mcp: blue-green pointer-swap deploy ONLY on a source change ────────────────
@@ -714,6 +727,16 @@ if changed "$MCP_PATHS"; then
   fi
   prune_docker_caches
   log "mcp redeployed + healthy at 127.0.0.1:${mcp_newport}"
+fi
+
+# ── review-bot deferral: stop HERE, AFTER the independent mcp path ─────────────
+# The bot deploy was deferred, so this tick is NOT a complete deploy of $TARGET: deployed-sha
+# must not advance and the deferral EPISODE in $DEFER_FILE must carry forward. Everything below
+# (host-observability re-materialization, certbot re-materialization, the deployed-sha advance)
+# is skipped exactly as the pre-fix `exit 0` skipped it — the ONLY behavioural difference is
+# that the mcp blue-green block above already ran on its own path.
+if [ "$bot_deferred" = 1 ]; then
+  exit 0
 fi
 
 # ── host observability probe: re-materialize on a probe-source change ─────────
