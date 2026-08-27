@@ -78,7 +78,17 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # FAILURE POSTURE IS SOFT: no PAT, or a failed clone/ensure, must NOT stop the container
 # booting — the live clone is a DEPLOY-STEP CANARY (it needs the real SSM PAT + a running
 # container), so it is not exercised by the in-repo unit tests.
+#   4. Clone `main` BLOBLESS + single-branch into $MCP_CODE_DIR and point REBAR_ROOT at it,
+#      so the attested LLM gates have an object database to resolve `origin/main` against.
+#      `.dockerignore` excludes `.git` and this image is `COPY . /app`, so /app is a source
+#      copy with no object DB — without this every `source=attested` gate failed with
+#      "cannot resolve ref 'origin/main' to a commit in '.'" and no attestation could be
+#      earned through the deployed server (ADR 0104 §3 designs it to mint both op-cert kinds).
+#      Blobless because a full clone of this repository is prohibitively large and the
+#      snapshot machinery fetches what it needs on demand.
 ENV REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets \
+    MCP_CODE_DIR=/var/gerrit/site/mcp-code \
+    REBAR_ROOT=/var/gerrit/site/mcp-code \
     MCP_TICKETS_URL=https://github.com/navapbc/rebar.git
 # The entrypoint is a REAL FILE (infra/scripts/mcp-entrypoint.sh), installed onto PATH the
 # same way Dockerfile.reviewbot installs reviewbot-ensure-tickets.sh. It used to be echoed
