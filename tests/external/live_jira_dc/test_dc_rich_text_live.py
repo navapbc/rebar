@@ -127,6 +127,72 @@ def _push_and_converge(
 
 @_skip
 @_skip_no_extra
+def test_live_rich_text_direct_wire_probe(
+    dc_transport: Any,
+    jira_dc_project: str,
+    bound_dc_issue: Any,
+    dc_request: Any,
+) -> None:
+    """DIAGNOSTIC PROBE (bug reckless-diabolic-kob): isolate Jira DC's renderer from the
+    reconcile machinery.
+
+    The two rich-text tests below fail with an EMPTY rendered description and a perpetual
+    re-emit. Offline the DC codec produces well-formed wiki (verified), so the open question
+    is purely live: does Jira DC STORE and RENDER that wiki wire when it is PUT directly,
+    bypassing the whole reconcile pass? This test computes the EXACT wire the outbound mapper
+    would send (``WikiTextCodec(rich=True).normalize_outbound(fit_outbound(md))``, i.e.
+    ``outbound_mapper.py``'s description branch), PUTs it straight through the transport's
+    field edit, and reads back BOTH the raw stored ``fields.description`` and the
+    ``renderedFields`` HTML — surfacing all three verbatim on any failure. A single live run
+    then discriminates: a green probe means Jira DC handles the wire and the defect is in the
+    reconcile applier; a red probe (raw not stored verbatim, or rendered empty/wrong) means
+    the defect is in Jira DC's storage/renderer of that wire, and the diag shows exactly how.
+    """
+    from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
+
+    _local_id, key = bound_dc_issue
+    dc_transport.project = jira_dc_project
+
+    heading = _uniq("graywolf-probe-heading")
+    bold = _uniq("graywolf-probe-bold")
+    code = _uniq("graywolf_probe_code")
+    md = _rich_markdown(heading, bold, code)
+    codec = WikiTextCodec(rich=True)
+    wire = codec.normalize_outbound(codec.fit_outbound(md))
+
+    dc_transport.update_issue(key, description=wire)
+
+    raw = (dc_transport.get_issue_by_rest(key).get("fields") or {}).get("description")
+    status, payload = dc_request(f"/rest/api/2/issue/{key}?expand=renderedFields")
+    rendered = (
+        (payload.get("renderedFields") or {}).get("description")
+        if isinstance(payload, dict)
+        else None
+    )
+
+    diag = (
+        f"\n--- DIRECT WIRE PROBE {key} ---"
+        f"\nSENT wire:  {wire!r}"
+        f"\nRAW stored: {raw!r}"
+        f"\nRENDERED:   {rendered!r}"
+        f"\n(renderedFields GET status {status})\n"
+    )
+
+    assert raw == wire, f"Jira DC did not store the wiki wire verbatim.{diag}"
+    lowered = (rendered or "").lower()
+    assert heading in (rendered or "") and "<h1" in lowered, (
+        f"the heading did not render to an <h1> element on a direct wire PUT.{diag}"
+    )
+    assert bold in (rendered or "") and ("<b>" in lowered or "<strong>" in lowered), (
+        f"the bold span did not render to <b>/<strong> on a direct wire PUT.{diag}"
+    )
+    assert code in (rendered or "") and ("<pre" in lowered or 'class="code' in lowered), (
+        f"the code block did not render to a code macro on a direct wire PUT.{diag}"
+    )
+
+
+@_skip
+@_skip_no_extra
 def test_live_rich_text_renders_and_echo_is_safe(
     dc_store_copy_repo: Path,
     dc_transport: Any,
@@ -175,15 +241,21 @@ def test_live_rich_text_renders_and_echo_is_safe(
     )
 
     html = _rendered_description_html(dc_request, key)
+    # DIAGNOSTIC (bug reckless-diabolic-kob): also read the RAW stored description the
+    # reconcile push landed, so a failure shows whether the applier stored the wiki wire,
+    # an empty value, or something Jira mangled — the complement to the direct-wire probe.
+    raw_stored = (dc_transport.get_issue_by_rest(key).get("fields") or {}).get("description")
+    _diag = f"\nRAW stored description after reconcile push: {raw_stored!r}"
     lowered = html.lower()
     assert heading in html and "<h1" in lowered, (
-        f"the heading did not render to an <h1> element. rendered HTML:\n{html}"
+        f"the heading did not render to an <h1> element.{_diag}\nrendered HTML:\n{html}"
     )
     assert bold in html and ("<b>" in lowered or "<strong>" in lowered), (
-        f"the bold span did not render to a <b>/<strong> element. rendered HTML:\n{html}"
+        f"the bold span did not render to a <b>/<strong> element.{_diag}\nrendered HTML:\n{html}"
     )
     assert code in html and ("<pre" in lowered or 'class="code' in lowered), (
-        f"the code block did not render to a code macro (<pre>/code panel). rendered HTML:\n{html}"
+        f"the code block did not render to a code macro (<pre>/code panel).{_diag}\n"
+        f"rendered HTML:\n{html}"
     )
 
     # ECHO-SAFETY — the immediately-following pass must write nothing.
