@@ -35,12 +35,23 @@ WORKDIR /app
 # Install THROUGH the committed uv.lock (same verified dependency set as CI/local dev):
 #  - agents: the rebar.llm gate runtime the certified tools drive.
 #  - mcp: the FastMCP server + Streamable-HTTP transport (uvicorn) + pyjwt.
+#  - bedrock: the provider package for the model this deployment is CONFIGURED to use.
+#    `[agents]` is `pydantic-ai-slim[anthropic,retries,duckduckgo]` and has never carried
+#    Bedrock; `[bedrock]` is a deliberately separate opt-in extra so boto3 stays out of the
+#    lean default install (ticket sporadic-bratty-porcupine). rebar.toml pins the model to
+#    `bedrock:us.anthropic.claude-*`, so WITHOUT this extra the container starts clean and
+#    every certified LLM tool fails at gate time with "the optional bedrock provider package
+#    is not installed" — returning an unsigned INDETERMINATE and minting no op-cert (bug
+#    d43e-c24f-dd39-44e9). `--no-dev` excludes the `[dev]` group that supplies boto3 locally
+#    and masked this. The coupling is guarded by tests/unit/test_mcp_on_box_infra.py.
 # Secrets (the static bearer tokens file, the op-cert signing key) are materialized
 # OUTSIDE the app (avians' fetch-secrets slice) and bind-mounted in — the app runtime
-# needs no boto3/SSM/AWS.
+# fetches no SSM parameters and holds no AWS key material of its own. It DOES now carry
+# boto3 (via the bedrock extra above) and DOES call AWS, but only bedrock:InvokeModel,
+# authenticated from the ambient instance-role credential chain — rebar manages no key.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY . /app
-RUN uv sync --locked --no-dev --extra agents --extra mcp
+RUN uv sync --locked --no-dev --extra agents --extra mcp --extra bedrock
 ENV PATH="/app/.venv/bin:$PATH"
 
 # The HTTP transport posture is supplied by the compose service env (REBAR_MCP_*).

@@ -465,3 +465,156 @@ def test_mcp_entrypoint_still_execs_the_server_last() -> None:
     assert executable[-1] == 'exec "$@"', (
         f"exec must be the LAST action in the entrypoint; found {executable[-1]!r}"
     )
+
+
+# ------------------------------------------------------- configured provider <-> image extras
+
+_REBAR_TOML = _REPO / "rebar.toml"
+
+# Which `pyproject.toml` optional-dependency group supplies the client package for a given
+# provider qualifier. `anthropic` rides inside `agents`
+# (`pydantic-ai-slim[anthropic,...]`); `bedrock` is a deliberately SEPARATE opt-in extra so
+# boto3 stays out of the default install (ticket sporadic-bratty-porcupine). A provider with
+# no entry here has no extra that can serve it, which the test reports as such rather than
+# silently skipping.
+_EXTRA_SUPPLYING_PROVIDER: dict[str, str] = {
+    "anthropic": "agents",
+    "bedrock": "bedrock",
+}
+
+
+def _configured_llm_providers() -> set[str]:
+    """Every provider the project's own `rebar.toml` can select for an LLM op.
+
+    Covers the scalar `[llm] model` (a SECOND resolution path the class table cannot
+    reach — see the rationale block above `[llm]` in rebar.toml), every
+    `[llm.model_classes]` primary, and every `fallback` entry, because
+    `model_classes.should_fall_back` can route a live call to a fallback provider.
+
+    Provider inference goes through rebar's OWN `infer_provider` rather than a local regex,
+    so this test cannot drift away from the resolver it is guarding.
+    """
+    import tomllib
+
+    from rebar.llm.config import infer_provider
+
+    llm = tomllib.loads(_REBAR_TOML.read_text(encoding="utf-8")).get("llm", {})
+    models: list[str] = []
+    if isinstance(llm.get("model"), str):
+        models.append(llm["model"])
+    for slot in (llm.get("model_classes") or {}).values():
+        if not isinstance(slot, dict):
+            continue
+        if isinstance(slot.get("model"), str):
+            models.append(slot["model"])
+        for entry in slot.get("fallback") or []:
+            if isinstance(entry, dict) and isinstance(entry.get("model"), str):
+                models.append(entry["model"])
+
+    providers = {p for p in (infer_provider(m, None) for m in models) if p}
+    assert providers, (
+        "parsed no LLM providers out of rebar.toml — the parse is broken, or the [llm] "
+        "table lost its model config; either way this guard would pass vacuously"
+    )
+    return providers
+
+
+def _dockerfile_mcp_installed_extras() -> set[str]:
+    """The extras Dockerfile.mcp's locked `uv sync` actually installs."""
+    line = next(
+        (
+            ln
+            for ln in _DOCKERFILE.read_text(encoding="utf-8").splitlines()
+            if "uv sync" in ln and not ln.lstrip().startswith("#")
+        ),
+        None,
+    )
+    assert line is not None, "Dockerfile.mcp must install its dependencies with `uv sync`"
+    return set(re.findall(r"--extra[= ]([A-Za-z0-9_-]+)", line))
+
+
+def test_dockerfile_mcp_installs_an_extra_for_every_configured_llm_provider() -> None:
+    """The image must be able to SERVE every provider the config can SELECT.
+
+    This is the defect behind bug d43e-c24f-dd39-44e9: `rebar.toml` pins
+    `bedrock:us.anthropic.claude-opus-4-8`, but the image installed only `agents` + `mcp`.
+    `[agents]` is `pydantic-ai-slim[anthropic,retries,duckduckgo]` — it has never carried
+    Bedrock — and `--no-dev` excludes the `[dev]` group that masks this locally. So the
+    container started clean and every certified LLM tool failed at gate time with
+    "the optional bedrock provider package is not installed", returning an unsigned
+    INDETERMINATE and minting no plan-review attestation.
+
+    Asserted as a COUPLING between two files, not as a fixed string: re-point the config at
+    a provider the image cannot serve and this fails, which is the class of defect rather
+    than just this instance of it.
+    """
+    configured = _configured_llm_providers()
+    installed = _dockerfile_mcp_installed_extras()
+
+    unserviceable = sorted(p for p in configured if p not in _EXTRA_SUPPLYING_PROVIDER)
+    assert not unserviceable, (
+        f"rebar.toml configures provider(s) {unserviceable} that no pyproject extra supplies; "
+        "add the extra (and map it in _EXTRA_SUPPLYING_PROVIDER) before the image can serve it"
+    )
+
+    missing = sorted(
+        {_EXTRA_SUPPLYING_PROVIDER[p] for p in configured} - installed,
+    )
+    assert not missing, (
+        f"Dockerfile.mcp installs extras {sorted(installed)}, which cannot serve every "
+        f"provider configured in rebar.toml ({sorted(configured)}): missing extra(s) "
+        f"{missing}. Add them to the `uv sync` line, or the deployed MCP server degrades to "
+        "the deterministic floor and mints no op-cert."
+    )
+
+
+# --------------------------------------------------------------- mcp Bedrock region wiring
+
+# The instance runs in us-east-1 and rebar.toml pins the same region beside the region-scoped
+# `us.*` inference-profile ids.
+_MCP_REGION_VARS = ("REBAR_LLM_BEDROCK_REGION", "AWS_DEFAULT_REGION")
+
+
+def test_compose_mcp_sets_both_bedrock_region_vars() -> None:
+    """The mcp service must resolve an AWS region, exactly as the review-bot service does.
+
+    MEASURED on the box for the sibling service (docker-compose.yml's review-bot env, ticket
+    a574): with neither var set, in-container `boto3.session.Session().region_name` is None
+    and bedrock-runtime construction raises NoRegionError — independently of IMDS, which
+    resolves fine (ticket 9249). BOTH vars are required and they are not interchangeable:
+    rebar's own knob threads into BedrockProvider and is recorded in the signed verdict's
+    provider provenance, while AWS_DEFAULT_REGION is what any bare boto3 caller reads.
+    """
+    svc = yaml.safe_load(_COMPOSE.read_text())["services"]["mcp"]
+    env = svc["environment"]
+    for var in _MCP_REGION_VARS:
+        assert env.get(var), (
+            f"the mcp service must set {var}; without a resolvable region the Bedrock "
+            "provider fails closed at gate time even with valid instance-role credentials"
+        )
+    assert env["REBAR_LLM_BEDROCK_REGION"] == env["AWS_DEFAULT_REGION"], (
+        "the two region vars must agree; a split would let rebar's provider and a bare boto3 "
+        "caller talk to different regions"
+    )
+
+
+def _mcp_run_new_body() -> str:
+    """The body of autodeploy.sh's `mcp_run_new`, so a match in a sibling function can't count."""
+    script = _AUTODEPLOY.read_text(encoding="utf-8")
+    start = script.index("mcp_run_new() {")
+    end = script.index("\n}", start)
+    return script[start:end]
+
+
+def test_autodeploy_mcp_run_new_passes_the_bedrock_region() -> None:
+    """The blue-green `docker run` must stay at parity with the compose service.
+
+    `mcp_run_new` — not compose — is the path an actual autodeploy takes, so region vars
+    present only in docker-compose.yml would never reach a deployed container.
+    """
+    body = _mcp_run_new_body()
+    for var in _MCP_REGION_VARS:
+        assert f"-e {var}=" in body or f'-e "{var}=' in body, (
+            f"mcp_run_new must pass {var}; docker-compose.yml declares it for the same "
+            "service and autodeploy is what actually starts the container"
+        )

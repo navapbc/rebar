@@ -381,6 +381,24 @@ services:
       # immediately (docs/concurrency.md). The review-bot appends code_review artifacts,
       # this appends the ticket events its tools write, and neither rewrites the other's.
       REBAR_SYNC_PUSH: "always"
+      # AWS region for the Bedrock provider. rebar.toml pins the configured model to
+      # `bedrock:us.anthropic.claude-*`, so this service makes real Bedrock calls; credentials
+      # come from the EC2 instance role (rebar-gerrit-instance-role carries an inline
+      # bedrock:InvokeModel policy) and reach the container over IMDS. REGION DOES NOT: MEASURED
+      # for the sibling review-bot service (ticket dressy-abbatial-antbear), an otherwise
+      # identical container has `boto3.session.Session().region_name is None` and
+      # bedrock-runtime construction raises NoRegionError — independently of IMDS, which
+      # resolves fine (ticket hallowed-usable-squeaker). Credential discovery and region
+      # discovery fail, and are fixed, separately.
+      #
+      # BOTH vars, and they are NOT interchangeable. REBAR_LLM_BEDROCK_REGION is rebar's own knob:
+      # it threads into BedrockProvider and is visible to the config layer, so the region is
+      # recorded in the signed verdict's provider_provenance (ticket ecstatic-joyless-furseal).
+      # AWS_DEFAULT_REGION is botocore's canonical var and is what every other caller in the
+      # image reads. Keep in sync with mcp_run_new in infra/scripts/autodeploy.sh, which is the
+      # path a real deploy takes.
+      REBAR_LLM_BEDROCK_REGION: "us-east-1"
+      AWS_DEFAULT_REGION: "us-east-1"
       # Fine-grained GitHub PAT (contents:write on the tickets repo) the entrypoint feeds to a
       # URL-scoped git credential helper for the clone + auto-push. Materialized from SSM into
       # the .env by fetch-secrets.sh; BLANK IS FINE — the clone is simply deferred and the
