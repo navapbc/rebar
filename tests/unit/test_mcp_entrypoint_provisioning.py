@@ -56,8 +56,20 @@ case "$1" in
     exit 128
     ;;
   clone)
+    # Which branch is being cloned tells the two clones apart: `--branch tickets` is the
+    # ticket store, `--branch main` is the code checkout the attested gates resolve against.
+    branch=""
+    prev=""
+    for arg in "$@"; do
+      [ "$prev" = "--branch" ] && branch="$arg"
+      prev="$arg"
+    done
     if [ -f "$GIT_STUB_STATE/clone-fails" ]; then
       echo "fatal: stub clone failure" >&2
+      exit 128
+    fi
+    if [ "$branch" = "main" ] && [ -f "$GIT_STUB_STATE/code-clone-fails" ]; then
+      echo "fatal: stub code clone failure" >&2
       exit 128
     fi
     # Last argument is the destination.
@@ -125,6 +137,26 @@ class Run:
         return any(call.startswith("clone ") for call in self.git_calls)
 
     @property
+    def tickets_cloned(self) -> bool:
+        """A clone of the TICKET store (`--branch tickets`).
+
+        The entrypoint fires two independent clones with different preconditions — the ticket
+        store needs the PAT, the code checkout does not — so `cloned` alone can no longer tell
+        a test which one happened. Every assertion about one clone names it.
+        """
+        return self._cloned_branch("tickets")
+
+    @property
+    def code_cloned(self) -> bool:
+        """A clone of the CODE checkout (`--branch main`) REBAR_ROOT points at."""
+        return self._cloned_branch("main")
+
+    def _cloned_branch(self, branch: str) -> bool:
+        return any(
+            call.startswith("clone ") and f"--branch {branch}" in call for call in self.git_calls
+        )
+
+    @property
     def ran_to_completion(self) -> bool:
         """Liveness anchor: the ensure step ran AND the terminal log line was emitted."""
         return bool(self.ensure_calls) and "provisioning finished" in self.stderr
@@ -137,8 +169,10 @@ def _provision(
     pat: str | None = "stub-pat",
     head_resolves: bool = False,
     clone_fails: bool = False,
+    code_clone_fails: bool = False,
     ensure_fails: bool = False,
     config_fails: bool = False,
+    code_dir: str | None = None,
     env: dict[str, str] | None = None,
     during: Callable[[Path], None] | None = None,
 ) -> Run:
@@ -164,6 +198,7 @@ def _provision(
     for marker, on in (
         ("head-resolves", head_resolves),
         ("clone-fails", clone_fails),
+        ("code-clone-fails", code_clone_fails),
         ("ensure-fails", ensure_fails),
         ("config-fails", config_fails),
     ):
@@ -179,6 +214,11 @@ def _provision(
             "MCP_ENSURE_SCRIPT": str(ensure),
             "MCP_TICKETS_URL": _TICKETS_URL,
             "REBAR_TRACKER_DIR": str(tracker) if tracker_dir is None else tracker_dir,
+            # Point the code checkout INSIDE tmp_path. Left unset it defaults to the box path
+            # (/var/gerrit/site/mcp-code), whose absent parent makes the entrypoint
+            # announce-and-skip — so the code side would be silently untested on every host
+            # and the suite's behaviour would depend on the host filesystem.
+            "MCP_CODE_DIR": str(tmp_path / "code") if code_dir is None else code_dir,
             # Keep a contended lock from stalling the suite.
             "MCP_RECLONE_LOCK_WAIT": "2",
             **(env or {}),
@@ -270,7 +310,7 @@ def test_poisoned_store_with_dot_git_but_no_resolvable_head_is_cleared_and_reclo
     run = _provision(tmp_path, head_resolves=False)
 
     assert run.ran_to_completion, f"script did not finish: {run.stderr}"
-    assert run.cloned, (
+    assert run.tickets_cloned, (
         f"a store with no resolvable HEAD must be re-cloned; git calls={run.git_calls}"
     )
     assert not orphan.exists(), (
@@ -295,7 +335,7 @@ def test_store_with_files_but_no_dot_git_at_all_is_cleared_and_recloned(
     run = _provision(tmp_path, head_resolves=False)
 
     assert run.ran_to_completion, f"script did not finish: {run.stderr}"
-    assert run.cloned, f"git calls={run.git_calls}"
+    assert run.tickets_cloned, f"git calls={run.git_calls}"
     assert not (tracker / "leftover").exists(), (
         "a non-empty directory must be cleared or `git clone` refuses it outright"
     )
@@ -324,19 +364,35 @@ def test_healthy_store_is_neither_cleared_nor_recloned(tmp_path: Path) -> None:
     assert any("rev-parse" in call for call in run.git_calls), (
         "the script must actually probe HEAD before deciding to skip"
     )
-    assert not run.cloned, f"a healthy store must NOT be re-cloned; git calls={run.git_calls}"
+    assert not run.tickets_cloned, (
+        f"a healthy store must NOT be re-cloned; git calls={run.git_calls}"
+    )
     assert keep.exists(), "a healthy store's contents must survive untouched"
     assert "no resolvable HEAD" not in run.stderr
     assert run.returncode == 0
 
 
 def test_no_pat_skips_the_clone_but_still_converges_the_store(tmp_path: Path) -> None:
-    """Soft failure posture: with no credential there is nothing to clone from, but the
-    ensure step must still run so an already-present store stays writable."""
+    """Soft failure posture: with no credential there is nothing to clone the TICKET store
+    from, but the ensure step must still run so an already-present store stays writable.
+
+    Scoped to the TICKETS clone deliberately. The CODE checkout is cloned anonymously — the
+    upstream repository answers unauthenticated git requests — and REBAR_ROOT is exported
+    unconditionally by Dockerfile.mcp, docker-compose.yml and autodeploy, while a blank
+    MCP_TICKETS_PAT is a documented, supported state. So a blanket "nothing was cloned" here
+    would pin down the exact regression this suite must forbid: REBAR_ROOT pointing at a
+    directory nobody ever created, which kills every attested gate on the deployed server.
+    """
     run = _provision(tmp_path, pat=None, head_resolves=False)
 
     assert run.ran_to_completion, f"script did not finish: {run.stderr}"
-    assert not run.cloned, f"git calls={run.git_calls}"
+    assert not run.tickets_cloned, (
+        f"no credential means no ticket-store clone; git calls={run.git_calls}"
+    )
+    assert run.code_cloned, (
+        "the code checkout needs no credential and REBAR_ROOT points at it unconditionally, "
+        f"so it must still be provisioned with a blank PAT; git calls={run.git_calls}"
+    )
     assert run.returncode == 0
 
 
@@ -351,7 +407,7 @@ def test_a_failing_clone_surfaces_and_is_not_reported_as_success(tmp_path: Path)
     """
     run = _provision(tmp_path, head_resolves=False, clone_fails=True)
 
-    assert run.cloned, "the clone must have been attempted"
+    assert run.tickets_cloned, "the clone must have been attempted"
     assert run.ran_to_completion, (
         "a failed clone must NOT abort provisioning — the ensure step still runs and the "
         f"terminal line is still emitted: {run.stderr}"
@@ -389,7 +445,9 @@ def test_the_clear_refuses_an_unsafe_tracker_dir(tmp_path: Path, unsafe: str) ->
     assert "refusing to clear" in run.stderr, (
         f"an unsafe REBAR_TRACKER_DIR {unsafe!r} must be refused before any rm"
     )
-    assert not run.cloned, f"nothing may be cloned after the refusal; git calls={run.git_calls}"
+    assert not run.tickets_cloned, (
+        f"no ticket store may be cloned after the refusal; git calls={run.git_calls}"
+    )
     assert sentinel.exists(), "the guard must protect the surrounding filesystem"
     assert run.returncode != 0, "a refused clear must surface in the exit status"
 
@@ -400,7 +458,7 @@ def test_a_safe_absolute_tracker_dir_is_accepted(tmp_path: Path) -> None:
 
     assert run.ran_to_completion, f"script did not finish: {run.stderr}"
     assert "refusing to clear" not in run.stderr
-    assert run.cloned
+    assert run.tickets_cloned
 
 
 # ----------------------------------------------------------------------- serialization
@@ -432,7 +490,7 @@ def test_a_concurrent_reclone_is_not_interleaved(tmp_path: Path) -> None:
         os.close(fd)
 
     assert run.ran_to_completion, f"script did not finish: {run.stderr}"
-    assert not run.cloned, (
+    assert not run.tickets_cloned, (
         f"a container must not clone while a peer holds the lock; git calls={run.git_calls}"
     )
     assert peer_work.exists(), "the peer's in-flight clone must not be cleared out from under it"
@@ -484,7 +542,7 @@ def test_a_peer_finishing_the_clone_while_we_wait_skips_the_redundant_reclone(
     assert "was re-cloned by another container" in run.stderr, (
         f"the lock holder must re-probe HEAD before re-cloning: {run.stderr}"
     )
-    assert not run.cloned, (
+    assert not run.tickets_cloned, (
         f"a store the peer already re-cloned must NOT be cloned again; git calls={run.git_calls}"
     )
     assert run.returncode == 0
@@ -511,3 +569,175 @@ def test_a_failing_credential_helper_config_does_not_abort_provisioning(
     )
     assert "could not install the tickets credential helper" in run.stderr
     assert run.returncode != 0, "the failure must surface in the exit status"
+
+
+def test_the_code_root_is_provisioned_so_attested_gates_can_resolve_main(tmp_path: Path) -> None:
+    """The entrypoint must provision a CODE repository, not just the tickets store.
+
+    Every attested-source gate — `review_plan`, `verify_completion`, `review_code`,
+    `reconcile` — resolves a ref against the repo root. The image cannot supply one:
+    `.dockerignore` excludes `.git` and `Dockerfile.mcp` does a plain `COPY . /app`, so `/app`
+    is a source copy with no object DB and `origin/main` cannot resolve. The gates fail with
+    `cannot resolve ref 'origin/main' to a commit in '.'`, which means NO attestation can be
+    earned through the deployed server and no task/story/epic can close through it without a
+    force — the one thing agents are forbidden to use.
+
+    `source: "local"` runs today, which is what isolates the fault: the gate CODE is fine, the
+    repository is missing. So the fix is to provision one, and this asserts the provisioning
+    actually executes rather than that the script contains a line that would.
+
+    The tracker is healthy here (`head_resolves=True`) so no tickets re-clone fires — any
+    clone observed is the CODE clone, which keeps the assertion unambiguous.
+    """
+    code = tmp_path / "code"
+    run = _provision(tmp_path, head_resolves=True, env={"MCP_CODE_DIR": str(code)})
+
+    assert run.ran_to_completion, (
+        f"precondition: provisioning must run to completion\nrc={run.returncode}\n{run.stderr}"
+    )
+
+    main_clones = [c for c in run.git_calls if c.startswith("clone ") and "--branch main" in c]
+    assert main_clones, (
+        "the entrypoint must clone the CODE side (branch main) so the attested gates have a "
+        f"repository to resolve origin/main against. git calls seen: {run.git_calls}\n"
+        f"{run.stderr}"
+    )
+    assert str(code) in main_clones[0], (
+        f"the code clone must land in MCP_CODE_DIR ({code}), not somewhere else: {main_clones[0]!r}"
+    )
+    contents = sorted(p.name for p in code.iterdir()) if code.exists() else "<absent>"
+    assert (code / ".git").is_dir(), (
+        "MCP_CODE_DIR must end up an actual repository (a .git dir), not a source copy — "
+        f"that is the whole defect. contents: {contents}"
+    )
+
+
+# --------------------------------------------------------------------- code checkout
+
+
+def test_a_failing_code_clone_surfaces_but_does_not_stop_the_container_booting(
+    tmp_path: Path,
+) -> None:
+    """The code checkout inherits the same SOFT posture as everything else in this script.
+
+    Provisioning runs backgrounded ahead of `exec`, so anything that aborts it early takes the
+    ensure step down with it and leaves no terminal status line. If a transient code-clone
+    failure could do that, one flaky network moment on the box would leave the ticket store
+    unconverged — read-only or unwritable — for the whole life of the container, and the logs
+    would show a truncated provisioning run with no explanation. Equally, the failure must not
+    be swallowed: an exit status of 0 here would report a server with no resolvable
+    `origin/main` as fully provisioned, and the missing repository would only be discovered
+    later as an unexplained gate failure.
+
+    The tracker is healthy, so the only clone in play is the code one.
+    """
+    code = tmp_path / "code"
+    run = _provision(tmp_path, head_resolves=True, code_clone_fails=True)
+
+    assert run.code_cloned, f"the code clone must have been attempted; git calls={run.git_calls}"
+    assert not run.tickets_cloned, (
+        f"only the code clone may fail in this scenario; git calls={run.git_calls}"
+    )
+    assert run.ran_to_completion, (
+        "a failed code clone must NOT abort provisioning — the ensure step still runs and the "
+        f"terminal line is still emitted: {run.stderr}"
+    )
+    assert run.returncode != 0, "a failed code clone must surface in the exit status"
+    assert "code checkout clone deferred" in run.stderr
+    assert not (code / ".git").exists(), "a failed clone must not leave a usable-looking repo"
+
+
+def test_an_absent_code_mount_point_is_announced_and_skipped_not_failed(
+    tmp_path: Path,
+) -> None:
+    """No mount point means this host has nowhere to put a checkout — not a failure.
+
+    The checkout lives on a named volume mounted at MCP_CODE_DIR. Contexts that run the image
+    without that volume are legitimate and common: a bare `docker run` of the image, an
+    operator driving `--provision-only` to repair the ticket store, a harness. Reporting those
+    as provisioning failures would make a healthy run look broken and, worse, would train
+    readers to ignore a non-zero provisioning status — the one signal that tells them the
+    ticket store never converged.
+
+    It must also refuse to CREATE the missing path: conjuring a whole directory tree would let
+    a mis-set MCP_CODE_DIR scatter a multi-gigabyte clone somewhere arbitrary on the box
+    instead of failing visibly. Only the leaf is ever created.
+    """
+    absent_parent = tmp_path / "unmounted"
+    code = absent_parent / "mcp-code"
+    run = _provision(tmp_path, head_resolves=True, code_dir=str(code))
+
+    assert run.ran_to_completion, f"script did not finish: {run.stderr}"
+    assert not run.code_cloned, (
+        f"there is nowhere to clone into, so nothing may be cloned; git calls={run.git_calls}"
+    )
+    assert "code checkout skipped" in run.stderr, "the skip must be announced, not silent"
+    assert str(absent_parent) in run.stderr, "the log must name the mount point that is missing"
+    assert not absent_parent.exists(), (
+        "only the LEAF may be created — conjuring the mount point would scatter the clone"
+    )
+    assert run.returncode == 0, "an absent mount point is a skip, not a provisioning failure"
+
+
+def test_a_healthy_code_checkout_is_neither_cleared_nor_recloned(tmp_path: Path) -> None:
+    """Idempotent skip on the code side, mirroring the ticket store's.
+
+    Containers restart routinely — `restart: always` on the compose service, every blue/green
+    rollout, an operator runbook restart — and the checkout is a PERSISTENT volume that
+    survives all of them. Re-cloning `main` on each boot would burn the readiness budget the
+    backgrounding exists to protect and would repeatedly clear a checkout the gates are
+    actively resolving refs against, so an already-usable checkout must be left alone.
+    """
+    code = tmp_path / "code"
+    (code / ".git").mkdir(parents=True)
+    keep = code / ".git" / "packed-refs"
+    keep.write_text("# pack-refs with: peeled fully-peeled sorted\n")
+
+    run = _provision(tmp_path, head_resolves=True)
+
+    # Liveness FIRST — the absence assertions below would pass on a script that died early.
+    assert run.ran_to_completion, f"script did not finish: {run.stderr}"
+    assert not run.code_cloned, (
+        f"a usable code checkout must NOT be re-cloned; git calls={run.git_calls}"
+    )
+    assert not run.tickets_cloned, f"git calls={run.git_calls}"
+    assert keep.exists(), "a healthy checkout's contents must survive untouched"
+    assert "unusable code checkout" not in run.stderr
+    assert run.returncode == 0
+
+
+def test_the_code_root_is_provisioned_even_without_a_tickets_pat(tmp_path: Path) -> None:
+    """A blank MCP_TICKETS_PAT must NOT leave REBAR_ROOT pointing at a directory that was
+    never created.
+
+    `REBAR_ROOT` is exported UNCONDITIONALLY (Dockerfile.mcp ENV, docker-compose.yml, and
+    autodeploy.sh's `mcp_run_new`), and docker-compose.yml documents a blank PAT as a
+    SUPPORTED state ("BLANK IS FINE -- the container still boots"). So if the code checkout is
+    provisioned only when a PAT is present, the blank-PAT deployment points the single global
+    repo-root override at a path with nothing behind it -- a NEW failure mode introduced by the
+    fix rather than the one it removes.
+
+    The two clones have genuinely different credential needs and must not share one guard:
+    the TICKETS clone pushes and needs the PAT, whereas the CODE clone is a read-only clone of
+    a repository that answers anonymously (`GET /info/refs?service=git-upload-pack` -> 200),
+    so it needs no credential at all. Binding the code clone to the tickets credential is what
+    creates the gap.
+
+    Tracker is healthy (`head_resolves=True`) so no tickets re-clone fires; `--branch main`
+    identifies the code clone unambiguously against the tickets clone's `--branch tickets`.
+    """
+    code = tmp_path / "code"
+    run = _provision(tmp_path, pat=None, head_resolves=True, env={"MCP_CODE_DIR": str(code)})
+
+    assert run.ran_to_completion, (
+        f"precondition: provisioning must still run to completion with no PAT\n{run.stderr}"
+    )
+
+    main_clones = [c for c in run.git_calls if c.startswith("clone ") and "--branch main" in c]
+    assert main_clones, (
+        "with a blank MCP_TICKETS_PAT the CODE checkout must STILL be provisioned, because "
+        "REBAR_ROOT points at it unconditionally. git calls seen: " + repr(run.git_calls)
+    )
+    assert (code / ".git").is_dir(), (
+        f"MCP_CODE_DIR ({code}) must be a real repository after a blank-PAT boot"
+    )

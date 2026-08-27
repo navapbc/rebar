@@ -364,6 +364,16 @@ services:
       # The entrypoint (Dockerfile.mcp) clones the `tickets` branch here on first boot and
       # converges it into a writable store; the named volume below makes it persistent.
       REBAR_TRACKER_DIR: "/var/gerrit/site/mcp-tickets"
+      # The CODE checkout the attested LLM gates resolve refs against, and the repo root
+      # rebar reads it through. `.dockerignore` excludes `.git` and the image is `COPY . /app`,
+      # so /app is a SOURCE COPY with no object database: with REBAR_ROOT unset the root
+      # resolved to the WORKDIR and every `source=attested` gate died at "cannot resolve ref
+      # 'origin/main' to a commit in '.'" — no plan-review or completion-verifier attestation
+      # could be earned through this server. The entrypoint clones `main` here (blobless,
+      # single-branch) in the background; the named volume below makes it persistent. MUST stay
+      # at parity with mcp_run_new in infra/scripts/autodeploy.sh (blue-green `docker run`).
+      MCP_CODE_DIR: "/var/gerrit/site/mcp-code"
+      REBAR_ROOT: "/var/gerrit/site/mcp-code"
       # Explicit rather than inherited from the implicit default, because this service is
       # a WRITER and both siblings state their posture (reviewbot "always", opcert "off").
       # A second independent remote writer on origin/tickets is the DESIGNED model, not an
@@ -397,6 +407,10 @@ services:
       # `docker compose down -v` does not destroy accumulated ticket events. Created by
       # compose-up.sh from its SITE_SUBDIRS list, alongside the other gerrit_* volumes.
       - gerrit_mcp_tickets:/var/gerrit/site/mcp-tickets
+      # The persistent code checkout (MCP_CODE_DIR / REBAR_ROOT above) — external for the same
+      # reason: a `docker compose down -v` must not throw away a multi-GB blobless clone and
+      # force every gate to fail again until it re-converges.
+      - gerrit_mcp_code:/var/gerrit/site/mcp-code
     # Liveness: the container HEALTHCHECK in Dockerfile.mcp hits loopback /health; declare
     # it here too so `docker compose ps` reflects health and a redeploy waits on it.
     healthcheck:
@@ -439,4 +453,8 @@ volumes:
   # /var/gerrit/site/mcp-tickets — the persistent rebar ticket store the MCP tools read and
   # write; created by compose-up.sh alongside the others.
   gerrit_mcp_tickets:
+    external: true
+  # /var/gerrit/site/mcp-code — the persistent blobless `main` checkout the attested LLM gates
+  # resolve refs against (REBAR_ROOT); created by compose-up.sh alongside the others.
+  gerrit_mcp_code:
     external: true

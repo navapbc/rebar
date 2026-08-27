@@ -1,5 +1,6 @@
 #!/bin/sh
-# mcp-entrypoint.sh — provision the rebar ticket store, then exec the MCP server.
+# mcp-entrypoint.sh — provision the rebar ticket store + the code checkout the attested
+# LLM gates resolve refs against, then exec the MCP server.
 #
 # Installed onto PATH by infra/compose/Dockerfile.mcp (the same `install -m 0755` shape
 # Dockerfile.reviewbot uses for reviewbot-ensure-tickets.sh) and wired as the image's
@@ -30,6 +31,18 @@ set -e
 # image installs (Dockerfile.reviewbot's shared ensure helper, copied in via COPY . /app).
 MCP_ENSURE_SCRIPT="${MCP_ENSURE_SCRIPT:-/app/infra/scripts/reviewbot-ensure-tickets.sh}"
 
+# Where the CODE checkout the attested gates resolve refs against lives. `.dockerignore`
+# excludes `.git` and Dockerfile.mcp is `COPY . /app`, so the image holds a SOURCE COPY with
+# no object database at all: with REBAR_ROOT unset the repo root resolved to the WORKDIR
+# (/app) and EVERY attested-source gate died at
+# `cannot resolve ref 'origin/main' to a commit in '.'` — no plan-review or
+# completion-verifier attestation could be earned through the deployed server, so nothing
+# could be claimed or closed through it. (`source: "local"` still ran, which is what pinned
+# the fault on the missing REPOSITORY rather than on the gate code.) ADR 0104 §3 designs the
+# server to mint both op-cert kinds; this wires the checkout that design requires.
+# Overridable so a test harness can point it at a fixture; the default is the mounted volume.
+MCP_CODE_DIR="${MCP_CODE_DIR:-/var/gerrit/site/mcp-code}"
+
 # How long to wait for a peer's re-clone before giving up, in seconds. Sized for a
 # ~200k-commit single-branch clone.
 MCP_RECLONE_LOCK_WAIT="${MCP_RECLONE_LOCK_WAIT:-7200}"
@@ -39,8 +52,8 @@ MCP_RECLONE_LOCK_WAIT="${MCP_RECLONE_LOCK_WAIT:-7200}"
 # `$REBAR_TRACKER_DIR` would mean `rm -rf /.[!.]* /*` — i.e. `rm -rf /*`. Refuse to run the
 # clear at all unless the target is a non-empty ABSOLUTE path that is not `/`. (The clear
 # itself adds a second, independent layer; see clear_tracker_dir.)
-tracker_dir_is_safe() {
-  case "${REBAR_TRACKER_DIR:-}" in
+dir_is_safe() {
+  case "${1:-}" in
     "" | "/") return 1 ;;
     /*) return 0 ;;
     *) return 1 ;;
@@ -48,8 +61,8 @@ tracker_dir_is_safe() {
 }
 
 # The directory with any trailing slashes stripped, so the clear globs cannot degenerate.
-tracker_dir() {
-  dir="${REBAR_TRACKER_DIR}"
+normalize_dir() {
+  dir="$1"
   while :; do
     case "$dir" in
       */) dir="${dir%/}" ;;
@@ -59,12 +72,12 @@ tracker_dir() {
   printf '%s' "$dir"
 }
 
-clear_tracker_dir() {
-  if ! tracker_dir_is_safe; then
-    echo "mcp: refusing to clear the tickets store — REBAR_TRACKER_DIR is not a safe absolute path" >&2
-    return 1
-  fi
-  dir="$(tracker_dir)"
+# Empty a directory that a clone is about to target. BOTH layers of the defence live here,
+# so every caller (tickets store, code checkout) inherits them; there is no path that clears
+# a directory without them.
+clear_dir() {
+  dir_is_safe "$1" || return 1
+  dir="$(normalize_dir "$1")"
   [ -d "$dir" ] || return 0
   # Clear from INSIDE the directory using RELATIVE globs. Second, independent layer of the
   # same defence: if the target is ever wrong the `cd` simply fails and nothing is removed,
@@ -72,6 +85,22 @@ clear_tracker_dir() {
   # unreachable; it is here so that a bypassed guard is a no-op rather than a catastrophe.
   (cd "$dir" && rm -rf ./.[!.]* ./* 2>/dev/null) || true
   return 0
+}
+
+tracker_dir_is_safe() {
+  dir_is_safe "${REBAR_TRACKER_DIR:-}"
+}
+
+tracker_dir() {
+  normalize_dir "${REBAR_TRACKER_DIR}"
+}
+
+clear_tracker_dir() {
+  if ! tracker_dir_is_safe; then
+    echo "mcp: refusing to clear the tickets store — REBAR_TRACKER_DIR is not a safe absolute path" >&2
+    return 1
+  fi
+  clear_dir "${REBAR_TRACKER_DIR}"
 }
 
 # --- serialization ----------------------------------------------------------------
@@ -147,6 +176,91 @@ reclone_store() {
   return "$rc"
 }
 
+# --- code checkout ------------------------------------------------------------------
+# The attested gates (review_plan / verify_completion, `source=attested`) pin a snapshot at a
+# ref — `origin/main` by default — which means they need an OBJECT DATABASE to resolve it
+# against. Provide one: a blobless, single-branch clone of `main` from the SAME repository
+# URL the tickets store clones from, on its own persistent volume, with REBAR_ROOT pointed at
+# it by the compose service / autodeploy's `docker run`.
+#
+# BLOBLESS (`--filter=blob:none`) is not an optimisation detail: a full clone of this
+# repository is prohibitively large for the box, and the snapshot machinery already fetches
+# the objects it needs on demand, so the partial clone is the shape that fits.
+#
+# Like the tickets clone this runs in the BACKGROUND (see the bottom of the file) and is
+# therefore allowed to outlive the 120s blue-green readiness deadline. Until it converges the
+# gates fail exactly as they do today — no worse — and NOTHING gates container promotion on
+# it: gating promotion on a backgrounded clone is precisely what produced the rollback loop
+# in bug unfit-beneficial-whimbrel.
+code_repo_present() {
+  # `.git` FIRST, and per-directory: a resolvable HEAD elsewhere says nothing about this
+  # checkout. A container removed mid-clone leaves `.git` behind with HEAD dangling, so the
+  # marker alone is not proof either — require both, exactly as the tickets store does.
+  [ -e "${MCP_CODE_DIR}/.git" ] &&
+    git -C "${MCP_CODE_DIR}" rev-parse --verify -q HEAD >/dev/null 2>&1
+}
+
+clone_code() {
+  if ! dir_is_safe "${MCP_CODE_DIR:-}"; then
+    echo "mcp: refusing to clear the code checkout — MCP_CODE_DIR is not a safe absolute path" >&2
+    return 1
+  fi
+  code_dir="$(normalize_dir "${MCP_CODE_DIR}")"
+  # Only ever create the LEAF. The checkout lives on a mounted volume whose parent exists on
+  # the box; refusing to conjure the whole path keeps a mis-set MCP_CODE_DIR from scattering a
+  # clone across the filesystem. An absent mount point means this host simply has nowhere to
+  # put a checkout (a bare `docker run` of the image, a harness driving --provision-only for
+  # the tickets store) — that is NOT a provisioning failure, so it is announced and SKIPPED
+  # rather than reported as one. A failure of the clone ITSELF still surfaces, below.
+  code_parent="$(dirname "$code_dir")"
+  if [ ! -d "$code_parent" ]; then
+    echo "mcp: code checkout skipped — its mount point ${code_parent} is absent" >&2
+    return 0
+  fi
+  mkdir -p "$code_dir" 2>/dev/null || true
+  if [ ! -d "$code_dir" ]; then
+    echo "mcp: code checkout directory is unavailable" >&2
+    return 1
+  fi
+  # Serialized on the checkout directory's OWN INODE, for the same reasons the tickets
+  # re-clone is (shared volume, blue/green overlap, `restart: always` containers that take no
+  # deploy lock). Separate fd from the tickets lock so the two never alias.
+  exec 8<"$code_dir"
+  if ! flock -w "$MCP_RECLONE_LOCK_WAIT" 8; then
+    echo "mcp: timed out waiting for the code checkout lock" >&2
+    exec 8<&-
+    return 1
+  fi
+  # Double-checked: a peer may have finished the clone while we waited.
+  if code_repo_present; then
+    exec 8<&-
+    echo "mcp: code checkout was cloned by another container" >&2
+    return 0
+  fi
+  code_rc=0
+  if clear_dir "$code_dir"; then
+    git clone --filter=blob:none --single-branch --branch main \
+      "${MCP_TICKETS_URL}" "$code_dir" || {
+      echo "mcp: code checkout clone deferred (deploy canary)" >&2
+      code_rc=1
+    }
+  else
+    echo "mcp: refusing to clear the code checkout — MCP_CODE_DIR is not a safe absolute path" >&2
+    code_rc=1
+  fi
+  exec 8<&-
+  return "$code_rc"
+}
+
+provision_code() {
+  if code_repo_present; then
+    return 0
+  fi
+  [ -e "${MCP_CODE_DIR}/.git" ] &&
+    echo "mcp: unusable code checkout (no resolvable HEAD) — re-cloning" >&2
+  clone_code
+}
+
 provision_store() {
   rc=0
   if [ -n "${MCP_TICKETS_PAT:-}" ]; then
@@ -174,6 +288,16 @@ provision_store() {
       reclone_store || rc=1
     fi
   fi
+  # The code checkout the attested gates resolve refs against. DELIBERATELY OUTSIDE the PAT
+  # guard above, and it must stay there: `navapbc/rebar` answers anonymous git requests
+  # (`GET .../info/refs?service=git-upload-pack` returns 200), so this clone needs NO
+  # credential — whereas REBAR_ROOT is exported UNCONDITIONALLY (Dockerfile.mcp ENV,
+  # docker-compose.yml, autodeploy's `docker run`) and a blank MCP_TICKETS_PAT is a SUPPORTED
+  # state. Nesting this under the PAT guard therefore points REBAR_ROOT at a directory that was
+  # never created, and every attested gate dies exactly as it did before this checkout existed.
+  # Same soft posture as everything else here: a failure is REPORTED and stepped over, never
+  # swallowed into a success and never allowed to stop the container booting.
+  provision_code || rc=1
   # Converge the (possibly freshly-cloned) worktree into a WRITABLE rebar store:
   # repo-local git identity + the `.env-id` marker. Idempotent.
   sh "${MCP_ENSURE_SCRIPT}" "${REBAR_TRACKER_DIR}" || {
