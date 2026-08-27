@@ -46,6 +46,11 @@ MIRROR_REMOTE="${MIRROR_REMOTE:-origin}"
 STATE_DIR="${STATE_DIR:-/var/lib/rebar}"
 LOCK="$STATE_DIR/deploy.lock"
 SHA_FILE="$STATE_DIR/deployed-sha"
+# mcp's own last-deployed sha. Needed BY THIS FIX: during a deferral episode the global
+# deployed-sha never advances (correctly — the BOT has not deployed), so an mcp gate that
+# diffs from it would re-trigger a full blue-green cutover on EVERY tick the bot stays busy.
+# The mcp path records its own completion so a tick that already deployed it computes no delta.
+MCP_SHA_FILE="$STATE_DIR/mcp-deployed-sha"
 BACKOFF_FILE="$STATE_DIR/deploy-backoff"              # "<target-sha> <fail-count> <next-epoch>"
 # Deferral episode marker: "<epoch of the FIRST tick that deferred>". Deliberately NOT keyed
 # to the target SHA the way BACKOFF_FILE is — see the drain gate below for why.
@@ -497,7 +502,15 @@ record_backoff_failure() {
 clear_backoff() { rm -f "$BACKOFF_FILE"; }
 
 # ── what changed? (computed in the mirror clone) ──────────────────────────────
-changed() { git -C "$MIRROR_DIR" diff --name-only "$DEPLOYED" "$TARGET" -- $1 2>/dev/null | grep -q .; }
+changed_range() { git -C "$MIRROR_DIR" diff --name-only "$1" "$2" -- $3 2>/dev/null | grep -q .; }
+changed() { changed_range "$DEPLOYED" "$TARGET" "$1"; }
+
+# mcp's baseline: its OWN marker, falling back to the global sha when absent or unparseable, so
+# the first tick after this lands decides exactly as it does today.
+mcp_deployed="$(cat "$MCP_SHA_FILE" 2>/dev/null || true)"
+if [ -z "$mcp_deployed" ] || ! git -C "$MIRROR_DIR" rev-parse --verify -q "$mcp_deployed^{commit}" >/dev/null 2>&1; then
+  mcp_deployed="$DEPLOYED"
+fi
 log "main advanced $DEPLOYED -> $TARGET; computing component deltas"
 
 # ── config refs (replication/g2p/meta): DETECT-ONLY (v1 boundary) ─────────────
@@ -507,7 +520,14 @@ if changed "$CONFIG_PATHS"; then
 fi
 
 # ── review-bot: rebuild + restart ONLY on a source change ─────────────────────
-if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
+# Set when the review-bot deploy DEFERRED this tick. The deferral must scope to the BOT block,
+# not terminate the script: the mcp block below is documented as independent of this one and is
+# a pointer-swap that never kills an in-flight op, so it has no reason to wait on the bot drain.
+bot_deferred=0
+# Hoisted into a function purely so the deferral can `return` — autodeploy.sh is a linear
+# oneshot with no enclosing loop, so `continue` is unavailable. The wrapper keeps the body's
+# indentation unchanged, so this stays a few hunks instead of re-indenting fifty lines.
+deploy_review_bot() {
   # ── drain gate: never recreate the container mid-review (bug 34cd) ───────────
   # `docker compose up -d` STOPS the running container, and uvicorn's shutdown drains only
   # the webhook QUEUE (app.py waits on queue.join()) — the backfill reconciler's inline
@@ -541,7 +561,10 @@ if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
       marker AUTODEPLOY_DEFERRED review-in-flight \
         "target=$TARGET in_flight=$inflight deferred_for=${waited}s bound=${DEPLOY_DEFER_MAX}s"
       log "review-bot busy ($inflight review(s) in flight); DEFERRING the deploy of $TARGET (${waited}s of the ${DEPLOY_DEFER_MAX}s bound used); deployed-sha unchanged; retrying on the next timer tick"
-      exit 0
+      # Leave the BOT path only: no rm -f "$DEFER_FILE" (the episode continues), no rebuild,
+      # deployed-sha not advanced — but the mcp block below still runs.
+      bot_deferred=1
+      return 0
     fi
     # Bound exhausted: recreate anyway, but make the kill COUNTABLE. Without this marker the
     # interruption is unobservable — which is the whole reason a fully live-locked gate could
@@ -612,6 +635,9 @@ if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
   fi
   prune_docker_caches
   log "review-bot redeployed + healthy"
+}
+if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
+  deploy_review_bot
 fi
 
 # ── mcp: blue-green pointer-swap deploy ONLY on a source change ────────────────
@@ -622,7 +648,7 @@ fi
 # in-flight certified op. Fatal-on-failure like the review-bot (record_backoff_failure + exit 1)
 # so deployed-sha is not advanced and the deploy retries next tick. The gerrit container is never
 # touched (blast-radius assert); gerrit is never involved.
-if changed "$MCP_PATHS"; then
+if changed_range "$mcp_deployed" "$TARGET" "$MCP_PATHS"; then
   log "mcp sources changed $DEPLOYED -> $TARGET; blue-green deploy (blast radius = mcp containers + /mcp nginx upstream only)"
   gerrit_before_mcp="$(docker inspect -f '{{.Id}}' "$GERRIT_CONTAINER" 2>/dev/null || true)"
 
@@ -713,7 +739,20 @@ if changed "$MCP_PATHS"; then
     err blast-radius "gerrit container id changed during an mcp deploy — investigate"
   fi
   prune_docker_caches
+  # mcp is DEPLOYED at $TARGET. Record it on mcp's OWN marker now, because a deferred tick
+  # exits below without reaching the footer — without this the next tick redeploys it.
+  echo "$TARGET" > "$MCP_SHA_FILE.tmp" && mv "$MCP_SHA_FILE.tmp" "$MCP_SHA_FILE"
   log "mcp redeployed + healthy at 127.0.0.1:${mcp_newport}"
+fi
+
+# ── review-bot deferral: stop HERE, AFTER the independent mcp path ─────────────
+# The bot deploy was deferred, so this tick is NOT a complete deploy of $TARGET: deployed-sha
+# must not advance and the deferral EPISODE in $DEFER_FILE must carry forward. Everything below
+# (host-observability re-materialization, certbot re-materialization, the deployed-sha advance)
+# is skipped exactly as the pre-fix `exit 0` skipped it — the ONLY behavioural difference is
+# that the mcp blue-green block above already ran on its own path.
+if [ "$bot_deferred" = 1 ]; then
+  exit 0
 fi
 
 # ── host observability probe: re-materialize on a probe-source change ─────────
@@ -761,6 +800,10 @@ fi
 
 # ── success: advance deployed-sha atomically, clear backoff ───────────────────
 echo "$TARGET" > "$SHA_FILE.tmp" && mv "$SHA_FILE.tmp" "$SHA_FILE"
+# Keep mcp's marker in lockstep on a COMPLETE deploy: the mcp block may have been a no-op this
+# tick because nothing under $MCP_PATHS changed, and a stale marker would make a later tick
+# think mcp is behind after a full deploy.
+echo "$TARGET" > "$MCP_SHA_FILE.tmp" && mv "$MCP_SHA_FILE.tmp" "$MCP_SHA_FILE"
 clear_backoff
 rm -f "$DEFER_FILE"          # the deferral episode ended with a deploy; do not carry it forward
 log "deploy complete: env now reflects $TARGET"

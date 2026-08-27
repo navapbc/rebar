@@ -216,8 +216,16 @@ def test_mcp_bluegreen_refreshes_ssm_secrets_before_starting_the_new_container()
     """
     script = _AUTODEPLOY.read_text(encoding="utf-8")
 
-    start = script.index('if changed "$MCP_PATHS"; then')
-    block = script[start:]
+    # Anchor on the block's own log line, not on the gate EXPRESSION. This test cares about
+    # ordering INSIDE the mcp block (fetch-secrets before mcp_run_new); how the gate is spelled
+    # is not its business, and pinning the expression made it break when the gate learned to
+    # diff from a per-component marker — a change-detector failure, not a real regression.
+    marker = "mcp sources changed"
+    assert marker in script, (
+        "could not locate the mcp blue-green block: its opening log line "
+        f"({marker!r}) is missing from autodeploy.sh"
+    )
+    block = script[script.index(marker) :]
 
     assert "fetch-secrets.sh" in block, (
         "the mcp blue-green block never calls fetch-secrets.sh, so an SSM secret rotation "
