@@ -39,6 +39,7 @@ from rebar.llm.code_review.finalize import _attach_code_review_metrics  # noqa: 
 from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.gate_error_sidecar import emit_gate_error
 from rebar.llm.run_identity import with_identity
+from rebar.llm.tracing import run_span
 from rebar.llm.workflow.completion_metrics import (  # noqa: F401
     _add_phase,
     _attach_completion_metrics,
@@ -164,6 +165,10 @@ def produce_plan_review_verdict(
         # op (and the non-step ProductionBatchRunner) reads the SAME resolved config via
         # resolve_gate_config instead of re-deriving from env (epic veiny-trout-brink).
         with (
+            # FIRST in the tuple, so this span is already current when the `with_identity(...)`
+            # ARGUMENT below is evaluated — mint_run_identity then READS this run's trace id
+            # instead of minting a fresh one, and the whole run is one trace.
+            run_span("review-plan", ticket_id=ctx.ticket_id),
             assemble_context_cache(),
             collect_contract_violations(),
             # Tally LLM step calls that fail but do not fail the run, so repeated silent
@@ -373,11 +378,15 @@ def produce_code_review_verdict(request: CodeReviewRequest) -> dict[str, Any]:
     """Run ``gates/code-review.yaml`` in-memory over a DIFF — short orchestrator (preflight ->
     assemble -> run-and-finalize). OFF by default (INERT, no LLM); ``enabled=True`` force-enables it
     (Gerrit voter, WS6/ADR 0015). Outage/mid-run -> INDETERMINATE; sidecar only if target_ticket."""
-    early = _code_review_preflight(request)
-    if early is not None:
-        return early
-    prep = _assemble_code_review_run(request)
-    return _run_code_review_gate(request, prep)
+    # One rebar-owned root span for the whole multi-pass fan-out, so its per-candidate spans
+    # nest into ONE trace. No `with_identity` here: review-code has no ticket, so it gains the
+    # grouping but not header correlation — its `${run:...}` headers are omitted by design.
+    with run_span("review-code", ticket_id=request.target_ticket):
+        early = _code_review_preflight(request)
+        if early is not None:
+            return early
+        prep = _assemble_code_review_run(request)
+        return _run_code_review_gate(request, prep)
 
 
 def _code_review_preflight(request: CodeReviewRequest) -> dict[str, Any] | None:
@@ -703,7 +712,13 @@ def produce_completion_verdict(
     _t_total = time.monotonic()
     # collect_step_failures wraps the WHOLE run so the reconcile op's drain can see failures
     # from the verify agent step; see completion_reconcile for where the tally lands.
-    with gate_config(with_identity(cfg, ticket_id, "verify-completion")), collect_step_failures():
+    # run_span FIRST: it must ENCLOSE the `gate_config(with_identity(...))` statement, because
+    # `with_identity(...)` is evaluated as an ARGUMENT and so runs before that item is entered.
+    with (
+        run_span("verify-completion", ticket_id=ticket_id),
+        gate_config(with_identity(cfg, ticket_id, "verify-completion")),
+        collect_step_failures(),
+    ):
         res = _ex.run_workflow(
             doc,
             {"ticket_id": ticket_id, "graph": bool(graph)},

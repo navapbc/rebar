@@ -51,6 +51,17 @@ def _candidate_tracer() -> Any:
     return trace.get_tracer("rebar.llm.candidate")
 
 
+def _set_attr(span: Any, key: str, value: object) -> None:
+    """Record one attribute onto ``span``, swallowing any failure.
+
+    Tracing must never break an operation, so a span object that rejects the attribute (or is
+    not a span at all) is simply ignored."""
+    try:
+        span.set_attribute(key, value)
+    except Exception:  # noqa: BLE001 - tracing must never break an operation
+        pass
+
+
 class _CandidateHandle:
     """A tiny handle that records the outcome of one candidate onto its span, best-effort."""
 
@@ -58,10 +69,7 @@ class _CandidateHandle:
         self._span = span
 
     def _set(self, key: str, value: object) -> None:
-        try:
-            self._span.set_attribute(key, value)
-        except Exception:  # noqa: BLE001 - tracing must never break an operation
-            pass
+        _set_attr(self._span, key, value)
 
     def returned(self, response: Any) -> None:
         self._set("rebar.candidate.outcome", "returned")
@@ -128,6 +136,53 @@ def _close_span(cm: Any, *, capture: bool) -> None:
             cm.__exit__(None, None, None)
     except Exception:  # noqa: BLE001 - tracing must never break an operation
         pass
+
+
+def _run_tracer() -> Any:
+    """Return the tracer that owns per-gate-run root spans (the monkeypatch seam).
+
+    Same lazy-API discipline as :func:`_candidate_tracer`: the OTel *API* import lives inside the
+    function so importing this module never requires the ``[tracing]`` extra, and an absent API
+    degrades to a no-op tracer."""
+    try:
+        from opentelemetry import trace
+    except Exception:  # noqa: BLE001 - OTel API absent -> no-op tracer
+        return _NoOpTracer()
+    return trace.get_tracer("rebar.llm.run")
+
+
+@contextlib.contextmanager
+def run_span(operation: str, *, ticket_id: str | None = None):
+    """Open ONE rebar-owned root span for a whole gate run, so every candidate span opened
+    inside it nests beneath it and the run is a SINGLE trace.
+
+    ``operation`` is a canonical rebar verb (``"review-plan"`` / ``"verify-completion"`` /
+    ``"review-code"``); ``ticket_id`` is recorded when the boundary has one (``review-code``
+    does not). Both are best-effort attributes.
+
+    Fail-open exactly like :func:`candidate_span`, and more load-bearingly so: this span sits at
+    the RUN boundary, so an unguarded tracing fault would abort the entire gate run. An absent
+    tracer, a ``get_tracer`` that raises, a ``start_as_current_span`` that raises, and a
+    ``set_attribute`` that raises are all swallowed — the ``with`` body still runs. The caller's
+    own exception propagates unchanged."""
+    cm = None
+    span: Any = _NoOpSpan()
+    try:
+        cm = _run_tracer().start_as_current_span(f"rebar {operation}")
+        span = cm.__enter__()
+    except Exception:  # noqa: BLE001 - tracing must never break an operation
+        cm = None
+        span = _NoOpSpan()
+    _set_attr(span, "rebar.run.operation", operation)
+    if ticket_id is not None:
+        _set_attr(span, "rebar.run.ticket_id", ticket_id)
+    try:
+        yield span
+    except BaseException:
+        _close_span(cm, capture=True)
+        raise
+    else:
+        _close_span(cm, capture=False)
 
 
 def wrap_candidate(model: Any, order: int, candidate: str) -> Any:
