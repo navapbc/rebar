@@ -33,6 +33,7 @@ Two live claims are proven here, each in its own test:
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from collections.abc import Callable
@@ -74,13 +75,35 @@ def _rich_markdown(heading: str, bold: str, code: str) -> str:
     return f"# {heading}\n\nA paragraph with **{bold}** emphasis.\n\n{{code}}\n{code}\n{{code}}\n"
 
 
+# The search-index-visibility budget. Jira DC's Lucene index is eventually consistent, and
+# on the ephemeral CI instance under load its reindex latency routinely runs 83-90s (the last
+# green run's own per-test setup times were 90.73s and 83.30s — right at the old fixed 90s
+# ceiling, so a slightly slower index blew the budget and flaked the lane). This carries real
+# margin over that observed latency, mirroring the Cloud probe's search-index-lag hardening
+# (ticket 1d21: a capped-exponential budget to ~195s). Env-tunable so an operator can widen it
+# for a slower instance without a code change.
+_SEARCH_INDEX_TIMEOUT_DEFAULT = 240.0
+
+
+def _search_index_timeout() -> float:
+    raw = os.environ.get("REBAR_DC_SEARCH_INDEX_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = 0.0
+        if value > 0:
+            return value
+    return _SEARCH_INDEX_TIMEOUT_DEFAULT
+
+
 def _wait_until_search_reflects(
     transport: Any,
     project: str,
     key: str,
     predicate: Callable[[dict[str, Any]], bool],
     what: str,
-    timeout: float = 90.0,
+    timeout: float | None = None,
 ) -> None:
     """Block until a JQL SEARCH returns ``key`` in a state satisfying ``predicate``.
 
@@ -88,8 +111,12 @@ def _wait_until_search_reflects(
     eventually consistent, so a field written a moment ago may not be visible to the pass
     yet. Waiting for the SEARCH (not a direct GET) to reflect the change is what keeps a
     timing artefact from being reported as a bridge defect — the same hazard the sibling
-    ``test_dc_mutations`` inbound cells guard against.
+    ``test_dc_mutations`` inbound cells guard against. The budget defaults to
+    ``_SEARCH_INDEX_TIMEOUT_DEFAULT`` (env-tunable) to carry real margin over the ephemeral
+    DC's observed ~90s reindex latency.
     """
+    if timeout is None:
+        timeout = _search_index_timeout()
     deadline = time.monotonic() + timeout
     attempts = 0
     last: dict[str, Any] | None = None
