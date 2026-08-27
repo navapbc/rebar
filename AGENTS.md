@@ -194,7 +194,11 @@ restated here:
   moving base ref silently makes an attestation stale — how to check currency cheaply with
   `rebar review-plan <id> --status` (read-only, no LLM) instead of re-running the review →
   `docs/plan-review-gate.md`.
-- **Gate duration expectations:** Expect `review-plan` to take 15 to 20 minutes and a completion-verifier-gated close to take 9 to 11 minutes.
+- **Gate duration expectations:** Expect `review-plan` to take 15 to 20 minutes and a
+  completion-verifier-gated close to take 9 to 11 minutes. These are GUIDELINES for
+  planning, **not** limits: a gate may legitimately run longer on a large store or a
+  contended box. Never convert them into a `timeout` — see the bounding section, which
+  carves gate runs out of the at-spawn wall-clock rule for exactly this reason.
 - **Plan-review criteria reference** — the generated per-criterion registry (one section per
   criterion, the reviewer's detection detail), the per-ticket structural quality gates, and
   the `.rebar/criteria_routing.json` overlay → `docs/plan-review-criteria-guide.md` (and
@@ -257,6 +261,15 @@ trap 'kill 0' EXIT INT TERM
 `timeout` is the bound; the `trap` is the sweep. Use both — `trap 'kill 0' EXIT INT TERM`
 signals the entire process group, so it reaps helpers you forgot about, and it fires on the
 error paths as well as the happy path.
+
+**This rule is about UNBOUNDED work, not slow work — gate runs are explicitly out of scope.**
+Do NOT put a `timeout` on `review-plan`, `verify-completion`, a completion-verifier-gated
+close, or any other long-running LLM/gate operation. Those are BOUNDED workloads: they
+terminate on their own with a verdict, which is exactly the "prefer a bounded workload"
+case below. Truncating one wastes a billable multi-call LLM run, produces no verdict, and —
+the expensive part — the truncation reads as a GATE FAILURE rather than as a limit the agent
+imposed on itself, so the next reader debugs the wrong thing. Run gates unbounded; background
+them if you need to keep working, and let them finish.
 
 **Rules, not suggestions:**
 
