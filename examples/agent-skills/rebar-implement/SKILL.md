@@ -290,7 +290,8 @@ The subagent done, **you** restore the full test set and run it (happy + edge + 
 - **All green** → the implementation satisfies behavior the implementer couldn't see. Good.
 - **Give the tests teeth (where the leaf warrants it):** perturb the implementation (negate a
   condition, revert a key line) and confirm a held-out test goes RED, then restore — a test
-  that stays green under mutation is a tautology.
+  that stays green under mutation is a tautology. **Run this step inside an OS sandbox** —
+  see "Sandbox the mutation run" below; it is mandatory, not advisory.
 - **Refactoring litmus:** confirm the tests would *not* break under a behavior-preserving rename
   or extraction. If one would, it's a change-detector — rewrite it to assert observable output.
 - **A held-out test fails** → this is genuine signal the implementation is incomplete or
@@ -299,6 +300,53 @@ The subagent done, **you** restore the full test set and run it (happy + edge + 
   If the *test* itself was wrong (over-/under-specified), correct it under revert-first
   discipline: revert the relevant code, fix the test, re-confirm it RED for the right reason,
   then re-apply the code and confirm GREEN.
+
+**Sandbox the mutation run — the seeded defect is arbitrary code.** Perturbing the code and
+then executing the tests *runs* that defect: for the duration of the check you are deliberately
+executing hostile code. On 2026-08-26 an ad-hoc mutation script stripped a safety guard from a
+shell script that performs real deletion, ran the tests, and the glob expanded to `rm -rf /*` —
+destroying `/opt/homebrew` and every Homebrew-installed app in `/Applications` before a
+60-second timeout stopped it. Any step that perturbs code and then executes tests **must** run
+inside an OS sandbox that denies writes outside the worktree and a scratch dir.
+
+**macOS** — the profile is written by the snippet itself, so nothing external is referenced:
+
+```sh
+SBX="$(mktemp -d)"
+cat > "$SBX/p.sb" <<EOF
+(version 1)
+(allow default)
+(deny file-write*)
+(allow file-write*
+  (subpath "$PWD")
+  (subpath "$SBX")
+  (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr"))
+EOF
+sandbox-exec -f "$SBX/p.sb" <your mutation test command>
+```
+
+**Linux** — the complete invocation, not an abbreviated fragment:
+
+```sh
+bwrap --ro-bind / / --dev /dev --proc /proc --bind "$PWD" "$PWD" -- <your mutation test command>
+```
+
+`bwrap` presence on PATH is **NOT** capability. Ubuntu 23.10+ restricts unprivileged user
+namespaces via AppArmor, so an installed `bwrap` can fail with `Creating new namespace failed`
+or `setting up uid map: Permission denied` — both observed. Probe the capability first:
+
+```sh
+bwrap --ro-bind / / -- /bin/true || echo "bwrap cannot namespace here"
+```
+
+**No sandbox available** — neither mechanism present, or `bwrap` present but unable to
+namespace: **do not run the mutation step against code that performs real filesystem deletion,
+and do not proceed unsandboxed.** Assert on an **injected seam** instead — point the deletion at
+a stub that records its argv and assert on what *would* have been deleted. That is a strictly
+better oracle than observing a wiped directory, and it needs no sandbox.
+
+The sandbox goes **around** this discipline; it does not relax it. RED-first, the held-out
+oracle, and the mutation-teeth requirement are unchanged.
 
 ### 4e-bis. Escalation — when re-dispatch isn't enough
 

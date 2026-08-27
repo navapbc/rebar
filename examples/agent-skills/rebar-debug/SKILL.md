@@ -788,7 +788,8 @@ derive the fix independently and say so.
   re-omit the missing field, delete the recovery loop) — confirm the held-out test returns to
   **RED**, then restore the fix. A test that stays green under mutation is a tautology, not a
   proof. Where the bug class warrants, also assert a second input or differentially vs.
-  pre-bug behavior to catch thin, single-input fixes.
+  pre-bug behavior to catch thin, single-input fixes. **Run this step inside an OS sandbox**
+  — see "Sandbox the mutation run" below; it is mandatory, not advisory.
 - **Refactoring litmus (guard the opposite failure):** the mutation check proves the test goes
   RED when behaviour breaks; also confirm it does *not* go red for a behaviour-preserving
   change. Ask: would this test break if someone renamed an internal variable or extracted a
@@ -796,6 +797,53 @@ derive the fix independently and say so.
   rewrite it to assert observable output (return value, stdout, exit code, emitted event, file
   written), never a private name, an intermediate variable, or a grep of source text.
 - The broader test suite (or relevant subset) still passes — no regressions.
+
+**Sandbox the mutation run — the seeded defect is arbitrary code.** Perturbing the code and
+then executing the tests *runs* that defect: for the duration of the check you are deliberately
+executing hostile code. On 2026-08-26 an ad-hoc mutation script stripped a safety guard from a
+shell script that performs real deletion, ran the tests, and the glob expanded to `rm -rf /*` —
+destroying `/opt/homebrew` and every Homebrew-installed app in `/Applications` before a
+60-second timeout stopped it. Any step that perturbs code and then executes tests **must** run
+inside an OS sandbox that denies writes outside the worktree and a scratch dir.
+
+**macOS** — the profile is written by the snippet itself, so nothing external is referenced:
+
+```sh
+SBX="$(mktemp -d)"
+cat > "$SBX/p.sb" <<EOF
+(version 1)
+(allow default)
+(deny file-write*)
+(allow file-write*
+  (subpath "$PWD")
+  (subpath "$SBX")
+  (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr"))
+EOF
+sandbox-exec -f "$SBX/p.sb" <your mutation test command>
+```
+
+**Linux** — the complete invocation, not an abbreviated fragment:
+
+```sh
+bwrap --ro-bind / / --dev /dev --proc /proc --bind "$PWD" "$PWD" -- <your mutation test command>
+```
+
+`bwrap` presence on PATH is **NOT** capability. Ubuntu 23.10+ restricts unprivileged user
+namespaces via AppArmor, so an installed `bwrap` can fail with `Creating new namespace failed`
+or `setting up uid map: Permission denied` — both observed. Probe the capability first:
+
+```sh
+bwrap --ro-bind / / -- /bin/true || echo "bwrap cannot namespace here"
+```
+
+**No sandbox available** — neither mechanism present, or `bwrap` present but unable to
+namespace: **do not run the mutation step against code that performs real filesystem deletion,
+and do not proceed unsandboxed.** Assert on an **injected seam** instead — point the deletion at
+a stub that records its argv and assert on what *would* have been deleted. That is a strictly
+better oracle than observing a wiped directory, and it needs no sandbox.
+
+The sandbox goes **around** this discipline; it does not relax it. RED-first, the held-out
+oracle, and the mutation-teeth requirement are unchanged.
 
 **Test-modification guard (strict):** if the held-out test fails on a plausible fix, that is
 either a genuinely incomplete fix (keep fixing the code) or a wrong test. When the test itself
