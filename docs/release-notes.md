@@ -8,6 +8,40 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — nanosecond timestamps are STRINGS on the MCP wire
+
+Bug `unreal-milky-sloth` (`6fe7-956f-4901-45cf`), 2026-08-27. rebar's MCP server emitted
+`time.time_ns()` timestamps as bare 19-digit JSON numbers. RFC 8259 §6 guarantees that
+implementations "agree exactly on their numeric values" only inside `[-(2**53)+1, (2**53)-1]`, and
+every supported MCP client parses JSON numbers as IEEE-754 binary64 — so this broke both ways: a
+client using plain `JSON.parse` silently truncated the value, and GitHub Copilot CLI, which parses
+losslessly into a `BigInt`, failed outright with `TypeError: Do not know how to serialize a BigInt`
+on `list_tickets` and `ready_tickets`.
+
+**What changed.** On the **MCP surface only**, any integer outside the JS-safe range is now emitted
+as its exact decimal **string**. CLI `--output json` and the Python library are UNCHANGED and still
+emit integers.
+
+**Which keys.** `created_at`, `updated_at`, `last_reopened_at`, `source_created_at` and comment
+`timestamp` / `source_created_at` (all optional), plus `signed_at` on `sign_result`,
+`verify_signature_result` and `plan_review_status`.
+
+**Why this is called out as BREAKING.** `signed_at` is a **required** key in those three schemas,
+and `docs/api-stability.md` says required keys are not retyped. Their `type` is now
+`["integer", "string"]` (plus `"null"` where it already was), so the integer form still validates and
+a reader that already coerced with `int()` is unaffected. It is recorded here rather than shipped as
+a silent exception, so the "strongest contract" rule stays literally true.
+
+**What a consumer must do.** Parse these fields as an arbitrary-precision integer — `int(x)` in
+Python, `BigInt(x)` in JavaScript — and accept both the integer and string forms. Do **not** use
+`Number(x)`: binary64 rounds silently, with no error. The real stored value `1787856371950409998`
+comes back from a plain `JSON.parse` of the old numeric form as `1787856371950410000`. Any consumer
+already doing `Number(x)` was **already** reading a corrupted value; this change is what makes the
+exact value reachable.
+
+**Invariant.** The instant is unchanged and the conversion is lossless: the decimal digits are
+identical to the integer form, only the JSON type differs.
+
 ## BREAKING (pre-1.0) — unreadable config errors gate resolution (no more fail-OPEN)
 
 Operator ruling on ticket 39f8-ae7c ("Unreadable config should result in an error"),

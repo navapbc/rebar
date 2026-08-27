@@ -318,7 +318,7 @@ try:
         ticket_id: str
         manifest: list[str] = []
         algorithm: str
-        signed_at: int
+        signed_at: int | str  # str: JS-safe wire form (bug 6fe7)
         # Op-cert shape (always present on a freshly-minted op-cert record).
         envelope: str
         principal: str
@@ -336,7 +336,7 @@ try:
         step_count: int
         algorithm: str | None
         key_id: str | None
-        signed_at: int | None
+        signed_at: int | str | None  # str: JS-safe wire form (bug 6fe7)
         head_sha: str | None
         verified: bool
         verdict: str
@@ -354,7 +354,7 @@ try:
         verdict: str
         reason: str
         verified_at_sha: str | None = None
-        signed_at: int | None = None
+        signed_at: int | str | None = None  # str: JS-safe wire form (bug 6fe7)
 
     class GroundingBackendOut(_Out):
         # One backend entry of GroundingInfoOut.backends.

@@ -76,6 +76,54 @@ The authoritative version of this table is `schemas.OUTPUT_SCHEMAS` in
 The `rebar bridge fsck` result is a strict three-field object:
 `unknown_event_types`, `binding_drift`, and `store_integrity` are all required.
 
+### Nanosecond timestamps — integers here, STRINGS over MCP
+
+Every rebar timestamp (`created_at`, `updated_at`, `last_reopened_at`, `source_created_at`,
+comment `timestamp`, and `signed_at` on the signing/plan-review results) is **nanoseconds since
+the Unix epoch (UTC)**, produced by `time.time_ns()`. Those are 19-digit values, e.g.
+`1787856371950409998`.
+
+**They do not fit in a JSON number that every reader agrees on.** RFC 8259 §6 guarantees that
+implementations "agree exactly on their numeric values" only for integers in
+`[-(2**53)+1, (2**53)-1]` — up to `9007199254740991`. So:
+
+| surface | wire form |
+|---|---|
+| CLI `--output json` | **integer** (unchanged) |
+| Python library (`rebar.*`) | Python `int` (unchanged — arbitrary precision) |
+| **MCP tools** | **decimal string** when the value is outside the JS-safe range |
+
+The MCP form is a string of **decimal digits only** — no sign, no thousands separators, no
+decimal point, no units suffix — e.g. `"1787856371950409998"`. It is emitted that way because
+every MCP client is JavaScript and parses bare JSON numbers as IEEE-754 binary64; it is a
+correctness measure, **not** a formatting preference. (rebar reached the same conclusion for its
+own event log years earlier and banned `jq` from that path for exactly this reason — see
+`src/rebar/_store/canonical.py`.)
+
+**How to consume it.** Parse as an arbitrary-precision integer and accept both forms:
+
+```python
+created_at = int(ticket["created_at"])      # Python: int() handles both int and str
+```
+
+```javascript
+const createdAt = BigInt(ticket.created_at); // JS: BigInt() handles both
+```
+
+**Do not use `Number(x)`,** and do not rely on a plain `JSON.parse` of the old numeric form.
+Binary64 rounds it **silently, with no error**: the real stored value `1787856371950409998`
+comes back from `JSON.parse` as `1787856371950410000`. A consumer doing `Number(x)` was already
+reading a corrupted value before this change; the string form is what makes the exact value
+reachable at all.
+
+**Invariant:** the instant is unchanged and the conversion is lossless — the decimal digits are
+identical to the integer form, only the JSON type differs. Round-tripping
+`int(wire_value) == stored_value` always holds.
+
+The `signed_at` retype is a **breaking change to a required key**, recorded in
+[docs/release-notes.md](release-notes.md) and the [CHANGELOG](../CHANGELOG.md) rather than shipped
+as a silent exception to the [API stability](api-stability.md) rule.
+
 ### `creation_channel` in `ticket_state`
 
 `show` / `list` / `ready` carry an optional **`creation_channel`** field on
