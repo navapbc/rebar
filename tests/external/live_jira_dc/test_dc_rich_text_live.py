@@ -33,17 +33,13 @@ Two live claims are proven here, each in its own test:
 
 from __future__ import annotations
 
-import os
-import time
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 from _bridge_output import converged_pass_problem, wrote_nothing_problem
 from _child_diag import assert_child_ran_clean
-from _dc_support import force_issue_reindex as _force_reindex
 from _dc_support import live_jira_ready
 from _dc_support import run_bridge as _run_bridge
 from _dc_support import skip_no_extra as _skip_no_extra
@@ -76,64 +72,11 @@ def _rich_markdown(heading: str, bold: str, code: str) -> str:
     return f"# {heading}\n\nA paragraph with **{bold}** emphasis.\n\n{{code}}\n{code}\n{{code}}\n"
 
 
-# The search-index-visibility budget. Jira DC's Lucene index is eventually consistent, and
-# on the ephemeral CI instance under load its reindex latency routinely runs 83-90s (the last
-# green run's own per-test setup times were 90.73s and 83.30s — right at the old fixed 90s
-# ceiling, so a slightly slower index blew the budget and flaked the lane). This carries real
-# margin over that observed latency, mirroring the Cloud probe's search-index-lag hardening
-# (ticket 1d21: a capped-exponential budget to ~195s). Env-tunable so an operator can widen it
-# for a slower instance without a code change.
-_SEARCH_INDEX_TIMEOUT_DEFAULT = 240.0
-
-
-def _search_index_timeout() -> float:
-    raw = os.environ.get("REBAR_DC_SEARCH_INDEX_TIMEOUT")
-    if raw:
-        try:
-            value = float(raw)
-        except ValueError:
-            value = 0.0
-        if value > 0:
-            return value
-    return _SEARCH_INDEX_TIMEOUT_DEFAULT
-
-
-def _wait_until_search_reflects(
-    transport: Any,
-    project: str,
-    key: str,
-    predicate: Callable[[dict[str, Any]], bool],
-    what: str,
-    timeout: float | None = None,
-) -> None:
-    """Block until a JQL SEARCH returns ``key`` in a state satisfying ``predicate``.
-
-    The reconcile pass reads remote fields off a JQL search, and Jira's Lucene index is
-    eventually consistent, so a field written a moment ago may not be visible to the pass
-    yet. Waiting for the SEARCH (not a direct GET) to reflect the change is what keeps a
-    timing artefact from being reported as a bridge defect — the same hazard the sibling
-    ``test_dc_mutations`` inbound cells guard against. The budget defaults to
-    ``_SEARCH_INDEX_TIMEOUT_DEFAULT`` (env-tunable) to carry real margin over the ephemeral
-    DC's observed ~90s reindex latency.
-    """
-    if timeout is None:
-        timeout = _search_index_timeout()
-    deadline = time.monotonic() + timeout
-    attempts = 0
-    last: dict[str, Any] | None = None
-    while time.monotonic() < deadline:
-        attempts += 1
-        for hit in transport.search_issues(f'project = "{project}" AND key = "{key}"'):
-            if hit.get("key") == key:
-                last = hit
-                if predicate(hit):
-                    return
-        time.sleep(2.0)
-    raise AssertionError(
-        f"the index never reflected {what} on {key} within {timeout:.0f}s ({attempts} "
-        f"attempts). This is NOT a bridge defect — the write succeeded, the SEARCH cannot see "
-        f"it yet. Last indexed fields: {(last or {}).get('fields')!r}"
-    )
+# The reconcile passes this module spawns are SCOPED (``--only``), so bug f449's lag-free
+# snapshot overlay applies: each scoped pass direct-GETs the bound key from the primary store
+# (immediately consistent) and arbitrates on that, NOT on the eventually-consistent JQL search
+# index. So a pass run immediately after a write no longer needs to wait for the Lucene index
+# to catch up — the former search-visibility wait/reindex dance is gone.
 
 
 def _rendered_description_html(dc_request: Any, key: str) -> str:
@@ -161,25 +104,17 @@ def _push_and_converge(
     description: str,
     *,
     what: str,
-    transport: Any,
-    project: str,
-    visible_token: str,
-    dc_request: Any,
 ) -> None:
-    """Set the local ``description``, run a scoped writing pass, and wait for the index.
+    """Set the local ``description`` and run a scoped writing pass.
 
     Scoping (``--only local_id,key``) is MANDATORY for writing passes here: the store copy
     is binding-scrubbed, so an unscoped pass would route the whole copied store down the
     CREATE path. Asserts the pass settled (no traceback, ``BRIDGE_STATE: converged``).
 
-    After the push, forces a synchronous per-issue reindex (``_force_reindex``) and then blocks
-    until a JQL SEARCH reflects ``visible_token`` in the description. The push writes over REST
-    (immediately visible to a direct GET) but the NEXT pass reads remote fields off the
-    eventually-consistent JQL search, so a follow-up pass run before the index caught up would
-    diff against a stale (pre-push) remote and could churn — the index-lag hazard the sibling
-    inbound cells guard against. The forced reindex makes that catch-up DETERMINISTIC rather
-    than dependent on Jira DC's unbounded background reindex (bug 2c60); the wait then confirms
-    it and still degrades safely if the reindex resource is unavailable.
+    No post-push search-index wait is needed: the write lands over REST (immediately visible
+    to a direct GET) and the NEXT scoped pass arbitrates on a lag-free direct GET of the key
+    (bug f449's snapshot overlay), not on the eventually-consistent JQL search — so it cannot
+    diff against a stale pre-push remote.
     """
     import rebar
 
@@ -188,14 +123,6 @@ def _push_and_converge(
     assert_child_ran_clean(cp, what=f"{what} pass")
     problem = converged_pass_problem(cp.stdout, cp.stderr)
     assert problem is None, f"{what}: {problem}\n{cp.stdout}\n--stderr--\n{cp.stderr}"
-    _force_reindex(dc_request, key)
-    _wait_until_search_reflects(
-        transport,
-        project,
-        key,
-        lambda h: visible_token in ((h.get("fields") or {}).get("description") or ""),
-        f"the pushed body ({what})",
-    )
 
 
 @_skip
@@ -245,10 +172,6 @@ def test_live_rich_text_renders_and_echo_is_safe(
         key,
         _rich_markdown(heading, bold, code),
         what="rich-body push",
-        transport=dc_transport,
-        project=jira_dc_project,
-        visible_token=heading,
-        dc_request=dc_request,
     )
 
     html = _rendered_description_html(dc_request, key)
@@ -281,7 +204,6 @@ def test_live_rich_text_both_sides_conflict_keeps_local(
     dc_transport: Any,
     jira_dc_project: str,
     bound_dc_issue: Any,
-    dc_request: Any,
 ) -> None:
     """AC2 (conflict half): a both-sides edit keeps rebar's body AND records the conflict.
 
@@ -313,10 +235,6 @@ def test_live_rich_text_both_sides_conflict_keeps_local(
         key,
         base_body,
         what="baseline push",
-        transport=dc_transport,
-        project=jira_dc_project,
-        visible_token=heading,
-        dc_request=dc_request,
     )
     settle = _run_bridge(dc_store_copy_repo, "sync", only=f"{local_id},{key}", max_changes=10)
     assert_child_ran_clean(settle, what="baseline settle pass")
@@ -336,16 +254,9 @@ def test_live_rich_text_both_sides_conflict_keeps_local(
     )
     jira_token = _uniq("graywolf-jira-side")
     dc_transport.update_issue(key, description=f"{base_body}\njira edit {jira_token}\n")
-    _force_reindex(dc_request, key)
-    _wait_until_search_reflects(
-        dc_transport,
-        jira_dc_project,
-        key,
-        lambda h: jira_token in ((h.get("fields") or {}).get("description") or ""),
-        "the Jira-side description edit",
-    )
 
-    # (3) THE PASS — local-wins emit + recorded conflict.
+    # (3) THE PASS — local-wins emit + recorded conflict. The scoped pass direct-GETs the key
+    # (bug f449 overlay), so it sees the Jira-side edit lag-free — no search-index wait needed.
     cp = _run_bridge(dc_store_copy_repo, "sync", only=f"{local_id},{key}", max_changes=10)
     assert_child_ran_clean(cp, what="conflict pass")
     assert converged_pass_problem(cp.stdout, cp.stderr) is None, (

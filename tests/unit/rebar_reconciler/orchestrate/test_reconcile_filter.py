@@ -279,6 +279,23 @@ class TestReconcileOnceFiltered:
 
         applier.apply = apply
         applier._applied = applied_mutations
+
+        # Bug f449: reconcile_once now refreshes scoped bound keys from the primary store
+        # (lag-free GET) before the differs. Thread a hermetic transport through the
+        # applier's ``_load_acli`` seam (the same seam ``_resolve_pass_transport`` uses) so
+        # the scoped GET stays offline. It returns each key's snapshot fields verbatim
+        # (immediately consistent), so the overlay is a no-op and the filter assertions
+        # below are unaffected.
+        class _FakeTransport:
+            def get_issue_by_rest(self, jira_key):
+                snap = {
+                    "DIG-100": {"summary": "test ticket", "status": {"name": "To Do"}},
+                    "DIG-200": {"summary": "other ticket", "status": {"name": "To Do"}},
+                    "DIG-300": {"summary": "third ticket", "status": {"name": "Done"}},
+                }
+                return {"fields": snap.get(jira_key, {})}
+
+        applier._load_acli = lambda: _FakeTransport()
         stubs["reconcile_applier"] = applier
 
         # Health stub
