@@ -115,7 +115,13 @@ incomplete run.
 
 ## Local use
 
-Run the same driver from the repository environment:
+Run the same driver from the repository environment. **The gate wraps its test
+subprocesses in an OS sandbox and aborts if none is available** — install
+`bubblewrap` on Linux (`sudo apt-get install -y bubblewrap`); macOS needs nothing,
+`sandbox-exec` ships with the OS. `REBAR_MUTATION_ALLOW_UNSANDBOXED=1` overrides the
+abort and logs a WARNING, but a mutant that reaches a destructive code path can then
+delete real files — see `docs/local-dev-env.md` before using it.
+
 
 ```sh
 uv run --locked python scripts/mutation_gate.py select --base HEAD^ --head HEAD
