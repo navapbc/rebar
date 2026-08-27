@@ -2404,6 +2404,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:57Z"
     },
+    "0d22-f664-77e1-495f": {
+      "created_at": "2026-08-27T19:05:40Z",
+      "jira_id": "4590435",
+      "jira_key": "REB-3750",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:05:42Z"
+    },
     "0d24-0055-d8d2-4ab0": {
       "baseline": {
         "assignee": {
@@ -7221,6 +7228,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-22T17:34:10Z"
+    },
+    "2523-b393-5c08-4f3f": {
+      "created_at": "2026-08-27T19:05:42Z",
+      "jira_id": "4590436",
+      "jira_key": "REB-3751",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:05:45Z"
     },
     "2529-bb55-586d-4785": {
       "baseline": {
@@ -14882,6 +14896,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:59Z"
     },
+    "463a-e356-af2e-4f8b": {
+      "created_at": "2026-08-27T19:05:47Z",
+      "jira_id": "4590437",
+      "jira_key": "REB-3752",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:05:49Z"
+    },
     "465d-c541-5e52-4e62": {
       "baseline": {
         "assignee": {
@@ -18938,7 +18959,7 @@
         "assignee": null,
         "description": "Disposable probe #2.\n\n## Acceptance Criteria\n- [ ] AC1: link/unlink exercised.\n- [ ] AC2: closed with a bug close_class.\n\n## Definition of Done\n- [ ] DD1: closed obsolete.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "PROBE: link/unlink + bug-close target (disposable)"
       },
       "created_at": "2026-08-27T10:42:00Z",
@@ -22668,9 +22689,17 @@
       "updated_at": "2026-08-15T15:02:04Z"
     },
     "6e5d-8b78-6cd6-4ec4": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Generalize the lag-free snapshot overlay to unscoped reconcile passes\n\n## Context\nBug f449 (seagreen-fortuitous-crayfish) fixes a narrow inbound stale-clobber window on the DC rich-text lane by refreshing SCOPED bound-present keys via a lag-free direct GET (get_issue_by_rest) before both differs and baseline advancement, so a post-write pass reading a stale JQL-search snapshot cannot mirror a stale value back over local (the bound-field inbound differ, inbound_differ._diff_jira_vs_local, is LEVEL-triggered with no baseline).\n\n## Gap\nThe f449 overlay is guarded to SCOPED passes only, to bound the direct-GET volume. Full, UNSCOPED production reconcile passes remain theoretically exposed to the same stale-inbound-clobber if a pass runs while the search index still lags a very recent rebar write. In production, passes are spaced far enough apart that the index normally catches up, so the practical risk is low -- but the level-triggered inbound path has no formal guard.\n\n## Proposed work\nRefresh only the AMBIGUOUS candidate keys on unscoped passes: keys where the search snapshot presents local==baseline AND snapshot-remote!=baseline (i.e. a field that looks like a remote edit but could be a stale echo of our own recent write). Direct-GET those keys, merge the mirrored scalar fields into curr_snapshot, then arbitrate on the lag-free value. This bounds GET volume even for unscoped passes (only genuinely-ambiguous keys) while closing the window for all passes.\n\n## Acceptance criteria\n- [ ] Unscoped passes refresh ambiguous candidate keys (local==baseline AND remote!=baseline) via\n      a lag-free GET before both differs and baseline advance.\n- [ ] A held-out oracle proves an unscoped pass does not clobber local under a stale post-write\n      snapshot, with bounded GET volume (only ambiguous keys refreshed).\n- [ ] make lint && make typecheck && make test green.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Generalize lag-free snapshot overlay to unscoped reconcile passes (unblock inbound stale-clobber window)"
+      },
       "created_at": "2026-08-27T15:07:23Z",
       "jira_id": "4590401",
       "jira_key": "REB-3735",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-27T15:07:27Z"
     },
@@ -23014,6 +23043,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:11Z"
     },
+    "6fe7-956f-4901-45cf": {
+      "created_at": "2026-08-27T19:05:49Z",
+      "jira_id": "4590438",
+      "jira_key": "REB-3753",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:05:52Z"
+    },
     "7013-447f-3084-4241": {
       "baseline": {
         "assignee": null,
@@ -23194,6 +23230,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:18Z"
     },
+    "71e7-4626-cb19-42d7": {
+      "created_at": "2026-08-27T19:05:53Z",
+      "jira_id": "4590439",
+      "jira_key": "REB-3754",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:05:55Z"
+    },
     "71fe-c6e9-0d52-48d8": {
       "baseline": {
         "assignee": {
@@ -23313,6 +23356,13 @@
       "jira_key": "REB-1149",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:21Z"
+    },
+    "724c-b5fd-efb1-40d5": {
+      "created_at": "2026-08-27T19:06:01Z",
+      "jira_id": "4590440",
+      "jira_key": "REB-3755",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:06:03Z"
     },
     "725b-9187-e932-4f7f": {
       "baseline": {
@@ -24915,6 +24965,13 @@
       "peer_parent": "REB-601",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:13Z"
+    },
+    "79b2-6ebc-6c1d-4125": {
+      "created_at": "2026-08-27T19:06:04Z",
+      "jira_id": "4590441",
+      "jira_key": "REB-3756",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:06:06Z"
     },
     "79c6-eaf3-38af-4ce9": {
       "baseline": {
@@ -30903,6 +30960,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:13Z"
     },
+    "962c-892b-aaa4-47e2": {
+      "created_at": "2026-08-27T19:06:10Z",
+      "jira_id": "4590442",
+      "jira_key": "REB-3757",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:06:13Z"
+    },
     "9675-65aa-8b60-4ceb": {
       "created_at": "2026-08-15T15:06:13Z",
       "jira_key": "REB-1336",
@@ -35459,6 +35523,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:35Z"
     },
+    "aca0-6a66-0a27-47cf": {
+      "created_at": "2026-08-27T19:06:13Z",
+      "jira_id": "4590443",
+      "jira_key": "REB-3758",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:06:18Z"
+    },
     "acaf-bb4d-9eba-470c": {
       "created_at": "2026-08-15T15:08:35Z",
       "jira_key": "REB-1413",
@@ -36174,9 +36245,17 @@
       "updated_at": "2026-08-15T15:08:55Z"
     },
     "af1b-8e22-7ef4-477b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Symptom\nThe live Jira DC lane (jira-dc-harness in external-integration.yml) fails on two rich-text tests AFTER change 2266 (bug f449 lag-free snapshot overlay) landed:\n\n1. test_live_rich_text_renders_and_echo_is_safe \u2014 after _push_and_converge of a rich body, renderedFields.description is EMPTY (''), so the <h1> assertion fails (test_dc_rich_text_live.py:179). The converged check passed (weak oracle), but nothing rich landed.\n2. test_live_rich_text_both_sides_conflict_keeps_local \u2014 the baseline settle pass (a converged repeat) computed outbound totals [1] when a converged repeat must compute nothing (test_dc_rich_text_live.py:241).\n\n## Prior state (ground truth)\nBefore 2266, BOTH tests failed ONLY at the now-removed _wait_until_search_reflects timeout (240s); the search index held description:None for >240s while the write succeeded. So on DC these assertions (render + echo) never actually executed before \u2014 2266 removed the wait and revealed/introduced these two failures.\n\n## Hypothesis to investigate\nThe f449 overlay (snapshot_lagfree_refresh.overlay_lagfree_scalars) overwrites curr_snapshot[key]['description'] with a DIRECT-GET raw value, changing the description's provenance/shape vs the JQL-search snapshot the rich-text echo-safety (story 3388) normalization was validated against. This may (a) break the codec normalization so a converged repeat re-pushes (symptom 2), and (b) alter first-push bidirectional suppression (3bf8) so inbound-wins and the rich body never lands (symptom 1). Alternatively these are pre-existing DC cutover bugs the search-wait masked.\n\n## Acceptance\nRoot cause proven (offline repro via real differ code with simulated lagging snapshot), fix restores DC-lane green for both tests, no regression to Cloud lane or f449 unit oracle.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "DC rich-text live: empty render + repeat re-push after f449 overlay"
+      },
       "created_at": "2026-08-27T15:07:27Z",
       "jira_id": "4590402",
       "jira_key": "REB-3736",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-27T15:07:31Z"
     },
@@ -38861,6 +38940,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:09Z"
     },
+    "baf9-eea0-4b8d-42a4": {
+      "created_at": "2026-08-27T19:06:22Z",
+      "jira_id": "4590444",
+      "jira_key": "REB-3759",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:06:24Z"
+    },
     "bb16-5f76-880d-405d": {
       "baseline": {
         "assignee": null,
@@ -39835,6 +39921,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:37Z"
     },
+    "c100-c4f1-2a2b-4905": {
+      "created_at": "2026-08-27T19:06:25Z",
+      "jira_id": "4590445",
+      "jira_key": "REB-3760",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:06:27Z"
+    },
     "c119-2f8c-dfb2-4f52": {
       "baseline": {
         "assignee": {
@@ -40710,7 +40803,7 @@
         "assignee": null,
         "description": "PROBE ticket. Disposable. Created to exercise the LIVE rebar MCP server end-to-end.\n\n## Context / Problem\nThe live MCP server at rebar.solutions.navateam.com needs an end-to-end smoke exercise of its write surface. This ticket is the probe subject; it carries no production value and is closed as obsolete when the exercise finishes.\n\n## Approach\nDrive create/show/search/list/comment/edit/link/unlink/claim/transition/reopen against the live endpoint and record anomalies as separate bug tickets.\n\n## Scope\n- In scope: this probe ticket only.\n- Out of scope: any repository file change.\n\n## Testing\nNo repository files change, so there is nothing to test; no_file_impact is declared.\n\n## Acceptance Criteria\n- [ ] AC1: The MCP write surface is exercised against the live server.\n- [ ] AC2: Anomalies found are filed as separate bug tickets.\n- [ ] AC3: This probe is closed as obsolete.\n\n## Definition of Done\n- [ ] DD1: Probe closed with close_class=obsolete.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "PROBE: live MCP surface exercise (disposable) [edited]"
       },
       "created_at": "2026-08-27T10:42:06Z",
@@ -40937,7 +41030,7 @@
         "assignee": null,
         "description": "Probe of create_idea on the live MCP server.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "PROBE: idea-status creation (disposable)"
       },
       "created_at": "2026-08-27T10:42:10Z",
@@ -44527,6 +44620,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:40Z"
+    },
+    "d758-79ab-bb11-4c11": {
+      "created_at": "2026-08-27T19:06:27Z",
+      "jira_id": "4590446",
+      "jira_key": "REB-3761",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:06:30Z"
     },
     "d763-944e-c66d-4ac2": {
       "baseline": {
@@ -50750,7 +50850,7 @@
         },
         "description": "# Live DC rich-text lane: outbound echo re-diffs against stale JQL search snapshot\n\n## Observed failure\n`tests/external/live_jira_dc/test_dc_rich_text_live.py::test_live_rich_text_renders_and_echo_is_safe` and `::test_live_rich_text_both_sides_conflict_keeps_local` fail on the dispatched Live External Integration run (33052311279, DC lane), both with: `AssertionError: the index never reflected the pushed body ... within 240s (120 attempts)`. The indexed doc shows `description: None` and `updated` stuck at the binding step.\n\n## Corrected root cause (supersedes the \"index lag / widen the wait\" framing of bug 2c60)\nThe test's `_push_and_converge` blocks on `_wait_until_search_reflects` \u2014 waiting for the JQL SEARCH index to reflect the pushed `description`. That guards a REAL dependency: the outbound FIELD differ (`compute_outbound_mutations`, outbound_differ.py) diffs local tickets against the FETCHER'S JQL-SEARCH SNAPSHOT (`fetcher.fetch_snapshot` -> `search_issues`). For a key PRESENT in the snapshot (ours is \u2014 its key is indexed for existence via `wait_until_searchable`), the differ compares local `description` against the SNAPSHOT's `description`, which is STALE (`None`) until the background Lucene reindex catches up. Direct GET (`_safe_get_issue` / `get_issue_by_rest`, immediately consistent) is used ONLY for bound-but-ABSENT keys, not bound-and-present ones. So on the ephemeral DC \u2014 whose background reindex is UNBOUNDED (ADR 0037 s3) and, on a starved instance, never reflects the write within any fixed budget \u2014 the echo pass re-diffs the just-pushed field as changed and would churn, and the wait times out.\n\nTwo prior fixes (2c60: widen to 240s; then force a per-issue reindex) both targeted search VISIBILITY. Widening cannot bound an unbounded wait, and the forced-reindex helper had NO effect (and no observability \u2014 it no-ops silently), likely because `/rest/api/2/reindex/issue` is not an effective synchronous foreground reindex on DC 8.17. The fix must remove the dependence on unbounded search visibility, not chase it.\n\n## Candidate resolutions (to be decided by investigation + history)\n1. PRODUCT: outbound differ confirms a snapshot-detected field change via a bounded direct GET\n   before emitting the mutation, so a stale-snapshot false-positive cannot cause churn (extends\n   the existing bound-but-absent direct-GET seam to bound-and-present keys). Robust for ANY\n   eventually-consistent remote.\n2. HARNESS: configure the ephemeral Jira DC for synchronous/fast indexing at boot.\n3. TEST: verify the landed body via a direct GET (immediately consistent) and re-express echo-\n   safety so it does not depend on unbounded search visibility.\n\n## Acceptance criteria\n- [ ] Root cause confirmed (which of 1/2/3, with history/ADR support).\n- [ ] Fix removes the unbounded-search-visibility dependency; a held-out test proves it with teeth.\n- [ ] A dispatched Live External Integration run shows the DC lane GREEN (both rich-text tests pass)\n      AND the Cloud mutation lane GREEN. Run URL commented here and on the epic.\n- [ ] `make lint && make typecheck && make test` green.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Live DC rich-text echo re-diffs against stale JQL search snapshot"
       },
       "created_at": "2026-08-27T10:42:25Z",
@@ -50793,6 +50893,13 @@
       "jira_key": "REB-1315",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:32Z"
+    },
+    "f4c5-4354-f6b1-491e": {
+      "created_at": "2026-08-27T19:06:32Z",
+      "jira_id": "4590447",
+      "jira_key": "REB-3762",
+      "state": "confirmed",
+      "updated_at": "2026-08-27T19:06:35Z"
     },
     "f4cf-60b2-41c0-4843": {
       "baseline": {
@@ -54547,7 +54654,26 @@
     "1787816221989744001": "__rebar_unknown_comment_id__",
     "1787819618161957001": "__rebar_unknown_comment_id__",
     "1787825676287108001": "__rebar_unknown_comment_id__",
-    "1787827649930053001": "__rebar_unknown_comment_id__"
+    "1787827649930053001": "__rebar_unknown_comment_id__",
+    "1787848983162149001": "__rebar_unknown_comment_id__",
+    "1787849177113400001": "__rebar_unknown_comment_id__",
+    "1787849590572153025": "__rebar_unknown_comment_id__",
+    "1787851626554562001": "__rebar_unknown_comment_id__",
+    "1787851646659272001": "__rebar_unknown_comment_id__",
+    "1787853604007650001": "__rebar_unknown_comment_id__",
+    "1787854595468949001": "__rebar_unknown_comment_id__",
+    "1787854749344876001": "__rebar_unknown_comment_id__",
+    "1787855074935207001": "__rebar_unknown_comment_id__",
+    "1787855367135487001": "__rebar_unknown_comment_id__",
+    "1787855674852171001": "__rebar_unknown_comment_id__",
+    "1787855890310958001": "__rebar_unknown_comment_id__",
+    "1787856092889615001": "__rebar_unknown_comment_id__",
+    "1787856551206486001": "__rebar_unknown_comment_id__",
+    "1787856740704723001": "__rebar_unknown_comment_id__",
+    "1787856976224609473": "__rebar_unknown_comment_id__",
+    "1787856976852940001": "__rebar_unknown_comment_id__",
+    "1787857011238572001": "__rebar_unknown_comment_id__",
+    "1787857324526033001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -56700,7 +56826,20 @@
     "REB-3736": "af1b-8e22-7ef4-477b",
     "REB-374": "e9d4-159a-ce80-4b4e",
     "REB-375": "eb26-9748-4108-4916",
+    "REB-3750": "0d22-f664-77e1-495f",
+    "REB-3751": "2523-b393-5c08-4f3f",
+    "REB-3752": "463a-e356-af2e-4f8b",
+    "REB-3753": "6fe7-956f-4901-45cf",
+    "REB-3754": "71e7-4626-cb19-42d7",
+    "REB-3755": "724c-b5fd-efb1-40d5",
+    "REB-3756": "79b2-6ebc-6c1d-4125",
+    "REB-3757": "962c-892b-aaa4-47e2",
+    "REB-3758": "aca0-6a66-0a27-47cf",
+    "REB-3759": "baf9-eea0-4b8d-42a4",
     "REB-376": "eb82-0da3-3138-4e26",
+    "REB-3760": "c100-c4f1-2a2b-4905",
+    "REB-3761": "d758-79ab-bb11-4c11",
+    "REB-3762": "f4c5-4354-f6b1-491e",
     "REB-377": "ed2b-3262-fc64-4f69",
     "REB-378": "ee21-05a6-b170-4272",
     "REB-379": "ee82-6c0f-a0ed-404d",
