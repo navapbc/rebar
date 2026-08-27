@@ -125,6 +125,31 @@ test -f "$(git rev-parse --git-common-dir)/hooks/pre-commit" \
 `make hooks` prints `✓ commit gate active: …` on success and exits non-zero (loudly) if the
 hook did not land — so the gate is never silently absent.
 
+### Mutation testing runs sandboxed (`REBAR_MUTATION_ALLOW_UNSANDBOXED`)
+
+`scripts/mutation_gate.py` runs both shard-test-executing subprocesses — the baseline
+`pytest` and the `mutmut run` mutant test-run — inside an OS sandbox that denies
+filesystem writes outside the scratch tree, the pytest basetemp, and the venv. macOS
+uses Seatbelt (`sandbox-exec`); Linux uses `bwrap`.
+
+This exists because mutation testing executes *deliberately broken* code. On
+2026-08-26 a mutation removed a guard from a script performing real deletion, a test
+exec'd it with an empty path variable, and the glob expanded to `rm -rf /*` —
+destroying `/opt/homebrew` and every Homebrew-installed app in `/Applications`. No
+mutation tool in any language sandboxes runtime effects; they isolate only the source
+tree, which does nothing once the mutant calls `rm -rf`.
+
+On a CI runner (`CI` set truthy) the run proceeds UNSANDBOXED with a WARNING: a runner is ephemeral and destroyed after the job, so it is already the isolated environment the sandbox substitutes for. On a workstation, with neither mechanism installed the run **aborts**. That is deliberate: a silent
+unsandboxed fallback is indistinguishable from a sandboxed run. To override:
+
+```sh
+REBAR_MUTATION_ALLOW_UNSANDBOXED=1 python scripts/mutation_gate.py ...
+```
+
+It logs a WARNING when set. **Understand the risk before using it** — a mutant that
+reaches a destructive code path can delete real files anywhere your user can write.
+Prefer installing `bwrap` (`apt install bubblewrap`) over setting this.
+
 ### The commit gate needs the dev tools on `PATH` (activate the venv before committing)
 
 The hooks run `make lint` (ruff, shellcheck) and `make typecheck` (mypy), which invoke the
