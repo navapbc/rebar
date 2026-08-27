@@ -642,3 +642,57 @@ def test_sigterm_grace_subprocess_waits_for_inflight_then_exits_zero():
     # signal. The subprocess timeout=30 above is the hang guard (no upper-bound wall-clock
     # assert — that is the proven CI flake class).
     assert elapsed >= 0.5
+
+
+# ── scheme preservation behind the TLS edge (fernlike-toothsome-hen, P1 security) ──────
+def test_absolute_urls_preserve_https_behind_the_deployed_edge_trust():
+    """The app must never hand a client an absolute `http://` URL when the request
+    arrived over TLS at the nginx edge.
+
+    Regression guard for fernlike-toothsome-hen: `https://<box>/mcp/` answered 307 with
+    `location: http://<box>/mcp`. A 307 preserves method and body, and clients differ on
+    whether they retain `Authorization` across a same-host scheme change — so a client
+    that retains it transmits its bearer PAT in plaintext.
+
+    Mechanism: uvicorn honours `X-Forwarded-Proto` only from a peer in its trust list,
+    which it reads from FORWARDED_ALLOW_IPS (default "127.0.0.1"). The service runs in a
+    container, so nginx's connection arrives from the docker bridge gateway and the
+    default distrusts it, leaving scope["scheme"] == "http".
+
+    This test drives the REAL streamable_http_app through uvicorn's own
+    ProxyHeadersMiddleware configured from the COMMITTED compose value, so it fails if
+    that deployment setting is ever dropped. The untrusted-peer negative control proves
+    the assertion has teeth rather than passing for an unrelated reason."""
+    import yaml
+    from starlette.testclient import TestClient
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    from rebar.mcp_server import build_server
+
+    compose = yaml.safe_load((REPO_ROOT / "infra" / "compose" / "docker-compose.yml").read_text())
+    deployed_trust = compose["services"]["mcp"]["environment"]["FORWARDED_ALLOW_IPS"]
+
+    # A peer address that is NOT loopback — what nginx looks like from inside the
+    # container once docker has published the port on the host's loopback.
+    gateway = ("172.17.0.1", 5000)
+    headers = {**MCP_HEADERS, "X-Forwarded-Proto": "https"}
+
+    def _location(trusted: str) -> str:
+        app = ProxyHeadersMiddleware(
+            build_server(_http_config()).streamable_http_app(), trusted_hosts=trusted
+        )
+        with TestClient(app, base_url="http://127.0.0.1:8000", client=gateway) as client:
+            resp = client.post("/mcp/", json=INIT_REQUEST, headers=headers, follow_redirects=False)
+        return resp.headers.get("location", "")
+
+    # Negative control: the pre-fix default distrusts the gateway, so the forwarded
+    # scheme is dropped and the app emits plaintext. This is the reported bug.
+    assert _location("127.0.0.1").startswith("http://"), (
+        "negative control did not reproduce the downgrade — the test would pass vacuously"
+    )
+
+    # The deployed configuration must preserve https.
+    assert _location(str(deployed_trust)).startswith("https://"), (
+        "an absolute URL built behind the TLS edge downgraded to http:// — a client "
+        "following it would transmit its bearer PAT in plaintext"
+    )

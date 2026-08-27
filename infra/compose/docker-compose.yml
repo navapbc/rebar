@@ -338,6 +338,23 @@ services:
       REBAR_MCP_HTTP_PORT: "8091"
       # TLS terminates at the nginx edge; acknowledge it so the non-loopback gate passes.
       REBAR_MCP_HTTP_TLS_AT_EDGE: "true"
+      # Trust nginx's X-Forwarded-Proto (bug 79b2 — HTTPS->HTTP downgrade of the bearer
+      # PAT). uvicorn reads FORWARDED_ALLOW_IPS natively and defaults it to "127.0.0.1",
+      # then wraps the app in ProxyHeadersMiddleware(trusted_hosts=<that>). But the app runs
+      # INSIDE this container: nginx's connection arrives from the docker bridge GATEWAY,
+      # not 127.0.0.1, so the peer was untrusted, `X-Forwarded-Proto: https` was DROPPED,
+      # and every scheme-derived absolute URL (notably Starlette's trailing-slash 307
+      # Location) was built as `http://` — a scheme downgrade that can put a client's
+      # bearer PAT on the wire in plaintext.
+      #
+      # "*" (trust any peer), NOT a pinned bridge-gateway IP: this service declares no
+      # `networks:` block, so that address is IMPLICIT and can drift on a compose/docker
+      # change — a stale pin would silently re-open the downgrade with no failure signal.
+      # Trust-all is BOUNDED here: the port is published on host LOOPBACK
+      # (127.0.0.1:8091:8091) with nginx the sole reachable client, and nginx sets
+      # X-Forwarded-Proto as a LITERAL (`proxy_set_header X-Forwarded-Proto https`), which
+      # OVERWRITES whatever a client sent — so no client can forge the value.
+      FORWARDED_ALLOW_IPS: "*"
       # The DNS-rebinding guard checks the forwarded Host/Origin: name the public edge.
       REBAR_MCP_HTTP_ALLOWED_HOSTS: "${REBAR_MCP_HTTP_ALLOWED_HOSTS:-rebar.solutions.navateam.com}"
       REBAR_MCP_HTTP_ALLOWED_ORIGINS: "${REBAR_MCP_HTTP_ALLOWED_ORIGINS:-https://rebar.solutions.navateam.com}"
