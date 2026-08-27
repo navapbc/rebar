@@ -128,6 +128,39 @@ post-deploy closes are enforced and unsetting `require_environment` fully revert
 does not itself enable enforcement. Plan-review certs are minted under the **same** environment
 but are gated separately (they are not the `require_environment` lane).
 
+### 4. Ticket store — a DEDICATED read-write clone at `/var/gerrit/site/mcp-tickets`
+
+The server needs a ticket store to read, and three questions had to be settled before one could
+be provisioned: does it serve the shared `tickets` branch at all, does it get its own volume or
+share the review-bot's, and is it a reader or a writer. Recorded here because the answers are
+load-bearing for anyone reasoning about blast radius, and they were previously only in the
+bug's comments (bug `kilted-nuclear-bronco`).
+
+**FULL READ-WRITE, serving the shared `tickets` branch.** Of read-only + certified ops,
+full read-write, and certified-ops-only-with-no-store, the operator ruling is full read-write:
+the server serves the shared branch and is a WRITER. `REBAR_MCP_READONLY` stays unset. This is
+what makes the MCP surface the primary way agents drive the tracker rather than a read mirror.
+
+**A DEDICATED volume, `/var/gerrit/site/mcp-tickets`** (`gerrit_mcp_tickets`), not the
+review-bot's store. Sharing would put two independent writers behind one directory. rebar's
+write lock would serialize them, but the review-bot's store was provisioned for a single writer
+and nothing in its design anticipates a second. A dedicated clone costs one directory and keeps
+the blast radius of an mcp-side store fault off the review-bot — which matters, because that
+store has its own history of divergence faults.
+
+**Credentials fall back to the review-bot PAT.** `MCP_TICKETS_PAT` is materialized from
+`/rebar/prod/mcp-tickets-pat`, but `fetch-secrets.sh` falls back to
+`/rebar/prod/reviewbot-tickets-pat` when the dedicated slot is blank. Both credentials do the
+same thing against the same target — clone and push `tickets` of `navapbc/rebar` — so requiring
+a duplicate secret to exist first would have left the store unprovisioned and the endpoint
+reporting "not initialized" purely for want of a copy. The dedicated slot remains PREFERRED and
+wins when populated.
+
+**Consequence worth stating plainly:** a writer sharing the busiest branch in the repo means
+every MCP write auto-commits and pushes, and contends with every other writer. That is accepted,
+not overlooked — see the store-provisioning bugs discovered from this decision
+(`fathomable-yester-thrip`, `unfit-beneficial-whimbrel`, `mobile-groovy-badger`).
+
 ## Consequences
 
 - ADR 0050's deferred AWS recipe is now filled for this box: a self-contained, TLS-fronted,
