@@ -75,13 +75,23 @@ def _parse_assignee(args: list[str]) -> str | None:
     return ns.assignee
 
 
-def _config_default_assignee(tracker: str) -> str:
+def _config_default_assignee(repo_root=None) -> str:
     """The configured ``ticket.default_assignee`` (env > file), or ``""`` if unset or
-    unreadable. Read from the repo root (the tracker's parent), where ``rebar.toml`` /
-    ``.rebar/`` live — the same cfg root the plan-review gate uses. A malformed config
-    must never break a claim, so any load error degrades to no default."""
+    unreadable.
+
+    Resolved from ``repo_root`` — the SAME root every other config reader uses
+    (``_engine_support/gates.py``, ``reads.py``, ``verify_opcert.py``), and ``None`` is a
+    valid value meaning "discover", not a missing argument. This used to pass
+    ``os.path.dirname(tracker)`` instead, which is the repo root ONLY when the tracker sits
+    inside the checkout. ``REBAR_TRACKER_DIR`` relocating the store is a SUPPORTED feature
+    (``_config_sources.tracker_dir_override``) and the deployed MCP server uses it — store at
+    ``/var/gerrit/site/mcp-tickets``, repo at ``/app`` — so the lookup landed in a directory
+    with no ``rebar.toml``, returned "", and every claim silently recorded NO assignee.
+
+    A malformed config must never break a claim, so any load error still degrades to no
+    default — which is also why the original failure was silent."""
     try:
-        return config.compose_config(root=os.path.dirname(tracker)).ticket.default_assignee or ""
+        return config.compose_config(root=repo_root).ticket.default_assignee or ""
     except Exception:  # noqa: BLE001 — non-critical: fall back to no default, never fail the claim
         return ""
 
@@ -103,7 +113,9 @@ def _review_before_claim(ticket_id: str, tracker: str, repo_root) -> None:
     brief under-lock re-check at signing."""
     from rebar.reducer import reduce_ticket
 
-    cfg_root = os.path.dirname(tracker)
+    # repo_root (possibly None -> discover), NOT the tracker's parent: a relocated store
+    # would otherwise resolve an empty config and the gate would read as disabled.
+    cfg_root = repo_root
     ticket_type = (reduce_ticket(os.path.join(tracker, ticket_id)) or {}).get("ticket_type", "")
     if not gates._plan_review_gate_applies(cfg_root, ticket_type, ticket_id=ticket_id):
         sys.stderr.write("plan-review gate not enabled for this ticket; --review skipped\n")
@@ -172,7 +184,7 @@ def claim_compute(
     # recursion below — so a cascaded parent claim inherits the same resolved default
     # (advisory f7ca28). An explicit "" (clear) is left untouched and never falls back.
     if assignee is None:
-        assignee = _config_default_assignee(tracker)
+        assignee = _config_default_assignee(repo_root)
 
     # `claim --review` (story a114): sense the gate and, when the attestation is
     # stale/missing, run the signed review BEFORE anything else — a non-PASS raises
@@ -185,11 +197,10 @@ def claim_compute(
     # verify, no LLM/network). Blocks (fail-closed) on a missing/stale/wrong
     # attestation when enabled; --force bypasses with an audit comment. The same
     # consolidated check guards `transition open -> in_progress` (see _commands/gates.py),
-    # so the two start-work paths can't diverge. cfg_root is the REPO root (parent of
-    # the tracker), where .rebar/config.conf lives.
-    gates.plan_review_precheck(
-        ticket_id, os.path.dirname(tracker), repo_root, force_reason=force_reason
-    )
+    # so the two start-work paths can't diverge. The cfg root is repo_root (possibly None,
+    # meaning discover) -- NOT the tracker's parent, which is only the repo root when the
+    # store is co-located; a relocated store resolved an empty config and disabled the gate.
+    gates.plan_review_precheck(ticket_id, repo_root, repo_root, force_reason=force_reason)
 
     # Parent-first cascade: if this ticket has an OPEN parent, claim the parent first
     # (recursively up the chain) so a child is never claimed while its parent is still
