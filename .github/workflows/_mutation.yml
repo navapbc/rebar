@@ -56,6 +56,15 @@ jobs:
         uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
         with:
           enable-cache: true
+      # bubblewrap is the Linux sandbox the mutation gate wraps its test subprocesses
+      # in (ticket e668-b496-e264-4283). Without it the gate fails CLOSED — by design,
+      # since a silent unsandboxed run is indistinguishable from a sandboxed one — so
+      # the runner must provide it. macOS needs no install: sandbox-exec ships with the OS.
+      - name: Install bubblewrap (Linux mutation sandbox)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          bwrap --version
       - name: Select mutation shards
         id: select
         shell: bash
@@ -110,6 +119,15 @@ jobs:
         uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
         with:
           enable-cache: true
+      # bubblewrap is the Linux sandbox the mutation gate wraps its test subprocesses
+      # in (ticket e668-b496-e264-4283). Without it the gate fails CLOSED — by design,
+      # since a silent unsandboxed run is indistinguishable from a sandboxed one — so
+      # the runner must provide it. macOS needs no install: sandbox-exec ships with the OS.
+      - name: Install bubblewrap (Linux mutation sandbox)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          bwrap --version
       - name: Install the pinned development environment
         run: uv sync --locked --extra dev
       - name: Run mutation shard
