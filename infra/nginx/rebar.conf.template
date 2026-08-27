@@ -86,6 +86,17 @@ server {
     # Gerrit pushes/clones can be large; lift the body cap.
     client_max_body_size 0;
 
+    # --- HSTS (bug 79b2) -------------------------------------------------
+    # Tell every client that this host is HTTPS-only, so a subsequent plain-http
+    # attempt (a typo'd URL, a stale bookmark, or an http:// Location an upstream
+    # emits) is rewritten to https BY THE CLIENT and the bearer PAT never leaves
+    # the machine in plaintext. SERVER level, not per-location, so every surface
+    # (/review/, /opcert/, /mcp, Gerrit) inherits it. `always` is REQUIRED: without
+    # it nginx emits add_header only on 2xx/3xx-class responses, and the MCP
+    # endpoint answers an unauthenticated client with 401 — precisely the first
+    # response a new client sees, and the one that most needs to pin https.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
     # --- review-bot: /review/ -> the FastAPI receiver --------------------
     # The trailing slash + trailing slash on proxy_pass STRIPS the /review/ prefix,
     # so an external GET /review/health reaches the app as GET /health.
@@ -119,17 +130,78 @@ server {
     # TLS terminates HERE (nginx edge); the MCP service is loopback-published and speaks
     # plain HTTP behind it (REBAR_MCP_HTTP_TLS_AT_EDGE=true acknowledges this). proxy_pass
     # to the NAMED upstream `rebar_mcp` (materialized include = the blue-green flip seam).
-    # A PREFIX `location /mcp` (no trailing slash) so BOTH the bare `/mcp` endpoint and
-    # `/mcp/...` match; NO path on proxy_pass so the URI is PRESERVED — the MCP server
-    # mounts its Streamable-HTTP endpoint at /mcp (REBAR_MCP_HTTP_PATH). The DNS-rebinding
-    # guard checks the forwarded Host, so pass the public $host through; the allowlist
-    # (REBAR_MCP_HTTP_ALLOWED_HOSTS/_ORIGINS) must name this host/origin.
+    # THREE locations: two EXACT-MATCH blocks that serve the documented external forms
+    # `/mcp/` and `/mcp` directly (mapped onto the app's /mcp), and the PREFIX
+    # `location /mcp` that still carries `/mcp/...` sub-paths URI-preserved. The
+    # DNS-rebinding guard checks the forwarded Host, so pass the public $host through; the
+    # allowlist (REBAR_MCP_HTTP_ALLOWED_HOSTS/_ORIGINS) must name this host/origin.
+    #
+    # EXACT-MATCH first (bug 79b2 — HTTPS->HTTP downgrade of the bearer PAT).
+    # The documented client URL is `https://<host>/mcp/` WITH a trailing slash, but the
+    # app mounts its Streamable-HTTP endpoint at `/mcp` (REBAR_MCP_HTTP_PATH). Under the
+    # URI-preserving prefix location below, `/mcp/` reached the app verbatim and
+    # Starlette's default `redirect_slashes=True` answered 307 with an ABSOLUTE
+    # `Location: http://<host>/mcp` — a same-host SCHEME DOWNGRADE. A 307 preserves
+    # method AND body, and clients differ on whether they keep `Authorization` across a
+    # same-host scheme change, so a client that keeps it retransmits its bearer PAT in
+    # PLAINTEXT. Fix: serve both external forms DIRECTLY at the edge with exact-match
+    # locations mapped onto the app's `/mcp`, so the app is never asked to redirect a
+    # trailing slash and NO Location header is produced for the documented URL. The
+    # `/mcp` PATH on proxy_pass is what performs that mapping (this is the pattern
+    # docs/mcp-auth.md documents, specialized to the named `rebar_mcp` upstream).
+    #
+    # Both blocks MUST carry the same Streamable-HTTP/SSE settings and forwarded headers
+    # as the prefix location — an exact-match location inherits nothing from it, so
+    # omitting them would break real MCP traffic (HTTP/1.0 upstream, buffered SSE) and
+    # drop the X-Forwarded-Proto the app derives absolute URLs from.
+    location = /mcp/ {
+        proxy_pass http://rebar_mcp/mcp;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        # Belt-and-braces: rewrite any http:// Location an upstream might still emit up
+        # to https, so no future upstream redirect can re-open the downgrade. Location
+        # level, NOT server level: proxy_redirect defaults to `default`, which is derived
+        # from each location's own proxy_pass, and a server-level rule would REPLACE that
+        # default for /review/ and /opcert/ and could break their relative redirects.
+        proxy_redirect http://$host/ https://$host/;
+        proxy_redirect http://rebar_mcp/ https://$host/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+
+    # Same target for the no-slash external form, so `/mcp` and `/mcp/` are
+    # indistinguishable to the app and neither can provoke a slash redirect.
+    location = /mcp {
+        proxy_pass http://rebar_mcp/mcp;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_redirect http://$host/ https://$host/;
+        proxy_redirect http://rebar_mcp/ https://$host/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+
+    # The PREFIX location stays for `/mcp/...` SUB-PATHS (nginx matches the exact-match
+    # blocks above first, so it no longer sees the bare `/mcp` or `/mcp/`). NO path on
+    # proxy_pass here so the URI is PRESERVED for those sub-paths.
     location /mcp {
         proxy_pass http://rebar_mcp;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        # Same http->https Location upgrade as the exact-match blocks: a sub-path is just
+        # as able to emit an absolute http:// redirect carrying the client's bearer.
+        proxy_redirect http://$host/ https://$host/;
+        proxy_redirect http://rebar_mcp/ https://$host/;
         # Streamable-HTTP responses are SSE streams: force HTTP/1.1 upstream (nginx
         # defaults to HTTP/1.0, which has no chunked transfer and breaks SSE) and clear
         # the Connection header so keep-alive is negotiated, then disable buffering +

@@ -153,9 +153,14 @@ def test_nginx_has_named_mcp_upstream_from_materialized_glob_include() -> None:
 
 def test_nginx_mcp_location_proxies_to_the_named_upstream() -> None:
     """AC3: a `location /mcp` proxies to the named upstream (proxy_pass
-    http://rebar_mcp), preserving the URI (no path on proxy_pass)."""
+    http://rebar_mcp), preserving the URI (no path on proxy_pass).
+
+    The selector anchors on a LINE-LEADING directive (and closes on a line-leading
+    `}`) so it cannot latch onto prose. The previous `location\\s+/mcp\\b[^{]*\\{`
+    matched the words "location /mcp" inside a COMMENT and then ran forward to the
+    next `{`, capturing whichever block happened to follow. Assertions unchanged."""
     text = _NGINX.read_text()
-    m = re.search(r"location\s+/mcp\b[^{]*\{(.*?)\}", text, re.DOTALL)
+    m = re.search(r"^[ \t]*location\s+/mcp\s*\{(.*?)^[ \t]*\}", text, re.DOTALL | re.MULTILINE)
     assert m, "`location /mcp` block not found"
     body = m.group(1)
     assert re.search(r"proxy_pass\s+http://rebar_mcp\s*;", body), body
@@ -464,4 +469,129 @@ def test_mcp_entrypoint_still_execs_the_server_last() -> None:
     assert executable, "entrypoint must not be empty"
     assert executable[-1] == 'exec "$@"', (
         f"exec must be the LAST action in the entrypoint; found {executable[-1]!r}"
+    )
+
+
+# ------------------------------------------------------- MCP edge: no scheme downgrade
+# Regression guard for fernlike-toothsome-hen (79b2-6ebc-6c1d-4125), a P1 security bug:
+# the documented client URL `https://<box>/mcp/` answered `307` with
+# `location: http://<box>/mcp` — an HTTPS→HTTP downgrade on the URL every doc and every
+# committed example points at. A 307 preserves method and body, and clients differ on
+# whether they keep `Authorization` across a same-host scheme change, so a client that
+# keeps it puts the bearer PAT on the wire in plaintext.
+#
+# Two mechanisms produced it, and both are pinned below:
+#   (a) the edge was a PREFIX `location /mcp` with a URI-preserving proxy_pass, so the
+#       external `/mcp/` reached the app verbatim while the app mounts at http_path
+#       `/mcp`; Starlette's default `redirect_slashes` then emitted the 307.
+#   (b) the app never trusted nginx's `X-Forwarded-Proto: https`, so it built the
+#       Location with scheme `http` (see the compose FORWARDED_ALLOW_IPS test).
+
+
+def _server_443_block() -> str:
+    """The body of the port-443 TLS server block."""
+    text = _NGINX.read_text()
+    start = text.index("listen 443 ssl;")
+    return text[start:]
+
+
+def test_nginx_serves_the_documented_mcp_slash_url_without_redirecting() -> None:
+    """The documented external URL `/mcp/` is served DIRECTLY by an exact-match location
+    whose proxy_pass carries the app's `/mcp` path, so nginx rewrites the URI at the edge
+    and the app's `redirect_slashes` never fires. No Location header is produced at all,
+    which is the only way a redirect cannot be downgraded.
+
+    Oracle: an exact-match `location = /mcp/` (and the bare `= /mcp` twin) whose
+    proxy_pass names the upstream AND the app path. A PREFIX location alone is exactly
+    the defect."""
+    text = _NGINX.read_text()
+    for external in ("/mcp/", "/mcp"):
+        pattern = r"location\s+=\s+" + re.escape(external) + r"\s*\{(.*?)\n    \}"
+        m = re.search(pattern, text, re.DOTALL)
+        assert m, f"exact-match `location = {external}` block not found"
+        body = m.group(1)
+        # The app path must be ON the proxy_pass: that is what makes nginx replace the
+        # matched URI, so the app is never asked to redirect `/mcp/` to `/mcp`.
+        assert re.search(r"proxy_pass\s+http://rebar_mcp/mcp\s*;", body), (
+            f"`location = {external}` must proxy_pass to http://rebar_mcp/mcp so the "
+            f"edge rewrites the URI instead of letting the app 307-redirect: {body}"
+        )
+
+
+def test_nginx_upgrades_any_plaintext_location_from_the_mcp_upstream() -> None:
+    """Fail-closed backstop: even if the MCP upstream ever emits an `http://` Location
+    again (an SDK change, a new route, a future redirect), nginx rewrites it to
+    `https://` before it reaches the client. Without this directive nothing at the edge
+    prevents a scheme downgrade.
+
+    Scoped to the MCP locations deliberately. `proxy_redirect` defaults to `default`,
+    which derives its rewrite from that location's own proxy_pass; declaring explicit
+    rules at SERVER level would replace that default for `/review/` and `/opcert/` too
+    and could break their relative redirects. The MCP blocks proxy to a named upstream
+    and rely on no such default, so overriding it there is safe.
+
+    Oracle: every MCP location carries rules mapping an http:// Location — whether the
+    app built it from the forwarded Host or from the upstream name — to https://."""
+    text = _NGINX.read_text()
+    for header, pattern in (
+        ("exact `= /mcp/`", r"location\s+=\s+/mcp/\s*\{(.*?)\n    \}"),
+        ("exact `= /mcp`", r"location\s+=\s+/mcp\s*\{(.*?)\n    \}"),
+        ("prefix `/mcp`", r"location\s+/mcp\s*\{(.*?)\n    \}"),
+    ):
+        m = re.search(pattern, text, re.DOTALL)
+        assert m, f"{header} block not found"
+        body = m.group(1)
+        assert re.search(r"proxy_redirect\s+http://\$host/\s+https://\$host/\s*;", body), (
+            f"{header} lacks `proxy_redirect http://$host/ https://$host/;`: {body}"
+        )
+        assert re.search(r"proxy_redirect\s+http://rebar_mcp/\s+https://\$host/\s*;", body), (
+            f"{header} lacks the named-upstream proxy_redirect rule: {body}"
+        )
+
+
+def test_nginx_asserts_hsts_on_every_tls_response() -> None:
+    """AC2: an HSTS header is served, so a client cannot be walked down to plaintext.
+
+    `always` is load-bearing: without it nginx omits add_header on error responses, and
+    the MCP endpoint's reply to an unauthenticated client is a 401 — precisely the
+    response a client sees before it has ever completed a request."""
+    body = _server_443_block()
+    m = re.search(r'add_header\s+Strict-Transport-Security\s+"([^"]+)"\s+always\s*;', body)
+    assert m, 'no `add_header Strict-Transport-Security "..." always;` on the 443 server'
+    value = m.group(1)
+    max_age = re.search(r"max-age=(\d+)", value)
+    assert max_age, f"HSTS header has no max-age: {value!r}"
+    # A max-age under a year is not a meaningful transport backstop.
+    assert int(max_age.group(1)) >= 31536000, f"HSTS max-age too short: {value!r}"
+
+
+def test_compose_mcp_trusts_the_edge_forwarded_proto() -> None:
+    """Root cause (b) of fernlike-toothsome-hen: the app built absolute URLs with scheme
+    `http` even though nginx sends `X-Forwarded-Proto: https`, because uvicorn only
+    honours forwarded headers from a TRUSTED peer. uvicorn resolves that trust list from
+    the environment — `forwarded_allow_ips=None` -> `os.environ.get("FORWARDED_ALLOW_IPS",
+    "127.0.0.1")` — and wraps the app in ProxyHeadersMiddleware with it. This service runs
+    INSIDE a container binding 0.0.0.0 with the port published on host loopback, so
+    nginx's connection arrives from the docker bridge gateway, NOT 127.0.0.1: the default
+    distrusts it and the forwarded scheme is dropped.
+
+    Setting it here needs no code change and corrects EVERY app-generated absolute URL,
+    not just the one Location that was reported.
+
+    Spoofing is not a new risk: nginx sets `proxy_set_header X-Forwarded-Proto https;` as
+    a LITERAL, so a client-supplied value is always overwritten before the app sees it,
+    and the container port is published on host loopback with nginx as the sole reachable
+    client — the posture REBAR_MCP_HTTP_TLS_AT_EDGE=true already acknowledges."""
+    doc = yaml.safe_load(_COMPOSE.read_text())
+    env = doc["services"]["mcp"]["environment"]
+    assert "FORWARDED_ALLOW_IPS" in env, (
+        "the mcp service must set FORWARDED_ALLOW_IPS or uvicorn drops nginx's "
+        "X-Forwarded-Proto and the app emits http:// absolute URLs"
+    )
+    # Exactly "*", not a pinned address. This service declares no `networks:` block, so
+    # the bridge gateway address is implicit and can drift on a compose/docker change; a
+    # stale pin would silently re-open the downgrade with no failing signal anywhere.
+    assert str(env["FORWARDED_ALLOW_IPS"]) == "*", (
+        "FORWARDED_ALLOW_IPS must be exactly '*' — a pinned bridge-gateway address can "
+        f"drift and silently re-open the scheme downgrade; got {env['FORWARDED_ALLOW_IPS']!r}"
     )
