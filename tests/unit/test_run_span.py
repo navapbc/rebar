@@ -225,3 +225,34 @@ def test_identity_still_minted_when_span_not_recording(
         got = mint_run_identity(ticket_id="t", operation="review-plan")[0]
     assert got != format(0x99, "032x")
     assert _HEX32.match(got)
+
+
+def test_code_review_boundary_groups_its_candidate_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC: the THIRD boundary — `produce_code_review_verdict` — is covered too.
+
+    Drives the real entry point so the real `run_span("review-code", ...)` wrapper opens,
+    and takes two candidate-level reads from inside it. Both must resolve to the run
+    span's trace id, which is what "one code-review run is one trace" means. Without this
+    the third boundary ships unproven: every other test here exercises only the two
+    `gate_config` boundaries.
+    """
+    from rebar.llm import run_identity
+    from rebar.llm.workflow import gate_dispatch
+
+    _install(monkeypatch, _Tracer(0xC0DE))
+    seen: list[str] = []
+
+    def _fake_preflight(request):
+        # Stands in for the multi-pass fan-out: two candidate-level reads inside the run.
+        seen.append(run_identity.mint_run_identity(ticket_id="t", operation="review-code")[0])
+        seen.append(run_identity.mint_run_identity(ticket_id="t", operation="review-code")[0])
+        return {"verdict": "INDETERMINATE"}
+
+    monkeypatch.setattr(gate_dispatch, "_code_review_preflight", _fake_preflight)
+    out = gate_dispatch.produce_code_review_verdict(
+        gate_dispatch.CodeReviewRequest(cfg=None, target_ticket=None)
+    )
+    assert out == {"verdict": "INDETERMINATE"}
+    assert seen == [format(0xC0DE, "032x")] * 2, seen
