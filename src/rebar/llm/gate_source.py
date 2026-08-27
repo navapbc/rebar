@@ -25,6 +25,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from time import monotonic_ns
 
+from rebar._config_resolvers import snapshot_repo_root
 from rebar._snapshot import (
     SOURCE_ATTESTED,
     SOURCE_LOCAL,
@@ -101,6 +102,14 @@ def resolve_gate_handle(
     phase_started_ns = monotonic_ns() if phase_metrics is not None else 0
     resolved_ref = ref or default_ref(repo_root)
     resolved_source = source or default_source(repo_root)
+    # The THIRD configured default this function owes, alongside ref and source. Without it a
+    # caller that passes no repo_root reaches the snapshot layer's bare-cwd fallback, and on
+    # the deployed MCP server the cwd is /app -- a source copy whose .git is excluded by
+    # .dockerignore -- while REBAR_ROOT names a healthy checkout. Every attested tool
+    # (review_plan, scan_spec, verify_completion, review_code) calls through without one, so
+    # all of them failed with `cannot resolve ref 'origin/main' to a commit in '.'`, including
+    # for a full SHA the configured checkout demonstrably contained. Ticket 1eb6.
+    repo_root = snapshot_repo_root(repo_root)
     if phase_metrics is not None:
         _record_phase(phase_metrics, "verifier_handle_defaults_ms", phase_started_ns)
         phase_started_ns = monotonic_ns()
