@@ -242,8 +242,10 @@ not a second source of truth. Tests pin both:
   `--output` command without a schema fails CI).
 
 **MCP outputSchema exemptions (documented in the coverage test):** the write
-tools (`comment`/`tag`/`archive`/`edit`/`link`/`set_*`/`compact`/…) and the MCP
-`fsck` tool return a generic `{result: <str>}` ack with no canonical shape;
+tools (`comment`/`tag`/`archive`/`edit`/`link`/`set_*`/`compact`/…) return a
+generic `{result: <str>}` ack with no canonical shape (the MCP `fsck` tool was in
+this list until bug `326f-595a-088b-40a5`; it now returns the canonical `fsck`
+shape and IS validated against it);
 `transition_ticket`/`reopen_ticket` advertise **no** `outputSchema` because their
 `{ticket_id, from, to, …}` result uses the Python reserved word `from` (they
 return a plain dict; their CLI/library JSON is still pinned to `transition_result`);

@@ -27,6 +27,7 @@ from rebar._mcp_models import (
     ClarityResultOut,
     DepsGraphOut,
     FileImpactItemOut,
+    FsckOut,
     GateResultOut,
     GroundingInfoOut,
     NextBatchOut,
@@ -382,7 +383,7 @@ def register_read_tools(mcp, ctx) -> None:
         return [TicketStateOut.model_validate(t) for t in rebar.recent_session_logs(limit=limit)]
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def fsck(recover: bool = False) -> str:
+    def fsck(recover: bool = False) -> FsckOut:
         """Check ticket-store integrity (JSON validity, CREATE presence, lock
         cleanup). Set recover=True to run the recovery path."""
         _shadow("mcp.read.fsck")
@@ -393,7 +394,7 @@ def register_read_tools(mcp, ctx) -> None:
             )
         # Plain fsck still mutates: it removes a stale .git/index.lock. On a
         # read-only server suppress that write (report the stale lock instead).
-        return rebar.fsck(recover=recover, report_only=_readonly())
+        return FsckOut.model_validate(rebar.fsck_report(recover=recover, report_only=_readonly()))
 
     # ── Quality gates + file-impact reads (WS5d) ───────────────────────────────
     @mcp.tool(annotations=_ANN["READ_ONLY"])

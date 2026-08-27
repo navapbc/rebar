@@ -354,6 +354,145 @@ def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) ->
     return out.getvalue()
 
 
+def _fsck_scan_report(*, report_only: bool, repo_root) -> dict:
+    """The structured SCAN report — ``rebar fsck --output json`` in process.
+
+    Asks the CLI for its own JSON so the shape comes from the CLI's transform and
+    text/JSON cannot drift. Completed = exit 0 (clean) or 1 (issues found).
+    """
+    import contextlib
+    import io
+    import json as _json
+
+    from rebar._commands import fsck as _fsck_mod
+
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = _fsck_mod.fsck_cli(["--output=json"], repo_root=repo_root, no_mutate=report_only)
+    if rc not in (0, 1):
+        raise RebarError(
+            f"rebar fsck failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",
+            returncode=rc,
+            stderr=err.getvalue(),
+        )
+    try:
+        payload = _json.loads(out.getvalue())
+        if not isinstance(payload, dict):
+            raise ValueError("fsck JSON payload is not an object")
+    except (ValueError, TypeError) as exc:
+        # Unparseable stdout means the run did not produce a report at all — an
+        # execution failure, not a clean/dirty diagnosis. Never fake an empty report.
+        raise RebarError(
+            f"rebar fsck produced no parseable JSON report (exit {rc}): {exc}",
+            returncode=rc,
+            stderr=err.getvalue(),
+        ) from exc
+    payload.setdefault("issues", [])
+    payload.setdefault("fixed", [])
+    payload.setdefault("issue_count", len(payload["issues"]))
+    if rc == 1 and not payload["issues"]:
+        # SCAN-ONLY invariant. Exit 1 with NO reported findings is unreachable for a
+        # real scan, so it can only mean the scan never happened: the exit code comes
+        # from _scan's COUNTED tally, while ``issues`` is every uppercase ``KIND:``
+        # line the text report emitted — a strict SUPERSET of the counted ones
+        # (_commands/fsck.py _transform_json). So exit 1 implies >= 1 counted issue,
+        # hence >= 1 KIND line, hence a non-empty ``issues``. The empty case is the
+        # uninitialized/unscannable store, which _missing_tracker_result renders as
+        # exit 1 plus a payload byte-identical to a clean one, with its real diagnostic
+        # on the TEXT path only. Fail closed rather than hand back a fabricated clean
+        # report for a store that was never read.
+        #
+        # This reasoning holds ONLY for the scan command. `fsck-recover` also exits 1,
+        # but there it means "attempted, nothing recovered" — a COMPLETED recovery
+        # (_commands/fsck_recover.py module docstring). That is why recover has its own
+        # reader below and never reaches this branch.
+        detail = (err.getvalue() or out.getvalue()).strip()
+        raise RebarError(
+            "rebar fsck could not scan the store (exit 1 with no findings — an "
+            "uninitialized or unreadable tracker, not a clean store)"
+            + (f": {detail}" if detail else ""),
+            returncode=rc,
+            stderr=err.getvalue(),
+        )
+    payload["mode"] = "scan"
+    payload["report"] = None
+    payload["returncode"] = rc
+    return payload
+
+
+def _fsck_recover_report(*, repo_root) -> dict:
+    """The RECOVERY record — a different operation with a different output shape.
+
+    ``fsck-recover`` is a destructive repair, not a diagnostic: it emits a
+    plain-English NARRATIVE of the actions it took ("Recovery successful: rebase
+    drained via --continue", "cherry-picked <sha>: …"), never the scan's tagged
+    ``KIND:`` lines, and it has no ``--output json`` mode. Its narrative is therefore
+    carried VERBATIM in ``report`` and is never run through the scan's line transform,
+    which would silently yield an empty ``issues`` list (plus spurious ``warn`` entries
+    parsed out of its ``WARN:`` prose) and discard the narrative entirely.
+
+    ``issues``/``fixed``/``issue_count`` are empty because a recovery produces ACTIONS,
+    not findings — ``mode == "recover"`` is the discriminator that says so, so a caller
+    can never mistake this for a clean scan.
+
+    Exit codes differ from the scan's (``_commands/fsck_recover.py`` module docstring):
+    0 = nothing to do / recovered, 1 = attempted but nothing recovered — BOTH completed
+    runs — and 2 = fatal (no tracker / bad args), which raises.
+    """
+    import contextlib
+    import io
+
+    from rebar._commands import fsck_recover as _fr
+
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = _fr.fsck_recover_cli([], repo_root=repo_root)
+    if rc not in (0, 1):
+        raise RebarError(
+            f"rebar fsck-recover failed (exit {rc}): {(err.getvalue() or out.getvalue()).strip()}",
+            returncode=rc,
+            stderr=err.getvalue(),
+        )
+    return {
+        "mode": "recover",
+        "report": out.getvalue(),
+        "issues": [],
+        "fixed": [],
+        "issue_count": 0,
+        "returncode": rc,
+    }
+
+
+def fsck_report(*, recover: bool = False, report_only: bool = False, repo_root=None) -> dict:
+    """Run fsck and return a STRUCTURED result instead of the human text — and,
+    crucially, WITHOUT collapsing "the diagnosis is: N findings" into "the tool failed".
+
+    fsck is a DIAGNOSTIC: a completed run is a RESULT whatever it found, so this
+    returns a ``dict`` carrying the exit code as DATA in ``returncode``. Only a run
+    that could not HAPPEN raises :class:`RebarError`, preserving today's failure
+    behaviour for genuine execution failures.
+
+    The result is DISCRIMINATED by ``mode``, because scan and recover are different
+    operations with different output shapes and different exit-code meanings:
+
+    * ``mode="scan"`` (default) — ``{issues, fixed, issue_count, returncode,
+      report: None}``, the canonical ``schemas.FSCK`` shape taken from the CLI's own
+      ``--output json``.
+    * ``mode="recover"`` (``recover=True``) — ``{report: <narrative text>, issues: [],
+      fixed: [], issue_count: 0, returncode}``. A recovery produces ACTIONS, not
+      findings; its prose is preserved verbatim rather than forced through the scan's
+      parser.
+
+    See :func:`_fsck_scan_report` and :func:`_fsck_recover_report` for the per-path
+    exit-code contracts, which are NOT the same.
+    """
+    if recover:
+        # report_only has no effect on the recover path (it has no index.lock mutation
+        # toggle); accepted for signature parity with fsck(), as it always has been.
+        return _fsck_recover_report(repo_root=repo_root)
+    return _fsck_scan_report(report_only=report_only, repo_root=repo_root)
+
+
 # NOTE: the deprecated ``rebar.list_epics()`` library function (DE7), the CLI
 # ``list-epics`` command, and the MCP ``list_epics`` tool were all removed pre-1.0
 # (the last two in ticket 5899). Compose the primitives directly instead::

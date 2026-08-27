@@ -821,6 +821,26 @@
         ]
       ]
     },
+    "fsck_report": {
+      "kind": "callable",
+      "params": [
+        [
+          "recover",
+          "KEYWORD_ONLY",
+          "False"
+        ],
+        [
+          "report_only",
+          "KEYWORD_ONLY",
+          "False"
+        ],
+        [
+          "repo_root",
+          "KEYWORD_ONLY",
+          "None"
+        ]
+      ]
+    },
     "get_file_impact": {
       "kind": "callable",
       "params": [
