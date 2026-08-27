@@ -90,6 +90,14 @@ jobs:
       - name: Run the agentic rich-text root-cause probe
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # PIN the agent to a direct-Anthropic model. Without this overlay the run resolves
+          # the SHIPPED default model, which is now `bedrock:us.anthropic.claude-opus-4-8`
+          # (needs an AWS credential chain this workflow does not configure) and the agentic
+          # runtime fails with "Unable to locate credentials". The overlay is the same
+          # per-provider selection mechanism the external suite's anthropic arm uses; it sets
+          # `[llm] model = anthropic:claude-opus-4-8` + the anthropic model_classes, so the
+          # only credential needed is the ANTHROPIC_API_KEY secret above.
+          REBAR_LLM_CONFIG_FILE: ${{ github.workspace }}/.github/llm-providers/anthropic.toml
           REBAR_RUN_EXTERNAL: "1"
           REBAR_DC_RICHTEXT_PROBE: "1"
           # Hard, deterministic guarantee (not a prompt instruction) that the agent's rebar
