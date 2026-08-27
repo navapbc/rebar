@@ -21,6 +21,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
+import mutation_sandbox
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -576,12 +577,27 @@ def execute_shard(root: Path, shard: Shard, artifact_dir: Path, label: str) -> R
         "no:randomly",
         f"--basetemp={basetemp}",
     )
-    clean = _run(clean_args, cwd=root, env=env)
+    # Sandbox BOTH shard-test-executing subprocesses. The baseline pytest below and the
+    # `mutmut run` further down are the only two that execute shard code; `mutmut
+    # results`/`show` are reporting and touch no test code. Sandboxing only the baseline
+    # would leave `mutmut run` — the path the 2026-08-26 incident took — unprotected.
+    sandbox_allow = (root, basetemp, Path(sys.prefix))
+    env = mutation_sandbox.sandbox_env(env)
+    clean = _run(
+        mutation_sandbox.wrap(clean_args, allow=sandbox_allow, profile_dir=artifact_dir, env=env),
+        cwd=root,
+        env=env,
+    )
     (artifact_dir / f"{label}-clean.txt").write_text(clean.stdout + clean.stderr, encoding="utf-8")
     if clean.returncode:
         raise GateError("baseline-test", f"{label}/{shard.name}: selected clean tests failed")
     mutation = _run(
-        (sys.executable, "-m", "mutmut", "run", "--max-children", "1"),
+        mutation_sandbox.wrap(
+            (sys.executable, "-m", "mutmut", "run", "--max-children", "1"),
+            allow=sandbox_allow,
+            profile_dir=artifact_dir,
+            env=env,
+        ),
         cwd=root,
         env=env,
     )
