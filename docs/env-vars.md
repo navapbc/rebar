@@ -49,6 +49,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_GATE_JANITOR_INTERVAL_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_MAX_AGE_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_MAX_BYTES` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_GATE_MAX_ENTRIES` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_REF` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_REVERIFY_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_SOURCE` | `src/rebar/_config_resolvers.py` |  |
@@ -179,14 +180,14 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_167 variables._
+_168 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
 These reads pass a non-literal name argument, so the concrete variable name is not statically resolvable:
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
-- `src/rebar/_config_resolvers.py:320` — `os.environ.get(<non-literal>)`
+- `src/rebar/_config_resolvers.py:325` — `os.environ.get(<non-literal>)`
 - `src/rebar/_operation_config.py:54` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:306` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:319` — `os.environ.get(<non-literal>)`

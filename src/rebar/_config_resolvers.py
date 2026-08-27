@@ -210,6 +210,11 @@ def resolve_janitor_tunables(
         # free_watermark_pct and reverify_seconds — an unset deployment keeps today's
         # free-space-only behaviour.
         "max_bytes": _snapshot_int(os.environ.get("REBAR_GATE_MAX_BYTES"), t, "max_bytes", d),
+        # Entry-COUNT cap (bug a37c): the one bound denominated in neither bytes nor free
+        # space, so it still engages on a large, mostly-empty volume where every byte term is
+        # inert. Unlike max_bytes it defaults ON — an opt-in bound protects nobody — and 0 is
+        # the operator's explicit off switch.
+        "max_entries": _snapshot_int(os.environ.get("REBAR_GATE_MAX_ENTRIES"), t, "max_entries", d),
         "reverify_seconds": _snapshot_int(
             os.environ.get("REBAR_GATE_REVERIFY_SECONDS"), t, "reverify_seconds", d
         ),

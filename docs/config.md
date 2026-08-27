@@ -549,6 +549,7 @@ free_watermark_pct   = 0              # ALSO reclaim when free disk < this % of 
 grace_seconds        = 120            # never evict an entry used within this window (env REBAR_GATE_GRACE_SECONDS)
 max_age_seconds      = 604800         # cold-trim entries older than this (7 days; env REBAR_GATE_MAX_AGE_SECONDS)
 max_bytes            = 0              # cap the snapshot store's own size in bytes; 0 = off (env REBAR_GATE_MAX_BYTES)
+max_entries          = 2000           # cap the snapshot store's ENTRY COUNT; 0 = off (env REBAR_GATE_MAX_ENTRIES)
 reverify_seconds     = 0              # periodic integrity reverify period; 0 = off (env REBAR_GATE_REVERIFY_SECONDS)
 interval_seconds     = 300            # janitor background pass cadence (env REBAR_GATE_JANITOR_INTERVAL_SECONDS)
 ```
@@ -569,6 +570,47 @@ the total exceeds the cap the janitor evicts LRU-by-`mtime` — under the same g
 watermark term — down to a target 5 points below the cap (the same fixed
 `RECLAIM_TARGET_MARGIN_PCT` hysteresis, mirrored). `0`, the default, disables the cap entirely
 and preserves the free-space-only behavior exactly.
+
+`max_entries` is the **metadata-pressure** bound, and the only reclamation term denominated
+in neither bytes nor free space. Every other axis measures the volume or the store's size, so
+on a large, mostly-empty volume all of them are inert — with 886 GiB free the 2 GiB floor is
+untouchable, `free_watermark_pct` and `max_bytes` default off, and a host that mints snapshots
+faster than the 7-day cold-trim expires them keeps every entry inside the age window. One
+developer host accumulated 13,056 entries that way and drove macOS `fseventsd` to 26.3 GB RSS
+and >150% CPU, exhausting swap until GUI applications could no longer launch; disk usage was
+never the binding constraint. The cost of a snapshot store is therefore its **directory-entry
+count**, not only its bytes, and that is what this key bounds.
+
+Unlike `max_bytes` it defaults **ON** (`2000`), because an opt-in bound protects nobody — the
+incident host had `max_bytes` available and unset the whole time. The default sits far above
+any plausible live working set (a host resolving gates all day holds tens to low hundreds of
+snapshots) and far below the count that melted that host, so it should never evict an entry a
+normal workload would reuse. Eviction is LRU-by-`mtime` under the same `grace_seconds`
+protection as the other terms, down to a target 5 points below the cap (the same
+`RECLAIM_TARGET_MARGIN_PCT` hysteresis, so a pass overshoots instead of re-firing every
+interval). Enforcement rides the existing operation-linked GC trigger — no daemon, no CI
+dependency — and the trigger's own decision remains a single `stat` of its stamp sidecar; the
+count is read from the enumeration the pass performs anyway.
+
+**Tuning.** Raise it if gates repeatedly re-materialize snapshots they just used (the symptom
+of a cap below the working set); lower it if the host's filesystem-notification daemon
+(`fseventsd`, `inotify`) shows sustained CPU or RSS growth. `0` disables the axis and restores
+the pre-`a37c` byte-only behaviour exactly.
+
+**Reclaiming an already-bloated store.** An existing host does not self-heal to the new bound
+on its own — the trigger fires at most once per `interval_seconds`, and the first pass it runs
+is what applies the cap. To reclaim now, run one pass in the foreground:
+
+```sh
+python -c 'from rebar._snapshot import janitor; print(janitor.run_gc())'
+```
+
+That honours `grace_seconds`, so an entry a concurrent gate is using is never taken. To see how
+large the store currently is before deciding on a value:
+
+```sh
+ls "${REBAR_GATE_TMPDIR:-${TMPDIR:-/tmp}}/rebar-gate-snapshots" | wc -l
+```
 
 Env-only (NOT `[snapshot]` keys): `REBAR_GATE_TMPDIR` (the snapshot store's base directory;
 default the system temp dir — never a hardcoded `/tmp`) and `REBAR_GATE_ALLOW_UNGATED`

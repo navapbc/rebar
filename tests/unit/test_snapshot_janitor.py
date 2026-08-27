@@ -871,3 +871,133 @@ def test_hot_tickets_entry_is_not_first_lru_victim(store, repo):
     assert res.evicted >= 1
     assert hot.exists(), "the hot tickets- entry must not be the first LRU victim"
     assert not cold.exists(), "the genuinely cold entry is the correct victim"
+
+
+# --------------------------------------------------------------------------------------
+# Bug a37c-d55c-72c3-439b — the ENTRY-COUNT axis (filesystem-metadata pressure).
+#
+# Every pre-existing reclamation term is denominated in BYTES or free space. On a large,
+# mostly-empty volume all of them are inert: 886 GiB free is nowhere near the 2 GiB floor,
+# ``free_watermark_pct`` and ``max_bytes`` both default off, and a host that mints
+# snapshots faster than the 7-day cold-trim expires them keeps every entry inside the age
+# window. 13,056 entries in one directory then drove macOS ``fseventsd`` to 26.3 GB RSS and
+# >150% CPU. The harm was directory-entry COUNT, which no byte-denominated axis measures.
+# --------------------------------------------------------------------------------------
+def test_entry_count_cap_reclaims_under_every_byte_denominated_threshold(store):
+    """AC2 — the incident, reproduced: free space abundant, ``max_bytes`` off, every entry
+    newer than ``max_age_seconds``. No byte axis can fire; the count axis must."""
+    now = time.time()
+    cfg = janitor.JanitorConfig(
+        free_watermark_bytes=2 * 1024**3,
+        free_watermark_pct=0,  # volume-relative term off (the default)
+        grace_seconds=100,
+        max_age_seconds=10**9,  # nothing is anywhere near cold
+        max_bytes=0,  # byte-total backstop off (the default)
+        max_entries=4,
+    )
+    entries = [_sparse_entry(store, f"{i:040x}", 4096, now - 5000 - i) for i in range(6)]
+
+    # free_bytes is enormous: the volume is nowhere near ANY watermark.
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=10**15)
+
+    assert res.evicted > 0, (
+        "a store over the entry-count cap must reclaim even with abundant free space, "
+        "max_bytes off and every entry inside max_age_seconds"
+    )
+    live = [e for e in entries if e.exists()]
+    assert len(live) <= cfg.max_entries
+    # LRU-first: mtime is ``now - 5000 - i``, so entries[-1] is the OLDEST and goes first
+    # while entries[0] — the most recently touched — survives.
+    assert entries[-1].exists() is False
+    assert entries[0].exists() is True
+
+
+def test_entry_count_cap_overshoots_to_the_hysteresis_target(store):
+    """AC3 — the count axis composes with ``RECLAIM_TARGET_MARGIN_PCT`` exactly as the two
+    byte axes do: an armed pass runs the store down to ``margin``% BELOW the cap rather
+    than stopping the instant it drops back under it and re-firing on every pass.
+
+    cap 10 -> target 10 * (100 - 5) // 100 = 9. Starting at 12 entries, a trigger-only
+    implementation stops after 2 evictions (12 -> 10, under the cap); reaching the TARGET
+    needs a third."""
+    now = time.time()
+    cfg = janitor.JanitorConfig(grace_seconds=100, max_age_seconds=10**9, max_entries=10)
+    for i in range(12):
+        _sparse_entry(store, f"{i:040x}", 4096, now - 5000 - i)
+
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=10**15)
+
+    target = 10 * (100 - janitor.RECLAIM_TARGET_MARGIN_PCT) // 100
+    assert res.evicted == 12 - target, (
+        "an armed count-capped pass must reclaim past the cap to the hysteresis target "
+        f"(expected {12 - target} evictions, got {res.evicted})"
+    )
+    assert len(janitor._entries(store)) == target
+
+
+def test_entry_count_cap_honours_the_grace_window(store):
+    """AC3 — an entry a concurrent gate touched inside ``grace_seconds`` is NEVER evicted
+    by the count axis, exactly as under the free-space and byte-total terms."""
+    now = time.time()
+    cfg = janitor.JanitorConfig(grace_seconds=100, max_age_seconds=10**9, max_entries=1)
+    hot = [_sparse_entry(store, f"{i:040x}", 4096, now - 1) for i in range(4)]
+
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=10**15)
+
+    assert all(e.exists() for e in hot), "the count axis must not evict inside the grace window"
+    assert res.evicted == 0
+    assert res.skipped_grace >= 1
+
+
+def test_entry_count_cap_is_on_by_default(store):
+    """AC1 — the default must be ON. ``max_bytes`` shipped defaulting to 0 and that is
+    precisely why this incident happened: an opt-in bound protects nobody."""
+    assert janitor.DEFAULT_MAX_ENTRIES > 0
+    assert janitor.JanitorConfig().max_entries == janitor.DEFAULT_MAX_ENTRIES
+
+
+def test_entry_count_cap_under_the_bound_evicts_nothing(store):
+    """A store inside the cap is untouched — the axis is a bound, not a cadence."""
+    now = time.time()
+    cfg = janitor.JanitorConfig(grace_seconds=100, max_age_seconds=10**9, max_entries=10)
+    entries = [_sparse_entry(store, f"{i:040x}", 4096, now - 5000 - i) for i in range(3)]
+
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=10**15)
+
+    assert res.evicted == 0
+    assert all(e.exists() for e in entries)
+
+
+def test_entry_count_cap_can_be_disabled_and_resolves_from_env_and_table(tmp_path, monkeypatch):
+    """``REBAR_GATE_MAX_ENTRIES`` env > ``[snapshot] max_entries`` > documented default,
+    with ``0`` as the operator's explicit off switch."""
+    monkeypatch.setenv("REBAR_GATE_MAX_ENTRIES", "321")
+    assert janitor.JanitorConfig.from_env().max_entries == 321
+    monkeypatch.delenv("REBAR_GATE_MAX_ENTRIES")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "rebar.toml").write_text("[snapshot]\nmax_entries = 654\n")
+    assert janitor.JanitorConfig.from_env(repo_root=str(proj)).max_entries == 654
+
+
+def test_disabled_entry_count_cap_reclaims_nothing(store):
+    """``max_entries = 0`` restores the pre-fix behaviour bit-for-bit (the operator opt-out)."""
+    now = time.time()
+    cfg = janitor.JanitorConfig(grace_seconds=100, max_age_seconds=10**9, max_entries=0)
+    entries = [_sparse_entry(store, f"{i:040x}", 4096, now - 5000 - i) for i in range(6)]
+
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=10**15)
+
+    assert res.evicted == 0
+    assert all(e.exists() for e in entries)
+
+
+def test_operation_linked_trigger_carries_the_count_axis(monkeypatch, tmp_path):
+    """AC4 — the axis rides the EXISTING operation-linked trigger: the detached worker's
+    config resolution already yields it, so no new daemon and no new trigger plumbing. The
+    trigger's own decision stays the O(1) stamp ``stat`` — it never enumerates the store."""
+    from rebar._snapshot import gc_trigger
+
+    assert gc_trigger._janitor_config(None).max_entries == janitor.DEFAULT_MAX_ENTRIES
+    monkeypatch.setenv("REBAR_GATE_MAX_ENTRIES", "77")
+    assert gc_trigger._janitor_config(None).max_entries == 77
