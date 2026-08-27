@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -220,20 +221,67 @@ def test_sandbox_env_points_home_at_a_nonexistent_path():
     assert out["PATH"] == "/usr/bin", "unrelated env must be preserved"
 
 
+# The test above asserts on the MAPPING `sandbox_env` returns. That stays green even if
+# nothing ever hands that mapping to a subprocess, so it cannot substantiate the claim
+# that the CHILD's HOME is hardened. The two below run a real child and ask the child.
+
+
+def test_a_child_launched_with_sandbox_env_observes_the_homeless_home():
+    """Ask a real child what its HOME is, rather than trusting the returned dict.
+
+    Deliberately NOT `@live`: it needs no sandbox mechanism, so it also covers the
+    Linux gate cells where `probe()` returns None and every `@live` test skips.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-c", "import os; print(os.environ['HOME'])"],
+        env=sb.sandbox_env(dict(os.environ)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    # Liveness first: a child that never ran prints nothing, and an absence assertion
+    # alone would read that as success.
+    assert proc.returncode == 0, f"the child never ran, so its HOME proves nothing; {_why(proc)}"
+    observed = proc.stdout.strip()
+    assert observed == sb.HOMELESS, f"child observed HOME={observed!r}; {_why(proc)}"
+    assert not Path(observed).exists(), "the hardened HOME must not exist on disk"
+
+
+@live
+def test_the_sandboxed_child_observes_the_homeless_home(tmp_path):
+    """The same observation through `wrap()`, as `execute_shard` actually invokes it."""
+    allowed = tmp_path / "scratch"
+    allowed.mkdir()
+    env = sb.sandbox_env(dict(os.environ))
+    argv = sb.wrap(
+        [sys.executable, "-c", "import os; print(os.environ['HOME'])"],
+        allow=[allowed],
+        profile_dir=tmp_path,
+        env=env,
+    )
+    proc = subprocess.run(argv, env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, f"the sandboxed child never ran; {_why(proc)}"
+    observed = proc.stdout.strip()
+    assert observed == sb.HOMELESS, f"sandboxed child observed HOME={observed!r}; {_why(proc)}"
+
+
 # --- call-site binding ------------------------------------------------------------
 # The tests above prove the sandbox MODULE enforces. They do not prove `execute_shard`
 # actually USES it: deleting the wrap from either call site left the whole suite green.
 # These assert the binding, so unwrapping a shard-test-executing subprocess fails here.
 
 
-def _execute_shard_run_calls() -> list[ast.Call]:
+def _execute_shard_fn() -> ast.FunctionDef:
     tree = ast.parse((REPO_ROOT / "scripts" / "mutation_gate.py").read_text(encoding="utf-8"))
-    fn = next(
+    return next(
         n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "execute_shard"
     )
+
+
+def _execute_shard_run_calls() -> list[ast.Call]:
     return [
         n
-        for n in ast.walk(fn)
+        for n in ast.walk(_execute_shard_fn())
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "_run"
     ]
 
@@ -390,3 +438,45 @@ def test_a_working_sandbox_is_used_even_on_ci(tmp_path, monkeypatch):
     sb.probe.cache_clear()
     argv = sb.wrap(["/bin/true"], allow=[tmp_path], profile_dir=tmp_path, env={"CI": "true"})
     assert argv[0] == "bwrap", "a usable sandbox must be used regardless of CI"
+
+
+def _sandbox_env_target(fn: ast.FunctionDef) -> str:
+    """The variable `execute_shard` assigns `mutation_sandbox.sandbox_env(...)` to."""
+    targets = [
+        node.targets[0].id
+        for node in ast.walk(fn)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and node.value.func.attr == "sandbox_env"
+        and isinstance(node.value.func.value, ast.Name)
+        and node.value.func.value.id == "mutation_sandbox"
+    ]
+    assert len(targets) == 1, (
+        "expected exactly one `env = mutation_sandbox.sandbox_env(...)` in execute_shard; "
+        f"found {len(targets)}. Without it the child inherits the real HOME and a mutant's "
+        "writes land in the developer's home directory."
+    )
+    return targets[0]
+
+
+def test_the_sandboxed_subprocesses_receive_the_hardened_env():
+    """The hardened env must actually REACH both children, not merely be computed.
+
+    Deleting `env = mutation_sandbox.sandbox_env(env)` from execute_shard left the whole
+    suite green (28 sandbox + 42 gate tests), because the only HOME test asserted on the
+    mapping the function returns rather than on any call site. This binds the two
+    sandbox-wrapped `_run` calls to that hardened env, so removing or bypassing it fails
+    here — the same control the wrap-binding tests above provide for `wrap` itself.
+    """
+    name = _sandbox_env_target(_execute_shard_fn())
+    wrapped = [c for c in _execute_shard_run_calls() if _is_sandbox_wrapped(c)]
+    assert len(wrapped) == 2, f"expected 2 sandbox-wrapped _run calls, found {len(wrapped)}"
+    for call in wrapped:
+        env_kw = next((k.value for k in call.keywords if k.arg == "env"), None)
+        assert isinstance(env_kw, ast.Name) and env_kw.id == name, (
+            "a sandbox-wrapped subprocess does not receive the hardened env "
+            f"({name!r}); its child would inherit the real HOME"
+        )
