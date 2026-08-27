@@ -50,7 +50,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from rebar._commands import doctor_locks, doctor_mapping
+from rebar._commands import doctor_locks, doctor_mapping, doctor_mcp_client
 from rebar._commands._repair_pause import owned_repair_pause
 from rebar._commands._seam import CommandError, tracker_dir
 from rebar._engine_support.output import OutputFormatError, parse_output
@@ -415,6 +415,7 @@ def _print_text(
     lock_reports: list[dict[str, Any]],
     lock_faults: list[dict[str, Any]],
     mapping_findings: list[dict[str, Any]],
+    mcp_client_findings: list[dict[str, Any]],
 ) -> None:
     if pre_oid:
         print(f"doctor: pre-tag {PRE_REPAIR_TAG} @ {pre_oid[:12]}")
@@ -443,6 +444,11 @@ def _print_text(
         key = f.get("key")
         prefix = f"mapping[{key}]" if key else "mapping"
         print(f"{prefix} {f['severity']}: {f['detail']}")
+    # MCP client-config findings render in their own section, and like locks and mapping
+    # stay OUT of the repair loop — they describe the operator's client environment, not
+    # the store, so there is nothing here for --repair to convert. Joined rather than
+    # looped: render_text always emits its header line, so this never prints a blank.
+    print("\n".join(doctor_mcp_client.render_text(mcp_client_findings)))
 
 
 def doctor_cli(argv: list[str], *, repo_root=None) -> int:
@@ -486,6 +492,10 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
     # loop). The config root is the repo root, not the tracker dir.
     mapping_findings = doctor_mapping.scan_mapping(repo_root)
 
+    # MCP client-config diagnostics: pure, stdlib-only, and read from the operator's home
+    # rather than the store, so they too stay outside `findings` / the repair loop.
+    mcp_client_findings = doctor_mcp_client.scan_mcp_clients()
+
     pre_oid = ""
     if do_repair and not dry_run and findings:
         try:
@@ -504,6 +514,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
                     "locks": lock_reports,
                     "lock_findings": lock_faults,
                     "mapping_findings": mapping_findings,
+                    "mcp_client_findings": mcp_client_findings,
                 }
             )
         )
@@ -515,6 +526,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
             lock_reports=lock_reports,
             lock_faults=lock_faults,
             mapping_findings=mapping_findings,
+            mcp_client_findings=mcp_client_findings,
         )
 
     outstanding = _outstanding(findings)
@@ -522,4 +534,10 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
     # process claims it. A HELD lock with a live holder is information, not a finding, so
     # it never fails a CI gate keyed on this exit code.
     blocking_mapping = doctor_mapping.has_blocking_mapping(mapping_findings)
+    # MCP client findings are deliberately ADVISORY — they are read from the operator's
+    # HOME, not from the store, so folding them into this exit code would make a
+    # store-health gate depend on whichever client configs happen to sit on the box
+    # running it. They are reported (text + JSON) and severity-classified via
+    # doctor_mcp_client.has_blocking_mcp_client, which a caller that DOES want to gate on
+    # client wiring can apply to `mcp_client_findings` itself.
     return 1 if outstanding or lock_faults or blocking_mapping else 0
