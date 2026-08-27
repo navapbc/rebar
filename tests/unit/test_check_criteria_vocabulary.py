@@ -306,6 +306,9 @@ def test_make_lint_rejects_live_vocabulary_through_guard(tmp_path: Path) -> None
     # the same reason the gates above do.
     (scripts / "check_raw_git_writes.py").write_text("", encoding="utf-8")
     (scripts / "check_wall_clock_asserts.py").write_text("", encoding="utf-8")
+    # Ticket 6818-615f-555e-4bb9 wired the destructive-test-exec gate into `make lint`
+    # ahead of the guard under test, so it needs a stub here for the same reason.
+    (scripts / "check_destructive_test_exec.py").write_text("", encoding="utf-8")
     _write(tmp_path, "src/rebar/live.py", _legacy_heading())
 
     stub_bin = tmp_path / "bin"
