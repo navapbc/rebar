@@ -441,6 +441,27 @@ def resolve_jira_probe_scope(env: Mapping[str, str] | None) -> tuple[str, str, s
     return src.get("JIRA_URL", ""), src.get("JIRA_USER", ""), src.get("JIRA_PROJECT", "")
 
 
+def snapshot_repo_root(explicit: str | os.PathLike[str] | None = None) -> str:
+    """The directory whose git object DB a snapshot operation reads.
+
+    ``explicit`` always wins — a caller that names a tree must never be silently redirected
+    to a different one. Otherwise this resolves the CONFIGURED root (``REBAR_ROOT``, then the
+    git toplevel of the cwd) and only then falls back to ``"."``.
+
+    That last fallback used to be the whole implementation, and it was an outage: the deployed
+    MCP server runs with cwd ``/app``, a source copy whose ``.git`` is excluded by
+    ``.dockerignore``, while ``REBAR_ROOT`` names a healthy checkout. Every attested-source tool
+    (``review_plan``, ``scan_spec``, ``verify_completion``, ``review_code``) calls through
+    without an explicit root, so all of them resolved refs against a directory with no object
+    DB and failed with ``cannot resolve ref 'origin/main' to a commit in '.'`` — including for
+    a full SHA the configured checkout demonstrably contained. Ticket
+    fatherly-incoherent-mare.
+    """
+    if explicit:
+        return str(explicit)
+    return repo_root_or_none() or "."
+
+
 def resolve_dc_comment_max_chars() -> int:
     """The Data Center comment ceiling ``reconciler.comment_max_chars`` — FAIL LOUD (no
     ``ConfigError`` guard); a non-positive value is returned as ``0`` (= unlimited)."""
