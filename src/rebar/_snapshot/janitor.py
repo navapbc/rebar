@@ -24,6 +24,16 @@ Design:
     total exceeds it the pass evicts LRU-first down to a target ``RECLAIM_TARGET_MARGIN_PCT``
     below the cap — the same hysteresis, mirrored. Secondary = a max-age cold-trim of
     genuinely cold entries, independent of space.
+    The ENTRY-COUNT cap (``max_entries``) is the one term denominated in neither bytes nor
+    free space. Every other axis measures the volume or the store's size, and on a large,
+    mostly-empty volume all of them are inert: bug ``a37c-d55c-72c3-439b`` measured 13,056
+    entries under a host's store with 886 GiB free, ``max_bytes`` off and every entry inside
+    the 7-day age window — no axis could fire, while the directory-entry COUNT drove macOS
+    ``fseventsd`` to 26.3 GB RSS and >150% CPU until the host could not launch applications.
+    The harm was filesystem METADATA pressure, so the bound has to be counted, not weighed.
+    It is ON by default (``max_bytes`` shipped opt-in and that is exactly why the incident
+    happened) and uses the same hysteresis, again mirrored: an armed pass runs the store down
+    to ``RECLAIM_TARGET_MARGIN_PCT`` below the cap.
   * **Victim selection.** LRU by the cache's touch-on-read ``mtime`` (never ``atime``),
     skipping any entry within a short grace window.
   * **Eviction mechanism.** ``rename(<sha>, trash/<uuid>)`` (atomic disappearance from the
@@ -67,6 +77,11 @@ DEFAULT_FREE_WATERMARK_PCT = 0  # volume-relative headroom %, 0 = off (absolute 
 DEFAULT_GRACE_SECONDS = 120  # never evict an entry used within the last 2 minutes
 DEFAULT_MAX_AGE_SECONDS = 7 * 24 * 3600  # cold-trim entries untouched for > 7 days
 DEFAULT_MAX_BYTES = 0  # store-size cap in bytes: 0 = off (opt-in)
+# Entry-count cap: ON by default (bug a37c). Sized well above any plausible working set
+# — a host resolving gates all day holds tens to low hundreds of live snapshots — and far
+# below the 13,056 entries that melted the incident host, so it bounds metadata pressure
+# without ever evicting an entry a normal workload would reuse. 0 = off (operator opt-out).
+DEFAULT_MAX_ENTRIES = 2000
 DEFAULT_REVERIFY_SECONDS = 0  # periodic integrity reverify: 0 = off (opt-in)
 DEFAULT_INTERVAL_SECONDS = 300  # background pass cadence
 
@@ -99,6 +114,7 @@ def _default_tunables() -> dict[str, int]:
         "grace_seconds": DEFAULT_GRACE_SECONDS,
         "max_age_seconds": DEFAULT_MAX_AGE_SECONDS,
         "max_bytes": DEFAULT_MAX_BYTES,
+        "max_entries": DEFAULT_MAX_ENTRIES,
         "reverify_seconds": DEFAULT_REVERIFY_SECONDS,
         "interval_seconds": DEFAULT_INTERVAL_SECONDS,
     }
@@ -127,6 +143,14 @@ class JanitorConfig:
     the watermark forever while the cache itself grows without bound — and defaults to ``0``
     (off), so no existing deployment's behaviour changes until an operator sets it.
 
+    ``max_entries`` is the METADATA-pressure bound: a cap on how many entries the store may
+    hold, independent of how many bytes they occupy. Every other axis is denominated in bytes
+    or free space and is therefore inert on a large, mostly-empty volume, which is how bug
+    ``a37c-d55c-72c3-439b`` accumulated 13,056 entries with 886 GiB free and drove the host's
+    ``fseventsd`` to 26.3 GB RSS. Unlike ``max_bytes`` it defaults ON — an opt-in bound
+    protects nobody, as that incident proved — and ``0`` is the operator's explicit off
+    switch. It is hysteretic on the same fixed margin as the byte cap.
+
     ``max_age_seconds`` is expected to be MUCH larger than ``grace_seconds`` (cold-trim
     age ≫ recency-protection window); a contradictory ``max_age < grace`` would let the
     cold-trim override the grace protection."""
@@ -136,6 +160,7 @@ class JanitorConfig:
     grace_seconds: int = DEFAULT_GRACE_SECONDS
     max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS
     max_bytes: int = DEFAULT_MAX_BYTES
+    max_entries: int = DEFAULT_MAX_ENTRIES
     reverify_seconds: int = DEFAULT_REVERIFY_SECONDS
     interval_seconds: int = DEFAULT_INTERVAL_SECONDS
 
@@ -397,6 +422,25 @@ def _byte_thresholds(root: Path, cfg: JanitorConfig) -> tuple[int, int]:
     return _cache.byte_total(root), cfg.max_bytes * (100 - RECLAIM_TARGET_MARGIN_PCT) // 100
 
 
+def _count_thresholds(entries: list[Path], cfg: JanitorConfig) -> tuple[int, int]:
+    """The ``(live entry count, stop-at target)`` pair for the entry-count cap.
+
+    ``max_entries <= 0`` disables the cap and reports ``(0, 0)``, which can never arm the
+    term — the operator's explicit opt-out restores the pre-``a37c`` behaviour bit-for-bit.
+    The live count is ``len(entries)``: the pass has ALREADY enumerated the store to sort it
+    LRU-first, so the count is free here. Nothing upstream pays for it — in particular the
+    operation-linked trigger (:mod:`rebar._snapshot.gc_trigger`) still decides with one
+    ``stat`` of its stamp sidecar and never enumerates a 13k-entry store.
+
+    The target is the cap reduced by ``RECLAIM_TARGET_MARGIN_PCT``, mirroring the byte cap, so
+    an armed pass overshoots instead of stalling one entry above the cap and re-firing every
+    pass. Integer floor division means a cap small enough that the margin rounds away (< 20)
+    targets the cap itself; that is the correct degenerate case, not a bug."""
+    if cfg.max_entries <= 0:
+        return 0, 0
+    return len(entries), cfg.max_entries * (100 - RECLAIM_TARGET_MARGIN_PCT) // 100
+
+
 def _reclaim_loop(
     root: Path,
     cfg: JanitorConfig,
@@ -410,12 +454,13 @@ def _reclaim_loop(
 ) -> None:
     """Walk ``entries`` LRU-first and evict, accumulating into ``res`` in place.
 
-    THREE independent reclamation terms compose here: the free-space watermark, the
-    ``max_bytes`` store-size cap, and the max-age cold-trim. An entry goes if the volume wants
-    space OR the store is over its byte budget OR the entry is genuinely cold; the grace window
-    protects a recently-used entry from the first two exactly as it always has (the cold-trim
-    deliberately overrides it, as before). Both space terms are hysteretic — armed at their
-    trigger, disarmed only once the pass reaches the lower/higher TARGET.
+    FOUR independent reclamation terms compose here: the free-space watermark, the
+    ``max_bytes`` store-size cap, the ``max_entries`` entry-count cap, and the max-age
+    cold-trim. An entry goes if the volume wants space OR the store is over its byte budget OR
+    the store holds too many entries OR the entry is genuinely cold; the grace window protects
+    a recently-used entry from the first three exactly as it always has (the cold-trim
+    deliberately overrides it, as before). All three bounded terms are hysteretic — armed at
+    their trigger, disarmed only once the pass reaches the lower/higher TARGET.
 
     The running byte total is tracked IN-LOOP by subtracting each eviction's reclaimed bytes
     rather than re-reading ``byte_total`` per entry: that read is an flock round-trip and this
@@ -423,15 +468,17 @@ def _reclaim_loop(
     grace_floor = now - cfg.grace_seconds
     max_age_floor = now - cfg.max_age_seconds
     used, byte_target = _byte_thresholds(root, cfg)
+    live, count_target = _count_thresholds(entries, cfg)
 
     need_space = free < space_trigger
     over_budget = cfg.max_bytes > 0 and used > cfg.max_bytes
+    over_count = cfg.max_entries > 0 and live > cfg.max_entries
 
     for entry in entries:
         mtime = _cache.entry_mtime(entry)
         in_grace = mtime > grace_floor
         too_cold = mtime < max_age_floor
-        wants_room = need_space or over_budget
+        wants_room = need_space or over_budget or over_count
 
         if in_grace and not too_cold:
             # Recently used and not yet max-age cold → protected by the grace window.
@@ -447,8 +494,10 @@ def _reclaim_loop(
             res.reclaimed_bytes += reclaimed
             free += reclaimed
             used -= reclaimed
+            live -= 1
             need_space = need_space and free < space_target
             over_budget = over_budget and used > byte_target
+            over_count = over_count and live > count_target
 
 
 def _reverify_pass(root: Path, cfg: JanitorConfig, now: float, res: GcResult) -> None:

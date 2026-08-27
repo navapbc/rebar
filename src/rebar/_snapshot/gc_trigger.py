@@ -186,9 +186,13 @@ def run_detached(root: str | os.PathLike[str], repo_root: str | None = None) -> 
     """Hold the worker lock and run one :func:`janitor.run_gc` pass. The child's entry point.
 
     Runs the SAME policy the review-bot's resident janitor runs (hysteretic watermark, grace
-    window, cold-trim, ``max_bytes`` backstop), so the two drivers cannot reclaim by different
-    rules. Overlap with that janitor is harmless: ``run_gc``'s non-blocking flock makes the
-    loser return ``skipped="locked"``.
+    window, cold-trim, ``max_bytes`` backstop, ``max_entries`` count cap), so the two drivers
+    cannot reclaim by different rules. The count cap needs no plumbing of its own here: it is a
+    :class:`~rebar._snapshot.janitor.JanitorConfig` field, so :func:`_janitor_config` already
+    carries it into the pass, and it is evaluated INSIDE ``run_gc`` from the enumeration that
+    pass performs anyway — :func:`maybe_gc`'s decision stays one ``stat`` of the stamp sidecar
+    (bug ``a37c-d55c-72c3-439b``). Overlap with that janitor is harmless: ``run_gc``'s
+    non-blocking flock makes the loser return ``skipped="locked"``.
 
     Stamps ONLY a pass that actually ran: a stand-aside must leave the clock alone so the next
     gate op tries again — stamping it would suppress the trigger for a full interval while the
