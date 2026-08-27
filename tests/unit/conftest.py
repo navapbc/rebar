@@ -47,9 +47,15 @@ _SCRIPTS_DIR = str(_REPO_ROOT / "src" / "rebar" / "_engine")
 #     explicitly from its own ``__init__.py`` with ``submodule_search_locations``,
 #     which is deterministic regardless of what ``sys.path[0]`` happens to be.
 #
-# The engine dir is appended (not prepended), so the shadow's own modules — and
-# any already-seeded flat ``rebar_reconciler.<name>`` ``sys.modules`` keys — keep
-# winning, preserving their object identity.
+# The shadow dir is ordered BEFORE the engine dir on ``__path__`` (bug b900-3cc1).
+# The engine ships a ``classify.py`` MODULE while the test tree's ``classify/`` is a
+# PACKAGE of the same name; collecting ``rebar_reconciler.classify.test_*`` needs the
+# NAME to resolve to the test PACKAGE. Whichever dir is searched first wins, so the
+# shadow must precede the engine — otherwise (e.g. when another test directory seeds the
+# ENGINE package first, leaving ``__path__ == [engine_dir]``) ``rebar_reconciler.classify``
+# binds to the engine module and collection dies with ``'…classify' is not a package``.
+# Shadow-first also preserves object identity for any already-seeded flat
+# ``rebar_reconciler.<name>`` ``sys.modules`` keys, which win over path resolution anyway.
 _ENGINE_PKG_DIR = Path(_SCRIPTS_DIR) / "rebar_reconciler"
 _SHADOW_PKG_DIR = Path(__file__).resolve().parent / "rebar_reconciler"
 
@@ -72,9 +78,17 @@ def _bridge_reconciler_shadow_package() -> None:
         except BaseException:  # pragma: no cover - defensive
             del sys.modules["rebar_reconciler"]
             raise
-    for extra in (str(_SHADOW_PKG_DIR), str(_ENGINE_PKG_DIR)):
-        if extra not in pkg.__path__:
-            pkg.__path__.append(extra)
+    # Order the shadow (test) dir BEFORE the engine dir unconditionally, so a test
+    # subpackage (e.g. ``rebar_reconciler.classify/``) wins over an engine module of the
+    # same name regardless of prior seed order (bug b900-3cc1). Rebuild in place so any
+    # unrelated existing entries are preserved after the two load-bearing ones.
+    _front = [str(_SHADOW_PKG_DIR), str(_ENGINE_PKG_DIR)]
+    pkg.__path__[:] = _front + [p for p in pkg.__path__ if p not in _front]
+    # Evict a stale non-package ``rebar_reconciler.classify`` (the engine module) so the
+    # test package can bind the name; nothing imports the engine module under that name.
+    classify = sys.modules.get("rebar_reconciler.classify")
+    if classify is not None and not hasattr(classify, "__path__"):
+        del sys.modules["rebar_reconciler.classify"]
 
 
 _bridge_reconciler_shadow_package()
