@@ -101,3 +101,46 @@ def test_cli_output_reflects_default(rebar_repo: Path, capsys: pytest.CaptureFix
     assert rc == 0
     out = capsys.readouterr().out.strip().splitlines()[-1]
     assert json.loads(out)["assignee"] == "dana@example.com"
+
+
+def test_default_assignee_resolves_when_the_tracker_lives_outside_the_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A RELOCATED store must still resolve `ticket.default_assignee` from the repo.
+
+    `REBAR_TRACKER_DIR` is a supported feature ("the decoupled/relocated store",
+    `_config_sources.tracker_dir_override`), and the deployed MCP server uses it — its store
+    is `/var/gerrit/site/mcp-tickets` while the repo is `/app`. `_config_default_assignee`
+    resolved config from `os.path.dirname(tracker)`, which is the repo root ONLY when the
+    tracker sits inside the checkout. Relocated, that lands in a directory with no
+    `rebar.toml`, the lookup returns "", and the claim silently records NO assignee — the
+    `except Exception: return ""` guard means nothing is logged.
+    """
+    monkeypatch.delenv("REBAR_DEFAULT_ASSIGNEE", raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "test@example.com"),
+        ("config", "user.name", "Test"),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True)
+    _set_default(repo, "configured@example.com")
+
+    # The store lives OUTSIDE the repo — its parent holds no rebar.toml.
+    external = tmp_path / "elsewhere" / "store"
+    external.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("REBAR_TRACKER_DIR", str(external))
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    rebar.init_repo(repo_root=str(repo))
+
+    # Precondition: the relocation is real, and its parent genuinely lacks the config.
+    assert not (external.parent / "rebar.toml").exists()
+
+    tid = rebar.create_ticket("task", "relocated-store claim", repo_root=str(repo))
+    rebar.claim(tid, repo_root=str(repo))
+
+    assert _assignee(tid, repo) == "configured@example.com", (
+        "a relocated store must resolve ticket.default_assignee from the REPO, not from the "
+        "tracker's parent — otherwise every claim on the deployed MCP server records no owner"
+    )

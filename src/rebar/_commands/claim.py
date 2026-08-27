@@ -75,13 +75,23 @@ def _parse_assignee(args: list[str]) -> str | None:
     return ns.assignee
 
 
-def _config_default_assignee(tracker: str) -> str:
+def _config_default_assignee(repo_root=None) -> str:
     """The configured ``ticket.default_assignee`` (env > file), or ``""`` if unset or
-    unreadable. Read from the repo root (the tracker's parent), where ``rebar.toml`` /
-    ``.rebar/`` live — the same cfg root the plan-review gate uses. A malformed config
-    must never break a claim, so any load error degrades to no default."""
+    unreadable.
+
+    Resolved from ``repo_root`` — the SAME root every other config reader uses
+    (``_engine_support/gates.py``, ``reads.py``, ``verify_opcert.py``), and ``None`` is a
+    valid value meaning "discover", not a missing argument. This used to pass
+    ``os.path.dirname(tracker)`` instead, which is the repo root ONLY when the tracker sits
+    inside the checkout. ``REBAR_TRACKER_DIR`` relocating the store is a SUPPORTED feature
+    (``_config_sources.tracker_dir_override``) and the deployed MCP server uses it — store at
+    ``/var/gerrit/site/mcp-tickets``, repo at ``/app`` — so the lookup landed in a directory
+    with no ``rebar.toml``, returned "", and every claim silently recorded NO assignee.
+
+    A malformed config must never break a claim, so any load error still degrades to no
+    default — which is also why the original failure was silent."""
     try:
-        return config.compose_config(root=os.path.dirname(tracker)).ticket.default_assignee or ""
+        return config.compose_config(root=repo_root).ticket.default_assignee or ""
     except Exception:  # noqa: BLE001 — non-critical: fall back to no default, never fail the claim
         return ""
 
@@ -172,7 +182,7 @@ def claim_compute(
     # recursion below — so a cascaded parent claim inherits the same resolved default
     # (advisory f7ca28). An explicit "" (clear) is left untouched and never falls back.
     if assignee is None:
-        assignee = _config_default_assignee(tracker)
+        assignee = _config_default_assignee(repo_root)
 
     # `claim --review` (story a114): sense the gate and, when the attestation is
     # stale/missing, run the signed review BEFORE anything else — a non-PASS raises
