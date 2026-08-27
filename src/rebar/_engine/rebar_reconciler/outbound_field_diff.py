@@ -366,6 +366,16 @@ def diff_canonical_fields(
     fitted = outbound_mapper.map_fields_to_remote({"description": local_desc}, ticket=ticket).get(
         "description", local_desc
     )
+    if __import__("os").environ.get("REBAR_DC_RICHTEXT_DIAG"):  # DEBUG-rebar-debug-kob
+        import sys as _sys
+
+        print(
+            f"DIAG-kob desc-diff local={local_desc!r} fitted={fitted!r} "
+            f"remote={canonical_remote.get('description', '')!r} "
+            f"suppressed={_suppressed_by_inbound('description', local_desc, normalized_local=fitted)}",
+            file=_sys.stderr,
+            flush=True,
+        )
     if not _suppressed_by_inbound("description", local_desc, normalized_local=fitted):
         # The port also normalizes soft-wrapped prose (the ADF encoder rejoins a
         # hard-wrapped paragraph into one), so the body that lands — and that a later

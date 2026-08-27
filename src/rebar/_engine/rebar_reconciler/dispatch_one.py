@@ -655,6 +655,15 @@ def _update_one_scalar_update(
             # the common update carries exactly its mapped fields (no bogus kwarg leaks
             # into stubs / the ACLI boundary).
             _extra = {"assignee_is_account_id": True} if assignee_is_account_id else {}
+            if __import__("os").environ.get("REBAR_DC_RICHTEXT_DIAG"):  # DEBUG-rebar-debug-kob
+                import sys as _sys
+
+                print(
+                    f"DIAG-kob scalar_update key={issue_key} "
+                    f"fields={ {k: repr(v)[:160] for k, v in fields.items()} }",
+                    file=_sys.stderr,
+                    flush=True,
+                )
             result = _call_with_retry(client.update_issue, issue_key, **_extra, **fields)
             applied = dict(fields)  # reached ONLY on a completed write
         except RetryExhaustedError:

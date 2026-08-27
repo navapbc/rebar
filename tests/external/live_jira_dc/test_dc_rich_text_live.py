@@ -120,6 +120,10 @@ def _push_and_converge(
 
     rebar.edit_ticket(local_id, repo_root=repo, description=description)
     cp = _run_bridge(repo, "sync", only=f"{local_id},{key}", max_changes=10)
+    # DEBUG-rebar-debug-kob: surface the reconcile subprocess stderr (carries DIAG-kob
+    # breadcrumbs) into pytest's captured stdout so it appears in the failure report even
+    # when this push "converges" but stores the wrong bytes.
+    print(f"\n=== DIAG-kob {what} push STDERR ===\n{cp.stderr}\n=== end {what} push ===")
     assert_child_ran_clean(cp, what=f"{what} pass")
     problem = converged_pass_problem(cp.stdout, cp.stderr)
     assert problem is None, f"{what}: {problem}\n{cp.stdout}\n--stderr--\n{cp.stderr}"
@@ -241,6 +245,7 @@ def test_live_rich_text_renders_and_echo_is_safe(
     # canonical env override reaches ``cutover_clients()`` in the child; ``monkeypatch`` reverts
     # it after the test.
     monkeypatch.setenv("REBAR_RECONCILER_RICH_TEXT_CUTOVER", "dc")
+    monkeypatch.setenv("REBAR_DC_RICHTEXT_DIAG", "1")  # DEBUG-rebar-debug-kob
 
     heading = _uniq("graywolf-heading")
     bold = _uniq("graywolf-bold")
