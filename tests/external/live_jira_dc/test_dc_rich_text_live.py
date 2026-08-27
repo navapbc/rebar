@@ -43,6 +43,7 @@ from typing import Any
 import pytest
 from _bridge_output import converged_pass_problem, wrote_nothing_problem
 from _child_diag import assert_child_ran_clean
+from _dc_support import force_issue_reindex as _force_reindex
 from _dc_support import live_jira_ready
 from _dc_support import run_bridge as _run_bridge
 from _dc_support import skip_no_extra as _skip_no_extra
@@ -163,6 +164,7 @@ def _push_and_converge(
     transport: Any,
     project: str,
     visible_token: str,
+    dc_request: Any,
 ) -> None:
     """Set the local ``description``, run a scoped writing pass, and wait for the index.
 
@@ -170,12 +172,14 @@ def _push_and_converge(
     is binding-scrubbed, so an unscoped pass would route the whole copied store down the
     CREATE path. Asserts the pass settled (no traceback, ``BRIDGE_STATE: converged``).
 
-    After the push, blocks until a JQL SEARCH reflects ``visible_token`` in the description.
-    The push writes over REST (immediately visible to a direct GET) but the NEXT pass reads
-    remote fields off the eventually-consistent JQL search, so a follow-up pass run before
-    the index caught up would diff against a stale (pre-push) remote and could churn — the
-    index-lag hazard the sibling inbound cells guard against. Waiting here makes the echo /
-    settle pass that follows deterministic.
+    After the push, forces a synchronous per-issue reindex (``_force_reindex``) and then blocks
+    until a JQL SEARCH reflects ``visible_token`` in the description. The push writes over REST
+    (immediately visible to a direct GET) but the NEXT pass reads remote fields off the
+    eventually-consistent JQL search, so a follow-up pass run before the index caught up would
+    diff against a stale (pre-push) remote and could churn — the index-lag hazard the sibling
+    inbound cells guard against. The forced reindex makes that catch-up DETERMINISTIC rather
+    than dependent on Jira DC's unbounded background reindex (bug 2c60); the wait then confirms
+    it and still degrades safely if the reindex resource is unavailable.
     """
     import rebar
 
@@ -184,6 +188,7 @@ def _push_and_converge(
     assert_child_ran_clean(cp, what=f"{what} pass")
     problem = converged_pass_problem(cp.stdout, cp.stderr)
     assert problem is None, f"{what}: {problem}\n{cp.stdout}\n--stderr--\n{cp.stderr}"
+    _force_reindex(dc_request, key)
     _wait_until_search_reflects(
         transport,
         project,
@@ -243,6 +248,7 @@ def test_live_rich_text_renders_and_echo_is_safe(
         transport=dc_transport,
         project=jira_dc_project,
         visible_token=heading,
+        dc_request=dc_request,
     )
 
     html = _rendered_description_html(dc_request, key)
@@ -275,6 +281,7 @@ def test_live_rich_text_both_sides_conflict_keeps_local(
     dc_transport: Any,
     jira_dc_project: str,
     bound_dc_issue: Any,
+    dc_request: Any,
 ) -> None:
     """AC2 (conflict half): a both-sides edit keeps rebar's body AND records the conflict.
 
@@ -309,6 +316,7 @@ def test_live_rich_text_both_sides_conflict_keeps_local(
         transport=dc_transport,
         project=jira_dc_project,
         visible_token=heading,
+        dc_request=dc_request,
     )
     settle = _run_bridge(dc_store_copy_repo, "sync", only=f"{local_id},{key}", max_changes=10)
     assert_child_ran_clean(settle, what="baseline settle pass")
@@ -328,6 +336,7 @@ def test_live_rich_text_both_sides_conflict_keeps_local(
     )
     jira_token = _uniq("graywolf-jira-side")
     dc_transport.update_issue(key, description=f"{base_body}\njira edit {jira_token}\n")
+    _force_reindex(dc_request, key)
     _wait_until_search_reflects(
         dc_transport,
         jira_dc_project,

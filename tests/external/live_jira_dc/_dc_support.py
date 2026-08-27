@@ -276,6 +276,38 @@ def wait_until_searchable(transport: Any, project: str, key: str, timeout: float
     )
 
 
+def force_issue_reindex(dc_request: Any, key: str) -> tuple[int, Any]:
+    """Force a synchronous per-issue reindex so a JQL SEARCH reflects ``key`` NOW.
+
+    Jira DC's Lucene index is eventually consistent and its background reindex latency is
+    UNBOUNDED (ADR 0037 §3): on the ephemeral CI instance under load the reindex thread can be
+    starved for minutes, so a field written a moment ago — visible immediately to a direct GET —
+    can stay invisible to the JQL SEARCH the reconcile pass reads from past any fixed budget
+    (bug 2c60: a pushed ``description`` never reflected within 240s / 120 attempts because the
+    whole DC step was running ~2x slow). Waiting longer cannot fix an unbounded wait; this drives
+    the specific issue through the admin ``IssueIndexingService`` REST resource directly, which
+    does not depend on the background thread's schedule, so the following search read is
+    deterministic.
+
+    It is an ACCELERATOR, not a new hard dependency: it reads the numeric id first (the reindex
+    resource addresses issues by id, not key) and, on any failure to obtain that id — a non-200
+    read or an id-less body — returns without reindexing and WITHOUT raising, so the caller
+    simply falls back to its existing search wait. A missing/404 reindex resource likewise leaves
+    the caller no worse off than before this helper existed.
+    """
+    status, body = dc_request(f"/rest/api/2/issue/{key}?fields=id")
+    if status != 200 or not isinstance(body, dict):
+        return status, body
+    issue_id = body.get("id")
+    if not issue_id:
+        return status, body
+    return dc_request(
+        f"/rest/api/2/reindex/issue?issueId={issue_id}"
+        "&indexComments=true&indexChangeHistory=true&indexWorklogs=false",
+        method="POST",
+    )
+
+
 def seed_searchable_issue(
     transport: Any,
     project: str,
