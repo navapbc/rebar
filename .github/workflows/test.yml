@@ -254,3 +254,189 @@ jobs:
             --jobs "$JOB_RESULTS" \
             --repo "$GITHUB_REPOSITORY" \
             --workflow-file test.yml >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Scheduled breadth sweep (epic 5664 S5 / Tier 2). These jobs run ONLY on the
+  # 6-hourly schedule and on-demand workflow_dispatch — never on push/PR — and cast
+  # NO Verified vote (the Gerrit gate is gerrit-verify.yaml, which invokes only the
+  # reusables, not test.yml). They add the breadth the hot-path gate deliberately
+  # omits for latency, at ZERO hot-path cost: newest + pre-release interpreters,
+  # Windows, the FULL macOS suite, a declared-lower-bound resolution, and external
+  # doc-link checking. A red sweep job is visible to the CI owner but gates no merge.
+  # Intermediate Python (3.12/3.13) is already swept by the `build-and-test` reusable
+  # on this same schedule, so it needs no dedicated job here.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  # Newest stable + pre-release interpreters (epic 5664 S5). rebar's Verified gate
+  # tops out at 3.13; this sweeps the LATEST release (3.14) plus the pre-release line
+  # (3.15 dev build, 3.14 free-threaded) so a stdlib/typing incompatibility on a newer
+  # interpreter surfaces here, off the hot path. Pre-release cells are non-blocking
+  # (`continue-on-error` per matrix flag): a not-yet-published wheel or a CPython-beta
+  # bug must not paint the sweep red. The 3.14 STABLE cell is a real signal and is not
+  # tolerated — and it installs the COMMITTED lock (`uv sync --locked`, which resolves
+  # cleanly on 3.14), NOT a re-resolution, so it is a PURE interpreter signal: it tests
+  # 3.14 against the exact dependency set the gate ships, with zero dependency-drift
+  # noise. (A `uv pip install` re-resolve pulls deps newer than the lock; ~120 of the
+  # failures that appeared that way were dependency drift, not 3.14 — see the S5 ticket
+  # for the disentangling experiment.) The pre-release cells (3.15, 3.14t) predate the
+  # lock's wheel coverage, so they re-resolve latest and stay non-blocking.
+  sweep-interpreters:
+    name: sweep (py${{ matrix.python-version }})
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.14"
+            experimental: false
+            locked: true
+          - python-version: "3.15"
+            experimental: true
+            locked: false
+          - python-version: "3.14t"
+            experimental: true
+            locked: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
+        with:
+          enable-cache: true
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Create the interpreter venv and install
+        run: |
+          if [ "${{ matrix.locked }}" = "true" ]; then
+            # Locked deps = the gate's exact set; pure interpreter signal (must-pass).
+            uv sync --locked --python "${{ matrix.python-version }}" \
+              --extra dev --extra reviewbot --extra ui
+          else
+            # Pre-release interpreters predate the lock's wheels; re-resolve latest.
+            uv venv --python "${{ matrix.python-version }}"
+            uv pip install '.[dev,reviewbot,ui]'
+          fi
+      - name: Run the default suite
+        run: >-
+          uv run --no-sync pytest -m "not integration and not external"
+          -n 4 --dist worksteal -q -p no:cacheprovider
+          --timeout=600 --timeout-method=thread
+          --basetemp="${{ runner.temp }}/rebar-basetemp-sweep-interp"
+
+  # Windows compatibility (epic 5664 S5). rebar is git- and path-heavy and the gate
+  # runs only Linux + macOS; this sweeps Windows so a path-separator / temp-dir /
+  # file-lock regression surfaces off the hot path. Non-blocking: Windows is not yet a
+  # declared support target, so a genuine incompatibility is a visible finding, never a
+  # red gate.
+  sweep-windows:
+    name: sweep (windows)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
+        with:
+          enable-cache: true
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Create venv and install
+        run: |
+          uv venv --python 3.13
+          uv pip install ".[dev,reviewbot,ui]"
+      - name: Run the default suite
+        run: >-
+          uv run --no-sync pytest -m "not integration and not external"
+          -n 4 --dist worksteal -q -p no:cacheprovider
+          --timeout=600 --timeout-method=thread
+
+  # FULL macOS suite (epic 5664 S5). The Verified gate runs only the REDUCED macOS
+  # `platform_compat` subset (story 8d36) to keep the critical path short; this sweeps
+  # the COMPLETE default suite on macOS on the schedule, at zero hot-path cost, so a
+  # macOS-only regression outside the platform_compat seams is still caught.
+  sweep-macos-full:
+    name: sweep (macos, full suite)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
+        with:
+          enable-cache: true
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Create venv and install
+        run: |
+          uv venv --python 3.13
+          uv pip install '.[dev,reviewbot,ui]'
+      - name: Run the FULL default suite (not integration/external)
+        run: >-
+          uv run --no-sync pytest -m "not integration and not external"
+          -n 3 --dist worksteal -q -p no:cacheprovider
+          --timeout=600 --timeout-method=thread
+          --basetemp="${{ runner.temp }}/rebar-basetemp-macos-full"
+
+  # Declared lower-bound resolution (epic 5664 S5). The committed uv.lock proves ONE
+  # resolution works; it does not prove the DECLARED floors do. This resolves the
+  # core + dev + agents dependency floors at their minimums (`--resolution
+  # lowest-direct`) on the OLDEST supported interpreter (3.11) and runs the unit tier
+  # against them, so a floor that is declared but not actually installable/working
+  # surfaces here. The floorless optional web extras (`ui`/`reviewbot`/`pricing`) are
+  # out of scope — their tests self-skip via `importorskip` — and their missing floors
+  # are tracked as separate follow-up work.
+  sweep-lower-bounds:
+    name: sweep (declared lower-bound resolution)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
+        with:
+          enable-cache: true
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Resolve + install the DECLARED floors (lowest-direct, oldest interpreter)
+        run: |
+          uv venv --python 3.11
+          uv pip install --resolution lowest-direct '.[dev,agents]'
+      - name: Run the unit tier against the floor resolution
+        run: >-
+          uv run --no-sync pytest tests/unit -m "not integration and not external"
+          -n 4 --dist worksteal -q -p no:cacheprovider
+          --timeout=600 --timeout-method=thread
+          --basetemp="${{ runner.temp }}/rebar-basetemp-lb"
+
+  # External documentation link checking (epic 5664 S5). Broken external links in
+  # README/docs/ rot silently; this checks them on the schedule. Non-blocking: external
+  # endpoints flake and rate-limit, so a link failure is a visible finding, never a
+  # gate (`fail: false` plus `continue-on-error`). lychee is SHA-pinned — test.yml is
+  # outside the zizmor audit set, but new third-party actions are pinned regardless
+  # (epic 5664 S2 precedent).
+  sweep-doc-links:
+    name: sweep (external doc links)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check external links in README + docs
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8  # v2.9.0
+        with:
+          args: >-
+            --no-progress --max-concurrency 4
+            README.md CONTRIBUTING.md 'docs/**/*.md'
+          fail: false

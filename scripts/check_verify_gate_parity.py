@@ -77,6 +77,17 @@ EXCLUDED_JOBS = frozenset(
         # input is `needs.<gate>.result`, so there is nothing for the Verified vote to
         # aggregate (ticket 03ef-6fb5-158b-4abd).
         "main-health-report",
+        # test.yml: the scheduled breadth sweep (epic 5664 S5 / Tier 2). Each of these runs
+        # ONLY on the 6-hourly schedule / manual dispatch (guarded by
+        # `if: github.event_name == 'schedule' || 'workflow_dispatch'`), never on the push/PR
+        # critical path, and casts NO Verified vote — they add interpreter / platform /
+        # lower-bound / doc-link breadth the hot-path gate deliberately omits for latency. A red
+        # sweep cell is a visible finding for the CI owner, never a merge gate.
+        "sweep-interpreters",
+        "sweep-windows",
+        "sweep-macos-full",
+        "sweep-lower-bounds",
+        "sweep-doc-links",
     }
 )
 
