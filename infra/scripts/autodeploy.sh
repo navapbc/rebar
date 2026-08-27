@@ -46,7 +46,28 @@ MIRROR_REMOTE="${MIRROR_REMOTE:-origin}"
 STATE_DIR="${STATE_DIR:-/var/lib/rebar}"
 LOCK="$STATE_DIR/deploy.lock"
 SHA_FILE="$STATE_DIR/deployed-sha"
+# Per-component completion marker for the mcp blue-green path. autodeploy deploys TWO
+# INDEPENDENT components per tick and one global deployed-sha cannot represent both: on a tick
+# where the review-bot DEFERS, the mcp block still deploys and cuts over, but the tick exits at
+# the bot_deferred guard WITHOUT advancing deployed-sha (correct — the BOT has not deployed).
+# Without a component marker the next tick recomputes the SAME mcp delta and rebuilds + swaps
+# the container again — with a chronically busy bot, every ~2 minutes, indefinitely. Absent
+# (every box before this change), it READS AS $DEPLOYED, so the first tick after an upgrade
+# behaves exactly as it does today: no spurious redeploy, no skipped deploy.
+MCP_SHA_FILE="$STATE_DIR/mcp-deployed-sha"
+# The review-bot's OWN last-deployed sha. One footer-written marker cannot represent TWO
+# independently-deploying components: an mcp failure exits before the footer, so a bot that
+# deployed successfully seconds earlier was never recorded, and the next tick redeployed it —
+# stop-and-draining the container and KILLING an in-flight review on every tick until mcp
+# recovered. Each component records its own completion, as soon as it completes.
+BOT_SHA_FILE="$STATE_DIR/bot-deployed-sha"
 BACKOFF_FILE="$STATE_DIR/deploy-backoff"              # "<target-sha> <fail-count> <next-epoch>"
+# The mcp component's OWN backoff, same format. It is SEPARATE from $BACKOFF_FILE on purpose:
+# $BACKOFF_FILE gates the whole script at the top, so writing it from the mcp path would let an
+# mcp failure suppress the REVIEW-BOT deploy — a component that never even ran on that tick.
+# The two paths deploy independently and track completion independently ($MCP_SHA_FILE); their
+# failure state is independent too.
+MCP_BACKOFF_FILE="$STATE_DIR/mcp-deploy-backoff"
 # Deferral episode marker: "<epoch of the FIRST tick that deferred>". Deliberately NOT keyed
 # to the target SHA the way BACKOFF_FILE is — see the drain gate below for why.
 DEFER_FILE="$STATE_DIR/deploy-defer"
@@ -480,11 +501,13 @@ if [ "$TARGET" = "$DEPLOYED" ]; then
 fi
 
 # backoff: same failed TARGET, not time yet -> skip. NEW target -> reset (fix-forward).
+# This file records REVIEW-BOT failures (every record_backoff_failure call site is inside
+# deploy_review_bot), so it gates the BOT path only. It used to `exit 0` the whole script,
+# which — once the mcp path became independent — meant a bot failure suppressed mcp deploys
+# on every subsequent tick: the exact coupling this change exists to remove, mirrored.
 read -r bo_sha bo_cnt bo_next < <(cat "$BACKOFF_FILE" 2>/dev/null || echo "- 0 0")
-if [ "$bo_sha" = "$TARGET" ] && [ "$(now)" -lt "${bo_next:-0}" ]; then
-  log "backoff active for $TARGET (fail #$bo_cnt); next attempt at $bo_next"; exit 0
-fi
-[ "$bo_sha" != "$TARGET" ] && { bo_cnt=0; }
+[ "$bo_sha" != "$TARGET" ] && { bo_cnt=0; }   # new target -> reset (fix-forward)
+bot_backoff_active() { [ "$bo_sha" = "$TARGET" ] && [ "$(now)" -lt "${bo_next:-0}" ]; }
 
 record_backoff_failure() {
   local n=$(( ${bo_cnt:-0} + 1 ))
@@ -496,8 +519,40 @@ record_backoff_failure() {
 }
 clear_backoff() { rm -f "$BACKOFF_FILE"; }
 
+# mcp-scoped mirror of the pair above. Deliberately does NOT exit/skip the tick by itself: it
+# only throttles the mcp block, leaving the review-bot path free to deploy on the next tick.
+read -r mcp_bo_sha mcp_bo_cnt mcp_bo_next < <(cat "$MCP_BACKOFF_FILE" 2>/dev/null || echo "- 0 0")
+[ "$mcp_bo_sha" != "$TARGET" ] && { mcp_bo_cnt=0; }   # new target -> reset (fix-forward)
+mcp_backoff_active() { [ "$mcp_bo_sha" = "$TARGET" ] && [ "$(now)" -lt "${mcp_bo_next:-0}" ]; }
+record_mcp_backoff_failure() {
+  local n=$(( ${mcp_bo_cnt:-0} + 1 ))
+  local wait=$(( BACKOFF_BASE * (BACKOFF_FACTOR ** (n-1)) )); [ "$wait" -gt "$BACKOFF_CAP" ] && wait=$BACKOFF_CAP
+  echo "$TARGET $n $(( $(now) + wait ))" > "$MCP_BACKOFF_FILE"
+  # The alarm counts the AUTODEPLOY_ERROR TOKEN, not this reason: observability.sh greps
+  # '^AUTODEPLOY_ERROR {' and publishes the count as rebar/host:deploy_errors. So continuity
+  # comes from still emitting the marker; the reason + component= marker are for an operator
+  # reading the journal, to tell which path failed.
+  err deploy_failed "component=mcp target=$TARGET fail#$n backoff=${wait}s"
+  log "mcp deploy failed; mcp backoff ${wait}s (fail #$n); OLD mcp upstream stays live, review-bot path unaffected"
+  prune_docker_caches
+}
+clear_mcp_backoff() { rm -f "$MCP_BACKOFF_FILE"; }
+
 # ── what changed? (computed in the mirror clone) ──────────────────────────────
-changed() { git -C "$MIRROR_DIR" diff --name-only "$DEPLOYED" "$TARGET" -- $1 2>/dev/null | grep -q .; }
+changed_range() { git -C "$MIRROR_DIR" diff --name-only "$1" "$2" -- $3 2>/dev/null | grep -q .; }
+changed() { changed_range "$DEPLOYED" "$TARGET" "$1"; }
+
+# The mcp component's OWN last-deployed sha (see $MCP_SHA_FILE above). Validated like the
+# first-run seed: an empty or garbage marker falls back to the global $DEPLOYED rather than
+# poisoning the diff range.
+mcp_deployed="$(cat "$MCP_SHA_FILE" 2>/dev/null || true)"
+if [ -z "$mcp_deployed" ] || ! git -C "$MIRROR_DIR" rev-parse --verify -q "$mcp_deployed^{commit}" >/dev/null 2>&1; then
+  mcp_deployed="$DEPLOYED"
+fi
+bot_deployed="$(cat "$BOT_SHA_FILE" 2>/dev/null || true)"
+if [ -z "$bot_deployed" ] || ! git -C "$MIRROR_DIR" rev-parse --verify -q "$bot_deployed^{commit}" >/dev/null 2>&1; then
+  bot_deployed="$DEPLOYED"
+fi
 log "main advanced $DEPLOYED -> $TARGET; computing component deltas"
 
 # ── config refs (replication/g2p/meta): DETECT-ONLY (v1 boundary) ─────────────
@@ -507,13 +562,20 @@ if changed "$CONFIG_PATHS"; then
 fi
 
 # ── review-bot: rebuild + restart ONLY on a source change ─────────────────────
-# Set when the review-bot deploy DEFERRED this tick. The deferral must scope to the BOT block,
-# not terminate the script: the mcp block below is documented as independent of this one and is
-# a pointer-swap that never kills an in-flight op, so it has no reason to wait on the bot drain.
+# The body lives in a FUNCTION purely so the drain gate's deferral can leave the BOT path
+# (`return`) instead of the whole PROCESS (`exit 0`). It used to `exit 0`, which also
+# skipped the INDEPENDENT mcp blue-green block below — and since the bot runs a single
+# review worker, `in_flight > 0` is its normal steady state, so in practice ~every tick
+# deferred and the mcp service never deployed at all (bug carefree-swift-scallop).
 bot_deferred=0
-# Hoisted into a function purely so the deferral can `return` — autodeploy.sh is a linear
-# oneshot with no enclosing loop, so `continue` is unavailable. The wrapper keeps the body's
-# indentation unchanged, so this stays a few hunks instead of re-indenting fifty lines.
+# Set when the bot has a PENDING delta it did not deploy this tick (its backoff window is
+# open). Like bot_deferred it means "this tick is not a complete deploy of $TARGET", so the
+# footer must not stamp either sha; unlike it, there is no deferral EPISODE to carry forward.
+bot_incomplete=0
+# The mcp mirror of bot_incomplete: the mcp block had a PENDING delta it did not deploy this
+# tick because its own backoff window is open. Same meaning, same consequence — the footer must
+# not stamp $TARGET into a component marker for a deploy that never ran.
+mcp_incomplete=0
 deploy_review_bot() {
   # ── drain gate: never recreate the container mid-review (bug 34cd) ───────────
   # `docker compose up -d` STOPS the running container, and uvicorn's shutdown drains only
@@ -548,8 +610,8 @@ deploy_review_bot() {
       marker AUTODEPLOY_DEFERRED review-in-flight \
         "target=$TARGET in_flight=$inflight deferred_for=${waited}s bound=${DEPLOY_DEFER_MAX}s"
       log "review-bot busy ($inflight review(s) in flight); DEFERRING the deploy of $TARGET (${waited}s of the ${DEPLOY_DEFER_MAX}s bound used); deployed-sha unchanged; retrying on the next timer tick"
-      # Leave the BOT path only: no rm -f "$DEFER_FILE" (the episode continues), no rebuild,
-      # deployed-sha not advanced — but the mcp block below still runs.
+      # Leave the BOT path only: no rm -f "$DEFER_FILE" (the episode continues), no
+      # rebuild/restart, deployed-sha not advanced — but the mcp block below still runs.
       bot_deferred=1
       return 0
     fi
@@ -620,11 +682,27 @@ deploy_review_bot() {
   if [ -n "$gerrit_before" ] && [ "$gerrit_before" != "$gerrit_after" ]; then
     err blast-radius "gerrit container id changed during a review-bot deploy — investigate"
   fi
+  # The bot is DEPLOYED at $TARGET. Record it on the component's OWN marker before any later
+  # step can abort the tick, so a subsequent mcp failure cannot cause a needless redeploy.
+  echo "$TARGET" > "$BOT_SHA_FILE.tmp" && mv "$BOT_SHA_FILE.tmp" "$BOT_SHA_FILE"
+  bot_deployed="$TARGET"
   prune_docker_caches
   log "review-bot redeployed + healthy"
 }
-if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
-  deploy_review_bot
+# Test the DELTA first, then the backoff: a backoff window is only interesting when there is
+# actually something to deploy, and skipping on an open window is only safe to report as a
+# no-op tick when there is not. Ordering it the other way logged a backoff skip on ticks with
+# no bot work at all, and — the reason this matters — let a tick with REAL pending bot work
+# reach the footer with bot_deferred=0, stamping $TARGET into bot-deployed-sha for a deploy
+# that never ran. The next tick then saw no pending delta and dropped the change for good.
+if changed_range "$bot_deployed" "$TARGET" "$BOT_PATHS" || \
+   changed_range "$bot_deployed" "$TARGET" "$SECRETS_PATHS"; then
+  if bot_backoff_active; then
+    log "review-bot backoff active for $TARGET (fail #$bo_cnt); next bot attempt at $bo_next; the bot delta is still PENDING so deployed-sha will NOT advance"
+    bot_incomplete=1
+  else
+    deploy_review_bot
+  fi
 fi
 
 # ── mcp: blue-green pointer-swap deploy ONLY on a source change ────────────────
@@ -632,19 +710,24 @@ fi
 # triggers both, each on its own path. Unlike the review-bot's stop-and-drain, the mcp server is
 # a never-idle shared endpoint, so this does an immutable-release + atomic-pointer-swap cutover
 # (start new alongside old -> health -> flip nginx -> retire old when idle) and NEVER kills an
-# in-flight certified op. Fatal-on-failure like the review-bot (record_backoff_failure + exit 1)
-# so deployed-sha is not advanced and the deploy retries next tick. The gerrit container is never
+# in-flight certified op. Fatal-on-failure (record_mcp_backoff_failure + exit 1) so deployed-sha
+# is not advanced and the deploy retries next tick — on the mcp-SCOPED backoff, so a failure here
+# throttles only mcp and never suppresses the review-bot deploy. The gerrit container is never
 # touched (blast-radius assert); gerrit is never involved.
-if changed "$MCP_PATHS"; then
-  log "mcp sources changed $DEPLOYED -> $TARGET; blue-green deploy (blast radius = mcp containers + /mcp nginx upstream only)"
+if mcp_backoff_active && changed_range "$mcp_deployed" "$TARGET" "$MCP_PATHS"; then
+  log "mcp backoff active for $TARGET (fail #$mcp_bo_cnt); next mcp attempt at $mcp_bo_next; the mcp delta is still PENDING so deployed-sha will NOT advance"
+  mcp_incomplete=1
+fi
+if ! mcp_backoff_active && changed_range "$mcp_deployed" "$TARGET" "$MCP_PATHS"; then
+  log "mcp sources changed $mcp_deployed -> $TARGET; blue-green deploy (blast radius = mcp containers + /mcp nginx upstream only)"
   gerrit_before_mcp="$(docker inspect -f '{{.Id}}' "$GERRIT_CONTAINER" 2>/dev/null || true)"
 
   # 1. sync + build the immutable release image, tagged by the target SHA.
   if ! git -C "$MIRROR_DIR" checkout -q "$TARGET" 2>/dev/null; then
-    err mcp-checkout-failed "git checkout $TARGET in $MIRROR_DIR failed"; record_backoff_failure; exit 1
+    err mcp-checkout-failed "git checkout $TARGET in $MIRROR_DIR failed"; record_mcp_backoff_failure; exit 1
   fi
   if ! rsync -a --delete "${RSYNC_EXCLUDES[@]}" "$MIRROR_DIR/" "$DEPLOY_REPO/" 2>/dev/null; then
-    err mcp-rsync-failed "rsync $MIRROR_DIR -> $DEPLOY_REPO failed"; record_backoff_failure; exit 1
+    err mcp-rsync-failed "rsync $MIRROR_DIR -> $DEPLOY_REPO failed"; record_mcp_backoff_failure; exit 1
   fi
   # Refresh the SSM-sourced secrets BEFORE building/starting the new container. mcp consumes
   # TWO rsync-EXCLUDED, SSM-materialized artifacts -- .env (mcp_run_new --env-file) and
@@ -660,13 +743,13 @@ if changed "$MCP_PATHS"; then
   # touching the live upstream, so the running container keeps serving.
   if ! ENV_FILE="$COMPOSE_DIR/.env" bash "$DEPLOY_REPO/infra/scripts/fetch-secrets.sh" >/dev/null 2>&1; then
     err mcp-secrets-fetch-failed "fetch-secrets.sh failed (SSM unreachable / param missing); .env left intact; mcp deploy aborted (old container stays live)"
-    record_backoff_failure; exit 1
+    record_mcp_backoff_failure; exit 1
   fi
   if ! ( cd "$COMPOSE_DIR" && docker compose build mcp ); then
-    err mcp-build-failed "docker compose build mcp failed"; record_backoff_failure; exit 1
+    err mcp-build-failed "docker compose build mcp failed"; record_mcp_backoff_failure; exit 1
   fi
   if ! docker tag "$MCP_IMAGE" "$MCP_IMAGE:$TARGET" >/dev/null 2>&1; then
-    err mcp-tag-failed "docker tag $MCP_IMAGE -> $MCP_IMAGE:$TARGET failed"; record_backoff_failure; exit 1
+    err mcp-tag-failed "docker tag $MCP_IMAGE -> $MCP_IMAGE:$TARGET failed"; record_mcp_backoff_failure; exit 1
   fi
 
   # 2. memory pre-check BEFORE the 2x overlap (8 GiB box). Below the floor: ABORT before ever
@@ -674,7 +757,7 @@ if changed "$MCP_PATHS"; then
   mcp_mem="$(mcp_mem_available_mb)"
   if [ "$mcp_mem" -ge 0 ] && [ "$mcp_mem" -lt "$MCP_MEM_MIN_MB" ]; then
     marker AUTODEPLOY_MCP_MEM_ABORT low-memory "MemAvailable=${mcp_mem}MB < min ${MCP_MEM_MIN_MB}MB on the 8GiB box; refusing the blue-green 2x overlap"
-    record_backoff_failure; exit 1
+    record_mcp_backoff_failure; exit 1
   fi
   [ "$mcp_mem" -lt 0 ] && log "mcp mem-check: MemAvailable UNREADABLE; failing OPEN (proceeding with the 2x overlap without a memory guarantee)"
 
@@ -683,7 +766,7 @@ if changed "$MCP_PATHS"; then
   mcp_newport="$(mcp_free_port)"
   if [ -z "$mcp_newport" ]; then
     marker AUTODEPLOY_MCP_RETIRE_CAP port-exhausted "both $MCP_PORT_A and $MCP_PORT_B held by un-reaped mcp containers; not starting a colliding 3rd (cap=$MCP_RELEASES_CAP)"
-    record_backoff_failure; exit 1
+    record_mcp_backoff_failure; exit 1
   fi
   mcp_newname="${MCP_CONTAINER_PREFIX}-${TARGET:0:12}-${mcp_newport}"
 
@@ -691,7 +774,7 @@ if changed "$MCP_PATHS"; then
   if ! mcp_run_new "$mcp_newname" "$mcp_newport"; then
     err mcp-run-failed "docker run $mcp_newname on 127.0.0.1:${mcp_newport} failed"
     docker rm -f "$mcp_newname" >/dev/null 2>&1 || true
-    record_backoff_failure; exit 1
+    record_mcp_backoff_failure; exit 1
   fi
 
   # 5. health-check the NEW container. On failure remove IT and leave the OLD upstream live +
@@ -704,7 +787,7 @@ if changed "$MCP_PATHS"; then
   if [ "$mcp_ok" != 1 ]; then
     err mcp-unhealthy "new mcp container $mcp_newname failed /health within ${MCP_HEALTH_TIMEOUT}s; removing it, leaving the OLD upstream live"
     docker rm -f "$mcp_newname" >/dev/null 2>&1 || true
-    record_backoff_failure; exit 1
+    record_mcp_backoff_failure; exit 1
   fi
 
   # 6. ATOMICALLY flip the /mcp/ upstream to the new container. The cutover is DONE at the reload;
@@ -713,7 +796,7 @@ if changed "$MCP_PATHS"; then
   if ! mcp_flip_upstream "$mcp_newport"; then
     err mcp-flip-failed "nginx flip to 127.0.0.1:${mcp_newport} failed; restored previous upstream + removing new container"
     docker rm -f "$mcp_newname" >/dev/null 2>&1 || true
-    record_backoff_failure; exit 1
+    record_mcp_backoff_failure; exit 1
   fi
   log "mcp cutover complete: /mcp upstream now 127.0.0.1:${mcp_newport} (deploy DONE; not waiting on in-flight drain)"
 
@@ -725,17 +808,24 @@ if changed "$MCP_PATHS"; then
   if [ -n "$gerrit_before_mcp" ] && [ "$gerrit_before_mcp" != "$gerrit_after_mcp" ]; then
     err blast-radius "gerrit container id changed during an mcp deploy — investigate"
   fi
+  # mcp is DEPLOYED at $TARGET. Record it on the component's OWN marker (atomically, same
+  # idiom as the deployed-sha advance below) so a tick that exits early at the bot_deferred
+  # guard — never reaching that advance — does not re-deploy this identical mcp delta forever.
+  echo "$TARGET" > "$MCP_SHA_FILE.tmp" && mv "$MCP_SHA_FILE.tmp" "$MCP_SHA_FILE"
+  mcp_deployed="$TARGET"
+  clear_mcp_backoff
   prune_docker_caches
   log "mcp redeployed + healthy at 127.0.0.1:${mcp_newport}"
 fi
 
-# ── review-bot deferral: stop HERE, AFTER the independent mcp path ─────────────
-# The bot deploy was deferred, so this tick is NOT a complete deploy of $TARGET: deployed-sha
-# must not advance and the deferral EPISODE in $DEFER_FILE must carry forward. Everything below
-# (host-observability re-materialization, certbot re-materialization, the deployed-sha advance)
-# is skipped exactly as the pre-fix `exit 0` skipped it — the ONLY behavioural difference is
-# that the mcp blue-green block above already ran on its own path.
-if [ "$bot_deferred" = 1 ]; then
+# ── review-bot did not deploy: stop HERE, AFTER the independent mcp path ───────
+# Either the bot deploy was DEFERRED (a review is in flight) or it was SKIPPED with a delta
+# still pending (its backoff window is open). Both mean the tick is NOT a complete deploy of
+# $TARGET: neither sha may advance, and on the deferral path the EPISODE in $DEFER_FILE must
+# carry forward. Everything below (host probe / certbot re-materialization, the deployed-sha
+# advance) is skipped exactly as the pre-fix `exit 0` skipped it — the ONLY behavioural
+# difference is that the mcp blue-green block above already ran on its own path.
+if [ "$bot_deferred" = 1 ] || [ "$bot_incomplete" = 1 ] || [ "$mcp_incomplete" = 1 ]; then
   exit 0
 fi
 
@@ -784,6 +874,16 @@ fi
 
 # ── success: advance deployed-sha atomically, clear backoff ───────────────────
 echo "$TARGET" > "$SHA_FILE.tmp" && mv "$SHA_FILE.tmp" "$SHA_FILE"
+# Keep the component markers in lockstep with the global one on a COMPLETE deploy. Either block
+# may have been a NO-OP this tick — because nothing under its trigger paths changed, or because
+# its backoff window was open with a real delta still pending. Only the FORMER is a complete
+# tick; the latter sets bot_incomplete / mcp_incomplete and exits at the guard above, so
+# reaching HERE means every component is genuinely at $TARGET and stamping both markers is
+# sound. Otherwise a later tick would diff from a stale marker, compute no delta, and drop the
+# pending change permanently.
+echo "$TARGET" > "$MCP_SHA_FILE.tmp" && mv "$MCP_SHA_FILE.tmp" "$MCP_SHA_FILE"
+echo "$TARGET" > "$BOT_SHA_FILE.tmp" && mv "$BOT_SHA_FILE.tmp" "$BOT_SHA_FILE"
 clear_backoff
+clear_mcp_backoff
 rm -f "$DEFER_FILE"          # the deferral episode ended with a deploy; do not carry it forward
 log "deploy complete: env now reflects $TARGET"
