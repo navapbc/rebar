@@ -364,6 +364,14 @@ mcp_free_port() {
 # compose-parity test (test_autodeploy_mcp_bluegreen.py) pins this set to docker-compose.yml so
 # it cannot silently drift — /health is auth-independent and would not catch a wrong
 # REBAR_MCP_AUTH_*/ALLOWED_HOSTS. $1 = container name, $2 = host port.
+# Start a blue-green mcp container at parity with the compose `mcp:` service.
+#
+# The SSM-materialized values -- MCP_TICKETS_PAT and the four JIRA_* bridge variables -- ride
+# `--env-file` below and are deliberately NOT re-spelled as `-e`. `docker run` does not
+# interpolate the project `.env`, so `-e JIRA_URL=${JIRA_URL:-}` would expand in THIS shell,
+# where the variable is unset, and pass an empty value that OVERRIDES the real one from the
+# env-file. They are listed in `_ENV_FILE_ONLY` in tests/scripts/test_autodeploy_mcp_bluegreen.py
+# so the parity oracle asserts that exclusion rather than demanding a matching `-e`.
 mcp_run_new() {
   docker run -d --name "$1" \
     --restart always \

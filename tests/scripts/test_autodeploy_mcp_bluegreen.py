@@ -864,7 +864,9 @@ def _parse_compose_mcp_env_and_volumes() -> tuple[dict[str, str], list[str]]:
 # Their compose spelling is `${KEY:-}` — compose resolves that from the project-dir .env,
 # but a bare `docker run` does NOT, so re-spelling them as `-e` would overwrite the real
 # value with an empty string.
-_ENV_FILE_ONLY = frozenset({"MCP_TICKETS_PAT"})
+_ENV_FILE_ONLY = frozenset(
+    {"MCP_TICKETS_PAT", "JIRA_URL", "JIRA_USER", "JIRA_PROJECT", "JIRA_API_TOKEN"}
+)
 
 
 def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> None:

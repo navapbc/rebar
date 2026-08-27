@@ -20,6 +20,13 @@
 #   /rebar/prod/mcp-client-pat-copilot     -> MCP_CLIENT_PAT_COPILOT     (MCP static auth, OPTIONAL)
 #   /rebar/prod/mcp-client-pat-codex       -> MCP_CLIENT_PAT_CODEX       (MCP static auth, OPTIONAL)
 #   /rebar/prod/mcp-client-pat-claude      -> MCP_CLIENT_PAT_CLAUDE      (MCP static auth, OPTIONAL)
+#   /rebar/prod/jira-url                   -> JIRA_URL                   (bridge, String,  OPTIONAL)
+#   /rebar/prod/jira-user                  -> JIRA_USER                  (bridge, String,  OPTIONAL)
+#   /rebar/prod/jira-project               -> JIRA_PROJECT               (bridge, String,  OPTIONAL)
+#   /rebar/prod/jira-api-token             -> JIRA_API_TOKEN             (bridge, SECRET,  OPTIONAL)
+# The four Jira leaves keep the GitHub Actions var/secret split: only the token is a
+# SecureString (read decrypted); the other three are plain Strings read WITHOUT
+# --with-decryption. All four are OPTIONAL -- see the soft-degrade note at their read below.
 # The two OAuth creds are OPTIONAL here (blank if unpopulated) — they are only needed
 # under auth.type = OAUTH, and compose-up.sh FAILS LOUD if OAUTH is selected but they
 # are empty. Making them REQUIRED here would couple every boot (incl. non-OAUTH rollback)
@@ -71,6 +78,24 @@ get_param_optional() {
   val="$(aws ssm get-parameter \
     --name "${SSM_PREFIX}/${leaf}" \
     --with-decryption \
+    --query 'Parameter.Value' \
+    --output text 2>/dev/null || true)"
+  if [ -z "${val}" ] || [ "${val}" = "None" ] || [ "${val}" = "CHANGEME" ]; then
+    printf ''
+    return 0
+  fi
+  printf '%s' "${val}"
+}
+
+# --- Read one OPTIONAL PLAIN (String) param --------------------------------
+# Like get_param_optional but for a NON-SecureString leaf, so it deliberately OMITS
+# --with-decryption. AWS would tolerate the flag on a String, but spelling it here would
+# erase the very distinction this script is preserving: which leaves are secrets and which
+# are ordinary configuration. Same never-abort contract: empty/None/CHANGEME yields empty.
+get_param_optional_plain() {
+  local leaf="$1" val
+  val="$(aws ssm get-parameter \
+    --name "${SSM_PREFIX}/${leaf}" \
     --query 'Parameter.Value' \
     --output text 2>/dev/null || true)"
   if [ -z "${val}" ] || [ "${val}" = "None" ] || [ "${val}" = "CHANGEME" ]; then
@@ -176,6 +201,33 @@ fi
 mcp_pat_copilot="$(get_param_optional mcp-client-pat-copilot)"
 mcp_pat_codex="$(get_param_optional mcp-client-pat-codex)"
 mcp_pat_claude="$(get_param_optional mcp-client-pat-claude)"
+
+# OPTIONAL: the Jira bridge configuration (bug colourless-hasteless-lamb). Without these the
+# MCP server's bridge tools fail immediately -- `bridge_check_access` exits 2 with
+# "bridge access check requires JIRA_URL, JIRA_USER, and JIRA_API_TOKEN".
+#
+# FAILURE POSTURE: SOFT DEGRADE, chosen deliberately. Precedent on this box is SPLIT --
+# mcp-static-tokens.json fails CLOSED because it is an AUTH boundary (no bearer store, no
+# endpoint), while a missing tickets PAT degrades softly. Jira credentials are an OUTBOUND
+# INTEGRATION credential: their absence cannot expose an unauthenticated endpoint, only leave
+# bridge tools unable to reach Jira. So all four use the OPTIONAL readers, never get_param.
+# That is not a stylistic choice -- get_param exits 1 and writes NO .env at all, and
+# autodeploy aborts the whole mcp deploy when fetch-secrets fails, so a REQUIRED read would
+# let one unpopulated Jira slot block deploys of entirely unrelated code and take every
+# container down. With the optional read, a blank slot leaves a blank .env value, the stack
+# boots, the endpoint stays up, and only the bridge tools report unavailable -- via the
+# already-typed exit-2 error that names exactly which variables are missing.
+#
+# Only the token is decrypted; the three plain Strings use the non-decrypting reader, keeping
+# the GitHub Actions vars.*-vs-secrets.* split intact on the box.
+jira_url="$(get_param_optional_plain jira-url)"
+jira_user="$(get_param_optional_plain jira-user)"
+# JIRA_PROJECT is a FOURTH required input for a live verdict, not an optional extra:
+# access_check._resolve_probe_scope fails closed with reason=missing_project when it is unset,
+# and rebar.config.resolve_jira_probe_scope reads the ENVIRONMENT ONLY -- the committed
+# rebar.toml `[jira] project` never reaches the probe. Terraform owns this parameter's value.
+jira_project="$(get_param_optional_plain jira-project)"
+jira_api_token="$(get_param_optional jira-api-token)"
 mcp_static_tokens_path="$(dirname "${ENV_FILE}")/mcp-static-tokens.json"
 
 # Append one token_env record per POPULATED client (env-var NAMES only; no secret interpolated).
@@ -222,6 +274,13 @@ chmod 600 "${tmp}"
   echo "MCP_CLIENT_PAT_COPILOT=${mcp_pat_copilot}"
   echo "MCP_CLIENT_PAT_CODEX=${mcp_pat_codex}"
   echo "MCP_CLIENT_PAT_CLAUDE=${mcp_pat_claude}"
+  # Jira bridge config. Blank is a SUPPORTED state: the container boots and the bridge tools
+  # report unavailable (see the soft-degrade note at the reads above). These reach the mcp
+  # container through this .env alone -- compose `env_file:` and mcp_run_new's `--env-file`.
+  echo "JIRA_URL=${jira_url}"
+  echo "JIRA_USER=${jira_user}"
+  echo "JIRA_PROJECT=${jira_project}"
+  echo "JIRA_API_TOKEN=${jira_api_token}"
   echo "REVIEW_BOT_PORT=8000"
 } >"${tmp}"
 mv -f "${tmp}" "${ENV_FILE}"

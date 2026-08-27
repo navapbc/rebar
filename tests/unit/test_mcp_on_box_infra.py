@@ -30,6 +30,8 @@ _AUTODEPLOY = _REPO / "infra" / "scripts" / "autodeploy.sh"
 _FETCH_SECRETS = _REPO / "infra" / "scripts" / "fetch-secrets.sh"
 _ENTRYPOINT = _REPO / "infra" / "scripts" / "mcp-entrypoint.sh"
 _DOCKERIGNORE = _REPO / ".dockerignore"
+_SSM_TF = _REPO / "infra" / "terraform" / "ssm.tf"
+_REBAR_TOML = _REPO / "rebar.toml"
 
 # The app's bounded SIGTERM grace, single-sourced in the module — the compose
 # stop_grace_period must cover it.
@@ -465,3 +467,184 @@ def test_mcp_entrypoint_still_execs_the_server_last() -> None:
     assert executable[-1] == 'exec "$@"', (
         f"exec must be the LAST action in the entrypoint; found {executable[-1]!r}"
     )
+
+
+# --------------------------------------------------------------------------- Jira bridge creds
+#
+# The Jira wiring the bridge tools need (bug colourless-hasteless-lamb). Without it every live
+# bridge operation on the deployed server failed at once: `bridge_check_access` exited 2 with
+# "bridge access check requires JIRA_URL, JIRA_USER, and JIRA_API_TOKEN".
+#
+# Two properties are pinned throughout, and they are the two a future edit is most likely to
+# quietly break:
+#
+#   1. The var/secret SPLIT. GitHub Actions models JIRA_URL/JIRA_USER/JIRA_PROJECT as non-secret
+#      `vars.*` and only JIRA_API_TOKEN as a `secrets.*`; rebar's own _child_env.py registry
+#      agrees. The box preserves that -- three Strings, one SecureString -- so that reading or
+#      correcting a wrong Jira URL never requires decrypting anything and rotating the token
+#      never disturbs the rest. "Tidying" all four into SecureString is the regression.
+#
+#   2. The SOFT-degrade posture. Absent Jira credentials must leave the endpoint UP. They are an
+#      outbound integration credential, not an auth boundary, so unlike mcp-static-tokens.json
+#      (which fails CLOSED -- no bearer store, no endpoint) a blank slot must never abort
+#      fetch-secrets.sh, which would write no .env at all and take every container down.
+
+_JIRA_PLAIN_LEAVES = ("jira-url", "jira-user", "jira-project")
+_JIRA_ENV = ("JIRA_URL", "JIRA_USER", "JIRA_PROJECT", "JIRA_API_TOKEN")
+
+
+def test_ssm_declares_the_jira_token_as_the_only_securestring_leaf() -> None:
+    """Only the API token is a secret; the other three must NOT be in the SecureString list."""
+    text = _SSM_TF.read_text(encoding="utf-8")
+    secret_block = re.search(r"rebar_secret_params\s*=\s*\[(.*?)^  \]", text, re.DOTALL | re.M)
+    assert secret_block, "rebar_secret_params list not found"
+    body = secret_block.group(1)
+    assert '"/rebar/prod/jira-api-token"' in body
+    for leaf in _JIRA_PLAIN_LEAVES:
+        assert f'"/rebar/prod/{leaf}"' not in body, (
+            f"{leaf} is a NON-secret (a `vars.*` in GitHub Actions) and must not be a "
+            "SecureString -- that costs rotation and debuggability for no security gain"
+        )
+
+
+def test_ssm_declares_the_non_secret_jira_leaves_as_plain_strings() -> None:
+    """url/user/project are `String`, and the token is never declared as one."""
+    text = _SSM_TF.read_text(encoding="utf-8")
+    for leaf in _JIRA_PLAIN_LEAVES:
+        assert f'"/rebar/prod/{leaf}"' in text, f"{leaf} must be declared"
+    for resource in ("rebar_plain_seeded", "jira_project"):
+        block = re.search(
+            rf'resource "aws_ssm_parameter" "{resource}" \{{(.*?)^\}}', text, re.DOTALL | re.M
+        )
+        assert block, f"resource {resource} not found"
+        assert 'type  = "String"' in block.group(1), f"{resource} must be a plain String"
+        assert "jira-api-token" not in block.group(1), (
+            "the API token must never be declared as a plaintext String"
+        )
+
+
+def test_ssm_adopts_the_operator_seeded_jira_parameters_instead_of_recreating_them() -> None:
+    """url/user/token were created OUT OF BAND by an operator, so terraform must ADOPT them.
+
+    Without an import block the next `apply` fails `ParameterAlreadyExists` -- the parameters
+    exist in SSM but not in state. Only these three: jira-project is terraform-created.
+    """
+    text = _SSM_TF.read_text(encoding="utf-8")
+    for leaf in ("jira-url", "jira-user", "jira-api-token"):
+        assert re.search(rf'import \{{[^}}]*?id = "/rebar/prod/{leaf}"', text, re.DOTALL), (
+            f"/rebar/prod/{leaf} was operator-seeded out of band and needs an import block"
+        )
+    assert not re.search(r'import \{[^}]*?id = "/rebar/prod/jira-project"', text, re.DOTALL), (
+        "jira-project is fully terraform-managed and is CREATED by apply, not imported"
+    )
+
+
+def test_ssm_holds_no_jira_credential_value() -> None:
+    """Terraform owns each parameter's existence and type -- never an operator's value."""
+    text = _SSM_TF.read_text(encoding="utf-8")
+    seeded = re.search(
+        r'resource "aws_ssm_parameter" "rebar_plain_seeded" \{(.*?)^\}', text, re.DOTALL | re.M
+    )
+    assert seeded and 'value = "CHANGEME"' in seeded.group(1)
+    assert "ignore_changes = [value]" in seeded.group(1), (
+        "an operator-seeded value must never be reverted to the placeholder by a later apply"
+    )
+
+
+def test_ssm_jira_project_matches_the_configured_project_key() -> None:
+    """The project key lives in two places by necessity; pin them equal so they cannot drift.
+
+    `rebar.config.resolve_jira_probe_scope` reads the ENVIRONMENT ONLY, so `rebar.toml`'s
+    `[jira] project` never reaches `access_check._resolve_probe_scope` -- which fails closed with
+    `missing_project`. The box therefore needs its own copy, and this is the guard that keeps the
+    copy honest.
+    """
+    tf = _SSM_TF.read_text(encoding="utf-8")
+    block = re.search(
+        r'resource "aws_ssm_parameter" "jira_project" \{(.*?)^\}', tf, re.DOTALL | re.M
+    )
+    assert block, "jira_project resource not found"
+    declared = re.search(r'value = "([^"]+)"', block.group(1))
+    assert declared, "jira_project must carry a real terraform-managed value"
+    configured = re.search(
+        r"^project\s*=\s*\"([^\"]+)\"", _REBAR_TOML.read_text(encoding="utf-8"), re.M
+    )
+    assert configured, "rebar.toml [jira] project not found"
+    assert declared.group(1) == configured.group(1), (
+        f"ssm.tf jira-project={declared.group(1)!r} has drifted from rebar.toml "
+        f"[jira] project={configured.group(1)!r}"
+    )
+
+
+def test_fetch_secrets_reads_each_jira_leaf_at_its_declared_type() -> None:
+    """The SecureString is decrypted; the three Strings are read WITHOUT --with-decryption."""
+    text = _FETCH_SECRETS.read_text(encoding="utf-8")
+    assert 'jira_api_token="$(get_param_optional jira-api-token)"' in text
+    for var, leaf in (
+        ("jira_url", "jira-url"),
+        ("jira_user", "jira-user"),
+        ("jira_project", "jira-project"),
+    ):
+        assert f'{var}="$(get_param_optional_plain {leaf})"' in text, (
+            f"{leaf} is a plain String and must be read by the non-decrypting reader"
+        )
+    start = text.index("get_param_optional_plain() {")
+    body = text[start : text.index("\n}", start)]
+    assert "--with-decryption" not in body, (
+        "the plain reader must omit --with-decryption; blanket-decrypting erases the very "
+        "secret/non-secret distinction this wiring preserves"
+    )
+
+
+def test_fetch_secrets_emits_every_jira_variable_into_the_env() -> None:
+    """All four land in the generated .env -- the single carrier into the mcp container."""
+    text = _FETCH_SECRETS.read_text(encoding="utf-8")
+    for env_var, shell_var in zip(
+        _JIRA_ENV, ("jira_url", "jira_user", "jira_project", "jira_api_token"), strict=True
+    ):
+        assert f"{env_var}=${{{shell_var}}}" in text
+
+
+def test_absent_jira_credentials_never_abort_the_secrets_fetch() -> None:
+    """SOFT degrade, pinned at the mechanism that decides it.
+
+    `get_param` exits 1 on an empty/None/CHANGEME value and writes NO .env at all, and
+    autodeploy aborts the entire mcp deploy when fetch-secrets fails. So a REQUIRED read of a
+    Jira leaf would let one unpopulated slot block deploys of unrelated code and take every
+    container down -- the opposite of "the endpoint stays up". Only the optional readers are
+    permitted here. Contrast test_static_tokens_have_no_such_fallback above: that boundary
+    fails CLOSED on purpose, and the two postures must not be conflated.
+    """
+    text = _FETCH_SECRETS.read_text(encoding="utf-8")
+    for leaf in (*_JIRA_PLAIN_LEAVES, "jira-api-token"):
+        assert f"get_param {leaf}" not in text, (
+            f"{leaf} must use an OPTIONAL reader; the fail-fast get_param would abort the whole "
+            "boot for a missing outbound integration credential"
+        )
+
+
+def test_compose_mcp_declares_every_jira_variable() -> None:
+    """The mcp service documents all four inputs rather than leaving them implicit in .env."""
+    doc = yaml.safe_load(_COMPOSE.read_text())
+    env = doc["services"]["mcp"]["environment"]
+    for key in _JIRA_ENV:
+        assert key in env, f"the mcp service must declare {key}"
+
+
+def test_autodeploy_carries_the_jira_variables_by_env_file_not_by_dash_e() -> None:
+    """Blue-green parity, and the one way to get it WRONG.
+
+    `docker run` does not interpolate the project `.env`, so `-e JIRA_URL=${JIRA_URL:-}` would
+    expand in the deploy shell -- where it is unset -- and pass an empty value that OVERRIDES
+    the real one from `--env-file`. The container would then look correctly configured and
+    still fail every bridge call. `--env-file` is the carrier, exactly as for MCP_TICKETS_PAT.
+    """
+    script = _AUTODEPLOY.read_text(encoding="utf-8")
+    start = script.index("mcp_run_new() {")
+    body = script[start : script.index("\n}", start)]
+    assert "--env-file" in body, "the env-file carrier must remain"
+    for key in _JIRA_ENV:
+        assert f"-e {key}=" not in body and f'-e "{key}=' not in body, (
+            f"{key} must reach the container via --env-file; an `-e` with an un-interpolated "
+            "compose default would blank the real value"
+        )

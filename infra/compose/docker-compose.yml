@@ -386,6 +386,26 @@ services:
       # the .env by fetch-secrets.sh; BLANK IS FINE — the clone is simply deferred and the
       # container still boots (soft failure posture).
       MCP_TICKETS_PAT: "${MCP_TICKETS_PAT:-}"
+      # Jira bridge configuration (bug colourless-hasteless-lamb). Like MCP_TICKETS_PAT above
+      # these are SSM-materialized into the .env by fetch-secrets.sh and are ALREADY delivered
+      # by `env_file: .env`; they are spelled out here so the mcp service documents every input
+      # it depends on rather than leaving them implicit in a generated file. They are therefore
+      # `_ENV_FILE_ONLY` in the compose/mcp_run_new parity oracle: `docker run` does NOT
+      # interpolate the project .env, so re-spelling them as `-e JIRA_URL=${JIRA_URL:-}` in
+      # autodeploy's mcp_run_new would resolve EMPTY in the deploy shell and CLOBBER the real
+      # value. --env-file is the carrier for these; see mcp_run_new.
+      #
+      # BLANK IS FINE and is the SOFT-DEGRADE posture: the container boots, /mcp keeps serving,
+      # and only the bridge tools report unavailable (bridge_check_access already raises a typed
+      # exit-2 error naming the missing variables). Contrast mcp-static-tokens.json below, which
+      # fails CLOSED because it is an AUTH boundary -- a missing outbound integration credential
+      # is a soft degrade, a missing bearer store is not.
+      JIRA_URL: "${JIRA_URL:-}"
+      JIRA_USER: "${JIRA_USER:-}"
+      # A FOURTH required input for a live verdict, not an optional extra: the probe scope
+      # resolver reads the environment only, so rebar.toml's `[jira] project` never reaches it.
+      JIRA_PROJECT: "${JIRA_PROJECT:-}"
+      JIRA_API_TOKEN: "${JIRA_API_TOKEN:-}"
     ports:
       # Publish on host loopback for the HOST nginx /mcp proxy. Host port 8091 (Gerrit owns
       # 8080, review-bot REVIEW_BOT_PORT, opcert 8090); container port is fixed 8091.

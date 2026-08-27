@@ -74,6 +74,16 @@ locals {
     # via get_param_optional and a blank slot only DEFERS the clone (the container still boots).
     # Operator populates this SecureString.
     "/rebar/prod/mcp-tickets-pat",
+    # The Jira API token the bridge tools authenticate with (bug colourless-hasteless-lamb).
+    # The ONLY Jira leaf that is a secret: GitHub Actions models it as `secrets.JIRA_API_TOKEN`
+    # while JIRA_URL/JIRA_USER/JIRA_PROJECT are non-secret `vars.*`
+    # (.github/workflows/reconcile-bridge.yml), and rebar's own _child_env.py secret registry
+    # lists JIRA_API_TOKEN as the sole jira child-env secret. That split is preserved here
+    # rather than flattened: making the other three SecureStrings would cost rotation and
+    # debuggability for no security gain. OPTIONAL at the container boundary --
+    # fetch-secrets.sh reads it via get_param_optional, so a blank slot degrades softly (the
+    # bridge tools report unavailable) instead of aborting the boot for every container.
+    "/rebar/prod/jira-api-token",
   ]
 }
 
@@ -91,4 +101,85 @@ resource "aws_ssm_parameter" "rebar_secrets" {
   tags = {
     Project = "rebar"
   }
+}
+
+# ---------------------------------------------------------------------------
+# SSM String parameters — NON-SECRET config slots under /rebar/prod/*
+# ---------------------------------------------------------------------------
+# Plaintext `String`, deliberately NOT SecureString. These mirror the GitHub
+# Actions `vars.*` half of the Jira configuration; only the API token above is a
+# `secrets.*`. Keeping the split means an operator can read and correct a wrong
+# Jira URL or account without decrypting anything, and rotating the token does
+# not disturb them.
+#
+# jira-url / jira-user were SEEDED OUT OF BAND by an operator (AWS CLI, not
+# terraform), so they carry both an `import` block (below) to adopt the existing
+# parameter instead of colliding with `ParameterAlreadyExists`, and the same
+# `ignore_changes = [value]` guard the secret slots use — terraform owns their
+# existence and type, never their value.
+#
+# jira-project is the exception: it is a public project key, not an operator
+# secret, so it is FULLY terraform-managed (a real value, no `ignore_changes`,
+# no import) following the `opcert_origin_guard` precedent. It exists because
+# `access_check._resolve_probe_scope` fails closed with `missing_project`
+# without it, and `rebar.config.resolve_jira_probe_scope` reads the ENVIRONMENT
+# ONLY — the committed `rebar.toml` `[jira] project` never reaches the probe.
+# Its value is asserted equal to `rebar.toml`'s by test so the two cannot drift.
+# ---------------------------------------------------------------------------
+
+locals {
+  # Operator-seeded, value-preserving plain params (adopted by the import blocks below).
+  rebar_plain_seeded_params = [
+    "/rebar/prod/jira-url",
+    "/rebar/prod/jira-user",
+  ]
+}
+
+resource "aws_ssm_parameter" "rebar_plain_seeded" {
+  for_each = toset(local.rebar_plain_seeded_params)
+
+  name  = each.value
+  type  = "String"
+  value = "CHANGEME"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = {
+    Project = "rebar"
+  }
+}
+
+# Fully terraform-managed: the Jira project key. Single-sourced with rebar.toml's
+# `[jira] project`; a test pins the two equal.
+resource "aws_ssm_parameter" "jira_project" {
+  name  = "/rebar/prod/jira-project"
+  type  = "String"
+  value = "REB"
+
+  tags = {
+    Project = "rebar"
+  }
+}
+
+# --- Adopt the out-of-band-seeded Jira parameters into state ----------------
+# An operator created these three with `aws ssm put-parameter` before terraform
+# ever declared them, so a plain apply would fail `ParameterAlreadyExists`.
+# These import blocks adopt them instead. They are idempotent (terraform skips an
+# import for a resource already in state) and can be deleted after the adopting
+# apply. NO credential value appears here — only the parameter names.
+import {
+  to = aws_ssm_parameter.rebar_plain_seeded["/rebar/prod/jira-url"]
+  id = "/rebar/prod/jira-url"
+}
+
+import {
+  to = aws_ssm_parameter.rebar_plain_seeded["/rebar/prod/jira-user"]
+  id = "/rebar/prod/jira-user"
+}
+
+import {
+  to = aws_ssm_parameter.rebar_secrets["/rebar/prod/jira-api-token"]
+  id = "/rebar/prod/jira-api-token"
 }

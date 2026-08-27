@@ -160,3 +160,93 @@ def test_mcp_bridge_tools_return_the_public_library_results(
         assert result == expected[name]
 
     assert seen == calls
+
+
+# --------------------------------------------------------------------------- #
+# Absent Jira credentials DEGRADE SOFTLY (bug colourless-hasteless-lamb)       #
+# --------------------------------------------------------------------------- #
+#
+# The deployed MCP server had no Jira credentials at all, so every live bridge operation
+# failed. Wiring them in (ssm.tf -> fetch-secrets.sh -> the container .env) is deliberately
+# a SOFT-degrade path: unlike the static bearer-token store, which is an AUTH boundary and
+# fails CLOSED, an absent OUTBOUND integration credential must never take the endpoint down.
+#
+# These pin the behaviour that makes that posture safe: a missing credential produces a
+# TYPED, per-call error that NAMES what is missing, not a crash and not a silent success. If
+# the probe ever started raising an untyped exception, or worse returning a PASS-shaped
+# verdict without credentials, the soft posture would stop being defensible.
+
+
+def _access_check():
+    from rebar._lib_ops import _engine_module
+
+    return _engine_module("rebar_reconciler.access_check")
+
+
+@pytest.mark.parametrize(
+    ("env", "reason"),
+    [
+        ({}, "missing_credentials"),
+        ({"JIRA_URL": "https://example.atlassian.net"}, "missing_credentials"),
+        (
+            {
+                "JIRA_URL": "https://example.atlassian.net",
+                "JIRA_USER": "someone@example.com",
+            },
+            "missing_credentials",
+        ),
+        # All three CREDENTIALS present but no project: the probe still cannot run. This is the
+        # case that makes JIRA_PROJECT a fourth REQUIRED input rather than an optional extra --
+        # `resolve_jira_probe_scope` reads the ENVIRONMENT ONLY, so rebar.toml's `[jira]
+        # project` never reaches it, and wiring only the credentials would move the failure
+        # here instead of reaching a verdict.
+        (
+            {
+                "JIRA_URL": "https://example.atlassian.net",
+                "JIRA_USER": "someone@example.com",
+                "JIRA_API_TOKEN": "unused-placeholder-not-a-real-token",
+            },
+            "missing_project",
+        ),
+    ],
+)
+def test_incomplete_jira_scope_yields_a_typed_verdict_not_a_crash(
+    env: dict[str, str], reason: str
+) -> None:
+    """Each incomplete scope fails CLOSED with a NAMED reason and exit 2 -- never a traceback.
+
+    No network is reached: the probe short-circuits before constructing a client, which is
+    exactly why an unconfigured box stays serviceable instead of hanging or erroring out.
+    """
+    result, lines, returncode = _access_check().run_access_check(env=env)
+
+    assert returncode == 2
+    assert result["verdict"] == "INVALID"
+    assert result["reason"] == reason
+    assert lines == [f"PROBE_FAIL reason={reason}"]
+
+
+def test_absent_credentials_surface_as_a_typed_error_naming_the_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The library boundary converts the exit-2 probe into a RebarError that NAMES the inputs.
+
+    This is the whole soft-degrade contract at the tool boundary: ONE tool reports a clear,
+    actionable "these are required" error while the server keeps serving every other tool.
+    An operator reading it learns which SSM slot to populate without opening the source.
+
+    The JIRA_* variables are cleared explicitly rather than assumed absent. A developer machine
+    (and, once this wiring lands, the box itself) HAS them set, so without this the test would
+    make a LIVE authenticated call to Jira -- slow, flaky, credential-dependent, and no longer
+    a test of the unconfigured path at all.
+    """
+    for variable in ("JIRA_URL", "JIRA_USER", "JIRA_PROJECT", "JIRA_API_TOKEN"):
+        monkeypatch.delenv(variable, raising=False)
+
+    with pytest.raises(rebar.RebarError) as excinfo:
+        rebar.bridge_check_access()
+
+    assert excinfo.value.returncode == 2
+    message = str(excinfo.value)
+    for variable in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN"):
+        assert variable in message, f"the error must name {variable} so an operator can act"
