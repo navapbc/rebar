@@ -625,6 +625,22 @@ def build_server(cfg=None):
             transport_security=ts,
             token_verifier=token_verifier,
             auth=auth_settings,
+            # STATELESS, deliberately. The SDK's default session manager keeps session
+            # state IN MEMORY in this process, so an `Mcp-Session-Id` is only ever valid
+            # on the container that minted it. The box's blue-green deploy swaps the nginx
+            # /mcp upstream the moment the new container is healthy, which orphans every
+            # live client session: the next request lands on a container that never heard
+            # of that id and 404s "Session expired", surfacing to agents as an opaque
+            # `rmcp::transport::worker` transport error mid-task. Retiring the old
+            # container gracefully cannot help -- the upstream has already moved, so
+            # nothing reaches it. Holding no per-container session state makes the failure
+            # structurally impossible rather than merely rarer.
+            #
+            # Safe because the tool surface is pure request/response: no tool takes the
+            # SDK's `Context`, which is the only handle for server-initiated messages, and
+            # `run_workflow` is poll-based (`get_workflow_status`), needing no session
+            # continuity. See ticket nemophilic-prettyish-cockroach.
+            stateless_http=True,
         )
     else:
         # stdio has no HTTP surface — the verifier is constructed (so a bad config still

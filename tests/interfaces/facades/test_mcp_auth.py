@@ -414,9 +414,21 @@ def test_session_id_replay_cannot_hijack_principal(tmp_path):
         )
         assert authed.status_code == 200
         session_id = authed.headers.get("mcp-session-id")
-        assert session_id  # the server minted a session for the authenticated client
-        replay = client.post(
-            "/mcp", json=INIT_REQUEST, headers={**MCP_HEADERS, "Mcp-Session-Id": session_id}
+        # The server runs STATELESS (nemophilic-prettyish-cockroach), so it mints NO session
+        # for an authenticated client. That REMOVES the artifact this attack replays rather
+        # than defending against its reuse: with no session id there is nothing to steal, and
+        # every request must carry its own bearer token. The assertion is kept rather than
+        # dropped so that a future return to stateful mode re-arms the original attack here.
+        assert session_id is None, (
+            "stateless transport must not mint an Mcp-Session-Id; if this fails the server "
+            "went back to per-session state and the replay defence below must be restored"
         )
-    # The replay (no token of its own) is never served in the first principal's context.
+        # Belt and braces: an unauthenticated request is refused whether or not it carries a
+        # forged session id. This is the property the original test protected.
+        replay = client.post(
+            "/mcp", json=INIT_REQUEST, headers={**MCP_HEADERS, "Mcp-Session-Id": "forged-id"}
+        )
+        bare = client.post("/mcp", json=INIT_REQUEST, headers=MCP_HEADERS)
+    # Neither the forged-session replay nor a bare request is ever served in a principal's context.
     assert replay.status_code == 401
+    assert bare.status_code == 401
