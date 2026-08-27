@@ -217,9 +217,51 @@ class _IssuesMixin(_TransportBase):
         """
         assignee = kwargs.pop("assignee", _MISSING)
         status = kwargs.pop("status", _MISSING)
+        _diag_on = __import__("os").environ.get("REBAR_DC_RICHTEXT_DIAG")  # DEBUG-rebar-debug-kob
         if kwargs:
             issue = _with_connection_retry(lambda: self._client.issue(remote_id))
-            _with_connection_retry(lambda: issue.update(fields=kwargs))
+            if _diag_on:  # DEBUG-rebar-debug-kob
+                import sys as _sys
+
+                _kw = {k: (type(v).__name__, repr(v)[:200]) for k, v in kwargs.items()}
+                print(
+                    f"DIAG-kob update_issue.PUT key={remote_id} fields={_kw}",
+                    file=_sys.stderr,
+                    flush=True,
+                )
+                try:
+                    _with_connection_retry(lambda: issue.update(fields=kwargs))
+                    print(
+                        f"DIAG-kob update_issue.OK key={remote_id} (no exception)",
+                        file=_sys.stderr,
+                        flush=True,
+                    )
+                except Exception as _exc:
+                    _body = getattr(_exc, "text", None) or getattr(_exc, "response", None)
+                    print(
+                        f"DIAG-kob update_issue.RAISED key={remote_id} "
+                        f"{type(_exc).__name__}: {str(_exc)[:400]} body={str(_body)[:400]}",
+                        file=_sys.stderr,
+                        flush=True,
+                    )
+                    raise
+                try:
+                    _rb = _with_connection_retry(lambda: self._client.issue(remote_id))
+                    _rbf = getattr(_rb, "raw", {}).get("fields", {})
+                    print(
+                        f"DIAG-kob update_issue.READBACK key={remote_id} "
+                        f"description={_rbf.get('description')!r}",
+                        file=_sys.stderr,
+                        flush=True,
+                    )
+                except Exception as _exc2:  # noqa: BLE001
+                    print(
+                        f"DIAG-kob update_issue.READBACK-FAIL key={remote_id} {_exc2!r}",
+                        file=_sys.stderr,
+                        flush=True,
+                    )
+            else:
+                _with_connection_retry(lambda: issue.update(fields=kwargs))
         if assignee is not _MISSING:
             self._assign(remote_id, assignee)
         if status is not _MISSING and status is not None:

@@ -1,0 +1,119 @@
+name: Jira DC Rich-Text Probe (agentic)
+
+# On-demand agentic ROOT-CAUSE run for the live Jira DC rich-text reconcile defect
+# (epic REB-3115 / bug reckless-diabolic-kob). It is the debug analog of the Jira DC
+# Capability Map workflow.
+#
+# THIS IS AN AUTHORING / DIAGNOSTIC TOOL, NOT A TEST-PATH COMPONENT. It boots the SAME
+# digest-pinned, ephemeral Jira DC image the `jira-dc-harness` job in external-integration.yml
+# uses, then runs an Opus agent (rebar.llm's own agentic runtime, driven by the pytest module
+# tests/external/live_jira_dc/test_dc_richtext_agentic_probe.py) against a store already BOUND
+# to a live DC issue. The agent computes wire with WikiTextCodec, diffs with
+# compute_update_fields, runs real scoped reconcile passes, writes directly through the
+# transport, and reads the raw + rendered description back — MANY experiments in ONE boot,
+# instead of one blind print-and-push observation per ~2h CI cycle.
+#
+# It produces a CANDIDATE root-cause finding + full experiment evidence for a human to review
+# (uploaded as a build artifact and printed to the job log). The agent is instructed to REPORT
+# the mechanism, never to fix the harness, the repository, or rebar's configuration, and
+# REBAR_MCP_READONLY=1 keeps rebar's own ticket store read-only for the run.
+#
+# `workflow_dispatch` ONLY — never push, PR, or schedule.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe-jira-dc-richtext:
+    name: agentic Jira DC rich-text root-cause (live, ephemeral)
+    runs-on: ubuntu-latest
+    # Native amd64 is a hard requirement for this harness to finish booting at all — see
+    # tests/external/live_jira_dc/README.md's measured arm64 findings. ubuntu-latest is
+    # native x86_64, mirroring the jira-dc-harness job in external-integration.yml.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
+        with:
+          enable-cache: true
+
+      - name: Require an LLM API key secret
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::Set the ANTHROPIC_API_KEY repository secret to run the agentic Jira DC rich-text probe (an Opus run)."
+            exit 1
+          fi
+
+      # BOTH extras: `[dev]` self-references `nava-rebar[agents,metrics]` (the LLM runtime the
+      # agent runs on), and `[jira-datacenter]` supplies pycontribs/jira (the DC transport the
+      # bound-issue fixture and the agent's experiments drive). `[dev]` does NOT imply
+      # `[jira-datacenter]`, so both are named explicitly — mirroring the jira-dc-harness job.
+      - name: Install rebar + the agentic LLM runtime + the DC transport
+        run: |
+          uv sync --locked --extra dev --extra jira-datacenter
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      - name: Build and start the Jira DC harness
+        working-directory: tests/external/live_jira_dc
+        run: docker compose up -d --build
+
+      - name: Wait for Jira DC to become ready
+        run: |
+          ok=
+          for i in $(seq 1 240); do
+            if curl -fsS http://localhost:2990/jira/rest/api/2/serverInfo >/dev/null 2>&1; then
+              echo "Jira DC ready after ${i} tries"; ok=1; break
+            fi
+            sleep 5
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Jira DC harness never became ready (see tests/external/live_jira_dc/README.md)"
+            (cd tests/external/live_jira_dc && docker compose logs --tail=200)
+            exit 1
+          fi
+
+      # ONE boot, ONE agentic investigation over the whole hypothesis set. -rA -s so the
+      # printed RICH-TEXT PROBE finding and its evidence reach the job log even on a passing
+      # (investigation-complete) run. The per-test hang guard mirrors the harness lane.
+      - name: Run the agentic rich-text root-cause probe
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REBAR_RUN_EXTERNAL: "1"
+          REBAR_DC_RICHTEXT_PROBE: "1"
+          # Hard, deterministic guarantee (not a prompt instruction) that the agent's rebar
+          # ticket tool is read-only: withholds comment_ticket regardless of gate mode.
+          REBAR_MCP_READONLY: "1"
+          # Generous agentic step budget — this run makes many local experiments in one boot.
+          REBAR_LLM_MAX_STEPS: "600"
+          JIRA_DC_PROBE_OUTPUT_DIR: ${{ runner.temp }}/jira-dc-richtext-probe
+        run: |
+          pytest tests/external/live_jira_dc/test_dc_richtext_agentic_probe.py \
+            -rA -s -q --timeout=1800 --timeout-method=thread
+
+      - name: Upload the root-cause finding + experiment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jira-dc-richtext-probe
+          path: ${{ runner.temp }}/jira-dc-richtext-probe
+          if-no-files-found: warn
+
+      - name: Jira DC container logs on failure
+        if: failure()
+        run: cd tests/external/live_jira_dc && docker compose logs --tail=200
+
+      - name: Tear down the Jira DC harness
+        if: always()
+        run: cd tests/external/live_jira_dc && docker compose down -v
