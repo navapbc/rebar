@@ -448,6 +448,13 @@ finding classes (each carried in `--output json` with a per-class count and path
 - `TRACKER_DIRTY_TMP_EVENT` — an orphaned `.tmp-event-*` temp file. Report-only and never
   counted or auto-touched: a live one belongs to an in-flight append.
 
+`STATUS_FORK_RESOLVED` belongs to that same report-only class: `fsck` still emits it (in
+the text report and in `--output json`'s `issues[]`, carrying the ticket id), but it is
+never counted, so it cannot by itself push `fsck`'s exit code to 1. A resolved status fork
+is not damage — the reducer already resolved the cross-clone race deterministically by
+UUID, and `status_fork_resolutions` is permanent derived state that survives compaction.
+Counting it would pin a busy store's `fsck` at exit 1 forever with nothing to repair.
+
 `rebar doctor --repair` heals the first two classes and then reconverges the store:
 
 1. Before the first mutation it records a backup ref `refs/rebar-doctor/<utc-ts>` at the
