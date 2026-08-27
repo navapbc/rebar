@@ -228,6 +228,14 @@ def run_differs(ctx: Any) -> None:
     A thin orchestrator over the named ``_run_differs_*`` phase helpers, each of
     which captures one cohesive stage of the former inline body VERBATIM.
     """
+    # Bug f449: for a SCOPED pass, refresh the scoped bound keys from the primary store
+    # (lag-free GET) and overlay ``ctx.curr_snapshot`` in place BEFORE any differ or the
+    # later baseline advance reads it, so a stale post-write JQL-search snapshot cannot make
+    # the level-triggered inbound differ clobber a just-synced field.
+    from rebar_reconciler.snapshot_lagfree_refresh import refresh_scoped_snapshot
+
+    refresh_scoped_snapshot(ctx)
+
     skip_invariant_filing, quarantine_keys, seed_repair_property_mutations = (
         _run_differs_invariants(ctx)
     )
