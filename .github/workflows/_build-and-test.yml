@@ -349,6 +349,16 @@ jobs:
       # they unlock needs network or AWS credentials — the suite's own network guard
       # holds. REBAR_REQUIRE_EXTRAS=1 on the pytest steps below turns "an extra went
       # missing again" into a hard failure instead of a silent skip.
+      # bubblewrap is the Linux sandbox the mutation gate wraps its test subprocesses
+      # in (ticket e668-b496-e264-4283). Without it the gate fails CLOSED — by design,
+      # since a silent unsandboxed run is indistinguishable from a sandboxed one — so
+      # the runner must provide it. macOS needs no install: sandbox-exec ships with the OS.
+      - name: Install bubblewrap (Linux mutation-sandbox enforcement tests)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          bwrap --version
       - name: Install rebar from the committed lock (dev + reviewbot + ui extras)
         shell: bash
         run: |
