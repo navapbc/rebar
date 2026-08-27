@@ -247,6 +247,17 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# patchset predating the script): `make lint` runs the patchset's OWN Makefile.
 	python scripts/check_raw_git_writes.py
 	python scripts/check_wall_clock_asserts.py
+	@# Destructive test-exec gate (ticket 6818-615f-555e-4bb9). A test must not
+	@# subprocess-exec a shell script whose deletion target is an unguarded variable
+	@# interpolation: on 2026-08-26 exactly that ran `rm -rf "$${dir}"/*` with dir="",
+	@# the glob expanded to `rm -rf /*`, and it destroyed /opt/homebrew and the
+	@# Homebrew-installed apps in /Applications before a 60s timeout stopped it.
+	@# Two shapes clear the gate: an injectable seam (`"$${RM_CMD:-rm}"`) or a
+	@# `: "$${dir:?}"` abort guard. `set -u` does NOT clear it — it fires on unset,
+	@# not set-but-empty, and set-but-empty is what the incident had. Static analysis
+	@# only: it cannot stop a mutation at runtime (see ticket e668-b496-e264-4283 for
+	@# the OS sandbox), so it is defence in depth, not the control.
+	python scripts/check_destructive_test_exec.py
 	@# DCO sign-off identity consistency (story 35d2): contributor-facing guidance must not
 	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
 	python scripts/check_dco_identity.py
