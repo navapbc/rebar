@@ -60,6 +60,19 @@ jobs:
       # in (ticket e668-b496-e264-4283). Without it the gate fails CLOSED — by design,
       # since a silent unsandboxed run is indistinguishable from a sandboxed one — so
       # the runner must provide it. macOS needs no install: sandbox-exec ships with the OS.
+      # GitHub's ubuntu runners ship bubblewrap but DENY unprivileged user namespaces
+      # ("bwrap: setting up uid map: Permission denied"), so the functional probe in
+      # mutation_sandbox correctly reports no sandbox and the gate fails closed.
+      #
+      # Accept unsandboxed HERE, and only here. A CI runner is already the disposable
+      # environment the sandbox exists to substitute for: it is ephemeral, destroyed
+      # after the job, and holds nothing of the developer's. cargo-mutants gives the
+      # same advice — "run in an isolated environment (container, CI, or VM)". The
+      # sandbox requirement protects developer WORKSTATIONS, which is where the
+      # 2026-08-26 `rm -rf /*` actually landed. The opt-out logs a WARNING, so an
+      # unsandboxed run is never silent.
+      - name: Allow unsandboxed mutation runs (CI is the disposable environment)
+        run: echo "REBAR_MUTATION_ALLOW_UNSANDBOXED=1" >> "$GITHUB_ENV"
       - name: Install bubblewrap (Linux mutation sandbox)
         run: |
           sudo apt-get update
@@ -123,6 +136,19 @@ jobs:
       # in (ticket e668-b496-e264-4283). Without it the gate fails CLOSED — by design,
       # since a silent unsandboxed run is indistinguishable from a sandboxed one — so
       # the runner must provide it. macOS needs no install: sandbox-exec ships with the OS.
+      # GitHub's ubuntu runners ship bubblewrap but DENY unprivileged user namespaces
+      # ("bwrap: setting up uid map: Permission denied"), so the functional probe in
+      # mutation_sandbox correctly reports no sandbox and the gate fails closed.
+      #
+      # Accept unsandboxed HERE, and only here. A CI runner is already the disposable
+      # environment the sandbox exists to substitute for: it is ephemeral, destroyed
+      # after the job, and holds nothing of the developer's. cargo-mutants gives the
+      # same advice — "run in an isolated environment (container, CI, or VM)". The
+      # sandbox requirement protects developer WORKSTATIONS, which is where the
+      # 2026-08-26 `rm -rf /*` actually landed. The opt-out logs a WARNING, so an
+      # unsandboxed run is never silent.
+      - name: Allow unsandboxed mutation runs (CI is the disposable environment)
+        run: echo "REBAR_MUTATION_ALLOW_UNSANDBOXED=1" >> "$GITHUB_ENV"
       - name: Install bubblewrap (Linux mutation sandbox)
         run: |
           sudo apt-get update
