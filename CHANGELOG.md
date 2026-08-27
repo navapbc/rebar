@@ -12,6 +12,24 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): the MCP server now emits nanosecond timestamps as JSON STRINGS.** Ticket
+  timestamps are `time.time_ns()` values — 19 digits — and were going out as bare JSON numbers.
+  RFC 8259 §6 only guarantees interoperability inside `[-(2**53)+1, (2**53)-1]`, and every MCP
+  client parses JSON numbers as IEEE-754 binary64, so `list_tickets` and `ready_tickets` failed
+  from GitHub Copilot CLI with `TypeError: Do not know how to serialize a BigInt`, while clients
+  using a plain `JSON.parse` silently truncated the value instead of erroring. On the **MCP surface
+  only**, an integer outside the JS-safe range is now emitted as its exact decimal string;
+  CLI `--output json` and the Python library still emit integers. Affected keys: `created_at`,
+  `updated_at`, `last_reopened_at`, `source_created_at`, comment `timestamp` /
+  `source_created_at`, and the **required** `signed_at` on `sign_result`,
+  `verify_signature_result` and `plan_review_status` — retyping a required key is why this is
+  flagged BREAKING. **Consumers must** parse these with an arbitrary-precision integer (`int(x)` in
+  Python, `BigInt(x)` in JavaScript) and accept both forms; `Number(x)` rounds silently (the stored
+  value `1787856371950409998` reads back as `1787856371950410000`). The instant is unchanged and
+  the conversion is lossless — same digits, different JSON type. `updated_at` is also now declared
+  in `ticket_state.schema.json` instead of riding as an undeclared additional property. See
+  [docs/release-notes.md](docs/release-notes.md).
+
 - **Library and MCP reads now ERROR on an ABSENT ticket store instead of reporting it as an
   empty one.** `rebar.list_tickets` / `search` / `ready` / `recent_session_logs` / `deps` /
   `next_batch` (and the MCP tools that delegate to them) previously returned `[]` when the

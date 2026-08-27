@@ -181,9 +181,12 @@ do not look for one. The floor comes from two real sources, in order of preferen
 1. **The report text.** A `rebar --version` output, a commit sha, or a release tag quoted in
    the bug's description or comments. This is authoritative when present; use it and stop.
 2. **The ticket's `created_at`.** When the report quotes no version, take the newest `main`
-   commit at or before the report. `created_at` is an integer of **nanoseconds** since the
-   epoch (`time.time_ns()`; see `src/rebar/schemas/ticket_state.schema.json`), for example
-   `1787354756915214001`. Git's `--before=` takes an approxidate or an `@<unix-seconds>`
+   commit at or before the report. `created_at` is **nanoseconds** since the epoch
+   (`time.time_ns()`; see `src/rebar/schemas/ticket_state.schema.json`), for example
+   `1787354756915214001`. It arrives as a JSON **integer** from the CLI and library, and as a
+   decimal **string** from the MCP server (it exceeds JavaScript's safe-integer range — bug
+   `6fe7-956f-4901-45cf`); both are the same digits, so coerce with `int()` and do not assume
+   either form. Git's `--before=` takes an approxidate or an `@<unix-seconds>`
    value, **not** nanoseconds: handed a raw 19-digit value it reads it as a far-future
    seconds count and silently returns the tip of `main`, which is the exact wrong answer.
    Convert to seconds first:
