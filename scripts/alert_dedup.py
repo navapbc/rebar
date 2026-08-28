@@ -79,6 +79,18 @@ def recent_marker_comment(
         if not str(comment.get("body", "")).startswith(marker):
             continue
         ts = comment.get("timestamp")
+        if isinstance(ts, str):
+            # Bug e127: `--output json` emits an out-of-JS-safe-range ns timestamp as its
+            # EXACT decimal string, so this consumer must coerce before type-checking.
+            # Without this the isinstance below rejects every comment, this helper always
+            # returns False, and the 24h accumulation cap silently stops working -- both
+            # alert lanes (canary_bridge, dependency_audit) would then append a marker
+            # comment on EVERY cycle, flooding the ticket they already filed. Fail-soft,
+            # so it degrades with no error.
+            try:
+                ts = int(ts)
+            except ValueError:
+                continue
         if not isinstance(ts, (int, float)):
             continue
         secs = ts / 1e9 if ts > 1e12 else ts  # store timestamps are ns
