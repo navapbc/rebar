@@ -1006,3 +1006,163 @@ def test_compose_mcp_trusts_the_edge_forwarded_proto() -> None:
         "FORWARDED_ALLOW_IPS must be exactly '*' — a pinned bridge-gateway address can "
         f"drift and silently re-open the scheme downgrade; got {env['FORWARDED_ALLOW_IPS']!r}"
     )
+
+
+# --- Location-scheme guarantee for the sibling 443 surfaces (bug a61d-adf9-3725-4847) ---
+#
+# 79b2 established the rule — an https request to this edge must never receive a `Location`
+# that downgrades the scheme to `http` — and enforced it on the MCP locations only. The three
+# sibling surfaces on the same 443 server had no equivalent guarantee, and the downgrade was
+# REPRODUCED on `/review/` against the deployed edge, unauthenticated:
+#
+#     GET https://<host>/review/health/  ->  307, location: http://<host>/health
+#
+# Root cause is 79b2's root cause (b) on two more services: FORWARDED_ALLOW_IPS was set only
+# for `mcp`, so uvicorn wrapped review-bot and opcert in ProxyHeadersMiddleware trusting only
+# 127.0.0.1. Both run in containers published on host loopback, so nginx arrives from the
+# docker bridge gateway, `X-Forwarded-Proto: https` was dropped, and Starlette's
+# `redirect_slashes` built its absolute `URL(scope=...)` at http://.
+#
+# Gerrit is NOT affected by that mechanism — it builds absolute Locations from
+# `canonicalWebUrl = https://...` (infra/compose/gerrit.config) and already emits https — but
+# that guarantee is one config value nothing at the edge enforces, so it carries the backstop
+# too.
+
+#: The three 443 surfaces that lacked the guarantee, with the upstream each proxies to. The
+#: upstream form is the second rule's left-hand side: an app can build an absolute Location
+#: either from the forwarded Host ($host) or from the upstream address it was reached on.
+_SIBLING_SURFACES = (
+    ("/review/", "http://127.0.0.1:8081/"),
+    ("/opcert/", "http://127.0.0.1:8090/"),
+    ("/", "http://127.0.0.1:8080/"),
+)
+
+
+def _location_body(text: str, prefix: str) -> str:
+    """The DIRECTIVES of the port-443 `location <prefix> {` block, comments stripped.
+
+    Scoped to the 443 server so `location /` does not match the port-80 redirect block,
+    and brace-matched rather than regex-terminated so a nested `if (...) { }` — which
+    `/opcert/`'s fail-closed guard uses — does not truncate the body early.
+
+    Comment lines are REMOVED, and that is load-bearing rather than tidiness: these
+    blocks are heavily commented and their prose names the very directives under test
+    (`proxy_redirect default;`, `rewrite`). Scanning the raw text let a mutant that
+    DELETED the real directive still match its own explanatory comment, so the oracle
+    passed on a config that no longer carried the rule. Assert on directives only.
+    """
+    server = text[text.index("listen 443 ssl;") :]
+    head = re.search(r"^[ \t]*location\s+" + re.escape(prefix) + r"\s*\{", server, re.MULTILINE)
+    assert head, f"no `location {prefix}` block on the 443 server"
+    depth, start = 1, head.end()
+    for i in range(start, len(server)):
+        if server[i] == "{":
+            depth += 1
+        elif server[i] == "}":
+            depth -= 1
+            if depth == 0:
+                body = server[start:i]
+                return "\n".join(
+                    line for line in body.splitlines() if not line.lstrip().startswith("#")
+                )
+    raise AssertionError(f"unbalanced braces in `location {prefix}`")
+
+
+def test_nginx_upgrades_any_plaintext_location_on_the_sibling_surfaces() -> None:
+    """AC2: every surface that can emit an absolute Location upgrades http:// to https://.
+
+    Oracle: each of `/review/`, `/opcert/` and Gerrit's `location /` carries BOTH forms of
+    the rule — the `$host` form (what Starlette builds from the forwarded Host, the shape
+    actually observed on `/review/`) and the upstream-address form (what an app that
+    reflects the address it was reached on would build).
+
+    Deleting either rule from any of the three blocks turns this RED, which is precisely
+    the gap this bug reports.
+    """
+    text = _render_nginx()
+    for prefix, upstream in _SIBLING_SURFACES:
+        body = _location_body(text, prefix)
+        assert re.search(r"proxy_redirect\s+http://\$host/\s+https://\$host/\s*;", body), (
+            f"`location {prefix}` lacks `proxy_redirect http://$host/ https://$host/;` — "
+            f"an app-built absolute Location can still downgrade the scheme: {body}"
+        )
+        assert re.search(
+            r"proxy_redirect\s+" + re.escape(upstream) + r"\s+https://\$host/\s*;", body
+        ), (
+            f"`location {prefix}` lacks `proxy_redirect {upstream} https://$host/;` — an "
+            f"upstream-address Location can still downgrade the scheme: {body}"
+        )
+
+
+def test_nginx_sibling_surfaces_restate_the_default_proxy_redirect() -> None:
+    """AC3: the implicit `default` rewrite each block relied on is preserved.
+
+    nginx drops a location's implicit `proxy_redirect default` the moment ANY explicit
+    `proxy_redirect` appears in that location. `/review/` proxies with the
+    prefix-STRIPPING form `proxy_pass http://127.0.0.1:${REVIEW_BOT_PORT}/;`, whose
+    `default` rewrites an upstream `http://127.0.0.1:PORT/...` Location back to
+    `/review/...`; silently losing that would be a regression introduced BY the fix.
+
+    So each block must restate `proxy_redirect default;` and must restate it FIRST —
+    nginx evaluates rules in order, and a `default` placed after the explicit rules would
+    never be reached for a Location the explicit rules already matched.
+    """
+    text = _render_nginx()
+    for prefix, _upstream in _SIBLING_SURFACES:
+        body = _location_body(text, prefix)
+        rules = re.findall(r"proxy_redirect\s+([^;]+);", body)
+        assert rules, f"`location {prefix}` has no proxy_redirect rules at all"
+        assert rules[0].strip() == "default", (
+            f"`location {prefix}` must restate `proxy_redirect default;` FIRST or nginx "
+            f"drops the implicit default it relied on; got {rules!r}"
+        )
+
+
+def test_nginx_gerrit_location_still_has_no_rewrite_and_no_proxy_pass_path() -> None:
+    """AC4: Gerrit's %2F-safe proxying is unaffected.
+
+    nginx preserves the raw, un-decoded request URI only when the location has NO
+    `rewrite` and its `proxy_pass` carries NO URI component. `proxy_redirect` is neither:
+    it rewrites the `Location`/`Refresh` RESPONSE headers and never touches the request
+    URI. This test pins that reasoning to the config — it fails if the backstop is ever
+    implemented as a rewrite, or if a path is added to Gerrit's proxy_pass.
+    """
+    body = _location_body(_render_nginx(), "/")
+    assert re.search(r"proxy_pass\s+http://127\.0\.0\.1:8080\s*;", body), (
+        f"Gerrit's proxy_pass must stay host:port with NO URI path, or nginx normalizes "
+        f"the request URI and corrupts %2F: {body}"
+    )
+    assert not re.search(r"^\s*rewrite\s", body, re.MULTILINE), (
+        f"a `rewrite` in Gerrit's location decodes the request URI and corrupts %2F: {body}"
+    )
+
+
+@pytest.mark.parametrize("service", ["review-bot", "opcert"])
+def test_compose_sibling_services_trust_the_edge_forwarded_proto(service: str) -> None:
+    """AC1/root cause: the two sibling FastAPI services trust nginx's forwarded proto.
+
+    The same posture the `mcp` service already fixed for 79b2, and the answer to this
+    bug's open question — both siblings shared the broken posture; neither was exempt.
+    uvicorn resolves its trust list from FORWARDED_ALLOW_IPS (default "127.0.0.1") and
+    wraps the app in ProxyHeadersMiddleware with it. Both services run INSIDE containers
+    with their port published on host loopback, so nginx's connection arrives from the
+    docker bridge gateway, not 127.0.0.1: the default distrusts it, `X-Forwarded-Proto:
+    https` is dropped, and every app-built absolute URL — notably Starlette's
+    trailing-slash 307 Location — is built as `http://`.
+
+    Exactly "*", not a pinned address: neither service declares a `networks:` block, so
+    the bridge gateway address is implicit and can drift, and a stale pin would silently
+    re-open the downgrade with no failing signal. Trust-all is bounded — the port is
+    published on host loopback with nginx the sole reachable client, and nginx sets
+    `X-Forwarded-Proto https` as a LITERAL that overwrites anything a client sends.
+    """
+    env = yaml.safe_load(_COMPOSE.read_text())["services"][service]["environment"]
+    assert "FORWARDED_ALLOW_IPS" in env, (
+        f"the {service} service must set FORWARDED_ALLOW_IPS or uvicorn drops nginx's "
+        f"X-Forwarded-Proto and the app emits http:// absolute URLs"
+    )
+    assert str(env["FORWARDED_ALLOW_IPS"]) == "*", (
+        f"{service}'s FORWARDED_ALLOW_IPS must be exactly '*' — a pinned bridge-gateway "
+        f"address can drift and silently re-open the scheme downgrade; "
+        f"got {env['FORWARDED_ALLOW_IPS']!r}"
+    )
