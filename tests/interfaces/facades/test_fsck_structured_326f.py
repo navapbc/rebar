@@ -89,7 +89,11 @@ def test_mcp_fsck_with_findings_returns_enumerable_structure_not_an_error(
     assert len(seeded) == 1, result["issues"]
     assert seeded[0]["kind"] == "missing_create"
     assert "no CREATE event found" in seeded[0]["detail"]
-    assert result["issue_count"] == len(result["issues"])
+    # issue_count is the COUNTED subset (bug 29c3-b025-04d7-454e): it agrees with the
+    # exit code and equals the number of counted findings, NOT len(issues) — the
+    # report-only kinds stay in issues[] with counted=False.
+    assert seeded[0]["counted"] is True
+    assert result["issue_count"] == sum(1 for i in result["issues"] if i["counted"])
     assert result["fixed"] == []
 
 

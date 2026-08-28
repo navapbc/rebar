@@ -160,7 +160,7 @@ def test_fsck_in_flight_refusal_preserves_legacy_report_surface(
     )
     if json_output:
         assert json.loads(captured.out) == {
-            "issues": [{"kind": "abort", "detail": expected_detail}],
+            "issues": [{"kind": "abort", "counted": True, "detail": expected_detail}],
             "fixed": [],
             "issue_count": 1,
         }

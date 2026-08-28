@@ -453,14 +453,25 @@ finding classes (each carried in `--output json` with a per-class count and path
   as an issue. A `.retired` that is preserved nowhere else is deliberately **not**
   classified — it may be the only copy of an event.
 - `TRACKER_DIRTY_TMP_EVENT` — an orphaned `.tmp-event-*` temp file. Report-only and never
-  counted or auto-touched: a live one belongs to an in-flight append.
+  counted or auto-touched: a live one belongs to an in-flight append. In `--output json` it
+  appears in `issues[]` with `counted: false`, so it is excluded from `issue_count`.
 
 `STATUS_FORK_RESOLVED` belongs to that same report-only class: `fsck` still emits it (in
-the text report and in `--output json`'s `issues[]`, carrying the ticket id), but it is
-never counted, so it cannot by itself push `fsck`'s exit code to 1. A resolved status fork
-is not damage — the reducer already resolved the cross-clone race deterministically by
-UUID, and `status_fork_resolutions` is permanent derived state that survives compaction.
-Counting it would pin a busy store's `fsck` at exit 1 forever with nothing to repair.
+the text report and in `--output json`'s `issues[]`, carrying the ticket id and
+`counted: false`), but it is never counted, so it cannot by itself push `fsck`'s exit code
+to 1 or inflate `--output json`'s `issue_count`. A resolved status fork is not damage — the
+reducer already resolved the cross-clone race deterministically by UUID, and
+`status_fork_resolutions` is permanent derived state that survives compaction. Counting it
+would pin a busy store's `fsck` at exit 1 forever with nothing to repair.
+
+`--output json`'s `issue_count` is the COUNTED subset of `issues[]` (the items with
+`counted: true`) and therefore AGREES with the exit code: 0 when the run exits 0, ≥ 1 when
+it exits 1. Every report-only kind — `PUSH_PENDING`, `STATUS_FORK_RESOLVED`,
+`TRACKER_DIRTY_TMP_EVENT`, and any `WARN:` line — is carried in `issues[]` with
+`counted: false` and never contributes to `issue_count`. A consumer that wants the old
+"every emitted line" total can still compute `len(issues)`. An uninitialized or absent
+tracker is reported as a single counted `not_initialized` issue, so its JSON payload is
+distinguishable from a clean store's empty `issues[]`.
 
 `rebar doctor --repair` heals the first two classes and then reconverges the store:
 
