@@ -695,6 +695,70 @@ def test_run_check_allows_stale(tmp_path, monkeypatch, capsys):
     assert out.strip() == "active=1 new=0 increased=0 stale=1"
 
 
+# ─────────────────── failing-check per-symbol detail lines ───────────────────
+
+
+def test_violation_details_names_new_and_increased():
+    """A failing comparison renders one detail line per new and increased symbol."""
+    current = {"src/rebar/a.py::a": 25, "src/rebar/c.py::c": 30}
+    baseline = {"src/rebar/a.py::a": 20}
+    counters = ccb.compare(current, baseline)
+    lines = ccb.render_violation_details(counters, current, baseline)
+    assert lines == [
+        f"  new       src/rebar/c.py::c score=30 threshold={ccb.COMPLEXITY_THRESHOLD}",
+        "  increased src/rebar/a.py::a score=25 ceiling=20",
+    ]
+
+
+def test_violation_details_stable_sorted_within_group():
+    """Detail lines are stable-sorted by key inside the new and increased groups."""
+    current = {
+        "src/rebar/b.py::b": 40,
+        "src/rebar/a.py::a": 30,
+        "src/rebar/d.py::d": 26,
+        "src/rebar/c.py::c": 22,
+    }
+    baseline = {"src/rebar/c.py::c": 20, "src/rebar/d.py::d": 20}
+    counters = ccb.compare(current, baseline)
+    lines = ccb.render_violation_details(counters, current, baseline)
+    assert lines == [
+        f"  new       src/rebar/a.py::a score=30 threshold={ccb.COMPLEXITY_THRESHOLD}",
+        f"  new       src/rebar/b.py::b score=40 threshold={ccb.COMPLEXITY_THRESHOLD}",
+        "  increased src/rebar/c.py::c score=22 ceiling=20",
+        "  increased src/rebar/d.py::d score=26 ceiling=20",
+    ]
+
+
+def test_violation_details_empty_when_no_regression():
+    """A passing / stale-only comparison yields no detail lines."""
+    current = {"src/rebar/a.py::a": 18}
+    baseline = {"src/rebar/a.py::a": 20, "src/rebar/b.py::b": 25}
+    counters = ccb.compare(current, baseline)
+    assert not counters.has_regression
+    assert ccb.render_violation_details(counters, current, baseline) == []
+
+
+def test_run_check_prints_detail_after_summary(tmp_path, monkeypatch, capsys):
+    """A failing --check keeps the compact summary and appends per-symbol detail."""
+    baseline_file = tmp_path / "baseline.json"
+    _write_committed_style_baseline(baseline_file, {"src/rebar/a.py::a": 20})
+    monkeypatch.setattr(ccb, "BASELINE_PATH", baseline_file)
+    monkeypatch.setattr(ccb, "run_scanner", lambda **k: [])
+    monkeypatch.setattr(
+        ccb,
+        "normalize_findings",
+        lambda f, root: {"src/rebar/a.py::a": 25, "src/rebar/c.py::c": 30},
+    )
+    rc = ccb._run_check(tmp_path)
+    lines = capsys.readouterr().out.splitlines()
+    assert rc == 1
+    assert lines[0] == "active=0 new=1 increased=1 stale=0"
+    assert lines[1:] == [
+        f"  new       src/rebar/c.py::c score=30 threshold={ccb.COMPLEXITY_THRESHOLD}",
+        "  increased src/rebar/a.py::a score=25 ceiling=20",
+    ]
+
+
 # ─────────────────────────────── --help / docs ──────────────────────────────
 
 

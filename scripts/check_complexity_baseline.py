@@ -37,6 +37,11 @@ Five distinct commands describe the debt and the gate (``<N>`` = the LIVE census
      passes whenever ``new`` and ``increased`` are zero. ``stale=0`` additionally holds
      only on a FRESHLY DRAINED baseline: a contributor's legitimate complexity reduction
      makes ``stale`` nonzero (and drops that symbol out of ``active``) and still passes.
+     On FAILURE (``new>0`` or ``increased>0``, exit 1) the compact summary line is kept
+     unchanged and additive per-symbol detail lines are appended after it — one
+     stable-sorted ``  new       <path>::<symbol> score=<n> threshold=15`` line per new
+     symbol, then one ``  increased <path>::<symbol> score=<n> ceiling=<c>`` line per
+     increased symbol. A passing or stale-only check emits no such detail lines.
   4. Maintenance rewrite: ``python scripts/check_complexity_baseline.py --update-stale``
      -> lowers still-over-threshold ceilings and removes vanished entries, REFUSING to
      write (nonzero) if ``new>0``/``increased>0``/scanner/schema error.
@@ -399,6 +404,26 @@ def compare(current: dict[str, int], baseline: dict[str, int]) -> Counters:
     return counters
 
 
+def render_violation_details(
+    counters: Counters, current: dict[str, int], baseline: dict[str, int]
+) -> list[str]:
+    """Return additive per-symbol detail lines for a FAILING check (else empty).
+
+    Emitted only for regression buckets — one line per ``new`` symbol (current score
+    vs. the configured ``threshold``) then one per ``increased`` symbol (current score
+    vs. its recorded ``ceiling``). Each group is stable-sorted by key. A passing or
+    stale-only comparison has no ``new``/``increased`` keys and so returns ``[]``,
+    keeping compact output unchanged. The compact summary line is rendered separately by
+    the caller; these lines are appended after it.
+    """
+    lines: list[str] = []
+    for key in sorted(counters.new):
+        lines.append(f"  new       {key} score={current[key]} threshold={COMPLEXITY_THRESHOLD}")
+    for key in sorted(counters.increased):
+        lines.append(f"  increased {key} score={current[key]} ceiling={baseline[key]}")
+    return lines
+
+
 # ──────────────────────────── update-stale ──────────────────────────────────
 
 
@@ -430,6 +455,8 @@ def _run_check(argv_cwd: Path) -> int:
         return 1
     counters = compare(current, baseline)
     print(counters.summary)
+    for line in render_violation_details(counters, current, baseline):
+        print(line)
     return 1 if counters.has_regression else 0
 
 
