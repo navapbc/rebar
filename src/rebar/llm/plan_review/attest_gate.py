@@ -106,8 +106,24 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     and NO network — a pure local HMAC verify + a light fingerprint recompute + hashing a
     handful of dependency files."""
     from rebar import _reads, signing
+    from rebar._store import freshness
 
     from .attest import compute_validity
+
+    # BEFORE the attestation is read, not after (bug b928): on a store that is not current
+    # that read is exactly what returns the wrong answer — a valid attestation reads as
+    # ``unsigned`` purely because this clone never received it. Consuming it and then
+    # noticing would already have certified against a view other readers do not have.
+    store = freshness.store_freshness(freshness.resolve_tracker(repo_root))
+    if not store["fresh"]:
+        return {
+            "ok": False,
+            "reason": (
+                f"{store['reason']} — refusing to decide the plan-review gate against a "
+                "ticket store that is not current"
+            ),
+            "verdict": freshness.STALE_VERDICT,
+        }
 
     try:
         result = signing.verify_signature(ticket_id, kind=_MANIFEST_PREFIX, repo_root=repo_root)
@@ -175,7 +191,9 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     :func:`compute_validity` classifier — ``certified`` when current, else one of ``stale-code`` /
     ``stale-head`` / ``stale-material`` / ``stale-reopened`` / ``stale-pin-drift`` /
     ``stale-pin-missing`` / ``unsigned`` / ``wrong-kind`` / ``not-closed`` / ``malformed-pin`` /
-    ``malformed-phase`` / ``incompatible-phase`` / ``unverifiable-material`` / ``error``. Every
+    ``malformed-phase`` / ``incompatible-phase`` / ``unverifiable-material`` /
+    ``stale-store`` (bug b928: the local store was not current, so the gate declined to
+    decide at all — the one verdict that is not about the attestation) / ``error``. Every
     non-certified reason NAMES what changed (which material component, which dependency files,
     which two SHAs, which reopen) rather than listing what might have — bug 94a3.
     Criteria-registry drift is NOT among them: it is grandfathered (ADR 0053) and surfaces as

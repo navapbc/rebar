@@ -17,6 +17,7 @@ from typing import Any
 from rebar import config
 from rebar._commands import close_disposition, txn
 from rebar._commands._seam import CommandError
+from rebar._store import freshness
 
 logger = logging.getLogger(__name__)
 
@@ -658,6 +659,8 @@ def _completion_precheck(
     skip = _gate_skip_expectation(ticket_id, code_root, force_close)
     if skip:
         return None, skip
+    # Gate is ON and unforced: refuse a stale store BEFORE the billable verifier (bug b928).
+    freshness.assert_gate_store_fresh("the completion close gate", ticket_id, repo_root)
 
     # Cheap precondition BEFORE the billable LLM call: an invalid close-class combination
     # (missing bug class, non-administrative class on a non-bug, missing reason for a
