@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/clarity_result.schema.json",
   "title": "ClarityResult",
-  "description": "Per-ticket clarity score, emitted by `rebar clarity-check <id>`. The engine `--output json` emits {score, verdict, threshold}; the library/MCP add a client-side `passed` boolean (so the library shape has 4 keys).",
+  "description": "Per-ticket clarity score, emitted by `rebar clarity-check <id>`. The engine `--output json` emits {score, verdict, threshold} plus a `reason` on a `fail`; the library/MCP add a client-side `passed` boolean (so the library shape has 4 keys).",
   "type": "object",
   "additionalProperties": true,
   "required": ["score", "verdict", "threshold"],
@@ -10,6 +10,7 @@
     "score": { "type": "integer" },
     "verdict": { "type": "string", "enum": ["pass", "fail"] },
     "threshold": { "type": "integer" },
-    "passed": { "type": "boolean", "description": "Added by the library/MCP wrappers (not the engine JSON)." }
+    "passed": { "type": "boolean", "description": "Added by the library/MCP wrappers (not the engine JSON)." },
+    "reason": { "type": "string", "description": "Present on a `fail` only: names which half of the verdict failed \u2014 the score floor, the structural plan floor (missing checklist, empty checklist item, unresolved sentinel with its line), or both." }
   }
 }

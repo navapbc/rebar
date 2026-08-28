@@ -243,6 +243,7 @@ class ClarityResult(TypedDict):
     verdict: Literal["pass", "fail"]
     threshold: int
     passed: NotRequired[bool]
+    reason: NotRequired[str]
 
 
 class GateResult(TypedDict):
