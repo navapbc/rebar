@@ -17,7 +17,7 @@ import sys
 
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._engine_support.reads import ReadError, deps_state, show_state
-from rebar._plan_clarity import evaluate_plan_clarity
+from rebar._plan_clarity import PlanClarityFloor, evaluate_plan_clarity
 
 # Non-graph artifact types (verbose logs / bulk review artifacts) carry no dispatchable work,
 # so the per-ticket readiness gates (check_ac / clarity / quality) are a no-op PASS for them.
@@ -157,6 +157,39 @@ def _clarity_threshold(repo_root: str | None, config_file: str | None) -> int:
         return 5
 
 
+def _clarity_floor_defects(floor: PlanClarityFloor) -> list[str]:
+    """Name each structural defect that makes ``floor.passes`` False."""
+    defects: list[str] = []
+    if not floor.ac_items:
+        defects.append("no `- [ ]` checklist items under an `## Acceptance Criteria` heading")
+    if floor.empty_ac_items:
+        positions = ", ".join(str(n) for n in floor.empty_ac_items)
+        defects.append(f"empty acceptance-criteria checklist item(s) at position {positions}")
+    defects.extend(
+        f"unresolved `{s.sentinel}` in a value position on line {s.line_number} "
+        f"of the `{s.section}` section"
+        for s in floor.sentinel_assignments
+    )
+    return defects
+
+
+def _clarity_reason(score: int, threshold: int, floor: PlanClarityFloor) -> str:
+    """Explain a ``fail`` verdict by naming which half of the conjunction failed.
+
+    The verdict is ``score >= threshold and floor.passes``, so a fail can come from
+    the score floor, the structural floor, or both.  Returning only the score left a
+    structural-floor fail looking self-contradictory — ``verdict: "fail"`` beside
+    ``score >= threshold`` with nothing to act on (bug ``enharmonic-cummy-olm``).
+    """
+    parts: list[str] = []
+    if score < threshold:
+        parts.append(f"clarity score {score} is below the threshold of {threshold}")
+    parts.extend(_clarity_floor_defects(floor))
+    if not parts:  # pragma: no cover - defensive: a fail always has a failing half
+        return "clarity check failed"
+    return "; ".join(parts)
+
+
 def clarity_check_compute(ticket_type: str, description: str, threshold: int) -> tuple[dict, int]:
     if ticket_type in _GATE_EXEMPT_TYPES:
         # session_log / code_review carry verbose free-form bodies, not dispatchable
@@ -166,7 +199,12 @@ def clarity_check_compute(ticket_type: str, description: str, threshold: int) ->
     floor = evaluate_plan_clarity(description)
     if score >= threshold and floor.passes:
         return {"score": score, "verdict": "pass", "threshold": threshold}, 0
-    return {"score": score, "verdict": "fail", "threshold": threshold}, 1
+    return {
+        "score": score,
+        "verdict": "fail",
+        "threshold": threshold,
+        "reason": _clarity_reason(score, threshold, floor),
+    }, 1
 
 
 def clarity_check_cli(argv: list[str], tracker: str, repo_root: str | None) -> int:

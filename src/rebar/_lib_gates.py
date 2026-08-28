@@ -34,7 +34,10 @@ if TYPE_CHECKING:
 # Quality checks exit 0=pass / 1=fail (not an error), so they report a `passed`
 # boolean rather than raising.
 def clarity_check(ticket_id: str, *, repo_root=None) -> ClarityResult:
-    """Score ticket clarity → {score, verdict, threshold, passed}."""
+    """Score ticket clarity → {score, verdict, threshold, passed}.
+
+    A ``fail`` also carries a ``reason`` naming which half of the verdict failed —
+    the score floor, the structural plan floor, or both."""
     from rebar._engine_support import gates, reads
     from rebar._engine_support.reads import ReadError
 

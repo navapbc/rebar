@@ -141,3 +141,66 @@ def test_suppression_terms_match_whole_words_not_substrings() -> None:
 def test_only_exact_active_section_names_are_scanned() -> None:
     description = _description() + "\n## Historical Approach\nbackend: TBD\n"
     _assert_both_pass(description)
+
+
+# ── the failing verdict must NAME its cause (bug enharmonic-cummy-olm) ────────
+# ``clarity_check_compute`` fails on the conjunction ``score >= threshold and
+# floor.passes``, but historically returned only the score half — so a plan that
+# cleared the score threshold and tripped the structural floor came back as
+# ``verdict: "fail"`` beside ``score >= threshold`` with nothing to act on.
+
+
+def _bulleted_ac_description() -> str:
+    """Score at/above the default threshold, structural floor failing.
+
+    ``## Acceptance Criteria`` scores +2 and the ``src/rebar/...`` path +1, but the
+    items are plain ``-`` bullets, so ``evaluate_plan_clarity`` collects no
+    checklist items and the floor fails.
+    """
+    return _description(acceptance_criteria="- AC1: the focused regression test passes.")
+
+
+def test_structural_floor_failure_is_named_when_the_score_passes() -> None:
+    description = _bulleted_ac_description()
+    result, code = clarity_check_compute("task", description, threshold=5)
+
+    assert code == 1
+    assert result["verdict"] == "fail"
+    assert result["score"] >= result["threshold"]  # the self-contradictory shape
+    reason = result.get("reason", "")
+    assert reason, "a fail whose score cleared the threshold must name the structural floor"
+    assert "acceptance criteria" in reason.lower()
+    assert "checklist" in reason.lower()
+
+
+def test_empty_ac_item_is_named_in_the_reason() -> None:
+    result, _ = clarity_check_compute(
+        "task",
+        _description(acceptance_criteria="- [ ] A real outcome remains.\n- [ ]   "),
+        threshold=5,
+    )
+    assert "empty" in result.get("reason", "").lower()
+
+
+def test_unresolved_sentinel_is_named_with_its_line_in_the_reason() -> None:
+    result, _ = clarity_check_compute("task", _description(approach="backend: TBD"), threshold=5)
+    reason = result.get("reason", "")
+    assert "TBD" in reason
+    assert "line" in reason.lower()
+
+
+def test_below_threshold_failure_names_the_score() -> None:
+    result, code = clarity_check_compute("task", "bare prose, no sections at all", threshold=5)
+
+    assert code == 1
+    assert result["score"] < result["threshold"]
+    reason = result.get("reason", "")
+    assert reason, "a below-threshold fail must name the score"
+    assert "score" in reason.lower()
+    assert str(result["threshold"]) in reason
+
+
+def test_pass_keeps_the_existing_shape_with_no_reason() -> None:
+    result, code = clarity_check_compute("task", _description(), threshold=5)
+    assert code == 0
+    assert result == {"score": result["score"], "verdict": "pass", "threshold": 5}

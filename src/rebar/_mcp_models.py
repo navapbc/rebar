@@ -170,6 +170,7 @@ try:
         verdict: str
         threshold: int
         passed: bool | None = None
+        reason: str | None = None
 
     class ValidateReportOut(_Out):
         score: int
