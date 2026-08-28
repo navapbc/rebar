@@ -138,7 +138,13 @@ def test_argv_tracker_adapter_appends_the_tracker(monkeypatch: pytest.MonkeyPatc
 def test_argv_tracker_root_adapter_appends_tracker_and_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``format``/``clarity-check`` (argv_tracker_root) get ``(rest, tracker, dirname)``."""
+    """``format``/``clarity-check`` (argv_tracker_root) get ``(rest, tracker, None)``.
+
+    The root arg is ``None`` — "discover the repo/config root" (REBAR_ROOT > git
+    toplevel of cwd) — NOT ``os.path.dirname(tracker)``, which is the repo root only
+    for a co-located store and resolves an empty config on a relocated one
+    (auspicial-friended-merganser).
+    """
     seen: list[tuple] = []
     monkeypatch.setattr(
         "rebar._engine_support.lookups.format_cli",
@@ -147,7 +153,7 @@ def test_argv_tracker_root_adapter_appends_tracker_and_root(
     monkeypatch.setattr("rebar._cli.ensure_initialized", lambda **_k: None)
     monkeypatch.setattr("rebar._engine_support.reads.tracker_dir", lambda: "/repo/.tickets-tracker")
     _execute.execute("format", ["abcd"])
-    assert seen == [(["abcd"], "/repo/.tickets-tracker", "/repo")]
+    assert seen == [(["abcd"], "/repo/.tickets-tracker", None)]
 
 
 def test_every_adapter_kind_has_at_least_one_route() -> None:

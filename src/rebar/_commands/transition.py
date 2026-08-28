@@ -272,7 +272,13 @@ def transition_compute(
     attestation — distinct from the force-bypass reason, which records why a gate was
     bypassed."""
     tracker = str(config.tracker_dir(repo_root))
-    repo_root_str = os.path.dirname(tracker)
+    # The code/config root — resolved the SAME way every config reader does (explicit
+    # repo_root > REBAR_ROOT > git toplevel of cwd), NOT os.path.dirname(tracker), which
+    # is the repo root ONLY when the store is co-located. REBAR_TRACKER_DIR relocating the
+    # store is supported, so inferring the root from the tracker resolved an empty config
+    # there — silently disabling the plan-review start-work gate below and misrooting the
+    # close-path blame/scratch/compaction that inherit this value (auspicial-friended-merganser).
+    repo_root_str = str(config.repo_root(repo_root))
 
     _validate_status("current_status", current_status)
     if target_status == "deleted":
@@ -687,7 +693,7 @@ def transition_cli(argv: list[str], *, repo_root=None, _confirm_verb: str = "tra
 
     # Un-archive seam — before status validation (archived is not a valid status).
     if current_status == "archived":
-        return _unarchive(ticket_id, target_status, tracker, os.path.dirname(tracker))
+        return _unarchive(ticket_id, target_status, tracker, str(config.repo_root(repo_root)))
 
     try:
         reason, force_reason, close_class, caused_by, ref = _parse_flags(flag_args)

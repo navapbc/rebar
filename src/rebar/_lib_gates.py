@@ -35,8 +35,6 @@ if TYPE_CHECKING:
 # boolean rather than raising.
 def clarity_check(ticket_id: str, *, repo_root=None) -> ClarityResult:
     """Score ticket clarity → {score, verdict, threshold, passed}."""
-    import os as _os
-
     from rebar._engine_support import gates, reads
     from rebar._engine_support.reads import ReadError
 
@@ -52,7 +50,10 @@ def clarity_check(ticket_id: str, *, repo_root=None) -> ClarityResult:
             "ClarityResult",
             {"score": 0, "verdict": "fail", "threshold": 0, "reason": str(exc), "passed": False},
         )
-    threshold = gates._clarity_threshold(_os.path.dirname(tracker), None)
+    # The clarity threshold is a CONFIG read: resolve it from repo_root (None == discover),
+    # NOT os.path.dirname(tracker), which is only the repo root for a co-located store
+    # (auspicial-friended-merganser).
+    threshold = gates._clarity_threshold(repo_root, None)
     data, code = gates.clarity_check_compute(
         (state.get("ticket_type") or "").strip(), state.get("description") or "", threshold
     )
