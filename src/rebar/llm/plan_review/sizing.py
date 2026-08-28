@@ -21,6 +21,7 @@ context window" cluster). Owns:
 from __future__ import annotations
 
 import hashlib
+import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -763,10 +764,14 @@ def save_checkpoint(ctx: PlanContext, envelope: CheckpointEnvelope) -> bool:
         return False
     try:
         d.mkdir(parents=True, exist_ok=True)
-        path = d / f"{envelope.digest}.json"
-        tmp = d / f".tmp-{envelope.digest}.json"
-        tmp.write_text(envelope.to_json(), encoding="utf-8")
-        tmp.replace(path)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=f".tmp-{envelope.digest}-", suffix=".tmp")
+        try:
+            with open(fd, "w", encoding="utf-8") as handle:
+                handle.write(envelope.to_json())
+            Path(tmp).replace(d / f"{envelope.digest}.json")
+        except Exception:
+            Path(tmp).unlink(missing_ok=True)
+            raise
         return True
     except Exception:  # noqa: BLE001 — checkpoint write is a best-effort resume optimization; any failure ⇒ not cached (the review still proceeds)
         return False

@@ -1306,6 +1306,74 @@ def test_checkpoint_save_resume_and_material_invalidation(tmp_path) -> None:
     assert sizing.load_checkpoint(ctx, other) is None
 
 
+def test_concurrent_save_checkpoint_same_digest_loses_no_writer(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two concurrent ``save_checkpoint`` writers for the SAME (ticket, digest) must BOTH
+    persist, per the function's ATOMIC tmp+rename docstring invariant (last-write-wins).
+
+    A shared ``.tmp-<digest>.json`` pathname (keyed by ticket+digest only, not per-writer)
+    makes that false: forced to interleave, both writers write the one shared temp, then the
+    second ``tmp.replace(path)`` finds a temp the first already consumed → ``FileNotFoundError``
+    → the outer ``except Exception: return False`` swallows it and that writer silently returns
+    ``False`` (its checkpoint lost). The barrier fires at the real ``pathlib.Path.replace`` seam,
+    after both writers have already run ``tmp.write_text`` — a deterministic collision. Sibling
+    of bug 7dea (completion_verdict_cache)."""
+    import threading
+
+    from rebar.llm.review_kernel import (
+        DISCOVERY_NAMESPACE_VERSION,
+        CheckpointEnvelope,
+        Usage,
+    )
+
+    ctx = _ctx(_GOOD_AC, repo_root=str(tmp_path))
+    chunk = [{"id": "E2"}]
+    digest = sizing.checkpoint_identity(material="matFP", chunk=chunk, model="m", agentic=False)
+
+    def _env(finding: str) -> CheckpointEnvelope:
+        return CheckpointEnvelope(
+            unit_id="single:E2",
+            kind="success",
+            digest=digest,
+            namespace_version=DISCOVERY_NAMESPACE_VERSION,
+            content=[{"finding": finding, "criteria": ["E2"]}],
+            usage=Usage(),
+        )
+
+    barrier = threading.Barrier(2, timeout=30)
+    real_replace = Path.replace
+
+    def barriered_replace(self, target):
+        # Gate only the checkpoint's own final <digest>.json write, so unrelated replaces
+        # (e.g. the temp-dir setup) never block.
+        if str(target).endswith(f"{digest}.json"):
+            barrier.wait()
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", barriered_replace)
+
+    results: dict[str, bool] = {}
+
+    def worker(name: str, finding: str) -> None:
+        results[name] = sizing.save_checkpoint(ctx, _env(finding))
+
+    threads = [
+        threading.Thread(target=worker, args=("A", "from-A")),
+        threading.Thread(target=worker, args=("B", "from-B")),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert results == {"A": True, "B": True}, f"a concurrent writer lost its checkpoint: {results}"
+    cache = tmp_path / ".rebar" / "cache" / "plan-review" / ctx.ticket_id
+    loaded = sizing.load_checkpoint(ctx, digest)
+    assert loaded is not None and loaded.content[0]["finding"] in {"from-A", "from-B"}
+    assert not list(cache.glob(".tmp-*")), "atomic tmp+rename must leave no residue"
+
+
 def test_centrality_from_ticket_graph() -> None:
     state = {
         "deps": [
