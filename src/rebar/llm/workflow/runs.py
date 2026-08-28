@@ -24,7 +24,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from rebar.llm.errors import WorkflowError, WorkflowParseError
+from rebar.llm.errors import WorkflowNotFoundError
 
 from . import executor as _ex
 from . import steps as _steps  # noqa: F401 — importing registers the built-in scripted steps
@@ -82,7 +82,7 @@ def _resolve_source_path(source: str, repo_root: str | None) -> Path:
     builtin = _examples_dir() / f"{source}.yaml"
     if builtin.exists():
         return builtin
-    raise WorkflowParseError(
+    raise WorkflowNotFoundError(
         f"workflow {source!r} not found (no such file, no .rebar/workflows/{source}.yaml, "
         f"and no built-in example of that name)",
         source=str(source),
@@ -512,7 +512,9 @@ def _reduce_ticket_state(ticket_id: str, repo_root: str | None) -> dict[str, Any
 def _locate(run_id: str, ticket_id: str | None, repo_root: str | None) -> str:
     tid = ticket_id or lookup_run_location(run_id, repo_root)
     if not tid:
-        raise WorkflowError(f"unknown run_id {run_id!r}: no run-index entry and no ticket_id given")
+        raise WorkflowNotFoundError(
+            f"unknown run_id {run_id!r}: no run-index entry and no ticket_id given"
+        )
     return tid
 
 
@@ -524,7 +526,7 @@ def status(
     state = _reduce_ticket_state(tid, repo_root)
     run = state.get("workflow_runs", {}).get(run_id)
     if run is None:
-        raise WorkflowError(f"run {run_id!r} not found on ticket {tid}")
+        raise WorkflowNotFoundError(f"run {run_id!r} not found on ticket {tid}")
     steps = state.get("workflow_steps", {}).get(run_id, {})
     return {
         "run_id": run_id,
@@ -545,7 +547,7 @@ def result(
     state = _reduce_ticket_state(tid, repo_root)
     run = state.get("workflow_runs", {}).get(run_id)
     if run is None:
-        raise WorkflowError(f"run {run_id!r} not found on ticket {tid}")
+        raise WorkflowNotFoundError(f"run {run_id!r} not found on ticket {tid}")
     steps = state.get("workflow_steps", {}).get(run_id, {})
     terminal = run.get("terminal_step")
     terminal_output = steps.get(terminal, {}).get("outputs") if terminal else None

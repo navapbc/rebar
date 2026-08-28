@@ -24,12 +24,18 @@ def _structured_llm_failure(exc: Exception) -> dict:
     authorial-hated-blackbear) rather than letting it propagate as an opaque FastMCP tool
     error. The driving agent can then branch on ``retryable`` (retry vs. escalate) instead of
     string-parsing an error. Carries the classifier disposition (``resolution_class`` /
-    ``diagnostic``) when the raised error had one attached (mamba's run seam / preflight)."""
+    ``diagnostic``) when the raised error had one attached (mamba's run seam / preflight).
+
+    The ``error`` code is derived from the shared ``error_code_for`` classifier so this second
+    LLM-tier failure site honours the same taxonomy as the generic MCP guard (bug
+    dbca-97ac-ad96-4d6d): a genuine outage stays ``llm_unavailable``, while a workflow
+    caller-input / not-found error carried on an ``LLMError`` subtype gets its precise code."""
+    from rebar._errors import error_code_for
     from rebar.llm.failure import outcome_of
 
     o = outcome_of(exc)
     return {
-        "error": "llm_unavailable",
+        "error": error_code_for(exc),
         "message": str(exc),
         "resolution_class": o.resolution_class.value if o is not None else None,
         "retryable": bool(o.retryable) if o is not None else False,

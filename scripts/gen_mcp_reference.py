@@ -186,7 +186,15 @@ def render() -> str:
         "broken config from a deliberate policy refusal. A cleartext (non-https) URL "
         "rejected by security policy (`InsecureUrlError`) is delivered as the distinct "
         "`config_insecure_url` code — the config parsed fine, so prompting the operator "
-        "to fix an unreadable config would mislead."
+        "to fix an unreadable config would mislead. The LLM-tier workflow read tools "
+        "(`render_workflow`, `get_workflow_status`) classify caller-input failures "
+        "precisely rather than collapsing them to `llm_unavailable` "
+        "(bug dbca-97ac-ad96-4d6d): an unknown workflow name or `run_id` is delivered as "
+        "`not_found`, and a workflow that was found but will not parse/lint/migrate is "
+        "delivered as `invalid_input`, so an agent can tell a fix-your-input mistake from "
+        "a retryable backend outage. A genuine LLM-backend unavailability (missing key or "
+        "a provider error) — including one raised while a workflow EXECUTE step runs — "
+        "still resolves to `llm_unavailable`."
     )
     lines.append("")
     lines.append(
