@@ -595,6 +595,43 @@ This is a SIGNAL, never an exception: the best-effort contract above is unchange
 marker that cannot be written (an unwritable tracker) degrades to "no status" rather than
 failing the write.
 
+#### Where the signal STOPS being advisory — the gate freshness assertion
+
+The marker above is advisory to a WRITE, and deliberately so. It is not advisory to a
+**gate**. Bug `cibophobic-moist-guineafowl`: a ticket carrying a valid
+`completion-verifier` attestation read as `unsigned` through a clone that had not received
+the write. A gate answering from such a store does not answer LATE, it answers WRONG — and
+then mints or withholds an operation certificate on the strength of it. A late comment is
+an inconvenience; a wrong certification corrupts the audit trail.
+
+So the gate-critical READ paths call `rebar._store.freshness.store_freshness` and REFUSE
+before consulting an attestation: the plan-review **claim** gate
+(`llm.plan_review.attest_gate.claim_gate_check`, and therefore `review-plan --status` and
+`transition open in_progress` too), the plan-review **close** gate
+(`_commands.gates.close_plan_review_gate_check`), and the **completion-verification** close
+gate (`_commands.close_precheck._completion_precheck`, which refuses *before* the billable
+verifier runs). Each reports the distinct verdict `stale-store` — never an attestation
+verdict, because "I could not trust the input" and "the attestation is stale" have
+different remedies.
+
+Staleness is defined **locally, with no network call**, so a gate never acquires a
+dependency on the remote being reachable: the durable `rebar-push-pending` marker is set
+(`push-pending`), or HEAD is behind / has diverged from the ALREADY-FETCHED
+remote-tracking ref (`behind` / `diverged`). Note that `fsck` stays silent on *merely
+behind* because a writer ff-adopts on its next push — a gate is a pure reader and never
+triggers that adoption, which is why this is the sharpest signal available to it.
+
+The probe fails **open**, the gate fails **closed**. A diagnostic that cannot read its own
+inputs must not convince a healthy store that it is broken (the same posture
+`push_state.read_status` takes), but once staleness is *established* the gate declines,
+because a gate that cannot trust its input has no business certifying with it.
+
+`rebar._store.freshness` is a READ-side concern only. The blanket alternative — refusing
+every write while the push is failing — was considered and rejected: it converts a
+degraded-but-usable system into an outage, and the write path's B4 contract above
+(a signal, never an exception) is unchanged, pinned by
+`tests/unit/test_gate_store_freshness.py::test_a_stale_store_does_not_make_an_ordinary_write_raise`.
+
 **Push policy.** `REBAR_SYNC_PUSH` is resolved by `rebar._store.push.push_tickets_branch`, so CLI, library, and MCP callers honor it uniformly. Values are insensitive to case and surrounding spaces. The default is `always`.
 
 | value    | behaviour |

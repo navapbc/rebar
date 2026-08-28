@@ -186,7 +186,7 @@ def _register_plan_review_tools(mcp, annotations) -> None:
 
         Returns {ok, verdict, reason, verified_at_sha, signed_at}. `verdict` is
         'certified' when current, else one of stale-code / stale-head /
-        stale-material / stale-reopened / stale-pin-drift / stale-pin-missing /
+        stale-material / stale-reopened / stale-pin-drift / stale-pin-missing / stale-store /
         unsigned / wrong-kind / not-closed / malformed-pin / malformed-phase /
         incompatible-phase / unverifiable-material / error, and `reason` NAMES what
         changed. `verified_at_sha` is the code anchor the plan was reviewed against

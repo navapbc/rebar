@@ -234,6 +234,22 @@ def close_plan_review_gate_check(
             ),
         }
 
+    from rebar._store import freshness
+
+    # Same harm as at claim (bug b928), same placement: an attestation read from a store
+    # that is not current can report ``unsigned`` for a ticket that is properly certified.
+    store = freshness.store_freshness(tracker or freshness.resolve_tracker(repo_root))
+    if not store["fresh"]:
+        return {
+            "ok": False,
+            "gate_ran": True,
+            "verdict": freshness.STALE_VERDICT,
+            "reason": (
+                f"{store['reason']} — refusing to decide the plan-review close gate "
+                "against a ticket store that is not current"
+            ),
+        }
+
     try:
         from rebar import signing
         from rebar._engine_support import reads as ticket_reads
