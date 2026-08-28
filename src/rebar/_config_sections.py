@@ -1,6 +1,9 @@
 """Per-section configuration coercion registry."""
 
+import logging
+
 from rebar._config_coercion import (
+    ConfigError,
     _as_bool,
     _as_choice,
     _as_float,
@@ -11,7 +14,16 @@ from rebar._config_coercion import (
     _as_str_list,
     _as_str_tuple,
     _as_tracker_dir,
+    _src,
+    _warn_unknown,
 )
+from rebar._deprecations import (
+    raise_or_warn_cfg_key,
+    warn_deprecated,
+    warn_deprecated_cfg_keys,
+)
+
+logger = logging.getLogger("rebar.config")
 
 # section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
 _SECTIONS: dict[str, dict] = {
@@ -105,6 +117,9 @@ _SECTIONS: dict[str, dict] = {
     "ui": {
         "enabled": lambda v, k: _as_bool(v, k),
     },
+    "warnings": {
+        "cross_session": lambda v, k: _as_bool(v, k),
+    },
     "reconciler": {
         # Keep in step with the `@register(...)` keys in
         # `rebar_reconciler/adapters/`: a backend that is registered but absent here
@@ -148,3 +163,80 @@ _SECTIONS: dict[str, dict] = {
         "size_near_fraction": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
     },
 }
+
+
+# section -> {deprecated_key -> canonical_key}, consumed by the coerce_sparse loop below. Every
+# entry needs a matching `cfg:<section>.<old>` row in rebar._deprecations, else warn_deprecated
+# raises. The 9416 entry is a PERMANENT rename: same boolean, untouched configs keep working.
+_ALIASES: dict[str, dict[str, str]] = {"verify": {"overlap_enabled": "suggest_duplicate_tickets"}}
+
+# Config sections owned by an OPTIONAL layer rather than the stdlib core typed
+# Config — currently ``llm`` (the ``nava-rebar[agents]`` extra; resolved by
+# ``rebar.llm.LLMConfig.from_env`` so the stdlib core never imports the agents
+# stack). They are RECOGNISED by the core parser — neither warned as unknown nor
+# coerced into :class:`Config` — and read raw via :func:`read_reserved_section`.
+# ``snapshot`` is the repo-snapshot-isolation gate cache/janitor tunables layer
+# (``rebar._snapshot``), resolved env-first by :class:`rebar._snapshot.JanitorConfig`.
+# ``mapping`` is the provider-neutral reconciler mapping-vocabulary layer
+# (``rebar_reconciler.mapping_config``), resolved by :func:`load_mapping_config`.
+_RESERVED_SECTIONS: frozenset[str] = frozenset({"llm", "snapshot", "mapping"})
+
+
+def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -> dict:
+    """Coerce+validate a nested mapping into a SPARSE nested dict of ONLY the keys
+    actually present (NO defaults applied) — the per-layer building block for
+    precedence merging. Resolves legacy aliases (the legacy key is accepted, with a
+    deprecation warning, regardless of ``strict``); raises :class:`ConfigError` on an
+    invalid value. Unknown sections/keys WARN by default and, with ``strict=True``,
+    hard-error (the deprecation cutover). Defaults are applied ONCE, at the end, by
+    :meth:`Config.from_mapping` — so a lower-priority layer's default can never
+    override a higher layer's explicit value."""
+    raw = dict(raw or {})
+    out: dict[str, dict] = {}
+    for sect, val in raw.items():
+        if sect in _RESERVED_SECTIONS:
+            continue  # owned by an optional layer (e.g. llm → rebar.llm); not a core key
+        if sect not in _SECTIONS:
+            if strict:
+                raise ConfigError(
+                    f"rebar config{_src(source)}: unknown section [{sect}] "
+                    "(REBAR_CONFIG_UNKNOWN_KEYS=error)"
+                )
+            logger.warning("rebar config%s: unknown section [%s] ignored", _src(source), sect)
+            continue
+        if not isinstance(val, dict):
+            raise ConfigError(f"[{sect}]: expected a table/section, got {type(val).__name__}")
+        d = dict(val)
+        # Tombstoned (REMOVED) TOML keys: route to a targeted RemovedInputError (error)
+        # or WARN (warn), BEFORE the generic unknown-key path — a retired lifecycle/gate
+        # key must fail loud, not be swallowed as a forward-compat "unknown key". This is
+        # separate from the genuinely-unknown-key policy in _warn_unknown.
+        for tkey in list(d):
+            if raise_or_warn_cfg_key(sect, tkey) is not None:
+                d.pop(tkey)  # warn-class: consumed here so _warn_unknown does not re-flag it
+        warn_deprecated_cfg_keys(sect, d, renames=_ALIASES.get(sect, {}), logger=logger)
+        for old, new in _ALIASES.get(sect, {}).items():
+            if old in d:
+                if new not in d:
+                    warn_deprecated(f"cfg:{sect}.{old}", logger=logger)
+                    d[new] = d.pop(old)
+                else:
+                    d.pop(old)  # canonical key wins
+        coerced: dict = {}
+        for key, coercer in _SECTIONS[sect].items():
+            if key in d:
+                coerced[key] = coercer(d.pop(key), f"{sect}.{key}")
+        _warn_unknown(sect, d, source, strict=strict)
+        if coerced:
+            out[sect] = coerced
+    return out
+
+
+def merge_sparse(*layers: dict | None) -> dict:
+    """Deep-merge sparse config layers in precedence order — LATER layers win,
+    per key. Each layer is a sparse nested dict from :func:`coerce_sparse`."""
+    out: dict[str, dict] = {}
+    for layer in layers:
+        for sect, vals in (layer or {}).items():
+            out.setdefault(sect, {}).update(vals)
+    return out
