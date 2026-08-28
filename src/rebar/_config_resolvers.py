@@ -264,6 +264,32 @@ def repo_root_or_none(explicit: str | os.PathLike[str] | None = None) -> str | N
     return out if cp.returncode == 0 and out else None
 
 
+def compaction_child_repo_root(canonical_tracker: str | os.PathLike[str]) -> str:
+    """The DURABLE code/config root for the detached compaction sweep child.
+
+    Precedence: ``REBAR_ROOT`` (realpath-normalized) > ``dirname(canonical_tracker)``.
+
+    Deliberately NOT :func:`repo_root_or_none`. That resolver's non-``REBAR_ROOT`` fallback is
+    the git toplevel of the CWD, and the compaction sweep runs in a child that OUTLIVES the
+    ``make worktree`` worktree that spawned it — a cwd/git-toplevel-derived root can be deleted
+    out from under the running child (bugs 3198/93a9). ``dirname(canonical_tracker)`` is durable
+    instead: the caller passes the tracker resolved THROUGH the worktree's ``.tickets-tracker``
+    symlink (:attr:`rebar._store.paths.StorePaths.canonical`), so its parent is the main
+    checkout, not the ephemeral worktree — no dependency on where the child happens to be
+    running. There is no explicit code root at this call site (``run_sweep`` holds only the
+    tracker), so the general ``explicit > REBAR_ROOT > durable-store-parent`` precedence reduces
+    to the ``REBAR_ROOT``-first tail here.
+
+    On the deployed relocated-store topology ``REBAR_ROOT`` is exported unconditionally and
+    names the provisioned checkout, so the first arm resolves the real code root — the store's
+    parent there has no ``rebar.toml`` and would compose an empty (default) config. Owns the
+    ``REBAR_ROOT`` read for :func:`rebar._commands.compact_trigger.run_sweep`."""
+    env = os.environ.get("REBAR_ROOT")
+    if env:
+        return os.path.realpath(env)
+    return os.path.dirname(os.fspath(canonical_tracker))
+
+
 def resolve_otlp_endpoint(explicit: str | None = None) -> str:
     """The OTLP trace-sink endpoint: an explicit ``--otlp-endpoint`` wins, else the
     standard ``OTEL_EXPORTER_OTLP_ENDPOINT`` env var, else ``""`` (no sink). Owns the

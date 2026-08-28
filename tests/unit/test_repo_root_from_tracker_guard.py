@@ -175,11 +175,36 @@ def test_unparseable_source_is_reported_not_skipped(tmp_path: Path) -> None:
 
 
 def test_the_repository_is_clean() -> None:
-    """The drained tree passes (the one deferred run_sweep site is sanctioned)."""
+    """The drained tree passes: the run_sweep site now RESOLVES its config root, so zero
+    config-root sites are deferred behind a sanction (bug scathing-custommade-bobcat)."""
     completed = subprocess.run(
         [sys.executable, str(_SCRIPT)], capture_output=True, text=True, check=False
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_no_config_root_site_is_deferred_behind_a_sanction() -> None:
+    """AC#3 (bug scathing-custommade-bobcat): the ``# repo-root-ok:`` allowlist holds ZERO
+    deferred CONFIG-root sites. The run_sweep detached-child site — the one the auspicial guard
+    deferred — now resolves the code root, so its sanction is gone. The ONLY sanctions left name
+    reads of the STORE's OWN git repo (``git -C tracker`` for tickets_branch / tickets_remote in
+    _store/sync.py), which are legitimately rooted at the store and are NOT config-root reads."""
+    src = _REPO_ROOT / "src" / "rebar"
+    sanctioned: dict[str, list[int]] = {}
+    for path in sorted(src.rglob("*.py")):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if gate.MARKER in line and line.split(gate.MARKER, 1)[1].strip():
+                sanctioned.setdefault(str(path.relative_to(_REPO_ROOT)), []).append(lineno)
+
+    compact_trigger = "src/rebar/_commands/compact_trigger.py"
+    assert compact_trigger not in sanctioned, (
+        "the run_sweep config-root site must be RESOLVED, not deferred behind a repo-root-ok "
+        f"sanction; found sanction(s) at {sanctioned.get(compact_trigger)!r}"
+    )
+    assert set(sanctioned) <= {"src/rebar/_store/sync.py"}, (
+        "the only remaining repo-root-ok sanctions may be the store's-own-git-repo reads in "
+        f"_store/sync.py (tickets_branch / tickets_remote); found others: {sorted(sanctioned)}"
+    )
 
 
 def test_make_lint_invokes_the_gate() -> None:

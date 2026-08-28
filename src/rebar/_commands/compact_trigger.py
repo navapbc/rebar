@@ -156,9 +156,10 @@ def _spawn_detached_sweep(tracker: str) -> None:
             "run_sweep",
             # The canonical store tracker, for the same reason spawn_detached resolves the
             # child's cwd: the child outlives the worktree that spawned it, and inside
-            # `run_sweep` this argument also becomes `repo_root = dirname(tracker)`. Handing
-            # over a worktree's SYMLINK would leave the running child pointed at a path that
-            # dies with the worktree (bug 93a9-66cf-e681-4f49).
+            # `run_sweep` this argument feeds `compaction_child_repo_root`, whose fallback arm
+            # is `dirname(canonical tracker)`. Handing over a worktree's SYMLINK would leave
+            # the running child pointed at a path that dies with the worktree (bug
+            # 93a9-66cf-e681-4f49).
             StorePaths(tracker).canonical,
             env={**os.environ},
             stderr=log_fh,
@@ -212,14 +213,19 @@ def run_sweep(tracker: str) -> None:
                 _lock.describe_lock_holder(tracker),
             )
             return
-        # KNOWN-DEFERRED config-root site (auspicial-friended-merganser follow-up): run_sweep
-        # is the detached-child entry point — its cwd is the STORE and it takes only `tracker`,
-        # so it cannot thread a code root through without a signature/spawn-contract change
-        # (a design decision, tracked separately). On a relocated store this reads default
-        # compaction config rather than a silently-disabled gate, so impact is milder. The
-        # AC#4 guard allowlists exactly this line via the marker directly below.
-        # repo-root-ok: detached run_sweep child; cwd IS the store (deferred follow-up).
-        repo_root = os.path.dirname(tracker)
+        # Resolve a DURABLE code root for the detached child. This entry point outlives the
+        # worktree that spawned it, so it must not lean on the caller's `repo_root` (a
+        # `make worktree` git-toplevel can be deleted out from under the running child —
+        # durability bug class 3198/93a9). Precedence: an explicit REBAR_ROOT wins; otherwise
+        # the directory of the CANONICAL tracker — which realpath-resolves a worktree's
+        # `.tickets-tracker` symlink back to the durable main checkout — so a RELOCATED store
+        # (REBAR_TRACKER_DIR outside the checkout) composes compaction config from the code
+        # root's `rebar.toml` rather than the store parent's default rule. Same class as
+        # auspicial-friended-merganser (Gerrit 2326) / injurious-pugnacious-azurevase (2339);
+        # this is the site auspicial deferred pending the durable-root resolution above.
+        from rebar._config_resolvers import compaction_child_repo_root
+
+        repo_root = compaction_child_repo_root(StorePaths(tracker).canonical)
         # Tag the store-lock acquisitions this sweep drives (transitively, via
         # compact_all_cli -> _compact_locked) as `op=compact-sweep`, so a blocked writer's
         # LockTimeout names the sweep and its safe-to-interrupt remedy rather than a bare pid

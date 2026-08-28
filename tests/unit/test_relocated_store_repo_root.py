@@ -12,6 +12,7 @@ repo at ``/app``).
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -225,3 +226,202 @@ def test_within_cap_still_silent_on_relocated_store(
         "task", "within cap", description="D" * 20, return_alias=True, repo_root=str(repo)
     )
     assert created["description_warning"] is None
+
+
+# ────────────── the detached compaction sweep: run_sweep's config root ──────────────
+#
+# ``compact_trigger.run_sweep`` is the DETACHED-CHILD compaction entry point (bug
+# scathing-custommade-bobcat, 6bf1-326b-7404-4034). It held only the tracker and hardcoded
+# ``repo_root = os.path.dirname(tracker)`` — the ONE config-root site auspicial-friended-merganser
+# deliberately deferred, because the child outlives the worktree that spawned it and the two
+# supported topologies disagreed on where a DURABLE code root lives. It now resolves one with
+# ``config.compaction_child_repo_root(StorePaths(tracker).canonical)``: REBAR_ROOT (the deployed
+# relocated-store topology) > dirname(canonical tracker) (the local co-located worktree, resolved
+# THROUGH the .tickets-tracker symlink so the outliving child never points at a dying toplevel —
+# bugs 3198/93a9). On a relocated store the buggy ``dirname(tracker)`` read the store's parent, so
+# a non-default ``[compact]`` block was ignored and the sweep folded by the DEFAULT rule.
+#
+# Config MUST come from a rebar.toml FILE, never REBAR_COMPACT_THRESHOLD /
+# REBAR_COMPACTION_HORIZON_NS
+# — an env read is root-independent and would hide the bug (the suite-wide conftest sets
+# REBAR_COMPACTION_HORIZON_NS=0, so these delenv it). The HORIZON is the discriminator, not the
+# threshold: select_tickets' BACKFILL arm folds any snapshot-less ticket with one foldable event
+# whatever the threshold, so the default 1,800 s horizon (which holds fresh events back) is what
+# makes the buggy default-config sweep fold nothing.
+
+
+def _relocated_store_with_compact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    compact_block: str,
+    set_rebar_root: bool = True,
+    comments: int = 4,
+) -> tuple[Path, Path, str]:
+    """A code repo carrying a ``[compact]`` block in its rebar.toml FILE and a store RELOCATED
+    outside it (``REBAR_TRACKER_DIR``), seeded with one foldable ticket. Returns
+    ``(repo, external_store, resolved_ticket_id)``."""
+    import rebar._engine_support.resolver as _resolver
+
+    monkeypatch.delenv("REBAR_DEFAULT_ASSIGNEE", raising=False)
+    # Force config to come from the FILE, not a root-independent env read (which hides the bug).
+    monkeypatch.delenv("REBAR_COMPACTION_HORIZON_NS", raising=False)
+    monkeypatch.delenv("REBAR_COMPACT_THRESHOLD", raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "test@example.com"),
+        ("config", "user.name", "Test"),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True)
+    (repo / "rebar.toml").write_text(compact_block, encoding="utf-8")
+    external = tmp_path / "elsewhere" / "store"
+    external.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("REBAR_TRACKER_DIR", str(external))
+    if set_rebar_root:
+        monkeypatch.setenv("REBAR_ROOT", str(repo))
+    else:
+        monkeypatch.delenv("REBAR_ROOT", raising=False)
+    rebar.init_repo(repo_root=str(repo))
+    assert not (external.parent / "rebar.toml").exists()
+    tid = rebar.create_ticket("task", "fold me", description="x" * 60, repo_root=str(repo))
+    for i in range(comments):
+        rebar.comment(tid, f"c{i}", repo_root=str(repo))
+    return repo, external, _resolver.resolve_ticket_id(tid, str(external))
+
+
+def _folds_horizon_zero() -> str:
+    return "[compact]\nthreshold = 1\nCOMPACTION_HORIZON_NS = 0\n"
+
+
+def test_run_sweep_folds_by_the_repo_compact_config_on_relocated_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC#2 behaviour: on a relocated store the sweep honours the repo's non-default
+    ``[compact]`` block (horizon 0 folds fresh events). The buggy ``dirname(tracker)`` read the
+    store's parent (no rebar.toml → the DEFAULT 1,800 s horizon), so the just-written events sat
+    inside the horizon and NOTHING folded — no SNAPSHOT."""
+    from rebar._commands import compact_trigger
+
+    _repo, external, tid = _relocated_store_with_compact(
+        tmp_path, monkeypatch, compact_block=_folds_horizon_zero()
+    )
+    compact_trigger.run_sweep(str(external))
+    assert list((external / tid).glob("*-SNAPSHOT.json")), (
+        "run_sweep did not fold under the repo's [compact] horizon=0 on a relocated store; it "
+        "read the DEFAULT config from the store's parent instead of resolving the code root"
+    )
+
+
+def test_run_sweep_hands_the_resolved_code_root_to_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC#2 seam: the root handed to ``compact_all_cli`` IS the resolved code root
+    (realpath of REBAR_ROOT), pinned at the seam so a fix that merely lands on a root reading
+    the same config by accident — e.g. passing ``repo_root=None`` and letting compose_config
+    rediscover it downstream — is still caught."""
+    from rebar._commands import compact as compact_mod
+    from rebar._commands import compact_trigger
+
+    repo, external, _tid = _relocated_store_with_compact(
+        tmp_path, monkeypatch, compact_block=_folds_horizon_zero()
+    )
+    seen: list = []
+    monkeypatch.setattr(
+        compact_mod, "compact_all_cli", lambda argv, repo_root: seen.append(repo_root)
+    )
+    compact_trigger.run_sweep(str(external))
+    assert seen == [os.path.realpath(str(repo))], (
+        "run_sweep must hand compact_all_cli the RESOLVED code root (realpath(REBAR_ROOT)); "
+        f"got {seen!r} (dirname(tracker) would be the store's parent {external.parent!r})"
+    )
+
+
+def test_run_sweep_resolves_the_code_root_without_rebar_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC#4: the SECOND precedence arm — REBAR_ROOT UNSET → ``dirname(canonical tracker)`` —
+    also reaches the DURABLE code root, resolved THROUGH the worktree's ``.tickets-tracker``
+    symlink. A worktree view hands the child the symlink; ``StorePaths(tracker).canonical``
+    realpath-resolves it to the main checkout's store, whose parent is the durable checkout —
+    NOT the ephemeral worktree ``dirname(tracker)`` would name (bugs 3198/93a9)."""
+    from rebar._commands import compact as compact_mod
+    from rebar._commands import compact_trigger
+
+    monkeypatch.delenv("REBAR_DEFAULT_ASSIGNEE", raising=False)
+    monkeypatch.delenv("REBAR_COMPACTION_HORIZON_NS", raising=False)
+    monkeypatch.delenv("REBAR_COMPACT_THRESHOLD", raising=False)
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
+    monkeypatch.delenv("REBAR_ROOT", raising=False)
+
+    checkout = tmp_path / "main-checkout"
+    checkout.mkdir()
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "test@example.com"),
+        ("config", "user.name", "Test"),
+    ):
+        subprocess.run(["git", *args], cwd=checkout, check=True)
+    (checkout / "rebar.toml").write_text(_folds_horizon_zero(), encoding="utf-8")
+    rebar.init_repo(repo_root=str(checkout))
+    store = Path(rebar.config.tracker_dir(str(checkout)))
+    assert store.parent == checkout, "the co-located store must sit beside the checkout"
+
+    # A worktree view: a .tickets-tracker SYMLINK to the canonical store, its parent NOT a
+    # rebar.toml-bearing checkout. dirname(symlink) would name this ephemeral dir.
+    worktree = tmp_path / "ephemeral-worktree"
+    worktree.mkdir()
+    symlinked_tracker = worktree / ".tickets-tracker"
+    symlinked_tracker.symlink_to(store, target_is_directory=True)
+
+    seen: list = []
+    monkeypatch.setattr(
+        compact_mod, "compact_all_cli", lambda argv, repo_root: seen.append(repo_root)
+    )
+    compact_trigger.run_sweep(str(symlinked_tracker))
+    assert seen == [str(checkout)], (
+        "with REBAR_ROOT unset, run_sweep must resolve the DURABLE code root as "
+        "dirname(canonical tracker) = the main checkout, not the ephemeral worktree that "
+        f"dirname(tracker)={worktree!r} would name; got {seen!r}"
+    )
+
+
+def test_run_sweep_respects_a_repo_config_that_folds_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC#5 config-effect contrast: the SAME store and ticket fold NOTHING under a ``[compact]``
+    block whose horizon puts the just-written events out of reach — proving the fold in AC#2 is
+    the repo config being READ, not an unconditional sweep. Also asserts LIVENESS: ``run_sweep``
+    swallows every exception, so an absent SNAPSHOT would otherwise be satisfied by a crash
+    BEFORE the sweep. The seam spy proves compact_all_cli was actually reached."""
+    from rebar._commands import compact as compact_mod
+    from rebar._commands import compact_trigger
+
+    # A horizon so large that no just-written event is old enough to fold.
+    never = "[compact]\nthreshold = 1\nCOMPACTION_HORIZON_NS = 100000000000000000\n"
+    repo, external, tid = _relocated_store_with_compact(tmp_path, monkeypatch, compact_block=never)
+
+    original = compact_mod.compact_all_cli
+    reached: list = []
+
+    def _spy(argv, repo_root):
+        reached.append(repo_root)
+        return original(argv, repo_root=repo_root)
+
+    monkeypatch.setattr(compact_mod, "compact_all_cli", _spy)
+    compact_trigger.run_sweep(str(external))
+
+    assert reached, (
+        "LIVENESS: run_sweep must actually REACH compact_all_cli — it swallows every "
+        "exception, so an early crash would leave this empty and the no-snapshot assertion "
+        "below would pass vacuously"
+    )
+    assert reached == [os.path.realpath(str(repo))], (
+        "and it must reach it with the RESOLVED code root, not dirname(tracker) — the store's "
+        f"parent {external.parent!r}. got: {reached!r}"
+    )
+    assert not list((external / tid).glob("*-SNAPSHOT.json")), (
+        "the repo's [compact] horizon puts the events out of reach, so the sweep must fold "
+        "NOTHING; a snapshot means the fold ignored the configured horizon"
+    )
