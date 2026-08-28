@@ -381,8 +381,11 @@ class PinnedTicketView:
         for state in states:
             item = copy.deepcopy(state)
             if not query.include_body:
-                item.pop("description", None)
-                item.pop("comments", None)
+                # ONE spelling of the lean row, shared with the event-log read path
+                # (story 98b8-5f08-1569-45cc) so the two backends cannot drift.
+                from rebar._engine_support.reads import lean_projection
+
+                item = lean_projection(item)
             if query.with_children_count:
                 item["children_count"] = len(self.direct_children(str(item["ticket_id"])))
             out.append(item)

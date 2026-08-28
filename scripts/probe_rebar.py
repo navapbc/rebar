@@ -554,22 +554,39 @@ def _probe() -> None:  # deliberately one linear probe script
     list_keys = sorted(next((x for x in _list_json() if x.get("ticket_id") == task), {}).keys())
     # `list` and `show` are deliberately NOT identical key sets — each carries
     # fields the other omits, BY DESIGN:
-    #   - `show` adds the bulky bodies (`comments`, `description`) that lean
-    #     `list` drops (opt back in with `list --full`), plus per-ticket
-    #     `digest_freshness`, `inbound_deps` (computed inbound edges, bug 05cb),
-    #     and `plan_review_health`.
+    #   - `show` adds the per-ticket computed fields `digest_freshness`,
+    #     `inbound_deps` (computed inbound edges, bug 05cb) and
+    #     `plan_review_health`, which no list row carries.
+    #   - `show` also keeps everything the LEAN list projection drops: the bulky
+    #     bodies (`comments`, `description`) AND the signature material
+    #     (`authorship_ledger`, `attestations`, `signature`, `keyring`), which on
+    #     a mature store is ~88% of a lean row's bytes (story 98b8-5f08-1569-45cc).
+    #     Opt back in with `list --full`.
     #   - `list` surfaces `managed_refs`, which `show` omits.
+    # The lean drop set is intersected with what `show` actually emits, because
+    # some of those fields are materialised only once a ticket HAS signature
+    # material — an empty tracker's `show` carries no `authorship_ledger`, and a
+    # field absent from both sides cannot appear in the difference.
     # Assert the exact symmetric difference in BOTH directions so drift is caught.
+    show_only_computed = {"digest_freshness", "inbound_deps", "plan_review_health"}
+    lean_dropped = {
+        "comments",
+        "description",
+        "authorship_ledger",
+        "attestations",
+        "signature",
+        "keyring",
+    }
     assert_eq(
         ["managed_refs"],
         sorted(set(list_keys) - set(show_keys)),
         "list adds exactly managed_refs over show",
     )
     assert_eq(
-        ["comments", "description", "digest_freshness", "inbound_deps", "plan_review_health"],
+        sorted(show_only_computed | (lean_dropped & set(show_keys))),
         sorted(set(show_keys) - set(list_keys)),
-        "show adds exactly comments+description+digest_freshness+inbound_deps"
-        "+plan_review_health over lean list",
+        "show adds exactly the computed fields + the lean-dropped bodies and "
+        "signature material over lean list",
     )
     run_rb("show", task)
     assert_not_contains('"parent_status_uuid"', "internal key not leaked in show")

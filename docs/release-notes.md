@@ -82,6 +82,65 @@ read event/sidecar files straight off disk, and `rebar_reconciler.outbound_comme
 timestamp only as an opaque identity key. None of them cross a CLI JSON boundary, and the Python
 library returns arbitrary-precision ints.
 
+## BREAKING (pre-1.0) — the lean DISCOVERY row drops the signature material too
+
+Story `resistant-constant-nurseshark` (`98b8-5f08-1569-45cc`), 2026-08-28. The
+`include_body=False` list row previously dropped only `description` and `comments`. It now
+also drops `authorship_ledger`, `attestations`, `signature` and `keyring`.
+
+Those four fields ARE the bulk. Measured on this store (2,855 tickets) they were **88% of a
+"lean" list's bytes** — `authorship_ledger` 26,241,422 B (59%), `attestations` 10,370,251 B
+(23%), `signature` 2,639,114 B (6%) — so a lean list weighed 44,392,067 B at 15,548 B/row.
+After the projection: 4,928,872 B at 1,726 B/row, a **9x** reduction. A list caller is
+choosing a ticket; the signature record is read per-ticket via `show` / `verify-signature`.
+
+**Which surfaces narrow, and which do not.** The projection is reached only through
+`include_body=False`, and `TicketQuery.include_body` defaults **True**, so a caller that does
+not ask for a lean row is unaffected. Every consumer of the lean path:
+
+| surface | before | after |
+|---|---|---|
+| CLI `rebar list` | lean (bodies dropped) | lean (bodies **and** signature material dropped) |
+| MCP `list_tickets` | lean (bodies dropped) — documented lean-by-default | lean (bodies **and** signature material dropped) |
+| MCP `ready_tickets` | **FULL** ticket shape, no opt-out | lean-by-default; new `full=True` restores |
+| library `rebar.list_tickets` | full | **unchanged** — its own `full` defaults **True** |
+| `rebar validate` (2,863 rows) | full | **unchanged** — `include_body` defaults True |
+| `next-batch` (62 rows) | full | **unchanged** — `include_body` defaults True |
+| `show` / `show_ticket` / `search` | full | **unchanged** — a different read path entirely |
+
+**The narrowing comes from each caller's own flag default, not from the library's.**
+`rebar.list_tickets` declares `full: bool = True`, so a direct library call with no `full`
+argument still returns the FULL shape. Only the CLI's `--full` (default False) and the MCP
+tool's `full=False` select a lean row — which is why exactly three surfaces are listed above.
+
+**1. MCP `ready_tickets` narrows a published default.** It had no `full` flag and returned the
+whole ticket shape. It was narrowed deliberately rather than left alone: it was the one
+discovery surface that disagreed with the others on its default shape, and it is the largest
+unbounded read on the surface (61 ready rows, 693,556 bytes, of which ~88% is signature
+material). `full=True` returns the previous bytes exactly.
+
+**2. CLI `rebar list --output json` narrows too**, because it shares `lean_projection` through
+`list_states(include_body=False)`. This is a **user-visible** change, not an agent-only one, so
+it is recorded here rather than left to be discovered. Measured on `rebar list --status closed`
+(2,696 rows), key counts taken from the same ticket (`0024-fa99-d5bb-49bc`) in each run:
+
+| | keys on that row | bytes, all 2,696 rows |
+|---|---:|---:|
+| before | 39 | 43,661,976 |
+| after (default) | 35 | 4,747,485 |
+| after, `--full` | 41 | 71,707,799 |
+
+The four keys that leave the default row are exactly `authorship_ledger`, `attestations`,
+`signature` and `keyring`, and nothing else changed — a **9.2x** byte reduction. `--full`
+restores all four plus the two bodies, verified against the same store.
+
+**What a consumer must do.** If you read any of those four fields off a `list_tickets` /
+`ready_tickets` / `rebar list` row, pass `full=True` (MCP) or `--full` (CLI), or read the
+single ticket with `show_ticket` / `rebar show`, which are UNCHANGED and still carry every
+field. Nothing was removed from any schema — all four ride `extra="allow"`, so this is a
+projection, not a shape change, and the opt-out returns exactly what the default returned
+before.
+
 ## BREAKING (pre-1.0) — nanosecond timestamps are STRINGS on the MCP wire
 
 Bug `unreal-milky-sloth` (`6fe7-956f-4901-45cf`), 2026-08-27. rebar's MCP server emitted
