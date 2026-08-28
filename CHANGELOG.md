@@ -54,6 +54,19 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   only its meaning changed. **Consumers** that relied on `issue_count == len(issues)` must compute
   `len(issues)` themselves; `issue_count` now answers "how many counted problems" (== the exit-code
   verdict). Bug `sugarcane-scrummy-arctichare` (`29c3-b025-04d7-454e`).
+
+- **The MCP discovery lists are now bounded and refuse loudly when oversized.** An unfiltered
+  `list_tickets` against a mature store returned 94.5 MB in one response over 177 seconds; the
+  server never errored, so clients died in client-specific ways (`Transport closed`, or a
+  silently truncated result) with no way to tell "too big" from "server died". `list_tickets`
+  and `ready_tickets` are now bounded at the same ~90 KB client budget the workflow reads
+  already used, and an over-budget result is REFUSED with a structured `response_too_large`
+  error naming the match count, the size, the budget and a remedy — never a partial list,
+  because a short list is indistinguishable from a complete one. Additive: a previously
+  unbounded call gains a structured failure it never had. The budget is measured on the wire
+  payload rather than the reducer rows, which under-report it by 178%. The remedy is per-tool:
+  `ready_tickets` takes no filters, so its refusal points at `next_batch(epic_id)` rather than
+  at arguments it would reject. See [docs/release-notes.md](docs/release-notes.md).
 - **BREAKING (pre-1.0): the discovery lists drop the signature material by default.** The lean
   list row — CLI `rebar list`, MCP `list_tickets` and MCP `ready_tickets` — now omits
   `authorship_ledger`, `attestations`, `signature` and `keyring` as well as `description` and

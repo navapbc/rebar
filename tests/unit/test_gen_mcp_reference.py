@@ -120,6 +120,7 @@ def test_transition_ticket_description_documents_close_class_boundaries(monkeypa
         allow_llm=ms._allow_llm,
         allow_jira_sync=ms._allow_jira_sync,
         cap_workflow_payload=ms._cap_workflow_payload,
+        bound_list_payload=ms._bound_list_payload,
         dump=ms._dump,
         MODE_CAPS=ms.MODE_CAPS,
         Mode=ms.Mode,
