@@ -20,6 +20,7 @@ no live Jira and no specific CI provider (``project.portability``).
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -526,3 +527,47 @@ def test_doctor_cli_mapping_warning_only_yields_zero_exit(
     assert rc == 0
     out = capsys.readouterr().out
     assert "STUB" in out
+
+
+# ===========================================================================
+# HERMETICITY — doctor_cli must not read the operator's real HOME
+# (ticket ec07-692f-af32-4818 / frousy-ornamental-whale)
+# ===========================================================================
+
+
+def test_doctor_cli_mcp_client_scan_is_hermetic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``doctor_cli`` must not read the operator's real HOME MCP client configs.
+
+    The scan (``doctor_mcp_client.scan_mcp_clients``) defaults ``home`` to
+    ``Path.home()``, so an un-isolated unit test transitively reads
+    ``~/.codex/config.toml`` / ``~/.copilot/mcp-config.json`` / ``~/.claude.json`` —
+    live machine state the test does not control. The unit tier redirects the scan's
+    default home to an empty fixture directory (``tests/unit/conftest.py``); with that
+    isolation every client is simply *unconfigured*, so the ONLY findings are
+    ``config-missing`` and no finding path may resolve under the operator's REAL home
+    directory. This test deliberately does NOT set ``HOME`` itself — it asserts the
+    tier's isolation is in force.
+    """
+    import os
+    import pwd
+
+    real_home = pwd.getpwuid(os.getuid()).pw_dir
+    proj = _proj(tmp_path, "[mapping.projects.STUB]\n")
+
+    rc = doctor.doctor_cli(["--output", "json"], repo_root=str(proj))
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    findings = payload["mcp_client_findings"]
+    # Machine-independent oracle: an isolated HOME cannot resolve any config path under
+    # the operator's real home. Before isolation the scan reads exactly those files.
+    for f in findings:
+        assert not str(f.get("path", "")).startswith(real_home), (
+            f"doctor_cli read the operator's REAL home config: {f.get('path')}"
+        )
+    # And an empty isolated home leaves every client unconfigured.
+    assert {f["kind"] for f in findings} == {"config-missing"}, (
+        f"expected only config-missing in an isolated home, got {[f.get('path') for f in findings]}"
+    )
