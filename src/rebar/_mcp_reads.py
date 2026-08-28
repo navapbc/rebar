@@ -233,6 +233,10 @@ def _discovery_rows(rows, *, full: bool) -> list[dict]:
     :func:`~rebar._engine_support.reads.lean_projection`. That is what keeps the two
     discovery surfaces from returning different shapes for the same rows
     (story 98b8-5f08-1569-45cc).
+
+    The payload bound is applied by the CALLER, after ``TicketStateOut.model_validate``,
+    because the budget must be measured on the validated rows the client actually
+    receives -- see :func:`rebar._mcp_budget._wire_bytes`.
     """
     from rebar._engine_support.reads import lean_projection
 
@@ -244,6 +248,7 @@ def register_read_tools(mcp, ctx) -> None:
     _readonly = partial(_context_gate, ctx, "readonly")
     _allow_jira_sync = partial(_context_gate, ctx, "allow_jira_sync")
     _cap_workflow_payload = ctx.cap_workflow_payload
+    _bound_list_payload = ctx.bound_list_payload
     MODE_CAPS = ctx.MODE_CAPS
     Mode = ctx.Mode
 
@@ -326,26 +331,34 @@ def register_read_tools(mcp, ctx) -> None:
         signature fields alone are ~88% of a list's bytes. Pass ``full=True`` for the
         complete ticket shape (or use ``show_ticket`` for a single ticket, which is
         unchanged and still carries every field).
+
+        **Bounded.** A result over the MCP response budget is REFUSED with a structured
+        ``response_too_large`` error naming the match count, the size, and the filters
+        to narrow with — never a silently shortened list, and never a bare transport
+        close (bug 494b-2dd3-e9d3-4fb0).
         """
         _shadow("mcp.read.list_tickets")
-        return [
-            TicketStateOut.model_validate(t)
-            for t in rebar.list_tickets(
-                status=status,
-                ticket_type=ticket_type,
-                priority=priority,
-                parent=parent,
-                has_tag=has_tag,
-                without_tag=without_tag,
-                include_archived=include_archived,
-                exclude_deleted=exclude_deleted,
-                min_children=min_children,
-                blocking_state=blocking_state,
-                with_children_count=with_children_count,
-                sort=sort,
-                full=full,
-            )
-        ]
+        return _bound_list_payload(
+            [
+                TicketStateOut.model_validate(t)
+                for t in rebar.list_tickets(
+                    status=status,
+                    ticket_type=ticket_type,
+                    priority=priority,
+                    parent=parent,
+                    has_tag=has_tag,
+                    without_tag=without_tag,
+                    include_archived=include_archived,
+                    exclude_deleted=exclude_deleted,
+                    min_children=min_children,
+                    blocking_state=blocking_state,
+                    with_children_count=with_children_count,
+                    sort=sort,
+                    full=full,
+                )
+            ],
+            tool="list_tickets",
+        )
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def ticket_deps(ticket_id: str) -> DepsGraphOut:
@@ -386,12 +399,18 @@ def register_read_tools(mcp, ctx) -> None:
         signature material a caller choosing a ticket never reads. Migration: pass
         ``full=True``, or read the single ticket with ``show_ticket``, which is
         unchanged. See ``docs/release-notes.md``.
+
+        **Bounded**, like ``list_tickets``. Its refusal names ``next_batch(epic_id)``
+        rather than filters, because this tool accepts none (bug 494b-2dd3-e9d3-4fb0).
         """
         _shadow("mcp.read.ready_tickets")
-        return [
-            TicketStateOut.model_validate(t)
-            for t in _discovery_rows(rebar.ready(sort=sort), full=full)
-        ]
+        return _bound_list_payload(
+            [
+                TicketStateOut.model_validate(t)
+                for t in _discovery_rows(rebar.ready(sort=sort), full=full)
+            ],
+            tool="ready_tickets",
+        )
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def next_batch(epic_id: str) -> NextBatchOut:
@@ -415,19 +434,29 @@ def register_read_tools(mcp, ctx) -> None:
         accepts ``<``/``<=``/``>``/``>=`` and ``n..m`` ranges) and ``-``/``not:``
         negation; an unknown ``field:`` degrades to a literal substring. ``sort``
         orders by ``priority|created|updated|id|status`` (``-`` prefix = descending;
-        unset values last)."""
+        unset values last).
+
+        **Bounded** — the word in the first line is now enforced rather than asserted. A
+        result over the MCP response budget is REFUSED with a structured
+        ``response_too_large`` error naming the match count, the size, and how to narrow;
+        ``search`` rows are already projected by ``project_search_result``, so an ordinary
+        query is far under budget, but an unfiltered one was previously as unbounded as
+        ``list_tickets`` (bug 494b-2dd3-e9d3-4fb0)."""
         _shadow("mcp.read.search")
-        return [
-            SearchResultOut.model_validate(t)
-            for t in rebar.search(
-                query,
-                status=status,
-                ticket_type=ticket_type,
-                has_tag=has_tag,
-                include_archived=include_archived,
-                sort=sort,
-            )
-        ]
+        return _bound_list_payload(
+            [
+                SearchResultOut.model_validate(t)
+                for t in rebar.search(
+                    query,
+                    status=status,
+                    ticket_type=ticket_type,
+                    has_tag=has_tag,
+                    include_archived=include_archived,
+                    sort=sort,
+                )
+            ],
+            tool="search",
+        )
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def recent_session_logs(limit: int = 5) -> list[TicketStateOut]:

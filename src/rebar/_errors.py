@@ -63,6 +63,7 @@ KNOWN_ERROR_CODES: frozenset[str] = frozenset(
         "invalid_input",
         "config_unreadable",
         "config_insecure_url",
+        "response_too_large",
         "command_failed",
     }
 )
