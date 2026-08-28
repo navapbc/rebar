@@ -446,3 +446,59 @@ def test_recover_merge_abort_clears_merge_state_before_touching_files(
     assert calls.index(("merge", "--abort")) < calls.index(("quarantine",)), (
         "merge --abort must run before any file is relocated"
     )
+
+
+def _tracker_with_origin(tmp_path: Path) -> tuple[Path, str]:
+    """A tracker cloned from an origin that has since advanced, so `reconverge` has a real
+    `origin/tickets` ref to fetch and would proceed to the locked merge. Returns
+    (tracker, origin_sha)."""
+    origin = tmp_path / "origin"
+    tracker = tmp_path / "tracker"
+    _new_tickets_repo(origin)
+    _commit_event(
+        origin,
+        "0000-base-0000-0000",
+        "1700000000000000000-0000-base-0000-0000-CREATE.json",
+        '{"e":"base"}',
+    )
+    subprocess.run(["git", "clone", "-q", "-b", "tickets", str(origin), str(tracker)], check=True)
+    _git(tracker, "config", "user.email", "t@t")
+    _git(tracker, "config", "user.name", "t")
+    origin_sha = _commit_event(
+        origin,
+        "1111-remote-1111-1111",
+        "1700000000000000000-1111-remote-1111-1111-CREATE.json",
+        '{"e":"remote"}',
+    )
+    return tracker, origin_sha
+
+
+def test_reconverge_refuses_a_stranded_merge_marker_after_lock_acquisition(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A genuinely stranded `MERGE_HEAD` (no lock holder) must still block the reset/merge
+    and direct the operator to `rebar fsck-recover`. After consensual-hollow-drake moved
+    recovery-state classification under the write lock, this refusal comes from the in-lock
+    guard in `_do_reconverge`; it must not be lost with the removed pre-lock early-out."""
+    import logging as _logging
+
+    tracker, origin_sha = _tracker_with_origin(tmp_path)
+    local_before = _git(tracker, "rev-parse", "HEAD").stdout.strip()
+
+    # A stranded merge marker: no process owns the write lock, yet MERGE_HEAD lingers.
+    (tracker / ".git" / "MERGE_HEAD").write_text(f"{origin_sha}\n", encoding="utf-8")
+    assert (tracker / ".git" / "MERGE_HEAD").exists()
+
+    with caplog.at_level(_logging.WARNING, logger="rebar._store.sync"):
+        sync.reconverge(tracker)
+
+    # Refusal: the operator is directed to fsck-recover ...
+    assert any(
+        "recovery state" in r.message and "fsck-recover" in r.message for r in caplog.records
+    ), [r.message for r in caplog.records]
+    # ... and nothing was mutated: HEAD unchanged, origin's commit NOT merged, marker kept.
+    assert _git(tracker, "rev-parse", "HEAD").stdout.strip() == local_before
+    assert _git(tracker, "merge-base", "--is-ancestor", origin_sha, "HEAD").returncode != 0, (
+        "a stranded-merge refusal must not merge origin's commit"
+    )
+    assert (tracker / ".git" / "MERGE_HEAD").exists(), "the stranded marker must be preserved"
