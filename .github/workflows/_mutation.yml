@@ -57,9 +57,11 @@ jobs:
         with:
           enable-cache: true
       # bubblewrap is the Linux sandbox the mutation gate wraps its test subprocesses
-      # in (ticket e668-b496-e264-4283). Without it the gate fails CLOSED — by design,
-      # since a silent unsandboxed run is indistinguishable from a sandboxed one — so
-      # the runner must provide it. macOS needs no install: sandbox-exec ships with the OS.
+      # in (ticket e668-b496-e264-4283). It is installed here, but NOTE WHAT ACTUALLY
+      # HAPPENS on this runner: GitHub's ubuntu images deny unprivileged CLONE_NEWUSER,
+      # so bwrap cannot create a namespace, the functional probe reports no mechanism,
+      # and the gate does NOT get a sandbox. macOS needs no install (sandbox-exec ships
+      # with the OS), but this job is Linux-only.
       - name: Install bubblewrap (Linux mutation sandbox)
         run: |
           sudo apt-get update
@@ -120,9 +122,11 @@ jobs:
         with:
           enable-cache: true
       # bubblewrap is the Linux sandbox the mutation gate wraps its test subprocesses
-      # in (ticket e668-b496-e264-4283). Without it the gate fails CLOSED — by design,
-      # since a silent unsandboxed run is indistinguishable from a sandboxed one — so
-      # the runner must provide it. macOS needs no install: sandbox-exec ships with the OS.
+      # in (ticket e668-b496-e264-4283). It is installed here, but NOTE WHAT ACTUALLY
+      # HAPPENS on this runner: GitHub's ubuntu images deny unprivileged CLONE_NEWUSER,
+      # so bwrap cannot create a namespace, the functional probe reports no mechanism,
+      # and the gate does NOT get a sandbox. macOS needs no install (sandbox-exec ships
+      # with the OS), but this job is Linux-only.
       - name: Install bubblewrap (Linux mutation sandbox)
         run: |
           sudo apt-get update
@@ -130,9 +134,21 @@ jobs:
           bwrap --version
       - name: Install the pinned development environment
         run: uv sync --locked --extra dev
+      # The gate therefore runs UNSANDBOXED on this lane, and now says so OUT LOUD.
+      # Ambient `CI` used to waive the sandbox implicitly; it no longer does
+      # (`f11d-f8fd`), because a workstation with `CI=1` exported got that same silent
+      # waiver — the configuration the 2026-08-26 `rm -rf /*` landed in. The waiver is
+      # declared here instead, in a reviewed file, so the exposure is visible rather
+      # than inherited from the environment.
+      #
+      # It is accepted ONLY because this runner is ephemeral and destroyed after the
+      # job. It would not be acceptable on a workstation, and the abort there is the
+      # whole point. Giving this lane a real sandbox — as the enforcement lane has since
+      # `0d22-f664` — is the better end state and removes the need for this line.
       - name: Run mutation shard
         env:
           MATRIX_SHARD: ${{ matrix.shard }}
+          REBAR_MUTATION_ALLOW_UNSANDBOXED: "1"
         run: |
           # predates-gate-ok: transitively guarded — this job runs only when the selector set
           # has-shards=true, and the selector's own `-f scripts/mutation_gate.py` guard forces
