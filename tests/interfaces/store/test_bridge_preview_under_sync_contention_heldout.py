@@ -14,6 +14,41 @@ from sync_contention_harness import _rebar_cli
 
 from rebar._store import lock as tracker_lock
 
+# The reader's wall-clock bound IS the lock-freedom oracle, so it must sit strictly between
+# two measured anchors. Below: a reader that never touches the writer lock. Above: one that
+# waits for it, which cannot finish before the holder's release deadline.
+#
+#   fast path      ~1.2s  (measured with the writer locks held, on a box at load 9.9)
+#   blocking       ~60s   (_HOLD_SECONDS — the holder only releases after this)
+#
+# The original bound of 15s gave ~12x headroom over the fast path while the signature it must
+# distinguish from is ~50x away, so ambient slowness on a constrained CI runner crossed it long
+# before anything resembling a block. That is a false "blocked" verdict, not a caught defect.
+# Ticket dire-negative-bunting.
+_HOLD_SECONDS = 60
+_OBSERVED_FAST_PATH_S = 1.5
+_MIN_HEADROOM_FACTOR = 20
+_PREVIEW_TIMEOUT_S = 45
+
+
+def test_the_preview_bound_discriminates_blocking_from_ambient_slowness() -> None:
+    """The bound must catch a blocked reader AND tolerate a slow machine.
+
+    Without the lower bound, a loaded CI runner fails this suite for reasons unrelated to lock
+    behaviour, which erodes CI as a regression oracle (AGENTS.md). Without the upper bound, a
+    reader that genuinely waits on the writer lock would slip through and the oracle would be
+    worthless. Both directions are load-bearing, so both are asserted.
+    """
+    assert _PREVIEW_TIMEOUT_S < _HOLD_SECONDS, (
+        f"bound {_PREVIEW_TIMEOUT_S}s must stay under the {_HOLD_SECONDS}s blocking signature, "
+        "or a reader that waits on the writer lock would pass"
+    )
+    floor = _MIN_HEADROOM_FACTOR * _OBSERVED_FAST_PATH_S
+    assert _PREVIEW_TIMEOUT_S >= floor, (
+        f"bound {_PREVIEW_TIMEOUT_S}s gives too little headroom over the ~{_OBSERVED_FAST_PATH_S}s "
+        f"fast path; needs >= {floor}s so ambient slowness is not misreported as lock blocking"
+    )
+
 
 def _load_reconcile_lock():
     """Load the engine lock without claiming the test package's dotted name."""
@@ -71,7 +106,9 @@ def test_preview_is_complete_while_sync_locks_are_held(
     try:
         assert acquired.wait(timeout=10), "could not pre-acquire tracker write lock"
         before_oid = reconcile_lock.check_pass_lock(repo)
-        completed = _rebar_cli("bridge", "preview", repo=repo, push="off", timeout=15)
+        completed = _rebar_cli(
+            "bridge", "preview", repo=repo, push="off", timeout=_PREVIEW_TIMEOUT_S
+        )
 
         assert completed.returncode == 0, completed.stderr
         payload = json.loads(completed.stdout)
