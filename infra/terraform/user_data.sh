@@ -88,9 +88,15 @@ chmod 600 "$ENV_FILE"
 
 # param name -> env var key. (Brace expansions below are escaped as $${...}
 # because they survive templatefile to run in bash.)
-# PARAMS is consumed below as $${!PARAMS[@]} / $${PARAMS[$name]}, which templatefile
-# reduces to ${!PARAMS[@]} / ${PARAMS[$name]}. ShellCheck reads the escaped pre-render
-# form and so cannot see the use.
+# PARAMS is consumed below as $${!PARAMS[@]} / $${PARAMS[$name]}; templatefile turns
+# each $$ into a literal $, so bash receives a real brace expansion.
+# Do NOT spell the post-render form out in prose here. templatefile() interpolates the
+# WHOLE file -- comments included, since # means nothing to it -- so an unescaped brace
+# expansion in a COMMENT is parsed as HCL and breaks every terraform operation in the
+# repo, not just this file (bug dd30-f10d-69f3-4c36; -target does not help, because
+# terraform evaluates the whole configuration first). Only $${...} is safe in this file;
+# the sole exception is ${data_volume_id}, which main.tf actually declares.
+# ShellCheck reads the escaped pre-render form and so cannot see the use.
 # shellcheck disable=SC2034
 declare -A PARAMS=(
   ["/rebar/prod/gerrit-admin-password"]="GERRIT_ADMIN_PASSWORD"
@@ -108,7 +114,9 @@ declare -A PARAMS=(
   # OAuth params before OAuth is even in use.
 )
 
-# After rendering, "$${!PARAMS[@]}" becomes "${!PARAMS[@]}" — one word per key.
+# "$${!PARAMS[@]}" renders to a real bash key expansion: one word PER KEY, not one word
+# in total. (Writing the rendered form out here would itself be an unescaped
+# interpolation -- see the note above the declaration.)
 # ShellCheck sees the pre-render literal and wrongly reports a single-iteration loop.
 # shellcheck disable=SC2066
 for name in "$${!PARAMS[@]}"; do
