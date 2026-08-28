@@ -163,3 +163,52 @@ def _isolated_mcp_client_home(_empty_mcp_client_home, monkeypatch):
         return original(home=_empty_mcp_client_home if home is None else home, env=env)
 
     monkeypatch.setattr(doctor_mcp_client, "scan_mcp_clients", _scan_isolated)
+
+
+@pytest.fixture(scope="session")
+def _isolated_aws_home(tmp_path_factory):
+    """One injected directory standing in for an unconfigured operator ``~/.aws``.
+
+    Holds an (empty) ``config`` and an (empty) ``credentials`` file so a boto3
+    Session pointed at them resolves NO named profiles — the shape of a machine
+    that has never configured AWS credentials.
+    """
+    aws_home = tmp_path_factory.mktemp("aws-home")
+    (aws_home / "config").write_text("")
+    (aws_home / "credentials").write_text("")
+    return aws_home
+
+
+@pytest.fixture(autouse=True)
+def _isolated_aws_provider_credentials(_isolated_aws_home, monkeypatch):
+    """Unit tests must never read the operator's REAL AWS credential/config files.
+
+    The production Bedrock provider path (``rebar.llm.bedrock_model.build_bedrock_provider``)
+    constructs ``boto3.session.Session(region_name=region)``. boto3 Session construction
+    eagerly resolves the ambient ``AWS_PROFILE`` through botocore, reading the operator's
+    REAL ``~/.aws/config`` (the default ``AWS_CONFIG_FILE`` location). Tests inject dummy
+    ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` and a region, but never isolate the
+    profile/config-FILE read. So on a dev box with ``AWS_PROFILE`` set + a matching profile
+    in ``~/.aws/config`` the Session builds, while under an empty/arbitrary ``$HOME`` the
+    named profile is absent and Session construction raises
+    ``botocore.exceptions.ProfileNotFound`` BEFORE the request boundary — so the outbound
+    payload is never captured and the provider-parity tests fail with "no outbound request
+    captured for 'bedrock:...'" (bug 864e-0fe2-820a-41ac, unhelpful-quartzitic-cardinal).
+
+    Point botocore at the injected empty ``config``/``credentials`` files and drop the
+    ambient profile selectors for the WHOLE unit tier, so every Bedrock-provider-driven
+    test — present or future — resolves an unconfigured AWS environment regardless of the
+    operator's real ``~/.aws`` or ``AWS_PROFILE``. This isolates ONLY the AWS
+    credential/config read: ``$HOME`` itself is left alone, so git identity and every other
+    home-derived resource other unit tests legitimately rely on are untouched. It is a
+    DIFFERENT seam from ``_isolated_mcp_client_home`` (which redirects the MCP-scanner's
+    default home, not ``$HOME`` either) and sets NO region env var, so region-resolution
+    tests are unaffected. This is test-only; production ``build_bedrock_provider`` still
+    reads the real AWS environment. A test that specifically needs different AWS
+    profile/config env re-sets it in its own body (a function-scoped ``monkeypatch``
+    applied after this autouse fixture wins — same as the existing fixtures).
+    """
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(_isolated_aws_home / "config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(_isolated_aws_home / "credentials"))
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_PROFILE", raising=False)
