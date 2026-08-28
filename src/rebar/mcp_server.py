@@ -693,10 +693,17 @@ def build_server(cfg=None):
     install_js_safe_guard(mcp)
 
     # Registration order matches the original in-line definition order (reads, then
-    # the always-registered LLM tools, then the READONLY-gated writes).
-    register_read_tools(mcp, ctx)
+    # the always-registered LLM tools, then the READONLY-gated writes). The read and
+    # write surfaces carry the cross-session advisory as a response field, so register
+    # them through a proxy that runs each tool under suppress_cross_session_warning():
+    # a scoped guard makes the field the single advisory without a process-global
+    # warnings filter (which would silence CrossSessionWarning for other import-rebar
+    # callers sharing this process).
+    from rebar._lib_warn import suppress_library_double_advisory
+
+    register_read_tools(suppress_library_double_advisory(mcp), ctx)
     register_llm_tools(mcp, ctx)
-    register_write_tools(mcp, ctx)
+    register_write_tools(suppress_library_double_advisory(mcp), ctx)
 
     # Box-facing health/gauge/grace (ADR deft-evolutive-mosasaur): expose /health with
     # the certified-op in-flight gauge and instrument the LLM tools. Harmless for stdio

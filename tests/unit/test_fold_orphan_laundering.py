@@ -214,7 +214,11 @@ def test_first_fold_excludes_nothing(store: Path) -> None:
     repo = store
     tid = _seed(repo, "first fold", comments=2)
     tdir = _tdir(repo, tid)
-    live_before = sorted(p.name for p in tdir.glob("*.json") if not p.name.endswith("-SYNC.json"))
+    live_before = sorted(
+        p.name
+        for p in tdir.glob("*.json")
+        if not p.name.endswith("-SYNC.json") and p.name != ".cache.json"
+    )
 
     assert _fold(repo, tid) == 0
 
@@ -237,7 +241,9 @@ def test_healthy_refold_excludes_nothing(store: Path) -> None:
     post_uuids = {
         json.loads(p.read_text(encoding="utf-8"))["uuid"]
         for p in _tdir(repo, tid).glob("*.json")
-        if not p.name.endswith("-SNAPSHOT.json") and not p.name.endswith("-SYNC.json")
+        if not p.name.endswith("-SNAPSHOT.json")
+        and not p.name.endswith("-SYNC.json")
+        and p.name != ".cache.json"
     }
 
     assert _fold(repo, tid) == 0

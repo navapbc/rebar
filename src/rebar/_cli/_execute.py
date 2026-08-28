@@ -51,10 +51,18 @@ def execute(name: str, rest: list[str]) -> int:
     if route is None or route.handler is None:
         raise RuntimeError(f"rebar: {name!r} has no executable route")
     _apply_init(route.init, rest)
-    _maybe_warn_cross_session(name, rest)
     module, _, attr = route.handler.partition(":")
     fn: _Handler = getattr(importlib.import_module(module), attr)
-    return _invoke(route, name, fn, rest)
+    from rebar._lib_warn import suppress_cross_session_warning
+
+    # The CLI owns the single cross-session advisory for its surface: it writes its own
+    # ``WARN:`` line for allowlisted commands. Hold the emit guard across BOTH detection
+    # (the detector reads the ticket through the instrumented library ``show_ticket``)
+    # and the handler dispatch (which calls instrumented library mutators), so the stdlib
+    # ``CrossSessionWarning`` never doubles the CLI's own line.
+    with suppress_cross_session_warning():
+        _maybe_warn_cross_session(name, rest)
+        return _invoke(route, name, fn, rest)
 
 
 def _maybe_warn_cross_session(name: str, rest: list[str]) -> None:
