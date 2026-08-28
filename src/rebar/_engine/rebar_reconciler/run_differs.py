@@ -205,6 +205,38 @@ def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) ->
         return None
 
 
+def _scoped_selection_ids(selection_ids: set[str], typed_mutations: list) -> list[str]:
+    """The selection id set the shadow ticket planner scopes against, expanded to include
+    the BOUND JIRA KEYS of the selected local ids — mirroring the legacy
+    ``reconcile_helpers._build_filter_target_set`` (LOCAL IDS ∪ bound JIRA KEYS).
+
+    A bound issue's outbound update/delete carries ``target = jira_key`` (see the OM→typed
+    conversion below), while ``--only`` / ``--except`` select by LOCAL id. Without this
+    expansion ``ticket_planner._scope_excluded`` compares a jira-key target against a
+    local-id-only set and wrongly ``scope_deferred``s the in-scope mutation, so the live
+    coordinator+fuse reroute drops the write (bug af1b). The bound keys are read purely
+    from the mutations' own provenance — no ``binding_store`` I/O — so this shadow layer
+    stays side-effect-free. For ``--except`` the same expansion is correct: an excepted
+    ticket's update targets its jira key, which must therefore also be in the excluded set.
+    """
+    selected = set(selection_ids)
+    scoped = set(selected)
+    if not selected:
+        return sorted(scoped)
+    for m in typed_mutations:
+        prov = getattr(m, "provenance", None) or {}
+        local_id = prov.get("local_id") if isinstance(prov, Mapping) else None
+        if local_id not in selected:
+            continue
+        jira_key = prov.get("jira_key") if isinstance(prov, Mapping) else None
+        if jira_key:
+            scoped.add(jira_key)
+        target = getattr(m, "target", None)
+        if target:
+            scoped.add(target)
+    return sorted(scoped)
+
+
 def run_differs(ctx: Any) -> None:
     """Diff phase: invariants + the legacy snapshot diff +
     the outbound differ (with OM->Mutation conversion) + the binding-aware inbound
@@ -298,7 +330,9 @@ def run_differs(ctx: Any) -> None:
         mode=mode,
         selection={
             "kind": getattr(ctx, "selection_kind", None),
-            "ids": sorted(getattr(ctx, "selection_ids", None) or []),
+            "ids": _scoped_selection_ids(
+                set(getattr(ctx, "selection_ids", None) or []), typed_mutations
+            ),
         },
         limits={"max_changes": getattr(ctx, "max_changes", None)},
         mutations=typed_mutations,
