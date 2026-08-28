@@ -248,6 +248,14 @@ ensure.hint_interval_secs = 86400    # min seconds between write-path "store is 
                                       # process (rate-limit; env REBAR_ENSURE_HINT_INTERVAL_SECS). Min 0.
 ensure.hint_enabled       = true     # kill-switch: false silences the nudge entirely
                                       # (env REBAR_ENSURE_HINT_ENABLED)
+
+# cross-session ticket-operation warning (epic concave-pale-sheldrake)
+warnings.cross_session = true        # emit a warning when this session mutates a ticket that
+                                      # another live session holds `in_progress` (matched by the
+                                      # claim's session id, not the assignee — two sessions may
+                                      # assign the same user). Default-on; set false to silence.
+                                      # Revisit this default if it proves noisy (env
+                                      # REBAR_WARNINGS_CROSS_SESSION).
 ```
 
 The default description limit is calibrated just above the historical p99 (7,500 characters):
