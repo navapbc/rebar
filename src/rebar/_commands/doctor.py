@@ -45,7 +45,6 @@ an edge.
 
 from __future__ import annotations
 
-import json
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -54,6 +53,7 @@ from rebar._commands import doctor_locks, doctor_mapping, doctor_mcp_client
 from rebar._commands._repair_pause import owned_repair_pause
 from rebar._commands._seam import CommandError, tracker_dir
 from rebar._engine_support.output import OutputFormatError, parse_output
+from rebar._mcp_errors import js_safe_dumps
 from rebar._store import lock as _store_lock
 from rebar._store.gitutil import run_git
 from rebar.graph._hierarchy import resolve_hierarchy_link
@@ -506,7 +506,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
 
     if fmt == "json":
         print(
-            json.dumps(
+            js_safe_dumps(
                 {
                     "findings": findings,
                     "finding_count": len(findings),

@@ -24,11 +24,11 @@ tests must monkeypatch it there, not here — see those modules' docstrings and
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import time
 
 from rebar import config
+from rebar._mcp_errors import js_safe_dumps
 from rebar._opcert_signing import (
     OpcertKeyUnavailable,
     ensure_opcert_key,
@@ -370,7 +370,7 @@ def sign_cli(argv: list[str]) -> int:
         sys.stderr.write(exc.message + "\n")
         return exc.returncode
     if fmt == "json":
-        sys.stdout.write(json.dumps(record, ensure_ascii=False) + "\n")
+        sys.stdout.write(js_safe_dumps(record, ensure_ascii=False) + "\n")
     elif record.get("envelope"):
         # Op-cert record (story 8d8e): render the DSSE envelope digest + principal (there is no
         # HMAC ``signature`` field to slice — the legacy render would KeyError).
@@ -440,7 +440,7 @@ def verify_signature_cli(argv: list[str]) -> int:
     except SigningError as exc:
         if fmt == "json":
             sys.stdout.write(
-                json.dumps(
+                js_safe_dumps(
                     error_envelope("ticket_not_found", pos[0], exc.message, exc.returncode),
                     ensure_ascii=False,
                 )
@@ -449,7 +449,7 @@ def verify_signature_cli(argv: list[str]) -> int:
         sys.stderr.write(exc.message + "\n")
         return exc.returncode
     if fmt == "json":
-        sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
+        sys.stdout.write(js_safe_dumps(result, ensure_ascii=False) + "\n")
     else:
         label = f"SIGNATURE[{kind}]" if kind else "SIGNATURE"
         sys.stdout.write(f"{label}: {result['verdict']} — {result['reason']}\n")

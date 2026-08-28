@@ -8,7 +8,6 @@ delegates here for backward compatibility.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from typing import Any
@@ -27,6 +26,7 @@ from rebar._engine_support.reads import (
     tracker_dir,
 )
 from rebar._engine_support.ticket_query import TicketQuery
+from rebar._mcp_errors import js_safe_dumps
 from rebar.reducer.llm_format import to_llm
 from rebar.reducer.search import search_result_to_llm
 
@@ -171,12 +171,12 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
             # show emits a parseable JSON error to stdout AND a free-form stderr
             # line (preserving the historical contract callers depend on).
             print(
-                json.dumps(
+                js_safe_dumps(
                     error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1),
                     ensure_ascii=False,
                 )
                 if "not found" in exc.message
-                else json.dumps(
+                else js_safe_dumps(
                     error_envelope("show_failed", raw_id, exc.message, 1), ensure_ascii=False
                 )
             )
@@ -186,7 +186,7 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
         if fmt == "llm":
             # The `--output llm` arm is a machine format with a show↔list parity contract
             # (test_llm_parity_show_vs_list) — do NOT add the overlap flag here.
-            print(json.dumps(to_llm(state), ensure_ascii=False, separators=(",", ":")))
+            print(js_safe_dumps(to_llm(state), ensure_ascii=False, separators=(",", ":")))
         else:
             # Cross-ticket overlap (epic only-crave-art): render the digest freshness flag in
             # the human `show` output ONLY. The flag is added to the dict THIS arm prints — it
@@ -204,7 +204,7 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
             from rebar.audit.read import plan_review_health
 
             out["plan_review_health"] = plan_review_health(state)
-            print(json.dumps(out, indent=2, ensure_ascii=False))
+            print(js_safe_dumps(out, indent=2, ensure_ascii=False))
             unresolved = sum(
                 1 for a in state.get("bridge_alerts", []) if not a.get("resolved", False)
             )
@@ -344,9 +344,9 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     results = list_states(tracker, TicketQuery(**opts))
     if fmt == "llm":
         for t in results:
-            print(json.dumps(to_llm(t), ensure_ascii=False, separators=(",", ":")))
+            print(js_safe_dumps(to_llm(t), ensure_ascii=False, separators=(",", ":")))
     else:
-        print(json.dumps(results, ensure_ascii=False))
+        print(js_safe_dumps(results, ensure_ascii=False))
         warning = _bridge_alert_warning(results)
         if warning:
             print(warning, file=sys.stderr)
@@ -388,9 +388,9 @@ def _cmd_session_logs(argv: list[str], tracker: str) -> int:
     results = recent_session_logs_state(tracker, limit=limit)
     if fmt == "llm":
         for t in results:
-            print(json.dumps(to_llm(t), ensure_ascii=False, separators=(",", ":")))
+            print(js_safe_dumps(to_llm(t), ensure_ascii=False, separators=(",", ":")))
     else:
-        print(json.dumps(results, ensure_ascii=False))
+        print(js_safe_dumps(results, ensure_ascii=False))
     return 0
 
 
@@ -413,10 +413,10 @@ def _cmd_deps(argv: list[str], tracker: str) -> int:
         # deps is a reader (always-JSON): emit a machine-readable error_envelope on
         # stdout (like show) so callers' json.load succeeds, plus prose on stderr.
         code = "ticket_not_found" if "not found" in exc.message else "deps_failed"
-        print(json.dumps(error_envelope(code, ns.ticket_id, exc.message, 1), ensure_ascii=False))
+        print(js_safe_dumps(error_envelope(code, ns.ticket_id, exc.message, 1), ensure_ascii=False))
         print(f"Error: {exc.message}", file=sys.stderr)
         return 1
-    print(json.dumps(result, ensure_ascii=False))
+    print(js_safe_dumps(result, ensure_ascii=False))
     return 0
 
 
@@ -469,10 +469,10 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
         return 2
     states = ready_states(tracker, epic=epic, sort=sort)
     if fmt == "json":
-        print(json.dumps(states, ensure_ascii=False))
+        print(js_safe_dumps(states, ensure_ascii=False))
     elif fmt == "llm":
         for s in states:
-            print(json.dumps(to_llm(s), ensure_ascii=False))
+            print(js_safe_dumps(to_llm(s), ensure_ascii=False))
     else:  # text: one id per line
         for s in states:
             tid = s.get("ticket_id")
@@ -485,10 +485,12 @@ def _print_search_results(results: list[dict], fmt: str) -> None:
     if fmt == "llm":
         for result in results:
             print(
-                json.dumps(search_result_to_llm(result), ensure_ascii=False, separators=(",", ":"))
+                js_safe_dumps(
+                    search_result_to_llm(result), ensure_ascii=False, separators=(",", ":")
+                )
             )
         return
-    print(json.dumps(results, ensure_ascii=False))
+    print(js_safe_dumps(results, ensure_ascii=False))
 
 
 def _cmd_search(argv: list[str], tracker: str) -> int:

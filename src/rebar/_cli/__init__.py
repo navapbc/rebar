@@ -20,6 +20,7 @@ import sys
 
 from rebar._cli import _help, _help_route, _registry
 from rebar._cli._init import ensure_initialized, ensure_store_mounted_best_effort
+from rebar._mcp_errors import js_safe_dumps
 
 # The registry route table is the SOLE routing authority; the router derives the four
 # policy sets it still consults at runtime from it (RP-05 S6 cutover). ``_registry``
@@ -265,8 +266,6 @@ def _grounding_info(argv: list[str]) -> int:
     Repo-independent (no store, no auto-init). The ``report`` profile: a human
     summary by default, the ``grounding_info`` schema under ``--output json``.
     """
-    import json as _json
-
     import rebar
     from rebar._engine_support.output import OutputFormatError, parse_output
 
@@ -286,7 +285,7 @@ def _grounding_info(argv: list[str]) -> int:
 
     info = rebar.grounding_info()
     if fmt == "json":
-        sys.stdout.write(_json.dumps(info, ensure_ascii=False) + "\n")
+        sys.stdout.write(js_safe_dumps(info, ensure_ascii=False) + "\n")
         return 0
 
     lines = [

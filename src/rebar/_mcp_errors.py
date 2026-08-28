@@ -16,7 +16,7 @@ from __future__ import annotations
 import functools
 import inspect
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 try:
     from pydantic import BaseModel
@@ -197,6 +197,31 @@ def js_safe_result(value):
             return value
         return js_safe_result(value.model_dump())
     return value
+
+
+def js_safe_dumps(value: Any, **kwargs: Any) -> str:
+    """``json.dumps`` with every JS-unsafe integer replaced by its exact decimal string.
+
+    The SINGLE choke point for CLI ``--output json`` (and ``--output llm``) store-data
+    serialization (bug unhelping-creviced-rhino / e127-a3ad-895a-4a2f, the CLI sibling of
+    the MCP fix 6fe7). It runs :func:`js_safe_result` over ``value`` FIRST, so a 19-digit
+    nanosecond timestamp (``created_at`` / ``updated_at`` / ``signed_at`` / ``timestamp``)
+    goes on the wire as its exact decimal string instead of a bare ``>2**53`` JSON number
+    that a float64 consumer (jq/Node/Ruby) silently rounds, or that a BigInt consumer
+    (GitHub Copilot CLI) then cannot re-serialize (``TypeError: Do not know how to serialize
+    a BigInt``). ``int(wire) == stored`` still holds — the conversion is a lossless retype,
+    not a rounding.
+
+    ``**kwargs`` are forwarded to ``json.dumps`` unchanged (``indent``, ``separators``,
+    ``ensure_ascii``, ``sort_keys``, ...), so every emitter keeps its exact byte format;
+    only integers OUTSIDE the safe range change shape.
+
+    Applied to the PLAIN dict/list the CLI emitter already holds — there is no pydantic
+    ``model_validate`` on the CLI path — so the decimal string is NOT re-coerced back to a
+    bare int. The declared-``int`` re-coercion caveat documented on :func:`js_safe_result`
+    is an MCP-output-model concern and does not arise here.
+    """
+    return json.dumps(js_safe_result(value), **kwargs)
 
 
 def install_js_safe_guard(mcp) -> None:

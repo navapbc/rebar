@@ -13,6 +13,7 @@ import sys
 
 from rebar._cli._init import ensure_initialized
 from rebar._cli._parser import ParseError, render_parse_error
+from rebar._mcp_errors import js_safe_dumps
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -163,7 +164,6 @@ def _workflow_show(args: argparse.Namespace) -> int:
 
 
 def _workflow_run(args: argparse.Namespace) -> int:
-    import json as _json
 
     import rebar
     from rebar.llm import errors as _werr
@@ -191,7 +191,7 @@ def _workflow_run(args: argparse.Namespace) -> int:
         return 1
 
     if args.output == "json":
-        sys.stdout.write(_json.dumps(res) + "\n")
+        sys.stdout.write(js_safe_dumps(res) + "\n")
     else:
         sys.stdout.write(f"run_id: {res['run_id']}\n")
         sys.stdout.write(f"status: {res['status']}\n")
@@ -203,7 +203,6 @@ def _workflow_run(args: argparse.Namespace) -> int:
 
 
 def _workflow_read(args: argparse.Namespace) -> int:
-    import json as _json
 
     import rebar
     from rebar.llm import errors as _werr
@@ -217,7 +216,7 @@ def _workflow_read(args: argparse.Namespace) -> int:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
     if args.output == "json":
-        sys.stdout.write(_json.dumps(res) + "\n")
+        sys.stdout.write(js_safe_dumps(res) + "\n")
     else:
         sys.stdout.write(f"run_id: {res['run_id']}  ({res.get('status')})\n")
         if args.cmd == "status":
@@ -225,7 +224,7 @@ def _workflow_read(args: argparse.Namespace) -> int:
                 sys.stdout.write(f"  - {sid}: {st}\n")
         else:
             sys.stdout.write(f"terminal_step: {res.get('terminal_step')}\n")
-            sys.stdout.write(f"terminal_output: {_json.dumps(res.get('terminal_output'))}\n")
+            sys.stdout.write(f"terminal_output: {js_safe_dumps(res.get('terminal_output'))}\n")
     return 0
 
 
@@ -268,7 +267,6 @@ def _workflow_new(args: argparse.Namespace) -> int:
 
 
 def _workflow_validate(args: argparse.Namespace) -> int:
-    import json as _json
 
     from rebar import config
     from rebar.llm.workflow import lint as _lint
@@ -297,7 +295,7 @@ def _workflow_validate(args: argparse.Namespace) -> int:
 
     if args.output == "json":
         sys.stdout.write(
-            _json.dumps(
+            js_safe_dumps(
                 {
                     "source": args.file,
                     "valid": valid,

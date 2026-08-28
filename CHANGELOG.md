@@ -12,6 +12,22 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): the CLI `--output json` surface now emits nanosecond timestamps as JSON
+  STRINGS.** The sibling of the MCP change below. `rebar … --output json` was emitting the 19-digit
+  `time.time_ns()` timestamps as bare JSON numbers, so float64 consumers (`jq`, Node `JSON.parse`,
+  Ruby) silently rounded them (`1787856371950409998` → `1787856371950410000`, a −42 ns drift) and
+  GitHub Copilot CLI failed with `TypeError: Do not know how to serialize a BigInt`. Any integer
+  outside the JS-safe range on the CLI `--output json` / `--output llm` surface is now emitted as its
+  exact decimal string, via the same `js_safe_dumps` choke point the MCP surface uses; a `make lint`
+  gate (`scripts/check_cli_json_js_safe.py`) prevents a future emitter from reintroducing a raw
+  `json.dumps`. Affected keys: `created_at`, `updated_at`, `last_reopened_at`, `source_created_at`,
+  comment `timestamp` / `source_created_at`, and `signed_at` on the sign / verify-signature
+  envelopes. This supersedes the "CLI `--output json` … still emit integers" note in the MCP entry
+  below. **Consumers must** parse these with an arbitrary-precision integer (`int(x)` in Python,
+  `BigInt(x)` in JavaScript) and accept both forms; consumers already doing so are unaffected. The
+  instant is unchanged and the conversion is lossless. See
+  [docs/release-notes.md](docs/release-notes.md).
+
 - **BREAKING (pre-1.0): the MCP server now emits nanosecond timestamps as JSON STRINGS.** Ticket
   timestamps are `time.time_ns()` values — 19 digits — and were going out as bare JSON numbers.
   RFC 8259 §6 only guarantees interoperability inside `[-(2**53)+1, (2**53)-1]`, and every MCP
@@ -19,7 +35,8 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   from GitHub Copilot CLI with `TypeError: Do not know how to serialize a BigInt`, while clients
   using a plain `JSON.parse` silently truncated the value instead of erroring. On the **MCP surface
   only**, an integer outside the JS-safe range is now emitted as its exact decimal string;
-  CLI `--output json` and the Python library still emit integers. Affected keys: `created_at`,
+  CLI `--output json` was unchanged at the time (the CLI has since been brought into line — see the
+  entry above) and the Python library still emits integers. Affected keys: `created_at`,
   `updated_at`, `last_reopened_at`, `source_created_at`, comment `timestamp` /
   `source_created_at`, and the **required** `signed_at` on `sign_result`,
   `verify_signature_result` and `plan_review_status` — retyping a required key is why this is

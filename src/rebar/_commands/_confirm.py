@@ -30,10 +30,10 @@ text confirmation is added on top — one stdout result per invocation.
 
 from __future__ import annotations
 
-import json
 from contextlib import contextmanager
 
 from rebar._engine_support.output import OutputFormatError, parse_output
+from rebar._mcp_errors import js_safe_dumps
 
 # Modes the global --output extraction accepts for the in-scope mutating verbs
 # (matches the "report" profile the legacy-JSON verbs already validate against).
@@ -109,7 +109,7 @@ def emit(outcome: str, subject: str, detail: str, line: str, *, extra: dict | No
         doc: dict = {"outcome": outcome, "subject": subject, "detail": detail}
         if extra:
             doc.update(extra)
-        print(json.dumps(doc, ensure_ascii=False))
+        print(js_safe_dumps(doc, ensure_ascii=False))
         return
     if not _state["quiet"]:
         print(line)

@@ -8,6 +8,43 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — nanosecond timestamps are STRINGS on the CLI `--output json` wire
+
+Bug `unhelping-creviced-rhino` (`e127-a3ad-895a-4a2f`), 2026-08-28. The CLI sibling of the MCP
+change below. `rebar … --output json` emitted `time.time_ns()` timestamps as bare 19-digit JSON
+numbers, exactly as the MCP server used to. RFC 8259 §6 guarantees that implementations "agree
+exactly on their numeric values" only inside `[-(2**53)+1, (2**53)-1]`, so a float64 consumer
+(`jq`, Node `JSON.parse`, Ruby) silently rounded them — the stored `1787856371950409998` reads
+back as `1787856371950410000`, a measured **−42 ns** drift — and GitHub Copilot CLI, which parses
+losslessly into a `BigInt`, died re-stringifying with `TypeError: Do not know how to serialize a
+BigInt`.
+
+**What changed.** On the CLI `--output json` surface, any integer outside the JS-safe range
+(`|n| > 2**53-1`) is now emitted as its exact decimal **string**, via the same
+`rebar._mcp_errors.js_safe_dumps` choke point the MCP surface already uses. Every CLI
+`--output json` (and `--output llm`) store-data emitter routes through it — `show`, `list`,
+`ready`, `search`, `session-logs`, `deps`, `sign`, `verify-signature`, and the rest — not only the
+timestamp verbs. A CI gate (`scripts/check_cli_json_js_safe.py`, wired into `make lint`) fails the
+build if a future CLI emitter serializes store data through a raw `json.dumps`, so a bare big-int
+cannot be reintroduced.
+
+**Which keys.** The nanosecond fields on the CLI read surface: `created_at`, `updated_at`,
+`last_reopened_at`, `source_created_at`, comment `timestamp` / `source_created_at`, and `signed_at`
+on the sign / verify-signature envelopes.
+
+**Why this is called out as BREAKING.** It supersedes the "CLI `--output json` … UNCHANGED" note in
+the MCP entry below: an integer field that could previously be read with a bare `Number()` /
+`JSON.parse` now arrives as a JSON string when it is out of JS-safe range. Consumers that already
+coerce with an arbitrary-precision integer — `int(x)` in Python, `BigInt(x)` in JavaScript — are
+unaffected, exactly as for the MCP change.
+
+**What a consumer must do.** Parse these fields as an arbitrary-precision integer and accept both
+the integer and string forms. Do **not** use `Number(x)` / bare `jq` numeric handling: binary64
+rounds silently, with no error.
+
+**Invariant.** The instant is unchanged and the conversion is lossless: the decimal digits are
+identical to the integer form, only the JSON type differs.
+
 ## BREAKING (pre-1.0) — nanosecond timestamps are STRINGS on the MCP wire
 
 Bug `unreal-milky-sloth` (`6fe7-956f-4901-45cf`), 2026-08-27. rebar's MCP server emitted
@@ -19,8 +56,9 @@ losslessly into a `BigInt`, failed outright with `TypeError: Do not know how to 
 on `list_tickets` and `ready_tickets`.
 
 **What changed.** On the **MCP surface only**, any integer outside the JS-safe range is now emitted
-as its exact decimal **string**. CLI `--output json` and the Python library are UNCHANGED and still
-emit integers.
+as its exact decimal **string**. CLI `--output json` and the Python library were UNCHANGED at the
+time of this entry; the CLI has since been brought into line — see the CLI entry above
+(`unhelping-creviced-rhino`, `e127-a3ad-895a-4a2f`). The Python library still emits integers.
 
 **Which keys.** `created_at`, `updated_at`, `last_reopened_at`, `source_created_at` and comment
 `timestamp` / `source_created_at` (all optional), plus `signed_at` on `sign_result`,

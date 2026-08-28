@@ -274,6 +274,15 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# `dirname(<tracker>)` composition only; sanction is `# repo-root-ok: <reason>` (reason
 	@# MANDATORY), used for the one detached-child site whose cwd IS the store.
 	python scripts/check_repo_root_from_tracker.py
+	@# CLI --output json JS-safe-integer gate (bug unhelping-creviced-rhino, e127-a3ad-895a-4a2f).
+	@# rebar's 19-digit nanosecond timestamps are outside the RFC 8259 §6 interoperable range,
+	@# so a bare JSON number on a CLI --output json stream is silently rounded by float64
+	@# consumers (jq/Node/Ruby, a measured -42 ns drift) and breaks BigInt consumers (GitHub
+	@# Copilot CLI: `TypeError: Do not know how to serialize a BigInt`). Flags a stdout write
+	@# built by a RAW json.dumps on the CLI surface; the single choke point is
+	@# `rebar._mcp_errors.js_safe_dumps`. Sanction is `# js-safe-ok: <reason>` (reason MANDATORY)
+	@# for a write that provably carries no ns timestamp.
+	python scripts/check_cli_json_js_safe.py
 	@# DCO sign-off identity consistency (story 35d2): contributor-facing guidance must not
 	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
 	python scripts/check_dco_identity.py

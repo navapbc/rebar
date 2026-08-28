@@ -315,6 +315,9 @@ def test_make_lint_rejects_live_vocabulary_through_guard(tmp_path: Path) -> None
     # Bug 2ec7-be89-9b01-496a wired the repo-root-from-tracker gate into `make lint`
     # ahead of the guard under test, so it needs a stub here for the same reason.
     (scripts / "check_repo_root_from_tracker.py").write_text("", encoding="utf-8")
+    # Bug e127-a3ad-895a-4a2f wired the CLI --output json JS-safe-integer gate into
+    # `make lint` ahead of the guard under test, so it needs a stub here for the same reason.
+    (scripts / "check_cli_json_js_safe.py").write_text("", encoding="utf-8")
     _write(tmp_path, "src/rebar/live.py", _legacy_heading())
 
     stub_bin = tmp_path / "bin"

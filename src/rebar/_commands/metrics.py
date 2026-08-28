@@ -20,12 +20,12 @@ Provenance/adapter isolation: this module NEVER imports any
 
 from __future__ import annotations
 
-import json
 import sys
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from rebar import config
+from rebar._mcp_errors import js_safe_dumps
 
 _DEFAULT_WINDOW_DAYS = 30
 
@@ -122,5 +122,5 @@ def metrics_cli(argv: list[str], *, repo_root: str | None = None) -> int:
         return 0
 
     doc = {"since": since, "until": until, "metrics": entries}
-    sys.stdout.write(json.dumps(doc, ensure_ascii=False) + "\n")
+    sys.stdout.write(js_safe_dumps(doc, ensure_ascii=False) + "\n")
     return 0
