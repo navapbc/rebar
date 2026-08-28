@@ -652,6 +652,33 @@ def _emit_transition_result(
         f"transitioned {ticket_id}: {current_status} -> {target_status}; "
         f"unblocked: {','.join(ids) if ids else 'none'}"
     )
+    _emit_completion_signature_text(ticket_id, result)
+
+
+def _emit_completion_signature_text(ticket_id: str, result: dict) -> None:
+    """Warn on an adjacent text line when a completion close landed UNSIGNED.
+
+    The default text branch used to inspect only the ``transitioned`` datum, so a
+    completion-verified close that COMMITTED but failed to obtain its attestation
+    printed an unqualified success line — the missing-signature signal reached the
+    JSON payload, the library return, and stderr, but never the default text
+    surface (bug faulty-floppy-kob). The key is absent for a plain transition and
+    for ``idea -> closed`` (absence => not a completion close, print nothing).
+
+    Gate on the ``signed`` BOOLEAN, not on ``cause == "signed"``: an idempotent
+    atomic close is fully attested but carries ``cause == "already_equivalent"``
+    (``signed`` is True), so a cause-token check would misreport it as unsigned.
+    Warn only when the close genuinely landed WITHOUT its attestation
+    (``signed`` is False: ``sign_failed`` / ``material_drifted`` / ``force_bypassed``).
+    """
+    from rebar._commands import _confirm
+
+    sig = result.get("completion_signature")
+    if not sig or sig.get("signed"):
+        return
+    _confirm.emit_text(
+        f"warning: {ticket_id} closed WITHOUT a completion signature (cause: {sig['cause']})"
+    )
 
 
 def transition_cli(argv: list[str], *, repo_root=None, _confirm_verb: str = "transitioned") -> int:

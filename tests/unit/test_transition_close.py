@@ -570,3 +570,153 @@ def test_a_legacy_close_event_without_the_field_reads_back_absent(tmp_path):
     assert "completion_expectation" not in state, (
         "an absent field on a legacy event must stay absent — unknown, never guessed"
     )
+
+
+# ── completion-signature reporting on the DEFAULT TEXT channel (bug faulty-floppy-kob) ──────
+# The `completion_signature` marker reaches the library return, the `--output json` branch, and
+# MCP, and the drift / sign_failed branches warn on stderr — but the CLI's DEFAULT (text) output
+# (`_emit_transition_result`'s "transitioned <id>: ... ; unblocked: ..." line) never inspected it.
+# So a close that landed WITHOUT its completion attestation (cause != "signed") printed an
+# unqualified success to a human, or to an agent reading the success line and not stderr. These
+# pin that the text line names the un-signed outcome for every non-`signed` cause, leaves a
+# fully-earned close (and non-completion transitions) byte-for-byte unchanged, and keeps exit 0.
+
+
+def test_text_output_warns_when_a_close_lands_without_its_signature(repo, monkeypatch, capsys):
+    """AC1/AC3, sign_failed: a signing failure lands the close UNSIGNED; the default text line
+    must say so, not report an unqualified success."""
+    _gate_on(monkeypatch)
+
+    def _boom(*_a, **_kw):
+        raise _signing.SigningError("flock: could not acquire lock after 60s")
+
+    monkeypatch.setattr(transition_close, "sign_completion_verdict", _boom)
+    tid = _open_ticket(repo)
+    monkeypatch.chdir(repo)
+
+    from rebar._cli import main
+
+    rc = main(["transition", tid, "in_progress", "closed"])
+    out = capsys.readouterr().out
+
+    assert rc == 0, "exit code is deliberately unchanged (AC3) — the text line carries the signal"
+    assert f"transitioned {tid}: in_progress -> closed" in out, (
+        "the pre-existing success line is preserved"
+    )
+    assert "WITHOUT a completion signature" in out, (
+        "AC1: the default text output must name the missing attestation"
+    )
+    assert "sign_failed" in out, "AC1: the specific cause is named (per cause in the vocabulary)"
+
+
+def test_text_output_names_material_drift_as_the_cause(repo, monkeypatch, capsys):
+    """AC1, material_drifted: drift lands unsigned for a DIFFERENT reason than a signing error,
+    so the text line must name that cause specifically."""
+    _gate_on(monkeypatch)
+    monkeypatch.setattr(transition_close, "_material_drifted", lambda *_a: True)
+    tid = _open_ticket(repo)
+    monkeypatch.chdir(repo)
+
+    from rebar._cli import main
+
+    rc = main(["transition", tid, "in_progress", "closed"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert f"transitioned {tid}: in_progress -> closed" in out
+    assert "WITHOUT a completion signature" in out
+    assert "material_drifted" in out
+
+
+def test_text_output_names_force_bypass_as_the_cause(repo, monkeypatch, capsys):
+    """AC1, force_bypassed: `--force` deliberately bypasses signing but still lands the close
+    UNSIGNED, so the text line must name that cause too."""
+    _gate_on(monkeypatch)
+    tid = _open_ticket(repo)
+    monkeypatch.chdir(repo)
+
+    from rebar._cli import main
+
+    rc = main(["transition", tid, "in_progress", "closed", "--force=operator call"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert f"transitioned {tid}: in_progress -> closed" in out
+    assert "WITHOUT a completion signature" in out
+    assert "force_bypassed" in out
+
+
+def test_a_signed_close_text_output_is_unchanged(repo, monkeypatch, capsys):
+    """AC2: a close that signs normally is a fully-earned close with nothing to warn about —
+    its text output is exactly the pre-existing success line, no warning added."""
+    _gate_on(monkeypatch)
+    monkeypatch.setattr(transition_close, "sign_completion_verdict", lambda *a, **k: {})
+    tid = _open_ticket(repo)
+    monkeypatch.chdir(repo)
+
+    from rebar._cli import main
+
+    rc = main(["transition", tid, "in_progress", "closed"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert f"transitioned {tid}: in_progress -> closed" in out
+    assert "WITHOUT a completion signature" not in out
+    assert "signature" not in out, "a signed close says nothing about signatures"
+
+
+def test_a_plain_transition_text_output_is_unchanged(repo, monkeypatch, capsys):
+    """AC2: a non-close transition carries no `completion_signature` key at all, so its text
+    output is unchanged — no signature warning."""
+    tid = rebar.create_ticket("task", "a task", repo_root=str(repo))
+    monkeypatch.chdir(repo)
+
+    from rebar._cli import main
+
+    rc = main(["transition", tid, "open", "in_progress"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert f"transitioned {tid}: open -> in_progress" in out
+    assert "WITHOUT a completion signature" not in out
+
+
+def test_idea_to_closed_text_output_is_unchanged(repo, monkeypatch, capsys):
+    """AC2: `idea -> closed` is a REJECT/DROP that carries no `completion_signature` key, so it
+    must print exactly what it prints today with no invented signature warning."""
+    tid = rebar.create_ticket("task", "an idea", repo_root=str(repo))
+    rebar.transition(tid, "open", "idea", repo_root=str(repo))
+    monkeypatch.chdir(repo)
+
+    from rebar._cli import main
+
+    rc = main(["transition", tid, "idea", "closed"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert f"transitioned {tid}: idea -> closed" in out
+    assert "WITHOUT a completion signature" not in out
+
+
+def test_a_signed_idempotent_atomic_close_text_output_is_unchanged(capsys):
+    """AC2 + LLM-Review finding: an idempotent atomic close is FULLY SIGNED but carries the
+    cause `already_equivalent` (signed is True). The warning must gate on the `signed`
+    boolean, not on `cause == "signed"`, so this attested close prints NO warning."""
+    from rebar._commands import _confirm
+    from rebar._commands.transition import _emit_transition_result
+
+    result = {
+        "noop": False,
+        "newly_unblocked": [],
+        "completion_signature": {"signed": True, "cause": "already_equivalent", "error": ""},
+    }
+    with _confirm.confirmation_context(quiet=False, fmt="text"):
+        _emit_transition_result(
+            "text", "abcd-1234-5678-9abc", "in_progress", "closed", result, "transitioned"
+        )
+    out = capsys.readouterr().out
+
+    assert "transitioned abcd-1234-5678-9abc: in_progress -> closed" in out
+    assert "WITHOUT a completion signature" not in out, (
+        "a fully-signed close must never be reported as unsigned, whatever its cause token"
+    )
