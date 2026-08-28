@@ -20,6 +20,7 @@ no live Jira and no specific CI provider (``project.portability``).
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -526,3 +527,56 @@ def test_doctor_cli_mapping_warning_only_yields_zero_exit(
     assert rc == 0
     out = capsys.readouterr().out
     assert "STUB" in out
+
+
+# ===========================================================================
+# HERMETICITY — doctor_cli must not read the operator's real HOME
+# (ticket ec07-692f-af32-4818 / frousy-ornamental-whale)
+# ===========================================================================
+
+
+def test_doctor_cli_mcp_client_scan_is_hermetic(
+    tmp_path: Path,
+    _empty_mcp_client_home: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``doctor_cli`` must not read the operator's real HOME MCP client configs.
+
+    The scan (``doctor_mcp_client.scan_mcp_clients``) defaults ``home`` to
+    ``Path.home()``, so an un-isolated unit test transitively reads
+    ``~/.codex/config.toml`` / ``~/.copilot/mcp-config.json`` / ``~/.claude.json`` —
+    live machine state the test does not control. The unit tier redirects the scan's
+    default home to the empty ``_empty_mcp_client_home`` fixture directory
+    (``tests/unit/conftest.py``). This test asserts that isolation is in force: every
+    MCP-client finding path must resolve UNDER that fixture directory (never under
+    ``Path.home()``), and — because the fixture home is empty — every client is simply
+    ``config-missing``.
+
+    The oracle keys on the injected fixture directory rather than "not under the real
+    home": on a CI runner the fixture's ``basetemp`` itself lives under the real home
+    (``/home/runner/...``), so a "not under real home" check gives a false positive
+    there. Keying on the fixture dir is both portable and machine-independent — before
+    the fix the scan reads ``Path.home()``, which is never under the fixture dir, so
+    this test is RED against the pre-fix code and GREEN with the fixture.
+    """
+    proj = _proj(tmp_path, "[mapping.projects.STUB]\n")
+    isolated = str(_empty_mcp_client_home)
+
+    rc = doctor.doctor_cli(["--output", "json"], repo_root=str(proj))
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    findings = payload["mcp_client_findings"]
+    assert findings, "expected the scan to run and report per-client findings"
+    # Every scanned path must live under the injected isolation dir, proving the scan
+    # did NOT fall back to the operator's real Path.home().
+    for f in findings:
+        path = str(f.get("path", ""))
+        assert path.startswith(isolated), (
+            f"doctor_cli scanned outside the isolated home ({isolated}): {path}"
+        )
+    # An empty isolated home leaves every client unconfigured.
+    assert {f["kind"] for f in findings} == {"config-missing"}, (
+        f"expected only config-missing in an isolated home, got "
+        f"{[(f.get('kind'), f.get('path')) for f in findings]}"
+    )

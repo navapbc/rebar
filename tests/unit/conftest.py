@@ -125,3 +125,41 @@ def _no_real_session_log_writes(monkeypatch):
         return {"id": None, "alias": None, "created": False}
 
     monkeypatch.setattr(rebar, "append_session_log", _noop_append_session_log)
+
+
+@pytest.fixture(scope="session")
+def _empty_mcp_client_home(tmp_path_factory):
+    """One empty directory standing in for an unconfigured operator home."""
+    return tmp_path_factory.mktemp("mcp-client-home")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_mcp_client_home(_empty_mcp_client_home, monkeypatch):
+    """Unit tests must never read the operator's REAL MCP client configs.
+
+    ``rebar doctor`` scans the operator's HOME for MCP client configs
+    (``doctor_mcp_client.scan_mcp_clients`` defaults ``home`` to ``Path.home()``), so any
+    unit test that drives the real ``doctor_cli`` transitively reads
+    ``~/.codex/config.toml``, ``~/.copilot/mcp-config.json`` and ``~/.claude.json`` —
+    live machine state it does not control. That makes such tests non-hermetic: they pass
+    or fail on developer-local state that is not in the repo, and can flake when those
+    files are rewritten concurrently (bug ec07-692f-af32-4818, frousy-ornamental-whale).
+
+    The scanner is deliberately injectable (``home=``); the ONLY un-isolated caller is
+    the CLI entry point, which passes no ``home``. Redirect just that default to an empty
+    per-session fixture directory, so every ``doctor_cli``-driven test — present or future
+    — sees an unconfigured home and never touches the operator's real configs. Explicit
+    ``home=`` callers (the scanner's own unit tests) are untouched, and ``$HOME`` itself
+    is left alone, so git identity, ``~/.aws`` and every other home-derived resource that
+    other unit tests legitimately rely on are unaffected. This mirrors the tier's existing
+    "never touch the real environment" seam neutralization (see
+    ``_no_real_session_log_writes``); production ``doctor`` still reads the real home.
+    """
+    from rebar._commands import doctor_mcp_client
+
+    original = doctor_mcp_client.scan_mcp_clients
+
+    def _scan_isolated(*, home=None, env=None):
+        return original(home=_empty_mcp_client_home if home is None else home, env=env)
+
+    monkeypatch.setattr(doctor_mcp_client, "scan_mcp_clients", _scan_isolated)
