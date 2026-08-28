@@ -39,8 +39,10 @@ from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError, LLMError
 from rebar.llm.model_classes import (
     build_fallback_model,
+    drive_off_event_loop,
     ensure_current_event_loop,
     entered_fallback_model,
+    event_loop_running,
     fallback_targets_for,
     primary_endpoint_for,
 )
@@ -367,6 +369,12 @@ class PydanticAIRunner:
         return cfg
 
     def run(self, req: RunRequest) -> dict:
+        # bug f643 (superior-trifling-dunlin): everything below drives pydantic-ai
+        # SYNCHRONOUSLY down to `run_until_complete`, which is illegal on a thread whose loop
+        # is already running (the MCP server calls sync tools ON the ASGI loop thread). Re-enter
+        # on a worker that has no running loop; that call takes the `False` arm and proceeds.
+        if event_loop_running():
+            return drive_off_event_loop(self.run, req)
         # Guard the agents extra FIRST — before importing any pydantic_ai submodule —
         # so an absent extra surfaces as a clean LLMConfigError (naming the extra), not a
         # raw ModuleNotFoundError from the `pydantic_ai.exceptions`/`.usage` imports below.

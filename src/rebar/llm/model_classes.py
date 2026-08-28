@@ -540,3 +540,56 @@ def entered_fallback_model(model: Any) -> Iterator[Any]:
             loop.run_until_complete(model.__aexit__(None, None, None))
         except Exception:
             logger.warning("llm fallback chain teardown failed", exc_info=True)
+
+
+def event_loop_running() -> bool:
+    """Is an asyncio event loop RUNNING on the calling thread? (bug f643 —
+    ``superior-trifling-dunlin``.)
+
+    Distinct from :func:`ensure_current_event_loop`, which asks "which loop is INSTALLED
+    here" and will happily hand back the running one. What the synchronous drive needs to
+    know is narrower and load-bearing: ``loop.run_until_complete`` — reached by every LLM
+    call rebar makes (``agent.run_sync`` via ``pydantic_ai._utils.get_event_loop``,
+    :func:`entered_fallback_model`, and ``ProviderSession``'s ``asyncio.run`` teardown) —
+    is legal ONLY on a thread whose loop is not already running, and raises
+    ``RuntimeError: This event loop is already running`` when it is.
+    """
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+def drive_off_event_loop(fn: Any, *args: Any) -> Any:
+    """Run the SYNCHRONOUS ``fn(*args)`` drive on a worker thread with NO running loop.
+
+    Bug f643 (``superior-trifling-dunlin``): under the MCP server a sync ``@mcp.tool`` body
+    is invoked DIRECTLY inside the ASGI request coroutine (the python ``mcp`` SDK's
+    ``func_metadata`` calls ``fn(**arguments)`` with no thread offload), so the whole tool
+    body — including :meth:`rebar.llm.runner.PydanticAIRunner.run` — executes on the event
+    loop thread with that loop RUNNING, and every ``run_until_complete`` beneath it raised.
+    Handing the drive to a thread of our own restores the invariant the synchronous path was
+    always written against; the CLI path (no running loop) never reaches here and is
+    unchanged.
+
+    ContextVars are inherited by asyncio tasks but NOT by raw threads, so the callable is
+    dispatched through a FRESH ``contextvars.copy_context()`` — the same pattern (and for
+    the same reason) as ``plan_review.generation._submit_ctx``. Without it the gate-session
+    vars (``_in_gate_session`` / ``_active_code_root`` / ``_active_tickets_root`` /
+    ``_active_gate_config``) and the review cancel scope would be absent in the worker and
+    ``assert_gated`` would fail closed on every agentic run. A fresh copy per call because
+    one ``Context`` cannot be entered concurrently.
+
+    The pool is a context manager, so the worker is joined before this returns — the thread
+    can never outlive the call that spawned it. ``Future.result()`` re-raises the worker's
+    exception object itself, so type, message and traceback reach the caller unchanged.
+    """
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+
+    context = contextvars.copy_context()
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="rebar-llm-drive") as pool:
+        return pool.submit(context.run, fn, *args).result()
