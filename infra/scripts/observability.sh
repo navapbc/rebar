@@ -15,7 +15,9 @@
 #       rebar/host:deploy_deferrals, and deploys that recreated the container ANYWAY
 #       (AUTODEPLOY_REVIEW_INTERRUPT) -> rebar/host:review_interrupts (bug 34cd alarm), and
 #       pressure-triggered reclaims on the no-op tick (AUTODEPLOY_DISK_PRESSURE) ->
-#       rebar/host:disk_pressure_prunes (diagnostic counter, task 9d15 — no alarm).
+#       rebar/host:disk_pressure_prunes (diagnostic counter, task 9d15 — no alarm), and
+#       reclaims that ran and did NOT recover the disk (AUTODEPLOY_DISK_PRESSURE_PERSISTS) ->
+#       rebar/host:disk_pressure_persists (bug 9bc0 — alarmable "reclaim is ineffective").
 #   4f. mcp blue-green target (foxterrier): retire/port-pool cap hits (AUTODEPLOY_MCP_RETIRE_CAP)
 #       -> rebar/host:mcp_retire_cap, and low-memory deploy aborts (AUTODEPLOY_MCP_MEM_ABORT) ->
 #       rebar/host:mcp_mem_abort (both alarmed in monitoring_foxterrier.tf).
@@ -278,6 +280,7 @@ INTERRUPT_OFFSET_FILE="${INTERRUPT_OFFSET_FILE:-/var/lib/rebar/autodeploy-interr
 INTERRUPT_BOUND_OFFSET_FILE="${INTERRUPT_BOUND_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-bound-offset}"
 INTERRUPT_SIGNAL_OFFSET_FILE="${INTERRUPT_SIGNAL_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-signal-offset}"
 DISK_PRESSURE_OFFSET_FILE="${DISK_PRESSURE_OFFSET_FILE:-/var/lib/rebar/autodeploy-disk-pressure-offset}"
+DISK_PRESSURE_PERSIST_OFFSET_FILE="${DISK_PRESSURE_PERSIST_OFFSET_FILE:-/var/lib/rebar/autodeploy-disk-pressure-persist-offset}"
 # mcp blue-green target (panicky-sylphish-foxterrier). Two DISTINCT tokens, kept out of
 # AUTODEPLOY_ERROR so a routine retire-cap / memory abort never inflates deploy_errors:
 #   mcp_retire_cap — the blue/green port pool is exhausted (both A and B held by un-reaped
@@ -289,8 +292,8 @@ MCP_RETIRE_CAP_OFFSET_FILE="${MCP_RETIRE_CAP_OFFSET_FILE:-/var/lib/rebar/autodep
 MCP_MEM_ABORT_OFFSET_FILE="${MCP_MEM_ABORT_OFFSET_FILE:-/var/lib/rebar/autodeploy-mcp-mem-abort-offset}"
 mkdir -p "$(dirname "$DEFER_OFFSET_FILE")" "$(dirname "$INTERRUPT_OFFSET_FILE")" \
   "$(dirname "$INTERRUPT_BOUND_OFFSET_FILE")" "$(dirname "$INTERRUPT_SIGNAL_OFFSET_FILE")" \
-  "$(dirname "$DISK_PRESSURE_OFFSET_FILE")" "$(dirname "$MCP_RETIRE_CAP_OFFSET_FILE")" \
-  "$(dirname "$MCP_MEM_ABORT_OFFSET_FILE")"
+  "$(dirname "$DISK_PRESSURE_OFFSET_FILE")" "$(dirname "$DISK_PRESSURE_PERSIST_OFFSET_FILE")" \
+  "$(dirname "$MCP_RETIRE_CAP_OFFSET_FILE")" "$(dirname "$MCP_MEM_ABORT_OFFSET_FILE")"
 publish_autodeploy_marker_delta() {
   local token="$1" metric="$2" offset_file="$3" label="$4" total prev new
   total=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE "$token") || true
@@ -334,6 +337,20 @@ publish_autodeploy_marker_delta \
 # never ran" from "it ran and reclaimed nothing" without host access (task 9d15-d576-e0ca-4596).
 publish_autodeploy_marker_delta '^AUTODEPLOY_DISK_PRESSURE \{' disk_pressure_prunes \
   "$DISK_PRESSURE_OFFSET_FILE" "auto-deploy disk-pressure prunes"
+# …and the counter that closes the gap the comment above CLAIMED to close but could not
+# (bug 9bc0). disk_pressure_prunes counts INVOCATIONS, so "the gate never ran" and "it ran and
+# reclaimed nothing" are the same number. AUTODEPLOY_DISK_PRESSURE_PERSISTS is emitted only
+# after PRESSURE_STREAK_ALARM (default 3) CONSECUTIVE reclaim cycles each completed with the
+# disk still pressured, so it fires on PERSISTENCE, not on pressure — the discriminator the
+# flapping rebar-root-disk-pressure threshold alarm cannot express. A single pressured cycle
+# that then recovers resets the streak and publishes nothing here.
+#
+# The token is DISTINCT from AUTODEPLOY_DISK_PRESSURE and the patterns cannot cross-count: both
+# are record-anchored and require the JSON `{` immediately after the token, so
+# `^AUTODEPLOY_DISK_PRESSURE \{` never matches `AUTODEPLOY_DISK_PRESSURE_PERSISTS {`.
+publish_autodeploy_marker_delta '^AUTODEPLOY_DISK_PRESSURE_PERSISTS \{' disk_pressure_persists \
+  "$DISK_PRESSURE_PERSIST_OFFSET_FILE" \
+  "reclaim cycles that ran and left the disk STILL pressured (reclaim is ineffective)"
 # mcp blue-green target (panicky-sylphish-foxterrier). Record-anchored like every counter above;
 # each kept out of deploy_errors so a routine retire-cap / memory abort never pages that alarm.
 publish_autodeploy_marker_delta '^AUTODEPLOY_MCP_RETIRE_CAP \{' mcp_retire_cap \
