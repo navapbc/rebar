@@ -22,6 +22,7 @@ from typing import Any
 
 from rebar._commands.gates import log_description_cap_warning as _warn_description_cap
 from rebar._errors import RebarError
+from rebar._lib_warn import emit_cross_session_warning
 
 
 def _python_leaf(fn, *args, repo_root, what: str, **kwargs) -> Any:
@@ -68,6 +69,7 @@ def comment(
     event. Deliberately not exposed over MCP."""
     from rebar._commands import leaf
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     _python_leaf(
         leaf.comment,
         ticket_id,
@@ -165,6 +167,7 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> str | None:
         normalized[key] = value if isinstance(value, list) else str(value)
     from rebar._commands import composer
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     warning = _python_leaf(
         composer.edit_core,
         ticket_id,
@@ -196,6 +199,8 @@ def link(id1: str, id2: str, relation: str, *, force: str = "", repo_root=None) 
     """
     from rebar._commands import composer
 
+    emit_cross_session_warning(id1, repo_root=repo_root)
+
     def _link(i, j, rel, *, repo_root):
         return composer.link_core(i, j, rel, repo_root=repo_root, quiet=True, force=force)
 
@@ -215,6 +220,7 @@ def unlink(id1: str, id2: str, relation: str | None = None, *, repo_root=None) -
     """
     from rebar._commands import unlink as _unlink_cmd
 
+    emit_cross_session_warning(id1, repo_root=repo_root)
     _python_leaf(_unlink_cmd.unlink_core, id1, id2, relation, repo_root=repo_root, what="unlink")
 
 
@@ -228,6 +234,7 @@ def tag(ticket_id: str, tag: str, *, repo_root=None) -> None:
     """
     from rebar._commands import leaf
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     _python_leaf(leaf.tag, ticket_id, tag, repo_root=repo_root, what="tag")
 
 
@@ -241,6 +248,7 @@ def untag(ticket_id: str, tag: str, *, repo_root=None) -> None:
     """
     from rebar._commands import leaf
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     _python_leaf(leaf.untag, ticket_id, tag, repo_root=repo_root, what="untag")
 
 
@@ -256,6 +264,7 @@ def archive(ticket_id: str, *, repo_root=None) -> None:
     """
     from rebar._commands import leaf
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     _python_leaf(leaf.archive, ticket_id, repo_root=repo_root, what="archive")
 
 
