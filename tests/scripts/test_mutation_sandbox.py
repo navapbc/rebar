@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import logging
 import os
 import subprocess
 import sys
@@ -834,4 +835,43 @@ def test_every_mutmut_run_in_the_module_receives_the_hardened_env():
     assert not offenders, (
         f"a `mutmut run` child inherits the real HOME in {offenders}; adjacent "
         f"home-directory writes would land in the developer's home"
+    )
+
+
+# --- observability: the conditions a reader needs are IN the log ---------------------
+
+
+def test_a_missing_allow_path_is_surfaced_not_silently_dropped(tmp_path, monkeypatch, caplog):
+    """A skipped bind must name itself, or its absence is indistinguishable from intent.
+
+    bwrap aborts if a --bind source is missing, so the wrapper skips it. Silently, a
+    caller that forgot to create a directory sees only a confusing write failure from
+    INSIDE the sandbox, with nothing pointing at the cause.
+    """
+    monkeypatch.setattr(sb.shutil, "which", lambda n: "/usr/bin/bwrap" if n == "bwrap" else None)
+    monkeypatch.setattr(sb, "_bwrap_works", lambda: True)
+    missing = tmp_path / "never-created"
+    with caplog.at_level(logging.WARNING, logger=sb.logger.name):
+        argv = sb.wrap(["/bin/true"], allow=[missing], profile_dir=tmp_path)
+    assert str(missing) in caplog.text, (
+        f"the skipped allow-list path was not named in the log; got {caplog.text!r}"
+    )
+    assert str(missing) not in argv, "a non-existent path must not be handed to --bind"
+
+
+def test_the_ci_fail_open_warning_names_the_variable_and_its_value(monkeypatch, caplog):
+    """A run that proceeds UNSANDBOXED must be unmistakable in its own log.
+
+    Ambient `CI` remains the sole condition on this fall-back (tightening that is
+    `f11d-f8fd`), so the log is the only place a reader can tell that a run had no
+    sandbox at all. It must name the variable AND the value that permitted it.
+    """
+    monkeypatch.setattr(sb, "probe", lambda: None)
+    env = {"CI": "true"}
+    with caplog.at_level(logging.WARNING, logger=sb.logger.name):
+        argv = sb.wrap(["/bin/true"], allow=[], profile_dir=Path("."), env=env)
+    assert argv == ["/bin/true"], "the CI fall-back returns the command unwrapped"
+    assert "UNSANDBOXED" in caplog.text
+    assert "CI=" in caplog.text and "true" in caplog.text, (
+        f"the warning must name the variable and its observed value; got {caplog.text!r}"
     )

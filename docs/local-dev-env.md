@@ -129,8 +129,10 @@ hook did not land — so the gate is never silently absent.
 
 `scripts/mutation_gate.py` runs both shard-test-executing subprocesses — the baseline
 `pytest` and the `mutmut run` mutant test-run — inside an OS sandbox that denies
-filesystem writes outside the scratch tree, the pytest basetemp, and the venv. macOS
-uses Seatbelt (`sandbox-exec`); Linux uses `bwrap`.
+filesystem writes outside the scratch tree and the pytest basetemp. The venv is
+deliberately EXCLUDED from that allow-list: a writable venv would let a mutant drop
+executable code into site-packages for a later un-sandboxed phase to import. macOS uses
+Seatbelt (`sandbox-exec`); Linux uses `bwrap`.
 
 This exists because mutation testing executes *deliberately broken* code. On
 2026-08-26 a mutation removed a guard from a script performing real deletion, a test

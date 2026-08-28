@@ -237,7 +237,15 @@ def _bwrap_argv(argv: Sequence[str], allow: Sequence[Path]) -> list[str]:
         resolved = Path(path).resolve()
         # bwrap's --bind requires SRC to exist on the host; a missing path aborts the
         # whole sandbox. Skip rather than abort — the deny-by-default floor still holds.
+        # SAY SO: a silently dropped bind is indistinguishable from one that was never
+        # requested, so a caller that forgot to create a directory sees only a confusing
+        # write failure from inside the sandbox instead of the cause.
         if not resolved.exists():
+            logger.warning(
+                "sandbox allow-list path %s does not exist; it will NOT be writable "
+                "inside the sandbox. Create it before wrapping if the child needs it.",
+                resolved,
+            )
             continue
         out += ["--bind", str(resolved), str(resolved)]
     out.append("--")
@@ -261,7 +269,8 @@ def wrap(
     if mechanism is None:
         if _ci_environment(env):
             logger.warning(
-                "No OS sandbox available and CI=%s: running mutation tests UNSANDBOXED. "
+                "No OS sandbox available and CI=%r: running mutation tests UNSANDBOXED "
+                "— nothing constrains a destructive mutant on this run. "
                 "A CI runner is already the disposable environment this sandbox "
                 "substitutes for — ephemeral, destroyed after the job, holding nothing "
                 "of a developer's. The sandbox requirement protects WORKSTATIONS. On a "
