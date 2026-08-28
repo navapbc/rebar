@@ -45,8 +45,12 @@ _GAUGE_ATTR = "_rebar_in_flight_gauge"
 class InFlightGauge:
     """Thread-safe counter of in-flight certified tool calls.
 
-    Sync MCP tools run on worker threads (``anyio.to_thread``), so the counter is
-    guarded by a lock. :meth:`track` only counts a call whose tool name is in
+    A sync MCP tool body does NOT run on a worker thread: the ``mcp`` SDK calls it
+    DIRECTLY inside the ASGI request coroutine, so :meth:`track` runs on the event-loop
+    thread (bug f643 / ``superior-trifling-dunlin`` — believing otherwise is exactly what
+    let that bug ship). The lock is still required: the gauge is READ and acted on from
+    other threads — notably the SIGTERM drain path, which polls :attr:`value` while
+    in-flight calls mutate it. :meth:`track` only counts a call whose tool name is in
     :data:`CERTIFIED_TOOLS`; any other name is a no-op context so instrumentation can
     be applied uniformly.
     """
