@@ -87,6 +87,52 @@ def test_recent_marker_comment_window(dedup: ModuleType) -> None:
     assert dedup.recent_marker_comment(runner, "t", "M:", now) is False
 
 
+#: RFC 8259 s6 interoperable integer range; also JS ``Number.MAX_SAFE_INTEGER``.
+JS_SAFE_MAX = 2**53 - 1
+
+
+def test_recent_marker_comment_accepts_the_string_wire_form(dedup: ModuleType) -> None:
+    """Bug e127: `--output json` emits an out-of-JS-safe-range ns timestamp as a STRING.
+
+    Both lanes that share this helper (canary_bridge, dependency_audit) type-checked the
+    comment ``timestamp`` with ``isinstance(ts, (int, float))``. A string fails that check,
+    so every marker comment is skipped, this helper always returns False, and the 24h
+    accumulation cap silently stops working -- appending a marker comment on EVERY cycle
+    to the ticket the lane already filed. It is fail-soft, so nothing raises.
+    """
+    now = 1_700_000_000
+    ns = (now - 60) * 10**9
+    assert ns > JS_SAFE_MAX, (
+        "the fixture instant is inside the JS-safe range, so it would never be emitted as "
+        "a string and this test could not detect the defect"
+    )
+    payload = json.dumps({"comments": [{"body": "M: hi", "timestamp": str(ns)}]})
+    assert f'"timestamp": "{ns}"' in payload, "the fixture must arrive as a JSON string"
+
+    runner = FakeRunner({("rebar", "show"): (0, payload, "")})
+    assert dedup.recent_marker_comment(runner, "t", "M:", now) is True, (
+        "a string-form timestamp was not recognized, so the 24h accumulation cap "
+        "silently stopped working"
+    )
+
+
+def test_a_stale_string_timestamp_still_does_not_suppress(dedup: ModuleType) -> None:
+    """LIVENESS: coercion must not turn the window into an unconditional True."""
+    now = 1_700_000_000
+    ns = (now - 30 * 3600) * 10**9
+    assert ns > JS_SAFE_MAX
+    payload = json.dumps({"comments": [{"body": "M: x", "timestamp": str(ns)}]})
+    runner = FakeRunner({("rebar", "show"): (0, payload, "")})
+    assert dedup.recent_marker_comment(runner, "t", "M:", now) is False
+
+
+def test_a_non_numeric_string_timestamp_is_skipped_not_raised(dedup: ModuleType) -> None:
+    """Fail-soft is preserved: junk must not raise out of a best-effort filer."""
+    payload = json.dumps({"comments": [{"body": "M: x", "timestamp": "not-a-number"}]})
+    runner = FakeRunner({("rebar", "show"): (0, payload, "")})
+    assert dedup.recent_marker_comment(runner, "t", "M:", 1_700_000_000) is False
+
+
 def test_recent_marker_comment_is_fail_soft(dedup: ModuleType) -> None:
     runner = FakeRunner({("rebar", "show"): (1, "", "boom")})
     assert dedup.recent_marker_comment(runner, "t", "M:", 0) is False

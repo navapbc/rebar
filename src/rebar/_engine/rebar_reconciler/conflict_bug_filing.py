@@ -104,6 +104,16 @@ def _recent_marker_comment(cli: str, tid: str, runner: Runner, now_epoch: int) -
         if not str(comment.get("body", "")).startswith(_MARKER):
             continue
         ts = comment.get("timestamp")
+        if isinstance(ts, str):
+            # Bug e127: `--output json` emits an out-of-JS-safe-range ns timestamp as its
+            # EXACT decimal string, so this consumer must coerce before type-checking.
+            # Without this the isinstance below rejects every comment, `_recent_marker_comment`
+            # always returns False, and the 24h dedup window silently stops working --
+            # fail-soft, so it degrades into duplicate accumulation comments with no error.
+            try:
+                ts = int(ts)
+            except ValueError:
+                continue
         if not isinstance(ts, (int, float)):
             continue
         secs = ts / 1e9 if ts > 1e12 else ts  # store timestamps are ns
