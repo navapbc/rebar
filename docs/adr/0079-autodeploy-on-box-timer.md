@@ -101,3 +101,16 @@ so retirement is safe. This mirrors the immutable-release + retire-when-idle sha
 `~/.local/bin/rebar-dev-update.sh` updater (`sticky-genetic-narwhal`), cited as external local
 prior art. The stability constraints of Decision 4 (bounded blast radius, self-heal/rollback,
 SHA-keyed backoff, `flock` serialisation) apply unchanged to the `mcp` target.
+
+## Amendment (2026-08-28) — the `mcp` server is stateless, so a cutover cannot orphan a session
+
+**Relates to:** ADR 0104 §2 (paired amendment of the same date), ticket
+`aca0-6a66-0a27-47cf`, commit `4af91ec2e799`.
+
+The blue-green amendment above flips the `/mcp/` upstream the moment the new container is
+healthy. That is safe for clients because the MCP HTTP transport runs **stateless**: it mints no
+`Mcp-Session-Id`, so no client session is bound to the container that served it. A cutover
+therefore **cannot orphan a client session** — a request that lands on the new container is
+served normally instead of 404-ing `Session expired`. The retire path's graceful SIGTERM drain
+consequently covers **in-flight operations only**; it neither needs nor claims to protect
+sessions.

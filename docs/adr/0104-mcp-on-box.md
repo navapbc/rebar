@@ -93,6 +93,14 @@ The `in_flight` gauge counts only **long-running / certified / LLM** ops (`revie
 not counted (killing them is harmless — the client retries). The gauge drives the **retire**
 check, not the deploy gate. The paired ADR 0079 amendment records this `mcp` target.
 
+> **Amendment (2026-08-28) — the server holds NO per-container session state.** The MCP HTTP
+> transport runs **stateless**: no `Mcp-Session-Id` is minted, so no client session is bound to
+> the container that served it (ticket `aca0-6a66-0a27-47cf`, commit `4af91ec2e799`). The
+> pointer swap in step 4 therefore **cannot orphan a client session** — a request that lands on
+> the new container is served normally instead of 404-ing `Session expired`. The retire path's
+> drain in step 5 consequently covers **in-flight operations only**; it neither needs nor claims
+> to protect sessions.
+
 ### 3. Certified-op routing — MCP signs under the box's EXISTING opcert environment; code review stays the Gerrit vote
 
 For the two op-cert kinds minted via MCP (plan-review at claim, completion-verifier at close —
