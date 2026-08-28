@@ -44,9 +44,19 @@ deprecated aliases and removed keys derived from `rebar._deprecations`.
   server picks up a changed key only on its next start.
 - **Exposure (CLI exposure).** The read-only `rebar config` command displays resolved typed configuration values and the precedence source for each key. Adapter credentials are not typed configuration keys and do not appear in this output. See `docs/security.md` for the adapter credential names that rebar removes from unrelated child environments.
 
+## Cross-session warnings
+
+`warnings.cross_session` (default `true`) makes a mutation that targets a ticket whose live
+claim is held by a DIFFERENT session emit a one-line warning naming the holder. The detector is
+deliberately **silent when the acting session id is unknown**: without a trustworthy acting id
+it cannot distinguish "another session holds this" from "I hold this," so it suppresses the
+warning rather than risk a false positive against the operator's own claim. This is an
+evidence-revisitable choice — we may revisit it if the silence proves to hide real conflicts,
+or conversely if false positives prove noisy once an acting id is resolved.
+
 ## Configuration keys
 
-The 101 typed `section.field` keys with type, default, description, and lifecycle.
+The 102 typed `section.field` keys with type, default, description, and lifecycle.
 
 | Key | Type | Default | Description | Lifecycle |
 |-----|------|---------|-------------|-----------|
@@ -126,6 +136,7 @@ The 101 typed `section.field` keys with type, default, description, and lifecycl
 | `mcp.auth_proxy_scopes` | `tuple[str, ...]` | `()` | Grants these scopes to principals accepted through the trusted proxy. | active |
 | `mcp.auth_custom_import` | `str` | `''` | Loads a trusted module and factory that supplies a custom token verifier. | active |
 | `ui.enabled` | `bool` | `False` | Allows `rebar audit serve` to start the read-only audit web interface. | active |
+| `warnings.cross_session` | `bool` | `True` | Warns when a mutation targets a ticket whose live claim is held by a DIFFERENT session. | active |
 | `reconciler.jira_cli_timeout` | `int` | `0` | Limits each Jira CLI call to this many seconds. Zero uses the 120-second process default. | active |
 | `reconciler.rich_text_cutover` | `str` | `'off'` | Selects which Jira clients receive rich-text payloads instead of plain text. | active |
 | `reconciler.dc_pandoc_timeout_s` | `float` | `10.0` | Limits one Data Center Pandoc conversion to this many seconds before Markdown fallback. | active |

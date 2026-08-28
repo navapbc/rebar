@@ -88,6 +88,16 @@ deprecated aliases and removed keys derived from `rebar._deprecations`.
 configuration values and the precedence source for each key. Adapter credentials are not \
 typed configuration keys and do not appear in this output. See `docs/security.md` for the \
 adapter credential names that rebar removes from unrelated child environments.
+
+## Cross-session warnings
+
+`warnings.cross_session` (default `true`) makes a mutation that targets a ticket whose live
+claim is held by a DIFFERENT session emit a one-line warning naming the holder. The detector is
+deliberately **silent when the acting session id is unknown**: without a trustworthy acting id
+it cannot distinguish "another session holds this" from "I hold this," so it suppresses the
+warning rather than risk a false positive against the operator's own claim. This is an
+evidence-revisitable choice — we may revisit it if the silence proves to hide real conflicts,
+or conversely if false positives prove noisy once an acting id is resolved.
 """
 
 # ── Curated narrative (security.md) — NOT registry-derivable ─────────────────────
