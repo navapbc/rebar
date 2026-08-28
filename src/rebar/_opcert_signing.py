@@ -59,12 +59,14 @@ def opcert_key_path(tracker: str | os.PathLike[str]) -> str:
     return str(Path(tracker) / OPCERT_KEY_FILE)
 
 
-def _derive_opcert_pub(key_path: str) -> None:
-    """(Re)derive ``<key_path>.pub`` from the committed private key via ``ssh-keygen -y``.
+def _derive_opcert_pub(key_path: str) -> str | None:
+    """(Re)derive the public line for ``key_path`` via ``ssh-keygen -y`` and RETURN it.
 
     The public key is DERIVATIVE — never a commit point — so it is safe to (re)write any time it
-    is missing. Best-effort: a failure to derive is logged and swallowed (the private key is the
-    authority; verification re-derives on demand)."""
+    is missing. Both the derivation and the ``<key_path>.pub`` cache write are best-effort (the
+    private key is the authority). The RETURNED TEXT, not the cache file, is what callers rely on:
+    a deployment-materialized key lives on a READ-ONLY secrets mount where the cache can never be
+    written, and verification must still find the public half there."""
     pub_path = key_path + ".pub"
     try:
         proc = subprocess.run(["ssh-keygen", "-y", "-f", key_path], capture_output=True, check=True)
@@ -72,7 +74,7 @@ def _derive_opcert_pub(key_path: str) -> None:
         logger.debug(
             "could not derive op-cert public key %s (best-effort)", pub_path, exc_info=True
         )
-        return
+        return None
     tmp = f"{pub_path}.{os.getpid()}.tmp"
     try:
         with open(tmp, "wb") as fh:
@@ -84,6 +86,7 @@ def _derive_opcert_pub(key_path: str) -> None:
             os.unlink(tmp)
         except OSError:
             pass
+    return proc.stdout.decode("utf-8", "replace").strip() or None
 
 
 def _ensure_opcert_pub(key_path: str) -> str:
@@ -235,27 +238,46 @@ def _current_binding() -> OpcertBinding | None:
     return current_binding()
 
 
-def _opcert_own_public_key(tracker: str | os.PathLike[str]) -> str | None:
-    """The environment's own op-cert public-key line (``ssh-ed25519 AAAA… rebar-opcert``), or None.
+def _opcert_own_key_paths(tracker: str | os.PathLike[str]) -> list[str]:
+    """Every private-key path THIS environment could have signed under, in resolution order.
 
-    Read-only: never CREATES the private key. If the ``.pub`` is missing but the private key is
-    present, re-derive the public key (derivative artifact); if neither is present, return None."""
-    key_path = opcert_key_path(tracker)
-    pub_path = key_path + ".pub"
+    Mirrors :func:`ensure_opcert_key`'s WRITE-side chain — the bound startup signer's
+    process-owned copy, then the ``REBAR_OPCERT_KEY_PATH`` deployment override, then the
+    ``<tracker>/.opcert-key`` genesis — so the verify side looks for the public half where the
+    signing key actually IS. A deployment that materializes the key outside the tracker (the
+    on-box MCP server) otherwise signs certs no reader on the same box can certify. Read-only:
+    resolves paths, never creates a key."""
+    paths: list[str] = []
+    binding = _current_binding()
+    if binding is not None and binding.key_path:
+        paths.append(binding.key_path)
+    override = os.environ.get("REBAR_OPCERT_KEY_PATH")  # read-via: credential-deployment-override
+    if override and override.strip():
+        paths.append(override.strip())
+    paths.append(opcert_key_path(tracker))
+    return list(dict.fromkeys(paths))
+
+
+def _read_opcert_pub(key_path: str) -> str | None:
+    """The public-key line for ``key_path`` — the cached ``.pub`` if readable, else derived from
+    the private key (:func:`_derive_opcert_pub`, which caches best-effort). None when neither."""
     try:
-        text = Path(pub_path).read_text(encoding="utf-8").strip()
+        text = Path(key_path + ".pub").read_text(encoding="utf-8").strip()
         if text:
             return text
     except OSError:
         pass
-    if os.path.exists(key_path):  # re-derive the derivative .pub from the committed private key
-        _derive_opcert_pub(key_path)
-        try:
-            text = Path(pub_path).read_text(encoding="utf-8").strip()
-            return text or None
-        except OSError:
-            return None
-    return None
+    if not os.path.exists(key_path):
+        return None
+    return _derive_opcert_pub(key_path)
+
+
+def _opcert_own_public_keys(tracker: str | os.PathLike[str]) -> list[str]:
+    """The public-key lines (``ssh-ed25519 AAAA…``) for every key this environment holds — the
+    trust root for SAME-ENVIRONMENT certification. Empty when it holds none, which is the honest
+    "cannot certify anything here" signal. Read-only: never CREATES a private key."""
+    pubs = [_read_opcert_pub(kp) for kp in _opcert_own_key_paths(tracker)]
+    return list(dict.fromkeys([p for p in pubs if p]))
 
 
 def _manifest_material_fingerprint(manifest) -> str | None:
@@ -525,8 +547,8 @@ def verify_opcert_record(
             ),
         }
 
-    own_pub = _opcert_own_public_key(tracker)
-    if not own_pub:
+    own_pubs = _opcert_own_public_keys(tracker)
+    if not own_pubs:
         return {
             **base,
             "verified": False,
@@ -534,7 +556,7 @@ def verify_opcert_record(
             "reason": "this environment has no op-cert public key; it cannot certify any signature",
         }
 
-    trust_root = authorship.allowed_signers_from_keys([own_pub], principal)
+    trust_root = authorship.allowed_signers_from_keys(own_pubs, principal)
     verdict = registry.verify(OPCERT_KIND, envelope, trust_root)
     if not verdict.verified:
         return {
