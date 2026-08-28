@@ -132,6 +132,45 @@ def _material_drifted(verified_sha: object, fresh_sha: object) -> bool:
     return _is_full_sha(verified_sha) and _is_full_sha(fresh_sha) and verified_sha != fresh_sha
 
 
+def _pin_completion_ref(ref: str | None, repo_root) -> str | None:
+    """NORMALISE the completion target at the close boundary: return an immutable sha that
+    replaces ``ref`` for the whole verify+sign unit.
+
+    4de6 pinned the DEFAULT target (``ref is None`` -> HEAD): resolving lazily at verify time
+    AND again at the pre-sign drift guard let a benign concurrent commit in that window split
+    them (verify saw A, sign saw B), refusing the signature and closing unsigned. This extends
+    the SAME pin to an EXPLICITLY supplied ref, because a SYMBOLIC one (a branch or a
+    remote-tracking ref such as ``origin/main``) is not the stable no-op a concrete sha is:
+    ``resolve_ref(..., fetch=False)`` reads the LOCAL ref store, and ``refs/remotes/origin/main``
+    lives in the SHARED git common dir, so ANY concurrent fetch in ANY worktree of the repo
+    advances it inside the verify->sign window — and the drift guard then compares two real,
+    differing SHAs and refuses the signature. A CONCRETE sha resolves to itself, so the pin is
+    a no-op for it; the pin changes WHEN the ref is resolved, never WHAT it targets.
+
+    The caller REBINDS ``ref`` to this result, so nothing downstream (verification, snapshot
+    materialisation, the drift guard, signing) ever sees a symbolic ref — a redundant
+    downstream ``rev-parse`` of a full sha is idempotent.
+
+    Two DIFFERENT failure policies, deliberately:
+
+    * EXPLICIT ref: FAIL EARLY — let :class:`SnapshotRefError` propagate. It is the same
+      fail-closed error the verifier path raises for an unresolvable ``--ref`` today, just
+      raised at the boundary instead of minutes into verification. The pin must never turn a
+      correctly-reported bad ref into a silent fallback.
+    * DEFAULT (``ref is None``): best-effort. If HEAD cannot resolve, fall back to the prior
+      lazy ``HEAD`` behavior (return ``None``) — never worse than before.
+    """
+    from rebar._snapshot.repo_snapshot import resolve_ref
+
+    root = str(config.repo_root(repo_root))
+    if ref is not None:
+        return resolve_ref(ref, root, fetch=False)
+    try:
+        return resolve_ref("HEAD", root, fetch=False)
+    except Exception:  # noqa: BLE001 — the DEFAULT pin is best-effort; lazy HEAD is the fallback
+        return None
+
+
 def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None, *, signer=None) -> dict:
     """The completion-verifier PRODUCER STEP: build the deterministic PASS manifest for
     ``result`` (via :func:`_verdict_manifest`) and mint the ``completion-verifier`` op-cert
@@ -572,21 +611,11 @@ def close_ticket(
     completion_expectation = ""
     plan_review_recheck = None
     if target_status == "closed" and current_status != "idea":
-        if ref is None:
-            # 4de6: pin the DEFAULT completion target to ONE immutable sha for the whole
-            # verify+sign unit. Resolving HEAD lazily at verify time AND again at the pre-sign
-            # drift guard let a benign concurrent commit in that window split them (verify saw A,
-            # sign saw B), refusing the signature and closing unsigned. Resolve HEAD once here and
-            # thread the sha through _completion_precheck (verify) AND the drift guard (which
-            # already resolves a non-"HEAD" ref), so both bind the same commit. Best-effort: if
-            # HEAD can't resolve, fall back to the prior lazy "HEAD" behavior (ref stays None) —
-            # never worse than before.
-            try:
-                from rebar._snapshot.repo_snapshot import resolve_ref
-
-                ref = resolve_ref("HEAD", str(config.repo_root(repo_root)), fetch=False)
-            except Exception:  # noqa: BLE001 — resolution is best-effort; lazy HEAD is the fallback
-                ref = None
+        # Pin the completion target ONCE, here at close entry, and thread that sha through
+        # _completion_precheck (verify) AND the pre-sign drift guard (which resolves `ref`
+        # again), so both bind the SAME commit. Covers the default HEAD target (4de6) and an
+        # explicitly supplied — possibly SYMBOLIC — ref. See _pin_completion_ref.
+        ref = _pin_completion_ref(ref, repo_root)
         from rebar.reducer import reduce_ticket as _reduce
 
         ticket_state = _reduce(os.path.join(tracker, ticket_id)) or {}
