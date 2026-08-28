@@ -10,7 +10,6 @@ claim core call, and the ``claimed`` confirmation / error-envelope output.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
@@ -19,6 +18,7 @@ from rebar._commands import gates, txn
 from rebar._commands._seam import CommandError
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
+from rebar._mcp_errors import js_safe_dumps
 
 _CLAIM_USAGE = (
     "Usage: ticket claim <ticket_id> [--assignee=<name>] [--force[=<reason>]] [--review]\n"
@@ -313,7 +313,7 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stderr.write(exc.message + "\n")
         if fmt == "json":
             sys.stdout.write(
-                json.dumps(
+                js_safe_dumps(
                     error_envelope(
                         "concurrency_conflict",
                         raw_id,
@@ -328,7 +328,7 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stderr.write(exc.message + "\n")
         if fmt == "json":
             sys.stdout.write(
-                json.dumps(
+                js_safe_dumps(
                     error_envelope(
                         "claim_failed",
                         raw_id,
@@ -343,7 +343,7 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
     # Use claim_compute's RETURN (the post-fallback assignee), not the raw parsed
     # value, so JSON + the report suffix reflect a default that was applied (f9ea30).
     if fmt == "json":
-        sys.stdout.write(json.dumps(result) + "\n")
+        sys.stdout.write(js_safe_dumps(result) + "\n")
     else:
         # Normalized confirmation (ticket 6bda-9d58-8546-4638): was
         # `CLAIMED: <id> (assignee: <who>)` — the id and the post-fallback assignee

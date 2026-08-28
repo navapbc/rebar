@@ -18,7 +18,6 @@ Output contract (byte-pinned by the interface-contract tests):
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
@@ -29,6 +28,7 @@ from rebar._engine_support.output import (
 )
 from rebar._engine_support.reads import ReadError, show_state
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._mcp_errors import js_safe_dumps
 from rebar.reducer import reduce_ticket
 
 
@@ -65,7 +65,7 @@ def file_impact_cli(argv: list[str], tracker: str) -> int:
     if not ticket_id:
         sys.stderr.write("Error: ticket_id must be non-empty\n")
         return 1
-    sys.stdout.write(json.dumps(file_impact(ticket_id, tracker), ensure_ascii=False) + "\n")
+    sys.stdout.write(js_safe_dumps(file_impact(ticket_id, tracker), ensure_ascii=False) + "\n")
     return 0
 
 
@@ -94,8 +94,8 @@ def verify_commands_cli(argv: list[str], tracker: str) -> int:
             env = error_envelope(
                 "ticket_not_found", ticket_id, f"Ticket '{ticket_id}' not found", 1
             )
-            sys.stdout.write(json.dumps(env, ensure_ascii=False) + "\n")
+            sys.stdout.write(js_safe_dumps(env, ensure_ascii=False) + "\n")
         sys.stderr.write(f"Error: ticket '{ticket_id}' not found\n")
         return 1
-    sys.stdout.write(json.dumps(vc, ensure_ascii=False, separators=(",", ":")) + "\n")
+    sys.stdout.write(js_safe_dumps(vc, ensure_ascii=False, separators=(",", ":")) + "\n")
     return 0

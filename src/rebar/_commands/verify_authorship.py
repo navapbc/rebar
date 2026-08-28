@@ -47,6 +47,7 @@ import sys
 from rebar import config
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced.verify import build_identity
+from rebar._mcp_errors import js_safe_dumps
 from rebar.reducer import KNOWN_EVENT_TYPES
 
 # Classifications (also the human-facing labels; ``verified`` is the only pass).
@@ -508,7 +509,7 @@ def cli(argv: list[str]) -> int:
         if as_json:
             # The report array holds one entry per NON-verified ENFORCED event; advisory enforces
             # none, so it is empty (and no per-event verdicts are computed in advisory mode).
-            print(json.dumps([]))
+            print(js_safe_dumps([]))
         print(
             "verify-identity: advisory — enforcement is off "
             f"({signed} signed (not era-verified in advisory mode), "
@@ -595,7 +596,7 @@ def cli(argv: list[str]) -> int:
 
     if as_json:
         # JSON mode: ONLY the report array on stdout; any human text goes to stderr.
-        print(json.dumps(report))
+        print(js_safe_dumps(report))
         for ref, cls, gf in problems:
             print(f"  {cls}{' [grandfathered]' if gf else ''}: {ref}", file=sys.stderr)
         print(summary, file=sys.stderr)

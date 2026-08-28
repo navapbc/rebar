@@ -20,13 +20,13 @@ included.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from typing import Any
 
 from rebar._engine_support import validate_checks as _checks
 from rebar._engine_support.output import OutputFormatError, parse_output
+from rebar._mcp_errors import js_safe_dumps
 
 # Colors (echo -e escapes in the bash original).
 _RED = "\033[0;31m"
@@ -390,7 +390,7 @@ def run(argv: list[str], tracker: str) -> int:
     score = calculate_score(buckets)
 
     if json_output:
-        print(json.dumps(to_json_dict(score, buckets), indent=2))
+        print(js_safe_dumps(to_json_dict(score, buckets), indent=2))
     else:
         _emit_findings(findings, verbose=verbose)
         _emit_summary(score, buckets, terse=terse)
