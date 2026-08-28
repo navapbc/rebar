@@ -178,6 +178,7 @@ def _mcp_list_tool():
         readonly=False,
         allow_jira_sync=False,
         cap_workflow_payload=lambda *a, **k: None,
+        bound_list_payload=lambda rows, **k: rows,
         MODE_CAPS={},
         Mode=None,
     )

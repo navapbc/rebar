@@ -51,6 +51,10 @@ class _FakeCtx:
         return False
 
     @staticmethod
+    def bound_list_payload(rows, **_):
+        return rows
+
+    @staticmethod
     def allow_jira_sync() -> bool:
         return False
 

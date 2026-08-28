@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -171,3 +172,214 @@ def test_both_discovery_surfaces_agree_on_their_default_shape(
         f"list-only={sorted(set(listed[0]) - set(ready[0]))} "
         f"ready-only={sorted(set(ready[0]) - set(listed[0]))}"
     )
+
+
+# ─────────────────────────── the response-size bound ────────────────────────────
+# Bug daughterly-agitative-ocelot (494b-2dd3-e9d3-4fb0). Measured against the live
+# deployed server on 2026-08-28, one unfiltered `tools/call list_tickets {}` returned
+# 94,541,551 bytes over 177 seconds in a single JSON-RPC result. The server never
+# errors; the CLIENT gives up, and how it gives up is client-specific -- GitHub Copilot
+# CLI reports `Transport closed`, another client truncated to 219,815 chars and spilled
+# to disk -- so no caller can tell "too big" from "server died". `_cap_workflow_payload`
+# already states the contract (keep an MCP payload under the client's ~25K-token budget)
+# but was wired to the two workflow reads only.
+
+
+def test_oversize_list_is_refused_with_a_structured_error_not_a_short_list(
+    rebar_repo: Path, bulky_store
+) -> None:
+    """Over budget -> a structured, actionable error. NEVER a truncated list.
+
+    A silently-shortened list is the vacuous result this project refuses: the caller
+    cannot tell it from a complete one. Asserted on the REGISTERED handler a real client
+    reaches, so a guard applied only to the instance after ``build_server()`` cannot pass
+    this and still ship broken.
+    """
+    from rebar.mcp_server import _LIST_TOKEN_BUDGET_BYTES
+
+    bulky_store(4000)
+    response = _call("list_tickets")
+
+    assert response.isError, "an over-budget list must not come back as a result"
+    text = "".join(getattr(b, "text", "") for b in (response.content or []))
+    envelope = json.loads(text[text.index("{") :])
+    assert envelope["error"] == "response_too_large", envelope
+    assert "response_too_large" in rebar.KNOWN_ERROR_CODES
+    message = envelope["message"]
+    assert "4000" in message, f"error must name the matching row count: {message}"
+    assert str(_LIST_TOKEN_BUDGET_BYTES) in message, f"error must name the budget: {message}"
+    for hint in ("status", "ticket_type", "has_tag"):
+        assert hint in message, f"error must name a narrowing filter ({hint}): {message}"
+    # And no partial payload rode along with the refusal.
+    assert response.structuredContent is None, response.structuredContent
+
+
+def test_oversize_list_travels_the_established_envelope_seam(rebar_repo: Path, bulky_store) -> None:
+    """The refusal must reuse `install_error_guard`, not a bespoke error path.
+
+    On the direct ``call_tool`` surface that means ``ToolError`` raised *from* an
+    ``McpEnvelopeError`` — the same delivery every other rebar MCP failure uses, so a
+    client branches on a code instead of parsing prose. The exception TYPE is what matters:
+    ``_envelope_error`` only envelopes a known rebar exception type, so a plain
+    ``Exception`` carrying ``.error_code`` would be dropped and the caller would get an
+    unstructured failure.
+    """
+    import asyncio
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from rebar._mcp_errors import McpEnvelopeError
+    from rebar.mcp_server import build_server
+
+    bulky_store(4000)
+    with pytest.raises(ToolError) as excinfo:
+        asyncio.run(build_server().call_tool("list_tickets", {}))
+    cause = excinfo.value.__cause__
+    assert isinstance(cause, McpEnvelopeError), f"not the envelope seam: {cause!r}"
+    assert cause.envelope["error"] == "response_too_large"
+
+
+def test_ready_tickets_is_bounded_too(rebar_repo: Path, monkeypatch) -> None:
+    """`ready_tickets` is the other whole-shape discovery surface; it gets the same bound.
+
+    Its lean shape is covered above; this is the other half. On the real store its 61 ready
+    tickets weighed 693,556 bytes unprojected and 76,878 lean, so the projection is what
+    keeps an ordinary ``ready`` under the budget -- and the bound is what makes an
+    extraordinary one fail loudly instead of killing the transport.
+    """
+    monkeypatch.setattr(rebar, "ready", lambda **_: [_bulky_state(i) for i in range(4000)])
+    response = _call("ready_tickets")
+    assert response.isError
+    text = "".join(getattr(b, "text", "") for b in (response.content or []))
+    assert json.loads(text[text.index("{") :])["error"] == "response_too_large"
+
+
+def test_a_list_that_fits_is_returned_whole(rebar_repo: Path, bulky_store) -> None:
+    """The bound must not cost the ordinary case: an under-budget list is unchanged."""
+    bulky_store(5)
+    rows = _rows(_call("list_tickets").structuredContent)
+    assert len(rows) == 5
+
+
+def test_budget_is_measured_on_the_wire_payload_not_the_raw_reducer_rows() -> None:
+    """The bound must not UNDER-estimate: measure what the client receives.
+
+    Sizing the raw reducer dicts is wrong on two independent axes, and both make the
+    measurement SMALLER than the truth -- which is the dangerous direction, because an
+    under-estimating bound passes a payload that still overruns the client:
+
+    1. ``TicketStateOut`` DECLARES defaults (`description`, `comments`, `deps`,
+       `inbound_deps`, `file_impact`, `file_impact_scope`, `no_file_impact_reason`,
+       `plan_review_health`, `cross_session_warning`), so ``model_validate`` RE-ADDS every
+       field the lean projection just dropped, as an explicit ``null``/``[]``/``""``.
+    2. ``js_safe_result`` rewrites each JS-unsafe 19-digit nanosecond integer as a QUOTED
+       string, which is longer than the bare int.
+
+    Measured at 2,855 rows (this store's size): raw dicts 552,772 bytes; after
+    ``model_validate`` 1,526,327; after ``js_safe_result`` 1,537,747 -- the raw measurement
+    under-reports the real payload by 178%, so a 90,000-byte budget measured that way would
+    in truth pass payloads approaching 250,000 bytes.
+    """
+    from rebar._mcp_budget import _payload_bytes, _wire_bytes
+    from rebar._mcp_errors import js_safe_result
+    from rebar._mcp_models import TicketStateOut
+
+    rows = []
+    for index in range(20):
+        state = _bulky_state(index)
+        # Nanosecond timestamps as the reducer emits them: bare 19-digit ints.
+        state["created_at"] = 1787858559072112001 + index
+        state["updated_at"] = 1787949089260113711 + index
+        rows.append({k: v for k, v in state.items() if k not in SIGNATURE_BULK})
+
+    raw_measure = _payload_bytes({"result": rows})
+    models = [TicketStateOut.model_validate(row) for row in rows]
+    wire_measure = _wire_bytes(models)
+    actual = len(json.dumps({"result": js_safe_result(models)}, default=str))
+
+    assert wire_measure == actual, (
+        f"the budget measured {wire_measure} bytes but the client receives {actual}"
+    )
+    assert raw_measure < actual, (
+        "this test is vacuous unless the raw-dict measurement really is smaller "
+        f"(raw={raw_measure} actual={actual})"
+    )
+
+
+def test_a_list_the_raw_measurement_would_have_passed_is_refused(
+    rebar_repo: Path, monkeypatch
+) -> None:
+    """The regression window: under budget by the raw measurement, over it on the wire.
+
+    250 plain rows (no signature bulk at all -- just the 19-digit `created_at`/`updated_at`
+    every ticket carries) measure 49,652 bytes as raw reducer dicts, comfortably inside the
+    90,000-byte budget, but reach the client as 135,902 bytes. A bound measured on the raw
+    dicts RETURNS this list; a payload 51% over the budget it was supposed to enforce is
+    exactly the "passes something that still overruns" failure the bound exists to prevent.
+    """
+    import rebar._engine_support.reads as reads_mod
+    from rebar._mcp_budget import _LIST_TOKEN_BUDGET_BYTES, _payload_bytes
+
+    def _plain(index: int) -> dict:
+        return {
+            "ticket_id": f"0000-0000-0000-{index:04x}",
+            "ticket_type": "task",
+            "title": f"ticket {index}",
+            "status": "open",
+            "priority": 2,
+            "tags": [],
+            "created_at": 1787858559072112001 + index,
+            "updated_at": 1787949089260113711 + index,
+        }
+
+    rows = [_plain(index) for index in range(250)]
+    assert _payload_bytes({"result": rows}) <= _LIST_TOKEN_BUDGET_BYTES, (
+        "this test is vacuous unless the RAW measurement really is under budget"
+    )
+    monkeypatch.setattr(reads_mod, "reduce_all_tickets", lambda *a, **k: list(rows))
+
+    response = _call("list_tickets")
+
+    assert response.isError, (
+        "a list that only LOOKS under budget as raw dicts must still be refused -- "
+        "the client receives 135,902 bytes for it"
+    )
+    text = "".join(getattr(b, "text", "") for b in (response.content or []))
+    message = json.loads(text[text.index("{") :])["message"]
+    reported = int(re.search(r"would return (\d+) bytes", message).group(1))
+    assert reported > _LIST_TOKEN_BUDGET_BYTES, (
+        f"the refusal must quote the size it actually compared against: {message}"
+    )
+
+
+def _refusal_message(response) -> str:
+    text = "".join(getattr(b, "text", "") for b in (response.content or []))
+    return json.loads(text[text.index("{") :])["message"]
+
+
+def test_the_refusal_names_a_remedy_the_TOOL_can_actually_execute(
+    rebar_repo: Path, bulky_store, monkeypatch
+) -> None:
+    """A remedy the tool would reject is worse than no remedy: it is a dead end.
+
+    ``ready_tickets`` takes only ``sort`` and ``full`` -- it has NO filter parameters, and
+    ``full`` switches SHAPE, not which tickets come back -- so telling its caller to "narrow
+    the query with status/has_tag" names arguments the tool would reject. ``ready`` is a
+    whole-store question; the scoped tool is ``next_batch``.
+    """
+    bulky_store(4000)
+    list_message = _refusal_message(_call("list_tickets"))
+    for filter_name in ("status", "ticket_type", "has_tag", "without_tag"):
+        assert filter_name in list_message, f"list_tickets can filter on {filter_name}"
+
+    monkeypatch.setattr(rebar, "ready", lambda **_: [_bulky_state(i) for i in range(4000)])
+    ready_message = _refusal_message(_call("ready_tickets"))
+    assert "next_batch" in ready_message, (
+        f"ready_tickets cannot be narrowed in place; its refusal must point at the "
+        f"scoped tool that can: {ready_message}"
+    )
+    for absent in ("has_tag", "without_tag", "parent"):
+        assert absent not in ready_message, (
+            f"ready_tickets has no {absent} parameter -- naming it sends the caller into "
+            f"a dead end: {ready_message}"
+        )
