@@ -23,6 +23,7 @@ SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observabil
 _SHA = "a" * 40
 
 METRIC = "disk_pressure_prunes"
+PERSIST_METRIC = "disk_pressure_persists"
 
 _OFFSET_VARIABLES = (
     "REPL_OFFSET_FILE",
@@ -34,6 +35,7 @@ _OFFSET_VARIABLES = (
     "INTERRUPT_BOUND_OFFSET_FILE",
     "INTERRUPT_SIGNAL_OFFSET_FILE",
     "DISK_PRESSURE_OFFSET_FILE",
+    "DISK_PRESSURE_PERSIST_OFFSET_FILE",
     "G2P_OFFSET_FILE",
 )
 
@@ -50,6 +52,21 @@ def _marker() -> str:
         {"ts": 1787175217, "reason": "pressure-prune", "detail": "root disk at 92% (threshold 90%)"}
     )
     return f"AUTODEPLOY_DISK_PRESSURE {payload}"
+
+
+def _persist_marker(streak: int = 3) -> str:
+    """The line autodeploy.sh writes when a reclaim has been INEFFECTIVE for `streak` cycles."""
+    payload = json.dumps(
+        {
+            "ts": 1787175217,
+            "reason": "reclaim-ineffective",
+            "detail": (
+                f"root disk STILL 92% (threshold 80%) after {streak} consecutive reclaim "
+                f"cycles; reclaim is not recovering the disk"
+            ),
+        }
+    )
+    return f"AUTODEPLOY_DISK_PRESSURE_PERSISTS {payload}"
 
 
 def _environment(
@@ -162,3 +179,95 @@ def test_second_run_publishes_only_the_new_markers(tmp_path: Path) -> None:
     assert (first.returncode, second.returncode) == (0, 0)
     assert _values(aws_log, METRIC) == [2, 1]
     assert paths["DISK_PRESSURE_OFFSET_FILE"].read_text().strip() == "3"
+
+
+# --- the "reclaim is ineffective" counter (bug 9bc0-1200-1451-44bb) -----------
+# disk_pressure_prunes counts INVOCATIONS, so "the reclaim gate never ran" and "it ran and
+# reclaimed nothing" are the same number — the exact question the 2026-08-28 incident could not
+# answer from CloudWatch. AUTODEPLOY_DISK_PRESSURE_PERSISTS is emitted only after N consecutive
+# reclaim cycles each completed with the disk still pressured, so it is publishable as the
+# alarmable "reclaim is ineffective" signal without host access.
+
+
+def test_persistence_markers_are_counted_into_their_own_metric(tmp_path: Path) -> None:
+    env, aws_log, paths = _environment(tmp_path, [_persist_marker(), _persist_marker(4)])
+
+    result = _run(env)
+
+    assert result.returncode == 0
+    assert _values(aws_log, PERSIST_METRIC) == [2]
+    assert paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"].read_text().strip() == "2"
+
+
+def test_the_two_disk_pressure_counters_never_cross_count(tmp_path: Path) -> None:
+    """The DISCRIMINATOR, at the metric layer. `AUTODEPLOY_DISK_PRESSURE` is a strict prefix of
+    `AUTODEPLOY_DISK_PRESSURE_PERSISTS`, so a pattern that is not anchored on the JSON `{` would
+    count every persistence marker into the invocation counter too — drowning the rare
+    "reclaim is ineffective" signal in ordinary reclaims, and inflating a counter that CI and
+    incident sweeps read as a plain prune count."""
+    lines = [_marker(), _persist_marker(), _persist_marker(4)]
+    env, aws_log, paths = _environment(tmp_path, lines)
+
+    result = _run(env)
+
+    assert result.returncode == 0
+    assert _values(aws_log, METRIC) == [1], (
+        "the invocation counter must see ONE prune, not three — the persistence marker's token "
+        "starts with the invocation marker's token and must not match it"
+    )
+    assert _values(aws_log, PERSIST_METRIC) == [2]
+    assert paths["DISK_PRESSURE_OFFSET_FILE"].read_text().strip() == "1"
+    assert paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"].read_text().strip() == "2"
+
+
+def test_persistence_prose_is_not_counted(tmp_path: Path) -> None:
+    """Record-anchored like every counter above (bug 8c2f): a log sentence naming the marker
+    mid-line never inflates the counter."""
+    lines = [
+        "saw an AUTODEPLOY_DISK_PRESSURE_PERSISTS marker earlier today",
+        _persist_marker(),
+    ]
+    env, aws_log, _ = _environment(tmp_path, lines)
+
+    result = _run(env)
+
+    assert result.returncode == 0
+    assert _values(aws_log, PERSIST_METRIC) == [1]
+
+
+def test_persistence_cold_start_seeds_the_offset_and_publishes_zero(tmp_path: Path) -> None:
+    """No offset file yet -> publish 0, never the inherited journal count (bug e2a6). Without
+    this, a box that had been persistently pressured before the counter shipped would page on
+    its first observability run for history it had already recovered from."""
+    env, aws_log, paths = _environment(tmp_path, [_persist_marker()] * 5, seed_offsets=False)
+
+    result = _run(env)
+
+    assert result.returncode == 0
+    assert _values(aws_log, PERSIST_METRIC) == [0]
+    assert paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"].read_text().strip() == "5"
+
+
+def test_persistence_second_run_publishes_only_the_new_markers(tmp_path: Path) -> None:
+    env, aws_log, paths = _environment(tmp_path, [_persist_marker()])
+
+    first = _run(env)
+    journal = Path(env["JOURNAL_FILE"])
+    journal.write_text(journal.read_text() + _persist_marker(4) + "\n")
+    second = _run(env)
+
+    assert (first.returncode, second.returncode) == (0, 0)
+    assert _values(aws_log, PERSIST_METRIC) == [1, 1]
+    assert paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"].read_text().strip() == "2"
+
+
+def test_no_persistence_markers_publishes_zero(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL at the metric layer: a box whose reclaims all worked publishes 0 here
+    even while ordinary prunes are being counted, so the alarm is silent on a healthy box."""
+    env, aws_log, _ = _environment(tmp_path, [_marker(), _marker()])
+
+    result = _run(env)
+
+    assert result.returncode == 0
+    assert _values(aws_log, METRIC) == [2]
+    assert _values(aws_log, PERSIST_METRIC) == [0]

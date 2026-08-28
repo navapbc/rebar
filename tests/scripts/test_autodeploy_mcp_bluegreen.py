@@ -46,11 +46,13 @@ CT="$DS/containers"
 touch "$CT"
 port_of(){ awk -F'|' -v n="$1" '$1==n{print $2}' "$CT" | head -1; }
 state_of(){ awk -F'|' -v n="$1" '$1==n{print $3}' "$CT" | head -1; }
+image_of(){ awk -F'|' -v n="$1" '$1==n{print $4}' "$CT" | head -1; }
+refcount(){ awk -F'|' -v i="$1" '$4==i{c++}END{print c+0}' "$CT"; }
 set_state(){
   awk -F'|' -v n="$1" -v s="$2" 'BEGIN{OFS="|"}{if($1==n)$3=s;print}' "$CT" > "$CT.t"
   mv "$CT.t" "$CT"
 }
-add_ct(){ echo "$1|$2|running" >> "$CT"; }
+add_ct(){ echo "$1|$2|running|$3" >> "$CT"; }
 del_ct(){ grep -v "^$1|" "$CT" > "$CT.t" 2>/dev/null; mv "$CT.t" "$CT" 2>/dev/null || true; }
 names_running(){ awk -F'|' '$3=="running"{print $1}' "$CT"; }
 names_all(){ awk -F'|' '{print $1}' "$CT"; }
@@ -62,6 +64,12 @@ case "$1 $2" in
     echo "compose-up-$last" >> "$LOG"; exit 0 ;;
   "compose logs")   echo "log-tail"; exit 0 ;;
   "image inspect")  exit 0 ;;
+  "image rm")
+    # Model the real daemon: `docker image rm` WITHOUT -f REFUSES while any container still
+    # references the image. That refusal is the retire path's last independent guard against
+    # removing a serving release, so the stub must reproduce it rather than always succeed.
+    if [ "$(refcount "$3")" -gt 0 ]; then echo "image-rm-refused $3" >> "$LOG"; exit 1; fi
+    echo "image-rm $3" >> "$LOG"; exit 0 ;;
 esac
 case "$1" in
   tag) echo "tag ${*:2}" >> "$LOG"; exit 0 ;;
@@ -74,8 +82,9 @@ case "$1" in
       esac
       prev="$a"
     done
+    img="${*: -1}"
     echo "run --name $name -p $port :: $*" >> "$LOG"
-    [ -n "$name" ] && add_ct "$name" "$port"
+    [ -n "$name" ] && add_ct "$name" "$port" "$img"
     [ -n "$port" ] && [ ! -f "$DS/health-$port" ] && printf '{"in_flight":0}' > "$DS/health-$port"
     exit 0 ;;
   ps)
@@ -88,6 +97,7 @@ case "$1" in
     nm="${*: -1}"
     case "$fmt" in
       *State.Running*) [ "$(state_of "$nm")" = "running" ] && echo "true" || echo "false" ;;
+      *Config.Image*) image_of "$nm" ;;
       *.Id*) if [ "$nm" = "compose-gerrit-1" ]; then cat "$DS/gerrit-id"; else echo "id-$nm"; fi ;;
       *) echo "" ;;
     esac
@@ -200,11 +210,20 @@ def _write_common_stubs(
 
 
 def _seed_container(
-    dstate: Path, name: str, port: int, in_flight: int = 0, state: str = "running"
+    dstate: Path,
+    name: str,
+    port: int,
+    in_flight: int = 0,
+    state: str = "running",
+    image: str = "",
 ) -> None:
+    """Seed one fake container. ``image`` is what `docker inspect -f '{{.Config.Image}}'`
+    reports; the default empty value means "no image recorded", which the retire path treats
+    as unknown and never acts on — so tests that predate the image-retirement behaviour are
+    unaffected and only tests that opt in by naming an image exercise it."""
     ct = dstate / "containers"
     with ct.open("a") as fh:
-        fh.write(f"{name}|{port}|{state}\n")
+        fh.write(f"{name}|{port}|{state}|{image}\n")
     (dstate / f"health-{port}").write_text(f'{{"in_flight":{in_flight}}}')
 
 
@@ -1621,4 +1640,148 @@ def test_a_complete_tick_advances_the_mcp_marker_even_when_mcp_was_a_no_op(
         "a COMPLETE tick must leave the mcp marker in lockstep with the global sha even when "
         "the mcp block was a no-op; otherwise a later mcp-only change diffs from a stale "
         f"baseline. mcp-deployed-sha={recorded!r}\n{ctx}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# per-release image retirement at reap (bug 9bc0-1200-1451-44bb)               #
+# --------------------------------------------------------------------------- #
+# Blue-green tags every build `compose-mcp:<sha>` and `docker image prune` without `-a` only
+# drops DANGLING images, so these tagged releases accumulated unbounded — 44 images / 11.09GB
+# on 2026-08-28, 10.08GB reclaimable — until the root disk hit 92% and nginx stalled buffering
+# to /var/lib/nginx/tmp/, taking the /mcp endpoint down. The retire path is where that garbage
+# becomes safely removable, because a REAPED container is by construction serving nothing.
+
+
+def _image_removals(cmds: list[str]) -> list[str]:
+    return [c.removeprefix("image-rm ") for c in cmds if c.startswith("image-rm ")]
+
+
+def test_reaping_a_drained_container_retires_its_per_release_image(
+    mcp_box: dict[str, object],
+) -> None:
+    """The AC: after a drained container is reaped, the `compose-mcp:<sha>` image IT was running
+    is removed, while the LIVE backend's image and the bare `compose-mcp` build tag survive."""
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image="compose-mcp:" + "a" * 40
+    )
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"],
+        "rebar-mcp-old-8091",
+        8091,
+        state="exited",
+        image="compose-mcp:" + "b" * 40,
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "image-rm ")
+    removed = _image_removals(cmds)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, f"a no-op tick is a normal outcome\n{ctx}"
+    assert removed == ["compose-mcp:" + "b" * 40], (
+        f"exactly the reaped container's per-release image must be removed — this is the "
+        f"tagged-image leak that filled the root disk and took /mcp down\n{ctx}"
+    )
+    assert "compose-mcp:" + "a" * 40 not in removed, (
+        f"the LIVE backend's image is the rollback lifeline and must survive\n{ctx}"
+    )
+
+
+def test_a_running_containers_image_is_never_removed(mcp_box: dict[str, object]) -> None:
+    """The defect-seeded guarantee: an image is retired ONLY after the reap for its container
+    has SUCCEEDED. A still-RUNNING non-live container is asked to drain (`docker stop`) but is
+    NOT reaped this tick, so its image must not be touched — removing it would strand a
+    container that may still be finishing in-flight certified ops."""
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image="compose-mcp:" + "a" * 40
+    )
+    # Still RUNNING on a non-live port with work in flight -> stopped, not reaped.
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"],
+        "rebar-mcp-draining-8091",
+        8091,
+        in_flight=3,
+        image="compose-mcp:" + "c" * 40,
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "stop rebar-mcp-draining-8091")
+    removed = _image_removals(cmds)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, f"a no-op tick is a normal outcome\n{ctx}"
+    assert any("stop rebar-mcp-draining-8091" in c for c in cmds), (
+        f"the still-running non-live container must be asked to drain\n{ctx}"
+    )
+    assert removed == [], (
+        f"NO image may be removed on a tick that reaped nothing — the retire path removes an "
+        f"image only after `docker rm` for that container SUCCEEDED\n{ctx}"
+    )
+    assert not any("image-rm-refused" in c for c in cmds), (
+        f"the guard must be the reap ordering itself, not a rescue by the daemon's "
+        f"still-referenced refusal\n{ctx}"
+    )
+
+
+def test_an_image_shared_with_the_live_backend_is_retained(mcp_box: dict[str, object]) -> None:
+    """A reaped container may have been running the SAME image the live backend runs (a redeploy
+    of an unchanged sha). Retiring on reap must key on the IMAGE, not on the container: removing
+    it would delete the image under the serving container."""
+    shared = "compose-mcp:" + "a" * 40
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image=shared)  # type: ignore[arg-type]
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"], "rebar-mcp-old-8091", 8091, state="exited", image=shared
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "rm rebar-mcp-old-8091")
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, ctx
+    assert any("rm rebar-mcp-old-8091" in c for c in cmds), f"the drained old must be reaped\n{ctx}"
+    assert _image_removals(cmds) == [], (
+        f"the live backend's image must be retained even when a reaped container shared it\n{ctx}"
+    )
+    # The retire path must DECLINE on its own live-image guard, not be rescued by the daemon
+    # refusing a still-referenced image. Both guards are real, but only the first is ours: if
+    # this assertion is dropped, deleting the live-image check leaves every test green while
+    # the code has started ATTEMPTING to remove a serving release on every reap.
+    assert not any("image-rm-refused" in c for c in cmds), (
+        f"no removal may even be ATTEMPTED for the live backend's image — the guard under test "
+        f"is the live-image check, not the daemon's still-referenced refusal\n{ctx}"
+    )
+
+
+def test_the_bare_build_tag_is_never_retired(mcp_box: dict[str, object]) -> None:
+    """`compose-mcp` (the bare `docker compose build mcp` output) is what the next deploy re-tags
+    into `compose-mcp:<sha>`. Removing it would break the following build's tag step, so a
+    container running the bare tag — the boot compose backend — never triggers a removal."""
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image="compose-mcp:" + "a" * 40
+    )
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"], "compose-mcp-1", 8091, state="exited", image="compose-mcp"
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "rm compose-mcp-1")
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, ctx
+    assert any(c == "rm compose-mcp-1" for c in cmds), f"the exited boot backend is reaped\n{ctx}"
+    assert _image_removals(cmds) == [], (
+        f"the bare `compose-mcp` build tag must never be retired\n{ctx}"
     )

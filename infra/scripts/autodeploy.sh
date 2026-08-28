@@ -131,6 +131,17 @@ BUILD_CACHE_KEEP="${BUILD_CACHE_KEEP:-5GB}"           # buildkit cache hard cap 
 DISK_PRESSURE_PCT="${DISK_PRESSURE_PCT:-80}"
 PRESSURE_PRUNE_MIN_INTERVAL="${PRESSURE_PRUNE_MIN_INTERVAL:-600}"
 PRESSURE_PRUNE_TS_FILE="${PRESSURE_PRUNE_TS_FILE:-$STATE_DIR/pressure-prune-ts}"
+# Persistent-pressure streak (bug 9bc0-1200-1451-44bb). The 2026-08-28 outage ran the reclaim
+# every ~10 min for ~11h while it freed NOTHING, and no signal expressed that: the threshold
+# alarm flaps with the disk, and AUTODEPLOY_DISK_PRESSURE counts INVOCATIONS, so "the gate never
+# ran" and "it ran and reclaimed nothing" are indistinguishable. This counter is the missing
+# discriminator — it counts CONSECUTIVE INEFFECTIVE RECLAIM CYCLES (a completed reclaim after
+# which the disk is STILL pressured), so it rises only on PERSISTENCE. The counter must survive
+# between ticks (each tick is a separate process), so it is persisted exactly like
+# PRESSURE_PRUNE_TS_FILE above. PRESSURE_STREAK_ALARM is the named threshold — deliberately a
+# tunable and not a literal, matching DISK_PRESSURE_PCT / PRESSURE_PRUNE_MIN_INTERVAL.
+PRESSURE_STREAK_FILE="${PRESSURE_STREAK_FILE:-$STATE_DIR/pressure-prune-streak}"
+PRESSURE_STREAK_ALARM="${PRESSURE_STREAK_ALARM:-3}"
 
 # ── mcp blue-green target (panicky-sylphish-foxterrier / ADR 0079 amendment / 0104) ──
 # The on-box rebar-mcp server is a NEVER-IDLE shared endpoint, so the review-bot's
@@ -270,17 +281,36 @@ capture_bot_logs() {
 # fail-closed the gate — and the failure path had NO reclamation at all). Bounded:
 # the buildkit cache is hard-capped at BUILD_CACHE_KEEP (keeps a warm cache for
 # fast rebuilds), dangling images are dropped; TAGGED images are never touched
-# (:prev is the rollback lifeline). Each prune is time-bounded (a wedged daemon
-# under disk pressure must not hold the deploy lock) and can NEVER alter control
-# flow or mask the caller's failure exit code — a prune failure only logs.
+# here (:prev is the review-bot's rollback lifeline, and the mcp per-release tags
+# are reclaimed at RETIRE instead — mcp_retire_image, so a serving release can
+# never be removed by a blanket prune). Each prune is time-bounded (a wedged
+# daemon under disk pressure must not hold the deploy lock) and can NEVER alter
+# control flow or mask the caller's failure exit code — a prune failure only logs.
+#
+# It also MEASURES itself (bug 9bc0): root-disk free space is read before and
+# after and the delta logged, because "disk pressure reclaim complete" was emitted
+# for ~11h on 2026-08-28 while freeing nothing. Effect is now observed, not inferred.
 prune_docker_caches() {
+  local before after
+  before="$(root_disk_free_kb)"
   if ! timeout 120 docker builder prune -f --keep-storage "$BUILD_CACHE_KEEP" >/dev/null 2>&1; then
     log "prune_docker_caches: builder prune failed (non-fatal)"
   fi
   if ! timeout 120 docker image prune -f >/dev/null 2>&1; then
     log "prune_docker_caches: image prune failed (non-fatal)"
   fi
+  after="$(root_disk_free_kb)"
+  log "prune_docker_caches: root-disk free before=${before}kB after=${after}kB freed=$((after - before))kB"
   return 0
+}
+
+# Echo the integer root-disk AVAILABLE kilobytes (the `df --output=avail` sibling of
+# root_disk_pct below). Echoes 0 if `df` yields nothing parseable, so an unreadable probe
+# degrades to a visible "freed=0kB" rather than breaking the arithmetic in the caller.
+root_disk_free_kb() {
+  local kb
+  kb="$(df --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')"
+  echo "${kb:-0}"
 }
 
 # Echo the integer root-disk used percent (same computation as observability.sh's root-disk
@@ -297,9 +327,16 @@ root_disk_pct() {
 # of no-op ticks can't hammer the docker daemon; a triggered prune emits exactly one countable
 # AUTODEPLOY_DISK_PRESSURE marker so observability.sh can publish it as a metric.
 reclaim_under_pressure() {
-  local pct last
+  local pct last after streak
   pct="$(root_disk_pct)"
   if [ "$pct" -lt "$DISK_PRESSURE_PCT" ]; then
+    # RESET LIVES HERE, not next to the increment below. A recovered tick returns from this
+    # branch and never reaches the post-reclaim code, so a reset placed there would be
+    # unreachable and the streak would never clear once it had risen.
+    if [ "$(read_pressure_streak)" -ne 0 ]; then
+      write_pressure_streak 0
+      log "disk pressure cleared ($pct% < $DISK_PRESSURE_PCT%): persistent-pressure streak reset"
+    fi
     return 0
   fi
   last="$(cat "$PRESSURE_PRUNE_TS_FILE" 2>/dev/null || echo 0)"
@@ -312,7 +349,39 @@ reclaim_under_pressure() {
   now > "$PRESSURE_PRUNE_TS_FILE.tmp" && mv "$PRESSURE_PRUNE_TS_FILE.tmp" "$PRESSURE_PRUNE_TS_FILE"
   log "disk pressure ($pct% >= $DISK_PRESSURE_PCT%): reclaiming docker garbage on the no-op tick"
   prune_docker_caches
-  log "disk pressure reclaim complete"
+  # A reclaim CYCLE just completed, so the streak is decided on its OUTCOME: re-read the disk
+  # and compare against the same threshold. The throttled branch above returns before this and
+  # therefore leaves the streak UNCHANGED — it counts reclaim cycles, not ticks, so a pressured
+  # tick that ran no reclaim is evidence neither for nor against effectiveness (and counting
+  # ticks would reach the alarm inside a single 600s throttle window on the ~2-min timer).
+  after="$(root_disk_pct)"
+  if [ "$after" -ge "$DISK_PRESSURE_PCT" ]; then
+    streak=$(( $(read_pressure_streak) + 1 ))
+    write_pressure_streak "$streak"
+    if [ "$streak" -ge "$PRESSURE_STREAK_ALARM" ]; then
+      marker AUTODEPLOY_DISK_PRESSURE_PERSISTS reclaim-ineffective \
+        "root disk STILL ${after}% (threshold ${DISK_PRESSURE_PCT}%) after ${streak} consecutive reclaim cycles; reclaim is not recovering the disk"
+    fi
+  else
+    streak=0
+    write_pressure_streak 0
+  fi
+  log "disk pressure reclaim complete (root disk ${pct}% -> ${after}%; consecutive ineffective cycles ${streak}, alarm at ${PRESSURE_STREAK_ALARM})"
+}
+
+# The persistent-pressure streak, persisted across ticks (each tick is a separate process).
+# Reads FAIL SAFE TOWARD SILENCE: absent, unreadable, or non-numeric is 0, so a lost or corrupt
+# counter DELAYS the marker rather than emitting a false one. Writes are tmp+rename, so a torn
+# write is never observed (same shape as the PRESSURE_PRUNE_TS_FILE write above).
+read_pressure_streak() {
+  local v
+  v="$(cat "$PRESSURE_STREAK_FILE" 2>/dev/null || echo 0)"
+  case "$v" in ''|*[!0-9]*) v=0 ;; esac
+  echo "$v"
+}
+write_pressure_streak() {
+  printf '%s\n' "$1" > "$PRESSURE_STREAK_FILE.tmp" \
+    && mv "$PRESSURE_STREAK_FILE.tmp" "$PRESSURE_STREAK_FILE"
 }
 
 # ── mcp blue-green helpers (foxterrier) ────────────────────────────────────────
@@ -329,6 +398,56 @@ mcp_managed() {
 mcp_port_of() { docker port "$1" 8091/tcp 2>/dev/null | sed -E 's/.*:([0-9]+)$/\1/' | head -1; }
 # The port the /mcp/ upstream include currently points at (the LIVE backend).
 mcp_live_port() { sed -nE 's/.*server[[:space:]]+127\.0\.0\.1:([0-9]+);.*/\1/p' "$MCP_UPSTREAM_FILE" 2>/dev/null | head -1; }
+# The image reference of the container publishing $1 (the live host port). Echoes nothing when
+# the port is unknown or no managed container publishes it — the caller then retains nothing on
+# this basis and falls back to its other guards (never the reverse).
+mcp_image_on_port() {
+  local want n
+  want="$1"
+  [ -n "$want" ] || return 0
+  while read -r n; do
+    [ -n "$n" ] || continue
+    if [ "$(mcp_port_of "$n")" = "$want" ]; then
+      docker inspect -f '{{.Config.Image}}' "$n" 2>/dev/null
+      return 0
+    fi
+  done < <(mcp_managed)
+}
+
+# Retire the per-release image $1 that a JUST-REAPED container was running; $2 is the LIVE
+# backend's image reference (may be empty = unknown). Called ONLY after `docker rm` succeeded
+# for that container, so nothing it served is still running (bug 9bc0).
+#
+# Blue-green tags every build `$MCP_IMAGE:$TARGET` (compose-mcp:<sha>) and `docker image prune`
+# without `-a` only drops DANGLING images, so these tagged releases accumulated unbounded —
+# 44 images / 11.09GB on 2026-08-28, 10.08GB of it reclaimable, which is what filled the root
+# disk and stalled nginx. Nothing was permitted to remove them; this is that permission,
+# narrowed to exactly the images whose container has been reaped.
+#
+# THREE independent guards keep a serving release safe:
+#   1. the bare $MCP_IMAGE build tag (the `docker compose build mcp` output that the deploy
+#      re-tags each release) is never removed — removing it would break the next build's tag;
+#   2. the LIVE backend's image is never removed;
+#   3. removal is `docker image rm` WITHOUT -f, so the daemon itself refuses while ANY
+#      container still references the image. Guard 3 holds even if 1 and 2 were both wrong.
+# `:prev` is listed defensively: today it is a $BOT_IMAGE-only scheme and no compose-mcp:prev
+# is ever created, so that arm is inert unless an mcp image-level rollback tag is introduced.
+mcp_retire_image() {
+  local img live_img
+  img="$1"; live_img="$2"
+  case "$img" in
+    ''|"$MCP_IMAGE"|"$MCP_IMAGE:latest"|"$MCP_IMAGE:prev") return 0 ;;
+  esac
+  if [ -n "$live_img" ] && [ "$img" = "$live_img" ]; then
+    return 0
+  fi
+  if docker image rm "$img" >/dev/null 2>&1; then
+    log "mcp retire: removed image $img (its container was reaped; live image + build tag retained)"
+  else
+    log "mcp retire: image $img not removed (still referenced, or already gone) — non-fatal"
+  fi
+  return 0
+}
 
 # MemAvailable in MB (MCP_MEM_AVAILABLE_MB overrides for tests). Echoes -1 for "unreadable",
 # which the caller treats as fail-OPEN.
@@ -443,8 +562,9 @@ mcp_retire_graceful() {
 # freeing its blue/green port. Over MCP_RELEASES_CAP managed containers (too many draining /
 # holding ports) emit AUTODEPLOY_MCP_RETIRE_CAP instead of forcing a kill. Safe on the no-op tick.
 mcp_retire_sweep() {
-  local live n p count
+  local live live_img n p img count
   live="$(mcp_live_port)"
+  live_img="$(mcp_image_on_port "$live")"
   while read -r n; do
     [ -n "$n" ] || continue
     p="$(mcp_port_of "$n")"
@@ -457,7 +577,14 @@ mcp_retire_sweep() {
       [ "$p" = "$live" ] && continue                    # keep the live backend (RELEASES_KEEP)
       mcp_retire_graceful "$n"
     else
-      docker rm "$n" >/dev/null 2>&1 && log "mcp retire: reaped exited $n (port ${p:-?} freed)"
+      # Read the image reference BEFORE the rm — it is unreadable once the container is gone,
+      # and the container NAME carries only a truncated sha plus the port, so it cannot be
+      # string-manipulated back into a tag. Retire the image only AFTER the reap SUCCEEDS.
+      img="$(docker inspect -f '{{.Config.Image}}' "$n" 2>/dev/null)"
+      if docker rm "$n" >/dev/null 2>&1; then
+        log "mcp retire: reaped exited $n (port ${p:-?} freed)"
+        mcp_retire_image "$img" "$live_img"
+      fi
     fi
   done < <(mcp_managed -a)
   count="$(mcp_managed -a | grep -c . || true)"
