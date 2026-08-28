@@ -661,9 +661,22 @@ def _diagnose_non_killed(root: Path, head: RunResults, artifact_dir: Path) -> st
     mutants = [name for name, status in head.statuses.items() if status != "killed"]
     if not mutants:
         return "stable"
-    env = _command_env(root)
+    # This re-runs MUTATED code, so it is sandboxed exactly like the two calls in
+    # execute_shard. It is the most dangerous of the three: it re-runs the mutants that
+    # were NOT killed, and a mutant that deletes a tree while the assertions still pass
+    # — or that the subprocess timeout stopped rather than a test — lands in precisely
+    # that set. Leaving it unwrapped left the 2026-08-26 path live (`724c-b5fd`).
+    basetemp = root / ".mutation-pytest"
+    basetemp.mkdir(parents=True, exist_ok=True)
+    sandbox_allow = (root, basetemp)
+    env = mutation_sandbox.sandbox_env(_command_env(root))
     _run(
-        (sys.executable, "-m", "mutmut", "run", *mutants, "--max-children", "1"),
+        mutation_sandbox.wrap(
+            (sys.executable, "-m", "mutmut", "run", *mutants, "--max-children", "1"),
+            allow=sandbox_allow,
+            profile_dir=artifact_dir,
+            env=env,
+        ),
         cwd=root,
         env=env,
     )

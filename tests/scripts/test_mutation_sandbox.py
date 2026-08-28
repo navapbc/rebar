@@ -202,6 +202,43 @@ def test_enforcement_holds_for_the_mutmut_run_argv_shape(tmp_path):
     )
 
 
+@live
+def test_the_diagnostic_rerun_allow_list_denies_writes_outside_it(tmp_path):
+    """Enforcement for the `_diagnose_non_killed` path, not just its argv shape.
+
+    That function re-runs the mutants that were NOT killed — survivors and timeouts —
+    which is the set a destructive mutant lands in, so it is the call site where a
+    missing sandbox costs the most. Its allow-list is `(root, basetemp)`, the same
+    contract `execute_shard` uses; this proves a write outside that contract is denied
+    while the child demonstrably ran. Denial is proven with a CREATE: a leaked create
+    is inert, whereas proving it with a delete would perform real damage on the day the
+    sandbox stopped enforcing.
+    """
+    root = _inside(tmp_path, "root")
+    root.mkdir()
+    basetemp = root / ".mutation-pytest"
+    basetemp.mkdir()
+    sentinel = basetemp / "live.txt"
+    target = _inside(tmp_path, "outside_the_repo.txt")
+    inner = (
+        "import os, pathlib;"
+        "pathlib.Path(os.environ['SENTINEL']).write_text(os.environ['MARK']);"
+        "pathlib.Path(os.environ['DENIED']).write_text('pwned')"
+    )
+    env = subprocess_env(MARK=LIVENESS, SENTINEL=str(sentinel), DENIED=str(target))
+    argv = sb.wrap(
+        [sys.executable, "-c", inner],
+        allow=(root, basetemp),
+        profile_dir=tmp_path,
+        env=env,
+    )
+    proc = subprocess.run(argv, env=env, capture_output=True, text=True, check=False)
+    _assert_child_ran(sentinel, proc)
+    assert not target.exists(), (
+        f"sandbox permitted a write outside the diagnostic re-run's allow-list; {_why(proc)}"
+    )
+
+
 # --- fail-closed + opt-out --------------------------------------------------------
 
 
@@ -714,3 +751,65 @@ def test_the_containment_guard_refuses_an_empty_name(tmp_path):
     """An empty name would resolve to tmp_path itself, widening the removal."""
     with pytest.raises(AssertionError, match="empty target name"):
         _inside(tmp_path, "")
+
+
+# --- module-wide binding: no `mutmut run` may be added unsandboxed --------------------
+# The tests above bind the two call sites inside `execute_shard`. That scoping is what
+# let a THIRD `mutmut run` — `_diagnose_non_killed`, which re-runs surviving mutants —
+# sit unsandboxed on main (`724c-b5fd`): a per-function assertion cannot see a call site
+# in another function. These scan the whole module, so a fourth site fails here rather
+# than silently reopening the hole.
+
+
+def _module_tree() -> ast.Module:
+    return ast.parse((REPO_ROOT / "scripts" / "mutation_gate.py").read_text(encoding="utf-8"))
+
+
+def _is_mutmut_run(node: ast.AST) -> bool:
+    """A `_run(...)` whose argv literals begin `-m mutmut run` (starred args ignored)."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_run"
+        and _argv_literals(node)[:3] == ("-m", "mutmut", "run")
+    )
+
+
+def _mutmut_run_sites() -> list[tuple[str, ast.Call]]:
+    """Every `mutmut run` invocation in mutation_gate.py, with its enclosing function."""
+    seen: dict[int, tuple[str, ast.Call]] = {}
+    for fn in (n for n in ast.walk(_module_tree()) if isinstance(n, ast.FunctionDef)):
+        for call in ast.walk(fn):
+            if _is_mutmut_run(call):
+                seen.setdefault(id(call), (fn.name, call))
+    return list(seen.values())
+
+
+def test_every_mutmut_run_in_the_module_is_sandbox_wrapped():
+    """Mutated code must not execute unsandboxed from ANY call site."""
+    sites = _mutmut_run_sites()
+    assert len(sites) >= 2, (
+        f"expected at least the execute_shard and _diagnose_non_killed sites, found "
+        f"{[name for name, _ in sites]}"
+    )
+    unwrapped = [name for name, call in sites if not _is_sandbox_wrapped(call)]
+    assert not unwrapped, (
+        f"`mutmut run` executes MUTATED code unsandboxed in {unwrapped} — this is the "
+        f"2026-08-26 path"
+    )
+
+
+def test_every_mutmut_run_in_the_module_receives_the_hardened_env():
+    """Each site must also get the hardened HOME, not just the sandbox wrapper."""
+    tree = _module_tree()
+    offenders = []
+    for name, call in _mutmut_run_sites():
+        fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name)
+        hardened = _sandbox_env_target(fn)
+        env_kw = next((k.value for k in call.keywords if k.arg == "env"), None)
+        if not (isinstance(env_kw, ast.Name) and env_kw.id == hardened):
+            offenders.append(name)
+    assert not offenders, (
+        f"a `mutmut run` child inherits the real HOME in {offenders}; adjacent "
+        f"home-directory writes would land in the developer's home"
+    )
