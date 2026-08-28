@@ -8,6 +8,53 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — nanosecond timestamps are STRINGS on CLI `--output json` too
+
+Bug `unhelping-creviced-rhino` (`e127-a3ad-895a-4a2f`), 2026-08-28. The wire form adopted for the
+MCP surface on 2026-08-27 (bug `6fe7-956f-4901-45cf`, the entry below) now also applies to the CLI
+`--output json` / `--output llm` reads. `docs/api-stability.md` calls `--output json` rebar's
+**strongest contract**, so this is recorded as a deliberate BREAKING retype, not a quiet fix.
+
+**Why the CLI, and why now.** The CLI is the surface where a user is explicitly invited to pipe
+rebar JSON into `jq` or `node`, and those are exactly the consumers RFC 8259 §6 does not protect.
+Measured against a real ticket on `origin/main`, a stored `created_at` of `1787860170488898642`
+came back from `node`'s plain `JSON.parse` as `1787860170488898600` — silently 42 ns wrong, in an
+audit trail. The only values whose form changes are the ones a float64 consumer was **already**
+reading incorrectly; in-range integers such as `priority` are untouched.
+
+**Measured, per surface** (unsafe integers — `|n| > 2**53-1` — in one command's JSON output,
+against a ticket carrying a comment and a signature):
+
+1. `rebar show <id> --output json` — **4 → 0** (`created_at`, `comments[0].timestamp`,
+   `signature.signed_at`, `updated_at`).
+2. `rebar list --output json` — **2 → 0**; `rebar ready --output json` — **3 → 0**;
+   `rebar search`, `rebar session-logs`, `rebar deps`, `rebar summary` and the `--output llm`
+   projections of `show`/`list`/`ready` go through the same emitter.
+3. `rebar sign --output json` — **1 → 0** and `rebar verify-signature --output json` — **1 → 0**
+   (`signed_at`), plus `rebar review-plan <id> --status --output json`.
+4. `rebar audit show <id> --output json` — **4 → 0** (the whole ticket state, nested under
+   `$.ticket`).
+
+**Explicitly NOT changed.** `rebar export` (NDJSON) and its library twin `rebar.export_tickets()`
+still emit integers: that is a separately versioned interop projection (`schema_version`) with a
+round-trip contract against `rebar import`, and retyping it needs a coordinated import-side change.
+The Python library facade (`rebar.show_ticket()` et al.) is unaffected in principle — it returns
+Python `int`s, which are arbitrary-precision, and only a JSON serialization boundary can lose
+digits.
+
+**Migration for CLI consumers.** Coercion is unaffected: `int(x)` in Python and `BigInt(x)` in
+JavaScript accept both forms, and `int("123") == int(123)`. What breaks is **naive raw-integer
+arithmetic** on the parsed value — `.created_at + 0` in `jq`, `data.created_at - start` in Node,
+or a Python comparison against an `int` without coercion. Those now fail LOUDLY (a `TypeError` in
+Python, a type error in `jq`) instead of silently returning a rounded number, which is the point:
+the previous behaviour corrupted the value with no signal.
+
+**Schema.** No schema change was needed. `ticket_state.schema.json`, `common.schema.json`,
+`sign_result.schema.json`, `verify_signature_result.schema.json` and
+`plan_review_status.schema.json` already type these fields `["integer", "string", ...]` and already
+describe the string WIRE FORM **with no surface qualifier**. Until this change that prose was true
+only of MCP; it is now literally true everywhere the schemas are wired to a `--output json`.
+
 ## BREAKING (pre-1.0) — nanosecond timestamps are STRINGS on the MCP wire
 
 Bug `unreal-milky-sloth` (`6fe7-956f-4901-45cf`), 2026-08-27. rebar's MCP server emitted
@@ -20,7 +67,8 @@ on `list_tickets` and `ready_tickets`.
 
 **What changed.** On the **MCP surface only**, any integer outside the JS-safe range is now emitted
 as its exact decimal **string**. CLI `--output json` and the Python library are UNCHANGED and still
-emit integers.
+emit integers. *(Superseded 2026-08-28 by bug `e127-a3ad-895a-4a2f` — see the entry above: the
+same wire form now applies to CLI `--output json` as well. The library remains unchanged.)*
 
 **Which keys.** `created_at`, `updated_at`, `last_reopened_at`, `source_created_at` and comment
 `timestamp` / `source_created_at` (all optional), plus `signed_at` on `sign_result`,

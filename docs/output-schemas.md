@@ -76,7 +76,7 @@ The authoritative version of this table is `schemas.OUTPUT_SCHEMAS` in
 The `rebar bridge fsck` result is a strict three-field object:
 `unknown_event_types`, `binding_drift`, and `store_integrity` are all required.
 
-### Nanosecond timestamps — integers here, STRINGS over MCP
+### Nanosecond timestamps — STRINGS on every JSON surface
 
 Every rebar timestamp (`created_at`, `updated_at`, `last_reopened_at`, `source_created_at`,
 comment `timestamp`, and `signed_at` on the signing/plan-review results) is **nanoseconds since
@@ -89,14 +89,18 @@ implementations "agree exactly on their numeric values" only for integers in
 
 | surface | wire form |
 |---|---|
-| CLI `--output json` | **integer** (unchanged) |
-| Python library (`rebar.*`) | Python `int` (unchanged — arbitrary precision) |
+| **CLI `--output json`** / `--output llm` | **decimal string** when the value is outside the JS-safe range |
 | **MCP tools** | **decimal string** when the value is outside the JS-safe range |
+| Python library (`rebar.*`) | Python `int` (unchanged — arbitrary precision, no JSON boundary) |
+| `rebar export` NDJSON / `rebar.export_tickets()` | **integer** (unchanged — a separately versioned interop projection with a `rebar import` round-trip contract) |
 
-The MCP form is a string of **decimal digits only** — no sign, no thousands separators, no
-decimal point, no units suffix — e.g. `"1787856371950409998"`. It is emitted that way because
-every MCP client is JavaScript and parses bare JSON numbers as IEEE-754 binary64; it is a
-correctness measure, **not** a formatting preference. (rebar reached the same conclusion for its
+The string form is **decimal digits only** — no sign, no thousands separators, no decimal
+point, no units suffix — e.g. `"1787856371950409998"`. It is emitted that way because the
+consumers of both surfaces parse bare JSON numbers as IEEE-754 binary64 (every MCP client is
+JavaScript; the CLI is the surface users pipe into `jq` and `node`); it is a correctness
+measure, **not** a formatting preference. MCP adopted it first (bug `6fe7-956f-4901-45cf`,
+2026-08-27) and the CLI followed (bug `e127-a3ad-895a-4a2f`, 2026-08-28) — both recorded as
+BREAKING in [release notes](release-notes.md) and the [CHANGELOG](../CHANGELOG.md). (rebar reached the same conclusion for its
 own event log years earlier and banned `jq` from that path for exactly this reason — see
 `src/rebar/_store/canonical.py`.)
 

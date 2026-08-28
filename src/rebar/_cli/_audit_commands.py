@@ -15,8 +15,9 @@ nonzero exit.
 
 from __future__ import annotations
 
-import json
 import sys
+
+from rebar._mcp_errors import js_safe_dumps
 
 _USAGE = (
     "Usage: rebar audit show <ticket> [--output json|text]\n"
@@ -68,7 +69,7 @@ def _audit_show(ticket: str, output: str) -> int:
 
     trail = audit_trail(ticket)
     if output == "json":
-        sys.stdout.write(json.dumps(trail, indent=2, default=str, ensure_ascii=False) + "\n")
+        sys.stdout.write(js_safe_dumps(trail, indent=2, default=str, ensure_ascii=False) + "\n")
         return 0
     _render_text(trail)
     return 0
