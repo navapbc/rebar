@@ -487,6 +487,65 @@ def test_run_scoped_banks_stay_isolated_across_concurrent_closes(store: Path) ->
     assert set(a.banked_ids()) == {"c00-aaaaaaaa"} and b.banked_ids() == set()
 
 
+def test_concurrent_persist_for_same_criterion_loses_no_writer(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two concurrent closes persisting the SAME ticket+criterion must BOTH land their
+    write, per the module's ``last-write-wins safe across concurrent closes`` invariant.
+
+    A shared ``<hash>.tmp`` pathname makes that false: forced to interleave, both writers
+    write the one shared temp file, then the second ``os.replace`` finds a temp the first
+    already consumed → ``FileNotFoundError`` → the outer best-effort handler swallows it and
+    the writer silently returns 0 (its cache population lost). The barrier fires at the real
+    ``os.replace`` seam, so both writers have already run ``tmp.write_text`` (which precedes
+    the replace in the code) before either replace runs — a deterministic collision."""
+    import threading
+
+    repo = store
+    _write_and_commit(repo, "src/a.py", "a = 1\n")
+    tid = _seed_ticket(repo, impact=["src/a.py"])
+    ids = cb.criterion_id_map(["the fix works"])
+    merged = _verdict(
+        [{"criterion": "the fix works", "criterion_id": ids["the fix works"], "met": True}]
+    )
+    bank_entries = {
+        ids["the fix works"]: {
+            "criterion_id": ids["the fix works"],
+            "met": True,
+            "evidence": "E1",
+        }
+    }
+
+    barrier = threading.Barrier(2, timeout=30)
+    real_replace = cvc.os.replace
+
+    def barriered_replace(src, dst, *args, **kwargs):
+        # Only gate the cache's own final write, so unrelated os.replace calls never block.
+        if str(dst).endswith(".json") and "completion_verdicts" in str(dst):
+            barrier.wait()
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(cvc.os, "replace", barriered_replace)
+
+    results: dict[str, int] = {}
+
+    def worker(name: str) -> None:
+        results[name] = cvc.persist_pass_verdicts(tid, merged, bank_entries, str(repo))
+
+    threads = [threading.Thread(target=worker, args=(name,)) for name in ("A", "B")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert results == {"A": 1, "B": 1}, f"a concurrent writer lost its cache write: {results}"
+    cache = cvc.cache_dir(str(repo), tid)
+    final = cache / f"{cvc.criterion_cache_key('the fix works')}.json"
+    entry = json.loads(final.read_text(encoding="utf-8"))
+    assert entry["met"] is True and entry["criterion"] == "the fix works"
+    assert not list(cache.glob("*.tmp")), "atomic tmp+rename must leave no residue"
+
+
 # ── budget: runaway backstop unchanged under the larger budget ──────────────────────
 def test_looping_tool_still_trips_backstop_under_larger_budget() -> None:
     """The recalibrated (larger) budget does not weaken the runaway guard: a looping tool

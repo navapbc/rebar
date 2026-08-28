@@ -27,12 +27,14 @@ Design pins (all review-certified in the ticket plan):
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -223,11 +225,17 @@ def persist_pass_verdicts(
                 "verified_ref_sha": verified_ref_sha,
                 "tickets_oid": tickets_oid,
             }
-            tmp = directory / f"{criterion_cache_key(text)}.tmp"
-            tmp.write_text(
-                json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
-            )
-            os.replace(tmp, directory / f"{criterion_cache_key(text)}.json")
+            key = criterion_cache_key(text)
+            fd, tmp_name = tempfile.mkstemp(dir=directory, prefix=key, suffix=".tmp")
+            tmp = Path(tmp_name)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+                os.replace(tmp, directory / f"{key}.json")
+            except Exception:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
+                raise
             written += 1
         return written
     except Exception:  # the cache is an accelerator; it must never fail a close
