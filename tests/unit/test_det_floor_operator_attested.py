@@ -118,7 +118,7 @@ def test_p6_operator_attested_is_advisory() -> None:
     assert r.status == "fail" and r.blocking is False
     assert r.coverage["operator_attested_gaps"] == 1
     assert r.finding is not None
-    assert any("[operator-attested]" in e for e in r.finding["evidence"])
+    assert any("[non-codebase]" in e for e in r.finding["evidence"])
 
 
 def test_p6_clean_when_operational_ac_tagged() -> None:

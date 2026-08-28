@@ -54,8 +54,8 @@ _OPERATOR_ATTESTED_TAG_RE = re.compile(
 # "done" evidence that inherently lives OUTSIDE the code snapshot the completion verifier
 # reads — a deploy, a prod/live-run outcome, an IaC apply, a cloud-resource state, a
 # merge-gate (Gerrit vote) outcome, a human/operator action, an operator drill, live-store
-# surgery, or a recorded out-of-band attestation. ADR-0043 wants such an AC tagged
-# [operator-attested]. Same lexicon family as p6's vague-term lint and p7's destructive sniff.
+# surgery, or a recorded out-of-band attestation. ADR-0043/ADR-0101 want such an AC tagged
+# [non-codebase]. Same lexicon family as p6's vague-term lint and p7's destructive sniff.
 _OPERATOR_EVIDENCE_MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (name, re.compile(pat, re.IGNORECASE))
     for name, pat in (
@@ -149,7 +149,7 @@ _OPERATOR_EVIDENCE_NEGATION = re.compile(
 def operator_evidence_ac_gaps(ac_lines: list[str]) -> list[tuple[str, list[str]]]:
     """Pure detector for the operator-attested-evidence lint (R2). Given AC checklist item
     lines (as produced by :func:`ac_item_lines`), returns one ``(ac_line, marker_names)`` per
-    item that (a) is NOT already tagged ``[operator-attested]``, (b) carries >=1
+    item that (a) is NOT already tagged ``[non-codebase]``, (b) carries >=1
     operational-evidence marker, and (c) is not suppressed by a codebase-verifiable co-signal
     or an explicit negation. Deterministic, side-effect-free, LLM-free — this is the unit the
     R2 self-gate evaluates. Returns ``[]`` when there is no such gap."""
@@ -173,8 +173,8 @@ def operator_evidence_issues(ac_lines: list[str]) -> list[str]:
         subject = re.sub(r"^\s*-\s*\[[ xX]?\]\s*", "", line).strip()[:80]
         issues.append(
             f"AC item {subject!r} cites operational evidence ({', '.join(markers)}) that lives "
-            "outside the codebase but is not tagged [operator-attested]; prefix the checkbox text "
-            "with [operator-attested] so the completion verifier accepts a recorded attestation "
+            "outside the codebase; tag it [non-codebase] — prefix the checkbox text with "
+            "[non-codebase] so the completion verifier accepts a recorded attestation "
             "instead of failing to find code proof."
         )
     return issues

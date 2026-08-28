@@ -18,6 +18,33 @@ def test_operator_attested_coaching_is_self_contained() -> None:
     assert not INTERNAL_ADR.search("\n".join(issues))
 
 
+def test_operator_attested_coaching_prescribes_canonical_tag() -> None:
+    """P6 coaching for an untagged outside-world AC must teach the canonical [non-codebase]
+    tag and must NOT prescribe the legacy [operator-attested] alias (ADR 0101: 'author-facing
+    guidance teaches only [non-codebase]'). The compatibility matcher still accepts either
+    spelling — that lives in test_non_codebase_tag.py — but the emitted advice is author-facing
+    guidance and so may name only the canonical tag."""
+    issues = operator_evidence_issues(
+        ["- [ ] the service is deployed to production and the vote outcome is recorded"]
+    )
+    assert issues
+    for issue in issues:
+        assert "[non-codebase]" in issue
+        assert "[operator-attested]" not in issue
+
+
+def test_operator_attested_coaching_negative_control() -> None:
+    """Contrast case: an AC already tagged with the canonical [non-codebase] declares its
+    out-of-codebase evidence, so no coaching is emitted at all — proving the assertion above
+    distinguishes the untagged (coached) case from the tagged (silent) one."""
+    assert (
+        operator_evidence_issues(
+            ["- [ ] [non-codebase] the service is deployed to production and the vote is recorded"]
+        )
+        == []
+    )
+
+
 def test_plan_review_prompts_do_not_expose_internal_adr_0043() -> None:
     prompt_paths = (
         ROOT / "src/rebar/llm/reviewers/plan_review_E2.md",

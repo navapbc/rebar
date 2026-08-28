@@ -190,13 +190,13 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
             lint_abstained += 1
         elif defect:
             issues.append(defect)
-    # Operator-attested evidence-kind lint (R2, ADR-0043): AC items whose "done" evidence lives
-    # OUTSIDE the codebase but are not tagged [operator-attested]. ADVISORY coaching only (p6
-    # never blocks); each gap's fix is inline. Detector extracted to det_operator_attested and
-    # self-gated by the deterministic lexicon eval (docs/experiments/plan-review-gate/).
+    # Operator-attested evidence-kind lint (R2, ADR-0043/ADR-0101): AC items whose "done"
+    # evidence lives OUTSIDE the codebase but are not tagged [non-codebase]. ADVISORY coaching
+    # only (p6 never blocks); each gap's fix is inline. Detector extracted to det_operator_attested
+    # and self-gated by the deterministic lexicon eval (docs/experiments/plan-review-gate/).
     oa_issues = det_operator_attested.operator_evidence_issues(items)
     issues.extend(oa_issues)
-    # Measurement-provenance lint (story f161, ADR-0043 x ADR-0016): [operator-attested] AC
+    # Measurement-provenance lint (story f161, ADR-0043 x ADR-0016): [non-codebase] AC
     # items whose measurement-provenance continuation line is absent/incomplete/placeholder/
     # enum-invalid. ADVISORY coaching only (p6 never blocks); each gap's fix is inline. Needs
     # the RAW plan text (not just checkbox lines) to see the indented continuation line.
