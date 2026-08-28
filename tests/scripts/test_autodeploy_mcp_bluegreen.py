@@ -930,6 +930,42 @@ def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> N
     )
 
 
+def test_docker_run_points_the_container_at_the_opcert_key(mcp_box: dict[str, object]) -> None:
+    """Bug `seaborne-wisdomless-songbird`: the blue-green container must be told WHERE its
+    op-cert key is, not merely have the file mounted.
+
+    `rebar._opcert_signing.resolve` takes the first of: a context-local startup binding, the
+    `REBAR_OPCERT_KEY_PATH` env override, then the `<tracker>/.opcert-key` genesis. On the box
+    the genesis file does not exist and the binding — composed from `REBAR_OPCERT_ENV_ID` +
+    `REBAR_IDENTITY_SIGNING_KEY` — is a ContextVar that is not observed on every tool-call path,
+    so the env override is the only resolution step that holds unconditionally. Without it the
+    container is KEY-LESS and every certified op reports `foreign_key`, which surfaces to users
+    as `claim` failing with "no certified plan-review attestation".
+
+    Asserted on the LITERAL flag rather than via the compose parse, so it stays RED if the flag
+    is dropped from EITHER file. `REBAR_IDENTITY_SIGNING_KEY` is asserted alongside because it is
+    separately load-bearing (authorship signing + the binding's own input) and must not be
+    treated as replaced by this addition."""
+    key = "/run/secrets/opcert-ed25519-key"
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "run --name")
+    run_line = _run_line(cmds)
+    ctx = f"rc={result.returncode}\nrun_line={run_line}\n{result.stdout}\n{result.stderr}"
+    assert run_line, f"the mcp deploy must `docker run` a new container\n{ctx}"
+    assert f"-e REBAR_OPCERT_KEY_PATH={key}" in run_line, (
+        "docker run must point the container at its op-cert key with "
+        f"`-e REBAR_OPCERT_KEY_PATH={key}` — mounting the file is not enough, a container "
+        f"without this env override is key-less and can only report foreign_key\n{ctx}"
+    )
+    assert f"-e REBAR_IDENTITY_SIGNING_KEY={key}" in run_line, (
+        f"docker run must still set REBAR_IDENTITY_SIGNING_KEY={key} — it signs authorship "
+        f"and is one of the two inputs to the startup op-cert binding\n{ctx}"
+    )
+    assert f"{key}:ro" in run_line, (
+        f"the op-cert key the env vars point at must be bind-mounted read-only\n{ctx}"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # change-detection contrast: REAL temp git repo, two commits                  #
 # --------------------------------------------------------------------------- #

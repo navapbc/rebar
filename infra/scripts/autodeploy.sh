@@ -372,6 +372,13 @@ mcp_free_port() {
 # where the variable is unset, and pass an empty value that OVERRIDES the real one from the
 # env-file. They are listed in `_ENV_FILE_ONLY` in tests/scripts/test_autodeploy_mcp_bluegreen.py
 # so the parity oracle asserts that exclusion rather than demanding a matching `-e`.
+#
+# REBAR_OPCERT_KEY_PATH is the op-cert key source `_opcert_signing.resolve` actually reads.
+# The startup binding composed from REBAR_OPCERT_ENV_ID + REBAR_IDENTITY_SIGNING_KEY is a
+# ContextVar and is not observed on every tool-call path; without this env override those
+# paths fall through to the ABSENT `<tracker>/.opcert-key` genesis, leaving the container
+# key-less so certified ops can only ever report foreign_key/unsigned. The key file is
+# already bind-mounted below -- only the pointer was missing.
 mcp_run_new() {
   docker run -d --name "$1" \
     --restart always \
@@ -392,6 +399,7 @@ mcp_run_new() {
     -e REBAR_MCP_ALLOW_LLM=1 \
     -e "REBAR_OPCERT_ENV_ID=${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}" \
     -e REBAR_IDENTITY_SIGNING_KEY=/run/secrets/opcert-ed25519-key \
+    -e REBAR_OPCERT_KEY_PATH=/run/secrets/opcert-ed25519-key \
     -e "REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets" \
     -e "MCP_CODE_DIR=/var/gerrit/site/mcp-code" \
     -e "REBAR_ROOT=/var/gerrit/site/mcp-code" \

@@ -375,6 +375,11 @@ services:
       # tools sign under, materialized outside the app and bind-mounted below.
       REBAR_OPCERT_ENV_ID: "${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}"
       REBAR_IDENTITY_SIGNING_KEY: "/run/secrets/opcert-ed25519-key"
+      # The op-cert key source `_opcert_signing.resolve` actually reads. The startup binding
+      # composed from the two keys above is a ContextVar, so it is not observed on every
+      # tool-call path; without this env override those paths fall through to the ABSENT
+      # `<tracker>/.opcert-key` genesis and the server can only report foreign_key/unsigned.
+      REBAR_OPCERT_KEY_PATH: "/run/secrets/opcert-ed25519-key"
       # The rebar ticket store the MCP tools read AND WRITE. Nothing bakes a store into the
       # image (.dockerignore excludes .tickets-tracker and .git), so without this the path
       # resolved to the WORKDIR and every tool failed "/app/.tickets-tracker not found".
