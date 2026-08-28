@@ -254,6 +254,13 @@ edge only (mirrors `assignee`; enumerated in `ticket_state.schema.json` and
 in a STATUS fork it follows the **lexical-UUID winner** and a losing concurrent claim
 never overwrites it; a session-less re-claim folds `None`, clearing any stale prior id.
 
+The reducer (`_processors.py` `_clear_claimed_session`) additionally **clears** all three
+provenance fields (`claimed_session`, `claim_harness`, `claim_remote_session`) to `None`
+— they are **cleared on every exit from `in_progress`** (the winning `in_progress -> <any
+other status>` edge: open, blocked, closed, idea), so a non-`in_progress` ticket reports no
+holder. Like the fold, it applies only when the incoming event's status is applied, so a
+losing concurrent transition never clears the fork winner's provenance.
+
 **Multi-harness provenance (story c557).** The same `open -> in_progress` STATUS additively
 carries two more opaque keys when present: `data["harness"]` (from the rebar-owned `AI_AGENT`
 convention var, the tool base name `claude-code` / `opencode` / `codex` / `cursor`, optionally
