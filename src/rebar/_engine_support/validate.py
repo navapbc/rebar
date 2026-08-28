@@ -79,7 +79,7 @@ def signature_findings(tracker: str) -> list:
     integrity failure. Operates on closed tickets too (signatures gate closure),
     which ``normalize_issues`` drops — hence the separate raw pass.
     """
-    from rebar import signing
+    from rebar import config, signing
     from rebar._engine_support.validate_checks import Finding
     from rebar.reducer import reduce_ticket
 
@@ -116,9 +116,12 @@ def signature_findings(tracker: str) -> list:
             continue
         # Shape-aware dispatch (story 8d8e): envelope-bearing op-cert records route to the op-cert
         # verifier, legacy HMAC records to the unchanged verify_record — so a certified op-cert is
-        # never mis-reported as unsigned. repo_root is the code root (parent of the tracker).
+        # never mis-reported as unsigned. repo_root is the CODE root — resolved the config way
+        # (None == discover), NOT os.path.dirname(tracker), which is the repo root only for a
+        # co-located store. Op-cert environment binding is advisory (ADR 0104), so discovery from
+        # cwd is correct here (auspicial-friended-merganser).
         verdict = signing.verify_attestation_record(
-            record, name, key=key, repo_root=os.path.dirname(tracker)
+            record, name, key=key, repo_root=config.repo_root_or_none()
         ).get("verdict")
         if verdict == "mismatch":
             out.append(

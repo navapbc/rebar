@@ -38,7 +38,7 @@ KNOWN_CAPABILITIES: frozenset[str] = CAPABILITY_KEYS
 #   dispatcher         → handler([name, *rest])          (reads.main / commands.main)
 #   argv               → handler([*argv_prefix, *rest])  (module <verb>_cli(rest))
 #   argv_tracker       → handler(rest, tracker_dir())
-#   argv_tracker_root  → handler(rest, tracker_dir(), dirname(tracker_dir()))
+#   argv_tracker_root  → handler(rest, tracker_dir(), None)  # root discovered downstream
 ADAPTER_KINDS: frozenset[str] = frozenset(
     {"dispatcher", "argv", "argv_tracker", "argv_tracker_root"}
 )
