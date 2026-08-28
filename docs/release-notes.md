@@ -82,6 +82,37 @@ read event/sidecar files straight off disk, and `rebar_reconciler.outbound_comme
 timestamp only as an opaque identity key. None of them cross a CLI JSON boundary, and the Python
 library returns arbitrary-precision ints.
 
+## BEHAVIOR CORRECTION (pre-1.0) — `fsck --output json`'s `issue_count` now agrees with the exit code
+
+Bug `sugarcane-scrummy-arctichare` (`29c3-b025-04d7-454e`), 2026-08-28. `rebar fsck --output json`
+computed `issue_count` as `len(issues)` — it counted **every** emitted `KIND:` line, including the
+report-only kinds that never drive the exit code. So a JSON consumer gating on `issue_count > 0`
+could reach a *different* verdict than a shell consumer gating on the exit code, against the same
+store and the same run.
+
+**What changed.** `issue_count` is redefined as the **counted subset** — the findings that respect
+each check's `is_issue` flag — so it now **agrees with the exit code** (0 when the run exits 0, ≥ 1
+when it exits 1). Each item in `issues[]` gains an **additive `counted` boolean**; the report-only
+kinds (`push_pending`, `status_fork_resolved`, `tracker_dirty_tmp_event`, and any `warn` line) are
+`counted: false` and are **excluded from `issue_count`**, while still appearing in `issues[]` so no
+finding is lost. An uninitialized/absent tracker now reports a single counted `not_initialized`
+issue, making its JSON payload distinguishable from a clean store's empty `issues[]` (previously
+byte-identical). The change is applied consistently across the CLI `--output json`, the library
+`fsck_report()`, and the MCP `fsck` tool.
+
+**Which field, which surfaces.** `issue_count` on the `Fsck` schema (`schemas/fsck.schema.json`),
+observed via CLI `rebar fsck --output json`, library `rebar.fsck_report()`, and the MCP `fsck`
+tool. The field's **type is unchanged** (integer, required); only its *computed meaning* changed.
+`counted` is a new optional boolean on each `issues[]` item.
+
+**Why this is called out.** `issue_count` is a **required** field in a strong-contract schema, so
+changing its value for a given store is an observable behavior change.
+
+**What a consumer relying on the old count must do.** A consumer that wanted "how many findings did
+fsck emit" (the old `len(issues)` semantics) must now compute `len(issues)` itself; `issue_count`
+answers "how many counted problems" (== the exit-code verdict). No external or CI consumer was
+found reading the value — this aligns the code with `docs/user-guide.md`.
+
 ## BREAKING (pre-1.0) — nanosecond timestamps are STRINGS on the MCP wire
 
 Bug `unreal-milky-sloth` (`6fe7-956f-4901-45cf`), 2026-08-27. rebar's MCP server emitted

@@ -45,6 +45,7 @@ from rebar._commands.fsck_repair import (  # noqa: F401
 )
 from rebar._commands.fsck_scan import _check_snapshot, _scan  # noqa: F401
 from rebar._commands.fsck_tracker_health import (  # noqa: F401
+    _DIRTY_LINE_SPECS,
     _branch_mismatch,
     _foreign_store_paths,
     _tracker_health,
@@ -78,6 +79,30 @@ _TRACKER_DIRTY_KINDS = {
 }
 
 _DIRTY_HEAD_RE = re.compile(r"^(\d+) path\(s\): (.*)$")
+
+# Findings the scan leaves emit with ``is_issue=False``: they appear in the text report
+# (and in ``issues[]``) but must NOT drive the exit code, so they must NOT be tallied into
+# ``issue_count`` either. This is the single place the text→JSON transform can see the
+# kind, so the JSON count becomes the COUNTED subset and AGREES with ``_scan``'s
+# ``is_issue``-respecting tally (bug 29c3-b025-04d7-454e).
+#
+# is_issue=False is decided at two kinds of production site, and this set tracks BOTH
+# without a hand-maintained duplicate that can silently drift (plan-review G6):
+#   * the tracker-dirty wedge classes are SINGLE-SOURCED from ``_DIRTY_LINE_SPECS`` below,
+#     so a future ``counted=False`` dirty class flows in automatically.
+#   * three scan/health kinds are decided by an inline ``is_issue=False`` at their
+#     production site (each site carries a pointer comment back here):
+#       push_pending         — fsck_tracker_health ``_tracker_sync_status`` (sync-ahead info)
+#       status_fork_resolved — fsck_scan (the reducer already resolved the cross-clone race)
+#       warn                 — every ``WARN:`` line (index-lock, forward-compat, branch mismatch)
+# The drift guard in tests/interfaces/facades/test_fsck_issue_count_29c3.py keeps this set
+# in lock-step with the per-site ``is_issue`` flags (round-trip over ``_DIRTY_LINE_SPECS``
+# plus a per-kind ``sum(counted) == exit-code tally`` cross-check).
+_NEVER_COUNTED_TRACKER_DIRTY_KINDS = frozenset(
+    kind.lower() for _key, kind, _blurb, counted in _DIRTY_LINE_SPECS if not counted
+)
+_NEVER_COUNTED_SCAN_KINDS = frozenset({"push_pending", "status_fork_resolved", "warn"})
+_NEVER_COUNTED_KINDS = _NEVER_COUNTED_SCAN_KINDS | _NEVER_COUNTED_TRACKER_DIRTY_KINDS
 
 
 def _dirty_json_fields(item: dict, rest: str) -> bool:
@@ -125,7 +150,11 @@ def _transform_json(text: str, compat_error: dict | None = None) -> str:
         if not m:
             continue
         kind, rest = m.group(1).lower(), m.group(2)
-        item = {"kind": kind}
+        # Additive per-issue flag: True when this kind is an ``is_issue`` finding that
+        # drives the exit code, False for the report-only kinds (bug 29c3-b025-04d7-454e).
+        # ``issues[]`` still carries EVERY finding; a consumer wanting the old total can
+        # compute ``len(issues)``.
+        item = {"kind": kind, "counted": kind not in _NEVER_COUNTED_KINDS}
         if kind in _TRACKER_DIRTY_KINDS and _dirty_json_fields(item, rest):
             issues.append(item)
             continue
@@ -140,7 +169,14 @@ def _transform_json(text: str, compat_error: dict | None = None) -> str:
         else:
             item["detail"] = rest
         issues.append(item)
-    payload: dict = {"issues": issues, "fixed": fixed, "issue_count": len(issues)}
+    # ``issue_count`` is the COUNTED subset — it agrees with the exit code, which comes
+    # from ``_scan``'s ``is_issue``-respecting tally. The never-counted kinds stay in
+    # ``issues[]`` (``counted=False``) but do not inflate the count.
+    payload: dict = {
+        "issues": issues,
+        "fixed": fixed,
+        "issue_count": sum(1 for i in issues if i["counted"]),
+    }
     if compat_error is not None:
         payload["compat_error"] = compat_error
     return json.dumps(payload)
@@ -262,7 +298,16 @@ def _missing_tracker_result(tracker: str, fmt: str) -> int | None:
             f"store exists at {legacy} — tracker.dir was changed without migrating."
         )
     if fmt == "json":
-        sys.stdout.write(_transform_json(mismatch_hint.strip()) + "\n")
+        # Emit an explicit, COUNTED ``not_initialized`` finding so the JSON payload is
+        # distinguishable from a clean store (which is ``issues:[], issue_count:0``) and
+        # ``issue_count`` (1) agrees with the exit code (1). The real diagnostic rides in
+        # the finding's ``detail``; the tracker.dir mismatch WARN (never counted) is
+        # carried alongside when present (bug 29c3-b025-04d7-454e).
+        diagnostic = (
+            f"NOT_INITIALIZED: ticket system not initialized ({tracker} not found) — "
+            "run 'rebar init' first"
+        )
+        sys.stdout.write(_transform_json(diagnostic + mismatch_hint) + "\n")
         return 1
     sys.stderr.write(
         f"Error: ticket system not initialized ({tracker} not found).\n"

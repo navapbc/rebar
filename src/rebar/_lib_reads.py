@@ -392,8 +392,16 @@ def _fsck_scan_report(*, report_only: bool, repo_root) -> dict:
         ) from exc
     payload.setdefault("issues", [])
     payload.setdefault("fixed", [])
-    payload.setdefault("issue_count", len(payload["issues"]))
-    if rc == 1 and not payload["issues"]:
+    # ``issue_count`` is the COUNTED subset (items with ``counted`` True); default an
+    # item to counted when the flag is absent (bug 29c3-b025-04d7-454e).
+    payload.setdefault("issue_count", sum(1 for i in payload["issues"] if i.get("counted", True)))
+    not_initialized = any(i.get("kind") == "not_initialized" for i in payload["issues"])
+    if not_initialized or (rc == 1 and not payload["issues"]):
+        # FAIL CLOSED on an unscannable store. The CLI now emits an explicit
+        # ``not_initialized`` finding for an uninitialized/absent tracker (its JSON was
+        # previously byte-identical to a clean store), so prefer that signal; the
+        # empty-issues coincidence remains as a belt-and-suspenders fallback.
+        #
         # SCAN-ONLY invariant. Exit 1 with NO reported findings is unreachable for a
         # real scan, so it can only mean the scan never happened: the exit code comes
         # from _scan's COUNTED tally, while ``issues`` is every uppercase ``KIND:``
@@ -401,19 +409,22 @@ def _fsck_scan_report(*, report_only: bool, repo_root) -> dict:
         # (_commands/fsck.py _transform_json). So exit 1 implies >= 1 counted issue,
         # hence >= 1 KIND line, hence a non-empty ``issues``. The empty case is the
         # uninitialized/unscannable store, which _missing_tracker_result renders as
-        # exit 1 plus a payload byte-identical to a clean one, with its real diagnostic
-        # on the TEXT path only. Fail closed rather than hand back a fabricated clean
-        # report for a store that was never read.
+        # exit 1 plus (now) an explicit ``not_initialized`` finding, with its full
+        # diagnostic on the TEXT path. Fail closed rather than hand back a report for a
+        # store that was never read.
         #
         # This reasoning holds ONLY for the scan command. `fsck-recover` also exits 1,
         # but there it means "attempted, nothing recovered" — a COMPLETED recovery
         # (_commands/fsck_recover.py module docstring). That is why recover has its own
         # reader below and never reaches this branch.
-        detail = (err.getvalue() or out.getvalue()).strip()
+        ni = next((i for i in payload["issues"] if i.get("kind") == "not_initialized"), None)
+        # Defensive .get: a future producer could emit not_initialized without a
+        # ``detail`` (the preceding line already guards ``kind`` the same way); fall
+        # back to the captured streams rather than KeyError on the error path.
+        reason = (ni.get("detail") if ni else None) or (err.getvalue() or out.getvalue()).strip()
         raise RebarError(
-            "rebar fsck could not scan the store (exit 1 with no findings — an "
-            "uninitialized or unreadable tracker, not a clean store)"
-            + (f": {detail}" if detail else ""),
+            "rebar fsck could not scan the store (an uninitialized or unreadable "
+            "tracker, not a clean store)" + (f": {reason}" if reason else ""),
             returncode=rc,
             stderr=err.getvalue(),
         )

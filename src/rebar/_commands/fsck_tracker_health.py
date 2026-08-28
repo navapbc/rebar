@@ -57,6 +57,9 @@ def _tracker_health(tracker: str, repo_root=None, authorship=None) -> tuple[list
     issues = 0
     pairs = authorship.identity_pairs() if authorship is not None else set()
     sync_line, sync_is_issue = _tracker_sync_status(tracker)
+    # NOTE: any pair added here with ``is_issue=False`` (e.g. a new WARN/informational
+    # check) MUST also be reflected in fsck._NEVER_COUNTED_KINDS so the JSON ``issue_count``
+    # stays in agreement with this exit-code tally — see that constant's drift guard.
     for line, is_issue in (
         (sync_line, sync_is_issue),
         (_branch_mismatch(tracker, repo_root), False),
@@ -230,6 +233,8 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
         except ValueError:
             ahead = 0
         if ahead > 0:
+            # PUSH_PENDING is is_issue=False (informational): mirrored in
+            # fsck._NEVER_COUNTED_KINDS so the JSON ``issue_count`` excludes it too.
             return (
                 f"PUSH_PENDING: local '{branch}' branch is ahead of {remote_ref} by "
                 f"{ahead} commit(s) — push pending (run a ticket write to retry the "
