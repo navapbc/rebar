@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from rebar import config
 from rebar._errors import RebarError
+from rebar._lib_warn import emit_cross_session_warning
 from rebar._lib_writes import _python_leaf
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ def clarity_check(ticket_id: str, *, repo_root=None) -> ClarityResult:
     from rebar._engine_support import gates, reads
     from rebar._engine_support.reads import ReadError
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     tracker = reads.tracker_dir(repo_root)
     reads.ensure_fresh(tracker)
     try:
@@ -65,6 +67,7 @@ def check_ac(ticket_id: str, *, repo_root=None) -> GateResult:
     plus a convenience ``passed`` boolean (verdict == 'pass')."""
     from rebar._engine_support import gates, reads
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     tracker = reads.tracker_dir(repo_root)
     reads.ensure_fresh(tracker)
     data, code = gates.check_ac_compute(ticket_id, tracker)
@@ -133,6 +136,7 @@ def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
     payload = impact if isinstance(impact, str) else _json.dumps(impact)
     from rebar._commands import leaf
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     _python_leaf(
         leaf.set_file_impact, ticket_id, payload, repo_root=repo_root, what="set-file-impact"
     )
@@ -142,6 +146,7 @@ def declare_no_file_impact(ticket_id: str, reason: str, *, repo_root=None) -> No
     """Record a validated explicit declaration that a ticket has no file impact."""
     from rebar._commands import leaf
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     _python_leaf(
         leaf.declare_no_file_impact,
         ticket_id,

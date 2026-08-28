@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal, cast, overload
 
 from rebar._errors import RebarError
+from rebar._lib_warn import emit_cross_session_warning
 
 if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING.
@@ -46,6 +47,7 @@ def show_ticket(ticket_id: str, *, repo_root=None, include_inbound: bool = False
     blocked-ness is readable from a single show (bug 05cb)."""
     from rebar import _reads
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     return cast(
         "TicketState",
         _reads.show_ticket(ticket_id, repo_root=repo_root, include_inbound=include_inbound),
@@ -173,6 +175,7 @@ def deps(ticket_id: str, *, repo_root=None) -> DepsGraph:
     """Dependency graph for a ticket (JSON)."""
     from rebar import _reads
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     return cast("DepsGraph", _reads.deps(ticket_id, repo_root=repo_root))
 
 
