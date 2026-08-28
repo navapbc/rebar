@@ -384,6 +384,48 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert LLMConfig.from_env().overlap_drain == "async"
 
 
+def test_overlap_drain_is_read_from_the_llm_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`overlap_drain` is read from `[llm]`; a `[tool.rebar.llm]` table is NOT parsed.
+
+    Deliberately asserts a NON-default value ("always"). With "off" or "async" the
+    assertion could not distinguish "the table was read" from "the table was ignored and
+    the default happens to match" — which is exactly how rebar.toml came to ship a
+    rollback instruction naming a table that has no effect. `_llm_drain_mode` also maps
+    any unrecognized value back to the default, so a silently-ignored table and a typo
+    are indistinguishable from the resolved value alone.
+    """
+    from rebar.llm.config import LLMConfig
+
+    monkeypatch.delenv("REBAR_LLM_OVERLAP_DRAIN", raising=False)
+    toml = tmp_path / "rebar.toml"
+
+    toml.write_text('[llm]\noverlap_drain = "always"\n')
+    assert LLMConfig.from_env(repo_root=str(tmp_path)).overlap_drain == "always"
+
+    # The table named by the old comment is not part of the schema and must not be read.
+    toml.write_text('[tool.rebar.llm]\noverlap_drain = "always"\n')
+    assert LLMConfig.from_env(repo_root=str(tmp_path)).overlap_drain != "always"
+
+
+def test_shipped_config_disables_the_write_path_enrichment_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The committed rebar.toml keeps the opportunistic write-path drain off.
+
+    Each drain cycle pushes ~4 separate commits per ticket to the shared `tickets`
+    branch; left on, it sustained a write rate that starved every other writer and let
+    stores diverge without bound.
+    """
+    from rebar.llm.config import LLMConfig
+
+    monkeypatch.delenv("REBAR_LLM_OVERLAP_DRAIN", raising=False)
+    root = Path(__file__).resolve().parents[2]
+    assert (root / "rebar.toml").is_file(), "repo-root rebar.toml not found"
+    assert LLMConfig.from_env(repo_root=str(root)).overlap_drain == "off"
+
+
 def _mock_flags(monkeypatch, *, enabled=True, drain="always", agents=True):
     from rebar import config as rc
     from rebar.llm import config as lc
