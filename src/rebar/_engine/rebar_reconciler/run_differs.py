@@ -298,7 +298,9 @@ def run_differs(ctx: Any) -> None:
         mode=mode,
         selection={
             "kind": getattr(ctx, "selection_kind", None),
-            "ids": sorted(getattr(ctx, "selection_ids", None) or []),
+            "ids": ticket_planner.scoped_selection_ids(
+                set(getattr(ctx, "selection_ids", None) or []), typed_mutations
+            ),
         },
         limits={"max_changes": getattr(ctx, "max_changes", None)},
         mutations=typed_mutations,
