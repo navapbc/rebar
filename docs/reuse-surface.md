@@ -62,7 +62,11 @@ All five functions pass `repo_root` through standard repository and tracker reso
 
 Event writes use the locked tracker write path. They commit locally and then follow `sync.push` when publishing to `sync.remote`. The `always` mode attempts publication before return, `async` starts detached publication, and `off` leaves commits local. An ordinary delivery failure preserves the local commit and is visible through `rebar.push_status()` or `rebar fsck`.
 
-### `unlink`
+### `CrossSessionWarning`
+
+`rebar.CrossSessionWarning` is a `UserWarning` subclass. Single-ticket library functions — the reads `show_ticket` and `deps`, the lifecycle writes `transition` and `reopen`, the mutations `comment`, `edit_ticket`, `link`, `unlink`, `tag`, `untag`, and `archive`, and the gates `clarity_check`, `check_ac`, `set_file_impact`, and `declare_no_file_impact` — emit it on the stdlib `warnings` channel when the acting session differs from the session holding the ticket's live `in_progress` claim. The warning is advisory: it is emitted before any mutation (so the holder is read pre-mutation), never alters the call's return value, and never raises. Bulk reads (`list_tickets`, `search`, `ready`, `next_batch`) and `claim` do not emit it.
+
+
 
 `unlink` resolves both ticket identifiers. When `relation` names one of the canonical relations, it removes that active relation from `id1` to `id2`. When `relation` is `None`, it removes the most recently created active link for the ordered pair. The operation writes an `UNLINK` event that cites the removed `LINK` event. A `relates_to` removal also writes the reciprocal `UNLINK` when the reciprocal link exists. Each direction is a separate commit and publication operation. A failure in the second direction does not undo the first. A missing reciprocal link produces a warning after the requested side is removed. Missing tickets, an invalid relation, or the absence of a matching active link raise `RebarError`.
 

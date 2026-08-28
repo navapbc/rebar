@@ -100,6 +100,7 @@ from rebar._lib_reads import (
     search,
     show_ticket,
 )
+from rebar._lib_warn import CrossSessionWarning
 
 # ── Public API re-exports (thin facade over the topical ``_lib_*`` submodules) ──
 # Every name below stays importable as ``rebar.<name>`` with its identical
@@ -173,6 +174,7 @@ __all__ = [
     "KNOWN_ERROR_CODES",
     "ConcurrencyError",
     "ConfigError",
+    "CrossSessionWarning",
     # exceptions
     "RebarError",
     "__version__",

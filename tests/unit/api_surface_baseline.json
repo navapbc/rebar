@@ -37,6 +37,13 @@
       "kind": "class",
       "methods": {}
     },
+    "CrossSessionWarning": {
+      "bases": [
+        "UserWarning"
+      ],
+      "kind": "class",
+      "methods": {}
+    },
     "KNOWN_ERROR_CODES": {
       "kind": "value",
       "type": "frozenset",
