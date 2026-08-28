@@ -297,6 +297,92 @@ jobs:
           # Default to the STRICTER lane if LANE is somehow unset — never fail open.
           python scripts/dependency_audit.py gate --lane "${LANE:-branch}"
 
+  sandbox-enforcement:
+    # The Linux write-deny had NO gating control (`0d22-f664`). bubblewrap is installed
+    # on the pytest cells, but those runners deny unprivileged CLONE_NEWUSER, so
+    # `probe()` returns None, every enforcement test SKIPS, and the leg goes green
+    # having proven nothing — the signal for a broken sandbox is indistinguishable from
+    # the signal for a healthy one.
+    #
+    # MEASURED (ubuntu:24.04, bubblewrap 0.9.0), running a real write through bwrap:
+    #   default container            -> UNUSABLE, bwrap never starts
+    #   --security-opt seccomp=...   -> UNUSABLE, bwrap never starts
+    #   --privileged                 -> ENFORCING, child ran, outside write denied
+    # so a plain `container:` job does not work and relaxing seccomp alone does not
+    # either. `--privileged` is an OCI runtime capability, not a CI-provider feature:
+    # the identical `docker run` works on a developer laptop, which is what
+    # `project.portability` requires.
+    name: sandbox enforcement (Linux bwrap, gating)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout branch head (push/PR lane)
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+
+      # PRECONDITION, asserted before any test runs. The probe carries a LIVENESS check
+      # and that is load-bearing: without one, a bwrap that fails to start never writes
+      # the file whose absence would be read as "denied", so every mode reports
+      # enforcement — the same false pass fixed under `c100-c4f1`. Requires BOTH that
+      # the child ran AND that the outside write did not land.
+      - name: Prove bwrap can namespace and enforce (fail the lane if not)
+        run: |
+          docker run --rm --privileged ubuntu:24.04 bash -c '
+            set -e
+            apt-get update -qq >/dev/null 2>&1
+            apt-get install -y -qq bubblewrap >/dev/null 2>&1
+            bwrap --version
+            d=$(mktemp -d); mkdir -p "$d/allow"
+            bwrap --ro-bind / / --bind "$d/allow" "$d/allow" --dev /dev -- \
+              /bin/sh -c "echo ran > \"$d/allow/live.txt\"; echo x > \"$d/denied.txt\"" \
+              >/dev/null 2>&1 || true
+            if [ ! -f "$d/allow/live.txt" ]; then
+              echo "::error::bwrap never started — this lane cannot prove enforcement"
+              exit 1
+            fi
+            if [ -f "$d/denied.txt" ]; then
+              echo "::error::bwrap ran but did NOT deny a write outside its allow-list"
+              exit 1
+            fi
+            echo "bwrap enforces: child ran, outside write denied"
+          '
+
+      # REBAR_REQUIRE_SANDBOX_ENFORCEMENT=1 turns the `@live` skip into a hard
+      # requirement, so a missing mechanism fails this lane instead of quietly skipping.
+      # If-present guard per ticket ee2a: Gerrit's Verified lane takes the workflow
+      # DEFINITION from the target branch but the TREE from the change, so a base that
+      # predates this test file would die with "can't open file" — a hard failure
+      # indistinguishable from a real gate violation. Re-enforces on rebase and on every
+      # post-merge change.
+      - name: Run the sandbox enforcement tests under a real bwrap
+        run: |
+          if [ ! -f tests/scripts/test_mutation_sandbox.py ]; then
+            echo "tests/scripts/test_mutation_sandbox.py not in checked-out tree (change predates the lane) — skipping;" \
+                 "the lane re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          docker run --rm --privileged \
+            -v "$PWD:/w" -w /w \
+            -e REBAR_REQUIRE_SANDBOX_ENFORCEMENT=1 \
+            python:3.13-slim bash -c '
+              set -e
+              apt-get update -qq >/dev/null 2>&1
+              apt-get install -y -qq bubblewrap git >/dev/null 2>&1
+              git config --global --add safe.directory /w
+              pip install -q ".[dev]"
+              python -m pytest tests/scripts/test_mutation_sandbox.py \
+                -p no:cacheprovider --no-header -v
+            '
+
   test:
     name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}

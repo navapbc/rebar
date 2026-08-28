@@ -56,7 +56,11 @@ PATCHSET_LANE_WORKFLOWS = ("_build-and-test.yml", "gerrit-verify.yaml")
 # step, which sparse-checks-out its script from the TRUSTED default branch, not the patchset.
 GERRIT_CHECKOUT_ACTION = "checkout-gerrit-change-action"
 
-_SCRIPT_RE = re.compile(r"scripts/[A-Za-z0-9_./-]+\.py")
+# Anchored at a path boundary so `tests/scripts/foo.py` is not misread as the gate
+# script `scripts/foo.py`. Without the lookbehind a step running a TEST file under
+# tests/scripts/ is swept in as a gate script, and then no if-present guard can
+# satisfy the check — the guard would be looking for a path that does not exist.
+_SCRIPT_RE = re.compile(r"(?<![A-Za-z0-9_./-])scripts/[A-Za-z0-9_./-]+\.py")
 
 
 class GateStep(NamedTuple):

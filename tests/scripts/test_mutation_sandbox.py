@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -59,10 +60,31 @@ def _why(proc: subprocess.CompletedProcess[str]) -> str:
     return f"exit={proc.returncode} stderr={(proc.stderr or '').strip()!r}"
 
 
+# The lane that exists to PROVE Linux enforcement sets this. There, a skip is a
+# FAILURE: a green leg full of skipped enforcement tests is the silent-skip mode this
+# flag removes (`0d22-f664`). Everywhere else the skip stands, so a developer without a
+# mechanism is not blocked.
+REQUIRE_ENFORCEMENT = os.environ.get("REBAR_REQUIRE_SANDBOX_ENFORCEMENT") == "1"
+
 live = pytest.mark.skipif(
-    sb.probe() is None,
+    sb.probe() is None and not REQUIRE_ENFORCEMENT,
     reason="no OS sandbox mechanism on this host (sandbox-exec or bwrap)",
 )
+
+
+def test_a_mechanism_is_required_when_the_lane_says_so():
+    """On the enforcement lane, a missing mechanism fails LOUDLY instead of skipping.
+
+    Without this the lane could go green having proven nothing — bubblewrap installed,
+    every enforcement test skipped, the Linux write-deny still unverified.
+    """
+    if not REQUIRE_ENFORCEMENT:
+        pytest.skip("REBAR_REQUIRE_SANDBOX_ENFORCEMENT is not set on this lane")
+    assert sb.probe() is not None, (
+        "REBAR_REQUIRE_SANDBOX_ENFORCEMENT=1 but no OS sandbox mechanism is available: "
+        "this lane exists to prove enforcement, so a skip here is a failure. On Linux "
+        "bwrap needs an unprivileged user namespace — see the lane's precondition step."
+    )
 
 
 # --- enforcement safety -----------------------------------------------------------

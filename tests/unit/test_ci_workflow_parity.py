@@ -969,9 +969,15 @@ def test_the_shared_tier_lanes_are_flag_free_and_governed_by_the_ini() -> None:
         for filename, step, body in _all_workflow_pytest_steps()
         if filename == "_build-and-test.yml"
     ]
-    assert len(lanes) == 2, (
-        "expected exactly the default-suite and integration lanes in _build-and-test.yml; "
-        f"found {[step for step, _ in lanes]}"
+    # Named rather than counted, so adding a lane is a deliberate edit here rather than
+    # a number that silently drifts.
+    assert {step for step, _ in lanes} == {
+        "Run the default suite (Python tiers; excludes integration + external)",
+        "Run the integration tier (concurrency + reconciler; network-guarded)",
+        "Run the sandbox enforcement tests under a real bwrap",
+    }, (
+        "unexpected pytest lane set in _build-and-test.yml; every lane must stay "
+        f"flag-free so the ini remains the only hang guard. found {[s for s, _ in lanes]}"
     )
     for step, body in lanes:
         found = re.findall(r"--timeout(?:-method)?=(\S+)", body)
@@ -1192,7 +1198,12 @@ def test_repo_policy_nodes_run_only_in_the_existing_primary_cell() -> None:
     import yaml
 
     workflow = yaml.safe_load(_read(_BAT_YML))
-    assert set(workflow["jobs"]) == {"lint", "pip-audit", "test"}
+    # `sandbox-enforcement` is NOT a policy-node lane and does not weaken this guard's
+    # intent: it runs one file (the mutation-sandbox enforcement tests) inside a
+    # privileged container, because bwrap cannot create a user namespace on the shared
+    # runners and the tests would otherwise skip silently (`0d22-f664`). Policy nodes
+    # still route by selector into the primary cell asserted below.
+    assert set(workflow["jobs"]) == {"lint", "pip-audit", "sandbox-enforcement", "test"}
     cells = _expanded_test_matrix(workflow)
     assert cells == [
         ("ubuntu-latest", "3.11"),
