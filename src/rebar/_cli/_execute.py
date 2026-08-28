@@ -129,10 +129,12 @@ def _invoke(route: _registry.Route, name: str, fn: _Handler, rest: list[str]) ->
 
         return fn(rest, reads.tracker_dir())
     if adapter == "argv_tracker_root":
-        import os
-
         from rebar._engine_support import reads
 
+        # repo_root is None ("discover" — REBAR_ROOT > git toplevel of cwd), the SAME
+        # contract every config reader uses, NOT os.path.dirname(tracker): a relocated
+        # store (REBAR_TRACKER_DIR) makes the tracker's parent a directory with no
+        # rebar.toml, so the command would read an empty config (auspicial-friended-merganser).
         tracker = reads.tracker_dir()
-        return fn(rest, tracker, os.path.dirname(tracker))
+        return fn(rest, tracker, None)
     raise RuntimeError(f"rebar: unknown adapter {adapter!r}")

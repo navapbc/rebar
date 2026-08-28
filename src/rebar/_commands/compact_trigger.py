@@ -85,7 +85,7 @@ def _sweep_is_stale(tracker: str, interval_s: int) -> bool:
     return age >= interval_s
 
 
-def ticket_needs_folding(tracker: str, ticket_id: str) -> bool:
+def ticket_needs_folding(tracker: str, ticket_id: str, *, repo_root=None) -> bool:
     """Whether THIS ticket alone satisfies the sweep's two-arm selection.
 
     ``O(1)`` in the size of the store — it reads one ticket directory, never scans the
@@ -104,7 +104,9 @@ def ticket_needs_folding(tracker: str, ticket_id: str) -> bool:
     if not os.path.isdir(ticket_dir):
         return False
     try:
-        cfg = _config.compose_config(os.path.dirname(tracker)).compact
+        # Config read: resolve from repo_root (None == discover), NOT os.path.dirname(tracker),
+        # which is the repo root only for a co-located store (auspicial-friended-merganser).
+        cfg = _config.compose_config(repo_root).compact
         threshold, horizon = cfg.threshold, cfg.COMPACTION_HORIZON_NS
     except Exception:  # noqa: BLE001 — an unreadable config must never fail a close
         return False
@@ -210,6 +212,13 @@ def run_sweep(tracker: str) -> None:
                 _lock.describe_lock_holder(tracker),
             )
             return
+        # KNOWN-DEFERRED config-root site (auspicial-friended-merganser follow-up): run_sweep
+        # is the detached-child entry point — its cwd is the STORE and it takes only `tracker`,
+        # so it cannot thread a code root through without a signature/spawn-contract change
+        # (a design decision, tracked separately). On a relocated store this reads default
+        # compaction config rather than a silently-disabled gate, so impact is milder. The
+        # AC#4 guard allowlists exactly this line via the marker directly below.
+        # repo-root-ok: detached run_sweep child; cwd IS the store (deferred follow-up).
         repo_root = os.path.dirname(tracker)
         # Tag the store-lock acquisitions this sweep drives (transitively, via
         # compact_all_cli -> _compact_locked) as `op=compact-sweep`, so a blocked writer's
@@ -242,15 +251,15 @@ def maybe_compact(tracker: str, ticket_id: str, *, repo_root=None) -> None:
         from rebar import config as _config
 
         try:
-            cfg = _config.compose_config(
-                repo_root if repo_root is not None else os.path.dirname(tracker)
-            ).compact
+            # None discovers the config root correctly; the former os.path.dirname(tracker)
+            # fallback only found rebar.toml for a co-located store (auspicial-friended-merganser).
+            cfg = _config.compose_config(repo_root).compact
         except Exception:  # noqa: BLE001 — an unreadable config must never fail a close
             return
         if cfg.trigger == "off":
             return
         if not (
-            ticket_needs_folding(tracker, ticket_id)
+            ticket_needs_folding(tracker, ticket_id, repo_root=repo_root)
             or _sweep_is_stale(tracker, cfg.trigger_interval_s)
         ):
             return

@@ -387,7 +387,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
             "could not write tombstone marker for %s; continuing", ticket_id, exc_info=True
         )
 
-    scratch.cleanup_for_ticket(os.path.dirname(tracker), ticket_id)
+    scratch.cleanup_for_ticket(repo_root, ticket_id)
 
     batch = batch_close_operations(ticket_ids=[ticket_id], tracker_dir=tracker)
     unblocked = batch["newly_unblocked"]

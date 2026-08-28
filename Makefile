@@ -267,6 +267,13 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# `# tickets-boundary-ok: <reason>`, the reason MANDATORY: the bare marker was already
 	@# a documented convention that nothing enforced, and 7 of the 13 defects carried one.
 	python scripts/check_tickets_boundary.py
+	@# Repo/config root derived from the store (bug auspicial-friended-merganser): a relocated
+	@# store (REBAR_TRACKER_DIR) makes `os.path.dirname(tracker)` a directory with no
+	@# rebar.toml, so config reads there resolve an EMPTY config — that silently disabled the
+	@# transition-open->in_progress plan-review gate on the deployed MCP server. Flags the
+	@# `dirname(<tracker>)` composition only; sanction is `# repo-root-ok: <reason>` (reason
+	@# MANDATORY), used for the one detached-child site whose cwd IS the store.
+	python scripts/check_repo_root_from_tracker.py
 	@# DCO sign-off identity consistency (story 35d2): contributor-facing guidance must not
 	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
 	python scripts/check_dco_identity.py
