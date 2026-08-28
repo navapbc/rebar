@@ -33,6 +33,11 @@ import rebar
 # so the per-cluster registrars can share them WITHOUT importing this module (which
 # would form an import cycle). Re-exported here for back-compat: existing callers
 # import e.g. ``rebar.mcp_server.NextBatchOut`` / ``ValidateReportOut`` directly.
+from rebar._mcp_budget import (
+    _LIST_TOKEN_BUDGET_BYTES,  # noqa: F401  (re-exported: tests read the budget here)
+    _bound_list_payload,
+    _cap_workflow_payload,
+)
 from rebar._mcp_llm import register_llm_tools
 from rebar._mcp_models import (
     BridgeAccessCheckOut,
@@ -445,56 +450,6 @@ def _allow_jira_sync() -> bool:
     return _mcp_gate("allow_jira_sync")
 
 
-# Keep MCP workflow status/result payloads under the client's ~25K-token budget
-# (WS-ffc4). ~90 KB ≈ 25K tokens; over it, elide the bulky step outputs (which an
-# agent can re-read via the library/CLI) while preserving the schema-valid shape.
-_WORKFLOW_TOKEN_BUDGET_BYTES = 90_000
-
-
-def _payload_bytes(payload: dict) -> int:
-    import json
-
-    return len(json.dumps(payload, default=str))
-
-
-def _cap_workflow_payload(payload: dict) -> dict:
-    """Bound a status/result payload under the ~25K-token MCP budget (WS-ffc4).
-
-    Truncates the bulky carriers in escalating order until the WHOLE payload fits —
-    bulk can live in `outputs`/`terminal_output` (result read) OR `steps` (status
-    read) OR `error`/elsewhere — so the budget is airtight regardless of shape. The
-    full result stays available via the library/CLI."""
-    if _payload_bytes(payload) <= _WORKFLOW_TOKEN_BUDGET_BYTES:
-        return payload
-    note = (
-        "[truncated to stay under the MCP token budget — read the full result via "
-        "rebar.get_workflow_result / `rebar workflow result`]"
-    )
-    capped = dict(payload)
-    capped["truncated"] = True
-    # 1) elide the result carriers.
-    if capped.get("terminal_output"):
-        capped["terminal_output"] = {"_truncated": note}
-    if isinstance(capped.get("outputs"), dict):
-        capped["outputs"] = {sid: {"_truncated": note} for sid in capped["outputs"]}
-    # 2) still over? collapse the per-step status map to a count (status read).
-    if _payload_bytes(capped) > _WORKFLOW_TOKEN_BUDGET_BYTES and isinstance(
-        capped.get("steps"), dict
-    ):
-        capped["steps"] = {"_truncated": f"{len(capped['steps'])} steps; {note}"}
-    # 3) last resort: a minimal envelope that is guaranteed to fit + schema-valid.
-    if _payload_bytes(capped) > _WORKFLOW_TOKEN_BUDGET_BYTES:
-        capped = {
-            "run_id": str(payload.get("run_id", "")),
-            "status": str(payload.get("status", "")),
-            "ticket_id": payload.get("ticket_id"),
-            "workflow_name": payload.get("workflow_name"),
-            "truncated": True,
-            "error": note,
-        }
-    return capped
-
-
 def _dump(item):
     """Normalize a typed list-item param to a plain dict (FastMCP may deliver a
     validated pydantic model or a raw dict depending on version). Drops keys whose
@@ -679,6 +634,7 @@ def build_server(cfg=None):
         allow_llm=_allow_llm,
         allow_jira_sync=_allow_jira_sync,
         cap_workflow_payload=_cap_workflow_payload,
+        bound_list_payload=_bound_list_payload,
         dump=_dump,
         MODE_CAPS=MODE_CAPS,
         Mode=Mode,
