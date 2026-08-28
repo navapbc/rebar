@@ -451,6 +451,53 @@ def _handle_retryable_gap(
     return decision, None
 
 
+def _emit_review_token_usage(decision: dict[str, Any], change_id: str, revision: str) -> None:
+    """Record the review's LLM token counts (from the verdict's ``coverage.metrics``) to
+    journald + CloudWatch. A fail-closed review carries no verdict/metrics → nothing recorded.
+    Best-effort: the vote is already cast, so this never fails the review."""
+    metrics = ((decision.get("verdict") or {}).get("coverage") or {}).get("metrics") or {}
+    if metrics:
+        _emit_token_usage(change_id, revision, metrics)
+
+
+async def _superseded_before_vote(
+    gc: GerritClient,
+    change_id: str,
+    revision: str,
+    *,
+    force: bool,
+    info: dict[str, Any],
+) -> bool:
+    """True when ``revision`` is no longer the change's current revision and the vote must be
+    SUPPRESSED (bug baa8). Runs immediately before casting, catching a patchset superseded
+    DURING the long review that the app-side pre-review guard could not see.
+
+    FAILS OPEN: a forced /rerun (or any ``manual-rerun`` event) is built FROM the current
+    revision and bypasses the check; and any lookup failure — ``None``, a Gerrit blip, or an
+    unusable revision string — returns ``False`` so the review is voted anyway (swallowing a
+    real review because Gerrit hiccupped is worse than the staleness this guards against)."""
+    if force or info["event_type"] == "manual-rerun":
+        return False
+    try:
+        current = await asyncio.to_thread(gc.get_change_event, change_id)
+        current_rev = ((current or {}).get("patchSet") or {}).get("revision")
+    except Exception:  # noqa: BLE001 — fail open: a Gerrit blip must not drop a review
+        return False
+    if not isinstance(current_rev, str) or not current_rev or current_rev == revision:
+        return False
+    _emit(
+        logging.INFO,
+        "voter_skip",
+        reason="superseded",
+        disposition="vote_suppressed_superseded",
+        change_id=change_id,
+        revision_id=revision,
+        current_revision_id=current_rev,
+        event_type=info["event_type"],
+    )
+    return True
+
+
 async def _review_and_vote(
     event: dict,
     *,
@@ -626,6 +673,17 @@ async def _review_and_vote(
         value = cfg.llm_review_max_value if is_pass else cfg.llm_review_block_value
         message = decision.get("message") or "rebar code review."
 
+        # Pre-vote staleness re-check (bug baa8): the app-side guard runs ONCE, before this
+        # 15–45 min review begins, so a patchset superseded DURING the review is still voted
+        # on — and that vote's comment dispatches a `gerrit-verify` run for the STALE refspec,
+        # which cancels the CURRENT patchset's Verified run. Re-read the change's current
+        # revision immediately before casting and SUPPRESS the vote when it no longer matches.
+        # FAIL OPEN (see :func:`_superseded_before_vote`): any lookup failure → review/vote
+        # anyway. A forced /rerun (or any manual-rerun event) is built FROM the current
+        # revision, so it bypasses the check exactly as the pre-review guard does.
+        if await _superseded_before_vote(gc, change_id, revision, force=force, info=info):
+            return {"status": "skipped", "reason": "superseded", "change_id": change_id}
+
         # post_review casts the vote AND anchors findings inline where they resolve to a real
         # revision path; a rejected comment retries message-only with an explicit notice rather
         # than silently dropping the text (bug lacquer-grotesque-urson). Its GerritError
@@ -688,11 +746,7 @@ async def _review_and_vote(
         # Token-usage observability (ticket clayish-basaltine-bug): record the review's LLM
         # token counts (from the verdict's coverage.metrics) to journald + CloudWatch. A
         # fail-closed review carries no verdict/metrics → nothing recorded. Best-effort.
-        _review_metrics = ((decision.get("verdict") or {}).get("coverage") or {}).get(
-            "metrics"
-        ) or {}
-        if _review_metrics:
-            _emit_token_usage(change_id, revision, _review_metrics)
+        _emit_review_token_usage(decision, change_id, revision)
         # Data capture (story limestone-unethical-zebrafinch): emit a durable, change-scoped
         # code_review artifact into the AMBIENT tickets store (repo_root=None — NOT the temp code
         # clone, which is already deleted) and link it relates_to the change's trailer-cited
