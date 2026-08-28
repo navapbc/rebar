@@ -212,6 +212,35 @@ server {
         proxy_read_timeout 3600s;
     }
 
+    # --- RFC 9728 protected-resource metadata (bug 71fe-2579-28cc-409c) ---
+    # The MCP app's 401 challenge advertises
+    #   resource_metadata="https://<host>/.well-known/oauth-protected-resource/mcp"
+    # and the app SERVES that document (probed on the box: app-direct 200, edge 404).
+    # It is a SIBLING of /mcp, not a sub-path, so none of the /mcp locations above
+    # matched it and it fell through to `location /` -> Gerrit, which 404s. An
+    # OAuth-capable client that follows the advertised URL therefore cannot discover
+    # the resource server. Route it to the same named upstream.
+    #
+    # EXACT match, not a prefix: it must cover this one document only, and must not
+    # widen or reorder anything else under /.well-known/ — in particular the
+    # `location /.well-known/acme-challenge/` on the port-80 server that certbot needs
+    # for issuance and renewal. NO URI path on proxy_pass, so the request URI reaches
+    # the app verbatim at exactly the path it already answers. Like the /mcp blocks,
+    # this names the `rebar_mcp` upstream rather than a port, so a blue-green flip
+    # re-points it atomically; and it repeats their headers/settings because an
+    # exact-match location inherits nothing from them.
+    location = /.well-known/oauth-protected-resource/mcp {
+        proxy_pass http://rebar_mcp;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_redirect http://$host/ https://$host/;
+        proxy_redirect http://rebar_mcp/ https://$host/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
     # --- Gerrit: everything else -----------------------------------------
     # CRITICAL — %2F-safe proxying. Gerrit project/change refs contain encoded
     # slashes (e.g. /a/projects/foo%2Fbar), and Gerrit must receive the request URI

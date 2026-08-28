@@ -885,6 +885,81 @@ def test_nginx_upgrades_any_plaintext_location_from_the_mcp_upstream() -> None:
         )
 
 
+# --- RFC 9728 protected-resource metadata routing (bug 71fe-2579-28cc-409c) ---
+#
+# The MCP app's 401 challenge advertises
+# `resource_metadata="https://<host>/.well-known/oauth-protected-resource/mcp"`, and the app
+# serves that document (probed on the box: app-direct 200, edge 404). The path is a SIBLING
+# of /mcp, so no /mcp location matched it and it fell through to `location /` -> Gerrit.
+
+# The one advertised URL, exactly as it appears in the 401 `WWW-Authenticate` header.
+_ADVERTISED_METADATA_PATH = "/.well-known/oauth-protected-resource/mcp"
+
+
+def _render_nginx(review_bot_port: str = "8081") -> str:
+    """The template as DEPLOYED, not as committed.
+
+    The deploy renders it with `envsubst '${REVIEW_BOT_PORT}'` (rebar.conf.template:5-12):
+    a single-variable substitution whose whole point is that nginx's own `$host`,
+    `$remote_addr` etc. survive untouched. Reproducing that one substitution in-process keeps
+    the test hermetic (no gettext binary in CI) while asserting on the bytes nginx actually
+    parses — a template-only assertion could pass on text that renders to something else.
+    """
+    return _NGINX.read_text().replace("${REVIEW_BOT_PORT}", review_bot_port)
+
+
+def test_nginx_routes_the_advertised_resource_metadata_url_to_the_mcp_app() -> None:
+    """The advertised `resource_metadata` URL must resolve at the edge, not 404.
+
+    Oracle: the RENDERED config carries an EXACT-match location for the advertised path
+    whose proxy_pass names the MCP upstream with NO URI path, so the URI reaches the app
+    verbatim at the path it already answers with 200. Exact match (not a prefix) is
+    load-bearing: it covers this one document and cannot widen /.well-known/.
+
+    Deleting the location block turns this RED — nothing else in the config matches the
+    path, which is precisely the defect."""
+    text = _render_nginx()
+    pattern = (
+        r"^[ \t]*location\s+=\s+" + re.escape(_ADVERTISED_METADATA_PATH) + r"\s*\{(.*?)^[ \t]*\}"
+    )
+    m = re.search(pattern, text, re.DOTALL | re.MULTILINE)
+    assert m, (
+        f"no `location = {_ADVERTISED_METADATA_PATH}` block: the URL the 401 advertises "
+        f"falls through to `location /` (Gerrit) and 404s"
+    )
+    body = m.group(1)
+    # Named upstream, so a blue-green flip re-points it atomically; NO URI path, so the
+    # advertised URI is preserved rather than rewritten.
+    assert re.search(r"proxy_pass\s+http://rebar_mcp\s*;", body), (
+        f"must proxy_pass to the named upstream with no URI path: {body}"
+    )
+    assert re.search(r"proxy_set_header\s+X-Forwarded-Proto\s+https\s*;", body), body
+
+
+def test_nginx_metadata_route_does_not_shadow_the_acme_challenge() -> None:
+    """The new /.well-known/ route must not disturb certbot's HTTP-01 webroot.
+
+    An exact-match location cannot shadow the ACME prefix location, but a careless widening
+    to `location /.well-known/` would — and certbot renewal failing is a silent TLS outage.
+    Oracle: the rendered config still serves the challenge from the certbot webroot."""
+    text = _render_nginx()
+    m = re.search(
+        r"^[ \t]*location\s+/\.well-known/acme-challenge/\s*\{(.*?)^[ \t]*\}",
+        text,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert m, "the ACME challenge location disappeared"
+    assert re.search(r"root\s+/var/www/certbot\s*;", m.group(1)), m.group(1)
+
+
+def test_nginx_template_substitutes_cleanly_under_envsubst() -> None:
+    """`envsubst '${REVIEW_BOT_PORT}'` substitutes that ONE variable and leaves every other
+    `${...}` in place — so any other `${...}` sequence would survive into the deployed
+    config verbatim and nginx would reject it. Oracle: the rendered text has none."""
+    leftovers = re.findall(r"\$\{[^}]*\}", _render_nginx())
+    assert leftovers == [], f"unsubstituted ${{...}} in the rendered config: {leftovers}"
+
+
 def test_nginx_asserts_hsts_on_every_tls_response() -> None:
     """AC2: an HSTS header is served, so a client cannot be walked down to plaintext.
 
