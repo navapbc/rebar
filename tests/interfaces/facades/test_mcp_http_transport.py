@@ -468,6 +468,8 @@ def test_wired_server_moves_gauge_for_a_really_registered_certified_tool():
     /health gauge while it runs and returns to 0 after — proving instrument_certified_tools
     + _wrap_tool_fn actually wrap a genuinely-registered tool (only the tool BODY is a
     stub). Read through the real /health route via TestClient."""
+    import asyncio
+    import inspect
     import threading
 
     from mcp.server.fastmcp import FastMCP
@@ -487,10 +489,15 @@ def test_wired_server_moves_gauge_for_a_really_registered_certified_tool():
 
     wire_health(server)
     wrapped = server._tool_manager.get_tool("review_plan").fn  # the production wrapper
+    # offload_sync_tools (bug dewy-rotatable-tarsier) marks every sync tool async, so the
+    # production wrapper is a COROUTINE FUNCTION: the SDK awaits it and it runs the body on
+    # an anyio worker thread. It must therefore be DRIVEN, not called -- a bare call only
+    # builds a coroutine and discards it, the body never runs, and the gauge never moves.
+    assert inspect.iscoroutinefunction(wrapped)
     app = server.streamable_http_app()
     with TestClient(app, base_url="http://127.0.0.1:8000") as client:
         assert client.get("/health").json()["in_flight"] == 0
-        worker = threading.Thread(target=wrapped)
+        worker = threading.Thread(target=lambda: asyncio.run(wrapped()))
         worker.start()
         assert started.wait(timeout=5)
         assert client.get("/health").json()["in_flight"] == 1  # via the real endpoint

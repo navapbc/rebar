@@ -24,6 +24,7 @@ Design notes:
 from __future__ import annotations
 
 import contextlib
+import functools
 import logging
 import os
 import threading
@@ -45,12 +46,15 @@ _GAUGE_ATTR = "_rebar_in_flight_gauge"
 class InFlightGauge:
     """Thread-safe counter of in-flight certified tool calls.
 
-    A sync MCP tool body does NOT run on a worker thread: the ``mcp`` SDK calls it
-    DIRECTLY inside the ASGI request coroutine, so :meth:`track` runs on the event-loop
-    thread (bug f643 / ``superior-trifling-dunlin`` — believing otherwise is exactly what
-    let that bug ship). The lock is still required: the gauge is READ and acted on from
-    other threads — notably the SIGTERM drain path, which polls :attr:`value` while
-    in-flight calls mutate it. :meth:`track` only counts a call whose tool name is in
+    The ``mcp`` SDK calls a sync tool body DIRECTLY inside the ASGI request coroutine, so
+    :meth:`track` USED to run on the event-loop thread (bug f643 /
+    ``superior-trifling-dunlin`` — believing otherwise is exactly what let that bug ship).
+    Since :func:`offload_sync_tools` (bug ``dewy-rotatable-tarsier``) it runs on an anyio
+    worker thread instead, because leaving those bodies on the loop stopped the server
+    answering every other request for the length of the call. Either way the lock is what
+    makes this safe, and it was always required: the gauge is READ and acted on from other
+    threads — notably the SIGTERM drain path, which polls :attr:`value` while in-flight
+    calls mutate it. :meth:`track` only counts a call whose tool name is in
     :data:`CERTIFIED_TOOLS`; any other name is a no-op context so instrumentation can
     be applied uniformly.
     """
@@ -111,6 +115,87 @@ def instrument_certified_tools(mcp: Any, gauge: InFlightGauge) -> None:
         if tool is None or getattr(tool, "is_async", False):
             continue
         tool.fn = _wrap_tool_fn(tool.fn, gauge, name)
+
+
+# ── Keep long tool bodies OFF the event loop ─────────────────────────────────
+# THE DEFECT THIS FIXES (bug dewy-rotatable-tarsier). Every rebar MCP tool is a plain
+# ``def``, and the SDK calls a sync tool body DIRECTLY inside the ASGI request coroutine
+# (``fastmcp/utilities/func_metadata.py``: ``if fn_is_async: await fn(...) else: fn(...)``).
+# On the stdio transport that was harmless — one client, one process. Behind the shared
+# HTTP transport it is not: a tool call occupies the uvicorn event loop for its whole
+# duration, so the server answers NOTHING else meanwhile — not ``initialize``, not
+# ``tools/list``, not even the unauthenticated ``/health`` route.
+#
+# MEASURED on the deployed box: a ``CallToolRequest`` began at 21:03:00.590 and the process
+# logged nothing at all for 3m56s; at 21:06:56.275 six ``/health`` responses and five 401s
+# completed within 5 MILLISECONDS of each other — a backlog draining the instant the loop was
+# released. From outside, that window is `http=000` after 70s and 401s taking 12s / 28s / 50s
+# / 63s, against a 0.25s steady state. rebar's own budgets make this routine rather than
+# exotic: AGENTS.md documents ``review_plan`` at 15-20 MINUTES and a completion-verifier close
+# at 9-11 minutes, and one unfiltered ``list_tickets`` has been measured at 177 seconds.
+#
+# It reads as a STARTUP bug because a redeploy makes every agent reconnect at once, so the
+# first client to ``initialize`` after a cutover is the one most likely to land behind another
+# client's long tool call. The handshake itself is not slow: a cold authenticated
+# ``initialize`` fired at the cutover instant measures 30 ms.
+#
+# THE FIX is the one this codebase already applied to the sibling service — ticket c2ba
+# (``melting-resting-serpent``) moved the review-bot's ``emit_code_review_artifact`` off the
+# event loop with ``asyncio.to_thread`` "so the drain bound can actually fire"
+# (infra/compose/docker-compose.yml). Same defect, same remedy: run each sync tool body on a
+# worker thread and mark the tool async so the SDK awaits it.
+#
+# ``anyio.to_thread.run_sync`` is used rather than ``asyncio.to_thread`` because the SDK's
+# transport runs under anyio, and because it COPIES THE CALLER'S CONTEXTVARS into the worker
+# thread (verified). That is load-bearing here and not incidental: ``run_http_with_grace``
+# binds the box's op-cert signer as a ContextVar inside the serving thread, and the certified
+# tools mint op-certs from it — a thread that did not inherit that context would sign under
+# the wrong environment. It also carries anyio's default 40-slot thread limiter, which bounds
+# how many tool bodies can run at once instead of letting an unbounded fan-out spawn threads.
+
+
+def _thread_offloaded(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """An async wrapper that runs ``fn`` on a worker thread, preserving its signature.
+
+    ``functools.wraps`` matters: the SDK already built this tool's ``fn_metadata`` (and
+    therefore its argument model and output schema) from the original callable at
+    registration time, and ``Tool.run`` passes arguments by KEYWORD, so the wrapper must
+    stay transparent to introspection and accept whatever the original accepted."""
+
+    @functools.wraps(fn)
+    async def _offloaded(*args: Any, **kwargs: Any) -> Any:
+        import anyio.to_thread
+
+        return await anyio.to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+
+    return _offloaded
+
+
+def offload_sync_tools(mcp: Any) -> int:
+    """Run every SYNC tool body on a worker thread; return how many were moved.
+
+    Applied to every tool, not just :data:`CERTIFIED_TOOLS`: the gauge only needs to see
+    billable work, but the event loop is blocked by ANY slow body, and the 177-second
+    ``list_tickets`` that motivated this is an ordinary read.
+
+    MUST run AFTER :func:`instrument_certified_tools`, which installs a SYNC gauge wrapper
+    and skips tools already marked async — reversing the order would leave the certified
+    tools uninstrumented. Composing this way also means the gauge is incremented on the
+    worker thread rather than the event-loop thread; that is safe, and is exactly what
+    :class:`InFlightGauge`'s lock has always been for."""
+
+    manager = getattr(mcp, "_tool_manager", None)
+    if manager is None:
+        return 0
+    moved = 0
+    for tool in manager.list_tools():
+        # An already-async tool is not a problem and must not be double-wrapped.
+        if getattr(tool, "is_async", False):
+            continue
+        tool.fn = _thread_offloaded(tool.fn)
+        tool.is_async = True
+        moved += 1
+    return moved
 
 
 def store_status() -> dict[str, Any]:
@@ -224,11 +309,17 @@ def register_health_route(mcp: Any, gauge: InFlightGauge) -> None:
 
 
 def wire_health(mcp: Any, gauge: InFlightGauge | None = None) -> InFlightGauge:
-    """Instrument the certified tools, register ``/health``, and stash the gauge on the
-    server so :func:`run_mcp` can drain it on SIGTERM. Returns the gauge."""
+    """Instrument the certified tools, move sync tool bodies off the event loop, register
+    ``/health``, and stash the gauge on the server so :func:`run_mcp` can drain it on
+    SIGTERM. Returns the gauge.
+
+    ORDER IS LOAD-BEARING. :func:`instrument_certified_tools` installs a SYNC wrapper and
+    skips tools already marked async, so offloading first would leave the certified tools
+    uninstrumented and the SIGTERM drain blind to in-flight billable work."""
 
     gauge = gauge or InFlightGauge()
     instrument_certified_tools(mcp, gauge)
+    offload_sync_tools(mcp)
     register_health_route(mcp, gauge)
     setattr(mcp, _GAUGE_ATTR, gauge)
     return gauge
