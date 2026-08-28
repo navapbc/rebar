@@ -113,7 +113,7 @@
       "additionalProperties": true,
       "required": ["error", "message"],
       "properties": {
-        "error": { "type": "string", "description": "Machine error code, e.g. 'ticket_not_found'." },
+        "error": { "type": "string", "description": "Machine error code drawn from `rebar.KNOWN_ERROR_CODES`, e.g. 'ticket_not_found'. Workflow caller-input failures use 'not_found' (unknown workflow name or run_id) and 'invalid_input' (a workflow that was found but will not parse/lint/migrate); a genuine LLM-backend outage stays 'llm_unavailable'." },
         "input": { "type": "string", "description": "The raw input that failed to resolve." },
         "message": { "type": "string" },
         "exit_code": { "type": "integer", "description": "Optional: the process exit code that accompanied this failure (see docs/exit-codes.md). Present on emitted failure envelopes; omitted by legacy read-not-found callers." }
