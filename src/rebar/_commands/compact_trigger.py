@@ -155,10 +155,9 @@ def _spawn_detached_sweep(tracker: str) -> None:
             "rebar._commands.compact_trigger",
             "run_sweep",
             # The canonical store tracker, for the same reason spawn_detached resolves the
-            # child's cwd: the child outlives the worktree that spawned it, and inside
-            # `run_sweep` this argument also becomes `repo_root = dirname(tracker)`. Handing
-            # over a worktree's SYMLINK would leave the running child pointed at a path that
-            # dies with the worktree (bug 93a9-66cf-e681-4f49).
+            # child's cwd: the child outlives the worktree that spawned it, so handing over a
+            # worktree's SYMLINK would leave the running child pointed at a path that dies
+            # with the worktree (bug 93a9-66cf-e681-4f49).
             StorePaths(tracker).canonical,
             env={**os.environ},
             stderr=log_fh,
@@ -212,14 +211,26 @@ def run_sweep(tracker: str) -> None:
                 _lock.describe_lock_holder(tracker),
             )
             return
-        # KNOWN-DEFERRED config-root site (auspicial-friended-merganser follow-up): run_sweep
-        # is the detached-child entry point — its cwd is the STORE and it takes only `tracker`,
-        # so it cannot thread a code root through without a signature/spawn-contract change
-        # (a design decision, tracked separately). On a relocated store this reads default
-        # compaction config rather than a silently-disabled gate, so impact is milder. The
-        # AC#4 guard allowlists exactly this line via the marker directly below.
-        # repo-root-ok: detached run_sweep child; cwd IS the store (deferred follow-up).
-        repo_root = os.path.dirname(tracker)
+        # RESOLVE the code root; never compose it from the store path. `tracker` is the
+        # STORE, and the store is RELOCATABLE (REBAR_TRACKER_DIR): the former
+        # os.path.dirname(tracker) equalled the code root only for a co-located checkout, so
+        # on the deployed topology (store /var/gerrit/site/mcp-tickets) the sweep read DEFAULT
+        # compaction config and folded the right tickets by the WRONG rule
+        # (scathing-custommade-bobcat). The bare resolver is correct for BOTH supported
+        # topologies even though this child holds only `tracker`:
+        #   * deployed: REBAR_ROOT is exported unconditionally and names the provisioned
+        #     CHECKOUT at /var/gerrit/site/mcp-code — NOT the /app WORKDIR, which is a source
+        #     copy whose .git is excluded by .dockerignore. Resolving is what keeps us off
+        #     /app; composing from the store, or defaulting to the cwd, lands on a directory
+        #     with no object DB (the fatherly-incoherent-mare shape).
+        #   * local: the git-toplevel arm reads a cwd that `_proc.detached_child_cwd` has
+        #     already anchored at the CANONICAL store's parent — the durable main checkout,
+        #     deliberately not the ephemeral worktree that spawned us.
+        # `None` (nothing resolved) is passed through as the discover sentinel, exactly as
+        # maybe_compact's own compose_config call does.
+        from rebar import config as _cfg
+
+        repo_root = _cfg.repo_root_or_none()
         # Tag the store-lock acquisitions this sweep drives (transitively, via
         # compact_all_cli -> _compact_locked) as `op=compact-sweep`, so a blocked writer's
         # LockTimeout names the sweep and its safe-to-interrupt remedy rather than a bare pid

@@ -225,3 +225,157 @@ def test_within_cap_still_silent_on_relocated_store(
         "task", "within cap", description="D" * 20, return_alias=True, repo_root=str(repo)
     )
     assert created["description_warning"] is None
+
+
+# ── scathing-custommade-bobcat: the detached compaction sweep's config root ──────────
+#
+# ``run_sweep`` is the DETACHED-CHILD compaction entry point and the LAST sanctioned site of
+# this class. It composed ``repo_root = os.path.dirname(tracker)`` and handed that to
+# ``compact_all_cli`` as the config root, so on a relocated store the sweep read DEFAULT
+# compaction config (threshold 10, 30-minute horizon) instead of the project's ``[compact]``
+# block: it folded the RIGHT tickets by the WRONG rule. The fix RESOLVES the code root the way
+# every other config reader does — bare ``config.repo_root_or_none()`` (explicit > REBAR_ROOT >
+# git toplevel of the cwd, which for the detached child is the DURABLE canonical-store parent
+# that ``_proc.detached_child_cwd`` anchors it to). Config MUST come from a rebar.toml FILE,
+# not ``REBAR_COMPACT_THRESHOLD`` / ``REBAR_COMPACTION_HORIZON_NS``, or the read would be
+# root-independent and hide the bug.
+
+
+def _relocated_store_folding_everything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path, str]:
+    """A relocated store whose CODE repo configures a fold-everything ``[compact]`` block, and
+    one seeded ticket with four comments. Returns ``(repo, external, resolved_ticket_id)``."""
+    monkeypatch.delenv("REBAR_COMPACT_THRESHOLD", raising=False)
+    monkeypatch.delenv("REBAR_COMPACTION_HORIZON_NS", raising=False)
+    repo, external = _init_relocated_store(tmp_path, monkeypatch)
+    # threshold 1 + horizon 0 fold anything; the DEFAULTS (10 / 1800 s) fold nothing here,
+    # so which root the sweep reads is observable in whether a SNAPSHOT appears.
+    (repo / "rebar.toml").write_text(
+        "[compact]\nthreshold = 1\nCOMPACTION_HORIZON_NS = 0\n", encoding="utf-8"
+    )
+    tid = rebar.create_ticket("task", "sweep me", description="x" * 60, repo_root=str(repo))
+    for i in range(4):
+        rebar.comment(tid, f"c{i}", repo_root=str(repo))
+    resolved = rebar._engine_support.resolver.resolve_ticket_id(tid, str(external))
+    return repo, external, resolved
+
+
+def test_run_sweep_folds_by_the_repo_compact_config_on_relocated_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC#2: the detached sweep must honour the CODE repo's ``[compact]`` config when the
+    store is relocated. With ``repo_root = os.path.dirname(tracker)`` it read the store's
+    parent — no rebar.toml, so the built-in defaults — and folded nothing."""
+    from rebar._commands import compact_trigger
+
+    _repo, external, tid = _relocated_store_folding_everything(tmp_path, monkeypatch)
+    assert not list((external / tid).glob("*-SNAPSHOT.json")), "precondition: never folded"
+
+    compact_trigger.run_sweep(str(external))
+
+    assert list((external / tid).glob("*-SNAPSHOT.json")), (
+        "the sweep did not fold an eligible ticket: it resolved its config root from the "
+        "STORE's parent, read the default threshold/horizon instead of the repo's "
+        "[compact] block, and folded the right tickets by the wrong rule"
+    )
+
+
+def test_run_sweep_hands_the_resolved_code_root_to_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SPECIFIC behaviour, pinned at the seam so no other guard can rescue it: the root
+    ``run_sweep`` passes to ``compact_all_cli`` is the RESOLVED code root, never the store's
+    parent. Asserting only the fold outcome would survive a fix that happened to land on a
+    root that reads the same config by accident."""
+    from rebar._commands import compact as compact_mod
+    from rebar._commands import compact_trigger
+
+    repo, external, _tid = _relocated_store_folding_everything(tmp_path, monkeypatch)
+    seen: list = []
+    monkeypatch.setattr(
+        compact_mod, "compact_all_cli", lambda argv, *, repo_root=None: seen.append(repo_root) or 0
+    )
+
+    compact_trigger.run_sweep(str(external))
+
+    assert seen, "run_sweep never reached the sweep"
+    handed = str(seen[0])
+    assert handed != str(external.parent), (
+        "run_sweep handed the sweep the STORE's parent (os.path.dirname(tracker)); on a "
+        "relocated store that directory holds no rebar.toml"
+    )
+    assert handed == str(repo), f"expected the resolved code root {str(repo)!r}, got {handed!r}"
+
+
+def test_run_sweep_respects_a_repo_config_that_folds_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Config-effect contrast: the SAME relocated store and the SAME seeded ticket fold
+    nothing when the repo's ``[compact]`` block says so — proving the fold above is the repo
+    config being read, not an unconditional sweep. The horizon is the discriminator, not the
+    threshold: ``_scan_snapshot_state`` (``compact.py``) asks ``compact_plan.needs_folding``,
+    whose BACKFILL arm selects any snapshot-less ticket with at least one foldable event
+    whatever the threshold, so only a horizon that puts these just-written events out of
+    reach can hold the sweep back."""
+    from rebar._commands import compact as compact_mod
+    from rebar._commands import compact_trigger
+
+    repo, external, tid = _relocated_store_folding_everything(tmp_path, monkeypatch)
+    (repo / "rebar.toml").write_text(
+        "[compact]\nthreshold = 1\nCOMPACTION_HORIZON_NS = 3600000000000\n", encoding="utf-8"
+    )
+    # LIVENESS. run_sweep swallows every exception (`except Exception: logger.warning`), so
+    # "no SNAPSHOT" alone would also be satisfied by a sweep that crashed or stood aside —
+    # the assertion would pass for the wrong reason. Wrap the REAL sweep (never replace it)
+    # to record that it ran to a clean return code.
+    real = compact_mod.compact_all_cli
+    outcome: list = []
+
+    def _recording(argv, *, repo_root=None):
+        rc = real(argv, repo_root=repo_root)
+        outcome.append(rc)
+        return rc
+
+    monkeypatch.setattr(compact_mod, "compact_all_cli", _recording)
+
+    compact_trigger.run_sweep(str(external))
+
+    assert outcome == [0], (
+        f"the sweep did not run to a clean return code, so the absence of a SNAPSHOT below "
+        f"proves nothing about the configured horizon. got: {outcome!r}"
+    )
+    assert not list((external / tid).glob("*-SNAPSHOT.json")), (
+        "the sweep folded events its repo config puts INSIDE the compaction horizon"
+    )
+
+
+def test_run_sweep_resolves_the_code_root_without_rebar_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The OTHER precedence arm — the one the local ``make worktree`` topology rides on.
+
+    Every test above resolves through ``REBAR_ROOT``, which is the DEPLOYED arm. Locally
+    nothing exports it: the detached child gets there on ``repo_root_or_none``'s git-toplevel
+    fallback, read from the cwd ``_proc.detached_child_cwd`` anchored at the canonical store's
+    parent (proven separately in ``test_detached_child_cwd.py`` to be the durable main
+    checkout, not the ephemeral worktree). With ``REBAR_ROOT`` unset and the cwd standing in
+    for that anchor, the sweep must STILL read the code repo's ``[compact]`` block — otherwise
+    the fix only works on the deployment and the local half of the argument is unproven.
+    """
+    from rebar._commands import compact_trigger
+
+    _repo, external, tid = _relocated_store_folding_everything(tmp_path, monkeypatch)
+    repo = _repo
+    monkeypatch.delenv("REBAR_ROOT", raising=False)
+    # The store's parent is NOT a git repo, so a toplevel probe from THERE finds nothing —
+    # only the anchored cwd can supply the code root.
+    assert not (external.parent / ".git").exists()
+    monkeypatch.chdir(repo)
+
+    compact_trigger.run_sweep(str(external))
+
+    assert list((external / tid).glob("*-SNAPSHOT.json")), (
+        "with REBAR_ROOT unset the sweep failed to resolve the code root from the git "
+        "toplevel of its anchored cwd, so it fell back to default compaction config"
+    )
