@@ -275,6 +275,15 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# ShellCheck ships via `shellcheck-py`, pinned exactly in pyproject's [dev] extra, so it
 	@# is a REQUIRED tool here and the gate FAILS (never skips) when it is absent.
 	python scripts/check_shellcheck.py
+	@# templatefile() escape gate (bug dd30-f10d-69f3-4c36). Sibling to the ShellCheck gate
+	@# above, and deliberately NOT covered by it: `templatefile()` interpolates the WHOLE
+	@# template — comments included, because `#` means nothing to it — so an unescaped
+	@# `$${...}` in a COMMENT is parsed as HCL. ShellCheck reads the same line as valid bash
+	@# and passes, which is exactly how commit ef1a7e66a65d broke EVERY terraform operation
+	@# in the repo (`-target` included: terraform evaluates the whole configuration first).
+	@# The rule is declared-variable-aware, not a blanket ban on `$${`: user_data.sh has four
+	@# legitimate `$${data_volume_id}` references, the one variable main.tf passes.
+	python scripts/check_templatefile_escapes.py
 	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
 	@# zizmor audits the release workflow + the Verified-gate vote path ($(ZIZMOR_WORKFLOWS),
 	@# widened in epic 5664 S1); actionlint below validates ALL workflows. zizmor is a
