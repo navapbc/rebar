@@ -65,6 +65,50 @@ live = pytest.mark.skipif(
 )
 
 
+# --- enforcement safety -----------------------------------------------------------
+# An enforcement test asserts that a control DENIES something. If the control silently
+# does nothing, the denied action HAPPENS — the 2026-08-26 incident's own mechanism,
+# re-created inside the test suite. Three rules keep these tests fail-safe:
+#
+#   1. Prove denial with a CREATE wherever the proof allows it. A leaked create is
+#      inert; a leaked delete destroys. Only the incident-shape test removes anything.
+#   2. Paths reach the shell through the ENVIRONMENT and are dereferenced as
+#      "${VAR:?}" — never interpolated into the script text. An empty or unset value
+#      then aborts the shell instead of expanding `rm -rf "$EMPTY"/*` from the root,
+#      which is exactly the guard whose absence caused the incident.
+#   3. Python confirms containment BEFORE launching a destructive child, rather than
+#      trusting the sandbox it is testing.
+
+LIVENESS = "child-reached-the-write"
+
+
+def _inside(tmp_path: Path, name: str) -> Path:
+    """Return `tmp_path/name`, refusing anything not strictly inside `tmp_path`.
+
+    The destructive test hands its target to `rm -rf`. If the sandbox enforces nothing
+    that removal really happens, so containment is checked here rather than assumed.
+    """
+    if not name:
+        raise AssertionError("refusing an empty target name")
+    target = (tmp_path / name).resolve()
+    root = tmp_path.resolve()
+    if target == root or root not in target.parents:
+        raise AssertionError(f"refusing {target!r}: not strictly inside {root!r}")
+    return target
+
+
+def _assert_child_ran(sentinel: Path, proc: subprocess.CompletedProcess[str]) -> None:
+    """Fail unless the CHILD ITSELF left evidence that it started.
+
+    Exit status deliberately does not count: a sandbox that fails to launch also exits
+    non-zero, so it cannot distinguish executed-and-denied from never-ran — the very
+    ambiguity these assertions exist to remove.
+    """
+    assert sentinel.exists() and LIVENESS in sentinel.read_text(encoding="utf-8"), (
+        f"the child never reached its write, so a denied/absent target proves nothing; {_why(proc)}"
+    )
+
+
 # --- enforcement (the load-bearing assertions) ------------------------------------
 
 
@@ -72,11 +116,17 @@ live = pytest.mark.skipif(
 def test_write_outside_the_allow_list_is_denied(tmp_path):
     allowed = tmp_path / "scratch"
     allowed.mkdir()
-    target = tmp_path / "outside.txt"
+    sentinel = allowed / "live.txt"
+    target = _inside(tmp_path, "outside.txt")
+    env = subprocess_env(MARK=LIVENESS, SENTINEL=str(sentinel), DENIED=str(target))
     argv = sb.wrap(
-        ["/bin/sh", "-c", f"echo pwned > {target}"], allow=[allowed], profile_dir=tmp_path
+        ["/bin/sh", "-c", 'echo "$MARK" > "${SENTINEL:?}"; echo pwned > "${DENIED:?}"'],
+        allow=[allowed],
+        profile_dir=tmp_path,
+        env=env,
     )
-    proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+    proc = subprocess.run(argv, env=env, capture_output=True, text=True, check=False)
+    _assert_child_ran(sentinel, proc)
     assert not target.exists(), f"sandbox permitted a write outside the allow-list; {_why(proc)}"
 
 
@@ -85,8 +135,16 @@ def test_write_inside_the_allow_list_succeeds(tmp_path):
     allowed = tmp_path / "scratch"
     allowed.mkdir()
     target = allowed / "ok.txt"
-    argv = sb.wrap(["/bin/sh", "-c", f"echo ok > {target}"], allow=[allowed], profile_dir=tmp_path)
-    proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+    env = subprocess_env(ALLOWED=str(target))
+    argv = sb.wrap(
+        ["/bin/sh", "-c", 'echo ok > "${ALLOWED:?}"'],
+        allow=[allowed],
+        profile_dir=tmp_path,
+        env=env,
+    )
+    proc = subprocess.run(argv, env=env, capture_output=True, text=True, check=False)
+    # This test needs no separate liveness check: the assertion below IS positive
+    # evidence the child ran, since a child that never started writes nothing.
     # Report the sandbox's own stderr: a bare "file missing" cannot distinguish
     # "the sandbox denied it" from "the sandbox never started", and that ambiguity
     # cost a full CI round-trip to diagnose.
@@ -95,17 +153,31 @@ def test_write_inside_the_allow_list_succeeds(tmp_path):
 
 @live
 def test_the_incident_shape_rm_rf_is_denied(tmp_path):
-    """`rm -rf <protected>/*` — verbatim what expanded to `rm -rf /*` on 2026-08-26."""
+    """`rm -rf <protected>/*` — the shape that expanded to `rm -rf /*` on 2026-08-26.
+
+    The only enforcement test that removes anything, so it carries three independent
+    bounds: Python confirms the target is strictly inside `tmp_path`; the path reaches
+    the shell only as `"${TARGET:?}"`, so an empty value aborts instead of globbing
+    from the filesystem root; and the sandbox denies the unlink. Deletion is tested
+    rather than replaced by a create because unlink is a different syscall class, and
+    a profile could permit it while denying writes.
+    """
     allowed = tmp_path / "scratch"
     allowed.mkdir()
-    protected = tmp_path / "protected"
+    protected = _inside(tmp_path, "protected")
     protected.mkdir()
     keep = protected / "keep.txt"
     keep.write_text("keep", encoding="utf-8")
+    sentinel = allowed / "live.txt"
+    env = subprocess_env(MARK=LIVENESS, SENTINEL=str(sentinel), TARGET=str(protected))
     argv = sb.wrap(
-        ["/bin/sh", "-c", f"rm -rf {protected}/*"], allow=[allowed], profile_dir=tmp_path
+        ["/bin/sh", "-c", 'echo "$MARK" > "${SENTINEL:?}"; rm -rf "${TARGET:?}"/*'],
+        allow=[allowed],
+        profile_dir=tmp_path,
+        env=env,
     )
-    proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+    proc = subprocess.run(argv, env=env, capture_output=True, text=True, check=False)
+    _assert_child_ran(sentinel, proc)
     assert keep.exists(), f"sandbox permitted the destructive deletion; {_why(proc)}"
 
 
@@ -114,10 +186,17 @@ def test_enforcement_holds_for_the_mutmut_run_argv_shape(tmp_path):
     """The incident ran under `mutmut run`, not the baseline pytest — cover that path."""
     allowed = tmp_path / "scratch"
     allowed.mkdir()
-    target = tmp_path / "mutmut_outside.txt"
-    inner = f"import subprocess; subprocess.run(['/bin/sh','-c','echo x > {target}'])"
-    argv = sb.wrap([sys.executable, "-c", inner], allow=[allowed], profile_dir=tmp_path)
-    proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+    sentinel = allowed / "live.txt"
+    target = _inside(tmp_path, "mutmut_outside.txt")
+    inner = (
+        "import os, pathlib;"
+        "pathlib.Path(os.environ['SENTINEL']).write_text(os.environ['MARK']);"
+        "pathlib.Path(os.environ['DENIED']).write_text('pwned')"
+    )
+    env = subprocess_env(MARK=LIVENESS, SENTINEL=str(sentinel), DENIED=str(target))
+    argv = sb.wrap([sys.executable, "-c", inner], allow=[allowed], profile_dir=tmp_path, env=env)
+    proc = subprocess.run(argv, env=env, capture_output=True, text=True, check=False)
+    _assert_child_ran(sentinel, proc)
     assert not target.exists(), (
         f"sandbox permitted a write from the mutmut-run-shaped child; {_why(proc)}"
     )
@@ -595,3 +674,43 @@ def test_the_sandboxed_subprocesses_receive_the_hardened_env():
             "a sandbox-wrapped subprocess does not receive the hardened env "
             f"({name!r}); its child would inherit the real HOME"
         )
+
+
+# --- the guards themselves ---------------------------------------------------------
+# These run everywhere (no sandbox needed), so the bounds on the destructive test are
+# themselves verified on every lane rather than assumed.
+
+
+def test_the_shell_guard_aborts_before_the_destructive_line():
+    """`"${VAR:?}"` must abort the script BEFORE the line that would delete.
+
+    Deliberately contains NO destructive command. A test that proved this by really
+    running `rm -rf "$EMPTY"/*` would itself perform the incident this module exists to
+    prevent (`e668-b496`) whenever the guard stopped working. Asserting that the shell
+    never REACHES the marker gives the same evidence with no blast radius.
+    """
+    proc = subprocess.run(
+        ["/bin/sh", "-c", 'echo start; : "${TARGET:?}"; echo reached-the-danger-point'],
+        env=subprocess_env(TARGET=""),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode != 0, f"an empty TARGET must abort the shell; {_why(proc)}"
+    assert "start" in proc.stdout, f"the shell should have run up to the guard; {_why(proc)}"
+    assert "reached-the-danger-point" not in proc.stdout, (
+        'the guard did not stop the script — a real `rm -rf "$TARGET"/*` on that '
+        "line would have expanded from the filesystem root"
+    )
+
+
+def test_the_containment_guard_refuses_a_path_outside_tmp(tmp_path):
+    """`_inside` must refuse to hand `rm -rf` anything outside the pytest tmp dir."""
+    with pytest.raises(AssertionError, match="not strictly inside"):
+        _inside(tmp_path, "../escape")
+
+
+def test_the_containment_guard_refuses_an_empty_name(tmp_path):
+    """An empty name would resolve to tmp_path itself, widening the removal."""
+    with pytest.raises(AssertionError, match="empty target name"):
+        _inside(tmp_path, "")
