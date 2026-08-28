@@ -43,6 +43,20 @@ from rebar._mcp_models import (
 from rebar._operation_config import _shadow
 
 
+def _cross_session(ticket_id: str) -> str | None:
+    """The cross-session holder-naming advisory, or ``None`` if silent/uncomputable.
+
+    Best-effort (story 734d): any exception silences the advisory rather than failing
+    the read the client asked for.
+    """
+    from rebar._commands.cross_session import cross_session_warning_for
+
+    try:
+        return cross_session_warning_for(ticket_id, repo_root=None)
+    except Exception:  # noqa: BLE001 — the advisory must never fail a read
+        return None
+
+
 def _gate_value(gate: object) -> bool:
     """Read either a live gate callback or its legacy boolean value."""
     return bool(gate() if callable(gate) else gate)
@@ -229,6 +243,7 @@ def register_read_tools(mcp, ctx) -> None:
 
         ticket = dict(rebar.show_ticket(ticket_id, include_inbound=True))
         ticket["plan_review_health"] = plan_review_health(ticket)
+        ticket["cross_session_warning"] = _cross_session(ticket_id)
         return TicketStateOut.model_validate(ticket)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])

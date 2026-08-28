@@ -124,6 +124,12 @@ try:
         plan_review_health: PlanReviewHealthAvailableOut | PlanReviewHealthUnavailableOut | None = (
             None
         )
+        # Story 734d: the cross-session holder-naming advisory. Same reasoning as
+        # description_warning — an MCP client reads only the tool result, so an
+        # advisory that lives solely on the server's stderr is undeliverable here.
+        # Present (non-null) only when the ticket's live claim is held by a
+        # DIFFERENT session than the acting one; advisory, never a gate.
+        cross_session_warning: str | None = None
 
         @classmethod
         def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -210,6 +216,11 @@ try:
         # verify.max_ticket_description_chars while the plan-review start-work gate
         # is enabled; advisory, and the write still succeeded.
         description_warning: str | None = None
+        # Story 734d: the cross-session holder-naming advisory. Same reasoning as
+        # description_warning — present (non-null) only when the ticket's live
+        # claim is held by a DIFFERENT session than the acting one; advisory, and
+        # the write still succeeded.
+        cross_session_warning: str | None = None
 
     class FileImpactItemOut(_Out):
         path: str

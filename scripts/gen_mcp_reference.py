@@ -189,6 +189,20 @@ def render() -> str:
         "to fix an unreadable config would mislead."
     )
     lines.append("")
+    lines.append(
+        "**Cross-session advisory (`cross_session_warning`):** the single-ticket tools "
+        "carry an optional `cross_session_warning` response field — a one-line "
+        "holder-naming advisory, present (non-null) only when the ticket's live claim is "
+        "held by a DIFFERENT session than the acting one. It rides on the single-ticket "
+        "writes (`comment_ticket`, `edit_ticket`, `tag_ticket`, `untag_ticket`, "
+        "`set_file_impact`, `set_verify_commands`, `archive_ticket`, `link_tickets`, "
+        "`unlink_tickets`) and on `show_ticket` as the optional `cross_session_warning` "
+        "model field; `transition_ticket` / `reopen_ticket` (which return the raw engine "
+        "dict) carry it as an additive `cross_session_warning` dict key, present only "
+        "when non-null. It is best-effort and advisory: it never gates the operation — "
+        "the mutation still lands."
+    )
+    lines.append("")
 
     lines.append("## Read-only (always available)")
     lines.append("")

@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import rebar
+from rebar._commands.cross_session import cross_session_warning_for
 from rebar._mcp_models import (
     AttachCommitsResultOut,
     ClaimResultOut,
@@ -31,6 +32,30 @@ from rebar._mcp_models import (
     tool_annotation_presets,
 )
 from rebar._operation_config import _shadow
+
+
+def _cross_session(ticket_id: str) -> str | None:
+    """The cross-session holder-naming advisory, or ``None`` if silent/uncomputable.
+
+    Best-effort (story 734d): same swallow-and-degrade contract as ``_push_status`` — a
+    failed compute must never break the operation the client asked for, so any exception
+    silences the advisory rather than propagating.
+    """
+    try:
+        return cross_session_warning_for(ticket_id, repo_root=None)
+    except Exception:  # noqa: BLE001 — the advisory must never fail a real operation
+        return None
+
+
+def _attach_cross_session(result: dict[str, Any], warning: str | None) -> dict[str, Any]:
+    """Add the advisory to a raw engine dict, but only when non-``None``.
+
+    The transition/reopen tools return the raw dict; the tests read it with ``dict.get``
+    and expect the key ABSENT when silent, so a ``None`` warning is not written.
+    """
+    if warning is not None:
+        result["cross_session_warning"] = warning
+    return result
 
 
 # Bug vapoury-attack-lamb. The tickets-branch push is best-effort: on failure it WARNS and
@@ -57,18 +82,25 @@ def _push_status() -> dict:
         return {"state": "unknown"}
 
 
-def _ack(result: str = "ok", *, description_warning: str | None = None) -> Any:
+def _ack(
+    result: str = "ok",
+    *,
+    description_warning: str | None = None,
+    cross_session_warning: str | None = None,
+) -> Any:
     """The shared write ack: the pre-existing ``{"result": …}`` plus delivery status.
 
     ``description_warning`` rides the same reasoning as ``push_status`` (ticket 594b):
     the library logs the save-time cap notice, but an MCP client reads only the tool
     result, so it is carried as a result field. ``None`` when there is nothing to say.
+    ``cross_session_warning`` (story 734d) rides that same reasoning.
     """
     return WriteAckOut.model_validate(
         {
             "result": result,
             "push_status": _push_status(),
             "description_warning": description_warning,
+            "cross_session_warning": cross_session_warning,
         }
     )
 
@@ -255,7 +287,8 @@ def register_write_tools(mcp, ctx) -> None:
         ``caused_by`` records the explicit culprit for a bug close. ``ref`` selects
         the committed tree used by completion verification; it defaults to HEAD."""
         _shadow("mcp.write.transition_ticket")
-        return _with_push(
+        warning = _cross_session(ticket_id)
+        result = _with_push(
             cast(
                 "dict[str, Any]",
                 rebar.transition(
@@ -270,6 +303,7 @@ def register_write_tools(mcp, ctx) -> None:
                 ),
             )
         )
+        return _attach_cross_session(result, warning)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def claim_ticket(
@@ -299,14 +333,17 @@ def register_write_tools(mcp, ctx) -> None:
         """Reopen a closed ticket (closed -> open). Optimistic-concurrency:
         raises a tool error if the ticket is not currently closed."""
         _shadow("mcp.write.reopen_ticket")
-        return _with_push(cast("dict[str, Any]", rebar.reopen(ticket_id)))
+        warning = _cross_session(ticket_id)
+        result = _with_push(cast("dict[str, Any]", rebar.reopen(ticket_id)))
+        return _attach_cross_session(result, warning)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def comment_ticket(ticket_id: str, body: str) -> WriteAckOut:
         """Append a comment to a ticket."""
         _shadow("mcp.write.comment_ticket")
+        warning = _cross_session(ticket_id)
         rebar.comment(ticket_id, body)
-        return _ack()
+        return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def log_session(
@@ -364,6 +401,7 @@ def register_write_tools(mcp, ctx) -> None:
         the ticket will need a review that refuses it until the description is shorter.
         """
         _shadow("mcp.write.edit_ticket")
+        warning = _cross_session(ticket_id)
         description_warning = rebar.edit_ticket(
             ticket_id,
             title=title,
@@ -377,7 +415,7 @@ def register_write_tools(mcp, ctx) -> None:
             bridge_project=bridge_project,
             repos=repos,
         )
-        return _ack(description_warning=description_warning)
+        return _ack(description_warning=description_warning, cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def link_tickets(id1: str, id2: str, relation: str, force: str = "") -> WriteAckOut:
@@ -394,14 +432,16 @@ def register_write_tools(mcp, ctx) -> None:
         ``force`` (a reason string) bypasses that check.
         """
         _shadow("mcp.write.link_tickets")
+        warning = _cross_session(id1)
         record = rebar.link(id1, id2, relation, force=force)
         if not record:
-            return _ack()
+            return _ack(cross_session_warning=warning)
         original = record.get("original") or {}
         resolved = record.get("resolved") or {}
         return _ack(
             f"ok (escalated: {original.get('source')}->{original.get('target')} "
-            f"recorded as {resolved.get('source')}->{resolved.get('target')})"
+            f"recorded as {resolved.get('source')}->{resolved.get('target')})",
+            cross_session_warning=warning,
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
@@ -413,29 +453,33 @@ def register_write_tools(mcp, ctx) -> None:
         most-recent active relation (the legacy pair-scoped behavior).
         """
         _shadow("mcp.write.unlink_tickets")
+        warning = _cross_session(id1)
         rebar.unlink(id1, id2, relation)
-        return _ack()
+        return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def tag_ticket(ticket_id: str, tag: str) -> WriteAckOut:
         """Add a tag to a ticket."""
         _shadow("mcp.write.tag_ticket")
+        warning = _cross_session(ticket_id)
         rebar.tag(ticket_id, tag)
-        return _ack()
+        return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def untag_ticket(ticket_id: str, tag: str) -> WriteAckOut:
         """Remove a tag from a ticket."""
         _shadow("mcp.write.untag_ticket")
+        warning = _cross_session(ticket_id)
         rebar.untag(ticket_id, tag)
-        return _ack()
+        return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["DESTRUCTIVE"])
     def archive_ticket(ticket_id: str) -> WriteAckOut:
         """Archive a ticket (excludes it from the default list)."""
         _shadow("mcp.write.archive_ticket")
+        warning = _cross_session(ticket_id)
         rebar.archive(ticket_id)
-        return _ack()
+        return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["DESTRUCTIVE"])
     def compact_ticket(ticket_id: str | None = None) -> WriteAckOut:
@@ -452,8 +496,9 @@ def register_write_tools(mcp, ctx) -> None:
         """Record file impact (list of {path, reason}) for conflict-aware
         next-batch scheduling."""
         _shadow("mcp.write.set_file_impact")
+        warning = _cross_session(ticket_id)
         rebar.set_file_impact(ticket_id, [_dump(e) for e in impact])
-        return _ack()
+        return _ack(cross_session_warning=warning)
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"], structured_output=False)
     def declare_no_file_impact(ticket_id: str, reason: str) -> str:
@@ -466,8 +511,9 @@ def register_write_tools(mcp, ctx) -> None:
     def set_verify_commands(ticket_id: str, commands: list[VerifyCommandItemOut]) -> WriteAckOut:
         """Record DD-level verify commands (list of {dd_id, dd_text, command})."""
         _shadow("mcp.write.set_verify_commands")
+        warning = _cross_session(ticket_id)
         rebar.set_verify_commands(ticket_id, [_dump(e) for e in commands])
-        return _ack()
+        return _ack(cross_session_warning=warning)
 
     _register_attach_commits(mcp, _ANN)
     _register_bridge_projects_writes(mcp, _ANN)
