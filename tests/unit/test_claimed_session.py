@@ -199,3 +199,136 @@ def test_forward_compat_unknown_key_tolerated() -> None:
     process_status(state, ev, ev["data"], "")
     assert state["claimed_session"] == "sess-fc"
     assert "some_future_key" not in state
+
+
+# ------------------------------------------------------------------ clear on exit (S1: 6f74)
+def _enter_event(uuid: str, session: str, harness: str, remote: str) -> dict:
+    """A winning ``open -> in_progress`` claim that stamps all three provenance fields."""
+    return {
+        "uuid": uuid,
+        "env_id": "env",
+        "timestamp": 1,
+        "data": {
+            "status": "in_progress",
+            "current_status": "open",
+            "parent_status_uuid": "p0",
+            "session": session,
+            "harness": harness,
+            "remote_session": remote,
+        },
+    }
+
+
+def _exit_event(uuid: str, target: str, parent_uuid: str) -> dict:
+    """An ``in_progress -> <target>`` exit STATUS event."""
+    return {
+        "uuid": uuid,
+        "env_id": "env",
+        "timestamp": 2,
+        "data": {
+            "status": target,
+            "current_status": "in_progress",
+            "parent_status_uuid": parent_uuid,
+        },
+    }
+
+
+def _reduce_enter_then_exit(target: str) -> dict:
+    state = make_initial_state()
+    state["status"] = "open"
+    state["parent_status_uuid"] = "p0"
+    enter = _enter_event("u1", "A", "claude-code", "R")
+    process_status(state, enter, enter["data"], "")
+    exit_ev = _exit_event("u2", target, "u1")
+    process_status(state, exit_ev, exit_ev["data"], "")
+    return state
+
+
+def test_claim_session_cleared_on_close() -> None:
+    """All three claim-session provenance fields clear on ``in_progress -> closed`` (happy
+    path + collateral invariants)."""
+    state = _reduce_enter_then_exit("closed")
+    assert state["claimed_session"] is None
+    assert state["claim_harness"] is None
+    assert state["claim_remote_session"] is None
+
+
+@pytest.mark.parametrize("target", ["blocked", "open", "idea"])
+def test_claim_session_cleared_on_exit(target: str) -> None:
+    """The three-field clear holds for every non-``in_progress`` exit target."""
+    state = _reduce_enter_then_exit(target)
+    assert state["claimed_session"] is None
+    assert state["claim_harness"] is None
+    assert state["claim_remote_session"] is None
+
+
+def test_claim_session_persists_while_in_progress() -> None:
+    """Negative control: no exit -> the holder persists, proving the change clears only on
+    exit from ``in_progress``, never on entry."""
+    state = make_initial_state()
+    state["status"] = "open"
+    state["parent_status_uuid"] = "p0"
+    enter = _enter_event("u1", "A", "claude-code", "R")
+    process_status(state, enter, enter["data"], "")
+    assert state["claimed_session"] == "A"
+    assert state["claim_harness"] == "claude-code"
+    assert state["claim_remote_session"] == "R"
+
+
+def test_fork_winning_exit_clears_holder() -> None:
+    """In a STATUS fork, a WINNING ``in_progress -> exit`` event clears the holder (the clear
+    is applied on the fork-winner branch, mirroring ``_fold_claimed_session`` gating)."""
+    state = make_initial_state()
+    state["status"] = "blocked"  # a losing sibling already advanced the live status
+    state["parent_status_uuid"] = "ffff-loser"
+    state["claimed_session"] = "stale"
+    state["claim_harness"] = "H"
+    state["claim_remote_session"] = "R"
+    winning_exit = {
+        "uuid": "0000-winner",
+        "env_id": "env",
+        "timestamp": 5,
+        "data": {"status": "closed", "current_status": "in_progress", "parent_status_uuid": "p0"},
+    }
+    process_status(state, winning_exit, winning_exit["data"], "")
+    assert state["status"] == "closed"
+    assert state["claimed_session"] is None
+    assert state["claim_harness"] is None
+    assert state["claim_remote_session"] is None
+
+
+def test_fork_losing_exit_does_not_clear_holder() -> None:
+    """In a STATUS fork, a LOSING ``in_progress -> exit`` event must NOT clear the fork
+    winner's holder — the clear is never applied on the existing-chain-wins branch (advisory
+    G6/T8, symmetric to ``test_fork_winner_session_wins``)."""
+    state = make_initial_state()
+    state["status"] = "closed"  # the winning sibling already exited
+    state["parent_status_uuid"] = "0000-winner"
+    state["claimed_session"] = "keeper"
+    state["claim_harness"] = "H"
+    state["claim_remote_session"] = "R"
+    losing_exit = {
+        "uuid": "ffff-loser",
+        "env_id": "env",
+        "timestamp": 5,
+        "data": {"status": "blocked", "current_status": "in_progress", "parent_status_uuid": "p0"},
+    }
+    process_status(state, losing_exit, losing_exit["data"], "")
+    assert state["claimed_session"] == "keeper"
+    assert state["claim_harness"] == "H"
+    assert state["claim_remote_session"] == "R"
+
+
+def test_claim_then_exit_clears_holder_e2e(rebar_repo: Path, monkeypatch) -> None:
+    """End-to-end via the library: a claim stamps the holder, and a real exit transition
+    clears all three provenance fields in the reduced state."""
+    monkeypatch.setenv("REBAR_SESSION_ID", "sess-e2e")
+    monkeypatch.setenv("AI_AGENT", "claude-code")
+    tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
+    rebar.claim(tid, assignee="alice", repo_root=str(rebar_repo))
+    assert _state(tid, rebar_repo)["claimed_session"] == "sess-e2e"
+    rebar.transition(tid, "in_progress", "blocked", repo_root=str(rebar_repo))
+    st = _state(tid, rebar_repo)
+    assert st["claimed_session"] is None
+    assert st["claim_harness"] is None
+    assert st["claim_remote_session"] is None

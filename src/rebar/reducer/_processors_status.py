@@ -46,6 +46,28 @@ def _fold_claimed_session(state: dict, data: dict) -> None:
         state["claim_remote_session"] = data.get("remote_session")
 
 
+def _clear_claimed_session(state: dict, data: dict) -> None:
+    """Clear claim-session provenance on a winning exit from ``in_progress`` (mirrors
+    :func:`_fold_claimed_session`).
+
+    ``_fold_claimed_session`` stamps ``claimed_session``/``claim_harness``/
+    ``claim_remote_session`` ONLY on the ``open -> in_progress`` claim edge, and nothing else
+    ever touches them — so a ticket that has LEFT ``in_progress`` keeps reporting its last
+    claimer. On the winning ``in_progress -> <any other status>`` edge (open, blocked, closed,
+    idea) we null all three, so a non-``in_progress`` ticket reports no holder. Guarded on the
+    ``in_progress -> non-in_progress`` edge only, so entering or re-entering ``in_progress``
+    leaves the freshly-stamped provenance untouched.
+
+    Like :func:`_fold_claimed_session`, applied ONLY when THIS event's status is being applied
+    (the caller invokes it in the normal-update and fork-WINNER branches, NEVER where the
+    existing chain wins), so a losing concurrent transition cannot clear the fork winner's
+    provenance."""
+    if data.get("current_status") == "in_progress" and data.get("status") != "in_progress":
+        state["claimed_session"] = None
+        state["claim_harness"] = None
+        state["claim_remote_session"] = None
+
+
 def _fold_close_metadata(state: dict, data: dict) -> None:
     """Record the close metadata carried on a winning ``*->closed`` STATUS fold (ticket ed13;
     extended with ``force_close_reason`` by bug defiant-orthoclase-buck).
@@ -137,6 +159,7 @@ def process_status(state: dict, event: dict, data: dict, _filepath: str) -> None
             _fold_plan_review_phase(state, state["status"])
             state["parent_status_uuid"] = incoming_uuid  # winner's own UUID
             _fold_claimed_session(state, data)  # only when THIS (winning) event is applied
+            _clear_claimed_session(state, data)  # clear provenance on the winning in_progress exit
             _fold_close_metadata(state, data)  # close metadata on the *->closed winning edge
         else:
             # Existing chain wins; keep state as-is.
@@ -164,6 +187,7 @@ def process_status(state: dict, event: dict, data: dict, _filepath: str) -> None
         state["status"] = data.get("status", state["status"])
         _fold_plan_review_phase(state, state["status"])
         _fold_claimed_session(state, data)  # normal (non-fork) update — this event is applied
+        _clear_claimed_session(state, data)  # clear provenance on the in_progress exit
         _fold_close_metadata(state, data)  # close metadata on the *->closed edge
         # Advance to THIS event's OWN UUID (not its data parent-pointer) so a
         # subsequent concurrent sibling forks against this event's identity and
