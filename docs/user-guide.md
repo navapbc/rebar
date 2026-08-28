@@ -432,6 +432,13 @@ rebar is meant to be used by many people/clones at once. Status-changing operati
 get a clean "someone else changed it" signal (exit 10) rather than a silent clobber —
 re-read and pick up from the current state. See [concurrency.md](concurrency.md).
 
+When you run a **single-ticket** CLI command (`show`, `comment`, `edit`, `transition`,
+`reopen`, `deps`, and friends) against a ticket whose live claim is held by **another
+session**, rebar prints an advisory `WARN:` line to **stderr** naming the holder — the
+command's stdout payload and exit code are untouched, so it never breaks a pipeline.
+Bulk commands (`list`, `ready`, `next-batch`, `search`, …) and `claim` do not warn.
+Set `warnings.cross_session = false` (default on) to disable the notice.
+
 ## A dirty tickets tracker: `fsck` names it, `doctor --repair` heals it
 
 A crash mid-compaction or an interrupted sync can leave the tickets tracker's working

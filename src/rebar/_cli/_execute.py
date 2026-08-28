@@ -19,6 +19,25 @@ from typing import Protocol
 
 from rebar._cli import _registry
 
+_CROSS_SESSION_WARN_COMMANDS = frozenset(
+    {
+        "show",
+        "comment",
+        "edit",
+        "transition",
+        "reopen",
+        "tag",
+        "untag",
+        "set-file-impact",
+        "deps",
+        "archive",
+        "check-ac",
+        "clarity-check",
+        "link",
+        "unlink",
+    }
+)
+
 
 class _Handler(Protocol):
     """A resolved CLI handler: called through an adapter, returns an exit code."""
@@ -32,9 +51,33 @@ def execute(name: str, rest: list[str]) -> int:
     if route is None or route.handler is None:
         raise RuntimeError(f"rebar: {name!r} has no executable route")
     _apply_init(route.init, rest)
+    _maybe_warn_cross_session(name, rest)
     module, _, attr = route.handler.partition(":")
     fn: _Handler = getattr(importlib.import_module(module), attr)
     return _invoke(route, name, fn, rest)
+
+
+def _maybe_warn_cross_session(name: str, rest: list[str]) -> None:
+    """Best-effort advisory: warn on stderr when another session holds the ticket.
+
+    Only single-ticket commands warn; the emit never alters stdout or the exit code
+    and any detector error is swallowed so the command always proceeds.
+    """
+    if name not in _CROSS_SESSION_WARN_COMMANDS:
+        return
+    try:
+        token = next((arg for arg in rest if not arg.startswith("-")), None)
+        if token is None:
+            return
+        from rebar._commands.cross_session import cross_session_warning_for
+
+        msg = cross_session_warning_for(token, repo_root=None)
+        if msg is not None:
+            import sys
+
+            sys.stderr.write("WARN: " + msg + "\n")
+    except Exception:  # noqa: BLE001 — advisory warning must never break the command
+        pass
 
 
 def _apply_init(policy: str, rest: list[str]) -> None:
