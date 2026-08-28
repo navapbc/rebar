@@ -657,36 +657,40 @@ def test_bwrap_uses_minimal_dev_not_a_writable_host_bind(tmp_path, monkeypatch):
 
 
 # --- CI is the disposable environment (LLM-Review 2269) ---------------------------
-# GitHub runners ship bubblewrap but deny unprivileged user namespaces, so the
-# functional probe correctly finds no sandbox and the gate would fail closed on every
-# CI run. A runner IS the isolated environment the sandbox substitutes for. A
-# workstation is not — and that is where the 2026-08-26 rm -rf /* landed.
+# There is exactly ONE way to run unsandboxed, and it must be NAMED. An earlier branch
+# waived the sandbox whenever ambient `CI` was truthy; `CI` is inheritable and trivially
+# set, so a workstation with `CI=1` exported ran mutation tests with no sandbox at all —
+# the configuration the 2026-08-26 `rm -rf /*` landed in (`f11d-f8fd`).
 
 
-def test_ci_runner_proceeds_unsandboxed_with_a_warning(tmp_path, monkeypatch, caplog):
-    monkeypatch.setattr(sb, "probe", lambda: None)
-    with caplog.at_level("WARNING"):
-        argv = sb.wrap(["/bin/true"], allow=[tmp_path], profile_dir=tmp_path, env={"CI": "true"})
-    assert argv == ["/bin/true"], "CI must proceed rather than abort"
-    assert any("UNSANDBOXED" in r.getMessage() for r in caplog.records)
-
-
-def test_workstation_still_aborts_when_no_sandbox(tmp_path, monkeypatch):
-    # The load-bearing half: without CI set, the abort path is unchanged.
-    monkeypatch.setattr(sb, "probe", lambda: None)
-    with pytest.raises(sb.SandboxUnavailable):
-        sb.wrap(["/bin/true"], allow=[tmp_path], profile_dir=tmp_path, env={})
-
-
-@pytest.mark.parametrize("value", ["", "0", "false", "no"])
-def test_falsey_ci_values_do_not_waive_the_sandbox(tmp_path, monkeypatch, value):
+@pytest.mark.parametrize("value", ["true", "1", "yes", "TRUE"])
+def test_ambient_ci_does_not_waive_the_sandbox(tmp_path, monkeypatch, value):
+    """No value of `CI` may disable the sandbox — only the named opt-out can."""
     monkeypatch.setattr(sb, "probe", lambda: None)
     with pytest.raises(sb.SandboxUnavailable):
         sb.wrap(["/bin/true"], allow=[tmp_path], profile_dir=tmp_path, env={"CI": value})
 
 
+def test_no_sandbox_aborts_when_the_opt_out_is_unset(tmp_path, monkeypatch):
+    monkeypatch.setattr(sb, "probe", lambda: None)
+    with pytest.raises(sb.SandboxUnavailable):
+        sb.wrap(["/bin/true"], allow=[tmp_path], profile_dir=tmp_path, env={})
+
+
+def test_the_named_opt_out_is_the_only_waiver(tmp_path, monkeypatch, caplog):
+    """The single remaining waiver still works, and still announces itself."""
+    monkeypatch.setattr(sb, "probe", lambda: None)
+    env = {"CI": "true", sb.ALLOW_UNSANDBOXED_ENV: "1"}
+    with caplog.at_level("WARNING"):
+        argv = sb.wrap(["/bin/true"], allow=[tmp_path], profile_dir=tmp_path, env=env)
+    assert argv == ["/bin/true"], "the named opt-out must still permit an unsandboxed run"
+    assert any(sb.ALLOW_UNSANDBOXED_ENV in r.getMessage() for r in caplog.records), (
+        "the waiver must name itself in the log"
+    )
+
+
 def test_a_working_sandbox_is_used_even_on_ci(tmp_path, monkeypatch):
-    # CI is a fallback for the ABSENCE of a mechanism, never a reason to skip one.
+    # A usable mechanism is never skipped, whatever the environment says.
     monkeypatch.setattr(sb.shutil, "which", lambda n: "/usr/bin/bwrap" if n == "bwrap" else None)
     monkeypatch.setattr(sb, "_bwrap_works", lambda: True)
     sb.probe.cache_clear()
@@ -857,21 +861,3 @@ def test_a_missing_allow_path_is_surfaced_not_silently_dropped(tmp_path, monkeyp
         f"the skipped allow-list path was not named in the log; got {caplog.text!r}"
     )
     assert str(missing) not in argv, "a non-existent path must not be handed to --bind"
-
-
-def test_the_ci_fail_open_warning_names_the_variable_and_its_value(monkeypatch, caplog):
-    """A run that proceeds UNSANDBOXED must be unmistakable in its own log.
-
-    Ambient `CI` remains the sole condition on this fall-back (tightening that is
-    `f11d-f8fd`), so the log is the only place a reader can tell that a run had no
-    sandbox at all. It must name the variable AND the value that permitted it.
-    """
-    monkeypatch.setattr(sb, "probe", lambda: None)
-    env = {"CI": "true"}
-    with caplog.at_level(logging.WARNING, logger=sb.logger.name):
-        argv = sb.wrap(["/bin/true"], allow=[], profile_dir=Path("."), env=env)
-    assert argv == ["/bin/true"], "the CI fall-back returns the command unwrapped"
-    assert "UNSANDBOXED" in caplog.text
-    assert "CI=" in caplog.text and "true" in caplog.text, (
-        f"the warning must name the variable and its observed value; got {caplog.text!r}"
-    )

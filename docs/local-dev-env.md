@@ -141,8 +141,12 @@ destroying `/opt/homebrew` and every Homebrew-installed app in `/Applications`. 
 mutation tool in any language sandboxes runtime effects; they isolate only the source
 tree, which does nothing once the mutant calls `rm -rf`.
 
-On a CI runner (`CI` set truthy) the run proceeds UNSANDBOXED with a WARNING: a runner is ephemeral and destroyed after the job, so it is already the isolated environment the sandbox substitutes for. On a workstation, with neither mechanism installed the run **aborts**. That is deliberate: a silent
-unsandboxed fallback is indistinguishable from a sandboxed run. To override:
+With no mechanism installed the run **aborts** — everywhere, including CI. That is
+deliberate: a silent unsandboxed fallback is indistinguishable from a sandboxed run.
+Ambient `CI` used to waive the sandbox on its own; it no longer does (`f11d-f8fd`),
+because `CI` is inheritable and trivially set, so a workstation with `CI=1` exported got
+the same silent waiver. There is now exactly one way to run unsandboxed, and it has to
+be named:
 
 ```sh
 REBAR_MUTATION_ALLOW_UNSANDBOXED=1 python scripts/mutation_gate.py ...
