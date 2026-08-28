@@ -361,6 +361,7 @@ import json as _json  # noqa: E402
 from pathlib import Path as _Path  # noqa: E402
 from typing import Any as _Any  # noqa: E402
 
+from rebar_reconciler import binding_lifecycle as _bl  # noqa: E402
 from rebar_reconciler import peer_state as _ps  # noqa: E402
 from rebar_reconciler.binding_store import BindingStore as _Store  # noqa: E402
 
@@ -405,9 +406,18 @@ def test_narrow_operation_matches_the_legacy_counter_progression(tmp_path: _Path
 
 def test_narrow_operation_persists_the_same_bytes_as_the_legacy_sequence(
     tmp_path: _Path,
+    monkeypatch: _Any,
 ) -> None:
     """Byte equivalence is asserted after ONE save, not per emit: neither path saves during
-    emission, so the comparison is 'same state, then the pass's single save'."""
+    emission, so the comparison is 'same state, then the pass's single save'.
+
+    ``created_at``/``updated_at`` are stamped from the wall clock in
+    ``BindingLifecycle.bind_confirm``. The two stores are bound in two separate
+    ``bind_confirm`` calls, so on a real clock they can straddle a one-second boundary and
+    serialize different timestamp bytes (index 72 in the saved JSON) even though the state
+    is identical. Freeze the clock so the comparison isolates state, not timing (bug
+    ``c49a-225d-2bc0-4478``)."""
+    monkeypatch.setattr(_bl, "_now_iso", lambda: "2026-01-01T00:00:00Z")
     legacy_root, new_root = tmp_path / "legacy", tmp_path / "new"
     legacy, new = _bound_store(legacy_root), _bound_store(new_root)
     wire = "h1. Heading\n\nbody"
