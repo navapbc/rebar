@@ -135,6 +135,26 @@ The default `run` reproduces targeted selection; the all-shard command reproduce
 sweep. Inspect `mutation-results/summary.json` first, then the shard's raw evidence and survivor
 diffs.
 
+## What the sandbox does and does not restrict
+
+The sandbox exists to stop a mutant DESTROYING things, and its scope is deliberately
+that and no wider. Recorded here so the residual surface is a decision rather than an
+accident:
+
+- **Filesystem writes are denied** outside an explicit allow-list (the scratch tree and
+  the pytest basetemp). The venv is deliberately excluded, so a mutant cannot drop
+  executable code into site-packages for a later un-sandboxed phase to import.
+- **Reads are NOT restricted.** A mutant can read anything the invoking user can.
+- **Network is NOT restricted.** The macOS profile is `(allow default)` with
+  `(deny file-write*)`, so a mutant could open a socket. The suite's own network guard,
+  not the sandbox, is what constrains that.
+
+Write-denial was the 2026-08-26 hazard and is what the sandbox is scoped to. Closing the
+read and network surface would need a different profile shape on both platforms and is
+NOT claimed today — treat mutation testing as running code that can read your files and
+reach the network, and do not run it with credentials in the environment you would not
+give a test.
+
 ## Emergency recovery
 
 If mutation infrastructure freezes the submit path, an operator must follow
