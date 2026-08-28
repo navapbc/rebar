@@ -8,9 +8,11 @@ not prove that a live tracker advance can coexist with a stable read at the olde
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import uuid
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,12 +35,13 @@ from rebar._snapshot.ticket_view import (
 pytestmark = pytest.mark.unit
 
 
-def _git(repo: str | Path, *args: str) -> str:
+def _git(repo: str | Path, *args: str, stdin: str | None = None) -> str:
     proc = subprocess.run(
         ["git", "-C", str(repo), *args],
         check=True,
         capture_output=True,
         text=True,
+        input=stdin,
     )
     return proc.stdout.strip()
 
@@ -630,20 +633,81 @@ def test_corrupt_event_json_fails_closed(repo: Path) -> None:
             view.show_ticket(ticket)
 
 
-def test_tree_listed_ticket_blob_missing_from_object_database_fails_closed(repo: Path) -> None:
-    ticket = rebar.create_ticket("task", "missing object", repo_root=str(repo))
+def _freeze_gc(tracker: str) -> None:
+    """Stop auto-gc packing objects mid-test, so a storage shape can be CONSTRUCTED.
+
+    rebar deliberately unsets `gc.auto` on the tracker and sets `gc.autoDetach=false`
+    (`_commands/_init_ensures.py`), so a triggered `git gc --auto` runs FOREGROUND
+    during a rebar write and can pack a blob that was just committed. Asserting a blob
+    is loose without this is asserting that gc happened not to have run — which is what
+    made this test fail on its own scaffolding (`7bcc-55a9`).
+    """
+    _git(tracker, "config", "gc.auto", "0")
+    _git(tracker, "config", "maintenance.auto", "false")
+
+
+def _object_root(tracker: str) -> Path:
+    root = Path(_git(tracker, "rev-parse", "--git-path", "objects"))
+    return root if root.is_absolute() else Path(tracker) / root
+
+
+def _drop_loose(tracker: str, object_root: Path, blob_oid: str) -> None:
+    """Make a LOOSE object unreadable by deleting its file."""
+    loose = object_root / blob_oid[:2] / blob_oid[2:]
+    assert loose.is_file(), f"expected {blob_oid} to be loose; got {loose}"
+    loose.unlink()
+
+
+def _drop_packed(tracker: str, object_root: Path, blob_oid: str) -> None:
+    """Make a PACKED object unreadable, without disturbing anything else.
+
+    Packing is induced deterministically rather than via `git gc`, whose thresholds
+    make it unreliable: a pack is written containing ONLY this blob, the loose copy is
+    removed so the pack is the sole source, and then that pack is deleted. A whole
+    repack would take the commit and trees with it, and the view would raise for a
+    missing TREE rather than for this blob — passing for the wrong reason.
+    """
+    pack_dir = object_root / "pack"
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    before = set(pack_dir.glob("pack-*"))
+    prefix = _git(tracker, "pack-objects", str(pack_dir / "pack"), stdin=f"{blob_oid}\n")
+    assert prefix, "git pack-objects wrote no pack"
+    _drop_loose(tracker, object_root, blob_oid)
+    # The pack is now the only source; if this fails the shape was never established.
+    _git(tracker, "cat-file", "-e", blob_oid)
+    written = set(pack_dir.glob("pack-*")) - before
+    assert written, "no new pack file appeared"
+    for path in written:
+        path.unlink()
+
+
+@pytest.mark.parametrize(("shape", "drop"), [("loose", _drop_loose), ("packed", _drop_packed)])
+def test_tree_listed_ticket_blob_missing_from_object_database_fails_closed(
+    repo: Path, shape: str, drop: Any
+) -> None:
+    """The view fails closed whichever way git chose to store the blob.
+
+    The old version asserted the blob was LOOSE as a setup precondition and deleted the
+    loose file. That is an implementation detail of git's storage, not a guarantee —
+    rebar deliberately no longer pins `gc.auto=0`, so an auto gc can pack the object and
+    the test then failed on its own scaffolding, before exercising anything.
+    """
+    # Materialize the tracker, then freeze gc BEFORE writing the ticket under test, so
+    # its blob's storage shape is the one this case builds rather than whatever gc left.
+    rebar.create_ticket("task", "warm the tracker", repo_root=str(repo))
     tracker = _tracker(repo)
+    _freeze_gc(tracker)
+
+    ticket = rebar.create_ticket("task", f"missing object {shape}", repo_root=str(repo))
     create_path = next(Path(tracker, ticket).glob("*-CREATE.json")).relative_to(tracker)
     blob_oid = _git(tracker, "rev-parse", f"HEAD:{create_path.as_posix()}")
-    object_root = Path(_git(tracker, "rev-parse", "--git-path", "objects"))
-    if not object_root.is_absolute():
-        object_root = Path(tracker) / object_root
-    loose_object = object_root / blob_oid[:2] / blob_oid[2:]
-    assert loose_object.is_file()
-    loose_object.unlink()
+
+    drop(tracker, _object_root(tracker), blob_oid)
 
     with PinnedTicketView.at_oid(tracker, tracker_head(tracker)) as view:
-        with pytest.raises(PinnedTicketViewError, match="missing Git object"):
+        # Match the ticket's own path, not just the generic phrase: that is what
+        # distinguishes "this blob is gone" from "some other object is gone".
+        with pytest.raises(PinnedTicketViewError, match=re.escape(create_path.as_posix())):
             view.show_ticket(ticket)
 
 
