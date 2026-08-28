@@ -38,11 +38,16 @@ reach the AST at all.
 
 SANCTION — ``# repo-root-ok: <reason>``, with a MANDATORY reason, honoured on the offending
 line, the line above, or the enclosing statement's first line (mirrors
-``# tickets-boundary-ok:`` / ``# raw-git-ok:``). Sanctioned sites today: the detached
-``run_sweep`` child in ``compact_trigger.py`` (cwd IS the store; a code root needs a
-spawn-contract change), and ``_store/sync.py``'s ``tickets_branch`` / ``tickets_remote`` reads
-in ``reconverge`` (branch/remote of the STORE's own git repo, ``git -C tracker``, with no code
-``repo_root`` in scope). A bare marker with no reason is itself reported.
+``# tickets-boundary-ok:`` / ``# raw-git-ok:``). Exactly one sanctioned site remains: the
+``_store/sync.py`` ``tickets_branch`` / ``tickets_remote`` reads in ``reconverge``, which name
+the branch and remote of the STORE's own git repo (``git -C tracker``) with no code
+``repo_root`` in scope — the store's parent genuinely IS the right root there. The detached
+``run_sweep`` child in ``compact_trigger.py`` was sanctioned as a deferred spawn-contract
+decision and is now FIXED (``scathing-custommade-bobcat``): a detached child holding only
+``tracker`` still resolves its code root with the bare resolver, because ``REBAR_ROOT`` covers
+the relocated deployment and ``_proc.detached_child_cwd`` anchors the child at the durable
+canonical-store parent for the git-toplevel arm. No CONFIG-root site is allowlisted.
+A bare marker with no reason is itself reported.
 """
 
 from __future__ import annotations
