@@ -171,26 +171,6 @@ def _bwrap_works() -> bool:
     return True
 
 
-def _ci_environment(env: Mapping[str, str] | None = None) -> bool:
-    """True on a CI runner.
-
-    `CI=true` is the de-facto cross-provider convention (GitHub Actions, GitLab,
-    CircleCI, Travis, Jenkins all set it), so this is NOT a CI-provider-specific
-    branch of the kind `project.portability` forbids — it does not name a provider
-    and needs no provider feature.
-
-    GitHub's ubuntu runners ship bubblewrap but deny unprivileged user namespaces
-    ("bwrap: setting up uid map: Permission denied"), so the functional probe
-    correctly reports no sandbox and the gate would otherwise fail closed on every
-    CI run. Accepting unsandboxed HERE is sound because the runner IS the isolated
-    environment — the posture cargo-mutants recommends ("run in an isolated
-    environment (container, CI, or VM)"). The 2026-08-26 `rm -rf /*` landed on a
-    developer workstation, which is what the abort path still protects.
-    """
-    raw = (env if env is not None else os.environ).get("CI", "")
-    return raw.strip().lower() not in {"", "0", "false", "no"}
-
-
 def opt_out_enabled(env: Mapping[str, str] | None = None) -> bool:
     raw = (env if env is not None else os.environ).get(ALLOW_UNSANDBOXED_ENV, "")
     return raw.strip().lower() not in {"", "0", "false", "no"}
@@ -267,17 +247,12 @@ def wrap(
     """
     mechanism = probe()
     if mechanism is None:
-        if _ci_environment(env):
-            logger.warning(
-                "No OS sandbox available and CI=%r: running mutation tests UNSANDBOXED "
-                "— nothing constrains a destructive mutant on this run. "
-                "A CI runner is already the disposable environment this sandbox "
-                "substitutes for — ephemeral, destroyed after the job, holding nothing "
-                "of a developer's. The sandbox requirement protects WORKSTATIONS. On a "
-                "workstation this path aborts instead.",
-                (env if env is not None else os.environ).get("CI"),
-            )
-            return list(argv)
+        # There is exactly ONE way to run unsandboxed, and it must be named. An earlier
+        # branch here waived the sandbox whenever ambient `CI` was truthy, which meant a
+        # workstation with `CI=1` exported — while debugging a CI script, say — silently
+        # ran mutation tests with no sandbox at all. That is the configuration the
+        # 2026-08-26 incident happened in, and it was nobody's deliberate choice
+        # (`f11d-f8fd`).
         if opt_out_enabled(env):
             logger.warning(
                 "%s is set: running mutation tests UNSANDBOXED. A mutation that reaches "
