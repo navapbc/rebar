@@ -59,11 +59,39 @@ KNOWN_ERROR_CODES: frozenset[str] = frozenset(
         "criterion_registry_malformed",
         "criterion_missing_file",
         "llm_unavailable",
+        "not_found",
+        "invalid_input",
         "config_unreadable",
         "config_insecure_url",
         "command_failed",
     }
 )
+
+
+def _workflow_caller_code(exc: BaseException) -> str | None:
+    """Classify a workflow-engine caller-input error to its vocabulary code, else ``None``.
+
+    Extracted from :func:`error_code_for` (bug dbca-97ac-ad96-4d6d) so the classifier stays
+    under the per-function complexity ceiling. ``WorkflowNotFoundError`` (an unknown workflow
+    name or ``run_id``) is a caller ``not_found``; a ``WorkflowParseError`` /
+    ``WorkflowValidationError`` / ``WorkflowVersionError`` (a workflow that WAS found but will
+    not parse/lint/migrate) is caller ``invalid_input``. Returns ``None`` for the bare
+    ``WorkflowError`` base so its EXECUTE-time LLM outage still resolves to ``llm_unavailable``.
+    """
+    try:
+        from rebar.llm.errors import (
+            WorkflowNotFoundError,
+            WorkflowParseError,
+            WorkflowValidationError,
+            WorkflowVersionError,
+        )
+    except ImportError:
+        return None
+    if isinstance(exc, WorkflowNotFoundError):
+        return "not_found"
+    if isinstance(exc, (WorkflowParseError, WorkflowValidationError, WorkflowVersionError)):
+        return "invalid_input"
+    return None
 
 
 def error_code_for(exc: BaseException) -> str:
@@ -78,8 +106,13 @@ def error_code_for(exc: BaseException) -> str:
     4. ``InsecureUrlError`` → ``config_insecure_url``; any other ``ConfigError`` →
        ``config_unreadable``
     5. a non-empty ``exc.error_code`` attribute → that code
-    6. ``LLMError`` → ``llm_unavailable``
-    7. fallback → ``command_failed``
+    6. a workflow-engine caller-input error → ``WorkflowNotFoundError`` (unknown name/run) →
+       ``not_found``; ``WorkflowParseError`` / ``WorkflowValidationError`` /
+       ``WorkflowVersionError`` (a workflow that WAS found but will not parse/lint/migrate) →
+       ``invalid_input``. The bare ``WorkflowError`` base is deliberately NOT remapped — a
+       workflow EXECUTE step can genuinely fail on LLM unavailability, so it falls through to 7.
+    7. ``LLMError`` → ``llm_unavailable``
+    8. fallback → ``command_failed``
 
     Imports exception types lazily to avoid cycles (this is a stdlib-only leaf).
     """
@@ -134,7 +167,15 @@ def error_code_for(exc: BaseException) -> str:
     if code:
         return code
 
-    # 6. LLMError
+    # 6. Workflow-engine caller-input / not-found errors — a WorkflowError subtree that must
+    #    NOT collapse to llm_unavailable (bug dbca-97ac-ad96-4d6d). The bare WorkflowError base
+    #    (the workflow EXECUTE base) is deliberately left to branch 7, because an execute step
+    #    can genuinely fail on LLM unavailability (protects AC3 of that ticket).
+    workflow_code = _workflow_caller_code(exc)
+    if workflow_code is not None:
+        return workflow_code
+
+    # 7. LLMError
     try:
         from rebar.llm.errors import LLMError
 
@@ -143,5 +184,5 @@ def error_code_for(exc: BaseException) -> str:
     except ImportError:
         pass
 
-    # 7. Fallback
+    # 8. Fallback
     return "command_failed"
