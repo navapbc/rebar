@@ -46,9 +46,11 @@ confirmed" rather than raising, matching ``bindings-retired.json`` and NOT
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
+import tempfile
 import time
 from typing import Any
 
@@ -188,13 +190,24 @@ class PeerConfirmationStore:
             return
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         payload = {"version": SCHEMA_VERSION, "records": self._records}
-        tmp_path = f"{self.path}.tmp"
+        # A UNIQUE per-writer temp (not a shared f"{self.path}.tmp"): two concurrent
+        # passes persisting this sidecar must not collide on one temp path, where the
+        # first os.replace would consume it and the second raise FileNotFoundError —
+        # a silently-lost write (bug b3dd, sibling of the 7dea/d284 fixes).
+        tmp_path = ""
         try:
-            with open(tmp_path, "w", encoding="utf-8") as handle:
+            fd, tmp_path = tempfile.mkstemp(
+                dir=os.path.dirname(self.path),
+                prefix=os.path.basename(self.path) + ".",
+                suffix=".tmp",
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2, sort_keys=True)
             os.replace(tmp_path, self.path)
         except OSError as exc:
             logger.warning("peer_confirmations: could not persist %s (%r)", self.path, exc)
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
             return
         self._dirty = False
 
