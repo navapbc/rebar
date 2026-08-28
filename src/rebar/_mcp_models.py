@@ -260,11 +260,18 @@ try:
         store_integrity: list[dict]
 
     class FsckOut(_Out):
-        """Structured ``fsck`` report (mirrors ``schemas/fsck.schema.json``).
+        """Structured ``fsck`` report (mirrors ``src/rebar/schemas/fsck.schema.json``).
 
         ``returncode`` carries the COMPLETED run's exit code as data (0 = clean,
         1 = issues found); it is absent from the CLI's own ``--output json`` payload,
-        hence optional here."""
+        hence optional here.
+
+        ``issue_count`` is the COUNTED subset of ``issues`` — it AGREES with the exit
+        code (bug 29c3-b025-04d7-454e). Each item in ``issues`` carries an additive
+        ``counted`` boolean: report-only kinds (``push_pending``,
+        ``status_fork_resolved``, ``tracker_dirty_tmp_event``, ``warn``) are
+        ``counted=False`` and excluded from ``issue_count`` while still present in
+        ``issues``, so a consumer wanting the old total can compute ``len(issues)``."""
 
         issues: list[dict]
         fixed: list[str]

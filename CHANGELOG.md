@@ -12,6 +12,21 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BEHAVIOR CORRECTION (pre-1.0): `fsck --output json`'s `issue_count` now agrees with the exit
+  code.** It was computed as `len(issues)`, counting every emitted `KIND:` line — including the
+  report-only kinds (`push_pending`, `status_fork_resolved`, `tracker_dirty_tmp_event`, and any
+  `warn` line) that never drive the exit code — so a JSON consumer gating on `issue_count > 0` could
+  disagree with a shell consumer gating on the exit code against the same store. `issue_count` is
+  now the **counted subset** (the findings that respect each check's `is_issue` flag) and matches
+  the exit code. Each `issues[]` item gains an additive `counted` boolean; report-only findings are
+  `counted: false` and excluded from `issue_count` but still present in `issues[]`, so nothing is
+  lost and `len(issues)` recovers the old total. An uninitialized/absent tracker now reports a
+  single counted `not_initialized` issue, distinguishing its JSON payload from a clean store's empty
+  `issues[]` (previously byte-identical). Applied consistently across CLI `--output json`, library
+  `fsck_report()`, and the MCP `fsck` tool. The `issue_count` type is unchanged (integer, required);
+  only its meaning changed. **Consumers** that relied on `issue_count == len(issues)` must compute
+  `len(issues)` themselves; `issue_count` now answers "how many counted problems" (== the exit-code
+  verdict). Bug `sugarcane-scrummy-arctichare` (`29c3-b025-04d7-454e`).
 - **BREAKING (pre-1.0): the MCP server now emits nanosecond timestamps as JSON STRINGS.** Ticket
   timestamps are `time.time_ns()` values — 19 digits — and were going out as bare JSON numbers.
   RFC 8259 §6 only guarantees interoperability inside `[-(2**53)+1, (2**53)-1]`, and every MCP

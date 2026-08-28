@@ -139,7 +139,9 @@ def _check_create_events(
             # permanent derived state that survives compaction, so counting it would
             # pin a busy store's fsck exit at 1 forever. Same report-only class as
             # PUSH_PENDING (fsck_tracker_health.py) and TRACKER_DIRTY_TMP_EVENT,
-            # both ``is_issue=False``; documented in docs/user-guide.md.
+            # both ``is_issue=False``; documented in docs/user-guide.md. This kind is in
+            # fsck._NEVER_COUNTED_KINDS so the JSON ``issue_count`` excludes it too — keep
+            # the two in sync (see that constant's drift guard).
     return lines, issues, signed_total, unsigned_total
 
 
