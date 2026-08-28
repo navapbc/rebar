@@ -20,6 +20,7 @@ from rebar._cli._init import ensure_initialized
 from rebar._cli._llm_eval_commands import _criteria, _llm, _prompt  # noqa: F401
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced import llm as _llm_parsers
+from rebar._mcp_errors import js_safe_dumps
 
 
 def _gate_source_error() -> type[Exception]:
@@ -342,7 +343,7 @@ def _review_plan(argv: list[str]) -> int:
         ensure_initialized(init_only=True)
         status = llm.plan_review_status(args.ticket_id)
         if args.output == "json":
-            sys.stdout.write(_json.dumps(status) + "\n")
+            sys.stdout.write(js_safe_dumps(status) + "\n")
         else:
             sha = status.get("verified_at_sha") or "unknown"
             sys.stdout.write(f"PLAN REVIEW STATUS: {status['verdict']} for {args.ticket_id}\n")

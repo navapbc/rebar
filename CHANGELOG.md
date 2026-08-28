@@ -12,6 +12,26 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): CLI `--output json` now emits nanosecond timestamps as JSON STRINGS too.**
+  The MCP-only wire form shipped in the entry below is extended to the CLI, the surface where users
+  are explicitly told to pipe rebar JSON into `jq`/`node` — and those are exactly the float64
+  consumers RFC 8259 §6 does not protect. Measured on a real ticket: a stored `created_at` of
+  `1787860170488898642` came back from `node`'s plain `JSON.parse` as `1787860170488898600`,
+  silently 42 ns wrong. Only integers outside `[-(2**53)+1, (2**53)-1]` change form; `priority` and
+  other in-range integers stay JSON numbers. Per surface, unsafe integers before → after:
+  (1) `rebar show --output json` **4 → 0**; (2) `rebar list` **2 → 0** / `rebar ready` **3 → 0**
+  (with `search`, `session-logs`, `deps`, `summary` and the `--output llm` projections on the same
+  emitter); (3) `rebar sign` **1 → 0** and `rebar verify-signature` **1 → 0** (`signed_at`), plus
+  `rebar review-plan --status`; (4) `rebar audit show` **4 → 0**. **Not changed:** `rebar export`
+  (NDJSON) and `rebar.export_tickets()`, a separately versioned projection with a round-trip
+  contract against `rebar import`; and the Python library facade, which returns arbitrary-precision
+  Python `int`s and has no JSON boundary to lose digits at. **Migration:** `int(x)` / `BigInt(x)`
+  coercion is unaffected. What breaks is naive raw-integer arithmetic on the parsed value
+  (`jq '.created_at + 0'`, `data.created_at - start` in Node) — and it now breaks LOUDLY instead of
+  returning a rounded number. No schema change was needed: the schemas already typed these fields
+  `["integer", "string", …]` and already described the string wire form with no surface qualifier.
+  See [docs/release-notes.md](docs/release-notes.md).
+
 - **BREAKING (pre-1.0): the MCP server now emits nanosecond timestamps as JSON STRINGS.** Ticket
   timestamps are `time.time_ns()` values — 19 digits — and were going out as bare JSON numbers.
   RFC 8259 §6 only guarantees interoperability inside `[-(2**53)+1, (2**53)-1]`, and every MCP
@@ -19,7 +39,8 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   from GitHub Copilot CLI with `TypeError: Do not know how to serialize a BigInt`, while clients
   using a plain `JSON.parse` silently truncated the value instead of erroring. On the **MCP surface
   only**, an integer outside the JS-safe range is now emitted as its exact decimal string;
-  CLI `--output json` and the Python library still emit integers. Affected keys: `created_at`,
+  CLI `--output json` and the Python library still emit integers *(the CLI half was superseded by
+  the entry above; the library still emits integers)*. Affected keys: `created_at`,
   `updated_at`, `last_reopened_at`, `source_created_at`, comment `timestamp` /
   `source_created_at`, and the **required** `signed_at` on `sign_result`,
   `verify_signature_result` and `plan_review_status` — retyping a required key is why this is
