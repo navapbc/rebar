@@ -57,6 +57,7 @@ from rebar._lib_mutations import (  # noqa: F401
     unlink,
     untag,
 )
+from rebar._lib_warn import emit_cross_session_warning
 
 if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING —
@@ -329,6 +330,7 @@ def transition(
     from rebar._commands.txn import ConcurrencyMismatch
     from rebar._engine_support.resolver import resolve_ticket_id
 
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     force = _normalize_transition_force(force, force_close)
 
     # Mirror the CLI's admission rule (tickets 3803 + fc20 + bug d54b): the free-text
@@ -466,4 +468,5 @@ def reopen(ticket_id: str, *, repo_root=None) -> TransitionResult:
     naming the parent (a raced parent still surfaces as ConcurrencyError / exit 10), and
     a parent already reopened is not rolled back if the child then fails. See
     ``docs/concurrency.md`` §I4a."""
+    emit_cross_session_warning(ticket_id, repo_root=repo_root)
     return transition(ticket_id, "closed", "open", repo_root=repo_root)
