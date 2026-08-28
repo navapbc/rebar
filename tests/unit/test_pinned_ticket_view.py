@@ -845,3 +845,61 @@ def test_completion_precheck_preserves_materialized_mode_selected_at_operation_s
     assert result is not None and result["verdict"] == "PASS"
     assert expectation == "required"
     assert observed["ticket_read_mode"] == "materialized_push_async"
+
+
+def test_snapshot_backend_lean_projection_matches_the_event_log_backend(repo: Path) -> None:
+    """The two read backends must return the SAME lean row shape (story 98b8-5f08-1569-45cc).
+
+    ``TicketView.list_by_query`` and the event-log ``list_states`` each own a lean path.
+    They were made to share one :func:`lean_projection` precisely so they cannot drift --
+    but sharing a function is only a claim until something COMPARES the two outputs. This
+    is that comparison, run against a real pinned view over a real tracker: same query,
+    both backends, identical key sets.
+    """
+    from rebar._engine_support import reads as ticket_reads
+    from rebar._engine_support.reads import LEAN_OMITTED_FIELDS
+
+    parent = rebar.create_ticket("story", "parent", repo_root=str(repo))
+    child = rebar.create_ticket(
+        "task", "child", parent=parent, description="a body", repo_root=str(repo)
+    )
+    rebar.comment(child, "a comment", repo_root=str(repo))
+    tracker = _tracker(repo)
+    query = TicketQuery(parent=parent, include_body=False)
+
+    with PinnedTicketView.at_oid(tracker, tracker_head(tracker)) as view:
+        snapshot_rows = view.list_by_query(query)
+    event_log_rows = ticket_reads.list_states(tracker, query)
+
+    assert [row["ticket_id"] for row in snapshot_rows] == [child]
+    assert [row["ticket_id"] for row in event_log_rows] == [child]
+    assert sorted(snapshot_rows[0]) == sorted(event_log_rows[0]), (
+        "the snapshot and event-log lean rows have drifted apart: "
+        f"snapshot-only={sorted(set(snapshot_rows[0]) - set(event_log_rows[0]))} "
+        f"event-log-only={sorted(set(event_log_rows[0]) - set(snapshot_rows[0]))}"
+    )
+    for field in LEAN_OMITTED_FIELDS:
+        assert field not in snapshot_rows[0], f"snapshot lean row still carries {field}"
+        assert field not in event_log_rows[0], f"event-log lean row still carries {field}"
+
+
+def test_snapshot_backend_full_query_keeps_the_omitted_fields(repo: Path) -> None:
+    """`include_body=True` must be an opt-out on BOTH backends, not a snapshot-only flag.
+
+    Guards the other direction of the projection: a snapshot backend that dropped the
+    fields unconditionally would pass the parity test above while silently making the
+    full read unavailable.
+    """
+    from rebar._engine_support import reads as ticket_reads
+
+    parent = rebar.create_ticket("story", "parent", repo_root=str(repo))
+    rebar.create_ticket("task", "child", parent=parent, description="a body", repo_root=str(repo))
+    tracker = _tracker(repo)
+    query = TicketQuery(parent=parent, include_body=True)
+
+    with PinnedTicketView.at_oid(tracker, tracker_head(tracker)) as view:
+        snapshot_rows = view.list_by_query(query)
+    event_log_rows = ticket_reads.list_states(tracker, query)
+
+    assert snapshot_rows[0].get("description") == "a body"
+    assert sorted(snapshot_rows[0]) == sorted(event_log_rows[0])

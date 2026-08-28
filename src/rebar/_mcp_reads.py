@@ -219,6 +219,26 @@ def _register_bridge_projects_read(mcp, ann) -> None:
         return rebar.bridge_projects_list()
 
 
+def _discovery_rows(rows, *, full: bool) -> list[dict]:
+    """Project a whole-shape discovery list lean, unless ``full``.
+
+    Lives at module level, not inside the registrar, so the branch does not add to
+    ``register_read_tools``' cyclomatic score (the complexity ratchet counts nested
+    defs into their enclosing function).
+
+    ``list_tickets`` gets its lean projection from the read core, which owns an
+    ``include_body`` flag; ``ready_tickets`` has no such flag on the library surface --
+    ``rebar.ready`` -> ``ready_states`` -> ``public_state`` carries none and this change
+    deliberately adds none -- so it projects here, through the SAME
+    :func:`~rebar._engine_support.reads.lean_projection`. That is what keeps the two
+    discovery surfaces from returning different shapes for the same rows
+    (story 98b8-5f08-1569-45cc).
+    """
+    from rebar._engine_support.reads import lean_projection
+
+    return list(rows) if full else [lean_projection(row) for row in rows]
+
+
 def register_read_tools(mcp, ctx) -> None:
     """Register the always-available read tools on ``mcp`` (see module docstring)."""
     _readonly = partial(_context_gate, ctx, "readonly")
@@ -300,10 +320,12 @@ def register_read_tools(mcp, ctx) -> None:
         children, and ``blocking_state`` ("unblocked"/"blocked") filters by
         readiness (all blockers closed vs an open blocker).
 
-        The list is **lean by default** — the bulky ``description`` and
-        ``comments`` fields are omitted so a broad list stays small. Pass
-        ``full=True`` for the complete ticket shape (or use ``show_ticket`` for a
-        single ticket's body).
+        The list is **lean by default** — the bodies (``description``, ``comments``)
+        AND the signature material (``authorship_ledger``, ``attestations``,
+        ``signature``, ``keyring``) are omitted, because on a mature store those four
+        signature fields alone are ~88% of a list's bytes. Pass ``full=True`` for the
+        complete ticket shape (or use ``show_ticket`` for a single ticket, which is
+        unchanged and still carries every field).
         """
         _shadow("mcp.read.list_tickets")
         return [
@@ -346,12 +368,30 @@ def register_read_tools(mcp, ctx) -> None:
         return _audit_trail(ticket_id)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def ready_tickets(sort: str | None = None) -> list[TicketStateOut]:
+    def ready_tickets(sort: str | None = None, full: bool = False) -> list[TicketStateOut]:
         """List tickets ready to work (all blockers closed). ``sort`` orders by
         ``priority|created|updated|id|status`` (prefix ``-`` for descending;
-        unset values sort last)."""
+        unset values sort last).
+
+        Lean by default, exactly like ``list_tickets`` — the bodies (``description``,
+        ``comments``) AND the signature material (``authorship_ledger``,
+        ``attestations``, ``signature``, ``keyring``) are omitted. Pass ``full=True``
+        for the complete shape.
+
+        **BREAKING (pre-1.0), story 98b8-5f08-1569-45cc.** This tool previously returned
+        the FULL ticket shape and had no ``full`` flag, so the lean default narrows a
+        published contract. It was narrowed deliberately rather than left alone: it is
+        the one discovery surface that disagreed with the others on its default shape,
+        and on this store its 61 ready rows weigh 693,556 bytes of which ~88% is
+        signature material a caller choosing a ticket never reads. Migration: pass
+        ``full=True``, or read the single ticket with ``show_ticket``, which is
+        unchanged. See ``docs/release-notes.md``.
+        """
         _shadow("mcp.read.ready_tickets")
-        return [TicketStateOut.model_validate(t) for t in rebar.ready(sort=sort)]
+        return [
+            TicketStateOut.model_validate(t)
+            for t in _discovery_rows(rebar.ready(sort=sort), full=full)
+        ]
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def next_batch(epic_id: str) -> NextBatchOut:

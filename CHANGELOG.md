@@ -54,6 +54,19 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   only its meaning changed. **Consumers** that relied on `issue_count == len(issues)` must compute
   `len(issues)` themselves; `issue_count` now answers "how many counted problems" (== the exit-code
   verdict). Bug `sugarcane-scrummy-arctichare` (`29c3-b025-04d7-454e`).
+- **BREAKING (pre-1.0): the discovery lists drop the signature material by default.** The lean
+  list row — CLI `rebar list`, MCP `list_tickets` and MCP `ready_tickets` — now omits
+  `authorship_ledger`, `attestations`, `signature` and `keyring` as well as `description` and
+  `comments`. Those four were 88% of a "lean" row's bytes on a mature store (15,548 bytes per row
+  became 1,726; a full `rebar list --status closed` over 2,696 rows went from 43,661,976 to
+  4,747,485 bytes, a 9.2x reduction). **Two surfaces narrow a published default.** MCP
+  `ready_tickets` previously returned the FULL ticket shape with no opt-out and now gains
+  `full=True`; CLI `rebar list --output json` narrows because it shares the same projection —
+  its row goes from 39 keys to 35, losing exactly those four and nothing else. Pass `full=True`
+  (MCP) or `--full` (CLI) for the previous shape, or read a single ticket with `show_ticket` /
+  `rebar show`, which are unchanged. The **library** `rebar.list_tickets` is unaffected — its own
+  `full` defaults `True`, so the narrowing comes from each caller's flag default, not the
+  library's — and so are `rebar validate` and `next-batch`, which do not ask for a lean row. See [docs/release-notes.md](docs/release-notes.md).
 - **BREAKING (pre-1.0): the MCP server now emits nanosecond timestamps as JSON STRINGS.** Ticket
   timestamps are `time.time_ns()` values — 19 digits — and were going out as bare JSON numbers.
   RFC 8259 §6 only guarantees interoperability inside `[-(2**53)+1, (2**53)-1]`, and every MCP
