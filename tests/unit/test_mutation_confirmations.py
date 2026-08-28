@@ -63,7 +63,12 @@ def _create(repo: Path, ttype: str = "task", title: str = "t", *extra: str) -> s
 
 
 def _event_count(repo: Path, tid: str) -> int:
-    return len(list((repo / ".tickets-tracker" / tid).glob("*.json")))
+    # Count real event records only; dotfiles like the reducer's ``.cache.json``
+    # are regenerable read caches, not events (see reducer/_cache.py's own dir-hash,
+    # which skips dotfiles). ``glob("*.json")`` matches dotfiles on pathlib, so filter.
+    return len(
+        [p for p in (repo / ".tickets-tracker" / tid).glob("*.json") if not p.name.startswith(".")]
+    )
 
 
 def _alias_of(repo: Path, tid: str) -> str:
