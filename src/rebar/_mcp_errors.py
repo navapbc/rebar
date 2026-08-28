@@ -9,6 +9,14 @@ It also owns the sibling wire-shape guard (bug 6fe7): :func:`install_js_safe_gua
 which keeps JS-unsafe integers (rebar's 19-digit nanosecond timestamps) off the
 JSON-RPC wire as bare numbers. Both guards live here because they share one seam —
 rebinding ``mcp.tool`` so every subsequently registered tool body is wrapped.
+
+The wire-shape half is NOT MCP-only any more. Bug e127 extended the same rule to the
+CLI ``--output json`` surface, which had the identical exposure (``jq``/``node`` round
+19-digit nanosecond timestamps silently). The CLI emitters import :func:`js_safe_result`
+and :func:`js_safe_dumps` from here rather than duplicating the traversal, so ONE
+implementation defines rebar's JSON wire form for out-of-range integers on every surface.
+The module keeps its name and every existing call site keeps its behaviour; only the set
+of importers grew.
 """
 
 from __future__ import annotations
@@ -197,6 +205,19 @@ def js_safe_result(value):
             return value
         return js_safe_result(value.model_dump())
     return value
+
+
+def js_safe_dumps(value, **kwargs) -> str:
+    """``json.dumps`` with every JS-unsafe integer replaced by its exact decimal string.
+
+    The emitter-side convenience over :func:`js_safe_result`, used by the CLI
+    ``--output json`` writers (bug e127) so each call site stays a single expression and
+    keeps its own ``indent`` / ``separators`` / ``ensure_ascii`` / ``default`` options.
+    The MCP surface does NOT go through here — it transforms the RETURN VALUE via
+    :func:`install_js_safe_guard` and lets FastMCP serialize — so this wrapper adds a
+    second entry point without touching the existing one.
+    """
+    return json.dumps(js_safe_result(value), **kwargs)
 
 
 def install_js_safe_guard(mcp) -> None:
