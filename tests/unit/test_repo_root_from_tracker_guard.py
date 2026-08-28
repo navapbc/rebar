@@ -175,7 +175,7 @@ def test_unparseable_source_is_reported_not_skipped(tmp_path: Path) -> None:
 
 
 def test_the_repository_is_clean() -> None:
-    """The drained tree passes (the one deferred run_sweep site is sanctioned)."""
+    """The drained tree passes."""
     completed = subprocess.run(
         [sys.executable, str(_SCRIPT)], capture_output=True, text=True, check=False
     )
@@ -197,4 +197,33 @@ def test_make_lint_invokes_the_gate() -> None:
             body.append(line)
     assert "scripts/check_repo_root_from_tracker.py" in "\n".join(body), (
         "`make lint` does not invoke the repo-root-from-tracker gate"
+    )
+
+
+def test_no_config_root_site_is_deferred_behind_a_sanction() -> None:
+    """``scathing-custommade-bobcat`` AC#3: the allowlist holds no DEFERRED config-root site.
+
+    The sanction exists for a path that genuinely is NOT a code root, never as a place to park
+    a fix. ``compact_trigger.run_sweep`` was the one deferred entry — sanctioned while "how does
+    a detached child learn its code root" looked like an open spawn-contract question — and it
+    is now resolved with the bare resolver like every other config reader. What may still carry
+    a marker is ``_store/sync.py``, whose reads name the branch and remote of the STORE's own
+    git repo; anything else is a regression of the deferral this ticket drained.
+    """
+    marked: dict[str, list[str]] = {}
+    for path in sorted((_REPO_ROOT / gate.SCAN_ROOT).rglob("*.py")):
+        lines = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if gate.BARE_MARKER in line
+        ]
+        if lines:
+            marked[str(path.relative_to(_REPO_ROOT))] = lines
+    assert "src/rebar/_commands/compact_trigger.py" not in marked, (
+        "the detached compaction sweep is sanctioned again — it must RESOLVE its code root "
+        f"(config.repo_root_or_none()), not compose it from the store: {marked}"
+    )
+    assert set(marked) <= {"src/rebar/_store/sync.py"}, (
+        "a new repo-root-ok sanction appeared outside the store's-own-git-repo reads; a "
+        f"config root must be resolved, not deferred behind a marker: {sorted(marked)}"
     )
