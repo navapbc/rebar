@@ -92,6 +92,40 @@ def _skip_causes(muts: Sequence[Any]) -> tuple[str, ...]:
     return tuple(str(m.payload["skip"]) for m in muts if m.payload.get("skip"))
 
 
+def scoped_selection_ids(selection_ids: set[str], typed_mutations: list) -> list[str]:
+    """The selection id set ``plan_pass`` scopes against, expanded to include the BOUND
+    JIRA KEYS of the selected local ids — mirroring the legacy
+    ``reconcile_helpers._build_filter_target_set`` (LOCAL IDS ∪ bound JIRA KEYS).
+
+    A bound issue's outbound update/delete carries ``target = jira_key`` (run_differs'
+    OM→typed conversion), while ``--only`` / ``--except`` select by LOCAL id. Without this
+    expansion ``_scope_excluded`` compares a jira-key target against a local-id-only set and
+    wrongly ``scope_deferred``s the in-scope mutation, so the live coordinator+fuse reroute
+    drops the write (bug af1b). The bound keys are read purely from the mutations' own
+    provenance — no ``binding_store`` I/O — so the shadow plan stays side-effect-free. For
+    ``--except`` the same expansion is correct: an excepted ticket's update targets its jira
+    key, which must therefore also land in the excluded set. Keys are derived only from
+    mutations present in this pass — the sole targets ``_scope_excluded`` ever checks — so a
+    selected id with no mutation contributes nothing (it has no target to scope).
+    """
+    selected = set(selection_ids)
+    scoped = set(selected)
+    if not selected:
+        return sorted(scoped)
+    for m in typed_mutations:
+        prov = getattr(m, "provenance", None) or {}
+        local_id = prov.get("local_id") if isinstance(prov, Mapping) else None
+        if local_id not in selected:
+            continue
+        jira_key = prov.get("jira_key") if isinstance(prov, Mapping) else None
+        if jira_key:
+            scoped.add(jira_key)
+        target = getattr(m, "target", None)
+        if target:
+            scoped.add(target)
+    return sorted(scoped)
+
+
 def _scope_excluded(target: str, selection: Mapping[str, Any]) -> bool:
     """True when ``selection`` scopes the pass OUT of ``target``. The canonical selection
     vocabulary (request.py / reconcile_helpers.narrow_selection_inputs) is:
