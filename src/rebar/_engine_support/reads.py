@@ -404,6 +404,36 @@ def _load_scratch(ticket_id: str, tracker: str) -> dict:
     return data
 
 
+#: Fields a DISCOVERY list never consumes, dropped when ``include_body`` is False.
+#:
+#: ``description``/``comments`` are the bodies. The other four are signature material:
+#: measured on the real store (2,855 tickets) they were 88% of a "lean" list's bytes --
+#: ``authorship_ledger`` 26.2 MB (59%), ``attestations`` 10.4 MB, ``signature`` 2.6 MB --
+#: which is why an unfiltered MCP ``list_tickets`` returned 94.5 MB and killed the client's
+#: transport (bug 494b-2dd3-e9d3-4fb0). A list caller wants to CHOOSE a ticket; the
+#: signature record is read per-ticket via ``show`` / ``verify-signature``. Per row this is
+#: 15,548 bytes -> 1,726 bytes.
+LEAN_OMITTED_FIELDS: tuple[str, ...] = (
+    "description",
+    "comments",
+    "authorship_ledger",
+    "attestations",
+    "signature",
+    "keyring",
+)
+
+
+def lean_projection(state: dict) -> dict:
+    """A copy of ``state`` without :data:`LEAN_OMITTED_FIELDS`.
+
+    The ONE spelling of the lean list row, shared by the event-log read path
+    (:func:`list_states`) and the snapshot read path
+    (``rebar._snapshot.ticket_view.TicketView.list_by_query``) so the two backends
+    cannot drift into returning different shapes for the same query.
+    """
+    return {k: v for k, v in state.items() if k not in LEAN_OMITTED_FIELDS}
+
+
 def list_states(tracker: str, query: TicketQuery | None = None) -> list[dict]:
     """List ticket states narrowed by a :class:`TicketQuery`. Two universal
     cross-ticket filters reuse the same reducer/graph the bespoke ``list-epics``
@@ -492,8 +522,7 @@ def list_states(tracker: str, query: TicketQuery | None = None) -> list[dict]:
             continue
         ps = public_state(t)
         if not include_body:
-            ps.pop("description", None)
-            ps.pop("comments", None)
+            ps = lean_projection(ps)
         if with_children_count:
             ps["children_count"] = cc
         out.append(ps)

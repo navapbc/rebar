@@ -219,11 +219,30 @@ def _register_bridge_projects_read(mcp, ann) -> None:
         return rebar.bridge_projects_list()
 
 
+def _discovery_rows(rows, *, full: bool, bound, tool: str) -> list[dict]:
+    """Project a whole-shape discovery list lean (unless ``full``), then bound it.
+
+    Lives at module level, not inside the registrar, so the branch does not add to
+    ``register_read_tools``' cyclomatic score (the complexity ratchet counts nested
+    defs into their enclosing function).
+
+    ``list_tickets`` gets its lean projection from the read core, which owns an
+    ``include_body`` flag; ``ready_tickets`` has no such flag on the library surface, so
+    it projects here — through the SAME :func:`lean_projection`, so the two discovery
+    surfaces cannot return different shapes (bug 494b-2dd3-e9d3-4fb0).
+    """
+    from rebar._engine_support.reads import lean_projection
+
+    projected = list(rows) if full else [lean_projection(row) for row in rows]
+    return bound(projected, tool=tool)
+
+
 def register_read_tools(mcp, ctx) -> None:
     """Register the always-available read tools on ``mcp`` (see module docstring)."""
     _readonly = partial(_context_gate, ctx, "readonly")
     _allow_jira_sync = partial(_context_gate, ctx, "allow_jira_sync")
     _cap_workflow_payload = ctx.cap_workflow_payload
+    _bound_list_payload = ctx.bound_list_payload
     MODE_CAPS = ctx.MODE_CAPS
     Mode = ctx.Mode
 
@@ -300,28 +319,37 @@ def register_read_tools(mcp, ctx) -> None:
         children, and ``blocking_state`` ("unblocked"/"blocked") filters by
         readiness (all blockers closed vs an open blocker).
 
-        The list is **lean by default** — the bulky ``description`` and
-        ``comments`` fields are omitted so a broad list stays small. Pass
-        ``full=True`` for the complete ticket shape (or use ``show_ticket`` for a
-        single ticket's body).
+        The list is **lean by default** — the bodies (``description``, ``comments``)
+        AND the signature material (``authorship_ledger``, ``attestations``,
+        ``signature``, ``keyring``) are omitted, because on a mature store the
+        signature fields alone are ~88% of a list's bytes. Pass ``full=True`` for the
+        complete ticket shape (or use ``show_ticket`` for a single ticket).
+
+        **Bounded.** A result over the MCP response budget is REFUSED with a structured
+        ``response_too_large`` error naming the match count, the size, and the filters
+        to narrow with — never a silently shortened list, and never a bare transport
+        close (bug 494b-2dd3-e9d3-4fb0).
         """
         _shadow("mcp.read.list_tickets")
         return [
             TicketStateOut.model_validate(t)
-            for t in rebar.list_tickets(
-                status=status,
-                ticket_type=ticket_type,
-                priority=priority,
-                parent=parent,
-                has_tag=has_tag,
-                without_tag=without_tag,
-                include_archived=include_archived,
-                exclude_deleted=exclude_deleted,
-                min_children=min_children,
-                blocking_state=blocking_state,
-                with_children_count=with_children_count,
-                sort=sort,
-                full=full,
+            for t in _bound_list_payload(
+                rebar.list_tickets(
+                    status=status,
+                    ticket_type=ticket_type,
+                    priority=priority,
+                    parent=parent,
+                    has_tag=has_tag,
+                    without_tag=without_tag,
+                    include_archived=include_archived,
+                    exclude_deleted=exclude_deleted,
+                    min_children=min_children,
+                    blocking_state=blocking_state,
+                    with_children_count=with_children_count,
+                    sort=sort,
+                    full=full,
+                ),
+                tool="list_tickets",
             )
         ]
 
@@ -346,12 +374,26 @@ def register_read_tools(mcp, ctx) -> None:
         return _audit_trail(ticket_id)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def ready_tickets(sort: str | None = None) -> list[TicketStateOut]:
+    def ready_tickets(sort: str | None = None, full: bool = False) -> list[TicketStateOut]:
         """List tickets ready to work (all blockers closed). ``sort`` orders by
         ``priority|created|updated|id|status`` (prefix ``-`` for descending;
-        unset values sort last)."""
+        unset values sort last).
+
+        Lean by default and bounded, exactly like ``list_tickets`` — this is the other
+        discovery surface that returns the whole ticket shape, and on the real store its
+        61 ready tickets weighed 693 KB unprojected (bug 494b-2dd3-e9d3-4fb0). Pass
+        ``full=True`` for the complete shape.
+        """
         _shadow("mcp.read.ready_tickets")
-        return [TicketStateOut.model_validate(t) for t in rebar.ready(sort=sort)]
+        return [
+            TicketStateOut.model_validate(t)
+            for t in _discovery_rows(
+                rebar.ready(sort=sort),
+                full=full,
+                bound=_bound_list_payload,
+                tool="ready_tickets",
+            )
+        ]
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def next_batch(epic_id: str) -> NextBatchOut:

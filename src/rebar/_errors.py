@@ -61,6 +61,7 @@ KNOWN_ERROR_CODES: frozenset[str] = frozenset(
         "llm_unavailable",
         "config_unreadable",
         "config_insecure_url",
+        "response_too_large",
         "command_failed",
     }
 )
