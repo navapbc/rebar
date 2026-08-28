@@ -293,16 +293,6 @@ def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIM
         return
     tracker = _lock.canonical_tracker(tracker)
 
-    # Cheap pre-lock early-out: skip a tracker mid rebase/merge recovery.
-    try:
-        _lock.check_no_rebase_in_progress(tracker)
-    except _lock.RebaseGuard:
-        logger.warning(
-            "tickets sync skipped — tracker in rebase/merge recovery state "
-            "(run: rebar fsck-recover)"
-        )
-        return
-
     # Branch + remote resolved from the MAIN repo config (the tracker's parent), matching
     # reads._sync_disabled / _push_mode. Best-effort: a malformed config skips sync.
     from rebar.config import ConfigError, tickets_branch, tickets_remote
@@ -335,6 +325,17 @@ def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIM
 
     # Locked reset/merge. Best-effort on lock contention (another writer/syncer holds
     # it) — bash does `flock -w 15 || exit 0`, so a timeout silently skips this round.
+    #
+    # Recovery-state classification (a stray MERGE_HEAD / rebase-merge / rebase-apply)
+    # is authoritative ONLY here, under the write lock — NOT at a pre-lock early-out
+    # (bug consensual-hollow-drake). `cindery-lithe-acaciarat` moved push_tickets_branch's
+    # non-fast-forward recovery merge under this same write lock; while that merge runs the
+    # lock holder leaves a transient MERGE_HEAD. A pre-lock check cannot tell that in-flight,
+    # lock-owned marker from an abandoned one, so it would misclassify the lock holder's own
+    # merge as stranded, warn `fsck-recover`, and skip the round without ever waiting for the
+    # lock. Waiting for the lock first means the holder's merge has completed (marker gone)
+    # by the time `_do_reconverge`'s in-lock `check_no_rebase_in_progress` guard runs, so only
+    # a marker that survives lock acquisition — a genuinely stranded one — is refused.
     try:
         with _lock.write_lock(tracker, timeout=lock_timeout, attempts=1, dual_window=True):
             _do_reconverge(tracker, branch, remote_name)
