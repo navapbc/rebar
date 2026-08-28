@@ -589,6 +589,15 @@ def build_server(cfg=None):
     # FastMCP is defined; complete it before pydantic-settings inspects the field.
     Settings.model_rebuild()
 
+    # The MCP surface conveys the cross-session advisory as a response FIELD; suppress the
+    # redundant stdlib ``CrossSessionWarning`` the instrumented library calls emit
+    # server-side (the client never sees it) so the field is the single MCP advisory.
+    import warnings as _warnings
+
+    from rebar._lib_warn import CrossSessionWarning as _CrossSessionWarning
+
+    _warnings.filterwarnings("ignore", category=_CrossSessionWarning)
+
     if cfg is None:
         cfg = rebar.config.compose_config()
     mcp_cfg = cfg.mcp
