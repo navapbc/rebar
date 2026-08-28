@@ -15,8 +15,6 @@ complexity-baseline key ``composer.py::edit_core`` and must not be re-keyed).
 
 from __future__ import annotations
 
-import os
-
 from rebar._commands._seam import (
     CommandError,
     append_event,
@@ -120,7 +118,9 @@ def _apply_tag_deltas(
         )
 
 
-def _edit_description_warning(out: dict, resolved: str, tracker, reduce_ticket) -> str | None:
+def _edit_description_warning(
+    out: dict, resolved: str, tracker, reduce_ticket, repo_root=None
+) -> str | None:
     """The save-time description-cap notice for an EDIT that wrote a description.
 
     Split out of :func:`composer.edit_core` (which sits at its locked complexity
@@ -131,6 +131,7 @@ def _edit_description_warning(out: dict, resolved: str, tracker, reduce_ticket) 
     """
     if "description" not in out:
         return None
+    from rebar import config as _config
     from rebar._commands.gates import description_cap_warning
 
     state = reduce_ticket(str(tracker / resolved)) or {}
@@ -138,7 +139,11 @@ def _edit_description_warning(out: dict, resolved: str, tracker, reduce_ticket) 
         out["description"],
         str(out.get("ticket_type") or state.get("ticket_type") or ""),
         ticket_id=str(state.get("alias") or resolved),
-        cfg_root=os.path.dirname(str(tracker)),
+        # The config root — RESOLVED (explicit repo_root > REBAR_ROOT > git toplevel of
+        # cwd), NOT os.path.dirname(tracker): the store is relocatable (REBAR_TRACKER_DIR),
+        # where the tracker's parent has no config and the advisory silently vanished
+        # (auspicial-friended-merganser sibling).
+        cfg_root=str(_config.repo_root(repo_root)),
     )
 
 

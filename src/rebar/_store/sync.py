@@ -293,12 +293,17 @@ def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIM
         return
     tracker = _lock.canonical_tracker(tracker)
 
-    # Branch + remote resolved from the MAIN repo config (the tracker's parent), matching
-    # reads._sync_disabled / _push_mode. Best-effort: a malformed config skips sync.
+    # Branch + remote resolved from the tracker's parent, matching reads._sync_disabled /
+    # _push_mode. reconverge operates on the STORE's OWN git repo (git -C tracker below)
+    # and these config keys name refs WITHIN that store repo; this read-path helper holds
+    # only `tracker` (no code repo_root threaded in), so the store's parent is the correct
+    # store-git-topology root here. Best-effort: a malformed config skips sync.
     from rebar.config import ConfigError, tickets_branch, tickets_remote
 
     try:
+        # repo-root-ok: branch/remote of the STORE's own git repo (git -C tracker), not code config
         branch = tickets_branch(os.path.dirname(str(tracker)))
+        # repo-root-ok: branch/remote of the STORE's own git repo (git -C tracker), not code config
         remote_name = tickets_remote(os.path.dirname(str(tracker)))
     except ConfigError:
         return

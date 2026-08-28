@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 import uuid as _uuid
 
@@ -261,6 +260,12 @@ def create_core(
     _apply_bridge_repos(data, bridge_project, repos)
 
     append_event(ticket_id, "CREATE", data, tracker, repo_root=repo_root)
+    # The config root — RESOLVED the way every config reader does (explicit repo_root >
+    # REBAR_ROOT > git toplevel of cwd), NOT os.path.dirname(tracker), which is the repo
+    # root ONLY when the store is co-located. REBAR_TRACKER_DIR relocating the store is
+    # supported, so inferring the root from the tracker read an EMPTY config there and
+    # silently suppressed both advisories below (auspicial-friended-merganser sibling).
+    cfg_root = str(_config.repo_root(repo_root))
     # Save-time heads-up (ticket 594b): computed AFTER the event lands, so an oversized
     # description is reported the moment it is written instead of at review-plan time.
     # Advisory only — each surface emits it on its own channel (CLI stderr, library
@@ -271,7 +276,7 @@ def create_core(
         description,
         ticket_type,
         ticket_id=alias or ticket_id,
-        cfg_root=os.path.dirname(str(tracker)),
+        cfg_root=cfg_root,
     )
     # Create-time advisory duplicate probe (ticket eac3-ed70-764a-4f9e): a recent
     # same-normalized-title create inside the journal window, surfaced the same way —
@@ -283,7 +288,7 @@ def create_core(
         ticket_id=ticket_id,
         alias=alias or None,
         title=title,
-        cfg_root=os.path.dirname(str(tracker)),
+        cfg_root=cfg_root,
     )
     return {
         "id": ticket_id,
@@ -644,7 +649,7 @@ def edit_core(
     warning: str | None = None
     if out:
         append_event(resolved, "EDIT", {"fields": out}, tracker, repo_root=repo_root)
-        warning = _edit_description_warning(out, resolved, tracker, reduce_ticket)
+        warning = _edit_description_warning(out, resolved, tracker, reduce_ticket, repo_root)
 
     if has_tag_op:
         _apply_tag_deltas(resolved, tracker, repo_root, has_set, set_list, add_list, remove_list)

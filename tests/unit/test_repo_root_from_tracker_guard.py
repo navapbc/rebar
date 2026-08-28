@@ -55,12 +55,44 @@ def _scan(tmp_path: Path, source: str) -> tuple[list, list]:
             "from os.path import dirname\nroot = dirname(tracker)\n",
             "`tracker`",
         ),
+        (
+            "import os\nroot = os.path.dirname(str(tracker))\n",
+            "`str(tracker)`",
+        ),
+        (
+            "import os\nfrom rebar._engine_support import reads\n"
+            "root = os.path.dirname(str(reads.tracker_dir()))\n",
+            "`str(reads.tracker_dir(...))`",
+        ),
     ],
 )
 def test_each_construct_shape_is_rejected(tmp_path: Path, source: str, shape: str) -> None:
     violations, _ = _scan(tmp_path, source)
     assert len(violations) == 1, f"expected one violation, got {[v.text for v in violations]}"
     assert violations[0].shape == shape
+
+
+def test_the_str_wrapped_variant_is_rejected(tmp_path: Path) -> None:
+    """The exact injurious-pugnacious-azurevase line from composer.py that suppressed the
+    save-time advisory on a relocated store — the str()-wrapped variant the auspicial guard
+    originally missed."""
+    violations, _ = _scan(tmp_path, "import os\ncfg_root = os.path.dirname(str(tracker))\n")
+    assert len(violations) == 1
+    assert violations[0].shape == "`str(tracker)`"
+
+
+def test_realpath_and_abspath_wrappers_are_not_unwrapped(tmp_path: Path) -> None:
+    """The realpath()/abspath() family is a separate, design-laden follow-up; the str()
+    extension must NOT flag those wrappers (a per-site root decision, tracked elsewhere)."""
+    source = (
+        "import os\n"
+        "a = os.path.dirname(os.path.realpath(tracker))\n"
+        "b = os.path.dirname(os.path.abspath(tracker))\n"
+    )
+    violations, bare = _scan(tmp_path, source)
+    assert violations == [] and bare == [], (
+        f"must not flag realpath/abspath wrappers: {[v.text for v in violations + bare]}"
+    )
 
 
 def test_the_real_defect_shape_is_rejected(tmp_path: Path) -> None:

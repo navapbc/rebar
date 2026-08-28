@@ -24,16 +24,25 @@ WHAT IS FLAGGED — only the COMPOSING expression, never prose. A call of the sh
 
   1. the name ``tracker``                       ``os.path.dirname(tracker)``
   2. a ``*.tracker_dir(...)`` resolver call      ``os.path.dirname(reads.tracker_dir())``
+  3. either of the above wrapped in ``str(...)`` ``os.path.dirname(str(tracker))``
+
+The ``str()`` wrapper (case 3) merely normalises the path — it names the same directory — so
+it composes the store's parent exactly as the bare form does. It was the variant the
+enumerated ``auspicial-friended-merganser`` list missed (composer.py / _store/sync.py), split
+to ``injurious-pugnacious-azurevase``. (``os.path.realpath`` / ``os.path.abspath`` wrappers are
+a separate, design-laden family — each site needs a per-site root decision — tracked as a
+follow-up and NOT unwrapped here.)
 
 Docstrings, comments, and error text are NOT flagged — they compose nothing, and comments never
 reach the AST at all.
 
 SANCTION — ``# repo-root-ok: <reason>``, with a MANDATORY reason, honoured on the offending
 line, the line above, or the enclosing statement's first line (mirrors
-``# tickets-boundary-ok:`` / ``# raw-git-ok:``). Exactly one site is sanctioned today: the
-detached ``run_sweep`` child in ``compact_trigger.py``, whose cwd IS the store and which takes
-only ``tracker`` — giving it a code root needs a spawn-contract change, tracked as an
-``auspicial-friended-merganser`` follow-up. A bare marker with no reason is itself reported.
+``# tickets-boundary-ok:`` / ``# raw-git-ok:``). Sanctioned sites today: the detached
+``run_sweep`` child in ``compact_trigger.py`` (cwd IS the store; a code root needs a
+spawn-contract change), and ``_store/sync.py``'s ``tickets_branch`` / ``tickets_remote`` reads
+in ``reconverge`` (branch/remote of the STORE's own git repo, ``git -C tracker``, with no code
+``repo_root`` in scope). A bare marker with no reason is itself reported.
 """
 
 from __future__ import annotations
@@ -51,6 +60,15 @@ SCAN_ROOT = "src"
 
 #: dirname callees that compose a parent path. ``_os`` is an occasional local alias.
 _DIRNAME_CALLEES = {"os.path.dirname", "dirname", "_os.path.dirname"}
+
+#: one-arg callees that merely NORMALISE a path without changing which directory it names,
+#: so ``dirname(str(tracker))`` composes the store's parent exactly as ``dirname(tracker)``
+#: does. The ``str()`` wrapper is the variant the enumerated auspicial-friended-merganser
+#: list missed (composer.py / _store/sync.py); unwrapping it keeps the gate airtight for the
+#: whole ``str()``-wrapped class. (``os.path.realpath`` / ``os.path.abspath`` wrappers are a
+#: separate, design-laden family tracked as a follow-up and are deliberately NOT unwrapped
+#: here.)
+_STORE_WRAPPER_CALLEES = {"str"}
 
 
 class _Finding:
@@ -73,13 +91,22 @@ def _callee_name(func: ast.AST) -> str:
 
 
 def _store_shape(arg: ast.AST) -> str | None:
-    """Return a human label if ``arg`` names the STORE (a tracker), else None."""
+    """Return a human label if ``arg`` names the STORE (a tracker), else None.
+
+    Unwraps a single path-normalising wrapper (``str(...)``) so ``dirname(str(tracker))``
+    is flagged exactly like ``dirname(tracker)`` — the wrapper does not change which
+    directory the composition names.
+    """
     if isinstance(arg, ast.Name) and arg.id == "tracker":
         return "`tracker`"
     if isinstance(arg, ast.Call):
         callee = _callee_name(arg.func)
         if callee == "tracker_dir" or callee.endswith(".tracker_dir"):
             return f"`{callee}(...)`"
+        if callee in _STORE_WRAPPER_CALLEES and len(arg.args) == 1:
+            inner = _store_shape(arg.args[0])
+            if inner is not None:
+                return f"`{callee}({inner.strip('`')})`"
     return None
 
 

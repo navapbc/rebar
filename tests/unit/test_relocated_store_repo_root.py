@@ -152,3 +152,76 @@ def test_transition_gate_off_by_config_still_allows(
     tid = rebar.create_ticket("task", "gate off", repo_root=str(repo))
     result = rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
     assert result["to"] == "in_progress"
+
+
+# ── injurious-pugnacious-azurevase: the str()-wrapped advisory config reads ──────────
+#
+# composer.py / composer_edit.py computed the ADVISORY description-cap warning's config
+# root as ``os.path.dirname(str(tracker))``. That is the str()-wrapped variant of the same
+# class: on a relocated store the tracker's parent has no rebar.toml, so the cap
+# (verify.max_ticket_description_chars) and the plan-review applicability both read an empty
+# config and the save-time warning was silently SUPPRESSED. The fix resolves the config root
+# from the in-scope ``repo_root`` (str(config.repo_root(repo_root))). Config MUST come from a
+# rebar.toml FILE, not an env var, or the read would be root-independent and hide the bug.
+
+
+def _relocated_store_with_low_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path]:
+    """A relocated store whose CODE repo enables the claim gate AND sets a low description
+    cap in its rebar.toml FILE — the two config reads the description-cap warning makes."""
+    repo, external = _init_relocated_store(tmp_path, monkeypatch)
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_plan_review_for_claim = true\nmax_ticket_description_chars = 50\n",
+        encoding="utf-8",
+    )
+    return repo, external
+
+
+def test_create_description_cap_warning_fires_on_relocated_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC#1 (create path): a create whose description exceeds the repo-configured cap must
+    warn even when the store is relocated. ``cfg_root=os.path.dirname(str(tracker))`` read
+    the store's parent (empty config, default 8,000 cap) and returned None."""
+    repo, _external = _relocated_store_with_low_cap(tmp_path, monkeypatch)
+    created = rebar.create_ticket(
+        "task",
+        "oversized on relocated store",
+        description="D" * 80,
+        return_alias=True,
+        repo_root=str(repo),
+    )
+    warning = created["description_warning"]
+    assert warning and "max_ticket_description_chars" in warning, (
+        "the create-path description-cap warning must fire on a relocated store; resolving "
+        "cfg_root from the tracker's parent read an empty config (8,000-char default) and "
+        f"suppressed it. got: {warning!r}"
+    )
+    assert "80" in warning and "50" in warning, f"warning must state length and cap: {warning!r}"
+
+
+def test_edit_description_cap_warning_fires_on_relocated_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC#1 (edit path): the same for an edit that writes an oversized description —
+    ``_edit_description_warning`` resolved cfg_root from the tracker's parent."""
+    repo, _external = _relocated_store_with_low_cap(tmp_path, monkeypatch)
+    tid = rebar.create_ticket("task", "small", description="ok", repo_root=str(repo))
+    warning = rebar.edit_ticket(tid, description="D" * 80, repo_root=str(repo))
+    assert warning and "max_ticket_description_chars" in warning, (
+        "the edit-path description-cap warning must fire on a relocated store; resolving "
+        f"cfg_root from the tracker's parent suppressed it. got: {warning!r}"
+    )
+
+
+def test_within_cap_still_silent_on_relocated_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contrast: a description WITHIN the repo cap stays silent — proving the warning above
+    is the configured cap firing on the correct root, not an unconditional notice."""
+    repo, _external = _relocated_store_with_low_cap(tmp_path, monkeypatch)
+    created = rebar.create_ticket(
+        "task", "within cap", description="D" * 20, return_alias=True, repo_root=str(repo)
+    )
+    assert created["description_warning"] is None
