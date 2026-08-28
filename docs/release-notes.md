@@ -113,6 +113,46 @@ fsck emit" (the old `len(issues)` semantics) must now compute `len(issues)` itse
 answers "how many counted problems" (== the exit-code verdict). No external or CI consumer was
 found reading the value — this aligns the code with `docs/user-guide.md`.
 
+## NEW — an over-budget MCP list is REFUSED with a structured error
+
+Bug `daughterly-agitative-ocelot` (`494b-2dd3-e9d3-4fb0`), 2026-08-28. Measured against the
+deployed server, one unfiltered `list_tickets` returned **94,541,551 bytes over 177 seconds**
+in a single JSON-RPC result. The server never errored — the CLIENT died, and how it died was
+client-specific (GitHub Copilot CLI: `Transport closed`; another client: a 219,815-char result
+spilled to disk), so no caller could tell "too big" from "server died".
+
+`list_tickets` and `ready_tickets` are now bounded at the same ~90,000-byte client budget
+`_cap_workflow_payload` already enforced on the two workflow reads. Over it, the call is
+**REFUSED** with `error_code="response_too_large"` naming the match count, the byte size, the
+budget and a remedy — never a silently shortened list, because a short list cannot be told
+from a complete one. The refusal rides the existing `install_error_guard` envelope seam, so a
+client branches on a code rather than parsing prose.
+
+**This is additive, not a break.** A previously-unbounded call gains a structured failure it
+never had; nothing that fits today starts failing. It depends on the lean projection landing
+first (`resistant-constant-nurseshark`, `98b8-5f08-1569-45cc`): without it this bound would
+refuse even `list_tickets(status="open")` at 224,610 lean bytes.
+
+**The budget is measured on the WIRE payload, not the reducer rows.** Sizing the raw dicts
+under-estimates on two axes, and under-estimating is the dangerous direction — it passes a
+payload that still overruns. At 2,855 rows: raw dicts 552,772 bytes; after
+`TicketStateOut.model_validate` 1,526,327 (the model DECLARES defaults, so validation re-adds
+every field the lean projection just dropped as an explicit `null`/`[]`/`""`); after
+`js_safe_result` 1,537,747 (19-digit nanosecond ints become longer quoted strings). A
+raw-dict measurement therefore under-reports by 178%.
+
+**The remedy is per-tool, because a remedy the tool would reject is a dead end.**
+`list_tickets` names its own six filters. `ready_tickets` accepts NO filter arguments — only
+`sort` and `full`, and `full` switches shape, not which tickets come back — so its refusal
+points at `next_batch(epic_id)`, the scoped view of the same unblocked work.
+
+**`ready_tickets` runs close to the budget by design.** After the projection its 59 rows
+measure 88,480 of the 90,000 bytes — about 1.7% headroom, ~1,499 bytes per row — so roughly
+one more ready ticket makes the default call refuse. The budget was not inflated to mask
+that: it is the client's real constraint, and raising it just moves the failure back into the
+client where there is no structured signal at all. A narrower discovery-specific output model
+is tracked separately as `lucky-egoistic-akitainu` (`0c99-8f2b-0de7-48f2`).
+
 ## BREAKING (pre-1.0) — the lean DISCOVERY row drops the signature material too
 
 Story `resistant-constant-nurseshark` (`98b8-5f08-1569-45cc`), 2026-08-28. The
