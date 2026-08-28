@@ -106,6 +106,17 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        # Location-scheme backstop (bug a61d). `proxy_redirect default;` is restated
+        # FIRST because nginx drops a location's implicit default as soon as ANY explicit
+        # rule appears here, and this block's default — derived from its own proxy_pass —
+        # is load-bearing. Rules are evaluated in order, so the two http->https upgrades
+        # follow it. Per-location, never server level: a server-level rule would REPLACE
+        # that default for every surface at once (79b2's binding precedent). This rewrites
+        # only the Location/Refresh RESPONSE headers; it is not a rewrite and adds no URI
+        # to proxy_pass, so request-URI handling is untouched.
+        proxy_redirect default;
+        proxy_redirect http://$host/ https://$host/;
+        proxy_redirect http://127.0.0.1:${REVIEW_BOT_PORT}/ https://$host/;
     }
 
     # --- op-cert gate: /opcert/ -> the FastAPI gate service (story 76d2) --
@@ -124,6 +135,17 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        # Location-scheme backstop (bug a61d). `proxy_redirect default;` is restated
+        # FIRST because nginx drops a location's implicit default as soon as ANY explicit
+        # rule appears here, and this block's default — derived from its own proxy_pass —
+        # is load-bearing. Rules are evaluated in order, so the two http->https upgrades
+        # follow it. Per-location, never server level: a server-level rule would REPLACE
+        # that default for every surface at once (79b2's binding precedent). This rewrites
+        # only the Location/Refresh RESPONSE headers; it is not a rewrite and adds no URI
+        # to proxy_pass, so request-URI handling is untouched.
+        proxy_redirect default;
+        proxy_redirect http://$host/ https://$host/;
+        proxy_redirect http://127.0.0.1:8090/ https://$host/;
     }
 
     # --- rebar MCP: /mcp -> the Streamable-HTTP service via the switchable upstream ---
@@ -256,5 +278,16 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        # Location-scheme backstop (bug a61d). `proxy_redirect default;` is restated
+        # FIRST because nginx drops a location's implicit default as soon as ANY explicit
+        # rule appears here, and this block's default — derived from its own proxy_pass —
+        # is load-bearing. Rules are evaluated in order, so the two http->https upgrades
+        # follow it. Per-location, never server level: a server-level rule would REPLACE
+        # that default for every surface at once (79b2's binding precedent). This rewrites
+        # only the Location/Refresh RESPONSE headers; it is not a rewrite and adds no URI
+        # to proxy_pass, so request-URI handling is untouched.
+        proxy_redirect default;
+        proxy_redirect http://$host/ https://$host/;
+        proxy_redirect http://127.0.0.1:8080/ https://$host/;
     }
 }

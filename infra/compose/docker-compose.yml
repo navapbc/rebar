@@ -117,6 +117,24 @@ services:
       # ticket event to origin/tickets as it is written. The push credential is a URL-scoped git
       # credential helper materialized by the entrypoint from REVIEWBOT_TICKETS_PAT (see .env /
       # fetch-secrets.sh); the persistent tickets worktree below is its store.
+      # Trust nginx's X-Forwarded-Proto (bug a61d — the same scheme downgrade 79b2 fixed
+      # for the mcp service, reproduced here: `GET /review/health/` answered 307 with
+      # `location: http://<host>/health`). uvicorn reads FORWARDED_ALLOW_IPS natively,
+      # defaults it to "127.0.0.1", and wraps the app in ProxyHeadersMiddleware with it.
+      # This app runs INSIDE this container with its port published on host loopback, so
+      # nginx's connection arrives from the docker bridge GATEWAY, not 127.0.0.1: the peer
+      # was untrusted, `X-Forwarded-Proto: https` was DROPPED, and Starlette's
+      # trailing-slash 307 built its absolute Location as `http://` — a scheme downgrade
+      # that can put a client's credential on the wire in plaintext.
+      #
+      # "*" (trust any peer), NOT a pinned bridge-gateway IP: this service declares no
+      # `networks:` block, so that address is IMPLICIT and can drift on a compose/docker
+      # change — a stale pin would silently re-open the downgrade with no failure signal.
+      # Trust-all is BOUNDED here: the port is published on host LOOPBACK with nginx the
+      # sole reachable client, and nginx sets X-Forwarded-Proto as a LITERAL
+      # (`proxy_set_header X-Forwarded-Proto https`), which OVERWRITES whatever a client
+      # sent — so no client can forge the value.
+      FORWARDED_ALLOW_IPS: "*"
       REBAR_SYNC_PUSH: "always"
       # Authorship signing key, CONTAINER-side path (bug beb1). fetch-secrets.sh materializes
       # the key on the HOST and exports that HOST path via env_file; that path does not exist
@@ -290,6 +308,24 @@ services:
       REBAR_OPCERT_TICKETS_REMOTE_URL: "${REBAR_OPCERT_TICKETS_REMOTE_URL:-https://github.com/navapbc/rebar.git}"
       REBAR_OPCERT_REVIEW_BRANCH: "main"
       # STORE-READ-ONLY: never push a gate write to the shared tickets branch.
+      # Trust nginx's X-Forwarded-Proto (bug a61d — the same scheme downgrade 79b2 fixed
+      # for the mcp service, reproduced here: `GET /review/health/` answered 307 with
+      # `location: http://<host>/health`). uvicorn reads FORWARDED_ALLOW_IPS natively,
+      # defaults it to "127.0.0.1", and wraps the app in ProxyHeadersMiddleware with it.
+      # This app runs INSIDE this container with its port published on host loopback, so
+      # nginx's connection arrives from the docker bridge GATEWAY, not 127.0.0.1: the peer
+      # was untrusted, `X-Forwarded-Proto: https` was DROPPED, and Starlette's
+      # trailing-slash 307 built its absolute Location as `http://` — a scheme downgrade
+      # that can put a client's credential on the wire in plaintext.
+      #
+      # "*" (trust any peer), NOT a pinned bridge-gateway IP: this service declares no
+      # `networks:` block, so that address is IMPLICIT and can drift on a compose/docker
+      # change — a stale pin would silently re-open the downgrade with no failure signal.
+      # Trust-all is BOUNDED here: the port is published on host LOOPBACK with nginx the
+      # sole reachable client, and nginx sets X-Forwarded-Proto as a LITERAL
+      # (`proxy_set_header X-Forwarded-Proto https`), which OVERWRITES whatever a client
+      # sent — so no client can forge the value.
+      FORWARDED_ALLOW_IPS: "*"
       REBAR_SYNC_PUSH: "off"
     ports:
       # Publish on host loopback for the HOST nginx /opcert/ proxy. Host port 8090 (Gerrit
