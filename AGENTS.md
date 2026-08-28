@@ -365,6 +365,10 @@ asymmetric — a non-**empty** result is trustworthy, an **empty** one is not un
 **receiver** is typed, so confirm it with `grep` before concluding a symbol is unused. Evidence
 and reproductions: `docs/code-navigation.md`; if Serena is absent, `claude mcp get serena`.
 
+Serena reads a dedicated **read-only mirror of `origin/main`**, not the checkout you are
+editing, and that mirror refreshes on a poll interval. So what it reports can **trail** current
+`main`, and it never includes **uncommitted** work sitting in your worktree.
+
 ## Git workflow — land changes THROUGH GERRIT, not GitHub PRs
 
 **Every change to `main` must pass two independent Gerrit gates before it can land — the
