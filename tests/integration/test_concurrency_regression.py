@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -797,6 +798,232 @@ def test_commit_and_push_preserves_local_and_competing_remote_events(two_clones,
     assert _git("show", "HEAD:remote-competitor.json", cwd=tracker_a).stdout == (
         '{"side":"remote"}\n'
     )
+
+
+# ── lock-owned push-recovery merge vs a peer reconverge (consensual-hollow-drake) ────────
+#
+# `cindery-lithe-acaciarat` moved `push_tickets_branch`'s non-fast-forward recovery
+# merge UNDER the store write lock (and added an in-lock recovery re-check). While that
+# merge runs, git leaves `MERGE_HEAD` in the tracker gitdir. `sync.reconverge` used to
+# classify recovery state at a PRE-LOCK early-out: it saw that transient `MERGE_HEAD`,
+# warned "tracker in rebase/merge recovery state (run: rebar fsck-recover)", and returned
+# WITHOUT waiting for the lock — misclassifying the lock holder's own in-progress merge as
+# an abandoned recovery state and skipping the reconvergence round. Recovery-state
+# classification must be authoritative only AFTER the write lock is acquired.
+_DRAKE_PUSH_CODE = """
+import os
+from rebar._store import push
+
+push.push_tickets_branch(os.environ["H1_TRACKER"], sleep_fn=lambda _delay: None)
+"""
+
+_DRAKE_SYNC_CODE = """
+import json
+import logging
+import os
+from rebar._store import sync
+
+
+class Capture(logging.Handler):
+    def emit(self, record):
+        print(
+            json.dumps(
+                {
+                    "level": record.levelname,
+                    "message": record.getMessage(),
+                    "funcName": record.funcName,
+                }
+            ),
+            flush=True,
+        )
+
+
+logger = logging.getLogger("rebar._store.sync")
+logger.handlers.clear()
+logger.addHandler(Capture())
+logger.setLevel(logging.DEBUG)
+logger.propagate = False
+sync.reconverge(os.environ["H1_TRACKER"], lock_timeout=int(os.environ["H1_LOCK_TIMEOUT"]))
+"""
+
+
+def _drake_reconverge_warned_at_pre_lock_site(stdout: str) -> bool:
+    """True iff reconverge emitted the `fsck-recover` recovery-state WARNING from its OWN
+    body (funcName ``reconverge``) — i.e. the pre-lock early-out, the bug signature. A
+    warning from ``_do_reconverge`` (the authoritative in-lock guard) is intentionally not
+    counted here."""
+    for line in stdout.splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (
+            record.get("level") == "WARNING"
+            and record.get("funcName") == "reconverge"
+            and "recovery state" in record.get("message", "")
+        ):
+            return True
+    return False
+
+
+def test_reconverge_waits_for_a_lock_owned_push_recovery_merge(tmp_path: Path) -> None:
+    """A peer ``reconverge`` must NOT skip with an ``fsck-recover`` warning solely because a
+    lock-OWNING push-recovery merge has created ``MERGE_HEAD`` (consensual-hollow-drake).
+
+    Barrier design (no wall-clock race): a blocking ``commit-msg`` hook pins the push
+    process inside its recovery merge with ``MERGE_HEAD`` present and the write lock held,
+    until a release marker appears. The peer reconverge runs against that pinned state.
+    """
+    from rebar._store import lock
+
+    root = tmp_path
+    remote = root / "remote.git"
+    seed = root / "seed"
+    main_root = root / "main"
+    tracker = main_root / ".tickets-tracker"
+    peer = root / "peer"
+    entered = root / "hook-entered"
+    release = root / "hook-release"
+    main_root.mkdir()
+
+    def _g(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return _git(*args, cwd=repo, check=check)
+
+    def _commit(repo: Path, name: str, body: str, message: str) -> None:
+        (repo / name).write_text(body, encoding="utf-8")
+        _g(repo, "add", name)
+        _g(repo, "commit", "--no-verify", "-m", message)
+
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    subprocess.run(["git", "init", "-q", "--initial-branch=tickets", str(seed)], check=True)
+    _g(seed, "config", "user.email", "t@t")
+    _g(seed, "config", "user.name", "t")
+    _commit(seed, "initial.json", "{}\n", "seed tickets")
+    _g(seed, "remote", "add", "origin", str(remote))
+    _g(seed, "push", "-q", "origin", "HEAD:tickets")
+
+    subprocess.run(
+        ["git", "clone", "-q", "--branch", "tickets", str(remote), str(tracker)], check=True
+    )
+    subprocess.run(
+        ["git", "clone", "-q", "--branch", "tickets", str(remote), str(peer)], check=True
+    )
+    for repo in (tracker, peer):
+        _g(repo, "config", "user.email", "t@t")
+        _g(repo, "config", "user.name", "t")
+    # Diverge: the tracker holds a local-only commit; a peer pushes a competing commit, so
+    # the tracker's next push must fetch + do a non-fast-forward recovery MERGE.
+    _commit(tracker, "local.json", '{"source":"local"}\n', "local event")
+    local_sha = _g(tracker, "rev-parse", "HEAD").stdout.strip()
+    _commit(peer, "remote.json", '{"source":"remote"}\n', "remote event")
+    remote_sha = _g(peer, "rev-parse", "HEAD").stdout.strip()
+    _g(peer, "push", "-q", "origin", "HEAD:tickets")
+
+    hook_dir = tracker / ".git" / "hooks"
+    hook = hook_dir / "commit-msg"
+    hook.write_text(
+        '#!/bin/sh\n: > "$H1_ENTERED"\nwhile [ ! -e "$H1_RELEASE" ]; do sleep 0.02; done\nexit 0\n',
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    _g(tracker, "config", "core.hooksPath", str(hook_dir))
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "H1_ENTERED": str(entered),
+            "H1_RELEASE": str(release),
+            "H1_TRACKER": str(tracker),
+            "H1_LOCK_TIMEOUT": "2",
+            "PYTHONUNBUFFERED": "1",
+            "REBAR_ROOT": str(main_root),
+            "REBAR_SYNC_PUSH": "always",
+            "REBAR_SYNC_REMOTE": "origin",
+            "REBAR_TRACKER_BRANCH": "tickets",
+        }
+    )
+    merge_head = tracker / ".git" / "MERGE_HEAD"
+
+    push_process = subprocess.Popen(
+        [sys.executable, "-c", _DRAKE_PUSH_CODE],
+        cwd=str(Path.cwd()),
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        # Barrier: wait until the push is pinned inside its recovery merge.
+        deadline = time.monotonic() + 15
+        while not entered.exists():
+            if push_process.poll() is not None:
+                out, err = push_process.communicate()
+                raise AssertionError(f"push exited before the merge hook: {out}\n{err}")
+            if time.monotonic() > deadline:
+                raise AssertionError("push did not reach the commit-msg hook in time")
+            time.sleep(0.02)
+
+        # Precondition (§5A): the marker is present AND owned by the lock-holding push.
+        holder = lock.describe_lock_holder(tracker)
+        assert merge_head.exists(), "precondition: the recovery merge must have created MERGE_HEAD"
+        assert lock.write_lock_is_busy(tracker), "precondition: the push must hold the write lock"
+        assert f"pid={push_process.pid}" in holder, holder
+        local_before = _g(tracker, "rev-parse", "HEAD").stdout.strip()
+
+        # AC1: the peer reconverge, run to completion WHILE the merge is lock-owned, must not
+        # warn/return from the pre-lock early-out. Fixed: it waits for the lock and (because
+        # the push still holds it) times out quietly with no such warning. Buggy: it sees
+        # MERGE_HEAD pre-lock and returns immediately with the `fsck-recover` warning.
+        peer_sync = subprocess.run(
+            [sys.executable, "-c", _DRAKE_SYNC_CODE],
+            cwd=str(Path.cwd()),
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        assert not _drake_reconverge_warned_at_pre_lock_site(peer_sync.stdout), (
+            "reconverge misclassified the lock holder's in-progress merge as abandoned "
+            f"recovery state: {peer_sync.stdout!r}"
+        )
+        # It must not have mutated the tracker while the lock holder owned the merge.
+        assert merge_head.exists(), "the lock holder's MERGE_HEAD must still be present"
+        assert _g(tracker, "rev-parse", "HEAD").stdout.strip() == local_before
+    finally:
+        release.touch()
+
+    push_out, push_err = push_process.communicate(timeout=30)
+    # AC2: once the recovery merge releases the lock, the push converges cleanly.
+    assert push_process.returncode == 0, f"push failed: {push_out}\n{push_err}"
+    assert not merge_head.exists(), "MERGE_HEAD must be cleared after the merge completes"
+    assert not lock.write_lock_is_busy(tracker), "the write lock must be released"
+    remote_head = _bare_git(remote, "rev-parse", "refs/heads/tickets").stdout.strip()
+    local_head = _g(tracker, "rev-parse", "HEAD").stdout.strip()
+    assert local_head == remote_head, "local and remote tips must match after convergence"
+
+    # A now-unobstructed peer reconverge succeeds and the peer ends fully converged.
+    del env["H1_LOCK_TIMEOUT"]
+    env["H1_LOCK_TIMEOUT"] = "10"
+    peer_env = {**env, "H1_TRACKER": str(peer)}
+    _g(peer, "remote", "set-url", "origin", str(remote))
+    clean_sync = subprocess.run(
+        [sys.executable, "-c", _DRAKE_SYNC_CODE],
+        cwd=str(Path.cwd()),
+        env=peer_env,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert not _drake_reconverge_warned_at_pre_lock_site(clean_sync.stdout), clean_sync.stdout
+    # All seeded events from both sides remain reachable, even after an aggressive prune.
+    for repo in (tracker, peer):
+        _g(repo, "gc", "--prune=now", "--quiet")
+        for sha in (local_sha, remote_sha):
+            assert _g(repo, "cat-file", "-e", sha, check=False).returncode == 0, (
+                f"event {sha} was collectible in {repo.name} — it was orphaned, not merged"
+            )
 
 
 # ─────────────────── RC2b: snapshot horizon + rebuild-on-stray (36d1) ─────────
