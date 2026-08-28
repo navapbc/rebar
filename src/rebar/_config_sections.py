@@ -105,6 +105,9 @@ _SECTIONS: dict[str, dict] = {
     "ui": {
         "enabled": lambda v, k: _as_bool(v, k),
     },
+    "warnings": {
+        "cross_session": lambda v, k: _as_bool(v, k),
+    },
     "reconciler": {
         # Keep in step with the `@register(...)` keys in
         # `rebar_reconciler/adapters/`: a backend that is registered but absent here

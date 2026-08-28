@@ -462,6 +462,14 @@ class UiConfig:
 
 
 @dataclass
+class WarningsConfig:
+    cross_session: bool = _documented(
+        True,
+        "Warns when a mutation targets a ticket whose live claim is held by a DIFFERENT session.",
+    )
+
+
+@dataclass
 class ReconcilerConfig:
     jira_cli_timeout: int = _documented(
         0,
@@ -685,6 +693,7 @@ class Config:
     sync: SyncConfig = field(default_factory=SyncConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
     ui: UiConfig = field(default_factory=UiConfig)
+    warnings: WarningsConfig = field(default_factory=WarningsConfig)
     reconciler: ReconcilerConfig = field(default_factory=ReconcilerConfig)
     jira: JiraConfig = field(default_factory=JiraConfig)
     scratch: ScratchConfig = field(default_factory=ScratchConfig)
@@ -713,6 +722,7 @@ _SECTION_CLASSES: dict[str, type] = {
     "sync": SyncConfig,
     "mcp": McpConfig,
     "ui": UiConfig,
+    "warnings": WarningsConfig,
     "reconciler": ReconcilerConfig,
     "jira": JiraConfig,
     "scratch": ScratchConfig,
