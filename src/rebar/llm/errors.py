@@ -115,6 +115,20 @@ class WorkflowError(LLMError):
     """Base class for the workflow engine (DSL parse/lint/migrate/execute)."""
 
 
+class WorkflowNotFoundError(WorkflowError):
+    """A workflow NAME or RUN could not be resolved — a caller-input NOT-FOUND lookup miss:
+    an unknown workflow name, an unknown ``run_id``, or a run absent from its ticket. A
+    dedicated subclass (NOT a parse/lint failure of a workflow that WAS found, and NOT the
+    bare :class:`WorkflowError` execute base) so ``error_code_for`` maps it to the caller-facing
+    ``not_found`` code while an EXECUTE-time LLM outage — which surfaces on the bare base — still
+    maps to ``llm_unavailable``. Optionally prefixes ``source`` onto the message so the
+    workflow-name miss keeps its ``<name>: workflow '<name>' not found ...`` shape."""
+
+    def __init__(self, message: str, *, source: str | None = None) -> None:
+        self.source = source
+        super().__init__(f"{source}: {message}" if source else message)
+
+
 class WorkflowParseError(WorkflowError):
     """A workflow file is not loadable: bad YAML, a rejected construct (anchor,
     merge key), an over-cap file, or not a single mapping document. Carries the
