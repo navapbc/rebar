@@ -362,6 +362,7 @@ def assemble_prefetch(spec: PrefetchSpec, *, repo_root) -> tuple[str, list[dict]
     ``(section_text, manifest)``. An empty result (no readable paths, no diffs) yields an empty
     section string so the caller appends nothing."""
     from rebar import _reads
+    from rebar.llm.config import resolve_code_root
 
     try:
         ticket = _reads.show_ticket(spec.ticket_id, repo_root=repo_root)
@@ -370,17 +371,29 @@ def assemble_prefetch(spec: PrefetchSpec, *, repo_root) -> tuple[str, list[dict]
     own = _normalize_impact(ticket.get("file_impact"))
     canonical = ticket.get("ticket_id", spec.ticket_id)
 
+    # Verdict-bearing WORKING-TREE reads (file bodies + test-glob discovery) MUST resolve to the
+    # `--ref`-pinned code snapshot the attested gate activated (`current_code_root()` via
+    # `use_code_root(handle.path)`), NOT the live `repo_root` — which is the ticket-store / server
+    # checkout the workflow threads through. Bug 831f (shimmery-customary-dorking): reading these
+    # from `repo_root` leaked the live checkout's (B's) bytes into the verifier's
+    # `<prefetched_file_contents>` evidence on a `--ref A` run. `allow_checkout_fallback=False`
+    # yields the snapshot-or-`None`, so local/no-gate mode (no active snapshot) preserves the prior
+    # behaviour by falling back to the passed `repo_root`. TICKET reads (`show_ticket`,
+    # `_subtree_impacts`) and immutable-by-sha referencing-commit diffs stay on `repo_root` (the
+    # materialized snapshot has no `.git`, and a commit diff is fixed by its SHA, not live state).
+    code_root = resolve_code_root(allow_checkout_fallback=False) or repo_root
+
     if spec.graph:
         subtree_freq = _subtree_impacts(canonical, repo_root)
     else:
         subtree_freq = {}
 
     ranked = rank_paths(own, subtree_freq, graph=spec.graph)
-    ranked = ranked + _discover_test_globs(repo_root, ranked, set(ranked))
+    ranked = ranked + _discover_test_globs(code_root, ranked, set(ranked))
 
     bodies: dict[str, str] = {}
     for path in ranked:
-        body = _read_body(repo_root, path)
+        body = _read_body(code_root, path)
         if body is not None:
             bodies[path] = body
 
