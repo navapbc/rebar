@@ -102,18 +102,27 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   in `ticket_state.schema.json` instead of riding as an undeclared additional property. See
   [docs/release-notes.md](docs/release-notes.md).
 
-- **Library and MCP reads now ERROR on an ABSENT ticket store instead of reporting it as an
-  empty one.** `rebar.list_tickets` / `search` / `ready` / `recent_session_logs` / `deps` /
-  `next_batch` (and the MCP tools that delegate to them) previously returned `[]` when the
-  tracker directory did not exist, which is indistinguishable from a store that exists and
-  holds no tickets; `show_ticket` reported the misleading `Ticket '<id>' not found`. They now
-  raise `RebarError` carrying the new `store_uninitialized` error code. This matches what the
-  CLI reads (`reads_cli.py`) and the library WRITE path (`event_prepare._ensure_initialized`)
-  have always done — only library reads were silent. **Migration:** a caller that relied on the
-  empty-list degrade should catch `RebarError` and branch on
-  `rebar.error_code_for(exc) == "store_uninitialized"`; an INITIALIZED-but-empty store still
-  returns `[]` unchanged, so only the missing-store case is affected. A deployed MCP server
-  with no store had been answering every tracker query "no tickets" for weeks because of this.
+- **Library and MCP reads now ERROR on an ABSENT *or present-but-unusable* ticket store instead
+  of reporting it as an empty one.** `rebar.list_tickets` / `search` / `ready` /
+  `recent_session_logs` / `deps` / `next_batch` (and the MCP tools that delegate to them)
+  previously returned `[]` whenever the tracker *directory* was missing OR merely existed without
+  being a usable store — a directory with no `.git` (the production shape: marker files only), or
+  a `.git` whose HEAD has not landed yet mid-clone — which is indistinguishable from a store that
+  exists and holds no tickets; `show_ticket` reported the misleading `Ticket '<id>' not found`.
+  They now raise `RebarError` carrying the new `store_uninitialized` error code whenever the
+  tracker is not a usable store. Usability is decided by one shared predicate
+  (`_store.store_usability.store_is_usable`) that both the reads and the library WRITE path
+  (`event_prepare._ensure_initialized`) flow through, so they can no longer disagree: a tracker
+  is usable if it has `.git` with a resolvable HEAD, OR it carries the on-disk store structure
+  (a committed `.store-compat.json` record, or a well-formed ticket event directory). The
+  structure clause keeps a `.git`-LESS *materialized* ticket snapshot — the pinned, read-only
+  tree `materialize_tickets` produces and the code-review gate agents read — READABLE, while a
+  genuinely broken directory raises. **Migration:** a caller that relied on the empty-list degrade
+  should catch `RebarError` and branch on `rebar.error_code_for(exc) == "store_uninitialized"`; an
+  INITIALIZED-but-empty store (including a zero-ticket snapshot carrying the committed record)
+  still returns `[]` unchanged, so only the absent/broken-store case is affected. A deployed MCP
+  server whose store held only marker files had been answering every tracker query "no tickets"
+  for an extended period because of this.
 - **New error code `store_uninitialized`** in `rebar.KNOWN_ERROR_CODES`, so the fault above is
   machine-readable over the MCP envelope rather than requiring message-text matching.
 
