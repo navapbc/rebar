@@ -272,6 +272,27 @@ services:
       - gerrit_reviewbot_tickets:/var/gerrit/site/reviewbot-tickets
     # REBAR_MCP_ALLOW_LLM deliberately NOT set (gates only the stdio MCP server;
     # the receiver calls the rebar.llm library directly — S4b).
+    #
+    # Liveness signal that distinguishes "listener closed, process alive" from healthy
+    # (the 2026-08-28 zombie: uvicorn closed its :8000 listener at the start of a graceful
+    # shutdown but the process never exited, so `docker compose ps` still reported the
+    # container `Up` while every request RST'd — a SILENT 502). This probe hits the process's
+    # OWN listener over container loopback, so in that state the connection is refused, the
+    # probe exits non-zero, and after `retries` the container flips to `unhealthy` — an
+    # observable signal monitoring can alarm on, instead of a container that reads green while
+    # serving nothing. It is REPORTING only: nothing here acts on health (autodeploy.sh runs
+    # `docker compose up -d` WITHOUT `--wait` and gates on its own curl /health probe;
+    # `restart: unless-stopped` does not react to health status), so declaring it does not
+    # change the recreate contract — it only surfaces the state. The merged force-exit deadline
+    # (app.py `_arm_hard_shutdown`) bounds how long that unhealthy-zombie state can persist;
+    # this healthcheck is what makes it VISIBLE while it does. Mirrors the `mcp` service's
+    # healthcheck; port is the container-fixed 8000 (see the `ports:` note above).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     logging:
       driver: journald
 

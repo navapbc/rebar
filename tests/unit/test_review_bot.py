@@ -1941,6 +1941,37 @@ def _compose_stop_grace_seconds() -> float:
     return float(match.group(1)) * (60 if match.group(2) == "m" else 1)
 
 
+def test_reviewbot_healthcheck_probes_its_own_listener():
+    """The review-bot service must declare a container healthcheck that probes its OWN
+    listener at ``/health``.
+
+    This is the AC4 signal for the 2026-08-28 zombie: uvicorn closed its :8000 listener at
+    the start of a graceful shutdown but the process never exited, so ``docker compose ps``
+    kept reporting the container ``Up`` while every request RST'd — a silent 502. A per-container
+    healthcheck that hits the process's own loopback listener flips the container to
+    ``unhealthy`` in exactly that state (the connection is refused), turning a silent zombie
+    into an observable, alarmable signal. Without this stanza the state is indistinguishable
+    from healthy at the container layer, which is what let it run for 22 minutes.
+    """
+    import pathlib
+
+    yaml = pytest.importorskip("yaml")
+    root = pathlib.Path(__file__).resolve().parents[2]
+    d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text())
+    hc = d["services"]["review-bot"].get("healthcheck")
+    assert hc, "the review-bot service must declare a healthcheck (AC4: the zombie must alarm)"
+    test = hc.get("test")
+    assert test, "the review-bot healthcheck must declare a `test`"
+    probe = " ".join(test) if isinstance(test, list) else str(test)
+    # Probes the process's OWN listener (container loopback) at the /health route, so a closed
+    # listener with a live process is detected as unhealthy rather than reading green.
+    assert "/health" in probe, f"the healthcheck must probe /health, got {probe!r}"
+    assert "127.0.0.1:8000" in probe, (
+        f"the healthcheck must hit the review-bot's own container listener on 127.0.0.1:8000, "
+        f"got {probe!r}"
+    )
+
+
 def test_reviewbot_stop_grace_period_covers_an_in_flight_store_write():
     """The grace period must outlast a shutdown that is still finishing a store write.
 
