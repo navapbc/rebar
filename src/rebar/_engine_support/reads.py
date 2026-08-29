@@ -232,11 +232,17 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
     there is ONE sync implementation, not a reinvented one. Every failure path is
     swallowed: a read must never fail because a fetch could not run.
     """
-    if (
-        _LOCAL_READ_CONTEXT.get()
-        or no_sync
-        or _sync_disabled(os.path.dirname(os.path.realpath(tracker)))
-    ):
+    if _LOCAL_READ_CONTEXT.get() or no_sync:
+        return
+    # sync.pull and tickets.branch are CODE-repo config (rebar.toml lives in the checkout,
+    # not beside a REBAR_TRACKER_DIR-relocated store) — resolve the code root the config way
+    # (None == discover), NOT os.path.dirname(tracker), which is the config root only for a
+    # co-located store. repo_root_or_none() is resolved AFTER the cheap short-circuits above
+    # so a local/no-sync read still pays no root-discovery cost.
+    from rebar.config import repo_root_or_none
+
+    cfg_root = repo_root_or_none()
+    if _sync_disabled(cfg_root):
         return
     try:
         from rebar.config import tickets_branch
@@ -244,9 +250,9 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
         tracker_abs = os.path.realpath(tracker)
         if not os.path.isdir(tracker_abs):
             return
-        # Branch resolved from the MAIN repo config (parent of the tracker), matching
-        # _sync_disabled above; a ConfigError is swallowed by the outer best-effort guard.
-        branch = tickets_branch(os.path.dirname(tracker_abs))
+        # Branch resolved from the CODE repo config (same cfg_root as _sync_disabled above);
+        # a ConfigError is swallowed by the outer best-effort guard.
+        branch = tickets_branch(cfg_root)
         # Only sync a tracker with a real tickets branch.
         r = subprocess.run(
             ["git", "-C", tracker_abs, "rev-parse", "--verify", branch],
@@ -366,23 +372,27 @@ def show_state(
         # (gates, field reads) never pay the corpus scan.
         state["inbound_deps"] = inbound_deps_state(resolved, tracker)
     if include_scratch:
-        state["scratch"] = _load_scratch(resolved, tracker)
+        state["scratch"] = _load_scratch(resolved)
     return state
 
 
-def _load_scratch(ticket_id: str, tracker: str) -> dict:
-    repo_root = os.path.dirname(os.path.abspath(tracker))
+def _load_scratch(ticket_id: str) -> dict:
     # scratch.base_dir via the typed config (env REBAR_SCRATCH_BASE_DIR, deprecated
-    # alias SCRATCH_BASE_DIR, or a config file). Explicit root → pure stat discovery
-    # (no git subprocess); a malformed config falls back to the default (display path).
-    from rebar.config import ConfigError, compose_config
+    # alias SCRATCH_BASE_DIR, or a config file). Resolve the CODE repo root the config
+    # way (None == discover), NOT os.path.dirname(tracker), which is the config root only
+    # for a co-located store; a relocated store's parent holds no rebar.toml. Explicit root
+    # → pure stat discovery (no git subprocess); a malformed config falls back to the
+    # default (display path).
+    from rebar.config import ConfigError, compose_config, repo_root_or_none
 
+    repo_root = repo_root_or_none()
     try:
         scratch_base = compose_config(root=repo_root).scratch.base_dir.strip()
     except ConfigError:
         scratch_base = ""
     if not scratch_base:
-        scratch_base = os.path.join(repo_root, ".rebar", "scratch")
+        base_root = repo_root or os.getcwd()
+        scratch_base = os.path.join(base_root, ".rebar", "scratch")
     scratch_dir = os.path.join(scratch_base, ticket_id)
     data: dict[str, Any] = {}
     if os.path.isdir(scratch_dir):

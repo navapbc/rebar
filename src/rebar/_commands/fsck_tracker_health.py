@@ -77,12 +77,13 @@ def _tracker_health(tracker: str, repo_root=None, authorship=None) -> tuple[list
 def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
     """Informational WARN when the tracker worktree's actually-checked-out branch
     differs from the configured ``tracker.branch``. 'configured' = the precedence-
-    resolved config (from ``repo_root`` when known, else the MAIN repo = the tracker's
-    parent); 'mounted' = the branch the worktree has checked out. This catches a
+    resolved config (from ``repo_root`` when known, else the CODE repo root discovered
+    the config way — ``rebar.toml`` lives in the checkout, NOT beside a relocated store);
+    'mounted' = the branch the worktree has checked out. This catches a
     ``tracker.branch`` changed in project config AFTER init: the store is NOT
     auto-migrated, so it stays on the old branch. Best-effort: skip on a malformed
     config or a detached/unreadable HEAD."""
-    root = repo_root if repo_root is not None else os.path.dirname(os.path.realpath(tracker))
+    root = repo_root if repo_root is not None else config.repo_root_or_none()
     try:
         configured = config.tickets_branch(root)
     except config.ConfigError:
@@ -201,9 +202,11 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
                 f"git timed out after {_FSCK_GIT_TIMEOUT}s",
             )
 
-    # Branch + remote resolved from the MAIN repo config (the tracker's parent).
+    # tickets.branch / tickets.remote are CODE-repo config (rebar.toml lives in the checkout,
+    # not beside a relocated store) — resolve the code root the config way, NOT from the
+    # tracker's parent, which holds no rebar.toml on a relocated store.
     try:
-        base = os.path.dirname(os.path.realpath(tracker))
+        base = config.repo_root_or_none()
         branch = config.tickets_branch(base)
         remote = config.tickets_remote(base)
     except config.ConfigError:
@@ -358,7 +361,7 @@ def _retired_source_folded(tracker: str, rel: str) -> bool:
     source = rel[: -len(RETIRED_SUFFIX)]
     if _exists_in_ref(tracker, "HEAD", source):
         return True
-    remote_ref = _configured_remote_ref(tracker)
+    remote_ref = _configured_remote_ref()
     return remote_ref is not None and _exists_in_ref(tracker, remote_ref, rel)
 
 
@@ -372,10 +375,11 @@ def _exists_in_ref(tracker: str, ref: str, rel: str) -> bool:
     return cp.returncode == 0
 
 
-def _configured_remote_ref(tracker: str) -> str | None:
-    """``<remote>/<branch>`` resolved from the MAIN repo config (the tracker's parent),
-    or None on a malformed config — matching :func:`_tracker_sync_status`."""
-    base = os.path.dirname(os.path.realpath(tracker))
+def _configured_remote_ref() -> str | None:
+    """``<remote>/<branch>`` from the CODE repo config (rebar.toml in the checkout, resolved
+    the config way — NOT the tracker's parent), or None on a malformed config — matching
+    :func:`_tracker_sync_status`."""
+    base = config.repo_root_or_none()
     try:
         return f"{config.tickets_remote(base)}/{config.tickets_branch(base)}"
     except config.ConfigError:
