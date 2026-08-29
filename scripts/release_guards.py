@@ -68,6 +68,29 @@ def check_version_lockstep(version: str, pyproject_text: str, server_json: dict)
     return failures
 
 
+MCP_REGISTRY_DESCRIPTION_MAX_LEN = 100
+
+
+def check_mcp_registry_description(server_json: dict) -> list[str]:
+    """Assert `server.json`'s top-level `description` fits the MCP Registry schema.
+
+    The registry (registry.modelcontextprotocol.io) rejects a publish with a
+    `body.description` longer than `MCP_REGISTRY_DESCRIPTION_MAX_LEN` chars (a 422 at
+    publish time, AFTER PyPI has already published — see the 0.13.0 release incident).
+    Returns a list of failure strings; an empty list means the description is short
+    enough to publish.
+    """
+    description = server_json.get("description")
+    if description is None:
+        return ["server.json has no top-level description field"]
+    if len(description) > MCP_REGISTRY_DESCRIPTION_MAX_LEN:
+        return [
+            f"server.json description is {len(description)} chars, exceeds the MCP "
+            f"Registry's {MCP_REGISTRY_DESCRIPTION_MAX_LEN}-char limit: {description!r}"
+        ]
+    return []
+
+
 def is_ancestor(sha: str, ref: str, *, cwd: str | Path | None = None) -> bool:
     """Return True iff `sha` is an ancestor of (or equal to) `ref`.
 
@@ -132,6 +155,11 @@ def _cmd_version_lockstep(args: argparse.Namespace) -> list[str]:
     return check_version_lockstep(args.version, pyproject_text, server_json)
 
 
+def _cmd_mcp_registry_description(args: argparse.Namespace) -> list[str]:
+    server_json = json.loads(Path(args.server_json).read_text(encoding="utf-8"))
+    return check_mcp_registry_description(server_json)
+
+
 def _cmd_ancestry(args: argparse.Namespace) -> list[str]:
     if is_ancestor(args.sha, args.ref):
         return []
@@ -155,6 +183,13 @@ def main(argv: list[str] | None = None) -> int:
     p_ver.add_argument("--pyproject", required=True)
     p_ver.add_argument("--server-json", required=True)
     p_ver.set_defaults(func=_cmd_version_lockstep)
+
+    p_desc = sub.add_parser(
+        "mcp-registry-description",
+        help="assert server.json's top-level description fits the MCP Registry schema",
+    )
+    p_desc.add_argument("--server-json", required=True)
+    p_desc.set_defaults(func=_cmd_mcp_registry_description)
 
     p_anc = sub.add_parser("ancestry", help="assert a commit descends from a ref")
     p_anc.add_argument("--sha", required=True)

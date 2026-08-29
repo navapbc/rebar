@@ -80,6 +80,14 @@ jobs:
         run: |
           python scripts/release_guards.py version-lockstep \
             --version "$VERSION" --pyproject pyproject.toml --server-json server.json
+      # (2b) MCP Registry description length — the registry rejects publish with a 422
+      # when server.json's top-level description exceeds its schema limit. Catch this
+      # BEFORE PyPI publish (that step is irreversible; the 0.13.0 release shipped to
+      # PyPI before this was ever caught, only failing later at the registry's own
+      # remote validation).
+      - name: Guard — server.json description fits the MCP Registry schema
+        run: |
+          python scripts/release_guards.py mcp-registry-description --server-json server.json
       # (3) Ancestry — HEAD must be reachable from origin/main (redundant with the ref guard
       # under dispatch-from-main, kept as defense-in-depth).
       - name: Guard — HEAD is an ancestor of origin/main
