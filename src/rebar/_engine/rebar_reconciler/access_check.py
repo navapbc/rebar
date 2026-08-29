@@ -234,6 +234,17 @@ def run_access_check(
                     )
                     lines.append(f"PROBE_FAIL step={current_step} reason=value_mismatch {detail}")
                     failed = True
+    except FileNotFoundError as exc:
+        binary = exc.filename or "acli"
+        _step(
+            steps,
+            lines,
+            current_step,
+            False,
+            reason="transport_unavailable",
+            detail=f"bridge transport binary unavailable: {binary}",
+        )
+        failed = True
     except Exception as exc:  # noqa: BLE001 - the probe reports provider failures in-band
         steps.append(
             {"step": current_step, "passed": False, "reason": "exception", "detail": str(exc)}
