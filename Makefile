@@ -310,6 +310,14 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# The rule is declared-variable-aware, not a blanket ban on `$${`: user_data.sh has four
 	@# legitimate `$${data_volume_id}` references, the one variable main.tf passes.
 	python scripts/check_templatefile_escapes.py
+	@# SSM SecureString secret-in-state gate (bug eb67-b96c-dcf0-4f86, ADR 0105). Sibling to the
+	@# templatefile gate above and structured the same way. A SecureString secret written with a
+	@# plaintext `value` persists that value in CLEARTEXT in the remote terraform state — the
+	@# provider reads the live value into state on every refresh even under `ignore_changes =
+	@# [value]`. This gate fails the build unless every operator-seeded SecureString secret uses
+	@# write-only `value_wo` + `value_wo_version` (never stored to state). Pure-Python + hermetic
+	@# (no live AWS), so it is portable across CI providers.
+	python scripts/check_ssm_secret_state.py
 	@# Single-source uv pin (bug 56b7-b21a-c8ab-4afc). setup-uv is SHA-pinned at all 25 call
 	@# sites, but uv ITSELF was not, so the action fell back to fetching a remote manifest on
 	@# every job -- and when that fetch failed the job failed with `##[error]fetch failed`, a

@@ -55,8 +55,10 @@ aws ssm put-parameter --region us-east-1 --type SecureString --overwrite \
 
 > **Ordering to avoid a mid-apply error:** prefer to let terraform `apply` **create** the two slots
 > as `CHANGEME` first, *then* `aws ssm put-parameter --overwrite` the real values (as shown above).
-> `ignore_changes = [value]` means a later `apply` never reverts your value to `CHANGEME`. If you
-> instead `put-parameter` *before* the first `apply`, terraform will fail with `ParameterAlreadyExists`
+> These secret slots use write-only `value_wo` (never persisted to state — ADR 0105; see
+> [`ssm-secret-write-only.md`](./ssm-secret-write-only.md)), so a later `apply` never reverts your
+> value to `CHANGEME` unless you bump `value_wo_version`. If you instead `put-parameter` *before* the
+> first `apply`, terraform will fail with `ParameterAlreadyExists`
 > — recover by importing:
 > `terraform import 'aws_ssm_parameter.rebar_secrets["/rebar/prod/github-oauth-client-id"]' /rebar/prod/github-oauth-client-id`.
 
