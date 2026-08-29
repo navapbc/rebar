@@ -33,13 +33,28 @@ def _tracker(repo_root: str | os.PathLike[str] | None) -> str:
     then repo-root (matches the shared resolver's repo_root-based contract).
 
     Read-side mirror of the write path's ``event_prepare._ensure_initialized``:
-    an ABSENT tracker dir raises ``RebarError`` (exit 1) with the same wording the
-    CLI reads and the write path use, instead of silently reducing to an empty
-    result (the reducer's ``except OSError`` swallows ``FileNotFoundError`` one
-    layer down). Every library/MCP read funnels through here, so they all inherit
-    the guard. An EXISTING but empty store is NOT an error — it still reads ``[]``."""
+    a tracker dir that is ABSENT — or present but NOT a usable store — raises
+    ``RebarError`` (exit 1) with the same wording the CLI reads and the write path
+    use, instead of silently reducing to an empty result (the reducer's
+    ``except OSError`` swallows ``FileNotFoundError`` one layer down). Both
+    surfaces share ONE usability predicate
+    (``_store.store_usability.store_is_usable``) so read and write cannot drift
+    apart. Every library/MCP read funnels through here, so they all inherit the
+    guard.
+
+    A store is usable when it has a live ``.git`` with a resolvable HEAD OR it
+    carries the rebar store structure on disk (the committed ``.store-compat.json``
+    record or a ticket event dir) — the latter keeps a ``.git``-less MATERIALIZED
+    snapshot readable (``_snapshot.materialize_tickets``; the gate-agent read
+    surface). A genuinely broken store (no ``.git``, no store structure — the
+    production marker-files-only shape) and a mid-clone store (``.git`` present but
+    HEAD unresolvable) satisfy neither and raise. An EXISTING, INITIALIZED but
+    empty store is NOT an error — it has a resolvable HEAD (or the committed
+    record), so it still reads ``[]``."""
+    from rebar._store.store_usability import store_is_usable
+
     tracker = str(config.tracker_dir(repo_root))
-    if not os.path.isdir(tracker):
+    if not store_is_usable(tracker):
         err = _rebar_error("Error: ticket system not initialized. Run 'ticket init' first.")
         # Carry a distinct code from the stable vocabulary rather than leaving callers to
         # sniff the message. This IS the api-compat answer to the behaviour change: a
