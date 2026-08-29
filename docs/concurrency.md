@@ -967,7 +967,7 @@ git-ignored, live only on disk, and are never in any clone:
 
 | File | What it is | What breaks without it |
 |---|---|---|
-| `.env-id` | this environment's identity, **stamped into every event** and the `principal` of every op-cert attestation | a new identity is minted; every existing attestation becomes unverifiable here (`foreign_key` at the claim/close gates) and must be re-earned |
+| `.env-id` | this environment's identity, **stamped into every event** and the `principal` of every op-cert attestation | a new identity is minted, so events and attestations split across two identities. Existing attestations still certify (the signing environment is not a gate — bug `c21f-6f29-5d2d-4a5a`), but the audit trail is no longer one identity, so carry the old id over |
 | `.opcert-key` | the op-cert signing key (mode `0600`) | nothing verifies, even with the matching `.env-id` — the signature was made by the missing key |
 | `.opcert-key.pub` | the op-cert public key the verifier reads (or re-derives from the private key) | verification cannot find a key to check against |
 | `.ensure-applied` | the ensure-registry marker | harmless: every unit simply re-runs and re-converges |
@@ -1004,8 +1004,11 @@ because the alternative is discovering the loss one ticket at a time at a gate, 
 later. Prior events are **not** rewritten — they are correctly stamped with whichever
 environment actually wrote them.
 
-Making an attestation from a previously-trusted environment survive a re-clone would mean
-publishing each environment's op-cert **public** key into the store, the way author
-identities already are. That is a real trust-model change (local same-environment
-certification becomes a small federated trust root) and needs its own ADR; it is
+A re-clone no longer invalidates op-cert attestations: the signing environment is not a gate
+(bug `c21f-6f29-5d2d-4a5a`), and an SSHSIG blob carries the public half it was made with, so a
+cert minted under the lost identity still certifies. What a re-clone does cost is a coherent
+**audit trail** — new events carry a new `env_id` — and the ability to sign under the old
+identity. Publishing each environment's op-cert **public** key into the store, the way author
+identities already are, would be the further step of making the trusted-set restriction usable
+without an out-of-band pin file; that is a real trust-model change needing its own ADR, and is
 deliberately not what the warning above does.

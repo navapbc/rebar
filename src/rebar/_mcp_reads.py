@@ -487,11 +487,13 @@ def register_read_tools(mcp, ctx) -> None:
     def verify_signature(ticket_id: str, kind: str | None = None) -> VerifySignatureResultOut:
         """Certify a ticket's verified-steps manifest against its signature.
 
-        Shape-aware verify (an asymmetric op-cert envelope against the signing
-        environment's Ed25519 public key, or a legacy record) returning {ticket_id,
-        verified, verdict, reason, manifest, ...}. verdict is 'certified' (steps
-        match), 'mismatch' (altered/invalid), 'foreign_key' (signed by a different
-        environment), or 'unsigned'. Read-only.
+        Shape-aware verify (an asymmetric op-cert envelope against the signer's Ed25519
+        public key, or a legacy record) returning {ticket_id, verified, verdict, reason,
+        manifest, ...}. verdict is 'certified' (steps match), 'mismatch' (altered/invalid),
+        'foreign_key' (no usable signer key, or the opt-in verify.require_environment
+        restriction excludes its signer), or 'unsigned'. The SIGNING ENVIRONMENT is not
+        itself a gate (bug c21f): a cert minted elsewhere certifies when its signature
+        verifies, and `trust_basis` names which key was used. Read-only.
 
         `kind` selects which attestation to verify (epic dark-acme-lumen): omitted verifies
         the most-recent signature (back-compatible); an explicit kind (e.g. 'plan-review' /

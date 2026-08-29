@@ -135,7 +135,8 @@ def signature_findings(tracker: str) -> list:
             out.append(
                 Finding(
                     "minor",
-                    f"[SIGNATURE] {name}: signed by a different environment (cannot certify here)",
+                    f"[SIGNATURE] {name}: no usable signer key (nothing pinned or readable "
+                    f"from the envelope), or verify.require_environment excludes its signer",
                 )
             )
     return out

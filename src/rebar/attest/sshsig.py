@@ -21,6 +21,7 @@ API STUB — bodies filled by the implementer.
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import subprocess
@@ -174,3 +175,58 @@ class SshsigScheme:
 def register_sshsig_scheme() -> None:
     """Register :class:`SshsigScheme` into the registry (no policy kinds pinned here)."""
     registry.register_scheme(SshsigScheme())
+
+
+# ── the signer's own embedded key (bug c21f) ──────────────────────────────────
+_SSHSIG_MAGIC = b"SSHSIG"
+
+
+def _read_sshsig_string(blob: bytes, offset: int) -> tuple[bytes, int]:
+    """Read one SSH wire-format ``string`` (uint32 length + bytes) at ``offset``."""
+    if offset + 4 > len(blob):
+        raise ValueError("truncated SSHSIG string length")
+    length = int.from_bytes(blob[offset : offset + 4], "big")
+    end = offset + 4 + length
+    if end > len(blob):
+        raise ValueError("truncated SSHSIG string body")
+    return blob[offset + 4 : end], end
+
+
+def embedded_public_key(signature: bytes) -> str | None:
+    """The signer's OWN public key, as an ``authorized_keys`` line, read out of an armored
+    SSHSIG signature — or ``None`` when it cannot be parsed.
+
+    Every SSHSIG blob carries the public half it was made with (RFC-draft SSHSIG:
+    ``MAGIC || version || publickey || namespace || reserved || hash_alg || signature``).
+    Using it as the trust root gives SELF-CONSISTENT verification: ``ssh-keygen -Y verify``
+    still checks the signature, the namespace, and the principal binding in full — the only
+    thing it does not establish is that the key belongs to a *known* environment. That is
+    exactly the property the operator has deferred (bug c21f: "certification environment
+    should not currently be a gate"), and the caller labels the weaker basis in its result
+    rather than hiding it. This is NOT ``-Y check-novalidate``, which is still never used.
+    """
+    try:
+        text = signature.decode("ascii", errors="strict")
+    except UnicodeDecodeError:
+        return None
+    body = "".join(
+        line.strip() for line in text.splitlines() if line.strip() and not line.startswith("-----")
+    )
+    try:
+        blob = base64.b64decode(body, validate=True)
+    except Exception:  # noqa: BLE001 — unparseable armor ⇒ no embedded key
+        return None
+    if not blob.startswith(_SSHSIG_MAGIC):
+        return None
+    try:
+        pubkey_blob, _ = _read_sshsig_string(blob, len(_SSHSIG_MAGIC) + 4)
+        keytype, _ = _read_sshsig_string(pubkey_blob, 0)
+    except ValueError:
+        return None
+    try:
+        keytype_str = keytype.decode("ascii", errors="strict")
+    except UnicodeDecodeError:
+        return None
+    if not keytype_str or _has_control_chars(keytype_str):
+        return None
+    return f"{keytype_str} {base64.b64encode(pubkey_blob).decode('ascii')}"

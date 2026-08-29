@@ -80,9 +80,16 @@ opcert_enforce_since = "<tickets-branch tip SHA at flip time>"
 - **Set both keys in the same change.** `require_environment` without a boundary would enforce
   every historical close; a boundary without `require_environment` enforces nothing. Together
   they enforce **only** post-deploy closes.
-- `require_environment` gates the **completion-verifier** lane (the close gate). Plan-review
-  certs are minted under the same environment (trusted where the claim/plan-review gate consumes
-  them) but are **not** the lane `require_environment` enforces.
+- `require_environment` gates the **completion-verifier** merge lane (`rebar verify-opcert`).
+  Since bug `c21f-6f29-5d2d-4a5a` it ALSO restricts the local claim/close verification path
+  (`verify_signature` / the plan-review claim gate): with it unset — the default, and this
+  project's posture — a validly signed cert from **any** environment certifies, because
+  certification environment is not currently a gate; with it set, only that environment's certs
+  are accepted there too, verified against its key pinned in
+  `.rebar/trusted_environments.yaml` (the envelope's own embedded key is not accepted as a
+  fallback under enforcement). Flipping the pair therefore tightens plan-review consumption as
+  well as the close lane — check that whichever environment your agents run `review-plan` in is
+  the one you pin.
 
 After the change merges, confirm on the authoritative config:
 ```bash

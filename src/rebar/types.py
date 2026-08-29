@@ -323,6 +323,9 @@ class VerifySignatureResult(TypedDict):
     reason: str
     ticket_id: str
     rebar_version: NotRequired[str | None]
+    # Which key certified an op-cert (bug c21f): own_key / pinned_environment /
+    # envelope_key. None when no trust root was reached.
+    trust_basis: NotRequired[str | None]
 
 
 class DepsGraph(TypedDict):

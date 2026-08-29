@@ -370,6 +370,11 @@ try:
         # Gate-code provenance: the rebar version+SHA that produced the attestation
         # (audit-only, epic jira-reb-596). None for pre-stamp / unsigned records.
         rebar_version: str | None = None
+        # Which key certified an op-cert (bug c21f): own_key / pinned_environment /
+        # envelope_key. The signing ENVIRONMENT is not a gate under current policy, so
+        # this makes the weaker envelope_key basis visible rather than silent. None when
+        # no trust root was reached (unsigned/legacy record, or a pre-key-selection refusal).
+        trust_basis: str | None = None
 
     class PlanReviewStatusOut(_Out):
         # The read-only plan-review attestation currency verdict, mirroring the
