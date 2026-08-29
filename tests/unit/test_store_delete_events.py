@@ -113,7 +113,7 @@ def test_commit_failure_restores_deletions(tracker, monkeypatch):
     real_run = subprocess.run
 
     def fake_run(cmd, *a, **kw):
-        if isinstance(cmd, list) and "commit" in cmd[:6]:
+        if isinstance(cmd, list) and "commit" in cmd:
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="injected commit failure")
         return real_run(cmd, *a, **kw)
 

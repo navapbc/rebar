@@ -27,6 +27,8 @@ import os
 import subprocess
 
 from rebar._store.gitutil import (
+    _AUTOMAINT_OFF,
+    _LOCAL_GIT_TIMEOUT,
     _is_transient_object_write_error,
     _with_index_lock_retry,
     _with_transient_fault_retry,
@@ -114,12 +116,26 @@ def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[st
     commit once dropped a concurrent locked write). Composed index.lock-OUTER /
     runner-FS-INNER — the same gitutil retries the transition/claim path uses. A
     non-lock, non-transient failure (including a genuine "nothing to commit" / UU wedge)
-    surfaces immediately, unchanged — the caller's UU-recovery path still handles it."""
+    surfaces immediately, unchanged — the caller's UU-recovery path still handles it.
+
+    ``_AUTOMAINT_OFF`` is injected so git does NOT run its post-commit auto-maintenance repack
+    INSIDE this bounded commit (bd66); the caller runs maintenance as an explicit deferred
+    step (:func:`gitutil.run_auto_maintenance`) under the same write lock."""
     return _with_index_lock_retry(
         tracker,
         lambda: _with_transient_fault_retry(
             lambda: _run_git(
-                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg]
+                [
+                    "git",
+                    "-C",
+                    tracker,
+                    *_AUTOMAINT_OFF,
+                    "commit",
+                    "-q",
+                    "--no-verify",
+                    "-m",
+                    commit_msg,
+                ]
             )
         ),
         force_reclaim=True,
@@ -148,8 +164,23 @@ def _git_commit_paths(
     The pathspec is the point: unlike a bare ``git commit`` (which commits the WHOLE index),
     this commits ONLY *relpaths*, so it can never sweep an unrelated staged event — belt to
     the write lock's braces. Rides out index.lock contention AND the transient runner-FS
-    git faults via the same composed gitutil retries as :func:`_git_commit`."""
-    argv = ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg, "--", *relpaths]
+    git faults via the same composed gitutil retries as :func:`_git_commit`.
+
+    ``_AUTOMAINT_OFF`` is injected so git's post-commit auto-maintenance repack is NOT charged
+    to this bounded commit (bd66); the caller defers it to :func:`gitutil.run_auto_maintenance`."""
+    argv = [
+        "git",
+        "-C",
+        tracker,
+        *_AUTOMAINT_OFF,
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        commit_msg,
+        "--",
+        *relpaths,
+    ]
     return _with_index_lock_retry(
         tracker,
         lambda: _with_transient_fault_retry(lambda: _run_git(argv)),
@@ -182,3 +213,26 @@ def _unstage(tracker: str | os.PathLike, relative_path: str) -> None:
         _run_git(["git", "-C", str(tracker), "reset", "-q", "--", relative_path])
     except OSError:
         pass
+
+
+# raw-git-ok: locked store seam internal
+def run_auto_maintenance(
+    tracker: str | os.PathLike[str], *, timeout: float = _LOCAL_GIT_TIMEOUT
+) -> subprocess.CompletedProcess | None:
+    """Run git's auto-maintenance as an EXPLICIT, BEST-EFFORT step (bd66).
+
+    ``git -C tracker maintenance run --auto`` — the SAME maintenance ``git commit`` would have
+    run itself (suppressed there by :data:`gitutil._AUTOMAINT_OFF`), now issued deliberately
+    AFTER the commit so the commit's tight ``_GIT_TIMEOUT`` never charges an O(store) repack.
+    ``--auto`` preserves git's threshold check, so it is a cheap no-op until the store actually
+    needs a repack. Runs FOREGROUND (ADR 0051's ``maintenance.autoDetach=false``, so the caller
+    MUST hold the store write lock to keep the repack serialised with writes) and is bounded by
+    the roomier ``_LOCAL_GIT_TIMEOUT`` watchdog — a hung repack fails this step cleanly.
+
+    BEST-EFFORT BY CONTRACT: the write has already SUCCEEDED and is durable, so a maintenance
+    failure or timeout MUST NEVER fail the write — the loose objects simply persist and the next
+    write's maintenance retries. Returns the git result (or ``None`` if git could not launch)."""
+    try:
+        return run_git_bounded(tracker, "maintenance", "run", "--auto", timeout=timeout)
+    except OSError:
+        return None

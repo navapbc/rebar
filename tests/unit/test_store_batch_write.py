@@ -192,7 +192,7 @@ def test_validation_failure_rolls_back_before_any_commit(tracker, monkeypatch):
     real_run = subprocess.run
 
     def fake_run(cmd, *a, **kw):
-        if isinstance(cmd, list) and ("add" in cmd[:6] or "commit" in cmd[:6]):
+        if isinstance(cmd, list) and ("add" in cmd[:6] or "commit" in cmd):
             calls.append(cmd[3] if len(cmd) > 3 else "?")
         return real_run(cmd, *a, **kw)
 
@@ -215,7 +215,7 @@ def test_commit_failure_rolls_back_whole_batch_and_next_write_is_clean(tracker, 
     real_run = subprocess.run
 
     def fake_run(cmd, *a, **kw):
-        if isinstance(cmd, list) and "commit" in cmd[:6]:
+        if isinstance(cmd, list) and "commit" in cmd:
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="injected commit failure")
         return real_run(cmd, *a, **kw)
 

@@ -38,7 +38,8 @@ from typing import Any
 from rebar._commands._seam import CommandError, finalize_event
 from rebar._store import compat, event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
-from rebar._store.gitutil import run_git_write
+from rebar._store.event_commit_git import run_auto_maintenance
+from rebar._store.gitutil import _AUTOMAINT_OFF, run_git_write
 from rebar.reducer import reduce_ticket
 from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 from rebar.reducer._sort import prefix_ts as _prefix_ts
@@ -138,6 +139,24 @@ def _git(tracker_dir: str, *args: str) -> None:
     cp = run_git_write(tracker_dir, *args, check=False)
     if cp.returncode != 0:
         raise CommandError(f"Error: git operation failed: {cp.stderr}", returncode=2)
+
+
+# raw-git-ok: locked store seam internal
+def _git_commit(tracker_dir: str, message: str) -> None:
+    """Commit the staged claim/transition event with git's auto-maintenance SUPPRESSED, then
+    run maintenance as an explicit deferred step (bd66) — parity with the event-append write
+    path (``event_append._deferred_maintenance``).
+
+    ADR 0051 keeps git maintenance FOREGROUND on the tickets worktree so a repack serialises
+    under the write lock; but letting ``git commit`` trigger it INLINE charges an O(store)
+    repack to the commit's own watchdog bound, so once the store crosses git's loose-object
+    threshold the commit that trips it can be SIGKILLed mid-repack. ``_AUTOMAINT_OFF`` keeps
+    the commit O(1); :func:`run_auto_maintenance` replays the identical maintenance as a
+    separate, roomier-bounded step — still under the lock the caller holds, so the repack
+    stays serialised. Best-effort maintenance: the commit already succeeded, so it never
+    fails the write."""
+    _git(tracker_dir, *_AUTOMAINT_OFF, "commit", "-q", "--no-verify", "-m", message)
+    run_auto_maintenance(tracker_dir)
 
 
 # raw-git-ok: locked store seam internal
@@ -425,7 +444,7 @@ def transition_core(
         fsutil.atomic_write(final_path, canonical_str(event), encoding="utf-8")
 
         _git(tracker_dir, "add", f"{ticket_id}/{final_filename}")
-        _git(tracker_dir, "commit", "-q", "--no-verify", "-m", f"ticket: STATUS {ticket_id}")
+        _git_commit(tracker_dir, f"ticket: STATUS {ticket_id}")
     except CommandError:
         if final_path is not None:
             _unstage(tracker_dir, final_path)  # drop from index (not just disk)
@@ -539,7 +558,7 @@ def claim_core(
 
         # Stage BOTH events and commit ONCE (atomic).
         _git(tracker_dir, "add", *rel_paths)
-        _git(tracker_dir, "commit", "-q", "--no-verify", "-m", f"ticket: CLAIM {ticket_id}")
+        _git_commit(tracker_dir, f"ticket: CLAIM {ticket_id}")
     except CommandError:
         _unstage(tracker_dir, status_path, edit_path)  # drop from index (not just disk)
         for p in (status_path, edit_path):
