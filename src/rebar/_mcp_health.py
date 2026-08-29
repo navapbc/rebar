@@ -38,6 +38,12 @@ import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
+from rebar._mcp_opcert_health import (
+    _OPCERT_STATUS_ATTR,
+    opcert_signing_status,
+    run_startup_opcert_check,
+)
+
 CERTIFIED_TOOLS = frozenset({"review_plan", "verify_completion", "review_code", "scan_spec"})
 """The certified, long-running LLM tools (``register_llm_tools`` in ``_mcp_llm.py``).
 Only these move the in-flight gauge; ``sign_review`` is excluded (it runs no LLM)."""
@@ -596,13 +602,14 @@ def install_startup_handshake(
 
 
 def register_health_route(mcp: Any, gauge: InFlightGauge) -> None:
-    """Register ``GET /health`` returning ``{"in_flight", "store", "handshake"}``.
+    """Register ``GET /health`` returning ``{"in_flight", "store", "handshake", "opcert"}``.
 
     Uses FastMCP's ``custom_route`` so the route lives on the Starlette app OUTSIDE the
     auth and transport-security middleware — an unauthenticated probe gets 200.
 
-    The status code stays 200 even with no store: see :func:`store_status` for why the
-    signal is a field rather than a failure."""
+    The status code stays 200 even with a degraded store or op-cert signer: see
+    :func:`store_status` / :func:`opcert_signing_status` for why the signal is a field
+    rather than a failure."""
 
     from starlette.responses import JSONResponse
 
@@ -613,6 +620,7 @@ def register_health_route(mcp: Any, gauge: InFlightGauge) -> None:
                 "in_flight": gauge.value,
                 "store": store_status(),
                 "handshake": handshake_status(mcp),
+                "opcert": getattr(mcp, _OPCERT_STATUS_ATTR, {"bound": False, "expected": False}),
             }
         )
 
@@ -753,6 +761,11 @@ def run_mcp(server: Any, mcp_cfg: Any, *, opcert_binding: Any = None) -> None:
     the serving thread so the certified-op tools mint certs under the box environment. HTTP
     binds it inside the uvicorn thread target (:func:`run_http_with_grace`); stdio binds it
     around ``server.run`` here (same thread). ``None`` is a transparent no-op."""
+
+    # Bug 879b serve-degraded surface: stash the pinned-key match status for /health and log a
+    # boot warning if the bound signer is not the pinned trusted-environment key. Never aborts.
+    setattr(server, _OPCERT_STATUS_ATTR, opcert_signing_status(opcert_binding))
+    run_startup_opcert_check(opcert_binding)
 
     if mcp_cfg.transport == "http":
         gauge = getattr(server, _GAUGE_ATTR, None)
