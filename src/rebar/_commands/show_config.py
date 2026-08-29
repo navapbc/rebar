@@ -16,13 +16,13 @@ values themselves carry no host state.
 from __future__ import annotations
 
 import dataclasses
-import json
 import sys
 from typing import Any
 
 from rebar import config as _config
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced import config as _config_parsers
+from rebar._mcp_errors import js_safe_dumps
 from rebar.config import _SECTIONS  # the canonical (section, key) inventory
 
 
@@ -216,7 +216,7 @@ def config_cli(argv: list[str]) -> int:
         sys.stderr.write(f"rebar config: {exc}\n")
         return 1
     if args.output == "json":
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        print(js_safe_dumps(payload, indent=2, sort_keys=True))
     else:
         print(_render_text(payload), end="")
     return 0

@@ -9,11 +9,11 @@ Output (always valid, empty arrays when the root has no descendants / is absent)
 
 from __future__ import annotations
 
-import json
 import sys
 from collections import deque
 
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._mcp_errors import js_safe_dumps
 from rebar.reducer import reduce_all_tickets
 
 _TYPE_TO_BUCKET = {"epic": "epics", "story": "stories", "task": "tasks", "bug": "bugs"}
@@ -84,5 +84,5 @@ def list_descendants_cli(argv: list[str], tracker: str) -> int:
     # Graceful: pass the raw input through when resolution misses (documented
     # empty-arrays contract).
     root_id = resolve_ticket_id(raw, tracker) or raw
-    sys.stdout.write(json.dumps(list_descendants(root_id, tracker), ensure_ascii=False) + "\n")
+    sys.stdout.write(js_safe_dumps(list_descendants(root_id, tracker), ensure_ascii=False) + "\n")
     return 0

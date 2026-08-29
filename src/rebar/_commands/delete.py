@@ -30,6 +30,7 @@ from rebar._alias import compute_alias, compute_genesis_alias
 from rebar._commands import scratch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._mcp_errors import js_safe_dumps
 from rebar._store import hlc
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git_write
@@ -292,7 +293,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
     if ticket_id is None:
         if fmt == "json":
             sys.stdout.write(
-                json.dumps(
+                js_safe_dumps(
                     error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1)
                 )
                 + "\n"
@@ -394,7 +395,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
 
     if fmt == "json":
         sys.stdout.write(
-            json.dumps({"ticket_id": ticket_id, "deleted": True, "newly_unblocked": unblocked})
+            js_safe_dumps({"ticket_id": ticket_id, "deleted": True, "newly_unblocked": unblocked})
             + "\n"
         )
     else:

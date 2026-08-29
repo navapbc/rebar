@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 from rebar import config
+from rebar._mcp_errors import js_safe_dumps
 from rebar._store import footprint
 
 
@@ -87,7 +87,7 @@ def tracker_footprint_cli(argv: list[str], *, repo_root: str | None = None) -> i
         return 1
 
     if args.output == "json":
-        sys.stdout.write(json.dumps(report, ensure_ascii=False) + "\n")
+        sys.stdout.write(js_safe_dumps(report, ensure_ascii=False) + "\n")
     else:
         sys.stdout.write(_render_text(report))
     return 0

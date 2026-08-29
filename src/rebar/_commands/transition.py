@@ -25,6 +25,7 @@ from rebar._commands.transition_close import close_ticket
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._mcp_errors import js_safe_dumps
 from rebar.reducer import reduce_ticket
 
 _VALID_STATUSES = ("idea", "open", "in_progress", "closed", "blocked")
@@ -572,7 +573,7 @@ def _resolve_id_or_report(raw_id: str, tracker: str, fmt: str) -> str | None:
     if ticket_id is None:
         if fmt == "json":
             sys.stdout.write(
-                json.dumps(
+                js_safe_dumps(
                     error_envelope("ticket_not_found", raw_id, f"Ticket '{raw_id}' not found", 1)
                 )
                 + "\n"
@@ -642,7 +643,7 @@ def _emit_transition_result(
         # English off stderr (bug silvern-dewy-damselfly).
         if "completion_signature" in result:
             payload["completion_signature"] = result["completion_signature"]
-        sys.stdout.write(json.dumps(payload) + "\n")
+        sys.stdout.write(js_safe_dumps(payload) + "\n")
         return
     if verb == "reopened":
         _confirm.emit_text(f"reopened {ticket_id}: {current_status} -> {target_status}")

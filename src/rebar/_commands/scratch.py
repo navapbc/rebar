@@ -21,6 +21,7 @@ import shutil
 import sys
 
 from rebar import config
+from rebar._mcp_errors import js_safe_dumps
 from rebar._store import fsutil
 from rebar.timeutils import utc_now_iso
 
@@ -88,7 +89,7 @@ def _validate_component(value: str, field_name: str, code: str) -> dict | None:
 
 
 def _emit(obj: dict) -> None:
-    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.write(js_safe_dumps(obj) + "\n")
 
 
 def _resolve_and_validate(ticket_id: str, key: str) -> tuple[str | None, int]:

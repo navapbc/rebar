@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.util
-import json
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -22,6 +21,7 @@ from pathlib import Path
 from types import ModuleType
 
 from rebar._cli._parser import ParseError, render_parse_error
+from rebar._mcp_errors import js_safe_dumps
 
 _BRIDGE_ROUTES = {"preview", "sync"}
 
@@ -195,7 +195,7 @@ def _status(parsed: argparse.Namespace) -> int:
         sys.stderr.write(f"Error: cannot read bridge status: {exc}\n")
         return 1
     if parsed.json:
-        sys.stdout.write(json.dumps(result, sort_keys=True) + "\n")
+        sys.stdout.write(js_safe_dumps(result, sort_keys=True) + "\n")
     else:
         summary = result["verdict"]
         if result.get("pass_id"):
@@ -229,7 +229,7 @@ def _projects(parsed: argparse.Namespace) -> int:
     verb = parsed.projects_verb
     if verb == "list":
         mapping = rebar.bridge_projects_list()
-        sys.stdout.write(json.dumps(mapping) + "\n")
+        sys.stdout.write(js_safe_dumps(mapping) + "\n")
         return 0
     if verb == "set":
         repos = [r for r in parsed.repos.split(",") if r] if parsed.repos else []
