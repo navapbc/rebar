@@ -21,7 +21,6 @@ documented there; :func:`_prepare_event` composes with it rather than restating 
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from rebar._store import staging as _staging
@@ -97,8 +96,22 @@ def event_filename(timestamp: int, uuid_str: str, event_type: str) -> str:
 
 
 def _ensure_initialized(tracker: str) -> None:
-    """Raise :class:`StoreError` (1) if *tracker* is not an initialized store."""
-    if not os.path.isdir(tracker) or not os.path.exists(os.path.join(tracker, ".git")):
+    """Raise :class:`StoreError` (1) if *tracker* is not an initialized store.
+
+    Shares the read side's usability predicate (``store_usability.store_is_usable``)
+    so the write-commit guard and every read agree on what a usable store is: this
+    rejects an ABSENT store and a mid-clone store (``.git`` present but HEAD
+    unresolvable), exactly as before. The predicate's ``.git``-less STRUCTURE clause
+    (for materialized read-only snapshots) cannot loosen this write gate in
+    practice — a write only ever targets the LIVE store (a ``.git`` clone), and a
+    live store holding any checked-out event dir necessarily has a resolvable HEAD
+    (git populates the worktree only after HEAD is set), so the ``.git``/HEAD clause
+    already covers it. Called on the locked write-commit path (``event_append``),
+    which already issues git, and the predicate's HEAD probe is wall-clock bounded
+    (``gitutil.run_git_bounded``) so it adds no unbounded lock-held git call."""
+    from rebar._store.store_usability import store_is_usable
+
+    if not store_is_usable(tracker):
         raise StoreError("Error: ticket system not initialized. Run 'ticket init' first.", 1)
 
 

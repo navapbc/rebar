@@ -86,21 +86,30 @@ def _audited_tickets(repo_root: str | None = None) -> list[dict[str, Any]]:
     them. Each entry is ``{"id": str, "title": str}``. Best-effort: ``audit_trail`` never
     raises, so a single ticket's read failure degrades to "no audit data" (excluded).
 
-    The enumeration itself is best-effort for the same reason. Library reads now raise on an
-    ABSENT store rather than reporting it as an empty one (bug
-    antelopine-limivorous-chinchilla), which is right for a driving agent but wrong here: this
-    is a read-only web index, and a server pointed at a repo with no tracker should render an
-    empty page, not return 500. The uninitialized store is caught and degraded; every OTHER
-    failure still propagates, so a genuinely broken store is not silently blanked. The
-    discriminator is the machine-readable ``store_uninitialized`` code, not the message
-    text -- that wording is defined in several modules and is not this module's to pin."""
+    The enumeration itself is best-effort for the same reason. Library reads raise
+    ``store_uninitialized`` for a store that is ABSENT *or* present-but-unusable — no
+    ``.git``, or a ``.git`` whose HEAD is unresolvable mid-clone (bugs
+    antelopine-limivorous-chinchilla and rapt-dreadable-dromedary). That is right for a
+    driving agent — it can act on "this store is broken" — but wrong here: this is a
+    read-only web index, and a server pointed at a repo with no usable tracker should
+    render an empty page, not return 500. So ANY ``store_uninitialized`` is caught and
+    degraded to an empty index, while every OTHER failure still propagates. The catch
+    covers the present-but-unusable store too, so — unlike an earlier version of this
+    guard — that case is NOT silently blanked: it is LOGGED at WARNING here, and the
+    driving agent / CLI still surface the absent-vs-unusable distinction for diagnosis.
+    The discriminator is the machine-readable ``store_uninitialized`` code, not the
+    message text -- that wording is defined in several modules and is not this module's
+    to pin."""
     out: list[dict[str, Any]] = []
     try:
         tickets = rebar.list_tickets(repo_root=repo_root)
     except rebar.RebarError as exc:
         if rebar.error_code_for(exc) != "store_uninitialized":
             raise
-        logger.warning("audit index: no ticket store at this repo root; rendering empty index")
+        logger.warning(
+            "audit index: no usable ticket store at this repo root "
+            "(absent or present-but-unusable); rendering empty index"
+        )
         return out
     for ticket in tickets:
         raw_id = ticket.get("ticket_id") or ticket.get("id")
