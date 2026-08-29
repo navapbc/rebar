@@ -102,6 +102,37 @@ def test_version_lockstep_no_packages_fails() -> None:
     assert fails, "server.json with zero packages must fail lockstep"
 
 
+# ── mcp-registry-description ──────────────────────────────────────────────────
+
+
+def test_mcp_registry_description_happy_at_limit() -> None:
+    fails = rg.check_mcp_registry_description({"description": "x" * 100})
+    assert fails == []
+
+
+def test_mcp_registry_description_too_long_fails() -> None:
+    fails = rg.check_mcp_registry_description({"description": "x" * 101})
+    assert len(fails) == 1
+    assert "101 chars" in fails[0]
+
+
+def test_mcp_registry_description_missing_fails() -> None:
+    fails = rg.check_mcp_registry_description({})
+    assert any("no top-level description" in f for f in fails)
+
+
+def test_cli_mcp_registry_description_exit_codes(tmp_path: Path) -> None:
+    import json
+
+    ok_path = tmp_path / "server_ok.json"
+    ok_path.write_text(json.dumps({"description": "short"}))
+    assert rg.main(["mcp-registry-description", "--server-json", str(ok_path)]) == 0
+
+    bad_path = tmp_path / "server_bad.json"
+    bad_path.write_text(json.dumps({"description": "x" * 101}))
+    assert rg.main(["mcp-registry-description", "--server-json", str(bad_path)]) == 1
+
+
 # ── ancestry ──────────────────────────────────────────────────────────────────
 def _git(cwd: Path, *args: str) -> str:
     env = {
