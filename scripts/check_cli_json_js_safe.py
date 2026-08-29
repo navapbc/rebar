@@ -22,9 +22,11 @@ The sanctioned choke point ``js_safe_dumps(...)`` is a plain ``Name`` callee and
 Docstrings, comments and error text compose no stdout write and are never flagged.
 
 SCAN ROOTS — the user-facing CLI ``--output json`` surface only: ``src/rebar/_cli``,
-``src/rebar/_commands``, ``src/rebar/_engine_support`` and ``src/rebar/signing.py``. The
-structured-logging stream (``rebar._logging``), the reconciler daemon and the LLM-eval tooling
-are DIFFERENT contracts and out of scope.
+``src/rebar/_commands``, ``src/rebar/_engine_support`` and ``src/rebar/signing.py``. This DOES
+cover the CLI LLM/eval verbs that live under ``src/rebar/_cli`` (e.g. ``_llm_eval_commands.py``),
+which share the ``--output json`` wire contract. The structured-logging stream
+(``rebar._logging``) and the reconciler daemon (``src/rebar/_engine/rebar_reconciler``) are
+DIFFERENT contracts, live outside these roots, and are out of scope.
 
 SANCTION — ``# js-safe-ok: <reason>``, with a MANDATORY reason, honoured on the offending line,
 the line above, or the enclosing statement's first line (mirrors ``# repo-root-ok:`` /
@@ -65,6 +67,10 @@ SCAN_ROOTS = (
 
 #: The stdout sinks a ``--output json`` value flows through.
 _STDOUT_SINKS = {"print", "sys.stdout.write", "stdout.write"}
+
+#: ``file=`` targets that keep a ``print`` on the stdout stream. Anything else (``sys.stderr``,
+#: a log handle) redirects it off stdout, so the JS-safe contract does not apply.
+_STDOUT_FILE_TARGETS = {"sys.stdout", "stdout"}
 
 #: Raw dumps callees the choke point replaces. ``_json`` is the common local alias.
 _RAW_DUMPS_CALLEES = {"json.dumps", "_json.dumps"}
@@ -125,13 +131,27 @@ class _Visitor(ast.NodeVisitor):
         self.hits: list[ast.Call] = []
 
     def visit_Call(self, node: ast.Call) -> None:
-        if _callee_name(node.func) in _STDOUT_SINKS:
+        if _callee_name(node.func) in _STDOUT_SINKS and self._writes_to_stdout(node):
             for arg in node.args:
                 raw = _contains_raw_dumps(arg)
                 if raw is not None:
                     self.hits.append(raw)
                     break
         self.generic_visit(node)
+
+    @staticmethod
+    def _writes_to_stdout(node: ast.Call) -> bool:
+        """A ``print(..., file=X)`` only lands on stdout when ``X`` is stdout (or absent).
+
+        ``print`` defaults to stdout, so a bare ``print(...)`` qualifies. An explicit
+        ``file=sys.stderr`` (or any non-stdout handle) redirects it off the JS-safe wire — the
+        docstring names stderr diagnostics as allowed — so it must NOT be flagged. The
+        ``*.write`` sinks are already bound to a concrete stream by their receiver.
+        """
+        for keyword in node.keywords:
+            if keyword.arg == "file":
+                return _callee_name(keyword.value) in _STDOUT_FILE_TARGETS
+        return True
 
 
 def _statement_lines(tree: ast.AST) -> dict[int, int]:
