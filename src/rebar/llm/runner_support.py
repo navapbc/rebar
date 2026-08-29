@@ -51,15 +51,27 @@ def _intersect_capabilities(per_candidate: list[ModelCapabilities]) -> ModelCapa
     candidate has it (task cc33).
 
     Any candidate may be the one that answers, and which one that is depends on provider health
-    at call time. Reading the primary's capabilities would make the run succeed or fail by luck —
-    a chain containing a model MEASURED to reject `temperature` would 400 only once that model
-    answered, a failure reproducing solely under provider degradation. Disagreeing prompt-cache
-    styles collapse to "none" for the same reason: each style's keys are provider-specific and
-    would error on the candidate that does not share it."""
-    styles = {caps.prompt_cache_style for caps in per_candidate}
+    at call time. For the fields that a wrong value makes the run 400, reading the primary's
+    capabilities would make the run succeed or fail by luck — a chain containing a model MEASURED
+    to reject `temperature` would 400 only once that model answered, a failure reproducing solely
+    under provider degradation. So `supports_temperature`, `native_structured_output`,
+    `supports_thinking`, `native_output_with_thinking`, and `native_web_search` all fail closed
+    with `all(...)`.
+
+    `prompt_cache_style` is the ONE exception, and follows the PRIMARY (bug 96f3): it does NOT
+    hard-fail cross-provider. The cache directive is a set of provider-scoped `ModelSettings`
+    keys (`bedrock_cache_*` vs `anthropic_cache_*`); `pydantic_ai.settings.merge_model_settings`
+    is a plain dict union with no key validation, and each provider model reads ONLY its own
+    `*_cache_*` keys via `model_settings.get(...)` — so a directive meant for the primary is a
+    silent `.get()` miss on a fallback that actually serves, never an error (the same
+    ignored-not-errored behavior LiteLLM documents for an inapplicable cache directive). The
+    primary serves virtually every call, so following it restores caching on the hot path while a
+    rare fallback runs uncached-but-correct; collapsing to "none" on any disagreement instead
+    disabled caching on the primary too. This reverses the earlier conservative collapse — see
+    ADR 0059 §7 and the `rebar.toml` [llm.model_classes] note."""
     return ModelCapabilities(
         native_structured_output=all(c.native_structured_output for c in per_candidate),
-        prompt_cache_style=per_candidate[0].prompt_cache_style if len(styles) == 1 else "none",
+        prompt_cache_style=per_candidate[0].prompt_cache_style,
         supports_thinking=all(c.supports_thinking for c in per_candidate),
         # `all` like every sibling: a chain may claim native output UNDER THINKING only when EVERY
         # candidate is MEASURED to support it (story 18ae) — any candidate could answer, so a

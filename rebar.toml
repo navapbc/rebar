@@ -189,8 +189,11 @@ enforce_since = "f9f38d0c6c4255ae3a6ecd7858fe98813c46ee4f"
 #
 # Direct Anthropic is the approved fallback for frontier and standard
 # ([rebar:esthetical-earthborn-vervet]); direct Sonnet native output is live-measured. Trivial has
-# no fallback until direct Haiku parity is measured. Mixed-provider chains disable prompt caching
-# because their provider-specific cache keys do not intersect.
+# no fallback until direct Haiku parity is measured. Prompt caching follows the PRIMARY (serving)
+# provider of the chain, not a whole-chain intersection ([rebar:paternal-repayable-flamingo],
+# reversing the earlier collapse-to-none): the cache directive is a set of provider-scoped
+# ModelSettings keys that a non-matching fallback silently ignores rather than erroring on, so the
+# Bedrock primary caches on the hot path while a rare Anthropic fallback runs uncached-but-correct.
 #
 # `fallback` FIRES NARROWLY: `should_fall_back` moves to the next candidate only for the
 # availability classes. A CREDENTIAL failure (`CHANGE_SETTINGS`)
