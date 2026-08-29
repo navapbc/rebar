@@ -24,6 +24,7 @@ from .manifest import (
     build_manifest,
     classify_file_scope,
     dependency_hashes,
+    gate_ref_hash_basis,
     is_plan_review_manifest,
     manifest_currency_basis,
     manifest_deps,
@@ -90,6 +91,7 @@ __all__ = [
     "classify_file_scope",
     "delivered_now",
     "dependency_hashes",
+    "gate_ref_hash_basis",
     "is_plan_review_manifest",
     "manifest_currency_basis",
     "manifest_deps",
@@ -407,6 +409,50 @@ def _authoritative_head(attestation: Mapping[str, Any]) -> str | None:
 
 
 # ── the fast claim-gate check (no LLM, no heavy reads) ────────────────────────────
+def _scoped_code_drift(deps: Mapping[str, str], auth_manifest: list[str], repo_root) -> str | None:
+    """The scoped (``dep``-line) half of the plan-review code-drift check: ``None`` when the
+    signed dependency hashes still match, else the ``stale-code`` reason to fail on.
+
+    Re-hashes at the CURRENT gate ref, NOT the signature's own pinned SHA — that tautology
+    made scoped drift undetectable in attested mode (72d9).
+
+    FAILS CLOSED when the attested basis could not be obtained (bug 505d-b2c5-734f-47d9).
+    The signed hashes
+    of an attestation carrying a ``verified_at_sha`` were produced against a COMMITTED
+    snapshot; hashing the in-place working tree instead is a SUBSTITUTION, and when that tree
+    happens to still hold the reviewed bytes the comparison reports "no drift" for an
+    attestation the moved gate ref has already invalidated — a fail-OPEN claim gate, which
+    the claim gate is documented never to be (docs/plan-review-gate.md; ADR 0002). An
+    attestation with no ``verified_at_sha`` (pre-S4b / never signed against an attested
+    snapshot) keeps the lenient working-tree basis it was always compared against. No new
+    verdict literal is introduced: this stays ``stale-code``, with a reason naming the ref
+    rather than falsely claiming the dependency files changed."""
+    from rebar import signing as _signing
+
+    from .read_set import hash_dep_entry
+
+    basis = gate_ref_hash_basis(repo_root)
+    if basis.degraded and _signing.verified_at_sha_from_manifest(auth_manifest):
+        named = f"'{basis.ref}'" if basis.ref else "the configured gate ref"
+        return (
+            "cannot confirm the code the plan was reviewed against is current: the gate ref "
+            f"{named} could not be resolved to a snapshot, so the attestation cannot be "
+            "re-checked (refusing to certify against the working tree)"
+        )
+    drifted = [
+        path
+        for path, digest in sorted(deps.items())
+        if hash_dep_entry(path, base=basis.path) != digest
+    ]
+    if not drifted:
+        return None
+    shown = ", ".join(drifted[:5]) + (" …" if len(drifted) > 5 else "")
+    return (
+        f"the code the plan was reviewed against drifted: "
+        f"{len(drifted)} dependency file(s) changed ({shown})"
+    )
+
+
 def compute_validity(
     attestation: Mapping[str, Any] | None,
     ticket_state: dict[str, Any],
@@ -603,24 +649,9 @@ def compute_validity(
         if profile is PlanValidityProfile.DEFAULT:
             deps = manifest_deps(auth_manifest)
             if deps:
-                # Re-hash at the CURRENT gate ref, NOT the signature's own pinned SHA —
-                # that tautology made scoped drift undetectable in attested mode (72d9).
-                from .read_set import hash_dep_entry
-
-                base = _hash_basis(repo_root, at_current_gate_ref=True)
-                drifted = [
-                    p
-                    for p, digest in sorted(deps.items())
-                    if hash_dep_entry(p, base=base) != digest
-                ]
-                if drifted:
-                    shown = ", ".join(drifted[:5]) + (" …" if len(drifted) > 5 else "")
-                    return _result(
-                        False,
-                        f"the code the plan was reviewed against drifted: "
-                        f"{len(drifted)} dependency file(s) changed ({shown})",
-                        "stale-code",
-                    )
+                scoped = _scoped_code_drift(deps, auth_manifest, repo_root)
+                if scoped is not None:
+                    return _result(False, scoped, "stale-code")
             elif manifest_file_scope(auth_manifest) != "none":
                 head = signing.head_sha(_config.repo_root(repo_root))
                 signed_head = _authoritative_head(attestation)
