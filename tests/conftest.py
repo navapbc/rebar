@@ -422,8 +422,24 @@ def _remove_readonly_run_snapshots(tmp_path: Path, _isolate_user_config: None) -
 
 @pytest.fixture(autouse=True)
 def _bound_review_bot_shutdown_drain(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep tests from inheriting the review bot's 20-minute production drain."""
+    """Keep tests from inheriting the review bot's 20-minute production drain, and make the
+    hard-shutdown force-exit inert for the whole suite.
+
+    The review-bot lifespan arms a daemon ``threading.Timer`` that calls
+    ``app._force_process_exit`` (``os._exit``) when an orphaned ``asyncio.to_thread`` offload
+    outlives the bounded cancel (bug 9d40-1db8-1bcc-4f91). Many test files across tiers drive
+    that lifespan; a real timer armed by one test can fire ``os._exit`` mid-run and kill the
+    pytest-xdist worker executing an UNRELATED test (seen as "worker 'gwN' crashed"). Patching
+    the module seam to a no-op keeps the arming/gating logic exercised while making the actual
+    process kill inert. Tests that assert the force-down monkeypatch this same seam to a recorder
+    inside the test body, which takes precedence. Guarded on import because the review-bot ``app``
+    module needs the optional ``fastapi`` extra, absent in the default test tier."""
     monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "1.0")
+    try:
+        from rebar.review_bot import app as _review_bot_app
+    except ImportError:
+        return
+    monkeypatch.setattr(_review_bot_app, "_force_process_exit", lambda code=0: None, raising=False)
 
 
 @pytest.fixture(scope="session")
