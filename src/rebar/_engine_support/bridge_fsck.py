@@ -34,6 +34,7 @@ from pathlib import Path
 from types import ModuleType
 
 from rebar._errors import RebarError
+from rebar._mcp_errors import js_safe_dumps
 from rebar._store.gitutil import run_git
 
 # ---------------------------------------------------------------------------
@@ -677,7 +678,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"Error: {diagnostic}\n")
         return 2
     if out_fmt == "json":
-        print(json.dumps(findings))
+        print(js_safe_dumps(findings))
     else:
         print(_format_report(findings))
 

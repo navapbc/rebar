@@ -133,7 +133,6 @@ def _review_code(argv: list[str]) -> int:
 
     Reviews a git range (``--base``/``--head``) or a ``--diff-file`` with one or
     more reviewers; JSON output conforms to the ``review_result`` schema."""
-    import json as _json
 
     parser = _llm_parsers.build_review_code(prog="rebar review-code")
     args = parser.parse_args(argv)
@@ -176,7 +175,7 @@ def _review_code(argv: list[str]) -> int:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
     if args.output == "json":
-        sys.stdout.write(_json.dumps(result) + "\n")
+        sys.stdout.write(js_safe_dumps(result) + "\n")
     else:
         _render_review_text(result)
         _render_source_line(result)
@@ -190,7 +189,6 @@ def _scan_spec(argv: list[str]) -> int:
 
     Scans open epics against a spec for gaps/conflicts/overlaps; JSON output
     conforms to the ``review_result`` schema."""
-    import json as _json
 
     parser = _llm_parsers.build_scan_spec(prog="rebar scan-spec")
     args = parser.parse_args(argv)
@@ -219,7 +217,7 @@ def _scan_spec(argv: list[str]) -> int:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
     if args.output == "json":
-        sys.stdout.write(_json.dumps(result) + "\n")
+        sys.stdout.write(js_safe_dumps(result) + "\n")
     else:
         _render_review_text(result)
         _render_source_line(result)
@@ -234,7 +232,6 @@ def _verify_completion(argv: list[str]) -> int:
     JSON output conforms to the ``completion_verdict`` schema in
     ``OUTPUT_SCHEMAS['verify_completion']``. The command returns zero on PASS and one on FAIL
     or error."""
-    import json as _json
 
     parser = _llm_parsers.build_verify_completion(prog="rebar verify-completion")
     args = parser.parse_args(argv)
@@ -242,7 +239,7 @@ def _verify_completion(argv: list[str]) -> int:
     from rebar import llm
 
     if args.check:
-        sys.stdout.write(_json.dumps(llm.available_backends(), indent=2) + "\n")
+        sys.stdout.write(js_safe_dumps(llm.available_backends(), indent=2) + "\n")
         return 0
     if not args.ticket_id:
         parser.error("ticket_id is required")
@@ -265,7 +262,7 @@ def _verify_completion(argv: list[str]) -> int:
 
     result["record"] = record_completion_verdict(result, args.ticket_id, sign=not args.no_sign)
     if args.output == "json":
-        sys.stdout.write(_json.dumps(result) + "\n")
+        sys.stdout.write(js_safe_dumps(result) + "\n")
     else:
         _render_verdict_text(result)
         _render_source_line(result)
@@ -319,7 +316,6 @@ def _review_plan(argv: list[str]) -> int:
     without them. A ticket that is not yet claimable (status closed/idea/blocked, or
     open but blocked by an unclosed dependency) fast-fails to INDETERMINATE with no LLM
     unless ``--force`` is passed. Exit 0 on PASS, 1 on BLOCK, 2 on INDETERMINATE."""
-    import json as _json
 
     parser = _llm_parsers.build_review_plan(prog="rebar review-plan")
     args = parser.parse_args(argv)
@@ -335,7 +331,7 @@ def _review_plan(argv: list[str]) -> int:
     from rebar import llm
 
     if args.check:
-        sys.stdout.write(_json.dumps(llm.available_backends(), indent=2) + "\n")
+        sys.stdout.write(js_safe_dumps(llm.available_backends(), indent=2) + "\n")
         return 0
     if args.status:
         if not args.ticket_id:
@@ -379,7 +375,7 @@ def _review_plan(argv: list[str]) -> int:
 
         sys.stderr.write(REMEDY + "\n")
     if args.output == "json":
-        sys.stdout.write(_json.dumps(result) + "\n")
+        sys.stdout.write(js_safe_dumps(result) + "\n")
     else:
         _render_plan_review_text(result)
         _render_source_line(result)
@@ -398,7 +394,6 @@ def _sign_review(argv: list[str]) -> int:
     ``REVIEW_RESULT`` sidecar — WITHOUT re-running the multi-pass LLM review. No LLM, no
     network, no 'agents' extra. REFUSES (exit 1) when there is no PASS sidecar, or the plan
     changed since the review (stale). Exit 0 on a successful re-sign."""
-    import json as _json
 
     parser = _llm_parsers.build_sign_review(prog="rebar sign-review")
     args = parser.parse_args(argv)
@@ -410,7 +405,7 @@ def _sign_review(argv: list[str]) -> int:
 
     result = llm.resign_plan_review(args.ticket_id)
     if args.output == "json":
-        sys.stdout.write(_json.dumps(result) + "\n")
+        sys.stdout.write(js_safe_dumps(result) + "\n")
     else:
         if result.get("ok"):
             sys.stdout.write(

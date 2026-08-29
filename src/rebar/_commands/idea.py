@@ -15,12 +15,12 @@ of a non-``open`` genesis status.
 
 from __future__ import annotations
 
-import json
 import sys
 
 from rebar._commands import composer
 from rebar._commands._seam import CommandError
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
+from rebar._mcp_errors import js_safe_dumps
 
 _USAGE = 'Usage: rebar idea "<title>" [--description=<text>] [--output json]'
 
@@ -72,7 +72,7 @@ def idea_cli(argv: list[str], *, repo_root=None) -> int:
     except CommandError as exc:
         if fmt == "json" and exc.error_code:
             print(
-                json.dumps(
+                js_safe_dumps(
                     error_envelope(exc.error_code, exc.input_str, exc.message, exc.returncode)
                 )
             )
@@ -80,7 +80,7 @@ def idea_cli(argv: list[str], *, repo_root=None) -> int:
         return exc.returncode
 
     if fmt == "json":
-        print(json.dumps({"id": res["id"], "alias": res["alias"], "title": res["title"]}))
+        print(js_safe_dumps({"id": res["id"], "alias": res["alias"], "title": res["title"]}))
     else:
         # Normalized confirmation (ticket 6bda-9d58-8546-4638): one line keeping the
         # old form's idea marker, alias, id, and title.

@@ -25,6 +25,7 @@ from typing import Any, cast
 
 from rebar._engine_support.output import error_envelope
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._mcp_errors import js_safe_dumps
 from rebar.reducer import is_terminal_status, reduce_all_tickets, reduce_ticket
 
 # Files that are shared-by-design and support concurrent additive edits.
@@ -546,7 +547,7 @@ def run(argv: list[str], tracker: str) -> int:
     except EpicNotFound as exc:
         if json_output:
             print(
-                json.dumps(
+                js_safe_dumps(
                     error_envelope(
                         "ticket_not_found",
                         exc.epic_id,
@@ -564,7 +565,7 @@ def run(argv: list[str], tracker: str) -> int:
         print(matrix, file=sys.stderr)
 
     if json_output:
-        print(json.dumps(to_json_dict(result), indent=2))
+        print(js_safe_dumps(to_json_dict(result), indent=2))
     else:
         print(render_text(result))
     return 0
