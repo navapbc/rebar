@@ -1785,3 +1785,76 @@ def test_the_bare_build_tag_is_never_retired(mcp_box: dict[str, object]) -> None
     assert _image_removals(cmds) == [], (
         f"the bare `compose-mcp` build tag must never be retired\n{ctx}"
     )
+
+
+def test_failed_handshake_container_is_not_promoted(mcp_box: dict[str, object]) -> None:
+    """A container that answers /health but reports it could NOT serve an MCP request must not
+    take the upstream.
+
+    /health is registered OUTSIDE the auth middleware and the DNS-rebinding guard, so a 200 said
+    only "the process is listening": a container whose allowlist does not admit the hostname real
+    traffic carries answers 200 while 421-ing every real request, and this gate promoted it
+    (vaccinated-flavorous-solenodon). The server now drives one real `initialize` through its own
+    session manager during lifespan startup and reports the outcome.
+    """
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    state: Path = mcp_box["state"]  # type: ignore[assignment]
+    before = upstream.read_bytes()
+    (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
+        '{"in_flight":0,"store":{"path":"/t","present":true,"expected":true},'
+        '"handshake":{"ok":false,"status":421,"host":"127.0.0.1:8091",'
+        '"error":"initialize returned HTTP 421"}}'
+    )
+
+    result = _run(mcp_box)
+    cmds = _commands(mcp_box)
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp-handshake-failed" in result.stdout + result.stderr, (
+        f"a container that cannot serve MCP must be refused by name, not promoted\n{ctx}"
+    )
+    assert upstream.read_bytes() == before, (
+        f"the OLD upstream must stay live and byte-identical\n{ctx}"
+    )
+    assert "nginx-reload" not in cmds, f"the upstream must not be flipped\n{ctx}"
+    assert any("rm-f" in c for c in cmds), f"the refused container must be removed\n{ctx}"
+    # Component independence: the refusal records the MCP backoff, never $BACKOFF_FILE, which
+    # gates the whole script and would throttle a review-bot deploy that never ran this tick
+    # (autodeploy.sh:64-69 / prespinal-gem-kinkajou).
+    assert (state / "mcp-deploy-backoff").exists(), f"the mcp backoff must be recorded\n{ctx}"
+    assert not (state / "deploy-backoff").exists(), (
+        f"an mcp failure must NOT record the review-bot backoff\n{ctx}"
+    )
+
+
+def test_container_reporting_a_successful_handshake_is_promoted(mcp_box: dict[str, object]) -> None:
+    """The other direction: a container that DID serve an MCP handshake still takes the upstream.
+    Without this, "refuses everything" would pass the test above."""
+    (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
+        '{"in_flight":0,"handshake":{"ok":true,"status":200,'
+        '"host":"rebar.solutions.navateam.com","elapsed_ms":3.0}}'
+    )
+
+    result = _run(mcp_box)
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp-handshake-failed" not in result.stdout + result.stderr, ctx
+    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+        f"a container that proved it can serve MCP must be promoted\n{ctx}"
+    )
+
+
+def test_container_with_no_handshake_field_still_promotes(mcp_box: dict[str, object]) -> None:
+    """Mixed-version safety: an OLDER container's /health predates the `handshake` field, and an
+    absent field must not read as a failure — exactly how the `store` gate treats one."""
+    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}')  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp-handshake-failed" not in result.stdout + result.stderr, ctx
+    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+        f"a mixed-version deploy must not be blocked by the new gate\n{ctx}"
+    )
