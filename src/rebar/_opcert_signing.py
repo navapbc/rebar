@@ -280,6 +280,30 @@ def _opcert_own_public_keys(tracker: str | os.PathLike[str]) -> list[str]:
     return list(dict.fromkeys([p for p in pubs if p]))
 
 
+def _warn_if_verify_cannot_resolve(
+    tracker: str | os.PathLike[str], key_path: str, principal: str
+) -> None:
+    """Bug 879b guard: after minting under ``key_path``, WARN when the same-environment verify
+    resolver (:func:`_opcert_own_public_keys`) cannot resolve a public counterpart for that key.
+
+    That divergence is exactly the class 2337 fixed: signing SUCCEEDS but ``verify_signature`` on
+    this same box returns ``foreign_key`` and the claim gate then refuses every ticket — a silent,
+    deferred failure with no guard surfacing it at the point of minting. This helper is purely
+    ADDITIVE: it logs, it never refuses, and it never changes the minted record. It stays silent
+    on the healthy path (post-2337 the signing key's public half IS in the resolvable set), firing
+    only on the real regression divergence."""
+    signed_pub = _read_opcert_pub(key_path)
+    if signed_pub is not None and signed_pub in _opcert_own_public_keys(tracker):
+        return
+    logger.warning(
+        "op-cert signed under a key whose public counterpart the same-environment verify path "
+        "cannot resolve (key_path=%s, principal=%s): the signature is valid but verify_signature "
+        "on this environment will not certify it (foreign_key). See bug 879b-9bf0-86fd-4a6b.",
+        key_path,
+        principal,
+    )
+
+
 def _manifest_material_fingerprint(manifest) -> str | None:
     """Extract the bound ``material: <fingerprint>`` value from a manifest (the material both the
     plan-review and completion manifests carry), or None when absent."""
@@ -320,6 +344,7 @@ def mint_opcert_record(
     key_path = ensure_opcert_key(str(tracker), create_if_missing=True, binding=binding)
 
     principal = opcert_principal(str(tracker), binding=binding)
+    _warn_if_verify_cannot_resolve(tracker, key_path, principal)
     material_fingerprint = _manifest_material_fingerprint(steps) or ""
     # Bound commit: the manifest's signed `verified-at-sha:` when present (an attested review or
     # close), else current HEAD.
