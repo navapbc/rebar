@@ -75,14 +75,16 @@ def _workflow_caller_code(exc: BaseException) -> str | None:
     Extracted from :func:`error_code_for` (bug dbca-97ac-ad96-4d6d) so the classifier stays
     under the per-function complexity ceiling. ``WorkflowNotFoundError`` (an unknown workflow
     name or ``run_id``) is a caller ``not_found``; a ``WorkflowParseError`` /
-    ``WorkflowValidationError`` / ``WorkflowVersionError`` (a workflow that WAS found but will
-    not parse/lint/migrate) is caller ``invalid_input``. Returns ``None`` for the bare
-    ``WorkflowError`` base so its EXECUTE-time LLM outage still resolves to ``llm_unavailable``.
+    ``WorkflowValidationError`` / ``WorkflowVersionError`` / ``WorkflowUnknownStepError`` (a
+    workflow that WAS found but will not parse/lint/migrate, or names an unknown scripted step)
+    is caller ``invalid_input``. Returns ``None`` for the bare ``WorkflowError`` base so its
+    EXECUTE-time LLM outage still resolves to ``llm_unavailable``.
     """
     try:
         from rebar.llm.errors import (
             WorkflowNotFoundError,
             WorkflowParseError,
+            WorkflowUnknownStepError,
             WorkflowValidationError,
             WorkflowVersionError,
         )
@@ -90,7 +92,15 @@ def _workflow_caller_code(exc: BaseException) -> str | None:
         return None
     if isinstance(exc, WorkflowNotFoundError):
         return "not_found"
-    if isinstance(exc, (WorkflowParseError, WorkflowValidationError, WorkflowVersionError)):
+    if isinstance(
+        exc,
+        (
+            WorkflowParseError,
+            WorkflowValidationError,
+            WorkflowVersionError,
+            WorkflowUnknownStepError,
+        ),
+    ):
         return "invalid_input"
     return None
 
@@ -109,9 +119,10 @@ def error_code_for(exc: BaseException) -> str:
     5. a non-empty ``exc.error_code`` attribute → that code
     6. a workflow-engine caller-input error → ``WorkflowNotFoundError`` (unknown name/run) →
        ``not_found``; ``WorkflowParseError`` / ``WorkflowValidationError`` /
-       ``WorkflowVersionError`` (a workflow that WAS found but will not parse/lint/migrate) →
-       ``invalid_input``. The bare ``WorkflowError`` base is deliberately NOT remapped — a
-       workflow EXECUTE step can genuinely fail on LLM unavailability, so it falls through to 7.
+       ``WorkflowVersionError`` / ``WorkflowUnknownStepError`` (a workflow that WAS found but
+       will not parse/lint/migrate, or names an unknown scripted step) → ``invalid_input``. The
+       bare ``WorkflowError`` base is deliberately NOT remapped — a workflow EXECUTE step can
+       genuinely fail on LLM unavailability, so it falls through to 7.
     7. ``LLMError`` → ``llm_unavailable``
     8. fallback → ``command_failed``
 

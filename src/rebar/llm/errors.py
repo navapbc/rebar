@@ -129,6 +129,17 @@ class WorkflowNotFoundError(WorkflowError):
         super().__init__(f"{source}: {message}" if source else message)
 
 
+class WorkflowUnknownStepError(WorkflowError):
+    """A workflow step's ``uses:`` names a scripted step absent from the step registry —
+    a caller/plan-authoring fault in a workflow that WAS found (the linter validates step
+    shape, not registry membership, so an unknown ``uses:`` reaches execute time). A
+    dedicated subclass (NOT the bare :class:`WorkflowError` execute base) so
+    ``error_code_for`` maps it to the caller-facing ``invalid_input`` code — the same class
+    as :class:`WorkflowValidationError` — while a genuine EXECUTE-time LLM outage on the bare
+    base still maps to ``llm_unavailable`` (dbca-97ac-ad96-4d6d AC3). Message passthrough,
+    mirroring :class:`WorkflowNotFoundError`."""
+
+
 class WorkflowParseError(WorkflowError):
     """A workflow file is not loadable: bad YAML, a rejected construct (anchor,
     merge key), an over-cap file, or not a single mapping document. Carries the
