@@ -51,6 +51,22 @@ def _event(change_id="rebar~main~Iabc", revision="rev1", project="rebar") -> dic
     }
 
 
+@pytest.fixture(autouse=True)
+def _neutralize_hard_shutdown_exit(monkeypatch):
+    """Safety net: the lifespan arms a daemon ``threading.Timer`` that calls
+    ``app._force_process_exit`` (``os._exit``) if a shutdown ever outlives its budget. A stale
+    timer from any lifespan test must never actually terminate the pytest process, so patch the
+    seam to a harmless no-op for every test. The dedicated force-down test overrides this with
+    its own recorder. Guarded because the review-bot ``app`` module needs the optional
+    ``fastapi`` extra, which is absent in the default test tier.
+    """
+    try:
+        from rebar.review_bot import app as appmod
+    except ImportError:
+        return
+    monkeypatch.setattr(appmod, "_force_process_exit", lambda code=0: None, raising=False)
+
+
 def test_candidate_events_skips_closed_changes():
     # Bug c943: the backfill reconciler re-voted MERGED/ABANDONED changes, drawing a 409
     # "change is closed" that the voter records as a (non-actionable) voter_error and — since
@@ -2184,6 +2200,96 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
         f"review-bot shutdown took {elapsed:.2f}s — the lifespan cancel/await is not bounded; "
         "a background task slow to honor cancellation hangs shutdown (c2ba AC2)."
     )
+
+
+def test_shutdown_forces_process_exit_when_an_orphaned_to_thread_review_outlives_cancel(
+    monkeypatch, tmp_path
+):
+    """AC1/AC2/AC5 (unoutlawed-eloquent-amphibian): the ``drain + cancel`` bound must hold at
+    the PROCESS level, not merely for the asyncio await.
+
+    Every review runs its blocking work through ``asyncio.to_thread`` on the default
+    ``ThreadPoolExecutor``, whose worker threads are **non-daemon**. Cancelling a task parked in
+    such an offload returns the *coroutine* at once (so the lifespan's bounded ``gather``
+    succeeds) but the OS thread keeps running the abandoned review. ``asyncio.run``'s own
+    teardown then JOINS the default executor (uvicorn's runner gives it a 5-minute window) and
+    interpreter finalization joins the surviving non-daemon thread with NO bound — so the
+    process, whose listener uvicorn already closed at the start of graceful shutdown, stays
+    alive (holding its published ``:8000``) for the whole remaining review. That is the live
+    2026-08-28 review-bot zombie, and it violates ADR 0067's ``total shutdown <= drain +
+    cancel`` invariant, which names exactly "the orphaned OS thread of an ``asyncio.to_thread``
+    offload that cannot be force-cancelled" as the hazard the bound must cover.
+
+    The lifespan must therefore FORCE THE PROCESS DOWN once its bounded shutdown work is done,
+    so the container releases the port for the replacement. This asserts the force-down ACTION
+    fired (an injected seam — a real ``os._exit`` cannot be observed in-process), not a
+    stopwatch, so it does not depend on the banned wall-clock timing class.
+    """
+    import threading
+    import types
+
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    exits: list[int] = []
+    # Held-out seam: record the force-down instead of actually terminating the test process.
+    monkeypatch.setattr(
+        appmod, "_force_process_exit", lambda code=0: exits.append(code), raising=False
+    )
+    # Short hard-shutdown grace so the daemon deadline fires quickly under test.
+    monkeypatch.setattr(appmod, "_HARD_SHUTDOWN_GRACE_SECONDS", 0.2, raising=False)
+
+    thread_started = threading.Event()
+    thread_finished = threading.Event()
+
+    def _orphaned_blocking_review():
+        thread_started.set()
+        time.sleep(1.5)  # the abandoned review still running in the to_thread OS thread
+        thread_finished.set()
+
+    async def _worker_that_offloads(queue, cfg):
+        # Mirror production: the review's blocking work runs via asyncio.to_thread on the
+        # default (non-daemon) executor. Cancelling THIS coroutine unwinds it at once, but the
+        # OS thread keeps running _orphaned_blocking_review — the un-force-cancellable case.
+        await asyncio.to_thread(_orphaned_blocking_review)
+
+    def _idle_reconcile_loop(*_a, **_k):
+        async def _loop():
+            await asyncio.sleep(3600)  # well-behaved: honors cancellation promptly
+
+        return _loop()
+
+    monkeypatch.setattr(appmod, "_worker", _worker_that_offloads, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_reconcile_loop, raising=True)
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.1")
+    monkeypatch.setenv("SHUTDOWN_CANCEL_SECONDS", "0.2")
+    fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=_cfg(tmp_path)))
+
+    async def _run():
+        async with appmod.lifespan(fake_app):
+            # Let the worker reach the to_thread offload so the OS thread is genuinely running
+            # when shutdown cancels the task (that is the state that hangs the teardown).
+            for _ in range(100):
+                if thread_started.is_set():
+                    break
+                await asyncio.sleep(0.02)
+
+    # asyncio.run's teardown blocks on the orphaned thread (~1.5s) even after the fix; the
+    # daemon hard-shutdown deadline fires the force-down seam while it is blocked.
+    asyncio.run(_run())
+    for _ in range(200):  # poll for the daemon deadline to fire — no wall-clock assertion
+        if exits:
+            break
+        time.sleep(0.02)
+
+    assert exits == [0], (
+        "the lifespan did not force the process down: an orphaned asyncio.to_thread review OS "
+        "thread will keep the container (and its published :8000) alive past drain+cancel — "
+        "the 2026-08-28 review-bot zombie. ADR 0067's drain+cancel bound must hold for the "
+        "PROCESS, not just the asyncio await."
+    )
+    # Let the orphaned thread finish so it does not leak into later tests.
+    thread_finished.wait(3.0)
 
 
 # ── 9ec0: the shutdown drain must cover the RECONCILER's inline review ────────

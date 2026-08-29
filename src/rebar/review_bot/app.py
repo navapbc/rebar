@@ -35,6 +35,7 @@ import contextlib
 import hmac
 import logging
 import os
+import threading
 import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
@@ -78,6 +79,45 @@ DEFAULT_PORT = 8000
 #: Number of background workers draining the review queue. One is enough for a
 #: single-box PoC (reviews serialize on the per-(change,rev) lock anyway).
 WORKER_COUNT = 1
+
+#: Grace after the bounded cancel/gather before the lifespan FORCE-EXITS the process (ADR 0067).
+#: ADR 0067's "total shutdown <= drain + cancel" is a PROCESS-level bound, but the asyncio-side
+#: cancel cannot deliver it on its own: every review runs its blocking work through
+#: ``asyncio.to_thread`` on the default (non-daemon) ThreadPoolExecutor. Cancelling a task parked
+#: in such an offload returns the coroutine at once — so the bounded ``gather`` above succeeds —
+#: but the OS thread keeps running the abandoned review. After the lifespan returns, uvicorn's
+#: ``asyncio.run`` teardown JOINS that executor (a 5-minute window) and then interpreter
+#: finalization joins the surviving non-daemon thread with NO bound, so the process — whose
+#: listener uvicorn already closed — outlives ``drain + cancel`` by the whole remaining review,
+#: 502ing ``/review/`` while a stale worker keeps voting (the 2026-08-28 zombie). A short daemon
+#: deadline armed at the end of the shutdown path restores the invariant: a clean teardown exits
+#: BEFORE it elapses (the daemon timer evaporates with the process), and only a genuinely-hung
+#: orphaned thread trips it into a hard ``os._exit`` — self-distinguishing on real process
+#: liveness rather than on any fragile thread-inspection heuristic. Kept small so the worst case
+#: (drain + cancel + this grace) still fits well inside the container ``stop_grace_period``.
+_HARD_SHUTDOWN_GRACE_SECONDS = 5.0
+
+
+def _force_process_exit(code: int = 0) -> None:  # pragma: no cover - exercised via the seam
+    """Terminate the process immediately, bypassing the interpreter finalization that would
+    otherwise JOIN an orphaned non-daemon ``asyncio.to_thread`` worker for the rest of its
+    review. Injected as a module seam so tests can observe the force-down without dying."""
+    os._exit(code)
+
+
+def _arm_hard_shutdown(grace: float) -> threading.Timer:
+    """Arm a DAEMON timer that force-exits the process ``grace`` seconds from now (ADR 0067).
+
+    Daemon so it never itself keeps the process alive: if the shutdown completes cleanly and the
+    interpreter exits first, the pending timer is discarded with the process. It only ever fires
+    when the process is still alive ``grace`` seconds after its bounded shutdown work finished —
+    i.e. when an orphaned OS thread is holding it up — and then hard-exits so the container
+    releases its published port for the replacement instead of lingering as a zombie."""
+    timer = threading.Timer(grace, _force_process_exit)
+    timer.daemon = True
+    timer.start()
+    return timer
+
 
 #: The per-review wall-clock timeout now lives in ``config.review_timeout_seconds()`` so the
 #: live worker (below) AND the backfill reconciler (``reconcile.reconcile_once``) bound a single
@@ -213,6 +253,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # that re-drives a rerun the discarded in-memory queue lost. Cleared HERE, after the
         # bounded cancel, so every task that observes it has already been drained or abandoned.
         _reconcile.clear_stop()
+        # Restore ADR 0067's PROCESS-level "shutdown <= drain + cancel" bound. The bounded cancel
+        # above returns the coroutines promptly, but a review whose blocking work is running in an
+        # ``asyncio.to_thread`` offload leaves a non-daemon OS thread alive; uvicorn's
+        # ``asyncio.run`` teardown then joins it (up to 5 min) and interpreter finalization joins
+        # it unbounded, so without this the process — listener already closed — lingers as the
+        # observed zombie. Arm a short DAEMON deadline: a clean teardown exits before it fires
+        # (the timer evaporates with the process), and only a genuinely-orphaned thread trips it
+        # into a hard exit, well within the container ``stop_grace_period``.
+        _arm_hard_shutdown(_HARD_SHUTDOWN_GRACE_SECONDS)
 
 
 def _event_revision(event: Any) -> str | None:
