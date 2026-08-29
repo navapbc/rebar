@@ -586,8 +586,11 @@ class PydanticAIRunner:
             # execution mode, model, and wall-clock — so a slow/serial fan-out (e.g. the
             # container per-child loop) is visible without a debugger. Quiet by default;
             # enable with REBAR_LOG_LEVEL=INFO. Failures log at WARNING.
+            _target_ticket_ids = req.target.get("ticket_ids")
             _call_label = (
-                ",".join(req.reviewers) if req.reviewers else (req.target.get("ticket_id") or "?")
+                ",".join(req.reviewers)
+                if req.reviewers
+                else (_target_ticket_ids[0] if _target_ticket_ids else "?")
             )
             _t0 = time.monotonic()
             # Widened from `dict[str, int]` for bug aec1: the run-shape keys merged in after a
@@ -679,7 +682,7 @@ class PydanticAIRunner:
                     req_limit,
                     eff_max_iter,
                     duration_s=time.monotonic() - _t0,
-                    ticket=req.target.get("ticket_id"),
+                    ticket=(_target_ticket_ids[0] if _target_ticket_ids else None),
                 )
                 # The spend row above goes to the JSONL usage log; this counts the SAME failure
                 # in memory so a run that survives it can report it on the verdict coverage
@@ -753,7 +756,7 @@ class PydanticAIRunner:
             call_label=_call_label,
             ran_model=ran_model,
             duration_s=time.monotonic() - _t0,
-            ticket=req.target.get("ticket_id"),
+            ticket=(_target_ticket_ids[0] if _target_ticket_ids else None),
         )
         return result
 

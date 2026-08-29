@@ -538,8 +538,9 @@ tool_calls_distinct=38` is an agent exploring — and it reads straight off the 
 diagnosis costs nothing and needs no re-run of a billable call. Each is written **only when
 present**: absent means "not measured", never `0` (which would falsely assert "used no tools").
 Rows also carry **`duration_s`** (wall clock for the call — a run can be cheap and still be a
-twenty-minute stall) and **`ticket`** (the ticket the call was made against, which makes spend
-comparable per unit of work rather than only per op).
+twenty-minute stall) and **`ticket`** (the first element of the request target's `ticket_ids`
+list, which makes spend comparable per unit of work rather than only per op — absent when that
+list is empty or missing).
 
 **The default gate sink.** `REBAR_USAGE_LOG` still wins outright when set, but with it unset a run
 inside a **gate session** (`review-plan`, `verify-completion`, …) now appends to

@@ -333,3 +333,76 @@ def test_runner_records_usage_at_seam(tmp_path, monkeypatch):
     # provider" is the ABSENCE of the key — the same convention as `model`/`step`/`model_class`.
     assert "provider" not in rows[0]
     assert "timestamp" in rows[0]
+
+
+def _run_with_target(tmp_path, monkeypatch, *, target, reviewers=("v",)):
+    """Drive PydanticAIRunner.run() through the offline FunctionModel seam (same
+    fixture as test_runner_records_usage_at_seam) with a caller-supplied `target`,
+    and return the single written usage row."""
+    pytest.importorskip("pydantic_ai")
+    import pydantic_ai.models
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import PydanticAIRunner, RunRequest
+
+    log_path = tmp_path / "usage.jsonl"
+    monkeypatch.setenv(usage_log.ENV_VAR, str(log_path))
+    pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
+
+    def gen(messages, info):
+        return ModelResponse(parts=[TextPart("hi")])
+
+    cfg = LLMConfig(repo_path=".")
+    req = RunRequest(
+        system_prompt="s",
+        instructions="i",
+        config=cfg,
+        reviewers=list(reviewers),
+        target=target,
+        mode="text",
+    )
+    PydanticAIRunner(cfg, model_override=FunctionModel(gen)).run(req)
+
+    rows = [json.loads(line) for line in log_path.read_text().splitlines()]
+    assert len(rows) == 1
+    return rows[0]
+
+
+# ── usage-log ticket attribution reads target["ticket_ids"] (bug undamaged-adept-xenarthra) ──
+def test_runner_records_ticket_from_target_ticket_ids(tmp_path, monkeypatch):
+    """Happy path: a single-element ticket_ids list attributes the row to that ticket."""
+    row = _run_with_target(tmp_path, monkeypatch, target={"ticket_ids": ["REB-1"]})
+    assert row["ticket"] == "REB-1"
+
+
+def test_runner_records_first_ticket_when_multiple(tmp_path, monkeypatch):
+    """A multi-ticket run attributes the row to the FIRST ticket id (pinned rule, not the
+    joined list — a graph run naming several tickets still produces one row)."""
+    row = _run_with_target(tmp_path, monkeypatch, target={"ticket_ids": ["REB-1", "REB-2"]})
+    assert row["ticket"] == "REB-1"
+
+
+def test_runner_omits_ticket_when_ticket_ids_empty(tmp_path, monkeypatch):
+    """Every real producer writes ticket_ids as a list that MAY be empty (never omits the
+    key) — this is the actual no-ticket path, not the missing-key case below. `record()`
+    omits the field entirely rather than writing null when ticket=None."""
+    row = _run_with_target(tmp_path, monkeypatch, target={"ticket_ids": []})
+    assert "ticket" not in row
+
+
+def test_runner_omits_ticket_when_ticket_ids_missing(tmp_path, monkeypatch):
+    """A target that omits ticket_ids entirely (e.g. a bare {"kind": ...}) also yields no
+    ticket attribution, same as the empty-list case."""
+    row = _run_with_target(tmp_path, monkeypatch, target={"kind": "workflow_step"})
+    assert "ticket" not in row
+
+
+def test_runner_call_label_falls_back_to_first_ticket_id(tmp_path, monkeypatch):
+    """The third read site (_call_label, used as `op` when no reviewers are set) also reads
+    ticket_ids, first-element rule — not the retired singular `ticket_id` key."""
+    row = _run_with_target(
+        tmp_path, monkeypatch, target={"ticket_ids": ["REB-9", "REB-10"]}, reviewers=()
+    )
+    assert row["op"] == "REB-9"
