@@ -142,8 +142,12 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
   is **no dependency on util-linux's `flock` binary** (or any other external tool).
   The `mkdir` window keeps mutual exclusion holding even where `fcntl.flock` is
   unreliable (e.g. some network filesystems).
-- [`acli`](https://developer.atlassian.com/cloud/acli/) (Atlassian CLI) — only for
-  **live** Jira reconciliation.
+- [`acli`](https://developer.atlassian.com/cloud/acli/) (Atlassian CLI) — a
+  **required external binary for the Jira Cloud reconciliation/bridge path**: every
+  `bridge`/`reconcile` Cloud mutation shells out to it, so it must be installed on
+  `PATH` (install pointer: [docs/jira-sync-setup.md](docs/jira-sync-setup.md)). The
+  `[jira-datacenter]` Data Center path does **not** need it — it uses the `jira`
+  Python library.
 
 **Python dependencies.** A base install (`pip install nava-rebar`) provides the `rebar` CLI, the `import rebar` library, and the lean workflow engine. It installs [`pyyaml>=6`](https://pyyaml.org) for the workflow DSL loader, [`jsonschema>=4.18`](https://python-jsonschema.readthedocs.io) for schema registry and workflow input and output validation, and [`referencing>=0.30`](https://referencing.readthedocs.io) for JSON Schema `$ref` resolution. The engine core and reconciler otherwise use the Python standard library. All other dependencies are optional extras that are imported lazily to keep the base installation light. CI verifies this boundary.
 
@@ -179,7 +183,9 @@ import package and commands stay `rebar` / `rebar-mcp`). Pick the channel that
 fits. (System prerequisites in all cases: `git` (≥ 2.38 to develop/test rebar; see
 [Requirements](#requirements)) and `python3` (≥ 3.11); write
 serialization uses a built-in `fcntl.flock` + `mkdir` lock with no external
-binary; `acli` only for live Jira reconciliation.)
+binary; `acli` is required on `PATH` for the Jira Cloud reconciliation/bridge path
+(see [docs/jira-sync-setup.md](docs/jira-sync-setup.md)), while the
+`[jira-datacenter]` Data Center path does not need it.)
 
 ### Homebrew (CLI)
 

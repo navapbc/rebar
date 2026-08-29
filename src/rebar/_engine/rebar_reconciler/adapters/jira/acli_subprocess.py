@@ -10,11 +10,13 @@ typed errors that surface those conditions. stdlib only.
 from __future__ import annotations
 
 import enum
+import errno
 import json
 import logging
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -30,6 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _DEFAULT_ACLI_CMD: list[str] = ["acli"]
+_ACLI_INSTALL_DOC = "docs/jira-sync-setup.md"
 _MAX_ATTEMPTS: int = 3  # initial + 2 retries
 _AUTH_FAILURE_CODE: int = 401
 
@@ -170,6 +173,31 @@ def _rate_limit_backoff(attempt: int, stderr: str | None) -> float | None:
         attempt + 1,
     )
     return delay
+
+
+class AcliNotInstalledError(FileNotFoundError):
+    """The `acli` (Atlassian CLI) binary — required for Jira Cloud operations — is not on PATH."""
+
+
+def acli_binary_available(acli_cmd: list[str] | None = None) -> bool:
+    """True if the acli transport binary (acli_cmd[0], default 'acli') is resolvable/executable."""
+    exe = (acli_cmd if acli_cmd is not None else _DEFAULT_ACLI_CMD)[0]
+    has_sep = os.sep in exe or (os.altsep is not None and os.altsep in exe)
+    if has_sep:
+        return os.path.isfile(exe) and os.access(exe, os.X_OK)
+    return shutil.which(exe) is not None
+
+
+def require_acli(acli_cmd: list[str] | None = None) -> None:
+    """Raise AcliNotInstalledError (typed, actionable) if the acli binary is unavailable."""
+    if acli_binary_available(acli_cmd):
+        return
+    exe = (acli_cmd if acli_cmd is not None else _DEFAULT_ACLI_CMD)[0]
+    message = (
+        f"{exe!r} not found on PATH: the Atlassian CLI ('acli') is required for Jira "
+        f"Cloud reconciliation/bridge operations. Install it — see {_ACLI_INSTALL_DOC}."
+    )
+    raise AcliNotInstalledError(errno.ENOENT, message)
 
 
 class AssigneeNotFoundError(BackendAssigneeNotFoundError, ValueError):
@@ -553,7 +581,14 @@ def _run_acli(
         )
         if os.name == "posix":
             popen_kwargs["start_new_session"] = True  # POSIX-only (killpg needs it)
-        p = subprocess.Popen(full_cmd, **popen_kwargs)
+        try:
+            p = subprocess.Popen(full_cmd, **popen_kwargs)
+        except FileNotFoundError as exc:
+            # The acli transport binary is absent from PATH. Re-raise as the
+            # typed, actionable error (a FileNotFoundError subclass, so existing
+            # handlers still catch it) instead of the bare errno-2 message.
+            require_acli(base)
+            raise AcliNotInstalledError(errno.ENOENT, str(exc)) from exc
         try:
             out, err = p.communicate(timeout=call_timeout)
         except subprocess.TimeoutExpired as exc:

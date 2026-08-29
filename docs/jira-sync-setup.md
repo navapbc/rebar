@@ -39,6 +39,11 @@ Everything else project-specific lives in GitHub repo Variables/Secrets:
 
 - **A Jira project** to mirror into (its key, e.g. `REB`), reachable from the
   Atlassian CLI (`acli`).
+  - **Non-container / `pip install` setups:** `acli` must be installed on `PATH` for
+    the Jira **Cloud** path — the reconciler shells out to it for all Cloud Jira I/O,
+    so an absent binary fails the pass. Pin its version + sha256 as described in the
+    pinned-version section below (step 3). The Data Center (`[jira-datacenter]`) path
+    does **not** require `acli` — it uses the `jira` Python library.
 - **A Jira identity + API token** the bridge authenticates as — ideally a dedicated
   service account, not a person. Generate the token at
   <https://id.atlassian.com/manage-profile/security/api-tokens>.
