@@ -191,3 +191,26 @@ import {
   to = aws_ssm_parameter.rebar_secrets["/rebar/prod/jira-api-token"]
   id = "/rebar/prod/jira-api-token"
 }
+
+# --- Adopt the out-of-band-seeded per-client MCP bearer PATs into state -------
+# The three `mcp-client-pat-*` SecureString slots were seeded in AWS by an
+# operator (each exists at version 1) before terraform declared them, so a plain
+# apply fails `ParameterAlreadyExists` on all three. These import blocks adopt
+# the live parameters instead. Under the write-only `value_wo` contract (ADR
+# 0105) the provider stores only the version integer, never the secret value, so
+# adoption records existence + type without reading the live token into state.
+# NO credential value appears here — only the parameter names.
+import {
+  to = aws_ssm_parameter.rebar_secrets["/rebar/prod/mcp-client-pat-copilot"]
+  id = "/rebar/prod/mcp-client-pat-copilot"
+}
+
+import {
+  to = aws_ssm_parameter.rebar_secrets["/rebar/prod/mcp-client-pat-codex"]
+  id = "/rebar/prod/mcp-client-pat-codex"
+}
+
+import {
+  to = aws_ssm_parameter.rebar_secrets["/rebar/prod/mcp-client-pat-claude"]
+  id = "/rebar/prod/mcp-client-pat-claude"
+}
