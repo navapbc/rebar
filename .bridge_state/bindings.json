@@ -11570,6 +11570,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-18T04:42:36Z"
     },
+    "3525-6b35-45fa-46d5": {
+      "created_at": "2026-08-29T17:29:20Z",
+      "jira_id": "4590626",
+      "jira_key": "REB-3883",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T17:29:23Z"
+    },
     "352b-5097-9971-4dc1": {
       "baseline": {
         "assignee": null,
@@ -19547,6 +19554,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:08Z"
     },
+    "5a05-0e52-33a0-48bf": {
+      "created_at": "2026-08-29T17:29:25Z",
+      "jira_id": "4590627",
+      "jira_key": "REB-3884",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T17:29:28Z"
+    },
     "5a30-d423-b1f5-4e33": {
       "baseline": {
         "assignee": {
@@ -26193,6 +26207,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:19Z"
     },
+    "7b43-6e34-26a6-43de": {
+      "created_at": "2026-08-29T17:29:31Z",
+      "jira_id": "4590628",
+      "jira_key": "REB-3885",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T17:29:33Z"
+    },
     "7b4a-0f39-1a45-4ce9": {
       "baseline": {
         "assignee": {
@@ -32466,6 +32487,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:18Z"
     },
+    "97e2-5165-38c2-4d9b": {
+      "created_at": "2026-08-29T17:29:34Z",
+      "jira_id": "4590629",
+      "jira_key": "REB-3886",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T17:29:37Z"
+    },
     "97e7-cf42-5c00-462c": {
       "baseline": {
         "assignee": null,
@@ -35239,6 +35267,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:48Z"
     },
+    "a453-193b-2864-451b": {
+      "created_at": "2026-08-29T17:29:39Z",
+      "jira_id": "4590630",
+      "jira_key": "REB-3887",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T17:29:42Z"
+    },
     "a454-9285-b999-4ac5": {
       "baseline": {
         "assignee": {
@@ -36956,6 +36991,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:35Z"
+    },
+    "ac93-8afd-1666-4866": {
+      "created_at": "2026-08-29T17:29:44Z",
+      "jira_id": "4590631",
+      "jira_key": "REB-3888",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T17:29:46Z"
     },
     "aca0-6a66-0a27-47cf": {
       "baseline": {
@@ -49499,6 +49541,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:54Z"
     },
+    "e3e0-2e7c-b280-4b4a": {
+      "created_at": "2026-08-29T17:29:51Z",
+      "jira_id": "4590632",
+      "jira_key": "REB-3889",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T17:29:53Z"
+    },
     "e43f-0d14-13f9-408f": {
       "baseline": {
         "assignee": {
@@ -52733,6 +52782,13 @@
       "jira_key": "REB-973",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:22Z"
+    },
+    "f268-32ae-4ea9-42fb": {
+      "created_at": "2026-08-29T17:29:55Z",
+      "jira_id": "4590633",
+      "jira_key": "REB-3890",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T17:29:57Z"
     },
     "f2d6-0e1a-3438-425b": {
       "baseline": {
@@ -57281,7 +57337,20 @@
     "1787976640140834418": "__rebar_unknown_comment_id__",
     "1787976844958283001": "__rebar_unknown_comment_id__",
     "1787976859516051001": "__rebar_unknown_comment_id__",
-    "1787977270586221001": "__rebar_unknown_comment_id__"
+    "1787977270586221001": "__rebar_unknown_comment_id__",
+    "1788021564621148730": "__rebar_unknown_comment_id__",
+    "1788021684063886669": "__rebar_unknown_comment_id__",
+    "1788021903553034658": "__rebar_unknown_comment_id__",
+    "1788021911463683845": "__rebar_unknown_comment_id__",
+    "1788022132532309148": "__rebar_unknown_comment_id__",
+    "1788022385544053116": "__rebar_unknown_comment_id__",
+    "1788022586775766710": "__rebar_unknown_comment_id__",
+    "1788023192813274818": "__rebar_unknown_comment_id__",
+    "1788023620676788910": "__rebar_unknown_comment_id__",
+    "1788023949113060670": "__rebar_unknown_comment_id__",
+    "1788024062498490103": "__rebar_unknown_comment_id__",
+    "1788024364895601653": "__rebar_unknown_comment_id__",
+    "1788024412585409178": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -59541,7 +59610,15 @@
     "REB-3880": "5caa-4b63-7ea2-4e71",
     "REB-3881": "f802-536b-0081-432a",
     "REB-3882": "79a4-eae7-e5c7-4713",
+    "REB-3883": "3525-6b35-45fa-46d5",
+    "REB-3884": "5a05-0e52-33a0-48bf",
+    "REB-3885": "7b43-6e34-26a6-43de",
+    "REB-3886": "97e2-5165-38c2-4d9b",
+    "REB-3887": "a453-193b-2864-451b",
+    "REB-3888": "ac93-8afd-1666-4866",
+    "REB-3889": "e3e0-2e7c-b280-4b4a",
     "REB-389": "f505-c747-e8ef-4a02",
+    "REB-3890": "f268-32ae-4ea9-42fb",
     "REB-39": "1acc-81fe-1a5d-4e0e",
     "REB-390": "f5df-0069-6339-4973",
     "REB-391": "f6f6-bc8e-ff37-4d60",
