@@ -30,6 +30,44 @@ RUN apt-get update \
     && awk -v v="$ver" 'BEGIN { split(v, p, "."); if (p[1] < 8 || (p[1] == 8 && p[2] < 9)) exit 1 }' \
     || { echo "ERROR: OpenSSH >= 8.9 is required (op-cert SSHSIG signing)" >&2; exit 1; }
 
+# ---------------------------------------------------------------------------
+# acli (Atlassian CLI) — the Jira-MUTATING bridge transport shells out to it: the
+# reconciler spawns a bare `acli` subprocess (adapters/jira/acli_subprocess.py,
+# `_DEFAULT_ACLI_CMD = ["acli"]`; ADR 0083). WITHOUT it on PATH every mutating bridge op
+# (`bridge_check_access`, `reconcile`) dies at the transport with
+# `[Errno 2] No such file or directory: 'acli'` (bug royalistic-gorgeable-norwayrat).
+#
+# Provisioned exactly the way CI pins it (.github/workflows/external-integration.yml, the
+# ACLI_VERSION/ACLI_SHA256 repo variables) and the way docs/jira-sync-setup.md documents:
+# an explicit version (NEVER floating "latest") + a sha256 checksum. Arch-aware because
+# this image runs on the AL2023 **arm64** box (docker-compose.yml) while CI is amd64 — a
+# single-arch pin would ship a binary that cannot exec on the box. curl is used only for
+# this download and PURGED in the same layer, so the runtime image stays lean.
+ARG ACLI_VERSION=1.3.19-stable
+ARG ACLI_SHA256_AMD64=f29fa8b7f01710053c2f4e07723501ebfe448672b669d32d83e961686d383a6d
+ARG ACLI_SHA256_ARM64=72972e74fa9036c5b40175570234a2e79559776c06a3aa29f632a39c7d3674da
+ARG TARGETARCH
+RUN case "${ACLI_VERSION}" in \
+        ''|latest) echo "ERROR: ACLI_VERSION must be pinned, not '${ACLI_VERSION}'" >&2; exit 1 ;; \
+    esac \
+    && case "${TARGETARCH:-amd64}" in \
+        amd64) acli_arch=amd64; acli_sha="${ACLI_SHA256_AMD64}" ;; \
+        arm64) acli_arch=arm64; acli_sha="${ACLI_SHA256_ARM64}" ;; \
+        *) echo "ERROR: unsupported TARGETARCH '${TARGETARCH}' for acli" >&2; exit 1 ;; \
+    esac \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && curl -sSL "https://acli.atlassian.com/linux/${ACLI_VERSION}/acli_${ACLI_VERSION}_linux_${acli_arch}.tar.gz" -o /root/acli.tar.gz \
+    && echo "${acli_sha}  /root/acli.tar.gz" | sha256sum -c --strict \
+    && mkdir -p /root/acli-unpack \
+    && tar xzf /root/acli.tar.gz -C /root/acli-unpack --strip-components=1 \
+    && install -m 0755 /root/acli-unpack/acli /usr/local/bin/acli \
+    && rm -rf /root/acli.tar.gz /root/acli-unpack \
+    && acli --version \
+    && apt-get purge -y curl \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Install THROUGH the committed uv.lock (same verified dependency set as CI/local dev):

@@ -140,6 +140,42 @@ def test_dockerfile_mcp_boots_rebar_mcp() -> None:
     assert 'CMD ["rebar-mcp"]' in _DOCKERFILE.read_text()
 
 
+def test_dockerfile_mcp_provisions_pinned_acli_on_path() -> None:
+    """Bug royalistic-gorgeable-norwayrat (AC1/AC2): the image MUST provision the `acli`
+    (Atlassian CLI) binary the Jira-mutating bridge transport shells out to
+    (adapters/jira/acli_subprocess.py spawns bare `acli`). Without it every mutating bridge
+    op fails at STEP_CREATE with `[Errno 2] No such file or directory: 'acli'`. The install
+    must be pinned (no floating "latest"), sha256-verified, arch-aware (the deploy box is
+    arm64 while CI is amd64), and land on PATH — so removing it can never regress silently.
+    """
+    text = _DOCKERFILE.read_text()
+
+    # Sourced from the same Atlassian download host CI pins against.
+    assert "acli.atlassian.com" in text, "no acli download step in Dockerfile.mcp"
+
+    # Version pinned to an explicit build (never floating "latest").
+    m = re.search(r"ARG\s+ACLI_VERSION=(\S+)", text)
+    assert m, "ACLI_VERSION build arg not declared"
+    version = m.group(1)
+    assert version and version != "latest", f"ACLI_VERSION must be pinned, got {version!r}"
+
+    # Arch-aware selection (portability): amd64 for CI parity, arm64 for the AL2023 box.
+    assert "TARGETARCH" in text, "acli install must select the tarball by TARGETARCH"
+
+    # A pinned sha256 for each arch we ship (supply-chain verification).
+    shas = re.findall(r"ACLI_SHA256_(?:AMD64|ARM64)=([0-9a-fA-F]{64})", text)
+    assert len(shas) >= 2, f"expected a pinned sha256 per arch, found {shas!r}"
+    # Distinct per arch — a copy-paste of one digest onto both would pass the count
+    # check yet fail `sha256sum -c` for the other architecture's tarball.
+    assert len(set(shas)) == len(shas), f"per-arch acli sha256 pins must be distinct: {shas!r}"
+
+    # The download is checksum-verified before use.
+    assert "sha256sum -c" in text, "acli tarball must be sha256sum-verified"
+
+    # The resulting binary lands on PATH.
+    assert "/usr/local/bin/acli" in text, "acli must be installed onto PATH"
+
+
 # --------------------------------------------------------------------------- nginx wiring
 
 
