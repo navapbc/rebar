@@ -17,6 +17,7 @@ import sys
 
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._engine_support.reads import ReadError, deps_state, show_state
+from rebar._mcp_errors import js_safe_dumps
 from rebar._plan_clarity import PlanClarityFloor, evaluate_plan_clarity
 
 # Non-graph artifact types (verbose logs / bulk review artifacts) carry no dispatchable work,
@@ -93,7 +94,7 @@ def check_ac_cli(argv: list[str], tracker: str) -> int:
     ticket_id = ns.ticket_id if ns.ticket_id is not None else rest[0]
     result, code = check_ac_compute(ticket_id, tracker)
     if fmt == "json":
-        sys.stdout.write(json.dumps(result) + "\n")
+        sys.stdout.write(js_safe_dumps(result) + "\n")
     elif result["verdict"] == "pass":
         sys.stdout.write(f"AC_CHECK: pass ({result['criteria_count']} criteria lines)\n")
     elif "could not load" in result["reason"]:
@@ -269,7 +270,7 @@ def clarity_check_cli(argv: list[str], tracker: str, repo_root: str | None) -> i
     description = data.get("description") or ""
     threshold = _clarity_threshold(repo_root, config_file or None)
     result, code = clarity_check_compute(ticket_type, description, threshold)
-    sys.stdout.write(json.dumps(result) + "\n")
+    sys.stdout.write(js_safe_dumps(result) + "\n")
     return code
 
 
@@ -405,7 +406,7 @@ def quality_check_cli(argv: list[str], tracker: str) -> int:
         result["file_impact"],
     )
     if fmt == "json":
-        sys.stdout.write(json.dumps(result) + "\n")
+        sys.stdout.write(js_safe_dumps(result) + "\n")
     else:
         reason = result["reason"]
         if result["verdict"] == "fail":
@@ -488,7 +489,7 @@ def summary_cli(argv: list[str], tracker: str) -> int:
         return 1
     items = [summary_compute(tid, tracker) for tid in rest]
     if fmt == "json":
-        sys.stdout.write(json.dumps(items) + "\n")
+        sys.stdout.write(js_safe_dumps(items) + "\n")
     else:
         for it in items:
             if it["status"] == "unknown" and it["title"] is None:

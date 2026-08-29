@@ -12,7 +12,6 @@ share the same Python helpers (alias compute, the shared reducer,
 
 from __future__ import annotations
 
-import json
 import logging
 import sys
 import uuid as _uuid
@@ -34,6 +33,7 @@ from rebar._commands.composer_edit import (
 )
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._mcp_errors import js_safe_dumps
 
 logger = logging.getLogger(__name__)
 
@@ -469,7 +469,7 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
     except CommandError as exc:
         if fmt == "json" and exc.error_code:
             print(
-                json.dumps(
+                js_safe_dumps(
                     error_envelope(exc.error_code, exc.input_str, exc.message, exc.returncode)
                 )
             )
@@ -477,7 +477,7 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
         return exc.returncode
 
     if fmt == "json":
-        print(json.dumps({"id": res["id"], "alias": res["alias"], "title": res["title"]}))
+        print(js_safe_dumps({"id": res["id"], "alias": res["alias"], "title": res["title"]}))
     else:
         # Normalized confirmation (ticket 6bda-9d58-8546-4638): one line, all the
         # data the old two-line form carried (alias, id, title).

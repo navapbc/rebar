@@ -14,6 +14,7 @@ import sys
 
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced import llm_eval as _llm_eval_parsers
+from rebar._mcp_errors import js_safe_dumps
 
 
 @guard_parse_errors
@@ -35,7 +36,6 @@ def _prompt(argv: list[str]) -> int:
 
 
 def _prompt_eval(args: argparse.Namespace) -> int:
-    import json as _json
 
     from rebar import config
     from rebar.llm.errors import LLMError
@@ -74,7 +74,7 @@ def _prompt_eval(args: argparse.Namespace) -> int:
         "dirty_prompt_sha256": dirty_hash,
     }
     if args.output == "json":
-        sys.stdout.write(_json.dumps(report) + "\n")
+        sys.stdout.write(js_safe_dumps(report) + "\n")
     else:
         sys.stdout.write(f"Eval spec for prompt {report['prompt']!r}: VALID\n")
         sys.stdout.write(
@@ -111,7 +111,6 @@ def _criteria(argv: list[str]) -> int:
 
 
 def _criteria_eval(args: argparse.Namespace) -> int:
-    import json as _json
 
     from rebar import config
     from rebar.llm.errors import LLMError
@@ -159,7 +158,7 @@ def _criteria_eval(args: argparse.Namespace) -> int:
         return 1
 
     if args.output == "json":
-        sys.stdout.write(_json.dumps(report) + "\n")
+        sys.stdout.write(js_safe_dumps(report) + "\n")
         return 0
 
     def _pct(v: float | None) -> str:
@@ -199,7 +198,6 @@ def _llm(argv: list[str]) -> int:
 
 
 def _llm_setup(args: argparse.Namespace) -> int:
-    import json as _json
 
     import rebar
     from rebar import _optional
@@ -247,7 +245,7 @@ def _llm_setup(args: argparse.Namespace) -> int:
     }
 
     if args.output == "json":
-        sys.stdout.write(_json.dumps(report) + "\n")
+        sys.stdout.write(js_safe_dumps(report) + "\n")
     else:
         sys.stdout.write("rebar LLM setup\n")
         sys.stdout.write(f"  extras:   agents={extras['agents']}  tracing={extras['tracing']}\n")

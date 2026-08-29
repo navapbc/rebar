@@ -30,6 +30,7 @@ import sys
 from rebar import config
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced.verify import build_opcert
+from rebar._mcp_errors import js_safe_dumps
 
 KIND = "completion-verifier"
 
@@ -134,7 +135,6 @@ def cli(argv: list[str]) -> int:
 
     # Local imports keep the CLI intercept lean and reuse the authorship gate's merged-log walk /
     # introducing-commit resolution / grandfathering rule verbatim.
-    import json
 
     import rebar
     from rebar.attest import authorship, opcert, trusted_env
@@ -255,7 +255,7 @@ def cli(argv: list[str]) -> int:
     )
 
     if as_json:
-        print(json.dumps(report))
+        print(js_safe_dumps(report))
         for tid, reason, gf in problems:
             print(f"  {tid}: {reason}{' [grandfathered]' if gf else ''}", file=sys.stderr)
         print(summary, file=sys.stderr)
