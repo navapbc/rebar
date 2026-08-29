@@ -703,3 +703,52 @@ def test_absolute_urls_preserve_https_behind_the_deployed_edge_trust():
         "an absolute URL built behind the TLS edge downgraded to http:// — a client "
         "following it would transmit its bearer PAT in plaintext"
     )
+
+
+def test_an_auth_enabled_server_still_reports_a_successful_handshake(tmp_path):
+    """An auth-enabled server still reports a SUCCESSFUL startup handshake.
+
+    The probe drives the session manager directly, so it never traverses
+    RequireAuthMiddleware/ProxyAuthMiddleware — the server holds no credential to present to
+    itself. That is deliberate: if an auth-enabled boot reported the handshake as failed, the
+    blue-green gate keyed on it would freeze every deploy on that box. Anchored on both sides:
+    the handshake reports ok while /mcp still challenges an unauthenticated caller with 401.
+    """
+    from starlette.testclient import TestClient
+
+    from rebar._mcp_health import install_startup_handshake
+    from rebar.mcp_server import build_server
+
+    # A COHERENT auth config: the allowlist admits the hostname of the declared public resource
+    # URL, which is what the probe presents. (Leaving the box's default loopback allowlist here
+    # would fail the handshake — correctly: clients told to reach https://rebar.example/mcp would
+    # be 421'd. That case is pinned in tests/unit/test_mcp_health_startup_handshake.py.)
+    server = build_server(
+        _auth_http_config(
+            tmp_path,
+            http_allowed_hosts=("rebar.example",),
+            http_allowed_origins=("https://rebar.example",),
+        )
+    )
+    app = install_startup_handshake(server, server.streamable_http_app())
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+        health = client.get("/health").json()
+        mcp = client.post("/mcp", json=INIT_REQUEST, headers=MCP_HEADERS)
+
+    assert health["handshake"]["ok"] is True, health["handshake"]
+    assert health["handshake"]["status"] == 200, health["handshake"]
+    assert mcp.status_code == 401  # auth is genuinely on; the probe simply predates it
+
+
+def test_health_reports_a_handshake_field_even_when_it_never_ran():
+    """Fail-closed: a server whose lifespan never ran the handshake reports ok=False rather than
+    omitting the field silently — the deploy gate must not read silence as success."""
+    from starlette.testclient import TestClient
+
+    from rebar.mcp_server import build_server
+
+    app = build_server(_http_config()).streamable_http_app()
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+        health = client.get("/health").json()
+
+    assert health["handshake"]["ok"] is False, health["handshake"]
