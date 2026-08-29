@@ -1,0 +1,58 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "83bb7d75_26432e1f",
+        "filename": "src/rebar/review_bot/app.py",
+        "patchSetId": 2
+      },
+      "lineNbr": 101,
+      "author": {
+        "id": 1000009
+      },
+      "writtenOn": "2026-08-29T17:44:21Z",
+      "side": 1,
+      "message": "Resolved in PS2: _force_process_exit now logs logger.critical naming the surviving offload threads + exit code before os._exit.",
+      "parentUuid": "9154c0f1_023e019b",
+      "revId": "000677b6abbce80fff5966280db5295bdd92fd1e",
+      "serverId": "fc71b410-f5b3-4446-8e2c-e56c4676521b"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "dece00c7_b9b322db",
+        "filename": "src/rebar/review_bot/app.py",
+        "patchSetId": 2
+      },
+      "lineNbr": 264,
+      "author": {
+        "id": 1000009
+      },
+      "writtenOn": "2026-08-29T17:44:21Z",
+      "side": 1,
+      "message": "Resolved in PS2: the deadline is gated on a live offload thread and the grace is source-derived (90s \u003d store lock+git budget) so it never preempts a legit write; still below stop_grace_period. New band test pins it.",
+      "parentUuid": "dbd41523_50dc7697",
+      "revId": "000677b6abbce80fff5966280db5295bdd92fd1e",
+      "serverId": "fc71b410-f5b3-4446-8e2c-e56c4676521b"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "5b484b55_b7ee7938",
+        "filename": "tests/unit/test_review_bot.py",
+        "patchSetId": 2
+      },
+      "lineNbr": 2205,
+      "author": {
+        "id": 1000009
+      },
+      "writtenOn": "2026-08-29T17:44:21Z",
+      "side": 1,
+      "message": "Resolved in PS2: added test_clean_shutdown_with_no_orphaned_offload_does_not_force_process_exit (mutation-checked).",
+      "parentUuid": "6588947a_720c8192",
+      "revId": "000677b6abbce80fff5966280db5295bdd92fd1e",
+      "serverId": "fc71b410-f5b3-4446-8e2c-e56c4676521b"
+    }
+  ]
+}
