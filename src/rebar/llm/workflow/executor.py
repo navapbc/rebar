@@ -43,7 +43,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from rebar.llm.errors import WorkflowError, WorkflowValidationError
+from rebar.llm.errors import WorkflowError, WorkflowUnknownStepError, WorkflowValidationError
 
 from .lint import lint_document
 from .runners import (
@@ -538,7 +538,7 @@ def _dispatch(
     name = ctx.step.get("uses")
     handler = registry.get(name) if name is not None else None
     if handler is None:
-        raise WorkflowError(f"unknown scripted step {name!r} (not in the step registry)")
+        raise WorkflowUnknownStepError(f"unknown scripted step {name!r} (not in the step registry)")
     out = handler(ctx)
     if isinstance(out, StepResult):
         return out
