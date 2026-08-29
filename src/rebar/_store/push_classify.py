@@ -9,6 +9,7 @@ The push loop imports these names; they do not import it.
 from __future__ import annotations
 
 import logging
+import random
 import time
 from collections.abc import Callable
 
@@ -75,10 +76,24 @@ _TRANSPORT_BACKOFF_SECONDS = (0.5, 2.0)
 # unpushed commits. Escalating backoff gives the competing write a window to land.
 _CAS_BACKOFF_SECONDS = (0.25, 0.5, 1.0, 2.0)
 
+# Bug baldish-regainable-steed: ADDITIVE jitter on top of the base schedule so writers that
+# collide once do not sleep identical durations, wake together, and re-collide (thundering
+# herd). Mirrors the additive-jitter idiom in the Jira DC transport (`retry_after * (1.0 +
+# random.random() * _RETRY_AFTER_JITTER)`). Kept small so consecutive base values stay
+# non-overlapping — the base ratio is 2x, so `[base, 1.25*base]` never reaches the next base
+# and escalation is preserved.
+_CAS_BACKOFF_JITTER = 0.25
+
 
 def _cas_backoff(attempt: int, sleep_fn: Callable[[float], None] | None = None) -> None:
-    """Sleep after non-fast-forward recovery *attempt* (1-based) before the next push."""
-    delay = _CAS_BACKOFF_SECONDS[min(attempt, len(_CAS_BACKOFF_SECONDS)) - 1]
+    """Sleep before a non-fast-forward recovery *attempt* (1-based) re-fetches.
+
+    The delay is the clamped base schedule plus additive jitter, landing in
+    ``[base, base * (1 + _CAS_BACKOFF_JITTER)]`` — always at least ``base`` and bounded, so
+    colliding writers do not wake in lockstep.
+    """
+    base = _CAS_BACKOFF_SECONDS[min(attempt, len(_CAS_BACKOFF_SECONDS)) - 1]
+    delay = base * (1.0 + random.random() * _CAS_BACKOFF_JITTER)
     (time.sleep if sleep_fn is None else sleep_fn)(delay)
 
 
