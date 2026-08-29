@@ -194,3 +194,53 @@ def test_hash_basis_resolution(tmp_path, monkeypatch):
     monkeypatch.setenv("REBAR_GATE_REF", "no-such-ref")
     basis = attest._hash_basis(str(repo), at_current_gate_ref=True)
     assert basis == str(rebar.config.repo_root(str(repo)))
+
+
+# --------------------------------------------------------------------------------------
+# bug 505d-b2c5-734f-47d9 — a DEGRADED basis must not certify (the claim gate is
+# fail-CLOSED: docs/plan-review-gate.md "| Claim gate | fail-closed |")
+# --------------------------------------------------------------------------------------
+def test_attested_claim_gate_refuses_to_certify_when_the_gate_ref_is_unresolvable(
+    tmp_path, monkeypatch
+):
+    """When the configured ATTESTED basis cannot be obtained, ``_hash_basis`` substitutes the
+    in-place working tree. If that tree happens to still hold the REVIEWED content while the
+    gate ref has moved, the drift comparison sees nothing and the gate certifies a stale
+    attestation — turning the fail-closed claim gate fail-OPEN. The substitution must instead
+    be visible to the verdict and block the claim."""
+    repo = _repo(tmp_path, monkeypatch)
+    # Pin the PRODUCTION gate ref (the suite default is `HEAD`); `_sign` already reviews at
+    # origin/main, so both sides agree — this is the deployed configuration.
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
+    monkeypatch.setenv("REBAR_GATE_REF", "origin/main")
+    tid = rebar.create_ticket("task", "degraded basis", repo_root=str(repo))
+    _sign(repo, tid, attested=True)
+
+    # The signed dependency drifts and LANDS on the gate ref …
+    (repo / "dep.py").write_text("DRIFTED = 999\n")
+    _git(repo, "add", "dep.py")
+    _git(repo, "commit", "-q", "-m", "dep v2")
+    _git(repo, "push", "-q", "origin", "main")
+    # … but this checkout is rolled back to the REVIEWED content, so a working-tree basis
+    # sees no drift whatsoever. CONTROL: while the ref resolves, the gate correctly blocks.
+    _git(repo, "reset", "--hard", "-q", "HEAD~1")
+    assert attest.claim_gate_check(tid, repo_root=str(repo))["verdict"] == "stale-code"
+
+    # Now make the configured gate ref unresolvable — the exact shape of the review-bot's
+    # clone (`git init` + fetch a patchset ref; no `origin` remote at all).
+    _git(repo, "remote", "remove", "origin")
+    subprocess.run(
+        ["git", "-C", str(repo), "update-ref", "-d", "refs/remotes/origin/main"], check=True
+    )
+
+    # PRECONDITION PROOF (anti-vacuity): the substitution really fired, and the substituted
+    # basis genuinely holds the reviewed bytes — so an unguarded comparison finds NO drift.
+    basis = attest._hash_basis(str(repo), at_current_gate_ref=True)
+    assert basis == str(rebar.config.repo_root(str(repo))), "the working-tree substitution fired"
+    assert (Path(basis) / "dep.py").read_text() == "ORIGINAL = 1\n"
+
+    chk = attest.claim_gate_check(tid, repo_root=str(repo))
+    assert chk["ok"] is False, chk
+    assert chk["verdict"] == "stale-code", chk
+    # and the reason names the basis it could not obtain, not a false "the files drifted"
+    assert "origin/main" in chk["reason"], chk

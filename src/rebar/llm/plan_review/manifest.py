@@ -215,6 +215,58 @@ def _cited_paths(verdict: dict[str, Any]) -> set[str]:
     return out
 
 
+@dataclass(frozen=True)
+class GateRefBasis:
+    """What the claim-gate freshness re-check resolved as its hashing basis, and whether it
+    had to DEGRADE to get there.
+
+    ``degraded`` is True in exactly one case: an ATTESTED gate whose configured ref (or whose
+    snapshot) could not be obtained, so the in-place working tree was SUBSTITUTED for the
+    committed snapshot the signed hashes were produced against. That substitution is not a
+    basis — the working tree may coincidentally still hold the reviewed bytes while the gate
+    ref has moved on, which reads as "no drift" for a genuinely stale attestation (fail-OPEN;
+    bug 505d-b2c5-734f-47d9). A configured ``source=local`` gate is NOT degraded: there
+    the checkout is the correct, documented basis, not a substitution.
+
+    ``ref`` names the gate ref that could not be obtained (``None`` when the failure happened
+    before the ref itself was resolvable) so a caller can say WHAT it could not read rather
+    than falsely reporting that the dependency files drifted."""
+
+    path: str
+    ref: str | None = None
+    degraded: bool = False
+
+
+def gate_ref_hash_basis(repo_root=None) -> GateRefBasis:
+    """Resolve the CURRENT-gate-ref hashing basis — the ONE shared ref-resolution boundary
+    (ADR 0002) — reporting whether it degraded to the working tree.
+
+    :func:`_hash_basis` delegates here for its ``at_current_gate_ref`` mode and keeps its
+    lenient, never-raising contract (it returns only ``.path``); callers that must fail CLOSED
+    on a substituted basis read ``.degraded``. The resolution logic lives here and ONLY here —
+    it is not duplicated into the claim gate."""
+    from rebar import config as _config
+
+    working = str(_config.repo_root(repo_root))
+    ref: str | None = None
+    try:
+        from rebar._snapshot import cache as _cache
+        from rebar._snapshot.repo_snapshot import resolve_ref
+        from rebar.llm import gate_source
+
+        if gate_source.default_source(working) != gate_source.SOURCE_ATTESTED:
+            return GateRefBasis(working)
+        ref = gate_source.default_ref(working)
+        sha = resolve_ref(ref, working, fetch=False)
+        handle = _cache.acquire(sha, source_mode="attested", repo_root=working, fetch=False)
+        return GateRefBasis(str(handle.path))
+    except Exception:
+        logger.warning(
+            "current gate-ref snapshot unavailable; hashing the working tree", exc_info=True
+        )
+        return GateRefBasis(working, ref=ref, degraded=True)
+
+
 def _hash_basis(repo_root=None, *, at_current_gate_ref: bool = False) -> str:
     """The ONE shared ref-resolution boundary (epic raze-vet-ditch S4b, amended by bug
     72d9 ``athletic-esthetical-polecat``) that BOTH the plan-review signing-time hashing
@@ -234,7 +286,11 @@ def _hash_basis(repo_root=None, *, at_current_gate_ref: bool = False) -> str:
         registers as drift, while an unrelated commit still does not (the per-path scoping
         ADR 0002 exists for). A configured ``source=local`` gate — or a ref/snapshot that
         cannot be resolved — degrades to the in-place checkout (the pre-S4b behavior; the
-        conservative direction, since the checkout normally contains the drift).
+        conservative direction, since the checkout normally contains the drift). This
+        function stays LENIENT — it never raises and always yields a path. Whether the basis
+        was substituted is reported separately by :func:`gate_ref_hash_basis`, which the
+        claim-gate re-check reads so it can fail CLOSED on a degraded attested basis (bug
+        505d-b2c5-734f-47d9) instead of certifying against the working tree.
       * else the active attested gate snapshot (``current_code_root``, set during an attested
         ``review_plan``) → the tree the signature is being produced against.
       * else the in-place checkout (``_config.repo_root``) — the local / back-out basis.
@@ -244,21 +300,7 @@ def _hash_basis(repo_root=None, *, at_current_gate_ref: bool = False) -> str:
     from rebar import config as _config
 
     if at_current_gate_ref:
-        try:
-            from rebar._snapshot import cache as _cache
-            from rebar._snapshot.repo_snapshot import resolve_ref
-            from rebar.llm import gate_source
-
-            root = str(_config.repo_root(repo_root))
-            if gate_source.default_source(root) == gate_source.SOURCE_ATTESTED:
-                sha = resolve_ref(gate_source.default_ref(root), root, fetch=False)
-                handle = _cache.acquire(sha, source_mode="attested", repo_root=root, fetch=False)
-                return str(handle.path)
-        except Exception:
-            logger.warning(
-                "current gate-ref snapshot unavailable; hashing the working tree", exc_info=True
-            )
-        return str(_config.repo_root(repo_root))
+        return gate_ref_hash_basis(repo_root).path
     from rebar.llm.config import current_code_root
 
     active = current_code_root()
