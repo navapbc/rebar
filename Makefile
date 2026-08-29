@@ -310,6 +310,17 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# The rule is declared-variable-aware, not a blanket ban on `$${`: user_data.sh has four
 	@# legitimate `$${data_volume_id}` references, the one variable main.tf passes.
 	python scripts/check_templatefile_escapes.py
+	@# Single-source uv pin (bug 56b7-b21a-c8ab-4afc). setup-uv is SHA-pinned at all 25 call
+	@# sites, but uv ITSELF was not, so the action fell back to fetching a remote manifest on
+	@# every job -- and when that fetch failed the job failed with `##[error]fetch failed`, a
+	@# verdict unrelated to the change under test (run 33214025855, dead in 21s). The pin is one
+	@# line, `[tool.uv] required-version` in pyproject.toml; this gate keeps it the SINGLE source
+	@# by rejecting the four ways it can be defeated -- removed, loosened to a range (which still
+	@# fetches, so it reads as pinned while restoring the outage), overridden by a per-call-site
+	@# `version:`/`version-file:` input (resolved AHEAD of the pyproject scan), or shadowed by a
+	@# root uv.toml. Stdlib + PyYAML, no CI provider required -- same portability contract as the
+	@# ShellCheck and templatefile gates above.
+	python scripts/check_uv_pin.py
 	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
 	@# zizmor audits the release workflow + the Verified-gate vote path ($(ZIZMOR_WORKFLOWS),
 	@# widened in epic 5664 S1); actionlint below validates ALL workflows. zizmor is a
