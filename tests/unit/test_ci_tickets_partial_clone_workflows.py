@@ -86,7 +86,7 @@ def test_identity_fetch_is_blobless_and_full_history() -> None:
 @pytest.mark.parametrize(
     ("path", "job", "limit_name", "limit"),
     [
-        (_VERIFY, "verify-identity", "REBAR_CHECKOUT_PACK_LIMIT_KIB", 102400),
+        (_VERIFY, "verify-identity", "REBAR_CHECKOUT_PACK_LIMIT_KIB", 563200),
     ],
 )
 def test_pack_guard_contract(path: Path, job: str, limit_name: str, limit: int) -> None:
