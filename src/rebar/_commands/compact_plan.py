@@ -32,7 +32,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from rebar._store import event_append
-from rebar._store.gitutil import run_git_write
+from rebar._store.gitutil import _AUTOMAINT_OFF, run_git_write
 from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
 logger = logging.getLogger(__name__)
@@ -279,7 +279,7 @@ def commit_ticket_dir(tracker: str, ticket_id: str, message: str) -> tuple[bool,
         return False, add.stderr
     if _git(tracker, "diff", "--cached", "--quiet").returncode == 0:
         return True, ""
-    commit = _git(tracker, "commit", "-q", "--no-verify", "-m", message)
+    commit = _git(tracker, *_AUTOMAINT_OFF, "commit", "-q", "--no-verify", "-m", message)
     if commit.returncode != 0:
         return False, commit.stderr
     return True, ""

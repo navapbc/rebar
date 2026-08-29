@@ -27,6 +27,7 @@ import os
 import subprocess
 
 from rebar._store.gitutil import (
+    _AUTOMAINT_OFF,
     _is_transient_object_write_error,
     _with_index_lock_retry,
     _with_transient_fault_retry,
@@ -114,12 +115,26 @@ def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[st
     commit once dropped a concurrent locked write). Composed index.lock-OUTER /
     runner-FS-INNER — the same gitutil retries the transition/claim path uses. A
     non-lock, non-transient failure (including a genuine "nothing to commit" / UU wedge)
-    surfaces immediately, unchanged — the caller's UU-recovery path still handles it."""
+    surfaces immediately, unchanged — the caller's UU-recovery path still handles it.
+
+    ``_AUTOMAINT_OFF`` is injected so git does NOT run its post-commit auto-maintenance repack
+    INSIDE this bounded commit (bd66); the caller runs maintenance as an explicit deferred
+    step (:func:`gitutil.run_auto_maintenance`) under the same write lock."""
     return _with_index_lock_retry(
         tracker,
         lambda: _with_transient_fault_retry(
             lambda: _run_git(
-                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg]
+                [
+                    "git",
+                    "-C",
+                    tracker,
+                    *_AUTOMAINT_OFF,
+                    "commit",
+                    "-q",
+                    "--no-verify",
+                    "-m",
+                    commit_msg,
+                ]
             )
         ),
         force_reclaim=True,
@@ -148,8 +163,23 @@ def _git_commit_paths(
     The pathspec is the point: unlike a bare ``git commit`` (which commits the WHOLE index),
     this commits ONLY *relpaths*, so it can never sweep an unrelated staged event — belt to
     the write lock's braces. Rides out index.lock contention AND the transient runner-FS
-    git faults via the same composed gitutil retries as :func:`_git_commit`."""
-    argv = ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg, "--", *relpaths]
+    git faults via the same composed gitutil retries as :func:`_git_commit`.
+
+    ``_AUTOMAINT_OFF`` is injected so git's post-commit auto-maintenance repack is NOT charged
+    to this bounded commit (bd66); the caller defers it to :func:`gitutil.run_auto_maintenance`."""
+    argv = [
+        "git",
+        "-C",
+        tracker,
+        *_AUTOMAINT_OFF,
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        commit_msg,
+        "--",
+        *relpaths,
+    ]
     return _with_index_lock_retry(
         tracker,
         lambda: _with_transient_fault_retry(lambda: _run_git(argv)),

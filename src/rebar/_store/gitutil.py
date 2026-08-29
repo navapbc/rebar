@@ -735,6 +735,51 @@ def run_git_write(
     return result
 
 
+# ── deferred auto-maintenance (bd66) ─────────────────────────────────────────────────────
+# git >= 2.47 runs ``git maintenance run --auto`` automatically at the END of ``git commit``,
+# and ADR 0051 deliberately forces it FOREGROUND on the tickets worktree
+# (``gc.autoDetach=false`` / ``maintenance.autoDetach=false``) so the repack serialises UNDER
+# the store write lock instead of racing it in a detached child. The cost of that choice: once
+# the store crosses git's ``gc.auto`` loose-object threshold (git default ~6700) the ONE commit
+# that trips it pays an O(store) repack INSIDE the ``git commit`` subprocess — charged to that
+# commit's own wall-clock bound (event_append's 30s ``_GIT_TIMEOUT``, c2ba). On a mature store
+# that repack can exceed the bound: the commit is SIGKILLed mid-repack, LOSING the write and
+# interrupting ``git repack`` (the very corruption ADR 0051 exists to prevent). Raising the
+# bound only moves the cliff — the SIGKILL still lands mid-repack.
+#
+# The fix keeps BOTH invariants — the tight commit bound AND ADR 0051's serialised FOREGROUND
+# maintenance — by SPLITTING them. ``_AUTOMAINT_OFF`` suppresses git's auto-maintenance on the
+# lock-held commit (so its bound covers ONLY the commit, which is O(1)), and
+# :func:`run_auto_maintenance` runs the identical maintenance as an EXPLICIT step the caller
+# issues under the SAME write lock, on the roomier ``_LOCAL_GIT_TIMEOUT`` watchdog.
+_AUTOMAINT_OFF: tuple[str, ...] = ("-c", "gc.auto=0", "-c", "maintenance.auto=false")
+
+
+# raw-git-ok: locked store seam internal
+def run_auto_maintenance(
+    tracker: str | os.PathLike[str], *, timeout: float = _LOCAL_GIT_TIMEOUT
+) -> subprocess.CompletedProcess | None:
+    """Run git's auto-maintenance as an EXPLICIT, BEST-EFFORT step (bd66).
+
+    ``git -C tracker maintenance run --auto`` — the SAME maintenance ``git commit`` would have
+    run itself (suppressed there by :data:`_AUTOMAINT_OFF`), now issued deliberately AFTER the
+    commit so the commit's tight ``_GIT_TIMEOUT`` never charges an O(store) repack. ``--auto``
+    preserves git's threshold check, so this is a cheap no-op until the store actually needs a
+    repack. Runs FOREGROUND (ADR 0051's ``maintenance.autoDetach=false``, so the caller MUST
+    hold the store write lock to keep the repack serialised with writes) and is bounded by the
+    ``_LOCAL_GIT_TIMEOUT`` watchdog — a hung repack fails this step cleanly rather than the
+    caller.
+
+    BEST-EFFORT BY CONTRACT: the write has already SUCCEEDED and is durable, so a maintenance
+    failure or timeout MUST NEVER fail the write — the loose objects simply persist and the
+    next write's maintenance retries. Returns the git result (or ``None`` if git could not be
+    launched at all)."""
+    try:
+        return run_git_bounded(tracker, "maintenance", "run", "--auto", timeout=timeout)
+    except OSError:
+        return None
+
+
 # ── stranded-index classification (bug 2fa6) ────────────────────────────────────────────
 # The tickets branch has a KNOWN SHAPE: per-ticket event directories (several id styles —
 # `b636-f31a-d590-4642`, `jira-reb-1001`) plus a small set of store dotfiles. Rather than

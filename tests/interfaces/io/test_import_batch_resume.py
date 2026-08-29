@@ -193,7 +193,7 @@ def test_crash_before_later_chunk_leaves_whole_commit_or_none_and_resumes(
     state = {"commits": 0}
 
     def fake_run(cmd, *a, **kw):
-        if isinstance(cmd, list) and "commit" in cmd[:6]:
+        if isinstance(cmd, list) and "commit" in cmd:
             state["commits"] += 1
             if state["commits"] == 3:
                 return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="injected crash")

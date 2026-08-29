@@ -30,6 +30,7 @@ from pathlib import Path
 from rebar._commands._repair_pause import RepairPauseError, owned_repair_pause
 from rebar._store import compat, lock
 from rebar._store.gitutil import (  # noqa: F401  (compat re-export — see the module docstring)
+    _AUTOMAINT_OFF,
     _dir_is_archived,
     _resolve_tracker_git_dir,
     _ticket_dirs,
@@ -444,7 +445,14 @@ def _repair_run(
                 return lines, -1
             if _git(tracker, "diff", "--cached", "--quiet").returncode != 0:
                 n = i // batch + 1
-                commit = _git(tracker, "commit", "--no-verify", "-m", f"a3-remediation: batch {n}")
+                commit = _git(
+                    tracker,
+                    *_AUTOMAINT_OFF,
+                    "commit",
+                    "--no-verify",
+                    "-m",
+                    f"a3-remediation: batch {n}",
+                )
                 if commit.returncode != 0:
                     lines.append("ABORT: commit failed while holding batch")
                     return lines, -1
