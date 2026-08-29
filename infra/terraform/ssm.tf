@@ -1,15 +1,20 @@
 # ---------------------------------------------------------------------------
 # SSM SecureString parameters — secret slots under /rebar/prod/*
 # ---------------------------------------------------------------------------
-# These are created as PLACEHOLDERS with the value "CHANGEME". An operator MUST
+# These are created as PLACEHOLDERS with the write-only value "CHANGEME". An operator MUST
 # populate the real values (e.g. via `aws ssm put-parameter --overwrite`)
 # BEFORE the S2 apply that brings up the instance. `user_data.sh` FAILS FAST if
 # any fetched value is still the "CHANGEME" sentinel — cloud-init marks the
 # instance failed rather than writing a broken config.
 #
-# `lifecycle { ignore_changes = [value] }` means once an operator overwrites a
-# value out-of-band, terraform will NOT revert it back to "CHANGEME" on the
-# next apply. Terraform owns the parameter's existence + type, not its value.
+# These secret slots use terraform WRITE-ONLY arguments — `value_wo` + `value_wo_version`
+# (ADR 0105). value_wo is, by provider design, NEVER persisted to terraform state (the old
+# `value = "CHANGEME"` + `lifecycle { ignore_changes = [value] }` contract suppressed the
+# diff but NOT the refresh, so the provider read the live cleartext into state on every
+# plan/import — bug eb67-b96c-dcf0-4f86). The provider re-sends value_wo only when
+# value_wo_version changes, so an operator-seeded value is never reverted to "CHANGEME" on
+# the next apply. Terraform owns the parameter's existence + type, not its value. Seed and
+# rotate per infra/runbooks/ssm-secret-write-only.md.
 # ---------------------------------------------------------------------------
 
 locals {
@@ -90,13 +95,14 @@ locals {
 resource "aws_ssm_parameter" "rebar_secrets" {
   for_each = toset(local.rebar_secret_params)
 
-  name  = each.value
-  type  = "SecureString"
-  value = "CHANGEME"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+  name = each.value
+  type = "SecureString"
+  # Write-only (ADR 0105): value_wo is NEVER persisted to terraform state. The provider
+  # sends it on create and whenever value_wo_version changes, storing only the version
+  # integer. An operator seeds the real value out-of-band; bump value_wo_version to push a
+  # terraform-driven rotation. See infra/runbooks/ssm-secret-write-only.md.
+  value_wo         = "CHANGEME"
+  value_wo_version = 1
 
   tags = {
     Project = "rebar"
@@ -114,9 +120,11 @@ resource "aws_ssm_parameter" "rebar_secrets" {
 #
 # jira-url / jira-user were SEEDED OUT OF BAND by an operator (AWS CLI, not
 # terraform), so they carry both an `import` block (below) to adopt the existing
-# parameter instead of colliding with `ParameterAlreadyExists`, and the same
-# `ignore_changes = [value]` guard the secret slots use — terraform owns their
-# existence and type, never their value.
+# parameter instead of colliding with `ParameterAlreadyExists`, and an
+# `ignore_changes = [value]` guard — terraform owns their existence and type,
+# never their value. (These are non-secret `String` params, so they keep the
+# ignore_changes contract; the SecureString SECRET slots above instead use
+# write-only `value_wo` per ADR 0105, which never reaches state at all.)
 #
 # jira-project is the exception: it is a public project key, not an operator
 # secret, so it is FULLY terraform-managed (a real value, no `ignore_changes`,

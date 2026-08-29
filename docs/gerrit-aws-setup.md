@@ -82,18 +82,23 @@ balancer, KMS-CMK state encryption, tighter ingress) is explicitly out of scope
 Internalize this before you touch anything else: **no secret is ever committed,
 baked into an image, or left on disk as a static credential.**
 
-**The SSM contract (ADR-0012).** All runtime secrets live as **SSM Parameter Store
-SecureString** parameters under the `/rebar/prod/*` namespace, encrypted with the
-AWS-managed SSM KMS key. Terraform (`infra/terraform/ssm.tf`) creates exactly seven
-parameters as **placeholders** with value `"CHANGEME"` and
-`lifecycle { ignore_changes = [value] }`, so Terraform owns the parameter's
-*existence and type*, never its *value* — you populate the real values out-of-band
-and Terraform never reverts them. The EC2 instance role grants scoped read of
+**The SSM contract (ADR-0012, hardened by ADR-0105).** All runtime secrets live as **SSM
+Parameter Store SecureString** parameters under the `/rebar/prod/*` namespace, encrypted with the
+AWS-managed SSM KMS key. Terraform (`infra/terraform/ssm.tf`) owns each parameter's
+*existence and type*, never its *value*. Secret parameters are declared with terraform
+**write-only arguments** — `value_wo` (a seed placeholder) plus `value_wo_version` — which the AWS
+provider, by design, **never persists to terraform state**; you populate/rotate the real values
+out-of-band and bump `value_wo_version` to push a new one. (The retired contract used
+`value = "CHANGEME"` + `lifecycle { ignore_changes = [value] }`; that only stopped terraform
+*writing* the value while the provider still *read* the live secret into state on every refresh —
+persisting cleartext to the state bucket. See ADR-0105 and
+`infra/runbooks/ssm-secret-write-only.md`.) The EC2 instance role grants scoped read of
 `/rebar/prod/*` + `kms:Decrypt`, so the box reads its own secrets **with no static
 AWS keys anywhere on disk**.
 
-The seven parameters you must populate (placeholders shown — substitute your real
-values out-of-band, e.g. `aws ssm put-parameter --overwrite --type SecureString`):
+The seven parameters you must populate (seed via `value_wo` in terraform, then set the real value
+out-of-band, e.g. `aws ssm put-parameter --overwrite --type SecureString`; to rotate, update the
+value and bump `value_wo_version` — see the runbook):
 
 | SSM parameter | Holds | Consumed by |
 |---|---|---|

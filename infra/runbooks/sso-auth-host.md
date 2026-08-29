@@ -68,7 +68,7 @@ gate instance — the auth host + module are staged for the first rebar subdomai
 | Secret | Where | Managed by | Consumed by |
 |---|---|---|---|
 | Google `client_secret` | SSM SecureString `/auth-solutions/GOOGLE_CLIENT_SECRET` | provisioned out-of-band (Nava IT → CLI) | auth-host Lambda, **read at runtime** (never baked) |
-| Cookie-signing key (HMAC) | SSM SecureString `/auth-solutions/COOKIE_SIGNING_SECRET` | Terraform owns existence+type (`aws_ssm_parameter.cookie_signing_secret`, `ignore_changes=[value]`); **value set out-of-band** | auth-host Lambda (runtime) **and** every edge-gate bundle (**baked at deploy** — Lambda@Edge can't read SSM) |
+| Cookie-signing key (HMAC) | SSM SecureString `/auth-solutions/COOKIE_SIGNING_SECRET` | Terraform owns existence+type (`aws_ssm_parameter.cookie_signing_secret`, **write-only `value_wo`** — never in state, ADR 0105); **value set out-of-band** | auth-host Lambda (runtime) **and** every edge-gate bundle (**baked at deploy** — Lambda@Edge can't read SSM) |
 | Origin secret (`X-Origin-Auth`) | Terraform state only (`random_password.auth_origin_secret`) | Terraform | injected by CloudFront as a custom origin header; verified by the auth-host Lambda (env var) |
 
 The Google **client_id** is public (`auth_sso.tf` locals) — not a secret.
@@ -78,7 +78,8 @@ The Google **client_id** is public (`auth_sso.tf` locals) — not a secret.
 ### Cookie-signing key (the SSO session key) — also the revoke lever
 
 Rotating this key **invalidates every live session**. Unlike snap (which regenerated
-it via `random_password`), rebar manages the SSM value with `ignore_changes=[value]`,
+it via `random_password`), rebar manages the SSM value with write-only `value_wo`
+(never persisted to state — ADR 0105; see [`ssm-secret-write-only.md`](./ssm-secret-write-only.md)),
 so you rotate it **out-of-band** and then force consumers to pick it up:
 
 1. Write a fresh key and force the auth host to redeploy so warm containers drop the

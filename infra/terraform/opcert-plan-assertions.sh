@@ -94,33 +94,35 @@ assert "invoke: exactly one execute-api:Invoke policy, labelled opcert_admin_inv
      | select([.s.Action] | flatten | any(. == "execute-api:Invoke"))]
    | length == 1 and .[0].label == "opcert_admin_invoke"'
 
-# (f) the KEY parameter carries `lifecycle { ignore_changes = [value] }` so an apply never
-#     clobbers the operator-seeded key. The ticket's literal query reads the configuration
-#     section's `.lifecycle_meta_arguments.ignore_changes`. NOTE: `terraform show -json` does
-#     NOT emit lifecycle meta-arguments in its configuration representation (verified on
-#     Terraform 1.10.x and 1.15.x — the field is simply absent), so that JSON query cannot
-#     succeed against current Terraform. We run it as the PRIMARY assertion (it will pass on a
-#     Terraform whose JSON schema exposes lifecycle) and, when the field is absent, fall back to
-#     a source-contract check that verifies the SAME property in opcert.tf. Both prove the key
-#     parameter is guarded by ignore_changes = [value].
+# (f) the KEY parameter uses terraform WRITE-ONLY arguments (`value_wo` + `value_wo_version`)
+#     so its value is NEVER persisted to terraform state (ADR 0105) and an apply never clobbers
+#     the operator-seeded key (the provider re-sends value_wo only when value_wo_version
+#     changes). It must NOT carry a plaintext `value = "..."` or `lifecycle { ignore_changes =
+#     [value] }` — that antipattern read the live cleartext into state on every refresh (bug
+#     eb67-b96c-dcf0-4f86). The configuration representation of `terraform show -json` exposes the
+#     `value_wo_version` expression; we run that as the PRIMARY assertion and, when the field is
+#     absent (older Terraform JSON schemas), fall back to a source-contract check on opcert.tf.
+#     Both prove the key parameter is write-only and NOT ignore_changes-guarded.
 f_json='.configuration.root_module.resources[]
           | select(.address == "aws_ssm_parameter.opcert_ed25519_key")
-          | .lifecycle_meta_arguments.ignore_changes? // empty | length > 0'
+          | .expressions.value_wo_version? // empty | length > 0'
 if jq -e "${f_json}" "${PLAN_JSON}" >/dev/null 2>&1; then
-  echo "  PASS  (f) key-param lifecycle.ignore_changes (via .lifecycle_meta_arguments)" >&2
+  echo "  PASS  (f) key-param write-only value_wo_version (via .expressions)" >&2
 else
-  # Fallback: assert the source declares ignore_changes = [value] on the key parameter.
+  # Fallback: assert the source declares value_wo + value_wo_version and does NOT declare
+  # ignore_changes = [value] on the key parameter.
   if awk '
       /resource "aws_ssm_parameter" "opcert_ed25519_key"/ { inres = 1 }
-      inres && /lifecycle[[:space:]]*{/                    { inlc = 1 }
-      inlc && /ignore_changes[[:space:]]*=[[:space:]]*\[[[:space:]]*value[[:space:]]*\]/ { found = 1 }
-      inres && /^}/ && !/resource/                         { inres = 0; inlc = 0 }
-      END { exit(found ? 0 : 1) }
+      inres && /value_wo[[:space:]]*=/                     { has_wo = 1 }
+      inres && /value_wo_version[[:space:]]*=/             { has_wover = 1 }
+      inres && /ignore_changes[[:space:]]*=[[:space:]]*\[[[:space:]]*value[[:space:]]*\]/ { bad = 1 }
+      inres && /^}/ && !/resource/                         { inres = 0 }
+      END { exit((has_wo && has_wover && !bad) ? 0 : 1) }
     ' opcert.tf; then
-    echo "  PASS  (f) key-param lifecycle.ignore_changes (source fallback: opcert.tf declares ignore_changes = [value])" >&2
+    echo "  PASS  (f) key-param write-only (source fallback: opcert.tf declares value_wo + value_wo_version, no ignore_changes)" >&2
   else
-    echo "  FAIL  (f) key-param lifecycle.ignore_changes" >&2
-    echo "opcert-plan-assertions: AC1 violation on '(f) lifecycle.ignore_changes'; refusing." >&2
+    echo "  FAIL  (f) key-param write-only value_wo/value_wo_version" >&2
+    echo "opcert-plan-assertions: AC1 violation on '(f) write-only value_wo'; refusing." >&2
     exit 1
   fi
 fi
