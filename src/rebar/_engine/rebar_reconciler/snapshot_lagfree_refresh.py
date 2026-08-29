@@ -6,7 +6,8 @@ Why this exists
 A reconcile pass arbitrates every bound field against ``ctx.curr_snapshot``, which the
 fetcher builds from a JQL SEARCH (``fetcher.fetch_snapshot`` -> ``search_issues``). On an
 eventually-consistent remote (notably Jira Data Center, whose background Lucene reindex is
-unbounded — ADR 0037 s3) that search result LAGS a very recent write.
+unbounded — ADR 0055 (Jira-family sub-seam), "Search-index lag" row) that search result
+LAGS a very recent write.
 
 The bound-field INBOUND differ is the exposed consumer. ``inbound_differ._diff_jira_vs_local``
 is LEVEL-triggered and consults NO baseline: it emits an inbound mirror for any mirrored
