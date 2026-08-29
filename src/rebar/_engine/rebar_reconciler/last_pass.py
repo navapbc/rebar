@@ -12,6 +12,7 @@ import datetime as dt
 import importlib.util
 import json
 import os
+import random
 import sys
 import tempfile
 import traceback
@@ -37,6 +38,12 @@ LAST_PASS_REF = "refs/reconciler/last-pass"
 DETAIL_IN_STORE = Path(".bridge_state/last-pass.json")
 HEALTHY_VERDICTS = frozenset({"HEALTHY", "PAUSED", "RUNNING"})
 _ZERO_OID = "0" * 40
+# Bug paediatric-orchestral-anemone: ADDITIVE jitter on top of the CAS-publish base schedule
+# so two passes that collide once on LAST_PASS_REF do not sleep identical durations, wake in
+# lockstep, and re-collide (thundering herd). Mirrors the additive-jitter idiom in
+# `push_classify._cas_backoff` / `_CAS_BACKOFF_JITTER` and the Jira DC transport. Kept small so
+# consecutive base values stay ordered — `[base, 1.25*base]` never reaches the next base.
+_CAS_BACKOFF_JITTER = 0.25
 
 
 class LastPassError(RuntimeError):
@@ -340,7 +347,8 @@ def publish(
             return record
         if attempt == 2:
             break
-        sleeper((0.1, 0.2)[attempt])
+        base = (0.1, 0.2)[attempt]
+        sleeper(base * (1.0 + random.random() * _CAS_BACKOFF_JITTER))
         old_oid = ref_lock._ref_oid(repo_root, LAST_PASS_REF, remote=remote) or _ZERO_OID
     raise LastPassError("last-pass ref changed during all three CAS publication attempts")
 

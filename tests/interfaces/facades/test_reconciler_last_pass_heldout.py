@@ -140,7 +140,7 @@ def test_writer_without_explicit_environment_uses_stable_local_identity(
     assert payload["environment_id"] != "reconciler"
 
 
-def test_last_pass_cas_retries_exactly_three_times_with_fixed_backoff(
+def test_last_pass_cas_retries_exactly_three_times_with_jittered_backoff(
     rebar_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reconciler_main = _reconciler_main()
@@ -172,7 +172,18 @@ def test_last_pass_cas_retries_exactly_three_times_with_fixed_backoff(
 
     assert rc == 0
     assert len(attempts) == 3
-    assert sleeps == [0.1, 0.2]
+    # Bug paediatric-orchestral-anemone: the backoff is now JITTERED, so the two
+    # non-final sleeps are the base schedule (0.1, 0.2) plus bounded additive jitter,
+    # landing in [base, 1.25*base] — never the raw fixed schedule. The lockstep
+    # (non-)collision teeth live in the held-out unit oracle
+    # tests/unit/test_last_pass_backoff_jitter_paediatric.py; here we pin the count and
+    # the jitter window at the integration tier.
+    assert len(sleeps) == 2
+    for base, slept in zip((0.1, 0.2), sleeps, strict=True):
+        assert base <= slept <= base * 1.25
+    # Escalation is preserved: 0.1*1.25 = 0.125 < 0.2, so the second sleep still exceeds
+    # the first regardless of the jitter draw.
+    assert sleeps[0] < sleeps[1]
     assert _remote_payload(remote)["outcome"] == "success"
 
 
