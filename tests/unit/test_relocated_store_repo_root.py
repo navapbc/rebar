@@ -13,6 +13,7 @@ repo at ``/app``).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -363,6 +364,14 @@ def test_run_sweep_resolves_the_code_root_without_rebar_root(
     checkout, not the ephemeral worktree). With ``REBAR_ROOT`` unset and the cwd standing in
     for that anchor, the sweep must STILL read the code repo's ``[compact]`` block — otherwise
     the fix only works on the deployment and the local half of the argument is unproven.
+
+    RETAINED DELIBERATELY (a027-d86c AC#3), not deleted for being weak: this is the
+    fold-EFFECT (end-to-end) half of the fallback-arm contract and the config-effect contrast
+    for its horizon. It is END-TO-END only, so it survives the ``repo_root=None`` mutant — the
+    resolved root is discarded but ``compact_all_cli`` re-discovers the same root from this
+    test's cwd and folds by accident. The SEAM half that closes that gap is
+    ``test_run_sweep_seam_pins_the_resolved_code_root_on_the_fallback_arm`` below; the two are
+    kept as a pair.
     """
     from rebar._commands import compact_trigger
 
@@ -379,6 +388,115 @@ def test_run_sweep_resolves_the_code_root_without_rebar_root(
     assert list((external / tid).glob("*-SNAPSHOT.json")), (
         "with REBAR_ROOT unset the sweep failed to resolve the code root from the git "
         "toplevel of its anchored cwd, so it fell back to default compaction config"
+    )
+
+
+# ── a027-d86c: the SEAM assertion for run_sweep's FALLBACK arm ────────────────────────
+#
+# The end-to-end fallback test above pins the fold EFFECT but survives the ``repo_root=None``
+# mutant: with the cwd inside the code repo, discarding the resolved root and passing ``None``
+# lets ``compact_all_cli`` re-discover the same root and fold by accident. Only a SEAM
+# assertion — recording the exact ``repo_root`` value ``run_sweep`` hands ``compact_all_cli`` —
+# kills that mutant on this arm (the ``REBAR_ROOT`` seam test above kills it only on the
+# deployed arm). The topology below is a REAL worktree symlink over a co-located store so that
+# ``dirname(tracker)`` (the ephemeral worktree) is distinguishable from the realpath-resolved
+# code root; a mock or a co-located dir without the symlink cannot tell the two arms apart.
+
+
+def _colocated_symlinked_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path]:
+    """The LOCAL topology the fallback arm actually rides on: a canonical store CO-LOCATED at
+    ``<main-checkout>/.tickets-tracker`` inside a git repo whose ``rebar.toml`` folds
+    everything, reached through an ephemeral worktree's ``.tickets-tracker`` SYMLINK — exactly
+    what ``make worktree`` provisions and what ``scathing-custommade-bobcat`` verified
+    out-of-band. Returns ``(main_checkout, worktree_tracker_symlink)``.
+
+    The symlink is load-bearing, not decoration: ``os.path.dirname(worktree_tracker)`` is the
+    EPHEMERAL worktree, while ``realpath(worktree_tracker)``'s parent — the anchor
+    ``_proc.detached_child_cwd`` picks — is the main checkout (the code root). A co-located dir
+    with no symlink cannot tell those two apart, so it could not distinguish the resolved-root
+    arm from the ``dirname(tracker)`` arm (a027-d86c AC#4)."""
+    monkeypatch.delenv("REBAR_COMPACT_THRESHOLD", raising=False)
+    monkeypatch.delenv("REBAR_COMPACTION_HORIZON_NS", raising=False)
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
+    monkeypatch.delenv("REBAR_DEFAULT_ASSIGNEE", raising=False)
+    checkout = tmp_path / "main-checkout"
+    checkout.mkdir()
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "test@example.com"),
+        ("config", "user.name", "Test"),
+    ):
+        subprocess.run(["git", *args], cwd=checkout, check=True)
+    (checkout / "rebar.toml").write_text(
+        "[compact]\nthreshold = 1\nCOMPACTION_HORIZON_NS = 0\n", encoding="utf-8"
+    )
+    # REBAR_ROOT is set ONLY to init the store here; each test deletes it to force the
+    # git-toplevel fallback arm under measurement.
+    monkeypatch.setenv("REBAR_ROOT", str(checkout))
+    rebar.init_repo(repo_root=str(checkout))
+    canonical_tracker = checkout / ".tickets-tracker"
+    assert canonical_tracker.is_dir(), "precondition: the store is co-located in the checkout"
+    worktree = tmp_path / "ephemeral-worktree"
+    worktree.mkdir()
+    worktree_tracker = worktree / ".tickets-tracker"
+    worktree_tracker.symlink_to(canonical_tracker)
+    return checkout, worktree_tracker
+
+
+def test_run_sweep_seam_pins_the_resolved_code_root_on_the_fallback_arm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SEAM assertion for the FALLBACK arm (``REBAR_ROOT`` unset). The root ``run_sweep`` hands
+    ``compact_all_cli`` on this arm must be the RESOLVED code root — never ``None`` (which the
+    end-to-end ``test_run_sweep_resolves_the_code_root_without_rebar_root`` lets
+    ``compact_all_cli`` re-discover from the same cwd, folding by accident: the mutant a027-d86c
+    reports as surviving) and never ``os.path.dirname(tracker)`` (the ephemeral worktree on this
+    symlinked topology, which holds no ``rebar.toml``).
+
+    Real symlinked store, real ``_proc.detached_child_cwd`` anchor — the resolution is not
+    mocked; only ``compact_all_cli`` is wrapped to record the value handed across the seam."""
+    from rebar._commands import compact as compact_mod
+    from rebar._commands import compact_trigger
+    from rebar._proc import detached_child_cwd
+
+    checkout, worktree_tracker = _colocated_symlinked_store(tmp_path, monkeypatch)
+
+    # The REAL detached-child anchor: the canonical store's parent reached THROUGH the worktree
+    # symlink — the main checkout, deliberately not the ephemeral worktree that dirname() sees.
+    anchor = detached_child_cwd(str(worktree_tracker))
+    assert anchor == os.path.realpath(checkout), "precondition: the anchor is the code root"
+    assert anchor != os.path.dirname(str(worktree_tracker)), (
+        "precondition: the symlink makes dirname(tracker) (the ephemeral worktree) differ from "
+        "the resolved code root — the property that makes the dirname(tracker) mutant killable"
+    )
+
+    monkeypatch.delenv("REBAR_ROOT", raising=False)  # force the git-toplevel fallback arm
+    monkeypatch.chdir(anchor)
+
+    seen: list = []
+    monkeypatch.setattr(
+        compact_mod,
+        "compact_all_cli",
+        lambda argv, *, repo_root=None: seen.append(repo_root) or 0,
+    )
+
+    compact_trigger.run_sweep(str(worktree_tracker))
+
+    assert seen, "run_sweep never reached the sweep on the fallback arm"
+    handed = seen[0]
+    assert handed is not None, (
+        "run_sweep handed the sweep repo_root=None: the resolved code root was discarded, so "
+        "compact_all_cli re-discovers it from cwd and folds by accident — the repo_root=None "
+        "mutant the end-to-end AC#4 test survives"
+    )
+    assert str(handed) != os.path.dirname(str(worktree_tracker)), (
+        "run_sweep handed the sweep os.path.dirname(tracker) — the EPHEMERAL worktree, which "
+        "holds no rebar.toml; on a symlinked/relocated store that reads the wrong [compact] rule"
+    )
+    assert str(handed) == os.path.realpath(checkout), (
+        f"expected the resolved code root {os.path.realpath(checkout)!r}, got {str(handed)!r}"
     )
 
 
