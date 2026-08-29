@@ -35,6 +35,7 @@ import contextlib
 import hmac
 import logging
 import os
+import threading
 import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
@@ -51,6 +52,7 @@ from rebar.review_bot.config import (
     review_timeout_seconds,
     shutdown_cancel_seconds,
     shutdown_drain_seconds,
+    shutdown_force_exit_grace_seconds,
 )
 from rebar.review_bot.startup import compose_startup_binding
 
@@ -78,6 +80,70 @@ DEFAULT_PORT = 8000
 #: Number of background workers draining the review queue. One is enough for a
 #: single-box PoC (reviews serialize on the per-(change,rev) lock anyway).
 WORKER_COUNT = 1
+
+#: Grace after the bounded cancel/gather before the lifespan FORCE-EXITS the process (ADR 0067).
+#: ADR 0067's "total shutdown <= drain + cancel" is a PROCESS-level bound, but the asyncio-side
+#: cancel cannot deliver it on its own: every review runs its blocking work through
+#: ``asyncio.to_thread`` on the default (non-daemon) ThreadPoolExecutor. Cancelling a task parked
+#: in such an offload returns the coroutine at once — so the bounded ``gather`` above succeeds —
+#: but the OS thread keeps running the abandoned review, and neither ``asyncio.run``'s
+#: ``shutdown_default_executor`` join nor interpreter finalization can force-cancel it (both
+#: simply JOIN it), so the process — whose listener uvicorn already closed — outlives
+#: ``drain + cancel`` by the whole remaining review, 502ing ``/review/`` while a stale worker
+#: keeps voting (the 2026-08-28 zombie). ``os._exit`` is the only thing that forces the process
+#: down; the lifespan arms a HARD DEADLINE that fires it. The grace lives in ``config`` so its
+#: source-derived sizing (never preempt a legitimate bounded store write mid-lock; still land
+#: below ``stop_grace_period``) can be asserted WITHOUT importing this fastapi-laden module.
+#:
+#: Thread-name prefix of the default event-loop executor's workers (CPython names them
+#: ``asyncio_0``, ``asyncio_1``, …). A live, non-daemon thread with this prefix at shutdown is an
+#: ``asyncio.to_thread`` offload the process cannot force-cancel — the arming signal below.
+_OFFLOAD_THREAD_PREFIX = "asyncio_"
+
+
+def _running_offload_threads() -> list[threading.Thread]:
+    """Live, non-daemon default-executor offload threads (the un-force-cancellable review work).
+
+    An empty list means no ``asyncio.to_thread`` offload is outstanding, so a clean shutdown will
+    exit on its own and the hard deadline is neither needed nor armed (this is also what makes the
+    clean-teardown contract testable in-process). A non-empty list is the orphaned-thread hazard."""
+    return [
+        t
+        for t in threading.enumerate()
+        if t.is_alive() and not t.daemon and t.name.startswith(_OFFLOAD_THREAD_PREFIX)
+    ]
+
+
+def _force_process_exit(code: int = 0) -> None:  # pragma: no cover - exercised via the seam
+    """Terminate the process immediately, bypassing the interpreter finalization that would
+    otherwise JOIN an orphaned non-daemon ``asyncio.to_thread`` worker for the rest of its
+    review. Logs the surviving offload threads FIRST so the force-down is operator-visible in
+    journald (otherwise the zombie/orphaned-thread incident leaves no signal that it tripped).
+    Injected as a module seam so tests can observe the force-down without dying."""
+    survivors = [t.name for t in _running_offload_threads()]
+    logger.critical(
+        "review-bot: graceful shutdown exceeded its bound with orphaned offload thread(s) %s "
+        "still running; forcing process exit (code=%s) so the container releases its port for "
+        "the replacement (ADR 0067)",
+        survivors,
+        code,
+    )
+    os._exit(code)
+
+
+def _arm_hard_shutdown(grace: float) -> threading.Timer:
+    """Arm a DAEMON timer that force-exits the process ``grace`` seconds from now (ADR 0067).
+
+    Daemon so it never itself keeps the process alive: if the shutdown completes cleanly and the
+    interpreter exits first, the pending timer is discarded with the process. It only ever fires
+    when the process is still alive ``grace`` seconds after its bounded shutdown work finished —
+    i.e. when an orphaned OS thread is holding it up — and then hard-exits so the container
+    releases its published port for the replacement instead of lingering as a zombie."""
+    timer = threading.Timer(grace, _force_process_exit)
+    timer.daemon = True
+    timer.start()
+    return timer
+
 
 #: The per-review wall-clock timeout now lives in ``config.review_timeout_seconds()`` so the
 #: live worker (below) AND the backfill reconciler (``reconcile.reconcile_once``) bound a single
@@ -213,6 +279,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # that re-drives a rerun the discarded in-memory queue lost. Cleared HERE, after the
         # bounded cancel, so every task that observes it has already been drained or abandoned.
         _reconcile.clear_stop()
+        # Restore ADR 0067's PROCESS-level "shutdown <= drain + cancel" bound. The bounded cancel
+        # above returns the coroutines promptly, but a review whose blocking work is running in an
+        # ``asyncio.to_thread`` offload leaves a non-daemon OS thread alive that neither
+        # ``asyncio.run``'s executor-join nor interpreter finalization can force-cancel — both
+        # merely JOIN it — so without this the process (listener already closed) lingers as the
+        # observed zombie until the whole abandoned review completes. Only ``os._exit`` forces it
+        # down. Arm the hard deadline ONLY when such an offload thread is actually still running
+        # (a clean shutdown with none exits on its own and needs no force): give any abandoned
+        # store write ``shutdown_force_exit_grace_seconds()`` — the lock-acquisition + one-git-call
+        # window — to finish and RELEASE its mkdir lock first, so the force-exit never orphans that
+        # lock, then hard-exit. ``drain + cancel + grace`` stays below the container
+        # ``stop_grace_period``, so this controlled exit fires before Docker's own SIGKILL.
+        if _running_offload_threads():
+            _arm_hard_shutdown(shutdown_force_exit_grace_seconds())
 
 
 def _event_revision(event: Any) -> str | None:
