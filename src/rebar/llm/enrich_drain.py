@@ -156,13 +156,26 @@ def status(tracker: str, *, now_ns: int | None = None, repo_root=None) -> dict[s
     return {"pending": pending, "claimed": claimed, "soaking": soaking}
 
 
-def _stale_digest_ids(tracker: str, repo_root) -> list[str]:
+def _stale_digest_ids(tracker: str, repo_root, *, now: int, debounce_ns: int) -> list[str]:
     """Self-healing fallback: tickets whose cached digest is PRESENT-STALE (content drifted
     since enrichment) — re-enriched even without a live queue entry, so a crash between cert
-    and enqueue can never permanently miss a ticket."""
+    and enqueue can never permanently miss a ticket.
+
+    RE-ENRICHMENT DEBOUNCE (bug 8bef-1558-b3ef-4b19): a present-stale ticket whose latest
+    ``DONE_ENRICH`` is younger than ``debounce_ns`` is SKIPPED. This scan returns every
+    present-stale ticket on EVERY drain, so before the debounce ordinary comment / edit /
+    reconcile-writeback churn re-staled the digest and re-fired a full ENQUEUE/CLAIM/DONE
+    quartet each drain (~15× per ticket in the 2026-08 fan-out that grew the tickets branch
+    ~10×). The debounce bounds re-enrichment to at most once per window per ticket. It DELAYS,
+    never DROPS — the digest stays stale, so the ticket re-enriches once the window elapses.
+    First-time enrichment (no ``DONE_ENRICH``) is never debounced, and ``debounce_ns <= 0``
+    disables it. Crucially it deletes NO event, so the union-merge retention invariant that
+    ``be8a0c0`` / epic 4520 require is untouched."""
     from rebar.llm.overlap import digest_sidecar as ds
+    from rebar.llm.overlap import queue as _queue
 
     out: list[str] = []
+    debounced = 0
     try:
         entries = os.listdir(tracker)
     except OSError:
@@ -170,8 +183,20 @@ def _stale_digest_ids(tracker: str, repo_root) -> list[str]:
     for name in entries:
         if name.startswith(".") or not os.path.isdir(os.path.join(tracker, name)):
             continue
-        if ds.freshness(name, tracker=tracker, repo_root=repo_root) == "present-stale":
-            out.append(name)
+        if ds.freshness(name, tracker=tracker, repo_root=repo_root) != "present-stale":
+            continue
+        if debounce_ns > 0:
+            done = _queue._latest(os.path.join(tracker, name), _queue.DONE)
+            if done is not None and (now - done[0]) < debounce_ns:
+                debounced += 1
+                continue
+        out.append(name)
+    if debounced:
+        logger.info(
+            "enrich drain: %d present-stale ticket(s) within the re-enrichment debounce "
+            "window; skipped this drain",
+            debounced,
+        )
     return out
 
 
@@ -387,7 +412,10 @@ def _collect_claims(
         # Self-healing fallback: a ticket with a present-stale digest but no live queue entry
         # (e.g. a crash between cert and enqueue, or a post-enrich edit) is ENQUEUED here with
         # a zero soak so it becomes claimable — then the single claim path below handles it.
-        for tid in _stale_digest_ids(tracker, repo_root):
+        # Re-enrichment is DEBOUNCED (bug 8bef): a ticket re-enriched within the window is
+        # skipped by _stale_digest_ids, so churn cannot re-fire a quartet every drain.
+        debounce_ns = int(cfg.overlap_reenrich_debounce_min * _queue._NS_PER_MIN)
+        for tid in _stale_digest_ids(tracker, repo_root, now=now, debounce_ns=debounce_ns):
             st = _queue.reduce_ticket(tid, tracker, now_ns=now)
             if not st["pending"] and not st["claimed"]:
                 _queue.enqueue(tid, soak_min=0, repo_root=repo_root, now_ns=now - 1)
@@ -462,6 +490,12 @@ def _finalize_claims(
                     "enrich drain: %s changed during enrichment; digest skipped, re-enqueued",
                     tid,
                 )
+                # DISTINCT from the self-heal fan-out (bug 8bef): this fires only when content
+                # drifts DURING a ticket's own enrich window (snapshot != current hash), so it
+                # is bounded by real concurrent edits in that seconds-long window, not by the
+                # every-drain stale scan. It is deliberately NOT debounced — no DONE_ENRICH
+                # exists for this attempt yet (the digest emit is being skipped), and the retry
+                # must stay immediate so the fresh content is not left unenriched.
                 _queue.enqueue(tid, soak_min=0, repo_root=repo_root)
                 continue
         ds.emit(result["digest"], tid, state=state, model=cfg.model, repo_root=repo_root)

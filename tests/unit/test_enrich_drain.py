@@ -1078,3 +1078,74 @@ def test_detached_drain_child_is_handed_the_canonical_tracker(
     argv, kwargs = spawned[0]
     assert argv[3] == canonical, "the detached child was handed an ephemeral worktree tracker"
     assert kwargs["cwd"] == os.path.dirname(canonical)
+
+
+# --- Re-enrichment debounce: bounds the self-heal fan-out (bug 8bef-1558-b3ef-4b19) ---------
+
+
+def _count(tid: str, tracker: str, event_type: str) -> int:
+    """Number of persisted queue events of *event_type* for *tid* (fan-out oracle)."""
+    ticket_dir = os.path.join(tracker, Q._resolve(tid, tracker))
+    return len(Q._event_names(ticket_dir, event_type))
+
+
+def test_reenrich_debounce_bounds_the_self_heal_fanout(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Held-out oracle (bug 8bef): a ticket enriched once, then drifting repeatedly WITHIN the
+    debounce window, must NOT re-enrich on every drain. Pre-fix ``_stale_digest_ids`` returned
+    the present-stale ticket every drain and ``_collect_claims`` re-enqueued it, firing a full
+    ENQUEUE/CLAIM/DONE quartet per drift (the unbounded fan-out that grew the tickets branch
+    ~10x). Post-fix the debounce skips a present-stale ticket whose last DONE_ENRICH is inside
+    the window, so N in-window drifts add ZERO enrichment cycles."""
+    monkeypatch.setenv("REBAR_LLM_OVERLAP_REENRICH_DEBOUNCE_MIN", "1440")
+    tracker = _tracker(repo)
+    tid = rebar.create_ticket("task", "Churner", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
+    # First-time enrichment is NEVER debounced (no prior DONE_ENRICH).
+    assert D.drain(tracker, repo_root=repo, runner=_DigestRunner())["processed"] == 1
+    assert _count(tid, tracker, Q.DONE) == 1
+
+    for i in range(5):
+        rebar.edit_ticket(tid, description=f"drift {i}", repo_root=repo)
+        assert ds.freshness(tid, repo_root=repo) == "present-stale"
+        D.drain(tracker, repo_root=repo, runner=_DigestRunner())
+
+    # The bound: exactly ONE enrichment cycle survives; the 5 in-window drifts add none.
+    assert _count(tid, tracker, Q.DONE) == 1, "in-window drift must not re-fire enrichment"
+    assert _count(tid, tracker, Q.ENQUEUE) == 1, "debounced ticket is never re-enqueued"
+
+
+def test_reenrich_debounce_allows_reenrichment_after_the_window(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bound DELAYS, it does not DROP: a genuine content drift older than the window
+    re-enriches exactly once, so legitimate freshness is preserved."""
+    monkeypatch.setenv("REBAR_LLM_OVERLAP_REENRICH_DEBOUNCE_MIN", "1440")
+    tracker = _tracker(repo)
+    tid = rebar.create_ticket("task", "Ager", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
+    D.drain(tracker, repo_root=repo, runner=_DigestRunner())
+    assert _count(tid, tracker, Q.DONE) == 1
+    rebar.edit_ticket(tid, description="drifted", repo_root=repo)
+    done = Q._latest(os.path.join(tracker, Q._resolve(tid, tracker)), Q.DONE)
+    assert done is not None
+    future = done[0] + (1441 * 60 * 1_000_000_000)  # one minute past the 1440-min window
+    monkeypatch.setattr(Q, "_now_ns", lambda: future)
+    D.drain(tracker, repo_root=repo, runner=_DigestRunner())
+    assert _count(tid, tracker, Q.DONE) == 2, "a drift older than the window must re-enrich"
+
+
+def test_reenrich_debounce_zero_disables_the_bound(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Setting the window to 0 restores the pre-fix behavior (self-heal fires on every drift),
+    proving the knob -- not an unrelated change -- is what bounds the fan-out."""
+    monkeypatch.setenv("REBAR_LLM_OVERLAP_REENRICH_DEBOUNCE_MIN", "0")
+    tracker = _tracker(repo)
+    tid = rebar.create_ticket("task", "Unbounded", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
+    D.drain(tracker, repo_root=repo, runner=_DigestRunner())
+    rebar.edit_ticket(tid, description="drifted", repo_root=repo)
+    D.drain(tracker, repo_root=repo, runner=_DigestRunner())
+    assert _count(tid, tracker, Q.DONE) == 2, "window=0 must preserve pre-fix re-enrichment"
