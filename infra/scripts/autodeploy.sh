@@ -955,6 +955,32 @@ print("missing" if st.get("expected") and not st.get("present") else "ok")' 2>/d
     record_backoff_failure; exit 1
   fi
 
+  # 5c. A 200 from /health still does not prove this container can serve an MCP REQUEST. The
+  #     route is a custom_route registered OUTSIDE the auth middleware and the DNS-rebinding
+  #     transport-security guard, so a container whose allowlist does not admit the hostname real
+  #     traffic carries answers /health 200 while returning 421 to every /mcp request — and this
+  #     gate promoted it (vaccinated-flavorous-solenodon; measured: promoted 54 s before the
+  #     container served its first /mcp request). The server now drives one real `initialize`
+  #     through its OWN session manager inside ASGI lifespan startup, before uvicorn accepts a
+  #     connection, and reports {"handshake": {"ok": ...}}.
+  #
+  #     Absent field => promote, exactly as the `store` gate treats an older container: a
+  #     mixed-version deploy must not be blocked by a field that container cannot report.
+  #     Failure records the MCP backoff, NOT $BACKOFF_FILE (which gates the whole script and
+  #     would throttle a review-bot deploy that never ran this tick — see MCP_BACKOFF_FILE).
+  mcp_handshake="$(curl -fsS -m 3 "http://127.0.0.1:${mcp_newport}/health" 2>/dev/null \
+    | python3 -c 'import json,sys
+try:
+    hs = json.load(sys.stdin).get("handshake") or {}
+except Exception:
+    hs = {}
+print("failed" if hs.get("ok") is False else "ok")' 2>/dev/null || echo ok)"
+  if [ "$mcp_handshake" = "failed" ]; then
+    err mcp-handshake-failed "new mcp container $mcp_newname answers /health but reports its startup MCP handshake FAILED, so it cannot serve an MCP request; removing it, leaving the OLD upstream live"
+    docker rm -f "$mcp_newname" >/dev/null 2>&1 || true
+    record_mcp_backoff_failure; exit 1
+  fi
+
 
   # 6. ATOMICALLY flip the /mcp/ upstream to the new container. The cutover is DONE at the reload;
   #    it never waits on the OLD backend's in-flight ops. On failure restore the previous include

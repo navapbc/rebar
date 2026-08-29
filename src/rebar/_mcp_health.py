@@ -16,6 +16,11 @@ Design notes:
 * ``/health`` is a FastMCP ``custom_route`` — a Starlette route on the app OUTSIDE the
   SDK ``RequireAuthMiddleware`` and the DNS-rebinding transport-security guard — so an
   unauthenticated container HEALTHCHECK/probe still gets 200 even when auth is enabled.
+  That exemption is also why a 200 alone proves nothing about the MCP request path, so
+  ``/health`` additionally reports the STARTUP HANDSHAKE: one real ``initialize`` driven
+  through this server's own session manager inside the ASGI lifespan, before uvicorn
+  accepts a connection (:func:`install_startup_handshake`, bug
+  vaccinated-flavorous-solenodon).
 * The grace window is a MODULE constant (:data:`DEFAULT_SHUTDOWN_GRACE_SECONDS`), the
   ``review_bot/config.py`` budget precedent, deliberately NOT a rebar config key so it
   does not ripple into ``MCP_ENV_VARS`` / ``server.json`` / the env-var docs generators.
@@ -25,6 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import json
 import logging
 import os
 import threading
@@ -41,6 +47,51 @@ DEFAULT_SHUTDOWN_GRACE_SECONDS = 1200
 exits. compose ``stop_grace_period`` must be >= this so Docker never SIGKILLs mid-op."""
 
 _GAUGE_ATTR = "_rebar_in_flight_gauge"
+
+DEFAULT_HANDSHAKE_BUDGET_SECONDS = 10.0
+"""Upper bound (seconds) on the startup MCP handshake. A module constant for the same
+reason as :data:`DEFAULT_SHUTDOWN_GRACE_SECONDS` — a config key would ripple into
+``MCP_ENV_VARS`` / ``server.json`` / the env-var docs generators."""
+
+_HANDSHAKE_ATTR = "_rebar_startup_handshake"
+
+_INITIALIZE_BODY = json.dumps(
+    {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "rebar-startup-handshake", "version": "1"},
+        },
+    }
+).encode()
+"""The one real MCP request the startup handshake drives through this server."""
+
+
+def _declared_public_host(resource_server_url: Any) -> str:
+    """The Host real traffic carries, from the deployment's DECLARED public resource URL —
+    ``mcp.auth_resource_server_url`` / ``REBAR_MCP_AUTH_RESOURCE_SERVER_URL``, which the box sets
+    to ``https://rebar.solutions.navateam.com/mcp``. The port is appended only when it is not the
+    scheme default, matching the Host header a proxy actually sends. ``""`` when unset or
+    unparseable."""
+
+    raw = str(resource_server_url or "").strip()
+    if not raw:
+        return ""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(raw)
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        return ""
+    if not host:
+        return ""
+    default_port = 443 if parts.scheme == "https" else 80
+    return host if port in (None, default_port) else f"{host}:{port}"
 
 
 class InFlightGauge:
@@ -292,8 +343,260 @@ def run_startup_store_sweep() -> None:
         logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
 
 
+def select_probe_host(
+    security: Any,
+    *,
+    resource_server_url: Any = None,
+    bind_host: str = "",
+    bind_port: int = 0,
+) -> str:
+    """The Host header the startup handshake presents to this server's own guard.
+
+    Precedence, all from this server's OWN settings:
+
+    1. the host of the DECLARED public resource URL (:func:`_declared_public_host`). This is
+       declared INDEPENDENTLY of the allowlist, which is what makes the probe non-vacuous: a
+       container whose ``REBAR_MCP_HTTP_ALLOWED_HOSTS`` admits some OTHER hostname answers
+       ``/health`` 200 while 421-ing every real request, and this is the case that catches it;
+    2. else the first ``allowed_hosts`` entry that is a LITERAL host (no ``*``);
+    3. else the first ``host:*`` port-wildcard entry as ``host:<bind port>`` — the only wildcard
+       form ``TransportSecurityMiddleware._validate_host`` matches;
+    4. else the bind address, ``0.0.0.0``/``::`` normalized to ``127.0.0.1``. An allowlist that
+       admits nothing usable — empty, or only unmatchable forms such as ``*.example.com`` — lands
+       here and is refused by this server's own guard.
+
+    LIMIT, stated rather than hidden: with no declared public resource URL there is nothing
+    independent to check the allowlist against, so on such a deployment a pass proves the request
+    path works, not that the right hosts are admitted."""
+
+    declared = _declared_public_host(resource_server_url)
+    if declared:
+        return declared
+    entries = [str(entry).strip() for entry in (getattr(security, "allowed_hosts", None) or [])]
+    for entry in entries:
+        if entry and "*" not in entry:
+            return entry
+    for entry in entries:
+        if entry.endswith(":*") and "*" not in entry[:-2]:
+            return f"{entry[:-2]}:{bind_port}"
+    host = (bind_host or "").strip()
+    if host in ("", "0.0.0.0", "::", "[::]"):  # a wildcard bind is probed over loopback
+        host = "127.0.0.1"
+    return f"{host}:{bind_port}"
+
+
+def _probe_scope(*, probe_host: str, path: str, bind_port: int) -> dict[str, Any]:
+    """The ASGI scope of the startup ``initialize`` POST."""
+
+    return {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": [
+            (b"host", probe_host.encode()),
+            (b"content-type", b"application/json"),
+            (b"accept", b"application/json, text/event-stream"),
+            (b"content-length", str(len(_INITIALIZE_BODY)).encode()),
+        ],
+        "client": ("127.0.0.1", 0),
+        "server": ("127.0.0.1", int(bind_port)),
+    }
+
+
+async def drive_initialize(
+    session_manager: Any, *, probe_host: str, path: str, bind_port: int
+) -> int | None:
+    """Drive one real ``initialize`` through ``session_manager`` and return its HTTP status.
+
+    Calls ``handle_request`` — the SAME entry point the ``/mcp`` route serves through
+    (``StreamableHTTPASGIApp(self._session_manager)`` in the SDK's ``streamable_http_app``)
+    — so a 200 cannot be produced unless the DNS-rebinding transport-security guard
+    admitted the Host, the transport parsed the body, the session manager started a server
+    task, and the MCP server answered the JSON-RPC request. That is what makes a later
+    ``/health`` 200 mean "this container has already served an MCP request".
+
+    ``receive`` yields the body ONCE and then ``http.disconnect``: without the disconnect
+    the SSE response stream never terminates and the drive hangs (observed)."""
+
+    scope = _probe_scope(probe_host=probe_host, path=path, bind_port=bind_port)
+    statuses: list[int] = []
+    delivered = False
+
+    async def receive() -> dict[str, Any]:
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return {"type": "http.request", "body": _INITIALIZE_BODY, "more_body": False}
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict[str, Any]) -> None:
+        if message.get("type") == "http.response.start":
+            statuses.append(int(message["status"]))
+
+    await session_manager.handle_request(scope, receive, send)
+    return statuses[0] if statuses else None
+
+
+async def run_startup_handshake(
+    drive: Callable[[], Any],
+    *,
+    probe_host: str,
+    budget_seconds: float = DEFAULT_HANDSHAKE_BUDGET_SECONDS,
+    fail_after: Any = None,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """Run ``drive`` under a bound and REPORT its outcome — never raise, never hang.
+
+    Returns ``{ok, status, host, elapsed_ms, error}``. A non-200 status, a drive that
+    raises, and a drive that exceeds ``budget_seconds`` are all reported as ``ok: False``
+    so boot continues and uvicorn still serves; a health probe that can abort startup
+    would be worse than one that reports a degraded field (same posture as
+    :func:`store_status`).
+
+    The timeout scope and the clock are INJECTED — the seam :func:`drain_then_exit`
+    already uses — so the bound is provable in a unit test with a fake clock instead of
+    by sleeping."""
+
+    import anyio
+
+    from rebar._deprecations import RemovedInputError
+
+    scope_factory = fail_after or anyio.fail_after
+    started = monotonic()
+    record: dict[str, Any] = {
+        "ok": False,
+        "status": None,
+        "host": probe_host,
+        "elapsed_ms": 0.0,
+        "error": None,
+    }
+    try:
+        with scope_factory(budget_seconds):
+            status = await drive()
+        record["status"] = status
+        record["ok"] = status == 200
+        if not record["ok"]:
+            record["error"] = f"initialize returned HTTP {status}"
+    except TimeoutError:
+        record["error"] = f"handshake exceeded its {budget_seconds}s budget"
+    except RemovedInputError:
+        # A removed, still-set, load-bearing input must fail the server HARD rather than be
+        # folded into this record's error field. RemovedInputError subclasses BaseException so
+        # it already sails past the handler below; the re-raise is redundant today and exists
+        # so the intent survives a future widening of that handler.
+        raise
+    except Exception as exc:  # noqa: BLE001 - see docstring: the handshake never raises
+        record["error"] = f"{type(exc).__name__}: {exc}"
+    record["elapsed_ms"] = round((monotonic() - started) * 1000.0, 3)
+    return record
+
+
+def handshake_status(mcp: Any) -> dict[str, Any]:
+    """The recorded startup-handshake outcome, or a fail-closed not-run record."""
+
+    record = getattr(mcp, _HANDSHAKE_ATTR, None)
+    if isinstance(record, dict):
+        return record
+    return {"ok": False, "status": None, "error": "startup handshake did not run"}
+
+
+def _starlette_app(app: Any) -> Any:
+    """The Starlette app inside ``app``, unwrapping ASGI middleware (``ProxyAuthMiddleware``
+    wraps the Streamable-HTTP app when the proxy auth strategy is active). ``None`` when
+    there is none — a fake/stub server in a test, which must not break boot."""
+
+    for _ in range(8):
+        if hasattr(app, "router"):
+            return app
+        app = getattr(app, "app", None)
+        if app is None:
+            return None
+    return None
+
+
+def install_startup_handshake(
+    mcp: Any,
+    app: Any,
+    *,
+    budget_seconds: float = DEFAULT_HANDSHAKE_BUDGET_SECONDS,
+    drive: Callable[[], Any] | None = None,
+) -> Any:
+    """Wrap ``app``'s ASGI lifespan so the handshake runs BEFORE uvicorn serves.
+
+    Starlette's ``Router.lifespan`` sends ``lifespan.startup.complete`` only after the
+    lifespan context has been entered, and uvicorn accepts no connection until it receives
+    that message — so recording the handshake inside the wrapper, after the session
+    manager's own lifespan is running and before the ``yield``, is what makes a later
+    ``/health`` 200 prove that this container has already served an MCP request. A
+    background task or a lazily-evaluated ``/health`` field would not.
+
+    Best-effort by construction: any failure to install is logged and boot continues."""
+
+    from rebar._deprecations import RemovedInputError
+
+    inner = _starlette_app(app)
+    if inner is None:  # pragma: no cover - defensive: a stub server in a test
+        return app
+    try:
+        settings = getattr(mcp, "settings", None)
+        probe_host = select_probe_host(
+            getattr(settings, "transport_security", None),
+            resource_server_url=getattr(
+                getattr(settings, "auth", None), "resource_server_url", None
+            ),
+            bind_host=str(getattr(settings, "host", "") or ""),
+            bind_port=int(getattr(settings, "port", 0) or 0),
+        )
+        path = str(getattr(settings, "streamable_http_path", "/mcp") or "/mcp")
+        bind_port = int(getattr(settings, "port", 0) or 0)
+        original = inner.router.lifespan_context
+    except RemovedInputError:
+        # Same contract: a retired, still-set input must abort boot loudly rather than be
+        # swallowed by the never-break-boot handler below. Redundant today (BaseException
+        # subclass); kept so a future widening cannot silently reintroduce the swallow.
+        raise
+    except Exception:  # installation never breaks boot
+        logging.getLogger("rebar").warning(
+            "startup MCP handshake not installed; /health will report it as not run",
+            exc_info=True,
+        )
+        return app
+
+    if drive is None:
+
+        async def drive() -> int | None:
+            return await drive_initialize(
+                mcp.session_manager, probe_host=probe_host, path=path, bind_port=bind_port
+            )
+
+    @contextlib.asynccontextmanager
+    async def _lifespan(scope_app: Any) -> Any:
+        async with original(scope_app):
+            record = await run_startup_handshake(
+                drive, probe_host=probe_host, budget_seconds=budget_seconds
+            )
+            setattr(mcp, _HANDSHAKE_ATTR, record)
+            if not record["ok"]:
+                logging.getLogger("rebar").error(
+                    "startup MCP handshake FAILED for host %s: %s — this container answers "
+                    "/health but may not be able to serve an MCP request",
+                    record["host"],
+                    record["error"],
+                )
+            yield
+
+    inner.router.lifespan_context = _lifespan
+    return app
+
+
 def register_health_route(mcp: Any, gauge: InFlightGauge) -> None:
-    """Register ``GET /health`` returning ``{"in_flight": <int>, "store": {...}}``.
+    """Register ``GET /health`` returning ``{"in_flight", "store", "handshake"}``.
 
     Uses FastMCP's ``custom_route`` so the route lives on the Starlette app OUTSIDE the
     auth and transport-security middleware — an unauthenticated probe gets 200.
@@ -305,7 +608,13 @@ def register_health_route(mcp: Any, gauge: InFlightGauge) -> None:
 
     @mcp.custom_route("/health", methods=["GET"])
     async def _health(_request: Any) -> Any:  # pragma: no cover - thin adapter
-        return JSONResponse({"in_flight": gauge.value, "store": store_status()})
+        return JSONResponse(
+            {
+                "in_flight": gauge.value,
+                "store": store_status(),
+                "handshake": handshake_status(mcp),
+            }
+        )
 
 
 def wire_health(mcp: Any, gauge: InFlightGauge | None = None) -> InFlightGauge:
@@ -403,6 +712,10 @@ def run_http_with_grace(
     from rebar._opcert_binding import bound_signer
 
     app = mcp.streamable_http_app()
+    # Prove the MCP REQUEST PATH works before uvicorn accepts its first connection: the
+    # handshake runs inside this app's ASGI lifespan, so a later /health 200 means this
+    # container has already served an `initialize` (bug vaccinated-flavorous-solenodon).
+    app = install_startup_handshake(mcp, app)
     config = uvicorn.Config(
         app,
         host=mcp.settings.host,
