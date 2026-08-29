@@ -11,8 +11,9 @@ gitignored, never committed**.
 ## How the credential material is delivered
 
 Three SSM SecureString parameters hold the raw PATs (declared in `infra/terraform/ssm.tf`,
-placeholder `CHANGEME`, `lifecycle.ignore_changes = [value]` so an operator-seeded value is never
-reverted):
+placeholder `CHANGEME`, write-only `value_wo` — never persisted to terraform state, ADR 0105; see
+[`ssm-secret-write-only.md`](./ssm-secret-write-only.md) — so an operator-seeded value is never
+reverted unless `value_wo_version` is bumped):
 
 - `/rebar/prod/mcp-client-pat-copilot`
 - `/rebar/prod/mcp-client-pat-codex`

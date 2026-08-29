@@ -30,21 +30,20 @@ locals {
   auth_account_id    = data.aws_caller_identity.current.account_id
 }
 
-# Cookie-signing HMAC key. Managed at its EXISTING path with the same "existence +
-# type, not value" contract rebar's other SSM secrets use (ssm.tf): the live value is
-# preserved on import (ignore_changes), the auth-host Lambda reads it at RUNTIME, and
-# terraform never needs to know the value. ROTATION (the SSO revoke lever): overwrite
-# the value out-of-band (`aws ssm put-parameter --overwrite`) and redeploy the Lambda —
-# see infra/runbooks/sso-auth-host.md. Rotating invalidates ALL live sessions.
+# Cookie-signing HMAC key. Managed at its EXISTING path with the "existence +
+# type, not value" contract rebar's other SSM secrets use (ssm.tf): the value uses
+# write-only `value_wo` (ADR 0105) so it is NEVER persisted to terraform state, the
+# auth-host Lambda reads it at RUNTIME, and terraform never needs to know the value.
+# ROTATION (the SSO revoke lever): overwrite the value out-of-band
+# (`aws ssm put-parameter --overwrite`) and redeploy the Lambda — see
+# infra/runbooks/sso-auth-host.md. Rotating invalidates ALL live sessions.
 resource "aws_ssm_parameter" "cookie_signing_secret" {
   name        = local.cookie_secret_name
   description = "HMAC key for the *.solutions.navateam.com SSO session cookie"
   type        = "SecureString"
-  value       = "CHANGEME"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+  # Write-only: never in state; operator seeds/rotates out-of-band (bump value_wo_version to push).
+  value_wo         = "CHANGEME"
+  value_wo_version = 1
 
   tags = {
     Project = "rebar"

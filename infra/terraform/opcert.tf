@@ -46,17 +46,17 @@ resource "random_password" "opcert_guard" {
 
 # The environment's passphrase-free Ed25519 op-cert PRIVATE key. Declared as a placeholder;
 # the operator SEEDS the real key out-of-band (`aws ssm put-parameter --overwrite`) after apply.
-# `lifecycle { ignore_changes = [value] }` means a later `terraform apply` NEVER reverts/clobbers
-# the operator-seeded key — Terraform owns the parameter's existence + type, not its value. This
-# guard applies ONLY to the key parameter (the guard parameter below is fully Terraform-managed).
+# Write-only `value_wo` (ADR 0105) is NEVER persisted to terraform state, and the provider
+# re-sends it only when value_wo_version changes, so a later `terraform apply` NEVER
+# reverts/clobbers the operator-seeded key — Terraform owns the parameter's existence + type,
+# not its value. This applies ONLY to the key parameter (the guard parameter below is a
+# terraform-GENERATED value and stays fully Terraform-managed).
 resource "aws_ssm_parameter" "opcert_ed25519_key" {
-  name  = "/rebar/prod/opcert-ed25519-key"
-  type  = "SecureString"
-  value = "CHANGEME" # placeholder; operator seeds the real key out-of-band (see runbook)
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+  name = "/rebar/prod/opcert-ed25519-key"
+  type = "SecureString"
+  # placeholder; operator seeds the real key out-of-band (see runbook). Write-only: never in state.
+  value_wo         = "CHANGEME"
+  value_wo_version = 1
 
   tags = {
     Project = "rebar"
