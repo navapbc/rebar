@@ -29,6 +29,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONFIG = REPO_ROOT / "src" / "rebar" / "llm" / "config.py"
 _GATE_CONTEXT = REPO_ROOT / "src" / "rebar" / "llm" / "gate_context.py"
 _SRC = REPO_ROOT / "src" / "rebar"
+# `config_readers.py` is `config.py`'s own composition-root sibling (ticket 02b7 moved the
+# env/file-reader helpers there to clear the module-size cap). It calls `current_code_root()`
+# directly for `_read_llm_file_table`'s ambient-discovery fallback; that call is never a
+# monkeypatch target (no test patches `rebar.llm.config.current_code_root` — it's a
+# ContextVar-backed read, exercised via `use_code_root`/`gate_read_root`, not mocked), so
+# giving it its own import does not reproduce the silent-break mode this guard exists for.
+_CONFIG_READERS = REPO_ROOT / "src" / "rebar" / "llm" / "config_readers.py"
 
 # The nine public names plus the three ContextVars that carry the domain's state.
 _MOVED_PUBLIC = (
@@ -105,10 +112,12 @@ def test_no_src_consumer_is_repointed_at_the_new_module() -> None:
     """THE SILENT-BREAK GUARD. Repointing a consumer to `gate_context` leaves every
     `rebar.llm.config.<name>` monkeypatch still applying to `config` while the consumer reads the
     new module — the patch stops taking effect and its test passes while asserting nothing. Only
-    `config.py` itself may import from `gate_context`."""
+    `config.py` itself (and its own `config_readers.py` composition-root sibling, ticket 02b7 —
+    see `_CONFIG_READERS` above for why that import is not a repoint) may import from
+    `gate_context`."""
     offenders: list[str] = []
     for module in parsed_python_files(_SRC):
-        if module.path == _GATE_CONTEXT or module.path == _CONFIG:
+        if module.path in (_GATE_CONTEXT, _CONFIG, _CONFIG_READERS):
             continue
         for node in ast.walk(module.tree):
             if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("gate_context"):

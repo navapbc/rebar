@@ -577,7 +577,6 @@ _EXPECTED_RUN_REQUEST_SITES = [
     ("llm/operations.py::_review_ticket_impl", "max_output_cfg(cfg)", "raw"),
     ("llm/overlap/judge.py::judge_one", "cfg", "bound"),
     ("llm/overlap/judge.py::judge_batch", "cfg", "bound"),
-    ("llm/plan_review/__init__.py::_score_floor_novelty", "vcfg", "bound"),
     (
         "llm/plan_review/completion_subcall.py::pass2_completion",
         "_max_output_cfg(cfg)",
@@ -585,6 +584,9 @@ _EXPECTED_RUN_REQUEST_SITES = [
     ),
     ("llm/plan_review/fidelity_spot_eval.py::_relocation_requests", "cfg", "unresolved"),
     ("llm/plan_review/fidelity_spot_eval.py::_relocation_requests", "cfg", "unresolved"),
+    # `_score_floor_novelty` moved from `plan_review/__init__.py` to the new sibling
+    # `plan_review/floors.py` (ticket 02b7, module-size headroom extraction).
+    ("llm/plan_review/floors.py::_score_floor_novelty", "vcfg", "bound"),
     ("llm/plan_review/passes.py::pass1_chunk", "_max_output_cfg(cfg)", "unresolved"),
     ("llm/plan_review/passes.py::pass1_container", "_max_output_cfg(cfg)", "bound"),
     ("llm/plan_review/passes.py::pass1_isf", "_max_output_cfg(cfg)", "bound"),
