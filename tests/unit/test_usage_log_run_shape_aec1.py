@@ -68,7 +68,7 @@ def _run(model, *, ticket_id: str | None = None):
         config=cfg,
         reviewers=["verify"],
         mode="text",
-        target={"ticket_id": ticket_id} if ticket_id else {},
+        target={"ticket_ids": [ticket_id]} if ticket_id else {},
     )
     return PydanticAIRunner(cfg, model_override=model).run(req)
 
