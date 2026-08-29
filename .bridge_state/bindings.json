@@ -393,6 +393,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:50:51Z"
     },
+    "02b7-82ef-ca69-4aa8": {
+      "created_at": "2026-08-29T20:32:24Z",
+      "jira_id": "4590654",
+      "jira_key": "REB-3911",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T20:32:27Z"
+    },
     "02c4-4e64-5ee3-459c": {
       "baseline": {
         "assignee": {
@@ -12625,7 +12632,7 @@
       "created_at": "2026-08-29T18:34:36Z",
       "jira_id": "4590635",
       "jira_key": "REB-3892",
-      "peer_parent": "",
+      "peer_parent": "REB-3897",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:34:39Z"
     },
@@ -13837,7 +13844,7 @@
       "created_at": "2026-08-29T18:34:42Z",
       "jira_id": "4590636",
       "jira_key": "REB-3893",
-      "peer_parent": "",
+      "peer_parent": "REB-3897",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:34:44Z"
     },
@@ -15645,9 +15652,17 @@
       "updated_at": "2026-08-15T14:58:05Z"
     },
     "471c-f71f-342c-45ed": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe plan-review harness needs a frozen, versioned corpus of past reviews it can replay. `plan_review_result_v2` sidecars (written by `src/rebar/llm/plan_review/sidecar.py`) already retain the Pass-1 findings, Pass-2 answer vectors and Pass-3 outputs per finding, but (a) `sidecar.prune` has deleted ~5,000 `REVIEW_RESULT` files from the tree (recoverable from `origin/tickets` history; `docs/experiments/plan-review-gate/harnesses/mine_outcome_corpus.py` already walks git objects this way), (b) the reviewed plan text is stored only as `material_fingerprint`, and (c) compaction has folded most pre-review `EDIT` events into `SNAPSHOT`s, so the at-review description must be reconstructed from git history. The `~/legacy-modernization-navigator` store (74 sidecars, different project overlay) should be included for overlay diversity.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/corpus.py`:\n\n1. Enumerate sidecars from a list of store roots (each a tickets-branch checkout or a git ref), reading tree files plus deleted `*-REVIEW_RESULT.json` blobs from history (`git log --diff-filter=D --name-only` then `git show <commit>^:<path>`). Keep only `data.schema in {plan_review_result_v1, plan_review_result_v2}`; record schema version, `impact_model_version`, `regver`, `verified_at_sha`, `provider_provenance.ran_model`, `review_phase`.\n2. Reconstruct the reviewed material per sidecar: replay `CREATE`/`EDIT` (tree + history-deleted) up to the sidecar timestamp for description and file_impact, resolve child pins from `reviewed_related_material`; recompute the fingerprint with `material_diff.material_basis` / `pass1.material_fingerprint` and mark each row `verified` only when it matches the stored `material_fingerprint`. Fall back to the nearest `SNAPSHOT.compiled_state.description` and mark `unverified` when no exact match is found.\n3. Emit a manifest (`docs/experiments/plan-review-gate/replay/corpus-<date>.manifest.json`: per-store counts, verdict/schema/cohort/model histograms, verification coverage, content hash) and a compact JSONL corpus (one row per review with findings, verification vectors, material text) under a git-ignored cache dir with the manifest hash as the reproducibility key. Assume rebuild-from-manifest is deterministic; the JSONL itself is not committed.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/__init__.py`, `corpus.py` (new)\n- `docs/experiments/plan-review-gate/replay/corpus-*.manifest.json` (new)\n- `.gitignore` (replay cache dir)\n- `tests/unit/evals/test_plan_replay_corpus.py` (new)\n\n## Testing\n\nUnit: a fixture store with one tree sidecar, one history-deleted sidecar, one compacted ticket \u2192 all three enumerated; fingerprint verification passes for a ticket whose EDIT history is intact and is marked `unverified` for one that was snapshotted with a later edit; v1 sidecars are loaded with the missing fields marked absent, not defaulted. Empty store \u2192 empty manifest, exit 0. Integration (manual, recorded in the manifest): a full build over both real stores.\n\n## Acceptance Criteria\n\n- [ ] Running the builder over the rebar and legacy-modernization-navigator stores produces a manifest whose sidecar count is \u2265 the tree count plus the history-recovered count, with per-store and per-schema totals; checked by reading the manifest.\n- [ ] \u226595% of v2 sidecars have their reviewed material reconstructed and `verified` against `material_fingerprint`; checked by the manifest's `verified_ratio`.\n- [ ] Rebuilding from the same store refs yields an identical manifest content hash; checked by running twice and diffing.\n- [ ] The builder makes no LLM calls and needs no network beyond a local git fetch; checked by running with no provider credentials.\n- [ ] Unit tests above pass in `make test`.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Freeze the replayable plan-review corpus: both stores, git-recovered sidecars, fingerprint-verified plan text (zero LLM)"
+      },
       "created_at": "2026-08-29T19:29:20Z",
       "jira_id": "4590643",
       "jira_key": "REB-3900",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:23Z"
     },
@@ -16572,9 +16587,17 @@
       "updated_at": "2026-08-15T14:58:34Z"
     },
     "4bd8-a2bb-813b-427e": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nReplaying a candidate change tells you *what would change*, not whether it is *better*. The store already carries outcome signals that need no LLM or human labeling: revise\u2192re-review pairs (2,483; per-finding survival via `norm_id` = \"author fixed it\" proxy), verdict flips on byte-identical material (208; the reviewer-noise floor), bug closes with `close_class=plan_defect` (84), `caused_by` links (89), tickets that PASSed plan review then FAILed completion (199), and reopens (18). `docs/experiments/calibrate_plan_review_thresholds.py` (`rev_rr`) and `docs/experiments/escaped_bug_analysis.py` compute pieces of this ad hoc.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/labels.py` over the corpus JSONL and the store event logs:\n\n- **Ticket-level labels**: `escaped_defect` (later `plan_defect` bug or `caused_by` target), `completion_failed_after_pass`, `reopened`, `clean_close` (closed, no escape signals, \u2265N days). Each label carries its source event id(s).\n- **Finding-level labels**: for consecutive reviews with changed material, join findings by `norm_id`; `resolved_by_author` (present in review k, absent in k+1 with material changed) vs `persisted`; `noise_flip` for identical-material pairs.\n- **Noise floor**: over identical-material pairs compute verdict flip rate, per-criterion finding churn (Jaccard by `norm_id`), and per-question Pass-2 answer agreement; publish as the band a candidate change must exceed.\n- Output `labels-<manifest-hash>.jsonl` plus a Markdown report with counts per label source, joined to the manifest hash so labels and corpus never drift apart.\n\nAssume the label definitions above as defaults; they are constants in one module so a later ticket can tighten them.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/labels.py` (new)\n- `docs/experiments/plan-review-gate/replay/labels-report-<date>.md` (new)\n- `tests/unit/evals/test_plan_replay_labels.py` (new)\n\n## Testing\n\nUnit: synthetic corpus of five tickets exercising each ticket label and each finding label; identical-material pair with a verdict flip counted as noise, changed-material pair not; a ticket with both `plan_defect` and completion FAIL labelled once per source. Empty corpus \u2192 empty report.\n\n## Acceptance Criteria\n\n- [ ] Every review and finding in the corpus carries the labels above, with the source event ids; checked by the labels report counts matching independent `jq` counts over the store for `plan_defect`, `caused_by` and reopen events.\n- [ ] The noise floor (verdict flip rate, per-criterion churn, per-question agreement) is published with the identical-material pair count it was computed from; checked in the report.\n- [ ] Labels are keyed to the corpus manifest hash and the loader refuses a mismatched pair; checked by a unit test.\n- [ ] No LLM calls; checked by running with no provider credentials.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Derive outcome labels and the reviewer-noise floor from the corpus (zero LLM)"
+      },
       "created_at": "2026-08-29T19:29:27Z",
       "jira_id": "4590644",
       "jira_key": "REB-3901",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:30Z"
     },
@@ -16738,9 +16761,17 @@
       "updated_at": "2026-08-15T14:58:40Z"
     },
     "4c80-edd3-20f1-4dff": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nNothing in rebar tracks eval spend in dollars. `usage_log.record()` (`src/rebar/llm/usage_log.py`) writes per-call token rows to `.rebar/usage.jsonl` only inside a gate session, `usage_report._price_row` can price rows via the optional `genai-prices` extra, the `rebar metrics` gate-economics lens counts calls not dollars, and there is no aggregate cap anywhere \u2014 the only limiter is the per-plan shed budget in `sizing.py`. This epic must stay under $200 on Bedrock, so the cap has to be enforced by the harness, not remembered by people.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/ledger.py`:\n\n- A committed ledger `docs/experiments/plan-review-gate/replay/ledger.jsonl`: one row per eval run (`run_id, tier, candidate, sample_n, started, finished, per-pass model ids, input/output/cache tokens, usd, price_table_version`) plus per-call rows in a git-ignored detail file. `cap_usd` and `reserve_usd` are constants in the module (200 / 30).\n- **Pre-flight**: each tier computes an estimate from stored corpus token counts \u00d7 `genai-prices` current prices for the pinned Bedrock model ids; `ledger.reserve(estimate)` refuses (non-zero exit, clear message with remaining allocation) when `spent + estimate > cap \u2212 reserve`.\n- **Metering**: every eval run opens a usage-log session with `REBAR_USAGE_LOG` pointed at a per-run file; on completion the rows are priced and the ledger row finalised with actual spend; a run that dies mid-way is finalised from whatever rows exist on the next `ledger reconcile`.\n- `python -m rebar.llm.evals.plan_replay ledger` prints spent / remaining / per-tier totals.\n\nAssume `genai-prices` Bedrock ids as the price source; the ledger records the price-table version so later re-pricing is possible.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/ledger.py` (new)\n- `docs/experiments/plan-review-gate/replay/ledger.jsonl` (new)\n- `pyproject.toml` (the `pricing` extra becomes a dependency of the eval package's entry point)\n- `tests/unit/evals/test_plan_replay_ledger.py` (new)\n\n## Testing\n\nUnit: reserve succeeds under the cap and refuses over it with the remaining amount in the message; a finalised run's usd equals priced tokens; a crashed run is reconciled from partial rows; the cap and reserve are read from one place. No live calls needed.\n\n## Acceptance Criteria\n\n- [ ] Every Tier-1/Tier-2 run appears in the committed ledger with actual priced spend and per-pass model ids; checked by the ledger after the commissioning runs.\n- [ ] A run whose pre-flight estimate exceeds the remaining allocation is refused before any LLM call; checked by a unit test and by a manual dry-run with an artificially low cap.\n- [ ] `ledger` prints spent/remaining and the total never exceeds $200 across the epic; checked at epic close.\n- [ ] Unit tests pass in `make test`.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Eval budget ledger: price every eval call, pre-flight estimates, refuse runs that would exceed the $200 cap"
+      },
       "created_at": "2026-08-29T19:29:32Z",
       "jira_id": "4590645",
       "jira_key": "REB-3902",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:35Z"
     },
@@ -18233,9 +18264,17 @@
       "updated_at": "2026-08-15T14:59:33Z"
     },
     "53ab-bdf6-de1c-4bb1": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nPass 2 (`src/rebar/llm/review_kernel/verify.py`, questions in `verify_models.py`, prompts `reviewers/plan_review_verifier*.md`, `temperature: 0`, standard class = Sonnet on Bedrock) is the cheapest LLM pass (~$0.5/review uncached, ~1 call with ~12 requests) and the one whose questions most directly set validity/impact. A question or prompt change can be measured by re-verifying the *stored* Pass-1 findings and comparing to the stored answers \u2014 no Opus needed. `verify_findings(findings, context, run_chunk=\u2026)` already exposes the pure seam; `plan-review-verifier.eval.yaml` has no `run_case` arm yet.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/tier1.py`:\n\n- Sample selection: deterministic stratified sample from the corpus (strata: verdict, leaf/container, finding count bucket, project overlay/store, `impact_model_version`), size N given on the command line, seed fixed; only `verified` rows (reconstructed plan text) are eligible; only rows whose `provider_provenance.ran_model` is the current standard-class model.\n- For each sampled review: build the verifier context from reconstructed plan text + stored findings (`finding, criteria, evidence, impact, location`), run the candidate verifier (prompt/questions from a candidate path; default = current) through the production `PydanticAIRunner` pinned to the standard class on Bedrock, collect `{binary, severity_attributes}`.\n- Compare to stored answers: per-question agreement (Cohen \u03ba and raw agreement per graded binary and veto question; per-attribute agreement for severity attributes), validity/impact/priority distribution shift, then hand both answer sets to Tier 0 for the downstream verdict/label metrics.\n- A **reproduction run** (candidate = current) is the first commissioning run: its agreement is the verifier noise floor at temperature 0 and is stored with the labels.\n- All calls go through the budget ledger pre-flight (estimate = stored `metrics` tokens \u00d7 current price \u00d7 N) and record the model id per result.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/tier1.py`, `sampling.py` (new)\n- `src/rebar/llm/evals/eval_solver.py` (add the verifier `run_case` arm)\n- `docs/experiments/plan-review-gate/replay/tier1-*.md` (generated)\n- `tests/unit/evals/test_plan_replay_tier1.py` (new)\n\n## Testing\n\nUnit: sampling is deterministic for a seed and respects strata; a `FakeRunner` returning canned verifications yields the expected per-question agreement table; a run whose pre-flight estimate exceeds the ledger allocation is refused before any call; a result with a non-standard-class model id is rejected at diff time. Live (commissioning, \u2264$40): the reproduction run on N=60.\n\n## Acceptance Criteria\n\n- [ ] `python -m rebar.llm.evals.plan_replay tier1 --candidate <path> --n N` produces per-question agreement, distribution shift and downstream Tier-0 metrics for a stratified sample; checked by one generated report.\n- [ ] The reproduction run (current questions) is recorded with its per-question agreement as the Pass-2 noise floor; checked by the report and the labels file.\n- [ ] Every call in the run is priced in the ledger and uses the Bedrock standard-class model id; checked by the ledger rows for the run.\n- [ ] Commissioning spend for this ticket \u2264 $40; checked by the ledger.\n- [ ] Unit tests pass in `make test`.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Tier-1 harness: replay Pass-2 impact/validity questions on stored Pass-1 findings (Sonnet via Bedrock, budgeted)"
+      },
       "created_at": "2026-08-29T19:29:40Z",
       "jira_id": "4590646",
       "jira_key": "REB-3903",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:42Z"
     },
@@ -20297,9 +20336,17 @@
       "updated_at": "2026-08-15T15:00:21Z"
     },
     "5d19-52e0-7c26-47fb": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nPass 3 (`src/rebar/llm/review_kernel/decide.py`: `validity()`, `impact_plan()`, `pass3_decide`, `DEFAULT_BLOCK_THRESHOLD`, per-criterion `block_threshold`/`default_posture` in `criteria_routing.json`, the execution-phase raise in `orchestrator.py`, `DEFAULT_ADVISORY_CAP`) is deterministic and every input it needs \u2014 the Pass-2 `verification` vector, `block_threshold`, `blocking_enabled`, `review_phase` \u2014 is in the v2 sidecar. `docs/calibration/plan_v5_rescore.py` and `docs/experiments/calibrate_plan_review_thresholds.py` prove the replay works but are one-off scripts with hardcoded baselines. Any proposal touching Pass-3 logic or thresholds should be assessable over all ~4,300 reviews for free.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/tier0.py`:\n\n- Input: the corpus + labels, and a **candidate** = a Python callable/module path for the decide function, a routing overlay JSON (thresholds/postures), and `[verify]` config overrides. Default candidate = current code, so \"replay current code\" is the identity check.\n- Run `orchestrator.pass3_over_findings` (or `pass3_decide` per finding) for baseline and candidate over every review; keep the stored decision as the historical reference too.\n- Report (`tier0-<candidate-name>-<date>.md` + JSON): verdict flip matrix (PASS/BLOCK/INDETERMINATE), friction rate (share of reviews BLOCKed), per-criterion block/advisory/drop deltas, priority distribution shift, and label-proxy metrics \u2014 block rate on `escaped_defect`/`completion_failed_after_pass` tickets (recall proxy) vs block rate on `clean_close` tickets (false-positive proxy), and share of blocking findings that were `resolved_by_author`. Every delta is annotated against the noise band from the labels ticket.\n- Post-verdict floors (novelty/completion/drift) are replayed only when their inputs are present in the sidecar (`coverage.drift`, prior findings); otherwise reported as not replayed.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/tier0.py`, `report.py` (new)\n- `docs/experiments/plan-review-gate/replay/tier0-*.md` (generated)\n- `tests/unit/evals/test_plan_replay_tier0.py` (new)\n\n## Testing\n\nUnit: identity replay of a fixture corpus yields zero diffs; a candidate overlay lowering one criterion's threshold flips exactly the fixture findings whose priority sits between old and new thresholds; a v1 sidecar lacking `block_threshold` is skipped and counted. E2E (manual, recorded in the report): replay the documented plan-v4\u2192plan-v5 impact-model change and reproduce the effect recorded in `docs/calibration/`.\n\n## Acceptance Criteria\n\n- [ ] `python -m rebar.llm.evals.plan_replay tier0 --candidate current` over the real corpus reports zero verdict flips against stored decisions for reviews whose `impact_model_version` matches current; checked by the generated report.\n- [ ] Replaying the plan-v4\u2192plan-v5 change reproduces its documented direction and approximate magnitude; checked against `docs/calibration/`.\n- [ ] The report contains verdict flip matrix, friction rate, per-criterion deltas and the label-proxy recall/false-positive metrics, each annotated relative to the noise band; checked by inspection of one report.\n- [ ] A full-corpus run completes in under 5 minutes on a laptop with zero LLM calls; checked by timing and by running without provider credentials.\n- [ ] Unit tests pass in `make test`.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Tier-0 harness: replay Pass-3 calculation, thresholds and routing overlays over the whole corpus (zero LLM)"
+      },
       "created_at": "2026-08-29T19:29:47Z",
       "jira_id": "4590647",
       "jira_key": "REB-3904",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:50Z"
     },
@@ -21950,7 +21997,7 @@
       "created_at": "2026-08-29T18:34:47Z",
       "jira_id": "4590637",
       "jira_key": "REB-3894",
-      "peer_parent": "",
+      "peer_parent": "REB-3897",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:34:49Z"
     },
@@ -22292,6 +22339,13 @@
       "jira_key": "REB-1157",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:17Z"
+    },
+    "673c-f602-748b-4b90": {
+      "created_at": "2026-08-29T20:32:30Z",
+      "jira_id": "4590655",
+      "jira_key": "REB-3912",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T20:32:33Z"
     },
     "6754-a380-7ce1-4bf4": {
       "baseline": {
@@ -24179,6 +24233,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:16Z"
     },
+    "7153-e5ad-5e20-4ae9": {
+      "created_at": "2026-08-29T20:32:37Z",
+      "jira_id": "4590656",
+      "jira_key": "REB-3913",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T20:32:41Z"
+    },
     "716f-b917-9fc8-41f5": {
       "baseline": {
         "assignee": null,
@@ -25315,9 +25376,17 @@
       "updated_at": "2026-08-15T15:02:46Z"
     },
     "759e-7dc1-675c-4877": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nEvery change to the plan-review gate \u2014 a Pass-1 criterion prompt, a Pass-2 impact/validity question, a Pass-3 formula or threshold \u2014 lands on a handful of live dogfood reviews. No standing instrument answers \"did this change make the gate better or worse?\" before it ships; the prior calibration epic (`pastoral-aquatic-viper`, 6982) rejected live A/B batches on cost and parked the human gold set. The work is scattered across six epics and several orphan stories (`jira-reb-529`, `jira-reb-1589`, `fort-wisp-wren`, `spin-cub-usher`, `ridiculous-expert-mouse`, `auspicious-torrid-curlew`). This epic unifies them behind one harness.\n\nThe instrument already mostly exists as data. The live rebar store holds ~4,300 `plan_review_result_v2` sidecars on ~1,280 tickets (2026-06-27 \u2192 now; ~2,000 older ones pruned from the tree but recoverable from `origin/tickets` history) and `~/legacy-modernization-navigator` holds 74 more. Each v2 sidecar retains the raw Pass-1 findings (prose + evidence + scenarios + criteria), the complete Pass-2 answer vector (graded binaries + severity attributes), and the Pass-3 outputs (validity, impact, priority, the exact `block_threshold`, decision). The reviewed plan text is not stored but is reconstructable from ticket `EDIT`/`SNAPSHOT` history and verifiable byte-exactly against the stored `material_fingerprint`. The store also carries free outcome labels: 2,483 revise\u2192re-review pairs (finding survival via `norm_id`), 208 verdict flips on byte-identical material (the reviewer-noise floor), 84 `plan_defect` bug closes, 89 `caused_by` links, 199 plan-PASS\u2192completion-FAIL tickets, 18 reopens.\n\n## Approach\n\nThree eval tiers, ordered by cost, each measuring one pass in isolation while holding the others fixed:\n\n- **Tier 0 \u2014 Pass-3 replay (zero LLM).** Re-run `review_kernel.decide.pass3_decide` (and the post-verdict floors) over the whole corpus with a candidate formula/threshold/routing overlay; diff against stored decisions. Generalises `docs/calibration/plan_v5_rescore.py` and `docs/experiments/calibrate_plan_review_thresholds.py`. Runs on every proposal, unlimited.\n- **Tier 1 \u2014 Pass-2 replay (Sonnet, ~$0.5/review uncached).** Re-run the verifier with candidate questions/prompt on the *stored* Pass-1 findings plus reconstructed plan text via the `verify_findings(run_chunk=\u2026)` seam; score per-question agreement against stored answers, then feed Tier 0.\n- **Tier 2 \u2014 Pass-1 replay (Opus, ~$3.4/review uncached, plus a Tier-1 run on the new findings).** Re-run finders with candidate criteria on a fixed stratified sample (~20 tickets); compare finding sets by `norm_id`/criterion; single-criterion mode (~$0.17/call) for per-criterion edits.\n\nNon-negotiable invariants, enforced by the harness rather than by convention:\n\n1. **Hard budget.** A committed ledger tracks every eval call priced via `genai-prices`; every run pre-flights a cost estimate and refuses to start if projected spend would exceed the remaining allocation. Epic-wide cap is **$200** total with a $30 reserve; commissioning spend is planned at \u2264$120 (one Tier-1 reproduction run to measure verifier noise, one Tier-2 baseline sample). Per-proposal costs are published.\n2. **Model parity.** Every LLM re-run uses the exact production model class for that pass (frontier Opus for Pass 1, standard Sonnet for Pass 2) through **Bedrock only**, on a homogeneous provider chain (the mixed Bedrock+Anthropic fallback silently disables prompt caching and roughly doubles cost). The harness records the per-pass model id in every result, refuses to diff runs whose per-pass model ids differ, and refuses to start when the configured model differs from the corpus baseline's `provider_provenance.ran_model`. Substituting a cheaper model to save budget is forbidden: it confounds the measurement.\n3. **Offline first.** Tier 0 and all label joins are pure functions of the frozen corpus; no proposal may be assessed on a live-only signal. Consistent with ADR 0054 (the field corpus is the instrument) and with 6982's rejection of live A/B.\n4. **Noise-aware acceptance.** A change is reported as regressing/improving only when its label-proxy deltas exceed the noise band measured from identical-material flips and the Tier-1 reproduction run; otherwise \"indistinguishable\".\n\n## Scope\n\nNew package `src/rebar/llm/evals/plan_replay/` (corpus, labels, tier runners, ledger, report) with a `python -m rebar.llm.evals.plan_replay` entry; frozen corpus manifest + ledger + reports under `docs/experiments/plan-review-gate/replay/`; an ADR and a contributor guide section; fixes to `usage_log` ticket attribution. No CI provider dependency \u2014 everything runs locally.\n\n## Acceptance Criteria\n\n- [ ] A frozen, versioned replay corpus exists covering both stores (tree + git-recovered sidecars), with at-review plan text reconstructed and fingerprint-verified for \u226595% of v2 sidecars; verified by the corpus manifest's coverage counts.\n- [ ] Outcome labels and a reviewer-noise floor are computed from the corpus with no LLM calls and joined to every review/finding; verified by a labels report listing counts per label source.\n- [ ] A Pass-3 change (formula, threshold, routing overlay) can be assessed over the entire corpus with zero LLM calls, producing a diff report (verdict flips, per-criterion deltas, label-proxy precision/recall, friction rate); verified by replaying current code against itself with zero diffs and replaying a known historical threshold change reproducing its documented effect.\n- [ ] A Pass-2 change can be assessed on a stratified sample using stored Pass-1 findings, with per-question agreement vs stored answers and downstream Tier-0 metrics; verified by a reproduction run (unchanged questions) whose agreement establishes the noise floor.\n- [ ] A Pass-1 change can be assessed on a fixed stratified sample with finding-set comparison by `norm_id`/criterion and downstream Tier-1/Tier-0 metrics; verified by one baseline sample run.\n- [ ] Every LLM eval call is priced and written to a committed ledger; a run whose pre-flight estimate exceeds remaining allocation is refused; total ledger spend at epic close is \u2264 $200; verified by the ledger file and a test of the refusal path.\n- [ ] Every eval result records the per-pass model id; the harness refuses to diff results with differing model ids and refuses to run a pass on a model other than its production class via Bedrock; verified by unit tests and by the ledger showing only Bedrock Opus/Sonnet ids.\n- [ ] Prompt caching is confirmed active for eval runs (cache_read_tokens > 0 on the second call of a run); verified from the usage log.\n- [ ] A contributor-facing protocol (ADR + docs) states which tier a proposal needs, the required report artifact, and the noise-band acceptance rule; verified by the docs landing and being referenced from `docs/plan-review-gate.md`.\n\n## Child decomposition\n\nCorpus builder (criterion 1) \u2192 outcome labels + noise floor (2) \u2192 Tier-0 harness (3) \u2192 Tier-1 harness (4) \u2192 Tier-2 harness (5) \u2192 budget ledger + model-parity guard + homogeneous Bedrock chain (6, 7, 8; includes the usage-log ticket-attribution bug) \u2192 change protocol ADR + docs (9). Folded-in existing work: `ridiculous-expert-mouse` (per-criterion fixture eval, a Tier-2 single-criterion consumer), `auspicious-torrid-curlew` (deterministic-floor candidates mined via Tier-0 replay), `brutal-idiocratic-rodent` (optional human-adjudicated gold subset, deferred enrichment). `jira-reb-529` is superseded: its recorded-LLM-response mocking is infeasible because prompts/responses are never persisted; the sidecar-replay tiers deliver its intent. `jira-reb-1589` and `fort-wisp-wren` are consumers that depend on this harness; `spin-cub-usher` and `yip-gem-teak` are related but out of scope.\n\n## Non-goals\n\nChanging any production criterion, question, or threshold (this epic builds the instrument); a full human-adjudicated gold set; live A/B in the production gate.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Plan-review process regression harness: replayable corpus + tiered evals under a hard $200 Bedrock budget"
+      },
       "created_at": "2026-08-29T19:29:54Z",
       "jira_id": "4590648",
       "jira_key": "REB-3905",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:57Z"
     },
@@ -26300,9 +26369,17 @@
       "updated_at": "2026-08-15T15:03:16Z"
     },
     "7a95-b393-e571-4dfb": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nA harness nobody is required to use changes nothing. Contributors editing a criterion prompt, a Pass-2 question, or a Pass-3 threshold need to know which tier applies, what report to attach to the Gerrit change, how to read \"indistinguishable from noise\", and how the budget is allocated per proposal. The decision also has to be reconciled with the record: ADR 0054 (field corpus is the instrument; new labelled sets rejected on cost) and epic 6982's \"no live A/B\" directive.\n\n## Approach\n\n- Write an ADR (`docs/adr/`) recording: the three tiers and what each measures; the model-parity rule (production model per pass, Bedrock only, no substitution); the budget ledger and cap; the noise-band acceptance rule (a change is improving/regressing only outside the band from identical-material flips and the Tier-1 reproduction run); why sidecar replay supersedes recorded-response mocking (`jira-reb-529`); how this extends rather than contradicts ADR 0054.\n- Add a section to `docs/plan-review-gate.md` (and a pointer in `src/rebar/_guides/passing-code-review.md`) with a tier-selection table: Pass-3 code/threshold/routing change \u2192 Tier 0 required, always; Pass-2 question/prompt change \u2192 Tier 1 on N\u226540 plus Tier 0; Pass-1 criterion prompt \u2192 Tier 2 single-criterion (N=20) plus downstream; finder system prompt or chunking \u2192 Tier 2 full mode. The report file path is named in the commit message under a `plan-review-eval:` trailer (advisory; no CI enforcement, to stay portable).\n- Publish the per-proposal cost table from the commissioning runs so future spend is planned.\n\n## Scope\n\n- `docs/adr/00NN-plan-review-replay-harness.md` (new)\n- `docs/plan-review-gate.md`, `src/rebar/_guides/passing-code-review.md`, `docs/README.md` (edits)\n\n## Testing\n\nDocs-only; `make lint` link/format checks. No new testable behavior.\n\n## Acceptance Criteria\n\n- [ ] The ADR exists, is listed in the ADR index, and cites ADR 0054 and epic 6982; checked by reading the index.\n- [ ] `docs/plan-review-gate.md` contains the tier-selection table and the noise-band rule and links the ADR; checked by reading the doc.\n- [ ] The per-proposal cost table matches the ledger's commissioning rows; checked by comparing the two.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Change protocol: ADR + contributor guide for measuring plan-review proposals (tier selection, required report, noise-band rule)"
+      },
       "created_at": "2026-08-29T19:30:03Z",
       "jira_id": "4590649",
       "jira_key": "REB-3906",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:06Z"
     },
@@ -28827,9 +28904,17 @@
       "updated_at": "2026-08-15T15:04:28Z"
     },
     "860f-8886-a17b-48f1": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/llm/runner.py` (the two `record()` call sites around the structured and agentic run paths) reads `req.target.get(\"ticket_id\")` when building the usage-log row, but every producer of `target` writes the plural key `ticket_ids` (`src/rebar/llm/workflow/runs.py` and `src/rebar/llm/operations.py`). Result: 0 of the ~11,900 rows in `.rebar/usage.jsonl` carry a ticket, so per-ticket (and therefore per-review) cost attribution from the usage log is impossible, and `docs/llm-framework.md`'s claim that rows carry `ticket` is false. The eval ledger needs per-run attribution and this is the cheapest fix on that path.\n\n## Approach\n\nRead `ticket_ids` (first element, or the joined list) at both call sites, keep accepting the singular key for compatibility, and correct the doc sentence. Do not change the producers' key.\n\n## Scope\n\n- `src/rebar/llm/runner.py`\n- `docs/llm-framework.md`\n- `tests/unit/test_usage_log.py` (or the existing runner usage test)\n\n## Testing\n\nUnit: a request whose target carries `ticket_ids=[id]` yields a usage row with `ticket == id`; one carrying the legacy singular key still works; one with neither yields `ticket=None`.\n\n## Acceptance Criteria\n\n- [ ] New usage-log rows produced by a gate session carry the ticket id; checked by running one `review-plan` locally (or the Tier-1 commissioning run) and inspecting the rows.\n- [ ] The regression test above passes in `make test`.\n- [ ] `docs/llm-framework.md` describes the actual field.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "usage_log rows never carry a ticket id: runner reads target[\"ticket_id\"] but producers write \"ticket_ids\""
+      },
       "created_at": "2026-08-29T19:30:11Z",
       "jira_id": "4590650",
       "jira_key": "REB-3907",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:14Z"
     },
@@ -32523,9 +32608,17 @@
       "updated_at": "2026-08-19T21:43:59Z"
     },
     "96f3-af59-ba26-4159": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nDaily plan-review cache reads in `.rebar/usage.jsonl` went from ~80% of input tokens (2026-08-06..11) to 0 from 2026-08-12 onward, and the median full plan review went from about $2.18 to about $4.82 (Aug 6\u201329 logged spend is roughly $3,000, of which finders alone are ~358M uncached Opus input tokens). The change coincides with commit `6d4f394195b2` (2026-08-10) adding the Anthropic-direct fallback to the frontier/standard classes in `rebar.toml` `[llm.model_classes]`. `_intersect_capabilities` in `src/rebar/llm/runner_support.py` intersects capabilities across the whole chain and collapses differing `prompt_cache_style` values to `\"none\"` \u2014 exactly the hazard the comment in `rebar.toml` around the caching keys warns about. So every call on a mixed chain runs uncached even though the primary Bedrock target supports caching.\n\n## Approach\n\nInvestigate before fixing (`/rebar-debug`): confirm with a unit reproduction that a chain `[bedrock:\u2026opus, anthropic:\u2026opus]` yields `prompt_cache_style=none` while the single-provider chain yields the Bedrock style; confirm from usage rows that the fallback almost never actually fires. Then pick one: (a) intersect capabilities only over providers that can actually serve the current call (primary first; fallback capabilities apply only after a fallback), or (b) make the chains homogeneous in `rebar.toml`. Default to (a) unless it destabilises the provider seam.\n\n## Scope\n\n- `src/rebar/llm/runner_support.py`\n- `rebar.toml` (only if option b)\n- `tests/unit/test_runner_support.py`\n\n## Testing\n\nUnit: mixed chain keeps the primary provider's cache style until a fallback actually occurs. Live check: one `review-plan` after the fix shows `cache_read_tokens > 0` on second and later finder calls.\n\n## Acceptance Criteria\n\n- [ ] A regression test proves a mixed chain no longer collapses `prompt_cache_style` to none for the primary target; checked in `make test`.\n- [ ] After the fix, a production plan review logs non-zero `cache_read_tokens`; checked in `.rebar/usage.jsonl`.\n- [ ] The root cause and the chosen option are recorded on this ticket.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Prompt caching silently disabled since 2026-08-12: mixed Bedrock+Anthropic class fallback collapses prompt_cache_style to none (~2x review cost)"
+      },
       "created_at": "2026-08-29T19:30:18Z",
       "jira_id": "4590651",
       "jira_key": "REB-3908",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:21Z"
     },
@@ -33912,7 +34005,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Summary\n\nA `docker compose` recreate driven by autodeploy left `compose-review-bot-1` in a **zombie** state: uvicorn began a graceful shutdown, **closed its listening socket**, and then never completed shutdown or exited. The container stayed `Up`, the queue worker kept running long agentic LLM reviews and casting votes, but nothing was listening on :8000 \u2014 so every request to `https://rebar.solutions.navateam.com/review/` returned **502**, and, more damagingly, **every Gerrit webhook delivery was refused**.\n\nLive production outage 2026-08-28 23:21:37 UTC -> 23:43:31 UTC (~22 min).\n\n## Proven root cause (with citations)\n\n**1. It is a dead listener, not a slow one, and not a lost port mapping.**\n\nThe port publish was intact throughout \u2014 `docker ps`: `compose-review-bot-1 | Up 2 hours | 127.0.0.1:8000->8000/tcp`, and host `ss -ltnp` showed `docker-proxy` LISTEN on `127.0.0.1:8000`. But **inside** the container `/proc/net/tcp` held only:\n\n```\n0: 0B00007F:8EAD ... 0A     <- 127.0.0.11 (Docker embedded DNS), the ONLY listener\n1: 020015AC:8C6C ... 01     <- ESTABLISHED outbound to :443 (worker calling Bedrock)\n```\n\nPort 8000 (`0x1F40`) was **absent**. Host probe: `curl 127.0.0.1:8000/health` -> `curl: (56) Recv failure: Connection reset by peer`, `code=000`, `total=0.004s`. nginx logged `recv() failed (104: Connection reset by peer) while reading response header from upstream` 45 times \u2014 a **502, never a 504**. docker-proxy accepted the TCP connection and got RST because nothing was bound inside.\n\n**2. The mechanism is an incomplete uvicorn graceful shutdown.**\n\n```\n2026-08-28T23:21:37.438Z  compose creates replacement container 62f25f31ae05 + SIGTERMs the old one\n2026-08-28T23:21:37.587Z  INFO:     Shutting down\n2026-08-28T23:21:37.687Z  INFO:     Waiting for application shutdown.     <- listener socket closed HERE\n2026-08-28T23:21:52     first 502 in nginx access log (15s later)\n```\n\nThere is **no** matching `Application shutdown complete` / `Finished server process` anywhere in the log, and no second `Application startup complete` (only the original at 22:01:45). `docker inspect` confirms `RestartCount=0`, `Started=22:01:39`. uvicorn closes the listening socket at the *start* of graceful shutdown, then awaits lifespan shutdown \u2014 which never returned, because in-flight review tasks kept running. Evidence the process stayed fully alive with the listener shut: `voter_voted` at 23:35:12 and an agentic LLM call at 23:39:23, ~18 minutes after the listener closed.\n\n**3. The recreate then deadlocked on the port.**\n\n`docker rm`'d container `62f25f31ae05` was `State=created`, `Created=2026-08-28T23:21:37.438Z`, no ports \u2014 it could never start because the zombie still held `127.0.0.1:8000`. Compose gave up, leaving a half-finished recreate.\n\n## Impact: review dispatch WAS stalled, and events were dropped\n\nGerrit delivers webhooks **container-to-container** (`http://review-bot:8000/webhook`), not through nginx \u2014 which is why the nginx access log contains zero `POST /review/` entries and the 502 alone understates the damage. Gerrit's `webhooks` plugin logged, repeatedly, from 23:21:37 onward:\n\n```\nERROR com.googlesource.gerrit.plugins.webhooks.PostTask : Failed to post: Processing event: comment-added\norg.apache.http.conn.HttpHostConnectException: Connect to review-bot:8000 [review-bot/172.21.0.2] failed: Connection refused\n```\n\nBoth intake paths were dead simultaneously:\n- **webhook intake** \u2014 refused (listener closed).\n- **reconcile backstop** \u2014 `{\"event\": \"reconcile_loop_stopped\", \"timestamp\": 1787959359.86}` at 23:22:39. The same lifespan shutdown that closed the listener also stopped the reconciler; it was the one shutdown task that *did* complete.\n\nPer ADR 0009 the webhooks plugin is **not** at-least-once, so events in that window were **dropped, not retried**. The worker was only draining the finite in-memory queue captured before 23:21:37.\n\n## Remediation performed (surface restored)\n\n```\ndocker rm 62f25f31ae05          # inert Created leftover, no ports, never started\ndocker restart d76f4a3e9106     # identical image 4c18557db1ec; NOT a redeploy/rebuild/config change\n```\n\nVerified: in-container `/proc/net/tcp` now shows `00000000:1F40 ... 0A` (0.0.0.0:8000 LISTEN); host `/health` -> `200 {\"status\":\"ok\",\"in_flight\":1,\"queue_depth\":0}`; `gerrit->bot code=200`; external `https://.../review/health` -> `200` on three consecutive probes. The reconcile loop immediately re-picked the dropped work (`merge_detection` at 23:43:32).\n\n## Note: this is NOT the MCP event-loop-blocking bug (dewy-rotatable-tarsier / change 2345)\n\nThat hypothesis was tested and **refuted**. Loop-blocking predicts intermittent recovery between reviews and a burst of backlogged `/health` responses; observed instead was a hard RST with **no listening socket at all**, persistently across quiet moments, for 22 minutes. Decisive counter-evidence after the restart: `/health` returns `200` in milliseconds **while `in_flight: 1`** \u2014 a review in progress does not block the HTTP surface in this service.\n\n## Acceptance Criteria\n\n- [ ] A `docker compose` recreate of `review-bot` cannot leave a container that has closed its listener but not exited: shutdown either completes within the stop timeout or the process is forced down, so the port is released for the replacement.\n- [ ] In-flight review tasks are cancelled (or awaited under a bounded deadline) during lifespan shutdown rather than blocking it indefinitely.\n- [ ] The reconcile loop is not stopped while the process continues serving/working \u2014 or, if shutdown has begun, the process reliably terminates so a fresh container restores both intake paths.\n- [ ] A health/liveness signal distinguishes \"listener closed, process alive\" from healthy, so this state alarms instead of presenting as a silent 502.\n- [ ] Regression test: a SIGTERM delivered while a long review is in flight results in process exit (not an indefinitely-hung shutdown) within the compose stop timeout.",
+        "description": "## Summary\n\nA `docker compose` recreate driven by autodeploy left `compose-review-bot-1` in a **zombie** state: uvicorn began a graceful shutdown, **closed its listening socket**, and then never completed shutdown or exited. The container stayed `Up`, the queue worker kept running long agentic LLM reviews and casting votes, but nothing was listening on :8000 \u2014 so every request to `https://rebar.solutions.navateam.com/review/` returned **502**, and, more damagingly, **every Gerrit webhook delivery was refused**.\n\nLive production outage 2026-08-28 23:21:37 UTC -> 23:43:31 UTC (~22 min).\n\n## Proven root cause (with citations)\n\n**1. It is a dead listener, not a slow one, and not a lost port mapping.**\n\nThe port publish was intact throughout \u2014 `docker ps`: `compose-review-bot-1 | Up 2 hours | 127.0.0.1:8000->8000/tcp`, and host `ss -ltnp` showed `docker-proxy` LISTEN on `127.0.0.1:8000`. But **inside** the container `/proc/net/tcp` held only:\n\n```\n0: 0B00007F:8EAD ... 0A     <- 127.0.0.11 (Docker embedded DNS), the ONLY listener\n1: 020015AC:8C6C ... 01     <- ESTABLISHED outbound to :443 (worker calling Bedrock)\n```\n\nPort 8000 (`0x1F40`) was **absent**. Host probe: `curl 127.0.0.1:8000/health` -> `curl: (56) Recv failure: Connection reset by peer`, `code=000`, `total=0.004s`. nginx logged `recv() failed (104: Connection reset by peer) while reading response header from upstream` 45 times \u2014 a **502, never a 504**. docker-proxy accepted the TCP connection and got RST because nothing was bound inside.\n\n**2. The mechanism is an incomplete uvicorn graceful shutdown.**\n\n```\n2026-08-28T23:21:37.438Z  compose creates replacement container 62f25f31ae05 + SIGTERMs the old one\n2026-08-28T23:21:37.587Z  INFO:     Shutting down\n2026-08-28T23:21:37.687Z  INFO:     Waiting for application shutdown.     <- listener socket closed HERE\n2026-08-28T23:21:52     first 502 in nginx access log (15s later)\n```\n\nThere is **no** matching `Application shutdown complete` / `Finished server process` anywhere in the log, and no second `Application startup complete` (only the original at 22:01:45). `docker inspect` confirms `RestartCount=0`, `Started=22:01:39`. uvicorn closes the listening socket at the *start* of graceful shutdown, then awaits lifespan shutdown \u2014 which never returned, because in-flight review tasks kept running. Evidence the process stayed fully alive with the listener shut: `voter_voted` at 23:35:12 and an agentic LLM call at 23:39:23, ~18 minutes after the listener closed.\n\n**3. The recreate then deadlocked on the port.**\n\n`docker rm`'d container `62f25f31ae05` was `State=created`, `Created=2026-08-28T23:21:37.438Z`, no ports \u2014 it could never start because the zombie still held `127.0.0.1:8000`. Compose gave up, leaving a half-finished recreate.\n\n## Impact: review dispatch WAS stalled, and events were dropped\n\nGerrit delivers webhooks **container-to-container** (`http://review-bot:8000/webhook`), not through nginx \u2014 which is why the nginx access log contains zero `POST /review/` entries and the 502 alone understates the damage. Gerrit's `webhooks` plugin logged, repeatedly, from 23:21:37 onward:\n\n```\nERROR com.googlesource.gerrit.plugins.webhooks.PostTask : Failed to post: Processing event: comment-added\norg.apache.http.conn.HttpHostConnectException: Connect to review-bot:8000 [review-bot/172.21.0.2] failed: Connection refused\n```\n\nBoth intake paths were dead simultaneously:\n- **webhook intake** \u2014 refused (listener closed).\n- **reconcile backstop** \u2014 `{\"event\": \"reconcile_loop_stopped\", \"timestamp\": 1787959359.86}` at 23:22:39. The same lifespan shutdown that closed the listener also stopped the reconciler; it was the one shutdown task that *did* complete.\n\nPer ADR 0009 the webhooks plugin is **not** at-least-once, so events in that window were **dropped, not retried**. The worker was only draining the finite in-memory queue captured before 23:21:37.\n\n## Remediation performed (surface restored)\n\n```\ndocker rm 62f25f31ae05          # inert Created leftover, no ports, never started\ndocker restart d76f4a3e9106     # identical image 4c18557db1ec; NOT a redeploy/rebuild/config change\n```\n\nVerified: in-container `/proc/net/tcp` now shows `00000000:1F40 ... 0A` (0.0.0.0:8000 LISTEN); host `/health` -> `200 {\"status\":\"ok\",\"in_flight\":1,\"queue_depth\":0}`; `gerrit->bot code=200`; external `https://.../review/health` -> `200` on three consecutive probes. The reconcile loop immediately re-picked the dropped work (`merge_detection` at 23:43:32).\n\n## Note: this is NOT the MCP event-loop-blocking bug (dewy-rotatable-tarsier / change 2345)\n\nThat hypothesis was tested and **refuted**. Loop-blocking predicts intermittent recovery between reviews and a burst of backlogged `/health` responses; observed instead was a hard RST with **no listening socket at all**, persistently across quiet moments, for 22 minutes. Decisive counter-evidence after the restart: `/health` returns `200` in milliseconds **while `in_flight: 1`** \u2014 a review in progress does not block the HTTP surface in this service.\n\n## Acceptance Criteria\n\n- [x] A `docker compose` recreate of `review-bot` cannot leave a container that has closed its listener but not exited: shutdown either completes within the stop timeout or the process is forced down, so the port is released for the replacement. **Done (change 2381, merge a36c7407):** the lifespan arms a daemon deadline that `os._exit`s the process when an orphaned `asyncio.to_thread` offload survives the bounded cancel; worst-case drain(1200)+cancel(10)+grace(90)=1300s < `stop_grace_period` 1320s, so the controlled exit fires before Docker's SIGKILL and the port is released.\n- [x] In-flight review tasks are cancelled (or awaited under a bounded deadline) during lifespan shutdown rather than blocking it indefinitely. **Done:** the pre-existing bounded cancel (`shutdown_cancel_seconds()`) unwinds the coroutines, and the new process-level force-exit bounds the OS-thread tail that the asyncio await cannot.\n- [x] The reconcile loop is not stopped while the process continues serving/working \u2014 or, if shutdown has begun, the process reliably terminates so a fresh container restores both intake paths. **Done (second clause):** the fix makes the process reliably terminate within the stop budget, so a fresh container restores both the webhook and the reconcile/backfill intake paths.\n- [x] A health/liveness signal distinguishes \"listener closed, process alive\" from healthy, so this state alarms instead of presenting as a silent 502. **Done:** the compose healthcheck (`infra/compose/docker-compose.yml`) probes the process's OWN listener at `/health` on 127.0.0.1 \u2014 in the zombie state uvicorn has closed that listener, so the probe gets connection-refused and the container is marked **unhealthy** (not silently 502-ing). The force-exit fix additionally makes that unhealthy state self-terminate so it cannot persist for 22 minutes holding the port.\n- [x] Regression test: a SIGTERM delivered while a long review is in flight results in process exit (not an indefinitely-hung shutdown) within the compose stop timeout. **Done:** `test_shutdown_forces_process_exit_when_an_orphaned_to_thread_review_outlives_cancel` drives a real orphaned `asyncio.to_thread` at shutdown and asserts the force-down fires; `test_force_exit_deadline_stays_within_the_stop_grace_band` pins drain+cancel+grace < `stop_grace_period`; `test_clean_shutdown_with_no_orphaned_offload_does_not_force_process_exit` guards the clean-teardown half. Mutation-checked (3 mutants caught).",
         "priority": "High",
         "status": "In Progress",
         "summary": "Autodeploy recreate leaves review-bot a zombie: uvicorn closes its listener but the process never exits, so /review/ 502s while the worker keeps voting"
@@ -42496,7 +42589,7 @@
       "created_at": "2026-08-29T18:34:52Z",
       "jira_id": "4590638",
       "jira_key": "REB-3895",
-      "peer_parent": "",
+      "peer_parent": "REB-3897",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:34:55Z"
     },
@@ -51218,7 +51311,7 @@
       "created_at": "2026-08-29T18:34:57Z",
       "jira_id": "4590639",
       "jira_key": "REB-3896",
-      "peer_parent": "",
+      "peer_parent": "REB-3897",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:35:00Z"
     },
@@ -51746,7 +51839,7 @@
       "created_at": "2026-08-29T18:35:11Z",
       "jira_id": "4590641",
       "jira_key": "REB-3898",
-      "peer_parent": "",
+      "peer_parent": "REB-3897",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:35:14Z"
     },
@@ -52528,9 +52621,17 @@
       "updated_at": "2026-08-15T15:15:08Z"
     },
     "efd4-847d-f7ad-47bc": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nEvaluating a Pass-1 change on Sonnet when production runs Opus (or vice versa) confounds the measurement: prior work showed Sonnet degrades past ~3 criteria per turn while Opus is flat, so a delta could be the model, not the change. Two further hazards: the production model classes (`rebar.toml` `[llm.model_classes]`: frontier = `bedrock:us.anthropic.claude-opus-4-8`, standard = `bedrock:\u2026claude-sonnet-4-6`) carry an Anthropic-direct fallback, and `_intersect_capabilities` (`src/rebar/llm/runner_support.py`) collapses a mixed chain's `prompt_cache_style` to `none` \u2014 which is why cache reads dropped to zero on 2026-08-12 and review cost roughly doubled. An eval run that silently fell back to Anthropic would both break the \"Bedrock only\" requirement and lose caching.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/parity.py` and wire it into every tier:\n\n- **Pinned targets**: the harness resolves the model for each pass from the production class but requires the resolved id to be a Bedrock id and drops any fallback candidate (homogeneous single-provider chain). It refuses to start when the resolved id differs from the corpus baseline's `provider_provenance.ran_model` for that pass, unless `--allow-model-change` is passed, in which case the run is labelled `model-change` and can never be diffed against a baseline with a different id.\n- **Result stamping**: every result row carries `{pass: model_id}`; `report.py` refuses to diff two result sets whose per-pass ids differ.\n- **Caching check**: after each run, assert from the run's usage-log rows that `cache_read_tokens > 0` on at least one call after the first; the report states cached vs uncached and the ledger flags uncached runs (they cost ~2\u00d7 and should be investigated before the next run).\n- No production config is changed by this ticket; the homogeneous chain is composed in-process for eval runs only.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/parity.py` (new); hooks in `tier1.py`, `tier2.py`, `report.py`\n- `tests/unit/evals/test_plan_replay_parity.py` (new)\n\n## Testing\n\nUnit: a config whose frontier class resolves to an Anthropic id is refused; a mixed chain is reduced to its Bedrock candidate; diffing results with different Pass-2 model ids raises; a usage-log fixture with zero cache reads marks the run uncached. Live check happens as part of the Tier-1 reproduction run.\n\n## Acceptance Criteria\n\n- [ ] Every Tier-1/Tier-2 result and ledger row carries Bedrock model ids equal to the production class for that pass; checked by the ledger after commissioning.\n- [ ] A diff between result sets with differing per-pass model ids is refused; checked by a unit test.\n- [ ] The Tier-1 reproduction run shows `cache_read_tokens > 0`; checked from its usage-log rows and stated in its report.\n- [ ] Unit tests pass in `make test`.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Model-parity guard: pin each eval pass to its production model on a homogeneous Bedrock chain; confirm prompt caching"
+      },
       "created_at": "2026-08-29T19:30:26Z",
       "jira_id": "4590652",
       "jira_key": "REB-3909",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:29Z"
     },
@@ -52953,9 +53054,17 @@
       "updated_at": "2026-08-21T21:35:20Z"
     },
     "f1d6-cfcc-a9c6-416d": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nPass 1 (`src/rebar/llm/plan_review/pass1.py`, `passes.pass1_chunk`, prompts `reviewers/plan_review_finder.md` + one `plan_review_<ID>.md` per criterion, routing in `criteria_routing.json` + `.rebar/criteria_routing.json`, frontier class = Opus on Bedrock) is the expensive pass (~$3.4/review uncached, ~12 finder calls). A criterion edit cannot be judged from stored data alone, so Tier 2 re-runs finders on a small fixed sample and then runs Tier 1 on the new findings so the whole chain is measured. Per-criterion edits are far cheaper in single-criterion mode (one single-turn call \u2248 $0.17 at 30k Opus input), and prior work (`docs/experiments/plan-review-model-tradeoff.md`) showed Opus is flat to 12 criteria/turn while Sonnet degrades \u2014 which is why the production model must be used.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/tier2.py`:\n\n- **Fixed sample**: a committed list of ~20 review ids drawn once by the Tier-1 stratified sampler (with the additional stratum: at least 5 containers, at least 8 with \u226510 findings, at least 3 from the LMN store), stored as `docs/experiments/plan-review-gate/replay/tier2-sample.json` so every proposal is measured on the same plans. Plan text comes from the reconstructed material; code-grounded AGENT criteria run against the pinned `verified_at_sha` snapshot via the existing `source=attested` mechanics.\n- **Full mode**: run the candidate registry/prompts through `ProductionBatchRunner`/`run_pass1` with the frontier class pinned to Bedrock Opus; compare finding sets to the stored Pass-1 findings by `norm_id` (Jaccard, gained/lost per criterion), then run Tier 1 (current questions) on the candidate findings and Tier 0 downstream.\n- **Single-criterion mode**: `--criteria T5c` runs only the named criteria (single-turn chunk of one, via the same seam `probe_criteria` uses) on the sample and compares only that criterion's findings; cost \u2248 N \u00d7 $0.17.\n- The baseline for a criterion whose stored findings were produced under a different `regver` is a one-time baseline run recorded in the ledger; otherwise the stored findings are the baseline.\n- Budget pre-flight from stored per-criterion usage (`coverage.usage.per_criterion`) \u00d7 current price.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/tier2.py` (new)\n- `docs/experiments/plan-review-gate/replay/tier2-sample.json`, `tier2-*.md` (new/generated)\n- `tests/unit/evals/test_plan_replay_tier2.py` (new)\n\n## Testing\n\nUnit: with a `FakeRunner` returning canned `P1Output`, gained/lost findings per criterion match expectations; single-criterion mode issues exactly one chunk per sampled review containing only the requested criterion; a run is refused when the frontier model is not the Bedrock Opus id; the sample file is validated against the corpus manifest. Live (commissioning, \u2264$60): one full-mode baseline over the fixed sample.\n\n## Acceptance Criteria\n\n- [ ] A committed fixed sample of review ids exists with the strata above; checked by the sample file and manifest cross-check.\n- [ ] `tier2 --candidate <registry-dir>` produces finding-set Jaccard and gained/lost-per-criterion tables plus downstream Tier-1/Tier-0 metrics; checked by one generated report.\n- [ ] `tier2 --criteria <id>` costs \u2264 N \u00d7 $0.25 in the ledger for a single-turn criterion; checked by the ledger.\n- [ ] Commissioning spend for this ticket \u2264 $60 and every call uses the Bedrock frontier model id; checked by the ledger.\n- [ ] Unit tests pass in `make test`.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Tier-2 harness: replay Pass-1 criteria on a fixed stratified sample (Opus via Bedrock, budgeted; single-criterion mode)"
+      },
       "created_at": "2026-08-29T19:30:33Z",
       "jira_id": "4590653",
       "jira_key": "REB-3910",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:36Z"
     },
@@ -53511,7 +53620,7 @@
       "created_at": "2026-08-29T18:35:17Z",
       "jira_id": "4590642",
       "jira_key": "REB-3899",
-      "peer_parent": "",
+      "peer_parent": "REB-3897",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:35:20Z"
     },
@@ -56276,7 +56385,7 @@
         "assignee": null,
         "description": "Add a set of E2E tests that replay a sampling of 20 tickets through plan review. Populate this sample with a static set of tickets from rebar history. The sample should include both container and leaf tickets and some tickets that trigger overlays. At least half of the sample should be tickets that returned a large number of findings. Tickets should include those that return indeterminate findings, blocking findings, and dropped findings. Replay should include both full plan review and partial re-review triggered by code drift. Replay should use a pinned version of the codebase based on the version used during the original ticket reviews. This should be an argument passed with the plan review command, not something we need to create bespoke code to handle. The only mock used by these tests should be the LLM calls. We should populate the mock with actual responses from live LLM calls using the sample ticket data (separate calls for each sample and call). We should document this process so that when the LLM calls in plan review change, we update these E2E tests accordingly. Our goal is for this to be a high fidelity E2E test of the plan review process. The tests should note observed tool use calls and budget usage from the live calls that populate the test sample so that the tests can fail appropriately if budget or tool use would exceed configured thresholds.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Replay testing for plan review"
       },
       "created_at": "2026-08-15T15:16:41Z",
@@ -57716,7 +57825,15 @@
     "1788029515491094451": "__rebar_unknown_comment_id__",
     "1788029518347627764": "__rebar_unknown_comment_id__",
     "1788029522409372707": "__rebar_unknown_comment_id__",
-    "1788029527544602796": "__rebar_unknown_comment_id__"
+    "1788029527544602796": "__rebar_unknown_comment_id__",
+    "1788031593779511713": "__rebar_unknown_comment_id__",
+    "1788033204867442001": "__rebar_unknown_comment_id__",
+    "1788033720446572922": "__rebar_unknown_comment_id__",
+    "1788033968618554001": "__rebar_unknown_comment_id__",
+    "1788034337423812746": "__rebar_unknown_comment_id__",
+    "1788034476455256008": "__rebar_unknown_comment_id__",
+    "1788034524788077001": "__rebar_unknown_comment_id__",
+    "1788034827271416403": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -60008,6 +60125,9 @@
     "REB-3909": "efd4-847d-f7ad-47bc",
     "REB-391": "f6f6-bc8e-ff37-4d60",
     "REB-3910": "f1d6-cfcc-a9c6-416d",
+    "REB-3911": "02b7-82ef-ca69-4aa8",
+    "REB-3912": "673c-f602-748b-4b90",
+    "REB-3913": "7153-e5ad-5e20-4ae9",
     "REB-392": "f724-f752-9cc8-4a6f",
     "REB-393": "f765-b3f2-e6ab-4842",
     "REB-394": "f803-63ea-816b-479a",
