@@ -394,9 +394,17 @@
       "updated_at": "2026-08-15T14:50:51Z"
     },
     "02b7-82ef-ca69-4aa8": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nMaking OperationSnapshot authoritative for LLM operations (gaudy-working-mantaray) migrates `LLMConfig.from_env` call sites and threads a snapshot-derived projection through the gate/workflow entry points. The two llm modules carrying the densest from_env/composition logic are within a few lines of the hard 800-LOC module-size cap (`.github/module-size-limit.txt` = 800), so that threading would breach the CI module-size gate on first edit:\n\n- `src/rebar/llm/config.py` = 799 (`LLMConfig.from_env` plus 14 from_env/gate references)\n- `src/rebar/llm/plan_review/__init__.py` = 796\n\nCreate headroom FIRST via behavior-preserving extraction along existing call-graph seams so the config-threading cutover lands without breaching the module-size gate. This story adds no snapshot-threading logic; it only relocates existing clusters.\n\n## Approach\n\nExtract cohesive existing clusters into sibling modules per the AGENTS.md module-size policy (existing seams only; target 200-500 LOC; never create a module < 100 LOC; never split mechanically):\n\n- `llm/config.py`: move the primitive env/file reader helpers (`_env_truthy`, `_read_llm_file_table`, `_llm_str_source`, `_llm_str`, `_llm_int`, `_llm_float`, `_llm_drain_mode`) into a sibling reader module that `LLMConfig.from_env` imports.\n- `llm/plan_review/__init__.py`: move the score-floor / completion-floor cluster (`_apply_floor_to_verdict`, `_score_floor_novelty`, `_maybe_apply_rising_floor`, `_apply_completion_floor_to_verdict`, `_classify_completion`, `_group_blocking_fix_units`, `_maybe_apply_completion_floor`) into a sibling `floors` module.\n\n`LLMConfig`, `review_plan`, and the public plan_review imports keep working; only internal call sites move.\n\n## Scope\n\n- `src/rebar/llm/` \u2014 extract the named clusters into new sibling modules and update imports only. Does NOT modify `src/rebar/llm/runner.py`, which is owned by the runner refactor (hurt-antigorite-genet), to avoid a collision.\n- `tests/unit/` \u2014 import-path updates only; no assertion changes.\n\n## Testing\n\nExisting llm and plan-review suites pass unchanged (behavior-preserving). Module-size gate, per-function complexity ratchet, lint, and typecheck pass. No new CI-provider, network, or Docker dependency is introduced (portable default suite).\n\n## Acceptance Criteria\n\n- [ ] `llm/config.py` and `llm/plan_review/__init__.py` are each comfortably below 800 LOC (target <= 700), achieved only by extracting existing call-graph clusters into sibling modules.\n- [ ] No newly created module is below 100 LOC, and no extraction is mechanical.\n- [ ] Behavior is unchanged: existing llm/provider/plan-review suites pass with no edits beyond import paths.\n- [ ] `llm/runner.py` is not modified here, avoiding collision with hurt-antigorite-genet.\n- [ ] Module-size gate, per-function complexity ratchet, lint, and typecheck all pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Create llm config-threading module-size headroom before the authoritative-snapshot cutover"
+      },
       "created_at": "2026-08-29T20:32:24Z",
       "jira_id": "4590654",
       "jira_key": "REB-3911",
+      "peer_parent": "REB-3897",
       "state": "confirmed",
       "updated_at": "2026-08-29T20:32:27Z"
     },
@@ -3529,6 +3537,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T19:38:32Z"
+    },
+    "1137-8215-ec04-4ca0": {
+      "created_at": "2026-08-29T21:29:17Z",
+      "jira_id": "4590657",
+      "jira_key": "REB-3914",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T21:29:20Z"
     },
     "114f-3eea-190e-4972": {
       "baseline": {
@@ -15654,7 +15669,7 @@
     "471c-f71f-342c-45ed": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\n\nThe plan-review harness needs a frozen, versioned corpus of past reviews it can replay. `plan_review_result_v2` sidecars (written by `src/rebar/llm/plan_review/sidecar.py`) already retain the Pass-1 findings, Pass-2 answer vectors and Pass-3 outputs per finding, but (a) `sidecar.prune` has deleted ~5,000 `REVIEW_RESULT` files from the tree (recoverable from `origin/tickets` history; `docs/experiments/plan-review-gate/harnesses/mine_outcome_corpus.py` already walks git objects this way), (b) the reviewed plan text is stored only as `material_fingerprint`, and (c) compaction has folded most pre-review `EDIT` events into `SNAPSHOT`s, so the at-review description must be reconstructed from git history. The `~/legacy-modernization-navigator` store (74 sidecars, different project overlay) should be included for overlay diversity.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/corpus.py`:\n\n1. Enumerate sidecars from a list of store roots (each a tickets-branch checkout or a git ref), reading tree files plus deleted `*-REVIEW_RESULT.json` blobs from history (`git log --diff-filter=D --name-only` then `git show <commit>^:<path>`). Keep only `data.schema in {plan_review_result_v1, plan_review_result_v2}`; record schema version, `impact_model_version`, `regver`, `verified_at_sha`, `provider_provenance.ran_model`, `review_phase`.\n2. Reconstruct the reviewed material per sidecar: replay `CREATE`/`EDIT` (tree + history-deleted) up to the sidecar timestamp for description and file_impact, resolve child pins from `reviewed_related_material`; recompute the fingerprint with `material_diff.material_basis` / `pass1.material_fingerprint` and mark each row `verified` only when it matches the stored `material_fingerprint`. Fall back to the nearest `SNAPSHOT.compiled_state.description` and mark `unverified` when no exact match is found.\n3. Emit a manifest (`docs/experiments/plan-review-gate/replay/corpus-<date>.manifest.json`: per-store counts, verdict/schema/cohort/model histograms, verification coverage, content hash) and a compact JSONL corpus (one row per review with findings, verification vectors, material text) under a git-ignored cache dir with the manifest hash as the reproducibility key. Assume rebuild-from-manifest is deterministic; the JSONL itself is not committed.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/__init__.py`, `corpus.py` (new)\n- `docs/experiments/plan-review-gate/replay/corpus-*.manifest.json` (new)\n- `.gitignore` (replay cache dir)\n- `tests/unit/evals/test_plan_replay_corpus.py` (new)\n\n## Testing\n\nUnit: a fixture store with one tree sidecar, one history-deleted sidecar, one compacted ticket \u2192 all three enumerated; fingerprint verification passes for a ticket whose EDIT history is intact and is marked `unverified` for one that was snapshotted with a later edit; v1 sidecars are loaded with the missing fields marked absent, not defaulted. Empty store \u2192 empty manifest, exit 0. Integration (manual, recorded in the manifest): a full build over both real stores.\n\n## Acceptance Criteria\n\n- [ ] Running the builder over the rebar and legacy-modernization-navigator stores produces a manifest whose sidecar count is \u2265 the tree count plus the history-recovered count, with per-store and per-schema totals; checked by reading the manifest.\n- [ ] \u226595% of v2 sidecars have their reviewed material reconstructed and `verified` against `material_fingerprint`; checked by the manifest's `verified_ratio`.\n- [ ] Rebuilding from the same store refs yields an identical manifest content hash; checked by running twice and diffing.\n- [ ] The builder makes no LLM calls and needs no network beyond a local git fetch; checked by running with no provider credentials.\n- [ ] Unit tests above pass in `make test`.",
+        "description": "## Context / Problem\n\nThe plan-review harness needs a frozen, versioned corpus of past reviews it can replay. `plan_review_result_v2` sidecars (written by `src/rebar/llm/plan_review/sidecar.py`) already retain the Pass-1 findings, Pass-2 answer vectors and Pass-3 outputs per finding, but (a) `sidecar.prune` has deleted ~5,000 `REVIEW_RESULT` files from the tree (recoverable from `origin/tickets` history; `docs/experiments/plan-review-gate/harnesses/mine_outcome_corpus.py` already walks git objects this way), (b) the reviewed plan text is stored only as `material_fingerprint`, and (c) compaction has folded most pre-review `EDIT` events into `SNAPSHOT`s, so the at-review description must be reconstructed from git history. The `~/legacy-modernization-navigator` store (74 sidecars, different project overlay) should be included for overlay diversity.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/corpus.py`:\n\n1. Enumerate sidecars from a list of store roots (each a tickets-branch checkout or a git ref), reading tree files plus deleted `*-REVIEW_RESULT.json` blobs from history \u2014 reuse the exact incantation already tested and compat-handled in `docs/experiments/plan-review-gate/harnesses/mine_outcome_corpus.py` (git-history-deleted-blob enumeration), not a fresh `git log --diff-filter=D` reimplementation. Keep only `data.schema in {plan_review_result_v1, plan_review_result_v2}`; record schema version, `impact_model_version`, `regver`, `verified_at_sha`, `provider_provenance.ran_model`, `review_phase`.\n2. Reconstruct the reviewed material per sidecar: replay `CREATE`/`EDIT` (tree + history-deleted) up to the sidecar timestamp for description and file_impact, resolve child pins from `reviewed_related_material`, and rebuild a full `PlanContext` (carrying `file_impact_scope` / `no_file_impact_reason` alongside description/file_impact/children) so the conditional `file_impact_scope` component is included in the recompute exactly as the signer computed it (`material_diff.material_basis` hashes it only when `file_impact_scope == \"none\"`). Recompute the fingerprint via `pass1.material_fingerprint`, mirroring `attest._legacy_material_ok` EXACTLY (not a simplified one-flag-per-rung scheme): try the candidate set `{current normalized}` \u222a `{(normalize_checkboxes=False, normalize_reason=False), (normalize_whitespace=False, normalize_reason=False), (normalize_reason=False)}` \u2014 `normalize_reason=False` on all three legacy rungs, matching `_legacy_material_ok` precisely, since a sidecar that is both pre-checkbox/pre-whitespace-normalization AND pre-reason-normalization would otherwise never verify under a naive one-flag-per-rung scheme. Mark a row `verified` if it matches under ANY candidate, and record which one matched. Fall back to the nearest `SNAPSHOT.compiled_state.description` and mark `unverified` when no candidate matches.\n3. Emit a manifest (`docs/experiments/plan-review-gate/replay/corpus-<date>.manifest.json`: per-store counts, verdict/schema/cohort/model histograms, verification coverage broken out by matched candidate, content hash) and a compact JSONL corpus (one row per review with findings, verification vectors, material text) under a git-ignored cache dir with the manifest hash as the reproducibility key. For determinism (AC3), rows are sorted by a stable key (store root, then ticket_id, then sidecar timestamp) and histogram/dict keys are sorted before serialization; the manifest is written with `json.dumps(..., sort_keys=True)` before hashing, so two builds from the same store refs produce byte-identical content and hash. Assume rebuild-from-manifest is deterministic; the JSONL itself is not committed.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/__init__.py`, `corpus.py` (new)\n- `docs/experiments/plan-review-gate/replay/corpus-*.manifest.json` (new)\n- `.gitignore` (replay cache dir)\n- `tests/unit/evals/test_plan_replay_corpus.py` (new)\n\n## Testing\n\nUnit: a fixture store with one tree sidecar, one history-deleted sidecar, one compacted ticket \u2192 all three enumerated; fingerprint verification passes for a ticket whose EDIT history is intact (including one fixture verified only under a non-current legacy candidate, and one fixture with `file_impact_scope == \"none\"` verified only once the conditional basis component is included) and is marked `unverified` for one that was snapshotted with a later edit; v1 sidecars are loaded with the missing fields marked absent, not defaulted. Two builds from the same fixture store produce byte-identical manifest content hashes. Empty store \u2192 empty manifest, exit 0. Integration (manual, recorded in the manifest): a full build over both real stores.\n\n## Acceptance Criteria\n\n- [ ] Running the builder over the rebar and legacy-modernization-navigator stores produces a manifest whose sidecar count is \u2265 the tree count plus the history-recovered count, with per-store and per-schema totals; checked by reading the manifest.\n- [ ] The manifest reports `verified_ratio` (the fraction of v2 sidecars whose reviewed material reconstructs and matches `material_fingerprint` under any candidate in the ladder) broken out by matched candidate; no threshold is asserted as a hard gate in this ticket \u2014 the observed ratio from the real build is the input the epic's later noise-floor/label work (`expectable-clownlike-ynambu`) uses to decide whether a floor is warranted; checked by reading the manifest's `verified_ratio` field and per-candidate breakdown.\n- [ ] Rebuilding from the same store refs yields an identical manifest content hash, via stable row ordering and sorted-key JSON serialization; checked by running twice and diffing.\n- [ ] The builder makes no LLM calls and needs no network beyond a local git fetch; checked by running with no provider credentials.\n- [ ] Unit tests above pass in `make test`.",
         "priority": "High",
         "status": "To Do",
         "summary": "Freeze the replayable plan-review corpus: both stores, git-recovered sidecars, fingerprint-verified plan text (zero LLM)"
@@ -15662,7 +15677,7 @@
       "created_at": "2026-08-29T19:29:20Z",
       "jira_id": "4590643",
       "jira_key": "REB-3900",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:23Z"
     },
@@ -16597,7 +16612,7 @@
       "created_at": "2026-08-29T19:29:27Z",
       "jira_id": "4590644",
       "jira_key": "REB-3901",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:30Z"
     },
@@ -16771,7 +16786,7 @@
       "created_at": "2026-08-29T19:29:32Z",
       "jira_id": "4590645",
       "jira_key": "REB-3902",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:35Z"
     },
@@ -18218,7 +18233,7 @@
     "536b-8930-b922-4063": {
       "baseline": {
         "assignee": null,
-        "description": "## Why\nCompaction now preserves folded event sources as `*.retired` (invariant I1, epic adept-hedge-stain / b306) instead of deleting them. Retention is currently **permanent** (accepted storage tradeoff); the tombstones accumulate on the tickets branch over time.\n\n## What\nAdd a branch-wide GC sweep that removes `*.retired` files provably past **causal stability** \u2014 no clone can still be mid-reconvergence against the pre-compaction events. Must honor the concurrency doctrine (I1-I9): never remove a `.retired` whose companion `.json` could still be reintroduced by an in-flight rebase/merge.\n\n## Scope\n- A `compact-gc` (or `compact --gc`) path listing `*.retired` under the tracker, removing only those past a configurable causal-stability horizon.\n- docs/concurrency.md I1: promote the 'follow-up' note to implemented behavior.\n\n## Acceptance Criteria\n- [ ] GC removes only `*.retired` past the causal-stability horizon; recent ones kept.\n- [ ] Two-clone test: a not-yet-observed compaction's `.retired` files are NOT GC'd (no resurrection window).\n- [ ] fsck + replay remain clean after a GC sweep.\n- [ ] docs/concurrency.md I1 updated from 'follow-up' to 'implemented'.",
+        "description": "## Why\nCompaction preserves folded event sources as `*.retired` (invariant I1, epic b306); retention is permanent, so tombstones \u2014 and the whole per-event commit/tree history \u2014 accumulate on the `tickets` branch. This blocks health-lane bug `defensive-buckskin-rhino` (`a453-193b-2864-451b`): the blobless CI checkout pack is ~481 MiB vs a deliberate 100 MiB budget (`verify-identity.yml:47`). A `git gc`/repack does NOT shrink it (proven). The only lever is reducing reachable commit/tree objects on `tickets` history \u2014 causally-safe history reclamation, which requires the causal-stability proof this epic owns.\n\n## Operator decision (2026-08-24, in comments)\nStability model = **option 2 (remote-anchored horizon) + stale-clone forced override**, N=30d default; residual loss of a >N-day-drifted clone's divergent work is ACCEPTED.\n\n## Design + proof (full detail in the DESIGN + PROOF comment)\nCausal-stability boundary C1\u2013C5: an event is reclaimable iff (C1) folded by a committed SNAPSHOT, (C2) that fold reachable on the sync remote's `tickets` ref \u2265 N days, (C3) stale clones (> N days) forced to reset to remote (no reintroduction), (C4) its signature is carried in the SNAPSHOT `authorship_ledger` OR `identity.enforce_since` is re-anchored to grandfather it, (C5) no unfolded state depends on it (I9). Under C1\u2013C5 no still-observable state changes, no signature verification breaks, no resurrection is possible.\n\nMeasured (origin/tickets): 235,482 commits, 408,295 trees, ZERO blobs blobless; trees \u224895% of bytes; root tree 270 KB \u00d7 6,008 flat ticket dirs re-emitted per commit; ~69% of commits are derived enrichment/digest churn; ~14K commits/day.\n\n## Quantified win \u2014 insufficient alone\n`.retired` files are blobs; the guarded pack is blobless \u21d2 `.retired` GC alone shrinks it by ~0. The real lever is collapsing per-event history into SNAPSHOT-anchored checkpoints below the horizon. Max safe win at N=30d \u2248 365\u2013380 MiB; N=7d \u2248 200\u2013215 MiB; reaching \u2264100 MiB needs an unsafe <4-day horizon. **So a temporary budget-raise bridge (W3) is unavoidable**, paired with structural fixes (out of scope, `discovered_from` this epic): W1 batch the enrichment/digest write lane; W2 shard the flat ticket dirs to shrink root-tree churn.\n\n## Mechanism (portable, out-of-band; NO CI-provider dependence)\nOffline reclamation in a disposable clone (I9b isolation), never on an interactive path or under the store lock:\n- **S1** remote-anchored eligibility (horizon computation) \u2014 pure git reachability + timestamps.\n- **S2** history coalescing to a re-signed baseline checkpoint = compacted as-of-horizon state + carried authorship_ledger; re-anchor `identity.enforce_since` to the baseline. Broadened from `.retired`-only to commit/tree reclamation (the object-count lever).\n- **S3** stale-clone detection + forced remote-override on reconnect.\n- **S0** ADR: amend \u00a7I1 permanent-retention doctrine; prove I1\u2013I9 hold under the horizon with the accepted >N-day loss.\n\n## Risk / rollback\nA rewrite changes every commit SHA \u21d2 every clone/worktree diverges (non-FF force-update of a shared, auto-pushed, high-write-rate branch); live clones with unpushed writes need a write-fence/maintenance window. Rollback: immutable backup ref `refs/tickets-backup/pre-reclaim-<date>` before the swap; stage on a shadow branch verified by `rebar fsck` + full-log replay + `verify-authorship`; the swap is one revertible ref update; never prune the backup until a green Verify Authorship Identity run + full reconcile.\n\n## Acceptance criteria\n- [ ] S0 ADR merged: \u00a7I1 doctrine amended; I1\u2013I9 proven under the remote-anchored horizon + override; accepted >N-day loss stated.\n- [ ] S1 eligibility check: only SNAPSHOT-folded events whose fold is remote-reachable \u2265 N days are eligible; recent ones excluded; portable (no single CI provider).\n- [ ] S2 coalescing: reachable commit/tree count reduced; re-signed baseline; `enforce_since` re-anchored; `rebar fsck` + replay + `verify-authorship` clean after; two-clone test shows a not-yet-observed fold is NOT reclaimed.\n- [ ] S3 stale-clone override enforced on reconnect.\n- [ ] docs/concurrency.md \u00a7I1 updated from 'follow-up' to 'implemented'.\n- [ ] Health-lane note: quantify residual pack size; confirm the W3 budget bridge value + W1/W2 follow-ups filed.\n\n## HARD STOP\nThis slice is DESIGN + PROOF only. No history rewrite / force-push / destructive reclaim executed. Escalated to the orchestrator for human approval before any destructive action.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Remote-anchored retired-event GC + stale-clone override (N-day horizon)"
@@ -18274,7 +18289,7 @@
       "created_at": "2026-08-29T19:29:40Z",
       "jira_id": "4590646",
       "jira_key": "REB-3903",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:42Z"
     },
@@ -19704,10 +19719,24 @@
     },
     "5a05-0e52-33a0-48bf": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# /var/gerrit data disk filled and has stayed near-full; review-bot went unhealthy\n\n## Impact (stated first)\nThe Gerrit/review-bot box (`i-00880b2c7f13527c5`, region us-east-1) suffered a box-wide disk-fill starting **2026-08-26 ~15:00 PDT**. The `/var/gerrit` data disk jumped from a ~55\u201359% baseline to **93\u201395% within ~6h and has NOT recovered** \u2014 it is still **94%** and the alarm `rebar-gerrit-data-disk-high` is **still in ALARM** at the time of this sweep (2026-08-29 10:00 PDT). During the fill, `rebar/host:reviewbot_healthy` **dropped to 0** (unhealthy) for two multi-hour windows, so LLM-Review capacity was degraded. Gerrit itself stayed up (`gerrit_healthy`=1, `Rebar/Gate:GerritReachable`=1 throughout).\n\n## Evidence \u2014 CloudWatch (namespace rebar/host, InstanceId i-00880b2c7f13527c5)\n\n### `rebar-gerrit-data-disk-high` alarm\n- `describe-alarm-history`: **OK -> ALARM at 2026-08-26T17:55:32 PDT**; no return-to-OK since.\n- StateReason: \"1 datapoint [88.0 (27/08/26 00:50Z)] >= threshold (85.0)\".\n\n### `disk_used_percent` mount=/var/gerrit (Maximum/hour, PDT)\n- Baseline: 52% (08-25 17:00) rising slowly to 59% (08-26 14:00).\n- **Sharp climb**: 08-26 15:00 = 64% -> 16:00 = 81% -> 17:00 = **88%** -> 18:00-20:00 = 89% ->\n  21:00 = **93%**.\n- **Plateau, unrecovered**: 93-95% continuously from 08-26 21:00 through 08-29 10:00\n  (latest datapoint **94%**). Trend: plateaued high, not draining.\n\n### `reviewbot_healthy` (Min/hour = 0 means unhealthy) \u2014 service impact\n- **0** for 08-26 15:00,16:00,17:00,18:00,20:00,21:00 PDT (coincides with the data-disk climb).\n- **0** again for 08-28 16:00-20:00 PDT (coincides with the root-disk thrash + deploy backpressure below).\n\n### Correlated root-disk pressure on the same box (30-GiB gp3 root, `root_disk_used_percent`)\n- `rebar-root-disk-pressure` **flapped into ALARM ~18 times** 08-26 20:41 -> 08-28 10:45 PDT.\n- Root usage oscillated 76-**98%** (peaks: 98% @08-26 15:00, 98% @08-28 01:00), then relaxed\n  to ~72-82% after 08-28 11:00.\n- `disk_pressure_prunes` ran **continuously ~5-6/hour for ~24h** (08-27 10:00 -> 08-28 10:00 PDT)\n  \u2014 the automated reclaim was working overtime and the root disk still sat near-full, matching\n  the \"reclaim frees nothing\" symptom of the closed root-disk tickets.\n\n### Downstream backpressure (08-28 16:00-20:00 PDT, review-bot unhealthy again)\n- `deploy_errors`: Sum=1 at 08-28 16:00 and 17:00 PDT -> `rebar-autodeploy-errors` ALARM\n  17:07->17:47 PDT.\n- `review_interrupts_bound_exceeded`: 08-28 16:00, 18:00, 19:00 (alarm flapped 3x);\n  `review_interrupts_signal_unavailable`: 08-28 17:00 (alarm 17:07->17:22).\n- `deploy_deferrals` climbed to Max 19-20/period on 08-28 evening \u2014 autodeploy repeatedly\n  deferred, consistent with disk pressure + in-flight reviews.\n  (Caveat: some marker-delta counters can over-report on a cold-start republish per closed\n  bug e2a6 widespread-zealous-narwhal; but the co-timed `reviewbot_healthy`=0 and root-disk\n  peaks make a real backpressure episode the stronger reading.)\n\n## Likely common cause (hypothesis)\nA large repository/pack growth landed on the box around 08-26 15:00 PDT, filling both `/var/gerrit` and root simultaneously. This is corroborated by CI's repo-growth guard tripping the same day: `.github/workflows/verify-identity.yml` step **\"Fail closed if the blobless checkout pack exceeds its limit\"** (`REBAR_CHECKOUT_PACK_LIMIT_KIB`, git `size-pack`), plus the mirror pack-size limits. Candidate on-disk consumers to confirm on the box: git repo/pack growth under `/var/gerrit` (tickets-branch and mirrors), Gerrit review artifacts/caches, docker layers/build cache, and journald/logs.\n\n## What this ticket is NOT (dedup)\n- No existing ticket covers the **`/var/gerrit` data disk** mount; all prior disk tickets are\n  the **root** volume or docker cache (3a52 masonic-abeyant-stagbeetle, 9bc0\n  taurine-smiling-hamadryad, 7a41 forgivable-nerdy-genet \u2014 all closed). The data-disk high +\n  sustained-non-recovery is a distinct, currently-active condition.\n- The 08-28 root-disk flapping recurs the closed root-disk-pressure symptom (3a52); linked\n  relates_to for context rather than as this ticket's headline.\n\n## Acceptance criteria\n- [ ] Identify what consumed `/var/gerrit` on 08-26 (du breakdown on the box: git/packs vs\n      review artifacts vs docker vs logs) and confirm/deny the pack-growth hypothesis.\n- [ ] Reclaim or grow `/var/gerrit` so `disk_used_percent` returns below the 85% threshold and\n      `rebar-gerrit-data-disk-high` clears (operator action \u2014 READ-ONLY sweep did not remediate).\n- [ ] Confirm `reviewbot_healthy` returns to steady 1 and stays there.\n- [ ] Add a guard/headroom or growth alarm so a repeat pack-growth event does not silently sit\n      at 93-95% for days (portable: not tied to a single CI provider).\n\n## Constraints / notes\n- Filed by a READ-ONLY AWS ops sweep (window 2026-08-26T17:55 PDT -> 2026-08-29T10:00 PDT). No\n  AWS mutation performed. Remediation (disk cleanup / volume resize) is an operator action.\n- Box logs are NOT shipped to CloudWatch Logs in us-east-1 (only lmn-*/snap-* groups exist), so\n  on-box `du`/journald inspection is required to finish root-cause \u2014 see sweep blind-spot note.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "[gerrit-data-disk-high] /var/gerrit sustained \u226593% since 2026-08-26 (still ALARM at 94%); box-wide disk-fill drove review-bot unhealthy"
       },
       "created_at": "2026-08-29T17:29:25Z",
@@ -20346,7 +20375,7 @@
       "created_at": "2026-08-29T19:29:47Z",
       "jira_id": "4590647",
       "jira_key": "REB-3904",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:50Z"
     },
@@ -22341,9 +22370,31 @@
       "updated_at": "2026-08-15T15:01:17Z"
     },
     "673c-f602-748b-4b90": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\n\nRun the rebar-janitor codebase-health pipeline against the current rebar repository as a deliberate maintenance pause. This is a read-only audit of product code: the deliverables are durable audit artifacts, a human-approved remediation plan, and tracker tickets. No production or test code will be changed.\n\n## Scope\n\nInspect the repository for code debt, code and architectural smells, separation-of-concerns problems, spent optionality, documentation gaps, oversized units, weak test oracles, AI-generated-code and security smells, and temporal decay. Weight recently changed regions while covering the full codebase. Consult prior janitor artifacts, tickets, ADRs, and commit history so intentional decisions are not mistaken for defects.\n\nThis repository's established artifact location is `.joe-janitor/`: `docs/documentation-policy.md` explicitly recognizes that tree, and `.joe-janitor/tools.md` already contains the durable playbook. Reuse that location rather than the generic skill default.\n\n## Plan\n\n1. Discovery: fan out one concern per independent agent, shard comment and test-suite review by subsystem, and pool path:line-cited findings without severity or confidence.\n2. Verification: independently blue-team each finding, establish reachable harm, check prior decisions and known-fine entries, apply the skill's fixed validity and impact floors, and persist the audit record plus reusable tool playbook.\n3. Remediation: obtain two blind proposals per survivor from asymmetric evidence bases (community practice versus project record), converge at move/end-state level, and research divergences.\n4. Approval: present the Remediation Plan one item at a time for human approve/refine/reject decisions; record explicit known-fine blessings only when given.\n5. Ticketization: first search for a matching current Janitor Cleanup epic and children; create only missing tracker records. Approved work becomes actionable child tickets with acceptance criteria, provenance, dependencies, and file impact.\n\nAny failed discovery shard remains an explicit coverage gap and prevents Phase 1 completion. Audit artifact updates preserve existing content and ticketization searches before creating records so a resumed run does not silently lose coverage or duplicate work.\n\n## Acceptance Criteria\n\n- [ ] Discovery covers every concern required by the rebar-janitor skill.\n- [ ] Every discovery candidate has an exact path:line citation.\n- [ ] Discovery candidates contain no severity or confidence score.\n- [ ] Independent verification records validity for every candidate it processes.\n- [ ] Independent verification records impact and a reachable-harm statement for every candidate it processes.\n- [ ] Independent verification records prior-decision and known-fine handling.\n- [ ] Candidates below validity 0.75 are dropped.\n- [ ] Candidates below impact 0.5 are dropped.\n- [ ] The dated audit record is persisted at `.joe-janitor/report-2026-08-29.md`.\n- [ ] The reusable command and pattern playbook is appended at `.joe-janitor/tools.md`.\n- [ ] The audit report records commands and tuned thresholds.\n- [ ] The audit report records survivors, dropped candidates, and their evidence-backed disposition.\n- [ ] Every surviving finding receives two blind asymmetric-evidence remediation proposals.\n- [ ] Every divergent proposal pair is researched before its item enters the Remediation Plan.\n- [ ] Each remediation item receives an explicit user approve, refine, or reject decision before ticket creation.\n- [ ] Approved work is filed as child tickets under a current Janitor Cleanup epic.\n- [ ] Each created child is linked back to this audit ticket.\n- [ ] No production code, tests, configuration, or documentation outside `.joe-janitor/` and the tracker is modified.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Run codebase-health janitor audit \u2014 2026-08-29"
+      },
       "created_at": "2026-08-29T20:32:30Z",
       "jira_id": "4590655",
       "jira_key": "REB-3912",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T20:32:33Z"
     },
@@ -24234,9 +24285,17 @@
       "updated_at": "2026-08-15T15:02:16Z"
     },
     "7153-e5ad-5e20-4ae9": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe typed reconciler payload work (earthborn-statuelike-boutu) introduces a named direction/action payload union and threads it through the planner, coordinator, and adapter-projection seam. The modules that build and project those payloads are already within a handful of lines of the hard 800-LOC module-size cap (`.github/module-size-limit.txt` = 800), so that expand would breach the CI module-size gate on first edit:\n\n- `src/rebar/_engine/rebar_reconciler/run_differs.py` = 798 (43 payload/mutation references)\n- `src/rebar/_engine/rebar_reconciler/outbound_differ.py` = 793\n- `src/rebar/_engine/rebar_reconciler/applier.py` = 793\n\nCreate headroom FIRST as a behavior-preserving extraction along existing call-graph seams, so the typed cutover lands without fighting the module-size gate. This story adds no typed-payload logic; it only relocates existing clusters.\n\n## Approach\n\nExtract cohesive, already-clustered helpers into sibling modules per the AGENTS.md module-size policy (existing call-graph seams only; target 200-500 LOC; never create a module < 100 LOC; never split mechanically to hit a number):\n\n- `run_differs.py`: move the self-contained outbound sub-pass (`_run_differs_outbound` plus its alert emitters `_emit_outbound_field_alerts` / `_emit_recovery_failure_alerts`) into a sibling module.\n- `outbound_differ.py`: move the memoized effective-mapping resolvers (`_memoize_effective`, `_effective_status_map_for`, `_effective_type_map_for`, `_effective_priority_map_for`, `_effective_create_defaults_for`, `_effective_link_map_for`, `_effective_excluded_sync_types_for`) into a sibling module.\n- `applier.py`: move the batch-execution cluster (`_apply_batch`, `_apply_one`, `_print_batch_recon`) or the cross-project/drift cluster (`HeadDriftError`, `CrossProjectTargetError`, `_cross_project_targets`, `_recheck_drift`) into a sibling module.\n\nPublic entry points and import paths keep working; only internal call sites move.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/` \u2014 extract the named clusters into new sibling modules and update imports only.\n- `tests/unit/rebar_reconciler/` \u2014 import-path updates only; no assertion changes.\n\n## Testing\n\nExisting reconciler unit/integration suites pass unchanged (behavior-preserving). Module-size gate and per-function complexity ratchet pass. Lint and typecheck pass. No new CI-provider, network, Docker, or Jira dependency is introduced (portable default suite).\n\n## Acceptance Criteria\n\n- [ ] `run_differs.py`, `outbound_differ.py`, and `applier.py` are each comfortably below 800 LOC (target <= 700) with room for the typed union, achieved only by extracting existing call-graph clusters into sibling modules.\n- [ ] No newly created module is below 100 LOC, and no extraction is mechanical: each sibling is a cluster whose members already called one another.\n- [ ] Behavior is unchanged: existing reconciler test suites pass with no edits beyond import paths.\n- [ ] Module-size gate, per-function complexity ratchet, lint, and typecheck all pass.\n- [ ] No production write-route change and no typed-payload/union logic is introduced here; that remains earthborn-statuelike-boutu.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Create reconciler payload-path module-size headroom before the typed-payload cutover"
+      },
       "created_at": "2026-08-29T20:32:37Z",
       "jira_id": "4590656",
       "jira_key": "REB-3913",
+      "peer_parent": "REB-3897",
       "state": "confirmed",
       "updated_at": "2026-08-29T20:32:41Z"
     },
@@ -26379,7 +26438,7 @@
       "created_at": "2026-08-29T19:30:03Z",
       "jira_id": "4590649",
       "jira_key": "REB-3906",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:06Z"
     },
@@ -28906,7 +28965,7 @@
     "860f-8886-a17b-48f1": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\n\n`src/rebar/llm/runner.py` (the two `record()` call sites around the structured and agentic run paths) reads `req.target.get(\"ticket_id\")` when building the usage-log row, but every producer of `target` writes the plural key `ticket_ids` (`src/rebar/llm/workflow/runs.py` and `src/rebar/llm/operations.py`). Result: 0 of the ~11,900 rows in `.rebar/usage.jsonl` carry a ticket, so per-ticket (and therefore per-review) cost attribution from the usage log is impossible, and `docs/llm-framework.md`'s claim that rows carry `ticket` is false. The eval ledger needs per-run attribution and this is the cheapest fix on that path.\n\n## Approach\n\nRead `ticket_ids` (first element, or the joined list) at both call sites, keep accepting the singular key for compatibility, and correct the doc sentence. Do not change the producers' key.\n\n## Scope\n\n- `src/rebar/llm/runner.py`\n- `docs/llm-framework.md`\n- `tests/unit/test_usage_log.py` (or the existing runner usage test)\n\n## Testing\n\nUnit: a request whose target carries `ticket_ids=[id]` yields a usage row with `ticket == id`; one carrying the legacy singular key still works; one with neither yields `ticket=None`.\n\n## Acceptance Criteria\n\n- [ ] New usage-log rows produced by a gate session carry the ticket id; checked by running one `review-plan` locally (or the Tier-1 commissioning run) and inspecting the rows.\n- [ ] The regression test above passes in `make test`.\n- [ ] `docs/llm-framework.md` describes the actual field.",
+        "description": "## Context / Problem\n\n`src/rebar/llm/runner.py` (the two `record()` call sites around the structured and agentic run paths, plus the `_call_label` fallback at runner.py:590) reads `req.target.get(\\\"ticket_id\\\")` when building the usage-log row, but every producer of `target` writes the plural key `ticket_ids` (`src/rebar/llm/workflow/runs.py` and `src/rebar/llm/operations.py`). Result: 0 of the ~11,900 rows in `.rebar/usage.jsonl` carry a ticket, so per-ticket (and therefore per-review) cost attribution from the usage log is impossible, and `docs/llm-framework.md`'s claim that rows carry `ticket` is false. The eval ledger needs per-run attribution and this is the cheapest fix on that path.\n\n## Approach\n\nAt all three read sites (the two `record()` call sites and the `_call_label` fallback at runner.py:590), read `ticket = target.get(\\\"ticket_ids\\\")` and take `ticket = ticket_ids[0] if ticket_ids else None` \u2014 producers always write `ticket_ids` as a list (possibly empty), never omit the key, so the empty-list case is the real path to handle, not a missing key. Drop the backward-compat read of the singular `ticket_id` key: no producer writes it, so it is a dead shim with no live consumer. Correct the doc sentence in `docs/llm-framework.md`. If a run's `ticket_ids` has more than one element (a multi-ticket/graph run), only the first is attributed to the usage row \u2014 this is a known simplification, not full multi-ticket attribution; that is out of scope here.\n\n## Scope\n\n- `src/rebar/llm/runner.py` (three read sites: both `record()` call sites and `_call_label`)\n- `docs/llm-framework.md`\n- `tests/unit/test_usage_log.py` (or the existing runner usage test)\n\n## Testing\n\nUnit: a request whose target carries `ticket_ids=[id]` yields a usage row with `ticket == id`; a request whose target carries `ticket_ids=[id_a, id_b]` yields `ticket == id_a` (first-element rule, pinned by test); a request whose target carries `ticket_ids=[]` (the real empty-list producer path) yields `ticket=None`; a request whose target omits `ticket_ids` entirely also yields `ticket=None`.\n\n## Acceptance Criteria\n\n- [ ] New usage-log rows produced by a gate session carry the ticket id; checked by running one `review-plan` locally (or the Tier-1 commissioning run) and inspecting the rows.\n- [ ] The regression tests above (single element, multi-element first-wins, empty list, missing key) pass in `make test`.\n- [ ] `docs/llm-framework.md` describes the actual field and the first-element attribution rule for multi-ticket runs.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "usage_log rows never carry a ticket id: runner reads target[\"ticket_id\"] but producers write \"ticket_ids\""
@@ -28914,7 +28973,7 @@
       "created_at": "2026-08-29T19:30:11Z",
       "jira_id": "4590650",
       "jira_key": "REB-3907",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:14Z"
     },
@@ -30308,6 +30367,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-24T19:40:52Z"
+    },
+    "8bef-1558-b3ef-4b19": {
+      "created_at": "2026-08-29T21:29:20Z",
+      "jira_id": "4590658",
+      "jira_key": "REB-3915",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T21:29:23Z"
     },
     "8c2f-8377-5044-4650": {
       "baseline": {
@@ -32082,6 +32148,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:58Z"
     },
+    "9497-da35-e247-4cb5": {
+      "created_at": "2026-08-29T21:29:27Z",
+      "jira_id": "4590659",
+      "jira_key": "REB-3916",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T21:29:29Z"
+    },
     "94a3-1323-3497-4f59": {
       "baseline": {
         "assignee": {
@@ -32609,10 +32682,24 @@
     },
     "96f3-af59-ba26-4159": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nDaily plan-review cache reads in `.rebar/usage.jsonl` went from ~80% of input tokens (2026-08-06..11) to 0 from 2026-08-12 onward, and the median full plan review went from about $2.18 to about $4.82 (Aug 6\u201329 logged spend is roughly $3,000, of which finders alone are ~358M uncached Opus input tokens). The change coincides with commit `6d4f394195b2` (2026-08-10) adding the Anthropic-direct fallback to the frontier/standard classes in `rebar.toml` `[llm.model_classes]`. `_intersect_capabilities` in `src/rebar/llm/runner_support.py` intersects capabilities across the whole chain and collapses differing `prompt_cache_style` values to `\"none\"` \u2014 exactly the hazard the comment in `rebar.toml` around the caching keys warns about. So every call on a mixed chain runs uncached even though the primary Bedrock target supports caching.\n\n## Approach\n\nInvestigate before fixing (`/rebar-debug`): confirm with a unit reproduction that a chain `[bedrock:\u2026opus, anthropic:\u2026opus]` yields `prompt_cache_style=none` while the single-provider chain yields the Bedrock style; confirm from usage rows that the fallback almost never actually fires. Then pick one: (a) intersect capabilities only over providers that can actually serve the current call (primary first; fallback capabilities apply only after a fallback), or (b) make the chains homogeneous in `rebar.toml`. Default to (a) unless it destabilises the provider seam.\n\n## Scope\n\n- `src/rebar/llm/runner_support.py`\n- `rebar.toml` (only if option b)\n- `tests/unit/test_runner_support.py`\n\n## Testing\n\nUnit: mixed chain keeps the primary provider's cache style until a fallback actually occurs. Live check: one `review-plan` after the fix shows `cache_read_tokens > 0` on second and later finder calls.\n\n## Acceptance Criteria\n\n- [ ] A regression test proves a mixed chain no longer collapses `prompt_cache_style` to none for the primary target; checked in `make test`.\n- [ ] After the fix, a production plan review logs non-zero `cache_read_tokens`; checked in `.rebar/usage.jsonl`.\n- [ ] The root cause and the chosen option are recorded on this ticket.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Prompt caching silently disabled since 2026-08-12: mixed Bedrock+Anthropic class fallback collapses prompt_cache_style to none (~2x review cost)"
       },
       "created_at": "2026-08-29T19:30:18Z",
@@ -33109,7 +33196,7 @@
       },
       "created_at": "2026-08-15T15:06:27Z",
       "jira_key": "REB-2512",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:27Z"
     },
@@ -34005,9 +34092,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Summary\n\nA `docker compose` recreate driven by autodeploy left `compose-review-bot-1` in a **zombie** state: uvicorn began a graceful shutdown, **closed its listening socket**, and then never completed shutdown or exited. The container stayed `Up`, the queue worker kept running long agentic LLM reviews and casting votes, but nothing was listening on :8000 \u2014 so every request to `https://rebar.solutions.navateam.com/review/` returned **502**, and, more damagingly, **every Gerrit webhook delivery was refused**.\n\nLive production outage 2026-08-28 23:21:37 UTC -> 23:43:31 UTC (~22 min).\n\n## Proven root cause (with citations)\n\n**1. It is a dead listener, not a slow one, and not a lost port mapping.**\n\nThe port publish was intact throughout \u2014 `docker ps`: `compose-review-bot-1 | Up 2 hours | 127.0.0.1:8000->8000/tcp`, and host `ss -ltnp` showed `docker-proxy` LISTEN on `127.0.0.1:8000`. But **inside** the container `/proc/net/tcp` held only:\n\n```\n0: 0B00007F:8EAD ... 0A     <- 127.0.0.11 (Docker embedded DNS), the ONLY listener\n1: 020015AC:8C6C ... 01     <- ESTABLISHED outbound to :443 (worker calling Bedrock)\n```\n\nPort 8000 (`0x1F40`) was **absent**. Host probe: `curl 127.0.0.1:8000/health` -> `curl: (56) Recv failure: Connection reset by peer`, `code=000`, `total=0.004s`. nginx logged `recv() failed (104: Connection reset by peer) while reading response header from upstream` 45 times \u2014 a **502, never a 504**. docker-proxy accepted the TCP connection and got RST because nothing was bound inside.\n\n**2. The mechanism is an incomplete uvicorn graceful shutdown.**\n\n```\n2026-08-28T23:21:37.438Z  compose creates replacement container 62f25f31ae05 + SIGTERMs the old one\n2026-08-28T23:21:37.587Z  INFO:     Shutting down\n2026-08-28T23:21:37.687Z  INFO:     Waiting for application shutdown.     <- listener socket closed HERE\n2026-08-28T23:21:52     first 502 in nginx access log (15s later)\n```\n\nThere is **no** matching `Application shutdown complete` / `Finished server process` anywhere in the log, and no second `Application startup complete` (only the original at 22:01:45). `docker inspect` confirms `RestartCount=0`, `Started=22:01:39`. uvicorn closes the listening socket at the *start* of graceful shutdown, then awaits lifespan shutdown \u2014 which never returned, because in-flight review tasks kept running. Evidence the process stayed fully alive with the listener shut: `voter_voted` at 23:35:12 and an agentic LLM call at 23:39:23, ~18 minutes after the listener closed.\n\n**3. The recreate then deadlocked on the port.**\n\n`docker rm`'d container `62f25f31ae05` was `State=created`, `Created=2026-08-28T23:21:37.438Z`, no ports \u2014 it could never start because the zombie still held `127.0.0.1:8000`. Compose gave up, leaving a half-finished recreate.\n\n## Impact: review dispatch WAS stalled, and events were dropped\n\nGerrit delivers webhooks **container-to-container** (`http://review-bot:8000/webhook`), not through nginx \u2014 which is why the nginx access log contains zero `POST /review/` entries and the 502 alone understates the damage. Gerrit's `webhooks` plugin logged, repeatedly, from 23:21:37 onward:\n\n```\nERROR com.googlesource.gerrit.plugins.webhooks.PostTask : Failed to post: Processing event: comment-added\norg.apache.http.conn.HttpHostConnectException: Connect to review-bot:8000 [review-bot/172.21.0.2] failed: Connection refused\n```\n\nBoth intake paths were dead simultaneously:\n- **webhook intake** \u2014 refused (listener closed).\n- **reconcile backstop** \u2014 `{\"event\": \"reconcile_loop_stopped\", \"timestamp\": 1787959359.86}` at 23:22:39. The same lifespan shutdown that closed the listener also stopped the reconciler; it was the one shutdown task that *did* complete.\n\nPer ADR 0009 the webhooks plugin is **not** at-least-once, so events in that window were **dropped, not retried**. The worker was only draining the finite in-memory queue captured before 23:21:37.\n\n## Remediation performed (surface restored)\n\n```\ndocker rm 62f25f31ae05          # inert Created leftover, no ports, never started\ndocker restart d76f4a3e9106     # identical image 4c18557db1ec; NOT a redeploy/rebuild/config change\n```\n\nVerified: in-container `/proc/net/tcp` now shows `00000000:1F40 ... 0A` (0.0.0.0:8000 LISTEN); host `/health` -> `200 {\"status\":\"ok\",\"in_flight\":1,\"queue_depth\":0}`; `gerrit->bot code=200`; external `https://.../review/health` -> `200` on three consecutive probes. The reconcile loop immediately re-picked the dropped work (`merge_detection` at 23:43:32).\n\n## Note: this is NOT the MCP event-loop-blocking bug (dewy-rotatable-tarsier / change 2345)\n\nThat hypothesis was tested and **refuted**. Loop-blocking predicts intermittent recovery between reviews and a burst of backlogged `/health` responses; observed instead was a hard RST with **no listening socket at all**, persistently across quiet moments, for 22 minutes. Decisive counter-evidence after the restart: `/health` returns `200` in milliseconds **while `in_flight: 1`** \u2014 a review in progress does not block the HTTP surface in this service.\n\n## Acceptance Criteria\n\n- [x] A `docker compose` recreate of `review-bot` cannot leave a container that has closed its listener but not exited: shutdown either completes within the stop timeout or the process is forced down, so the port is released for the replacement. **Done (change 2381, merge a36c7407):** the lifespan arms a daemon deadline that `os._exit`s the process when an orphaned `asyncio.to_thread` offload survives the bounded cancel; worst-case drain(1200)+cancel(10)+grace(90)=1300s < `stop_grace_period` 1320s, so the controlled exit fires before Docker's SIGKILL and the port is released.\n- [x] In-flight review tasks are cancelled (or awaited under a bounded deadline) during lifespan shutdown rather than blocking it indefinitely. **Done:** the pre-existing bounded cancel (`shutdown_cancel_seconds()`) unwinds the coroutines, and the new process-level force-exit bounds the OS-thread tail that the asyncio await cannot.\n- [x] The reconcile loop is not stopped while the process continues serving/working \u2014 or, if shutdown has begun, the process reliably terminates so a fresh container restores both intake paths. **Done (second clause):** the fix makes the process reliably terminate within the stop budget, so a fresh container restores both the webhook and the reconcile/backfill intake paths.\n- [x] A health/liveness signal distinguishes \"listener closed, process alive\" from healthy, so this state alarms instead of presenting as a silent 502. **Done:** the compose healthcheck (`infra/compose/docker-compose.yml`) probes the process's OWN listener at `/health` on 127.0.0.1 \u2014 in the zombie state uvicorn has closed that listener, so the probe gets connection-refused and the container is marked **unhealthy** (not silently 502-ing). The force-exit fix additionally makes that unhealthy state self-terminate so it cannot persist for 22 minutes holding the port.\n- [x] Regression test: a SIGTERM delivered while a long review is in flight results in process exit (not an indefinitely-hung shutdown) within the compose stop timeout. **Done:** `test_shutdown_forces_process_exit_when_an_orphaned_to_thread_review_outlives_cancel` drives a real orphaned `asyncio.to_thread` at shutdown and asserts the force-down fires; `test_force_exit_deadline_stays_within_the_stop_grace_band` pins drain+cancel+grace < `stop_grace_period`; `test_clean_shutdown_with_no_orphaned_offload_does_not_force_process_exit` guards the clean-teardown half. Mutation-checked (3 mutants caught).",
+        "description": "## Summary\n\nA `docker compose` recreate driven by autodeploy left `compose-review-bot-1` in a **zombie** state: uvicorn began a graceful shutdown, **closed its listening socket**, and then never completed shutdown or exited. The container stayed `Up`, the queue worker kept running long agentic LLM reviews and casting votes, but nothing was listening on :8000 \u2014 so every request to `https://rebar.solutions.navateam.com/review/` returned **502**, and, more damagingly, **every Gerrit webhook delivery was refused**.\n\nLive production outage 2026-08-28 23:21:37 UTC -> 23:43:31 UTC (~22 min).\n\n## Proven root cause (with citations)\n\n**1. It is a dead listener, not a slow one, and not a lost port mapping.**\n\nThe port publish was intact throughout \u2014 `docker ps`: `compose-review-bot-1 | Up 2 hours | 127.0.0.1:8000->8000/tcp`, and host `ss -ltnp` showed `docker-proxy` LISTEN on `127.0.0.1:8000`. But **inside** the container `/proc/net/tcp` held only:\n\n```\n0: 0B00007F:8EAD ... 0A     <- 127.0.0.11 (Docker embedded DNS), the ONLY listener\n1: 020015AC:8C6C ... 01     <- ESTABLISHED outbound to :443 (worker calling Bedrock)\n```\n\nPort 8000 (`0x1F40`) was **absent**. Host probe: `curl 127.0.0.1:8000/health` -> `curl: (56) Recv failure: Connection reset by peer`, `code=000`, `total=0.004s`. nginx logged `recv() failed (104: Connection reset by peer) while reading response header from upstream` 45 times \u2014 a **502, never a 504**. docker-proxy accepted the TCP connection and got RST because nothing was bound inside.\n\n**2. The mechanism is an incomplete uvicorn graceful shutdown.**\n\n```\n2026-08-28T23:21:37.438Z  compose creates replacement container 62f25f31ae05 + SIGTERMs the old one\n2026-08-28T23:21:37.587Z  INFO:     Shutting down\n2026-08-28T23:21:37.687Z  INFO:     Waiting for application shutdown.     <- listener socket closed HERE\n2026-08-28T23:21:52     first 502 in nginx access log (15s later)\n```\n\nThere is **no** matching `Application shutdown complete` / `Finished server process` anywhere in the log, and no second `Application startup complete` (only the original at 22:01:45). `docker inspect` confirms `RestartCount=0`, `Started=22:01:39`. uvicorn closes the listening socket at the *start* of graceful shutdown, then awaits lifespan shutdown \u2014 which never returned, because in-flight review tasks kept running. Evidence the process stayed fully alive with the listener shut: `voter_voted` at 23:35:12 and an agentic LLM call at 23:39:23, ~18 minutes after the listener closed.\n\n**3. The recreate then deadlocked on the port.**\n\n`docker rm`'d container `62f25f31ae05` was `State=created`, `Created=2026-08-28T23:21:37.438Z`, no ports \u2014 it could never start because the zombie still held `127.0.0.1:8000`. Compose gave up, leaving a half-finished recreate.\n\n## Impact: review dispatch WAS stalled, and events were dropped\n\nGerrit delivers webhooks **container-to-container** (`http://review-bot:8000/webhook`), not through nginx \u2014 which is why the nginx access log contains zero `POST /review/` entries and the 502 alone understates the damage. Gerrit's `webhooks` plugin logged, repeatedly, from 23:21:37 onward:\n\n```\nERROR com.googlesource.gerrit.plugins.webhooks.PostTask : Failed to post: Processing event: comment-added\norg.apache.http.conn.HttpHostConnectException: Connect to review-bot:8000 [review-bot/172.21.0.2] failed: Connection refused\n```\n\nBoth intake paths were dead simultaneously:\n- **webhook intake** \u2014 refused (listener closed).\n- **reconcile backstop** \u2014 `{\"event\": \"reconcile_loop_stopped\", \"timestamp\": 1787959359.86}` at 23:22:39. The same lifespan shutdown that closed the listener also stopped the reconciler; it was the one shutdown task that *did* complete.\n\nPer ADR 0009 the webhooks plugin is **not** at-least-once, so events in that window were **dropped, not retried**. The worker was only draining the finite in-memory queue captured before 23:21:37.\n\n## Remediation performed (surface restored)\n\n```\ndocker rm 62f25f31ae05          # inert Created leftover, no ports, never started\ndocker restart d76f4a3e9106     # identical image 4c18557db1ec; NOT a redeploy/rebuild/config change\n```\n\nVerified: in-container `/proc/net/tcp` now shows `00000000:1F40 ... 0A` (0.0.0.0:8000 LISTEN); host `/health` -> `200 {\"status\":\"ok\",\"in_flight\":1,\"queue_depth\":0}`; `gerrit->bot code=200`; external `https://.../review/health` -> `200` on three consecutive probes. The reconcile loop immediately re-picked the dropped work (`merge_detection` at 23:43:32).\n\n## Note: this is NOT the MCP event-loop-blocking bug (dewy-rotatable-tarsier / change 2345)\n\nThat hypothesis was tested and **refuted**. Loop-blocking predicts intermittent recovery between reviews and a burst of backlogged `/health` responses; observed instead was a hard RST with **no listening socket at all**, persistently across quiet moments, for 22 minutes. Decisive counter-evidence after the restart: `/health` returns `200` in milliseconds **while `in_flight: 1`** \u2014 a review in progress does not block the HTTP surface in this service.\n\n## Acceptance Criteria\n\n(Detailed evidence + Gerrit links are in this ticket's comments; bullets summarize.)\n\n- [x] A recreate cannot leave a listener-closed-but-alive container: shutdown completes within the stop timeout or the process is forced down, releasing the port. **Done (change 2381, commit a36c7407):** lifespan arms a daemon deadline that `os._exit`s when an orphaned `asyncio.to_thread` offload outlives the bounded cancel; drain(1200)+cancel(10)+grace(90)=1300s < `stop_grace_period` 1320s.\n- [x] In-flight review tasks are cancelled/awaited under a bounded deadline during shutdown, not blocking it indefinitely. **Done:** pre-existing bounded cancel unwinds the coroutines; the new force-exit bounds the OS-thread tail the asyncio await cannot.\n- [x] If shutdown has begun, the process reliably terminates so a fresh container restores both intake paths. **Done (second clause):** the force-exit guarantees termination within the stop budget, so a fresh container restores webhook + reconcile intake.\n- [x] A health/liveness signal distinguishes \"listener closed, process alive\" from healthy, so this state alarms instead of a silent 502. **Done (change 2384, MERGED):** added the missing per-container `healthcheck:` to the `review-bot` compose service (only `mcp` had one) probing its OWN listener at `127.0.0.1:8000/health`; in the zombie state the probe is refused \u2192 container flips **unhealthy** (observable/alarmable). Reporting-only (no `--wait`; `restart: unless-stopped` ignores health), so the recreate contract is unchanged. Test `test_reviewbot_healthcheck_probes_its_own_listener` (3 mutants caught).\n- [x] Regression test: SIGTERM during a long in-flight review yields process exit within the compose stop timeout. **Done:** `test_shutdown_forces_process_exit_when_an_orphaned_to_thread_review_outlives_cancel` (firing), `test_force_exit_deadline_stays_within_the_stop_grace_band` (band), `test_clean_shutdown_with_no_orphaned_offload_does_not_force_process_exit` (clean half). Mutation-checked.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Autodeploy recreate leaves review-bot a zombie: uvicorn closes its listener but the process never exits, so /review/ 502s while the worker keeps voting"
       },
       "created_at": "2026-08-29T01:01:56Z",
@@ -52631,7 +52718,7 @@
       "created_at": "2026-08-29T19:30:26Z",
       "jira_id": "4590652",
       "jira_key": "REB-3909",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:29Z"
     },
@@ -53064,7 +53151,7 @@
       "created_at": "2026-08-29T19:30:33Z",
       "jira_id": "4590653",
       "jira_key": "REB-3910",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:36Z"
     },
@@ -55116,7 +55203,7 @@
       "created_at": "2026-08-15T20:35:17Z",
       "jira_id": "4588882",
       "jira_key": "REB-3044",
-      "peer_parent": "",
+      "peer_parent": "REB-3905",
       "state": "confirmed",
       "updated_at": "2026-08-15T20:35:19Z"
     },
@@ -57833,7 +57920,14 @@
     "1788034337423812746": "__rebar_unknown_comment_id__",
     "1788034476455256008": "__rebar_unknown_comment_id__",
     "1788034524788077001": "__rebar_unknown_comment_id__",
-    "1788034827271416403": "__rebar_unknown_comment_id__"
+    "1788034827271416403": "__rebar_unknown_comment_id__",
+    "1788035352340904828": "__rebar_unknown_comment_id__",
+    "1788035656663907001": "__rebar_unknown_comment_id__",
+    "1788036012908204100": "__rebar_unknown_comment_id__",
+    "1788036605268846001": "__rebar_unknown_comment_id__",
+    "1788037224122857749": "__rebar_unknown_comment_id__",
+    "1788037527999641001": "__rebar_unknown_comment_id__",
+    "1788037859304441917": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -60128,6 +60222,9 @@
     "REB-3911": "02b7-82ef-ca69-4aa8",
     "REB-3912": "673c-f602-748b-4b90",
     "REB-3913": "7153-e5ad-5e20-4ae9",
+    "REB-3914": "1137-8215-ec04-4ca0",
+    "REB-3915": "8bef-1558-b3ef-4b19",
+    "REB-3916": "9497-da35-e247-4cb5",
     "REB-392": "f724-f752-9cc8-4a6f",
     "REB-393": "f765-b3f2-e6ab-4842",
     "REB-394": "f803-63ea-816b-479a",
