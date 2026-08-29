@@ -22,9 +22,11 @@ The sanctioned choke point ``js_safe_dumps(...)`` is a plain ``Name`` callee and
 Docstrings, comments and error text compose no stdout write and are never flagged.
 
 SCAN ROOTS — the user-facing CLI ``--output json`` surface only: ``src/rebar/_cli``,
-``src/rebar/_commands``, ``src/rebar/_engine_support`` and ``src/rebar/signing.py``. The
-structured-logging stream (``rebar._logging``), the reconciler daemon and the LLM-eval tooling
-are DIFFERENT contracts and out of scope.
+``src/rebar/_commands``, ``src/rebar/_engine_support`` and ``src/rebar/signing.py``. This DOES
+cover the CLI LLM/eval verbs that live under ``src/rebar/_cli`` (e.g. ``_llm_eval_commands.py``),
+which share the ``--output json`` wire contract. The structured-logging stream
+(``rebar._logging``) and the reconciler daemon (``src/rebar/_engine/rebar_reconciler``) are
+DIFFERENT contracts, live outside these roots, and are out of scope.
 
 SANCTION — ``# js-safe-ok: <reason>``, with a MANDATORY reason, honoured on the offending line,
 the line above, or the enclosing statement's first line (mirrors ``# repo-root-ok:`` /
@@ -65,6 +67,12 @@ SCAN_ROOTS = (
 
 #: The stdout sinks a ``--output json`` value flows through.
 _STDOUT_SINKS = {"print", "sys.stdout.write", "stdout.write"}
+
+#: ``file=`` targets that PROVABLY redirect a ``print`` off stdout (a stderr diagnostic the
+#: docstring names as allowed). Only these earn an exemption; an ambiguous ``file=<variable>``
+#: does NOT, so the guard fails CLOSED and the author sanctions with ``# js-safe-ok:`` if it is
+#: genuinely off-stdout.
+_NON_STDOUT_FILE_TARGETS = {"sys.stderr", "stderr"}
 
 #: Raw dumps callees the choke point replaces. ``_json`` is the common local alias.
 _RAW_DUMPS_CALLEES = {"json.dumps", "_json.dumps"}
@@ -125,13 +133,30 @@ class _Visitor(ast.NodeVisitor):
         self.hits: list[ast.Call] = []
 
     def visit_Call(self, node: ast.Call) -> None:
-        if _callee_name(node.func) in _STDOUT_SINKS:
+        if _callee_name(node.func) in _STDOUT_SINKS and self._writes_to_stdout(node):
             for arg in node.args:
                 raw = _contains_raw_dumps(arg)
                 if raw is not None:
                     self.hits.append(raw)
                     break
         self.generic_visit(node)
+
+    @staticmethod
+    def _writes_to_stdout(node: ast.Call) -> bool:
+        """A ``print(..., file=X)`` lands on stdout unless ``X`` PROVABLY redirects it off.
+
+        ``print`` defaults to stdout, so a bare ``print(...)`` qualifies. An explicit
+        ``file=sys.stderr`` (or ``stderr``) — the docstring names stderr diagnostics as allowed
+        — is exempt. Every other ``file=`` target, INCLUDING an ambiguous ``file=<variable>``
+        that could alias ``sys.stdout`` at runtime, fails CLOSED (treated as stdout): the guard
+        cannot prove it is off-stdout, so it flags it and the author sanctions with
+        ``# js-safe-ok:`` if warranted. The ``*.write`` sinks are already bound to a concrete
+        stream by their receiver.
+        """
+        for keyword in node.keywords:
+            if keyword.arg == "file":
+                return _callee_name(keyword.value) not in _NON_STDOUT_FILE_TARGETS
+        return True
 
 
 def _statement_lines(tree: ast.AST) -> dict[int, int]:
