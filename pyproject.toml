@@ -296,6 +296,35 @@ dev = [
 rebar = "rebar.cli:main"
 rebar-mcp = "rebar.mcp_server:main"
 
+# uv version pin (bug 56b7-b21a-c8ab-4afc). SINGLE SOURCE OF TRUTH for the uv version,
+# for CI and for local development alike. Bump this one line to upgrade uv.
+#
+# Why it lives here rather than in a `.github/uv-version.txt` alongside python-version.txt:
+# `astral-sh/setup-uv` resolves a version with NO action inputs by scanning exactly two paths
+# in the working directory — `uv.toml`, then `pyproject.toml` (WorkspaceVersionResolver /
+# getWorkspaceCandidates in the action's src/version/version-request-resolver.ts, at the SHA
+# every call site pins). Any other filename would need a `version-file:` input repeated at all
+# 25 call sites. A `uv.toml` would also be read, but uv treats it as a REPLACEMENT for the
+# section below, so it would silently orphan any future setting added here.
+#
+# Why the `==` form is load-bearing and NOT cosmetic: the action normalizes a leading `==` away
+# and then classifies the remainder with `tc.isExplicitVersion` (src/version/specifier.ts). An
+# exact version takes the ExactVersionResolver branch, which returns without any network call.
+# A RANGE (`>=0.12.7`) instead takes the range/latest branch, which fetches
+# https://raw.githubusercontent.com/astral-sh/versions/.../uv.ndjson on every job — the very
+# fetch this pin exists to remove, whose failure killed CI run 33214025855. scripts/check_uv_pin.py
+# (run from `make lint`) fails the build if this is ever loosened to a range, removed, shadowed
+# by a root uv.toml, or overridden by a per-call-site `version:` input.
+#
+# 0.12.7 is what CI already resolved to via "falling back to latest" (run 33225196631,
+# `Successfully installed uv version 0.12.7` across every job of the matrix), so pinning it is
+# behaviour-preserving rather than a silent upgrade or downgrade.
+#
+# NOTE: uv reads `required-version` itself, so a local uv that differs now fails fast with
+# `Update uv by running uv self update 0.12.7`. That is intended — see docs/local-dev-env.md.
+[tool.uv]
+required-version = "==0.12.7"
+
 # Bake the gate-code commit SHA into the wheel/sdist for non-git installs (epic
 # jira-reb-596). Auto-discovers hatch_build.py at the repo root; writes the generated,
 # git-ignored src/rebar/_build_info.py, force-included in the wheel below.

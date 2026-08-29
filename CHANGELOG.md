@@ -104,6 +104,29 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Fixed
 
+- **CI no longer depends on a network fetch to `raw.githubusercontent.com` before every job:
+  uv is pinned.** `astral-sh/setup-uv` was SHA-pinned at all 25 call sites, but **uv itself was
+  not** — no `version:` input anywhere, no `[tool.uv] required-version`, no `uv.toml`. With no
+  version resolvable from the checkout the action fell back to fetching a remote version
+  manifest on every job, so every workflow carried a network dependency it did not need. When
+  that fetch failed the job failed with `##[error]fetch failed`, a verdict with no relationship
+  to the change under test — run 33214025855 died that way in 21 seconds. `release.yml` was
+  among the call sites, so the resolved uv could also change between publishes with no
+  repository change at all. Fixed by adding `[tool.uv] required-version = "==0.12.7"` to
+  `pyproject.toml`: `setup-uv`'s zero-input workspace scan reads exactly `uv.toml` then
+  `pyproject.toml`, so one line reaches all 25 call sites without editing any of them, and an
+  **exact** specifier resolves through the action's `ExactVersionResolver` with no network call.
+  `0.12.7` is what CI already resolved to via "falling back to latest", so the pin is
+  behaviour-preserving rather than a silent upgrade or downgrade. The `==` form is load-bearing:
+  a range such as `>=0.12.7` reads as pinned but still fetches the manifest. **Local impact:**
+  uv reads `required-version` itself, so a contributor on a different uv now gets a fast,
+  self-describing `Update uv by running uv self update 0.12.7` instead of silently diverging
+  from CI — see `docs/local-dev-env.md`. A new `scripts/check_uv_pin.py`, wired into
+  `make lint`, keeps the pin single-sourced: it fails the build if the pin is removed, loosened
+  to a range, shadowed by a root `uv.toml`, or overridden by a per-call-site
+  `version:`/`version-file:` input (which `setup-uv` resolves *ahead of* the workspace scan).
+  Upgrading uv stays a deliberate one-line change.
+
 - **A RELOCATED ticket store is now honoured by the reconciler, bridge, and snapshot paths.**
   `config.tracker_dir()` has always documented the store as relocatable — `REBAR_TRACKER_DIR`
   wins verbatim, and an absolute `tracker.dir` relocates the store (EV-3b) — but 13 shipped

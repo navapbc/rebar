@@ -59,6 +59,35 @@ make venv                    # .venv on the pinned interpreter (uv fetches it if
 uv python install 3.12       # only if make venv reports it cannot find that version
 ```
 
+## Prerequisite — uv is pinned, and uv enforces the pin on you
+
+`uv` itself is pinned to an exact version by **`[tool.uv] required-version` in
+`pyproject.toml`** — one line, the single source of truth for CI and for your laptop alike. If
+your local `uv` is a different version, **every** `uv` command in this repository stops with:
+
+```
+error: Required uv version `==0.12.7` does not match the running version `0.7.18`.
+Update `uv` by running `uv self update 0.12.7`.
+```
+
+That error is **expected and self-describing, not a broken checkout** — run the command it
+names. It is the same class of guard as the interpreter pin above: `make venv` refuses to build
+on an unpinned Python for the same reason this refuses to build on an unpinned uv, because a
+local toolchain that silently differs from CI's teaches you to discount local failures.
+
+The pin also removes a CI failure mode. `astral-sh/setup-uv` is SHA-pinned at all 25 call
+sites, but with no version resolvable from the checkout it fell back to fetching a remote
+manifest from `raw.githubusercontent.com` on **every** job — and when that fetch failed, the job
+failed with `##[error]fetch failed`, a verdict with nothing to do with the change under test
+(bug `56b7-b21a-c8ab-4afc`; run 33214025855 died that way in 21 seconds). An exact `==` pin is
+resolved locally with no network call.
+
+The `==` form is load-bearing: a range such as `>=0.12.7` reads as pinned but sends the action
+back down the manifest-fetch path. `scripts/check_uv_pin.py` (run by `make lint`) fails the
+build if the pin is removed, loosened to a range, shadowed by a root `uv.toml`, or overridden
+by a per-call-site `version:` input — so **upgrading uv is a deliberate one-line change** to
+`pyproject.toml`, and nothing else needs to move.
+
 ## TL;DR (canonical setup)
 
 ```sh
