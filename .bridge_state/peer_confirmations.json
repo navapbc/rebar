@@ -14109,6 +14109,15 @@
       "source_id": "568c-b44b-7e2b-4d87",
       "target_id": "jira-reb-977"
     },
+    "56b7-b21a-c8ab-4afc|5a90-ec98-af5a-48d0|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1787978158093716028,
+      "link_id": "50693",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "56b7-b21a-c8ab-4afc",
+      "target_id": "5a90-ec98-af5a-48d0"
+    },
     "56d9-0869-428c-44a3|2fd4-baa0-4471-4382|parent": {
       "confirmed_at": 1786807014031431659,
       "confirmed_pass": "2026-08-15T14-49-02",
@@ -14698,6 +14707,15 @@
       "source": "snapshot",
       "source_id": "5a8f-d6a0-ca32-4f51",
       "target_id": "ee3d-fc7b-e280-4cbb"
+    },
+    "5a90-ec98-af5a-48d0|56b7-b21a-c8ab-4afc|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1787978158091770831,
+      "link_id": "50693",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "5a90-ec98-af5a-48d0",
+      "target_id": "56b7-b21a-c8ab-4afc"
     },
     "5a90-ec98-af5a-48d0|b4c2-db4c-fde5-4a45|relates_to": {
       "direction": "snapshot",
