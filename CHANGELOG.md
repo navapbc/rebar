@@ -104,6 +104,36 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Fixed
 
+- **uv is pinned to an exact version, so CI can no longer silently change which uv it runs.** `astral-sh/setup-uv` was SHA-pinned at all 25 call sites, but **uv itself was
+  not** — no `version:` input anywhere, no `[tool.uv] required-version`, no `uv.toml`. With no
+  version resolvable from the checkout the action fell back to fetching a remote version
+  manifest on every job, so every workflow carried a network dependency it did not need. When
+  that fetch failed the job failed with `##[error]fetch failed`, a verdict with no relationship
+  to the change under test — run 33214025855 died that way in 21 seconds. `release.yml` was
+  among the call sites, so the resolved uv could also change between publishes with no
+  repository change at all. Fixed by adding `[tool.uv] required-version = "==0.12.7"` to
+  `pyproject.toml`: `setup-uv`'s zero-input workspace scan reads exactly `uv.toml` then
+  `pyproject.toml`, so one line reaches all 25 call sites without editing any of them, and an
+  **exact** specifier resolves through the action's `ExactVersionResolver` with no network call.
+  `0.12.7` is what CI already resolved to via "falling back to latest", so the pin is
+  behaviour-preserving rather than a silent upgrade or downgrade. The `==` form is load-bearing:
+  a range such as `>=0.12.7` reads as pinned but still fetches the manifest. **Local impact:**
+  uv reads `required-version` itself, so a contributor on a different uv now gets a fast,
+  self-describing `Update uv by running uv self update 0.12.7` instead of silently diverging
+  from CI — see `docs/local-dev-env.md`. A new `scripts/check_uv_pin.py`, wired into
+  `make lint`, keeps the pin single-sourced: it fails the build if the pin is removed, loosened
+  to a range, shadowed by a root `uv.toml`, or overridden by a per-call-site
+  `version:`/`version-file:` input (which `setup-uv` resolves *ahead of* the workspace scan).
+  Upgrading uv stays a deliberate one-line change. **Scope, stated precisely:** `setup-uv` has a
+  second, independent manifest consumer — `downloadVersion` calls `getArtifact` unconditionally
+  on a tool-cache miss to obtain the download URL — so one `raw.githubusercontent.com` fetch per
+  job REMAINS, and this change does not by itself eliminate the `##[error]fetch failed` class.
+  What it does eliminate is the version-resolution fetch and the non-determinism: verified on run
+  33230196661, every job now logs `Found version for uv in .../pyproject.toml: 0.12.7` and
+  `Successfully installed uv version 0.12.7` with no `Could not determine uv version` fallback.
+  The residual fetch is tracked as bug `5caa-4b63-7ea2-4e71`, which needs a different mechanism
+  (tool-cache seeding, or installing uv without the action).
+
 - **A RELOCATED ticket store is now honoured by the reconciler, bridge, and snapshot paths.**
   `config.tracker_dir()` has always documented the store as relocatable — `REBAR_TRACKER_DIR`
   wins verbatim, and an absolute `tracker.dir` relocates the store (EV-3b) — but 13 shipped
