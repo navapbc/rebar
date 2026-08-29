@@ -126,6 +126,35 @@ def shutdown_cancel_seconds() -> float:
     return val if val > 0 else float(DEFAULT_SHUTDOWN_CANCEL_SECONDS)
 
 
+def shutdown_force_exit_grace_seconds() -> float:
+    """Grace (seconds) AFTER the bounded cancel before the lifespan force-exits the process.
+
+    ADR 0067's ``total shutdown <= drain + cancel`` is a PROCESS-level bound, but the asyncio
+    side cannot deliver it alone: a review's blocking work runs in an ``asyncio.to_thread``
+    offload on the default, non-daemon ThreadPoolExecutor. Cancelling a task parked there
+    unwinds the coroutine at once (so the bounded ``gather`` succeeds) but the OS thread keeps
+    running the abandoned review, and NEITHER ``asyncio.run``'s ``shutdown_default_executor``
+    join NOR interpreter finalization can force-cancel it — both simply JOIN it (empirically the
+    process outlives ``drain + cancel`` by the whole remaining review). Only ``os._exit`` can
+    force the process down, so the lifespan arms a hard deadline; this is that deadline's grace.
+
+    Sized so the force-exit NEVER preempts a LEGITIMATE bounded store write mid-lock (which
+    would orphan the ``mkdir`` write-lock dir exactly as a mid-write SIGKILL does — the hazard
+    the container ``stop_grace_period`` is sized to avoid): an abandoned ``event_append`` store
+    write needs at most the lock-acquisition budget plus one bounded git call to finish and
+    RELEASE its lock, so the grace is that sum. With this grace the worst-case total
+    (``drain + cancel + grace``) still lands strictly BELOW ``stop_grace_period`` (see
+    docker-compose.yml), so the controlled force-exit fires before Docker's own SIGKILL —
+    guaranteeing the port is released for the replacement even when the recreate path's SIGKILL
+    escalation is unreliable (the 2026-08-28 22-minute zombie).
+
+    Derived from the store's own budgets (not a bare literal) so raising either tracks here."""
+    from rebar._store import lock as _lock
+    from rebar._store.event_commit_git import _GIT_TIMEOUT
+
+    return float(_lock._DEFAULT_TIMEOUT * _lock._DEFAULT_ATTEMPTS + _GIT_TIMEOUT)
+
+
 def configure_logging() -> None:
     """Attach a stdout handler to the ``rebar`` logger so the review-bot's structured
     ``_emit()`` INFO events (``voter_voted`` / ``voter_skip`` / ``merge_detection`` / all
