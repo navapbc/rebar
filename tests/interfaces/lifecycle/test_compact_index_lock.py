@@ -17,7 +17,7 @@ from pathlib import Path
 
 import rebar
 from rebar._commands import compact as _compact
-from rebar._store import gitutil
+from rebar._store import git_locking, gitutil
 
 _STALE_S = getattr(gitutil, "_INDEX_LOCK_STALE_S", 300)
 
@@ -92,7 +92,7 @@ def test_compact_rides_out_contended_index_lock(rebar_repo: Path, monkeypatch) -
             lock.unlink()
             released["done"] = True
 
-    monkeypatch.setattr(gitutil, "_retry_probe", _probe)
+    monkeypatch.setattr(git_locking, "_retry_probe", _probe)
 
     rc = _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(rebar_repo))
     assert rc == 0, "compaction must ride out a contended index.lock via retry backoff"
@@ -109,7 +109,7 @@ def test_compact_path_nonlock_failure_is_not_retried(monkeypatch) -> None:
     returns on the FIRST attempt and is never retried. Asserted directly against the shared
     ``_with_index_lock_retry`` seam that the compact write path routes through."""
     attempts: list[int] = []
-    monkeypatch.setattr(gitutil, "_retry_probe", lambda n, r: attempts.append(n))
+    monkeypatch.setattr(git_locking, "_retry_probe", lambda n, r: attempts.append(n))
     calls = {"n": 0}
 
     def run_once():

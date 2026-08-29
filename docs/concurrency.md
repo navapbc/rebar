@@ -287,7 +287,7 @@ because it passes `attempts=1`.
 
 `acquire()` / `write_lock()` therefore take a **`retries`** argument: after an expired
 pass they sleep a jittered exponential backoff (0.5s, 1.0s, capped at 2.0s — reusing
-`gitutil`'s `_jitter` / `_backoff_sleep` seams) and take another pass. The canonical
+`git_locking`'s `_jitter` / `_backoff_sleep` seams) and take another pass. The canonical
 write path opts in with 2 retries, giving a ceiling of roughly **180s** (3 × 60s plus
 backoff); holders measured at 88s, 103s and 163s all exceed one budget but fall inside
 that ceiling, so they now cost latency instead of a lost write. When every pass is
@@ -805,7 +805,7 @@ identity is the *per-worktree* git dir (right for the per-worktree `index.lock`,
 Coordination is two composed mechanisms, applied at **both** fetch entry points:
 
 - **A blocking cross-process fetch lock keyed on the common dir**
-  (`gitutil.fetch_coordination_lock` → `<common-dir>/rebar-fetch.lock`, resolved through
+  (`git_locking.fetch_coordination_lock` → `<common-dir>/rebar-fetch.lock`, resolved through
   `commondir` pointers and `realpath` so worktrees and symlinks collapse to one identity). It
   is a **dedicated fetch lock, never the ticket write lock** — a slow network fetch serializes
   only other *fetches*, so a blocked remote cannot block a local ticket writer (the fetch

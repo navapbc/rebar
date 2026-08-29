@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 import rebar
-from rebar._store import gitutil
+from rebar._store import git_locking, gitutil
 from rebar._store import lock as _lock
 
 
@@ -91,7 +91,7 @@ def test_stale_index_lock_not_reclaimed_when_inode_replaced_midflight(
         lock_file.unlink()
         lock_file.write_text(fresh_marker)  # fresh mtime (inode number may be reused by the OS)
 
-    monkeypatch.setattr(gitutil, "_reclaim_probe", _peer_replaces_lock)
+    monkeypatch.setattr(git_locking, "_reclaim_probe", _peer_replaces_lock)
 
     gitutil._reclaim_if_stale_index_lock(tracker)
 

@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 from rebar._commands import fsck
-from rebar._store import gitutil
+from rebar._store import git_locking, gitutil
 
 
 def _resolved_index_lock(tracker: str) -> Path:
@@ -63,7 +63,7 @@ def test_fsck_check3_does_not_clobber_fresh_lock_replaced_midflight(rebar_repo: 
 
     # Hook for the FIXED code path (Check 3 -> hardened helper): the helper's probe
     # fires after the stale decision and before the guarded re-validation + unlink.
-    monkeypatch.setattr(gitutil, "_reclaim_probe", _peer_replaces_lock)
+    monkeypatch.setattr(git_locking, "_reclaim_probe", _peer_replaces_lock)
 
     # Hook for the PRE-FIX code path (Check 3's raw check->use): the peer swap fires
     # right after the staleness check (getmtime) and before the raw os.remove. The
