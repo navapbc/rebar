@@ -19,7 +19,7 @@ import rebar
 from rebar import config
 from rebar._commands import delete as _delete
 from rebar._commands import init as _init
-from rebar._store import gitutil
+from rebar._store import git_locking, gitutil
 
 _STALE_S = getattr(gitutil, "_INDEX_LOCK_STALE_S", 300)
 
@@ -126,7 +126,7 @@ def test_delete_rides_out_contended_index_lock(tmp_path: Path, monkeypatch) -> N
     tid = rebar.create_ticket("task", "doomed", repo_root=str(repo))
     lock = _plant_fresh_lock(_tracker(repo))
     attempts: list = []
-    monkeypatch.setattr(gitutil, "_retry_probe", _release_after_first_fail(lock, attempts))
+    monkeypatch.setattr(git_locking, "_retry_probe", _release_after_first_fail(lock, attempts))
 
     rc = _delete.delete_cli([tid, "--user-approved"], repo_root=str(repo))
     assert rc == 0, "delete must ride out a contended index.lock via retry backoff"
@@ -143,7 +143,7 @@ def test_init_git_rides_out_contended_index_lock(tmp_path: Path, monkeypatch) ->
     _init._git(tracker, "add", "--", ".init-contended-probe")
     lock = _plant_fresh_lock(tracker)
     attempts: list = []
-    monkeypatch.setattr(gitutil, "_retry_probe", _release_after_first_fail(lock, attempts))
+    monkeypatch.setattr(git_locking, "_retry_probe", _release_after_first_fail(lock, attempts))
 
     cp = _init._git(tracker, "commit", "-q", "--no-verify", "-m", "probe: init _git ride-out")
     assert cp.returncode == 0, "init._git must ride out a contended index.lock via retry"
@@ -155,7 +155,7 @@ def test_delete_init_path_nonlock_failure_is_not_retried(monkeypatch) -> None:
     on the FIRST attempt and is never retried. Asserted directly against the shared
     ``_with_index_lock_retry`` seam that the delete/init write paths route through."""
     attempts: list[int] = []
-    monkeypatch.setattr(gitutil, "_retry_probe", lambda n, r: attempts.append(n))
+    monkeypatch.setattr(git_locking, "_retry_probe", lambda n, r: attempts.append(n))
     calls = {"n": 0}
 
     def run_once():

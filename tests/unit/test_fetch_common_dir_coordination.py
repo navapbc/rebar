@@ -32,8 +32,8 @@ from pathlib import Path
 import pytest
 
 from rebar._snapshot import git_fetch
-from rebar._store import git_outcome, sync
-from rebar._store.gitutil import _resolve_common_git_dir, fetch_coordination_lock
+from rebar._store import git_locking, git_outcome, sync
+from rebar._store.git_locking import _resolve_common_git_dir, fetch_coordination_lock
 
 # The exact production stderr recorded on the ticket.
 _CAS_STDERR = (
@@ -295,12 +295,11 @@ def test_fetch_coordination_lock_yields_unlocked_when_open_fails(
     repo = tmp_path / "repo"
     _new_tickets_repo(repo)
     _commit_event(repo, "0000-aaaa-bbbb-cccc", "{}")
-    import rebar._store.gitutil as gitutil
 
     def boom(*a, **k):  # os.open raises → best-effort unlocked path
         raise OSError("no fd")
 
-    monkeypatch.setattr(gitutil.os, "open", boom)
+    monkeypatch.setattr(git_locking.os, "open", boom)
     ran = False
     with fetch_coordination_lock(str(repo)):
         ran = True
@@ -315,10 +314,8 @@ def test_fetch_coordination_lock_degrades_unlocked_when_peer_wedges(
     repo = tmp_path / "repo"
     _new_tickets_repo(repo)
     _commit_event(repo, "0000-aaaa-bbbb-cccc", "{}")
-    import rebar._store.gitutil as gitutil
-
-    monkeypatch.setattr(gitutil, "_FETCH_COORD_WAIT_S", 0.2)
-    monkeypatch.setattr(gitutil, "_FETCH_COORD_POLL_S", 0.02)
+    monkeypatch.setattr(git_locking, "_FETCH_COORD_WAIT_S", 0.2)
+    monkeypatch.setattr(git_locking, "_FETCH_COORD_POLL_S", 0.02)
 
     common = _resolve_common_git_dir(str(repo))
     assert common is not None

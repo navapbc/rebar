@@ -33,7 +33,7 @@ import pytest
 
 import rebar
 from rebar import config
-from rebar._store import event_append, gitutil
+from rebar._store import event_append, git_locking, gitutil
 
 # A short stale threshold so the retry path self-heals fast in tests. The implementation
 # must expose the reclamation threshold as this module-level seconds value.
@@ -122,7 +122,7 @@ def test_contended_index_lock_cleared_during_backoff_succeeds(
             lock.unlink()
             released.append(attempt)
 
-    monkeypatch.setattr(gitutil, "_retry_probe", release_on_first_failure)
+    monkeypatch.setattr(git_locking, "_retry_probe", release_on_first_failure)
 
     rc = event_append.stage_and_commit(tracker, "tk-cont", _event("u-cont"))
     assert rc == 0

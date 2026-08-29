@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar._store import gitutil
+from rebar._store import git_locking, gitutil
 
 
 def _fresh_repo(tmp_path: Path, name: str) -> str:
@@ -131,8 +131,8 @@ def test_stuck_lock_surfaces_one_actionable_error(
     lock = _index_lock_path(repo)
     lock.write_text("")  # never released: a genuinely stuck lock
 
-    monkeypatch.setattr(gitutil, "_INDEX_LOCK_ATTEMPTS", 3)
-    monkeypatch.setattr(gitutil, "_INDEX_LOCK_BACKOFF_S", 0.05)
+    monkeypatch.setattr(git_locking, "_INDEX_LOCK_ATTEMPTS", 3)
+    monkeypatch.setattr(git_locking, "_INDEX_LOCK_BACKOFF_S", 0.05)
 
     result = gitutil.run_git_write(repo, "add", "--", "f.txt")
 
@@ -184,7 +184,7 @@ def test_uncontended_write_never_sleeps(tmp_path: Path, monkeypatch: pytest.Monk
     def counting_sleep(s: float) -> None:
         sleeps.append(s)
 
-    monkeypatch.setattr(gitutil, "_backoff_sleep", counting_sleep)
+    monkeypatch.setattr(git_locking, "_backoff_sleep", counting_sleep)
     result = gitutil.run_git_write(repo, "add", "--", "f.txt")
     assert result.returncode == 0
     assert sleeps == [], f"uncontended happy path must not sleep, slept: {sleeps}"
