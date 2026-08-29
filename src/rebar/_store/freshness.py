@@ -69,15 +69,16 @@ _GIT_TIMEOUT = 60
 def _remote_ref(tracker: str) -> str | None:
     """``<remote>/<branch>`` for this tracker, or ``None`` when it cannot be resolved.
 
-    Resolved from the MAIN repo config (the tracker's parent), the same way
-    ``fsck_tracker_health._tracker_sync_status`` does — a local-only store, an
-    unconfigured remote, or a never-fetched branch all yield ``None``, which reads as
-    "nothing to compare against" rather than as staleness.
+    ``tickets.remote`` / ``tickets.branch`` are CODE-repo config (``rebar.toml`` lives in the
+    checkout, not beside a relocated store), so resolve the code root the config way — NOT the
+    tracker's parent — the same way ``fsck_tracker_health._tracker_sync_status`` does. A
+    local-only store, an unconfigured remote, or a never-fetched branch all yield ``None``,
+    which reads as "nothing to compare against" rather than as staleness.
     """
     from rebar import config
 
     try:
-        base = os.path.dirname(os.path.realpath(tracker))
+        base = config.repo_root_or_none()
         ref = f"{config.tickets_remote(base)}/{config.tickets_branch(base)}"
     except Exception:  # noqa: BLE001 — an unresolvable config is "no basis", not "stale"
         return None

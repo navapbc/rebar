@@ -12,6 +12,7 @@ repo at ``/app``).
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -378,4 +379,260 @@ def test_run_sweep_resolves_the_code_root_without_rebar_root(
     assert list((external / tid).glob("*-SNAPSHOT.json")), (
         "with REBAR_ROOT unset the sweep failed to resolve the code root from the git "
         "toplevel of its anchored cwd, so it fell back to default compaction config"
+    )
+
+
+# ── flowered-basaltic-beagle: the reads.py realpath()/abspath() config reads ─────────
+#
+# ``ensure_fresh`` and ``_load_scratch`` (reads.py) each read a ``compose_config()``-derived
+# value from a root that was composed from the tracker path:
+#   * ``ensure_fresh`` — ``sync.pull`` (via ``_sync_disabled(os.path.dirname(realpath(tracker)))``)
+#     and ``tickets.branch`` (via ``tickets_branch(os.path.dirname(tracker_abs))``).
+#   * ``_load_scratch`` — ``scratch.base_dir`` (default under
+#     ``os.path.dirname(abspath(tracker))``).
+# These are the realpath()/abspath() members of the class (feisty's guard blind spot). On a
+# relocated store the tracker's parent holds no rebar.toml, so each read resolved an empty
+# config; the fix routes all three through ``config.repo_root_or_none()`` (the CODE root).
+
+
+def _reads_relocated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    """A CODE checkout and a store in SEPARATE trees, code root pinned via ``REBAR_ROOT``.
+
+    Returns ``(code_root, tracker)``. The tracker's parent (``mcp-tickets/``) is deliberately
+    NOT the code root, so a site that composes a root from the tracker path lands in the wrong
+    tree. Lighter than ``_init_relocated_store`` — these reads.py sites take an explicit
+    ``tracker`` and never open the store, so no ``rebar init`` is needed.
+    """
+    code_root = tmp_path / "mcp-code"
+    store = tmp_path / "mcp-tickets"
+    tracker = store / "tickets"
+    tracker.mkdir(parents=True)
+    code_root.mkdir()
+    monkeypatch.setenv("REBAR_ROOT", str(code_root))
+    return code_root, tracker
+
+
+def test_load_scratch_reads_scratch_under_the_code_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_load_scratch`` (scratch.base_dir site, reads.py) must default the scratch base to
+    ``<code_root>/.rebar/scratch``. The payload is placed ONLY under the code root, so a site
+    that instead composes ``<store_parent>/.rebar/scratch`` (the pre-fix
+    ``os.path.dirname(os.path.abspath(tracker))``) finds nothing — RED pre-fix (empty dict),
+    GREEN post-fix (the payload is read). (AC#1)
+    """
+    from rebar._engine_support import reads
+
+    code_root, tracker = _reads_relocated_store(tmp_path, monkeypatch)
+    ticket_id = "postwar-bardic-walleye"
+    scratch_dir = code_root / ".rebar" / "scratch" / ticket_id
+    scratch_dir.mkdir(parents=True)
+    (scratch_dir / "note").write_text(
+        json.dumps({"ts": "2026-01-01T00:00:00Z", "value": "code-root scratch"}),
+        encoding="utf-8",
+    )
+
+    data = reads._load_scratch(ticket_id, str(tracker))
+
+    assert data.get("note", {}).get("value") == "code-root scratch", (
+        "scratch.base_dir was resolved from the store's parent, not the code root: "
+        f"{data!r} (tracker={tracker}, code_root={code_root})"
+    )
+
+
+def test_ensure_fresh_resolves_sync_and_branch_from_the_code_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ensure_fresh`` reads ``sync.pull`` (via ``_sync_disabled``) and ``tickets.branch`` (via
+    ``tickets_branch``). Both must be resolved with the CODE repo root. We capture the ``root``
+    each receives and assert it is the code root — RED pre-fix (the store's parent, the
+    ``os.path.dirname(...realpath(tracker))`` spelling), GREEN post-fix. (AC#1)
+    """
+    import os as _os
+
+    from rebar._engine_support import reads
+
+    code_root, tracker = _reads_relocated_store(tmp_path, monkeypatch)
+    expected_root = _os.path.realpath(str(code_root))
+    seen: dict = {}
+
+    def _capture_sync_disabled(root):
+        seen["sync_disabled_root"] = root
+        return False  # proceed past the sync.pull short-circuit
+
+    def _capture_tickets_branch(root=None):
+        seen["tickets_branch_root"] = None if root is None else _os.fspath(root)
+        return "definitely-not-a-real-branch"  # git rev-parse --verify fails -> return
+
+    monkeypatch.setattr(reads, "_sync_disabled", _capture_sync_disabled)
+    monkeypatch.setattr("rebar.config.tickets_branch", _capture_tickets_branch)
+
+    reads.ensure_fresh(str(tracker))
+
+    assert seen.get("sync_disabled_root") == expected_root, (
+        "sync.pull was read from the store's parent, not the code root: "
+        f"{seen.get('sync_disabled_root')!r} != {expected_root!r}"
+    )
+    assert seen.get("tickets_branch_root") == expected_root, (
+        "tickets.branch was read from the store's parent, not the code root: "
+        f"{seen.get('tickets_branch_root')!r} != {expected_root!r}"
+    )
+
+
+def test_ensure_fresh_local_read_context_skips_root_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The no-git fast path is preserved: inside ``_LOCAL_READ_CONTEXT`` (or ``no_sync``)
+    ``ensure_fresh`` returns BEFORE resolving any root, so a local read pays no root-discovery
+    cost. Guards the short-circuit-before-resolve ordering the fix depends on."""
+    from rebar._engine_support import reads
+
+    _code_root, tracker = _reads_relocated_store(tmp_path, monkeypatch)
+    called: list = []
+    monkeypatch.setattr(reads, "_sync_disabled", lambda root: called.append(root) or False)
+
+    token = reads._LOCAL_READ_CONTEXT.set(True)
+    try:
+        reads.ensure_fresh(str(tracker))
+    finally:
+        reads._LOCAL_READ_CONTEXT.reset(token)
+    assert called == [], "a local-context read must not resolve sync.pull at all"
+
+    reads.ensure_fresh(str(tracker), no_sync=True)
+    assert called == [], "a no_sync read must not resolve sync.pull at all"
+
+
+# ── flowered-basaltic-beagle: fsck/freshness tickets.branch/tickets.remote config reads ──
+#
+# The plan-review gate (G1G2/G6) correctly identified that fsck_tracker_health and freshness
+# READ compose_config() — `config.tickets_branch()` / `config.tickets_remote()` resolve
+# `tickets.branch` / `tickets.remote` from rebar.toml — so by the approved principle #1 they
+# resolve the CODE repo root, exactly like reads.py:249. They were initially mis-bucketed as
+# store-root git ops; these oracles pin the corrected code-root resolution (RED against the
+# `dirname(realpath(tracker))` spelling, GREEN once each resolves via repo_root_or_none()).
+
+
+def _capture_branch_remote_roots(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Record the ``root`` each ``config.tickets_branch`` / ``tickets_remote`` call receives,
+    returning dummy values so the caller's git probe stands down."""
+    import os as _os
+
+    from rebar import config as _config
+
+    seen: dict = {"branch": [], "remote": []}
+
+    def _branch(root=None):
+        seen["branch"].append(None if root is None else _os.fspath(root))
+        return "definitely-not-a-real-branch"
+
+    def _remote(root=None):
+        seen["remote"].append(None if root is None else _os.fspath(root))
+        return "definitely-not-a-real-remote"
+
+    monkeypatch.setattr(_config, "tickets_branch", _branch)
+    monkeypatch.setattr(_config, "tickets_remote", _remote)
+    return seen
+
+
+def test_freshness_remote_ref_reads_branch_remote_from_the_code_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``freshness._remote_ref`` resolves the store's remote-tracking ref from
+    ``tickets.remote`` / ``tickets.branch`` — CODE-repo config. On a relocated store it must
+    read the code root, not the tracker's parent. (principle #1)"""
+    import os as _os
+
+    from rebar._store import freshness
+
+    code_root, tracker = _reads_relocated_store(tmp_path, monkeypatch)
+    expected = _os.path.realpath(str(code_root))
+    seen = _capture_branch_remote_roots(monkeypatch)
+
+    freshness._remote_ref(str(tracker))
+
+    assert seen["remote"] == [expected] and seen["branch"] == [expected], (
+        f"freshness._remote_ref read tickets.remote/branch from the store's parent: {seen!r} "
+        f"(expected code root {expected!r})"
+    )
+
+
+def test_tracker_sync_status_reads_branch_remote_from_the_code_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``fsck_tracker_health._tracker_sync_status`` reads the same CODE-repo config to name the
+    store's remote-tracking ref for the health probe."""
+    import os as _os
+
+    from rebar._commands import fsck_tracker_health as fth
+
+    code_root, tracker = _reads_relocated_store(tmp_path, monkeypatch)
+    expected = _os.path.realpath(str(code_root))
+    seen = _capture_branch_remote_roots(monkeypatch)
+
+    fth._tracker_sync_status(str(tracker))
+
+    assert seen["branch"] == [expected] and seen["remote"] == [expected], (
+        f"_tracker_sync_status read tickets.branch/remote from the store's parent: {seen!r} "
+        f"(expected code root {expected!r})"
+    )
+
+
+def test_configured_remote_ref_reads_branch_remote_from_the_code_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``fsck_tracker_health._configured_remote_ref`` composes ``<remote>/<branch>`` from the
+    CODE-repo config, not the tracker's parent."""
+    import os as _os
+
+    from rebar._commands import fsck_tracker_health as fth
+
+    code_root, tracker = _reads_relocated_store(tmp_path, monkeypatch)
+    expected = _os.path.realpath(str(code_root))
+    seen = _capture_branch_remote_roots(monkeypatch)
+
+    fth._configured_remote_ref(str(tracker))
+
+    assert seen["remote"] == [expected] and seen["branch"] == [expected], (
+        f"_configured_remote_ref read tickets.remote/branch from the store's parent: {seen!r} "
+        f"(expected code root {expected!r})"
+    )
+
+
+def test_branch_mismatch_fallback_reads_branch_from_the_code_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``fsck_tracker_health._branch_mismatch`` prefers an explicitly-threaded ``repo_root``
+    (the code root fsck already passes); its FALLBACK (repo_root=None) must ALSO be the code
+    root, not the tracker's parent."""
+    import os as _os
+
+    from rebar._commands import fsck_tracker_health as fth
+
+    code_root, tracker = _reads_relocated_store(tmp_path, monkeypatch)
+    expected = _os.path.realpath(str(code_root))
+    seen = _capture_branch_remote_roots(monkeypatch)
+
+    fth._branch_mismatch(str(tracker))  # repo_root defaults to None -> fallback path
+
+    assert seen["branch"] == [expected], (
+        f"_branch_mismatch fallback read tickets.branch from the store's parent: {seen!r} "
+        f"(expected code root {expected!r})"
+    )
+
+
+def test_branch_mismatch_prefers_explicit_repo_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contrast: when fsck threads an explicit ``repo_root`` it wins over the fallback —
+    proving the fallback change did not break the threaded-root path."""
+    from rebar._commands import fsck_tracker_health as fth
+
+    _code_root, tracker = _reads_relocated_store(tmp_path, monkeypatch)
+    threaded = str(tmp_path / "explicit-code-root")
+    seen = _capture_branch_remote_roots(monkeypatch)
+
+    fth._branch_mismatch(str(tracker), repo_root=threaded)
+
+    assert seen["branch"] == [threaded], (
+        f"an explicitly threaded repo_root must be used verbatim: {seen!r} (expected {threaded!r})"
     )
