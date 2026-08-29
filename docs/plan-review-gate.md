@@ -54,7 +54,7 @@ stays fast — target p95 < ~50 ms, no LLM, no network):
    `bug` is reviewed under the bug tier (see above) and so is subject to this fast-fail
    like any other reviewed type.
 
-2. **The start-work gate.** When `verify.require_plan_review_for_claim` is enabled, every entry into `in_progress` checks for a current certified plan-review attestation. This includes `claim`, `transition <id> open in_progress`, a resume from `blocked`, and reactivation from `closed`. Checking the target status prevents the paths `open → blocked → in_progress` and `open → closed → in_progress` from bypassing review. A reviewed ticket keeps its valid attestation across a normal block and resume. Every entry point calls `rebar._commands.gates.plan_review_precheck`. The check invokes no LLM and makes no network request. It verifies the DSSE envelope through SSHSIG against the signing environment's Ed25519 public key, requires the certificate principal to identify that environment, and recomputes the material fingerprint. Bugs and `session_log` tickets are exempt from the start-work gate. A bug can still receive a bug-tier plan review. `--force="<reason>"` bypasses the gate and records the reason. `claim` also uses the atomic claim primitive, so two agents cannot claim one ticket.
+2. **The start-work gate.** When `verify.require_plan_review_for_claim` is enabled, every entry into `in_progress` checks for a current certified plan-review attestation. This includes `claim`, `transition <id> open in_progress`, a resume from `blocked`, and reactivation from `closed`. Checking the target status prevents the paths `open → blocked → in_progress` and `open → closed → in_progress` from bypassing review. A reviewed ticket keeps its valid attestation across a normal block and resume. Every entry point calls `rebar._commands.gates.plan_review_precheck`. The check invokes no LLM and makes no network request. It verifies the DSSE envelope through SSHSIG against the signer's Ed25519 public key and recomputes the material fingerprint. It does **not** require the certificate principal to be this environment. Certification environment is **not** a gate under current operator policy (bug `c21f-6f29-5d2d-4a5a`): *"Any certification is as good as any other certification right now. Limited to a trusted set of environments is a future feature, but not currently in use."* So a review signed by the on-box MCP server satisfies a claim run from a local CLI worktree, and vice versa. A signature that does not verify is still refused — see `docs/manifest-signing.md` for the `trust_basis` the verifier reports and for the opt-in `verify.require_environment` restriction that narrows the trusted set again. Bugs and `session_log` tickets are exempt from the start-work gate. A bug can still receive a bug-tier plan review. `--force="<reason>"` bypasses the gate and records the reason. `claim` also uses the atomic claim primitive, so two agents cannot claim one ticket.
 
 A review is a **process, not a dialog**: when a finding blocks (or you want to
 clear advisories), revise the ticket and re-run `review-plan` to earn a fresh
@@ -1119,10 +1119,20 @@ then edited the plan — still blocks, so the gate is not bypassable by editing 
 *who* signed it: a cert bound to another ticket, or of another kind, classifies `wrong-kind` and
 blocks — read from the SIGNED payload, so a lying plaintext mirror on the record buys nothing.
 
-**The security posture, stated plainly.** `.rebar/trusted_environments.yaml` is the only trust
-root, so an unpinned principal has no key to verify against — there is no coherent middle where
-signatures are checked but unpinned signers are waved through (an attacker would simply use an
-unpinned principal). Dropping provenance therefore makes this criterion an **anti-sloppiness gate**
+**The security posture, stated plainly.** This argument once read: "`.rebar/trusted_environments.yaml`
+is the only trust root, so an unpinned principal has no key to verify against — there is no coherent
+middle where signatures are checked but unpinned signers are waved through." That names a real
+trade-off, but it is **no longer current policy** and it was never quite right about the mechanics:
+an SSHSIG blob carries the public half it was made with, so an unpinned signer's signature *can* be
+checked for self-consistency — full signature, namespace and principal binding — just not tied to a
+*known* environment. Bug `c21f-6f29-5d2d-4a5a` took the middle deliberately, on the operator's ruling that *"any
+certification is as good as any other certification right now — limited to a trusted set of
+environments is a future feature, but not currently in use."* The
+verifier reports which key certified in `trust_basis`, so the weaker `envelope_key` basis is visible
+rather than silent, and restricting the trusted set again is the opt-in `verify.require_environment`
+feature. The conclusion below is unchanged.
+
+Dropping provenance makes this criterion an **anti-sloppiness gate**
 ("did you write and review a plan before shipping 150+ non-test lines under a bug label?"), not an
 anti-adversary one: the attestation record lives on the auto-pushed, non-Gerrit-gated tickets
 branch, which `opcert.opcert_from_record` documents as attacker-writable. That is acceptable
@@ -1533,7 +1543,7 @@ reason: "derived plan-review health unavailable"}` — and never change a gate d
 normal freshness profile; close uses its close profile (implementation code may advance), but
 both retain material, phase, and enabled-pin checks.
 
-`rebar verify-signature <ticket>` locally certifies a DSSE envelope by verifying its SSHSIG signature against the signing environment's Ed25519 public key and requiring the certificate principal to identify that environment. A CI process that requires a named trusted environment uses `rebar verify-opcert` with the public key pinned in `.rebar/trusted_environments.yaml`. A certified current plan-review certificate records that the plan passed review. A claimed ticket without that certificate records that the review was bypassed. The completion close gate uses the corresponding distinction between a certified completion-verifier record and a close without one.
+`rebar verify-signature <ticket>` locally certifies a DSSE envelope by verifying its SSHSIG signature against the signer's Ed25519 public key. The signing environment is not itself a gate (bug `c21f-6f29-5d2d-4a5a`), so a certificate minted elsewhere certifies here when its signature verifies; the result's `trust_basis` names which key was used. A CI process that requires a named trusted environment uses `rebar verify-opcert` with the public key pinned in `.rebar/trusted_environments.yaml`. A certified current plan-review certificate records that the plan passed review. A claimed ticket without that certificate records that the review was bypassed. The completion close gate uses the corresponding distinction between a certified completion-verifier record and a close without one.
 
 ### Multiple attestation kinds + how a CI gate reads them
 
@@ -1549,7 +1559,7 @@ Read the map through these interfaces:
 
 ## End-to-end latency before work begins
 
-The claim check performs local DSSE and SSHSIG verification against the signing environment's Ed25519 public key, confirms that the certificate principal identifies that environment, and recomputes freshness data. It makes no LLM call or network request. The preceding `review-plan` operation runs a multi-pass LLM review and can take seconds or minutes depending on ticket size and review tier. A plan that needs revision may require several review rounds, and each edit invalidates the prompt cache. The review sidecar records latency and cost for later analysis.
+The claim check performs local DSSE and SSHSIG verification against the signer's Ed25519 public key and recomputes freshness data. It does not require the certificate principal to identify this environment. It makes no LLM call or network request. The preceding `review-plan` operation runs a multi-pass LLM review and can take seconds or minutes depending on ticket size and review tier. A plan that needs revision may require several review rounds, and each edit invalidates the prompt cache. The review sidecar records latency and cost for later analysis.
 
 ## Asymmetric-error invariants (a design invariant — read before tuning a floor or adding a criterion)
 

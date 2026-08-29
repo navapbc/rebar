@@ -125,7 +125,7 @@ signing.verify_attestation_record(record, ticket_id, *, kind=None, key=None, rep
 # Dispatches by record shape to the operation-certificate or generic HMAC verifier.
 ```
 
-An operation-certificate record uses `algorithm="sshsig"` and has no HMAC `signature` field. `verify_signature` performs same-environment verification. It requires the record principal to match the current environment and verifies the DSSE envelope through SSHSIG against that environment's Ed25519 public key. Verification of a certificate from another environment returns `foreign_key` on this path.
+An operation-certificate record uses `algorithm="sshsig"` and has no HMAC `signature` field. `verify_signature` verifies the DSSE envelope through SSHSIG against the signer's Ed25519 public key. It does **not** require the record principal to match the current environment: Certification environment is **not** a gate under current operator policy (bug `c21f-6f29-5d2d-4a5a`): *"Any certification is as good as any other certification right now. Limited to a trusted set of environments is a future feature, but not currently in use."* A certificate from another environment therefore certifies when its signature verifies, and the result's `trust_basis` (`own_key` / `pinned_environment` / `envelope_key`) names which key was used. Setting `verify.require_environment` re-enables the restriction. See `docs/manifest-signing.md`.
 
 The verdict dictionary contains `verified`, `verdict`, `reason`, `manifest`, `step_count`, `algorithm`, `key_id`, `signed_at`, `head_sha`, and authenticated operation-certificate fields where available. Common verdicts include:
 
@@ -133,7 +133,7 @@ The verdict dictionary contains `verified`, `verdict`, `reason`, `manifest`, `st
 |---|---|
 | `certified` | The selected certificate or generic HMAC record verifies under the applicable local key. |
 | `mismatch` | The signature, signed subject, ticket binding, or kind binding does not verify. |
-| `foreign_key` | The record identifies another environment or the local verification key is unavailable. |
+| `foreign_key` | No usable signer key could be obtained (no own key, nothing pinned, no key readable from the envelope), or `verify.require_environment` is set and the record identifies a different environment. |
 | `invalid` | The operation-certificate envelope or payload is malformed. |
 | `unavailable` | The configured signing scheme cannot run. |
 | `unknown_kind` | No verification policy exists for the attestation kind. |

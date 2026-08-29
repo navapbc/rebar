@@ -444,20 +444,97 @@ def _opcert_subject_binding_error(
     return None
 
 
+def _required_environment(repo_root) -> str | None:
+    """``verify.require_environment`` — the environment an operator has REQUIRED op-certs to come
+    from — or ``None`` when unset (the default, and this project's posture).
+
+    Unset is the operator-ruled current policy: environment identity is not a gate (bug c21f).
+    Setting it re-enables the trusted-set restriction, which is a deferred FUTURE feature; the
+    runbook (``infra/runbooks/mcp-opcert-enforcement-flip.md``) sets it together with
+    ``verify.opcert_enforce_since``, the merge gate's grandfather boundary — a MERGED-LOG anchor
+    that has no meaning on this local, per-record path, so only the environment key is read here.
+    Fails OPEN on an unreadable config: an absent/broken ``rebar.toml`` must not silently turn a
+    restriction ON that the operator never configured."""
+    try:
+        return config.compose_config(root=repo_root).verify.require_environment or None
+    except Exception:  # noqa: BLE001 — no readable config ⇒ no required environment
+        return None
+
+
+def _pinned_environment_keys(principal: str, repo_root) -> list[str]:
+    """Public keys pinned for ``principal`` in ``.rebar/trusted_environments.yaml`` (the
+    out-of-band, review-gated trust root the ``verify-opcert`` merge gate uses). Empty when the
+    environment is not pinned, or the config is absent/malformed."""
+    try:
+        from rebar.attest import trusted_env
+
+        keyring = trusted_env.trusted_env_keyring(principal, repo_root) or []
+    except Exception:  # noqa: BLE001 — absent/malformed pin config ⇒ nothing pinned here
+        return []
+    return [
+        rec["public_key"]
+        for rec in keyring
+        if isinstance(rec, dict) and isinstance(rec.get("public_key"), str) and rec["public_key"]
+    ]
+
+
+def _opcert_trust_root(
+    principal: str, own_principal: str, tracker: str, envelope, repo_root, required_env: str | None
+) -> tuple[list[str], str | None]:
+    """The keys to verify ``envelope`` under, plus the ``trust_basis`` label naming their source.
+
+    Strongest first: this environment's OWN key when it is the signer; then the key PINNED
+    out-of-band for that environment; then — only while the trusted-set restriction is OFF — the
+    signer's own key as carried inside the SSHSIG blob. That last basis is self-consistent rather
+    than pinned: ``ssh-keygen -Y verify`` still checks the signature, namespace and principal
+    binding in full, so a forged or altered envelope is still rejected; what it does not establish
+    is that the key belongs to a KNOWN environment. Under the operator's current policy that is
+    precisely the property that is not gated, and the label makes the weaker basis visible.
+
+    With ``verify.require_environment`` SET the envelope-key fallback is withheld: enforcement must
+    bind to the PINNED key, never to a key the certificate supplies about itself."""
+    if principal == own_principal:
+        own_pubs = _opcert_own_public_keys(tracker)
+        if own_pubs:
+            return own_pubs, "own_key"
+    pinned = _pinned_environment_keys(principal, repo_root)
+    if pinned:
+        return pinned, "pinned_environment"
+    if required_env is not None:
+        return [], None
+    from rebar.attest import sshsig
+
+    sigs = list(envelope.signatures)
+    embedded = sshsig.embedded_public_key(sigs[0].sig) if sigs else None
+    return ([embedded], "envelope_key") if embedded else ([], None)
+
+
 def verify_opcert_record(
     record: dict, ticket_id: str, *, kind: str | None = None, repo_root=None
 ) -> dict:
-    """Verify an ``envelope``-bearing op-cert record for SAME-ENVIRONMENT certification.
+    """Verify an ``envelope``-bearing op-cert record. The SIGNATURE is the gate; the signing
+    ENVIRONMENT is not (bug c21f).
+
+    Operator policy, verbatim: *"Certification environment should not currently be a gate. Any
+    certification is as good as any other certification right now. Limited to a trusted set of
+    environments is a future feature, but not currently in use."* So a cert minted by the on-box
+    MCP server certifies for a local CLI worktree and vice versa — identity alone never refuses.
+    This mirrors the same call already made for the bugfix-size gate (bug 846b): gate on the FACT
+    of certification, never on its SOURCE.
 
     Translation table (the wrapper's contract; downstream readers see the uniform verify shape):
-      * ``record.principal != own env_id`` → verdict ``foreign_key`` / ``certified: false`` WITHOUT
-        invoking the scheme (there is no key to verify with — exactly today's HMAC ``foreign_key``
-        semantics; a cert for another environment is the merge-gate's job, not the local wrapper's);
-      * ``record.principal == own env_id`` → ``registry.verify(OPCERT_KIND, envelope, trust_root)``
-        against the environment's OWN public key, THEN the SIGNED subject-binding check
-        (:func:`_opcert_subject_binding_error`), mapping ``verified → certified`` and passing the
-        scheme ``verdict``/``reason`` through (``certified`` / ``mismatch`` / ``invalid`` /
-        ``unavailable`` / ``unknown_kind`` / ``unknown_scheme``).
+      * ``verify.require_environment`` SET (the opt-in future feature, unset by default) and the
+        cert's principal is not that environment → ``foreign_key``, without invoking the scheme;
+      * otherwise the scheme runs — ``registry.verify(OPCERT_KIND, envelope, trust_root)`` against
+        the strongest available trust root (see :func:`_opcert_trust_root`), THEN the SIGNED
+        subject-binding check (:func:`_opcert_subject_binding_error`), mapping
+        ``verified → certified`` and passing the scheme ``verdict``/``reason`` through
+        (``certified`` / ``mismatch`` / ``invalid`` / ``unavailable`` / ``unknown_kind`` /
+        ``unknown_scheme``). ``mismatch`` and ``unsigned`` keep their exact meaning: not gating on
+        environment is NOT gating on nothing, and an altered/forged envelope is still refused.
+
+    ``trust_basis`` names WHICH key certified — ``own_key`` / ``pinned_environment`` /
+    ``envelope_key`` — so a weaker basis is VISIBLE rather than silently folded into ``certified``.
 
     SECURITY (findings A + B):
       * ``kind`` is the attestation-kind SLOT being verified (threaded from ``verify_signature`` /
@@ -524,6 +601,12 @@ def verify_opcert_record(
         # this (not ``algorithm``) so an attacker cannot force the plaintext-manifest material path
         # by mutating ``algorithm`` while keeping the envelope.
         "opcert": True,
+        # Which key certified this cert (bug c21f). ``None`` until a trust root is chosen; then
+        # ``own_key`` (this environment's) / ``pinned_environment`` (a key pinned out-of-band in
+        # ``.rebar/trusted_environments.yaml``) / ``envelope_key`` (the signer's own key, carried
+        # inside the SSHSIG blob — self-consistent, but not tied to a KNOWN environment). Surfaced
+        # so the weakest basis is visible to readers and audits, never silent.
+        "trust_basis": None,
     }
 
     if envelope is None:
@@ -535,28 +618,46 @@ def verify_opcert_record(
             "reason": "op-cert envelope could not be decoded",
         }
 
-    # Foreign principal: signed by (or claiming) a DIFFERENT environment — cannot certify here.
-    if not principal or principal != own_principal:
+    # A cert with no principal at all names no signer — there is nothing to bind a key to.
+    if not principal:
+        return {
+            **base,
+            "verified": False,
+            "verdict": "foreign_key",
+            "reason": "op-cert carries no principal; there is no identity to verify it under",
+        }
+
+    # The OPT-IN future feature (deferred by operator policy, unset in this project): when an
+    # operator sets ``verify.require_environment``, the trusted set IS restricted again.
+    required_env = _required_environment(repo_root)
+    if required_env is not None and principal != required_env:
         return {
             **base,
             "verified": False,
             "verdict": "foreign_key",
             "reason": (
-                f"op-cert signed by a different environment "
-                f"(principal {principal!r}; this environment is {own_principal!r})"
+                f"verify.require_environment is set to {required_env!r}, but this op-cert was "
+                f"signed by environment {principal!r}"
             ),
         }
 
-    own_pubs = _opcert_own_public_keys(tracker)
-    if not own_pubs:
+    keys, trust_basis = _opcert_trust_root(
+        principal, own_principal, tracker, envelope, repo_root, required_env
+    )
+    base = {**base, "trust_basis": trust_basis}
+    if not keys:
         return {
             **base,
             "verified": False,
             "verdict": "foreign_key",
-            "reason": "this environment has no op-cert public key; it cannot certify any signature",
+            "reason": (
+                f"no public key is obtainable for environment {principal!r} — neither this "
+                "environment's own key, nor a key pinned in .rebar/trusted_environments.yaml, "
+                "nor one embedded in the signature envelope"
+            ),
         }
 
-    trust_root = authorship.allowed_signers_from_keys(own_pubs, principal)
+    trust_root = authorship.allowed_signers_from_keys(keys, principal)
     verdict = registry.verify(OPCERT_KIND, envelope, trust_root)
     if not verdict.verified:
         return {
