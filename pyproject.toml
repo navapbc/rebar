@@ -67,8 +67,10 @@ dependencies = [
 
 # The engine assets (the rebar_reconciler package + jira-capability-probe.py + the
 # alias wordlist) are stdlib-only and ship as package data under rebar/_engine/.
-# System prerequisites (not pip deps): git, and `acli` (only for live Jira
-# reconciliation).
+# System prerequisites (not pip deps): git, and `acli` (the Atlassian CLI),
+# required on PATH for the Jira **Cloud** reconciler/bridge path — the reconciler
+# shells out to it for all Cloud Jira I/O. The Data Center extra (`jira-datacenter`)
+# does not need `acli`; it uses the `jira` Python library.
 
 [project.urls]
 Homepage = "https://github.com/navapbc/rebar"
