@@ -292,20 +292,110 @@ def run_startup_store_sweep() -> None:
         logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
 
 
+_OPCERT_STATUS_ATTR = "_rebar_opcert_status"
+
+
+def opcert_signing_status(binding: Any, repo_root: str | None = None) -> dict[str, Any]:
+    """Whether the box's bound startup op-cert signer's public key matches the pinned
+    trusted-environment key for its principal — ``{bound, expected, env_id?, matched?}``.
+
+    This is the ONE same-environment failure the derived-key verify path cannot catch (bug 879b):
+    a private key that signs valid op-certs but whose PUBLIC half is not the published/pinned key
+    that *required-environment* verify checks against. Everything else about a signable key is
+    already validated at composition (``compose_startup_opcert_binding``) or re-derivable from the
+    private key on demand, so a "can we derive a pub?" probe would be redundant — the pinned-key
+    match is the only non-redundant signal.
+
+    ``expected`` gates strictness exactly like :func:`store_status`: it is True only when this
+    deployment OPTED INTO pinning by shipping ``.rebar/trusted_environments.yaml``. Required-
+    environment binding is advisory/deferred today (ADR 0104 decision 3), so a deployment that has
+    not configured pinning is never marked degraded. NEVER raises: a malformed config or any
+    resolution fault is reported as ``expected: False`` rather than aborting the probe."""
+    from rebar._opcert_signing import _read_opcert_pub
+    from rebar.attest.trusted_env import load_trusted_environments, trusted_env_keyring
+
+    if binding is None:
+        return {"bound": False, "expected": False}
+    env_id = getattr(binding, "principal", None)
+    key_path = getattr(binding, "key_path", None)
+    status: dict[str, Any] = {"bound": True, "expected": False, "env_id": env_id}
+    from rebar._deprecations import RemovedInputError
+
+    try:
+        status["expected"] = load_trusted_environments(repo_root) is not None
+        if not status["expected"]:
+            return status
+        signer_pub = _read_opcert_pub(key_path) if key_path else None
+        keyring = trusted_env_keyring(env_id, repo_root) if env_id else None
+        pinned = [
+            k.get("public_key") for k in (keyring or []) if k.get("revoked_at_log_position") is None
+        ]
+        status["matched"] = signer_pub is not None and signer_pub in pinned
+    except RemovedInputError:
+        # Same contract as the store probe above: a removed, still-set, load-bearing input must
+        # fail HARD rather than be folded into this probe's error field. RemovedInputError
+        # subclasses BaseException so it already sails past the handler below -- this re-raise
+        # is redundant today and exists so the intent survives a future widening.
+        raise
+    except Exception as exc:  # noqa: BLE001 - the probe never raises (see docstring)
+        status["expected"] = False
+        status["error"] = str(exc)
+    return status
+
+
+def opcert_signer_degraded(status: dict[str, Any]) -> bool:
+    """True only when a deployment that opted into pinning has a bound signer whose public key is
+    NOT the pinned trusted-environment key. Non-blocking: a degraded signer still serves — those
+    are valid signatures that only fail the advisory environment-binding check (ADR 0104 dec. 3)."""
+    return bool(status.get("bound") and status.get("expected") and not status.get("matched"))
+
+
+def run_startup_opcert_check(binding: Any, repo_root: str | None = None) -> None:
+    """Boot-time SERVE-DEGRADED surface for bug 879b: log a WARNING (naming the principal) when
+    the bound startup signer's public key is not the pinned trusted-environment key. NEVER raises
+    and NEVER aborts boot — the op-cert-signer sibling of :func:`run_startup_store_sweep`."""
+    from rebar._deprecations import RemovedInputError
+
+    try:
+        status = opcert_signing_status(binding, repo_root)
+        if opcert_signer_degraded(status):
+            logging.getLogger("rebar").warning(
+                "startup: bound op-cert signer's public key is NOT the pinned trusted-environment "
+                "key for principal %s — its op-certs are valid signatures but FAIL a required-"
+                "environment (pinned-key) verify. Serving DEGRADED (this binding check is advisory "
+                "today; boot continues). See bug 879b-9bf0-86fd-4a6b.",
+                status.get("env_id"),
+            )
+    except RemovedInputError:
+        # A retired, still-set input must abort boot loudly rather than be swallowed by the
+        # never-abort handler below; redundant today (BaseException subclass), kept so a future
+        # widening to `except BaseException` cannot silently reintroduce the swallow.
+        raise
+    except Exception:  # a health check must never abort boot
+        logging.getLogger("rebar").debug("startup op-cert check skipped", exc_info=True)
+
+
 def register_health_route(mcp: Any, gauge: InFlightGauge) -> None:
-    """Register ``GET /health`` returning ``{"in_flight": <int>, "store": {...}}``.
+    """Register ``GET /health`` returning ``{"in_flight", "store", "opcert"}``.
 
     Uses FastMCP's ``custom_route`` so the route lives on the Starlette app OUTSIDE the
     auth and transport-security middleware — an unauthenticated probe gets 200.
 
-    The status code stays 200 even with no store: see :func:`store_status` for why the
-    signal is a field rather than a failure."""
+    The status code stays 200 even with a degraded store or op-cert signer: see
+    :func:`store_status` / :func:`opcert_signing_status` for why the signal is a field
+    rather than a failure."""
 
     from starlette.responses import JSONResponse
 
     @mcp.custom_route("/health", methods=["GET"])
     async def _health(_request: Any) -> Any:  # pragma: no cover - thin adapter
-        return JSONResponse({"in_flight": gauge.value, "store": store_status()})
+        return JSONResponse(
+            {
+                "in_flight": gauge.value,
+                "store": store_status(),
+                "opcert": getattr(mcp, _OPCERT_STATUS_ATTR, {"bound": False, "expected": False}),
+            }
+        )
 
 
 def wire_health(mcp: Any, gauge: InFlightGauge | None = None) -> InFlightGauge:
@@ -440,6 +530,11 @@ def run_mcp(server: Any, mcp_cfg: Any, *, opcert_binding: Any = None) -> None:
     the serving thread so the certified-op tools mint certs under the box environment. HTTP
     binds it inside the uvicorn thread target (:func:`run_http_with_grace`); stdio binds it
     around ``server.run`` here (same thread). ``None`` is a transparent no-op."""
+
+    # Bug 879b serve-degraded surface: stash the pinned-key match status for /health and log a
+    # boot warning if the bound signer is not the pinned trusted-environment key. Never aborts.
+    setattr(server, _OPCERT_STATUS_ATTR, opcert_signing_status(opcert_binding))
+    run_startup_opcert_check(opcert_binding)
 
     if mcp_cfg.transport == "http":
         gauge = getattr(server, _GAUGE_ATTR, None)
