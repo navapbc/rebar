@@ -826,18 +826,26 @@ discarded) are recorded in the run **trace** for provenance, but their tokens ar
 into the aggregate successful-run usage tally — usage accounts the winning run, the trace
 accounts the attempts.
 
-**A mixed-provider fallback chain disables prompt caching — a 0/0 cache reading is not a
-regression.** A chain's capability record is the **conservative intersection** over its
-candidates (`runner_support._intersect_capabilities` is the authority): any candidate may be
-the one that answers, so a capability holds only if every candidate has it. Prompt-cache
-styles that disagree therefore collapse to `"none"` for the whole chain — each style's cache
-keys are provider-specific and would error on the candidate that does not share them. The
-observable consequence: an op running on such a chain (e.g.
-`["bedrock:…", "anthropic:…"]`) legitimately reports `cache_read_tokens = 0` and
-`cache_write_tokens = 0` (provenance `prompt_cache_style = "none"`) while the *same model
-called on its own* caches normally. The shipped configuration records the same fact — see the
-fallback note in `rebar.toml` ("Mixed-provider chains disable prompt caching because their
-provider-specific cache keys do not intersect").
+**A mixed-provider fallback chain caches on its PRIMARY (serving) target.** A chain's
+capability record is the **conservative intersection** over its candidates
+(`runner_support._intersect_capabilities` is the authority) for every field that can hard-fail
+cross-provider — any candidate may answer, so `supports_temperature`, native-output routing,
+thinking, and web provenance hold only if every candidate has them. `prompt_cache_style` is the
+ONE exception (bug `96f3-af59-ba26-4159`): it follows the **primary** candidate. The cache
+directive is a set of provider-scoped `ModelSettings` keys (`bedrock_cache_*` vs
+`anthropic_cache_*`); `merge_model_settings` (pydantic-ai, which `FallbackModel` applies per
+served candidate) is a plain dict union with no validation, and rebar's own run-level assembly
+(`structured_run.build_model_settings`, seeded from `cache_settings_for` at `runner.py:556`) is
+likewise an unvalidated dict — each provider model then reads ONLY its own keys via `.get(...)`,
+so a directive built for the primary is a silent miss — not an error — on a fallback that
+actually serves. A Bedrock-primary +
+Anthropic-fallback chain (the shipped `frontier`/`standard` shape) therefore caches on the
+Bedrock target that serves ~99.6% of calls, and the rare Anthropic fallback runs
+uncached-but-correct. (This REVERSES the earlier whole-chain collapse-to-none, whose premise —
+that a foreign cache key "would error on the candidate that does not share it" — was disproven at
+runtime; see the `_intersect_capabilities` docstring, the `rebar.toml` `[llm.model_classes]`
+note, and ADR 0059 §7.) A single-provider chain still reports its own style; only a chain whose
+PRIMARY cannot cache reports `prompt_cache_style = "none"` with `cache_read_tokens = 0`.
 
 ## Completion verification + the close gate (`verify_completion`)
 

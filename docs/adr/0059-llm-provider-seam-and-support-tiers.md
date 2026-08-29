@@ -517,6 +517,30 @@ the path.* The guard that now protects it uses no hand-built verdict anywhere in
 
 ### 7. Prompt caching is a capability, keyed per provider, with per-model floors
 
+> **Superseding decision (2026-08-29, ticket `paternal-repayable-flamingo`
+> `96f3-af59-ba26-4159`) — on a FALLBACK CHAIN, cache capability follows the PRIMARY (serving)
+> provider, NOT a conservative whole-chain intersection.** The original seam
+> (`_intersect_capabilities`) collapsed `prompt_cache_style` to `"none"` whenever a chain's
+> candidates disagreed, on the premise that a provider's cache keys "would error on the candidate
+> that does not share it." That premise is FALSE and was never measured: the cache directive is a
+> set of provider-scoped `ModelSettings` keys (`bedrock_cache_*` vs `anthropic_cache_*`);
+> `pydantic_ai.settings.merge_model_settings` is a plain dict union with no key validation, and
+> each provider model reads ONLY its own `*_cache_*` keys via `model_settings.get(...)`, so a
+> directive built for the primary is a silent `.get()` miss on a fallback that actually serves —
+> ignored, never errored (the identical behavior LiteLLM documents for an inapplicable cache
+> directive, and the property-of-the-resolved-model pattern pydantic-ai's own `FallbackModel`
+> uses by re-preparing settings per candidate). When commit `6d4f394195b2`
+> (`esthetical-earthborn-vervet`) configured `frontier`/`standard` as mixed Bedrock+Anthropic
+> chains, this collapse silently disabled caching on the Bedrock primary that serves ~99.6% of
+> calls — a ~2x plan-review cost regression observed from 2026-08-12. The fix makes
+> `_intersect_capabilities` take `per_candidate[0].prompt_cache_style` unconditionally; a rare
+> fallback runs uncached-but-correct. The fields that CAN hard-fail cross-provider
+> (`supports_temperature` → 400, `native_structured_output`, `supports_thinking`,
+> `native_output_with_thinking`, `native_web_search`) STILL fail closed with `all(...)`. This
+> preserves §2's invariant — the decision reads the `prompt_cache_style` capability FIELD, never a
+> provider-name string. The paragraphs below still describe how each arm's keys are shaped and why
+> a shared automatic key is wrong; only the whole-chain *collapse* is superseded.
+
 `cache_settings_for` sets instructions + tool-definitions breakpoints on every caching call, plus
 a THIRD message-tail breakpoint on the AGENTIC path only, **with DIFFERENT keys per arm**
 (`capabilities.py:492-514`): `anthropic_cache=True` vs `bedrock_cache_messages=True`.
