@@ -312,6 +312,15 @@ job asserts version-lockstep across them before it will build:
 # CHANGELOG.md:          promote [Unreleased] -> [X.Y.Z] (step 1a)
 git add pyproject.toml server.json CHANGELOG.md
 ```
+Bumping `pyproject.toml`'s `version` changes `rebar.__version__`, which the
+public-API-surface drift gate (`tests/unit/test_api_surface_gate.py`) tracks as part
+of the committed baseline — so **every** version bump fails `make test` until the
+baseline is regenerated. Refresh it and fold it into the same commit:
+```bash
+python scripts/gen_api_surface.py --update
+git diff tests/unit/api_surface_baseline.json   # expect only the __version__ value to change
+git add tests/unit/api_surface_baseline.json
+```
 **Land it through Gerrit — never push the release commit directly to `main`** (a
 repository ruleset rejects direct pushes; see "Git workflow" in AGENTS.md /
 CONTRIBUTING.md). Commit with the

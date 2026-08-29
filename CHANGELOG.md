@@ -10,6 +10,8 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-28
+
 ### Changed
 
 - **BREAKING (pre-1.0): `rebar export` NDJSON (`schema_version` 1 → 2) now emits nanosecond
@@ -1703,7 +1705,8 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 - Harden concurrency, extract txn, rename to rebar, agent-fitness features
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
-[unreleased]: https://github.com/navapbc/rebar/compare/v0.12.0...HEAD
+[unreleased]: https://github.com/navapbc/rebar/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/navapbc/rebar/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/navapbc/rebar/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/navapbc/rebar/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/navapbc/rebar/compare/v0.10.0...v0.10.1
