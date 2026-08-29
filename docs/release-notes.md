@@ -8,6 +8,43 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — `rebar export` NDJSON timestamps are STRINGS (`schema_version` 1 → 2)
+
+Bug `guilty-pusslike-wyvern` (`a8db-dc3c-983a-40b0`), 2026-08-28. The js-safe decimal-string wire
+form adopted for the MCP surface (bug `6fe7-956f-4901-45cf`) and then the CLI `--output json`
+surface (bug `e127-a3ad-895a-4a2f`, the entry below) now also applies to the **NDJSON export
+projection** — `rebar export` and its library twin `rebar.export_tickets()` — the last surface that
+still emitted bare `time.time_ns()` integers. That entry explicitly deferred export as
+"a separately versioned interop projection with a round-trip contract against `rebar import`"; this
+change makes the coordinated export+import move.
+
+**Why.** The export artifact is consumed by `jq`, `node`, and JS-based DuckDB/pandas loaders —
+exactly the float64 consumers RFC 8259 §6 does not protect. Measured on a freshly created ticket
+carrying a comment, `rebar export` emitted **4** unsafe integers (`$.created_at`,
+`$.comments[0].timestamp`, `$.signature.signed_at`, `$.updated_at`); a stored `…502255001` came back
+from `node`'s `JSON.parse` as `…502255000`, silently 1 ns wrong. After the fix: **4 → 0**.
+
+**What changed on the wire.** An integer outside `[-(2**53)+1, (2**53)-1]` is emitted as its EXACT
+decimal STRING; in-range integers (`priority`, counts) stay JSON numbers. The affected fields are
+`created_at`, `updated_at`, `comments[].timestamp`, `signature.signed_at`, and the
+`source_created_at` provenance carried on imported records. `EXPORT_SCHEMA_VERSION` is bumped to
+**2**; `export.schema.json`'s description now documents the wire form (the fields were already typed
+`["integer", "string", …]`, so no field was retyped).
+
+**Round-trip preserved.** `rebar import` (via `rebar._io._provenance`) now coerces the imported
+`created_at` / comment `timestamp` provenance with `int()`, accepting BOTH the new string wire form
+and older bare-integer exports, and storing a canonical `int`. `export | import` reproduces the
+EXACT nanosecond digits — pinned by a regression test that asserts the digits (`int(wire) == stored`),
+not merely the JSON type, since a float64 round-trip would pass a type-only check while returning
+`…000`.
+
+**Migration for consumers.** Parse these fields with `int(x)` / `BigInt(x)` — a schema-conformant
+consumer already accepted the string form, since `export.schema.json` typed them `["integer",
+"string"]` and states the projection may evolve without breaking consumers. What breaks is **naive
+raw-integer arithmetic** on the parsed value (`.created_at + 0` in `jq`, `data.created_at - start` in
+Node), which now fails LOUDLY instead of silently returning a rounded number. rebar's only in-repo
+consumer of the export format is `rebar import`, updated in lockstep here.
+
 ## BREAKING (pre-1.0) — nanosecond timestamps are STRINGS on CLI `--output json` too
 
 Bug `unhelping-creviced-rhino` (`e127-a3ad-895a-4a2f`), 2026-08-28. The wire form adopted for the
@@ -38,6 +75,9 @@ against a ticket carrying a comment and a signature):
 **Explicitly NOT changed.** `rebar export` (NDJSON) and its library twin `rebar.export_tickets()`
 still emit integers: that is a separately versioned interop projection (`schema_version`) with a
 round-trip contract against `rebar import`, and retyping it needs a coordinated import-side change.
+*(Superseded 2026-08-28 by bug `guilty-pusslike-wyvern` (`a8db-dc3c-983a-40b0`) — see the entry
+above: export now emits the same string wire form under `schema_version` 2, with a matching `int()`
+coercion on import.)*
 The Python library facade (`rebar.show_ticket()` et al.) is unaffected in principle — it returns
 Python `int`s, which are arbitrary-precision, and only a JSON serialization boundary can lose
 digits.

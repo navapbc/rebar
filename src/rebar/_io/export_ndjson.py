@@ -15,7 +15,6 @@ SNAPSHOT-bounded) keeps memory flat regardless of store size.
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from collections.abc import Iterator
@@ -23,6 +22,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from rebar import config
+from rebar._mcp_errors import js_safe_dumps
 from rebar.reducer import reduce_ticket
 from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 from rebar.reducer._present import public_state
@@ -31,7 +31,14 @@ from . import _strip
 
 # Export-line format version (independent of the event-log SCHEMA_VERSION). Bump
 # when the per-line export shape changes in a way importers must be aware of.
-EXPORT_SCHEMA_VERSION = 1
+#
+# v2 (bug guilty-pusslike-wyvern): a ``time.time_ns()`` timestamp outside the JS-safe
+# range (``|n| > 2**53-1``) is emitted on the NDJSON wire as its EXACT decimal STRING,
+# not a bare JSON number — RFC 8259 §6 only guarantees numeric agreement inside that
+# range, so a float64 consumer (jq/node/DuckDB) silently rounds a bare 19-digit int.
+# This mirrors the js-safe wire form bug e127 adopted for the CLI ``--output json`` and
+# MCP surfaces; the ``rebar import`` twin coerces the field back with ``int()``.
+EXPORT_SCHEMA_VERSION = 2
 
 
 def _ticket_dir_names(tracker: str) -> list[str]:
@@ -165,7 +172,7 @@ def export_tickets(
             include_deleted=include_deleted,
         ):
             if sink is not None:
-                sink.write(json.dumps(line, ensure_ascii=False) + "\n")
+                sink.write(js_safe_dumps(line, ensure_ascii=False) + "\n")
             exported += 1
     finally:
         if opened is not None:

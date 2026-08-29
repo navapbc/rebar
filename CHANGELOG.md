@@ -12,6 +12,26 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): `rebar export` NDJSON (`schema_version` 1 → 2) now emits nanosecond
+  timestamps as JSON STRINGS.** The js-safe decimal-string wire form the entries below adopted for
+  MCP and CLI `--output json` is extended to the last surface left out: the NDJSON export projection
+  (`rebar export` and its library twin `rebar.export_tickets()`). A `time.time_ns()` timestamp
+  outside `[-(2**53)+1, (2**53)-1]` (`created_at`, `updated_at`, `comments[].timestamp`,
+  `signature.signed_at`, and the `source_created_at` provenance on imported records) is now emitted
+  as its EXACT decimal string, so a float64 consumer of the export artifact (`jq`, `node`, a DuckDB
+  or pandas JS-based loader) no longer silently rounds it — measured on a real ticket, `rebar export`
+  went from **4 → 0** unsafe integers, and `node`'s `JSON.parse` of a stored `…255001` no longer
+  returns `…255000`. `EXPORT_SCHEMA_VERSION` is bumped to **2** to mark the wire-form change.
+  The round-trip twin is preserved: `rebar import` coerces these fields with `int()`, so
+  `export | import` still reproduces the EXACT nanosecond digits (proven by a regression test that
+  pins the digits, not merely the type). Only out-of-range integers change form; `priority` and
+  other in-range integers stay JSON numbers. **Migration:** parse these fields with `int(x)` /
+  `BigInt(x)` (the export schema already typed them `["integer", "string"]`, so a conformant
+  consumer already accepted the string form); what breaks is naive raw-integer arithmetic on the
+  parsed value, which now fails LOUDLY instead of returning a rounded number.
+  Bug `guilty-pusslike-wyvern` (`a8db-dc3c-983a-40b0`). See
+  [docs/release-notes.md](docs/release-notes.md).
+
 - **BREAKING (pre-1.0): CLI `--output json` now emits nanosecond timestamps as JSON STRINGS too.**
   The MCP-only wire form shipped in the entry below is extended to the CLI, the surface where users
   are explicitly told to pipe rebar JSON into `jq`/`node` — and those are exactly the float64
@@ -24,7 +44,9 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   emitter); (3) `rebar sign` **1 → 0** and `rebar verify-signature` **1 → 0** (`signed_at`), plus
   `rebar review-plan --status`; (4) `rebar audit show` **4 → 0**. **Not changed:** `rebar export`
   (NDJSON) and `rebar.export_tickets()`, a separately versioned projection with a round-trip
-  contract against `rebar import`; and the Python library facade, which returns arbitrary-precision
+  contract against `rebar import` *(superseded — see the `guilty-pusslike-wyvern` entry above: export
+  now adopts the same string wire form under `schema_version` 2)*; and the Python library facade,
+  which returns arbitrary-precision
   Python `int`s and has no JSON boundary to lose digits at. **Migration:** `int(x)` / `BigInt(x)`
   coercion is unaffected. What breaks is naive raw-integer arithmetic on the parsed value
   (`jq '.created_at + 0'`, `data.created_at - start` in Node) — and it now breaks LOUDLY instead of
