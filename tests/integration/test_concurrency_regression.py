@@ -1488,6 +1488,97 @@ def test_push_retry_merge_under_lock_preserves_events(two_clones):
         assert expected in bodies, f"event lost — {expected!r} missing from: {bodies!r}"
 
 
+def _tickets_merge_count(tracker: Path) -> int:
+    """Number of merge (2-parent) commits reachable from the local ``tickets`` branch.
+
+    A merge commit on the tickets branch is produced ONLY by the non-fast-forward
+    recovery path (``rebar._store.push_recovery._recover_non_fast_forward`` →
+    ``_merge_remote_under_lock``), which runs after a push loses the CAS race and must
+    back off, re-fetch, and merge before retrying. A plain append push fast-forwards and
+    adds a single-parent commit. So a rise in this count is durable evidence that a real
+    CAS collision drove the backoff+refetch recovery — the anti-vacuity anchor the ticket
+    requires (a contention test that never actually collided has proven nothing).
+    """
+    return int(_git("rev-list", "--merges", "--count", "tickets", cwd=tracker).stdout.strip())
+
+
+def test_cas_backoff_refetch_lands_all_writes_under_real_contention(two_clones):
+    """Bug baldish-regainable-steed (AC3): REAL concurrent writers colliding on the shared
+    tickets branch must each land, with no writer starved, through the CAS backoff+refetch
+    recovery path (back off → re-fetch → merge → retry).
+
+    This drives the actual push/CAS/recovery path with NO mocked sleep and NO fake git: a
+    peer advances ``origin/tickets`` and then a stale-based writer's push is
+    non-fast-forward and must recover. It asserts OUTCOMES — every write present after
+    convergence — rather than internal call counts, and anchors against vacuity by proving
+    a collision actually occurred (a recovery merge commit appears on the branch). The
+    companion unit oracle (``tests/unit/test_cas_backoff_refetch_baldish.py``) carries the
+    jitter/ordering mutation teeth; this gate carries the real-contention no-loss outcome.
+    """
+    _remote, repo_a, repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    tracker_b = _tracker(repo_b)
+
+    # Prime B's read-side sync so its subsequent writes start from a STALE base — the
+    # once-a-minute throttle marker then keeps B from re-fetching before each write, which
+    # is what forces every B push to be non-fast-forward and drive the recovery path.
+    _engine_run(repo_b, "list")
+    merges_before = _tickets_merge_count(tracker_b)
+
+    # Interleave real writers across several rounds: A advances origin/tickets, then B
+    # (stale) writes and must recover. Repeating spends the ESCALATING, jittered backoff
+    # under genuine contention rather than a single collision.
+    a_notes = [f"from-A-round-{i}" for i in range(3)]
+    b_notes = [f"from-B-round-{i}" for i in range(3)]
+    for a_note, b_note in zip(a_notes, b_notes, strict=True):
+        assert _engine_run(repo_a, "comment", seed, a_note).returncode == 0
+        result = _engine_run(repo_b, "comment", seed, b_note, check=False)
+        assert result.returncode == 0, f"contended B write did not land: {result.stderr}"
+
+    # Anti-vacuity: at least one non-fast-forward recovery actually ran. Without a real
+    # collision the outcome assertions below would pass trivially and prove nothing.
+    _reconverge_by_read_sync(repo_b, tracker_b, passes=2)
+    assert _tickets_merge_count(tracker_b) > merges_before, (
+        "no recovery merge appeared — the writers never actually collided, so this "
+        "contention gate would prove nothing about the backoff+refetch path"
+    )
+
+    # Outcome (no starvation, every write eventually lands): after both clones converge,
+    # each carries EVERY comment from both writers. This is the true oracle for
+    # 'every write lands' — distinct from a best-effort exit code, since B4 returns without
+    # raising on exhaustion, so a zero exit alone would not prove the event reached the store.
+    _reconverge_by_read_sync(repo_a, tracker_a, passes=2)
+    shown_a = json.loads(_engine_run(repo_a, "show", seed).stdout)
+    shown_b = json.loads(_engine_run(repo_b, "show", seed).stdout)
+    for shown, who in ((shown_a, "A"), (shown_b, "B")):
+        bodies = " ".join(c.get("body", "") for c in shown.get("comments", []))
+        for expected in (*a_notes, *b_notes):
+            assert expected in bodies, f"event lost on clone {who}: {expected!r} missing"
+
+
+def test_zero_contention_write_takes_no_cas_recovery(two_clones):
+    """Negative control (AC / Testing 'negative control at zero contention'): a single
+    writer on a FRESH base fast-forwards — no non-fast-forward, so no backoff, no re-fetch,
+    and no recovery merge. Confirms the fix leaves the uncontended path unchanged."""
+    _remote, _repo_a, repo_b, seed = two_clones
+    tracker_b = _tracker(repo_b)
+
+    # Fresh base: B syncs origin/tickets first, then is the ONLY writer this round.
+    _reconverge_by_read_sync(repo_b, tracker_b, passes=1)
+    merges_before = _tickets_merge_count(tracker_b)
+
+    assert _engine_run(repo_b, "comment", seed, "solo-write").returncode == 0
+
+    # The write landed and produced NO recovery merge (the push fast-forwarded).
+    assert _tickets_merge_count(tracker_b) == merges_before, (
+        "an uncontended write unexpectedly produced a recovery merge — the fix changed "
+        "the zero-contention path"
+    )
+    shown = json.loads(_engine_run(repo_b, "show", seed).stdout)
+    bodies = " ".join(c.get("body", "") for c in shown.get("comments", []))
+    assert "solo-write" in bodies
+
+
 def test_two_clone_concurrent_claim_loser_detects_and_fork_surfaced(two_clones):
     """Two clones claim the same open ticket. The loser (lower-HLC assignee) is told it
     lost (exit 10) once its push merges the winner's claim, and the resolved STATUS fork

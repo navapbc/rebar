@@ -426,7 +426,11 @@ def test_lost_cas_race_backs_off_between_retries(
     assert push.push_tickets_branch(str(tracker), strict=True, sleep_fn=slept.append) is None
     assert len([call for call in calls if call and call[0] == "push"]) == 3
     # One backoff per recovery that preceded a re-push, escalating rather than back-to-back.
-    assert slept == list(push_classify._CAS_BACKOFF_SECONDS[:2])
+    # Bug baldish: the backoff is jittered, so each sleep lands in an escalating window
+    # [base, base*(1+jitter)] rather than on the exact base value.
+    assert len(slept) == 2
+    for got, base in zip(slept, push_classify._CAS_BACKOFF_SECONDS[:2], strict=True):
+        assert base <= got <= base * (1.0 + push_classify._CAS_BACKOFF_JITTER), (got, base)
     assert slept == sorted(slept)
     assert all(delay > 0 for delay in slept)
 
@@ -494,7 +498,11 @@ def test_merge_recovery_retries_a_promisor_transport_fault(
     assert push.push_tickets_branch(str(tracker), strict=True, sleep_fn=slept.append) is None
     merges = [c for c in calls if c and c[0] == "merge" and c[1:2] != ("--abort",)]
     assert len(merges) == 2, "the transport-faulted merge must be retried"
-    assert slept[0] == push_classify._TRANSPORT_BACKOFF_SECONDS[0]
+    # Bug baldish: the CAS backoff now runs BEFORE the re-fetch, so it is the FIRST sleep;
+    # the transport backoff for the promisor-faulted merge still fires, after it.
+    cas_base = push_classify._CAS_BACKOFF_SECONDS[0]
+    assert cas_base <= slept[0] <= cas_base * (1.0 + push_classify._CAS_BACKOFF_JITTER)
+    assert push_classify._TRANSPORT_BACKOFF_SECONDS[0] in slept
 
 
 def test_merge_recovery_keeps_a_genuine_conflict_terminal(
