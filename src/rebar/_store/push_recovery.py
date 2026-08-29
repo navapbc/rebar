@@ -385,6 +385,13 @@ def _recover_non_fast_forward(
     ``True`` means a clean merge, ``False`` means a retryable local recovery
     failure, and ``None`` preserves the default path's terminal best-effort stop.
     """
+    # Bug baldish-regainable-steed: back off FIRST, then re-fetch and recompute the merge, so
+    # a lost CAS race gets a window to converge instead of re-colliding with the same
+    # concurrent writer. The sleep must sit BEFORE the fetch (order: SLEEP -> fetch -> merge)
+    # so the caller's next push immediately follows a merge of freshly-fetched state rather
+    # than staler pre-sleep state. Placing it after the merge (bug ebee's original) made each
+    # retry push state captured before the sleep — staler, not fresher.
+    _cas_backoff(attempt, sleep_fn)
     fetch = _fetch_for_recovery(core, base_path, remote, branch, sleep_fn)
     if fetch.returncode != 0:
         _raise_if_strict(
@@ -403,10 +410,6 @@ def _recover_non_fast_forward(
             recovered = _merge_remote_under_lock(
                 core, base_path, remote_ref, attempt, strict, _lock, sleep_fn
             )
-        if recovered:
-            # Bug ebee: back off before the caller re-pushes, so a lost CAS race gets a
-            # window to converge instead of re-colliding with the same concurrent writer.
-            _cas_backoff(attempt, sleep_fn)
         return recovered
     except _lock.LockTimeout:
         _raise_if_strict(
