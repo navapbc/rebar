@@ -54,6 +54,10 @@ COMPOSITION_ROOT_BASENAMES: frozenset[str] = frozenset(
         "_config_schema.py",
         "_child_env.py",
         "model_classes.py",
+        # The env/file reader helpers split out of llm/config.py for module-size headroom
+        # (ticket 02b7). Same composition root as config.py, two files — mirrors the
+        # _config_sources.py / _config_resolvers.py split above.
+        "config_readers.py",
     }
 )
 

@@ -23,7 +23,10 @@ import importlib.util
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-_CONFIG_PY = REPO_ROOT / "src" / "rebar" / "llm" / "config.py"
+# The `_llm_*` env-reading helpers (and the non-env `_llm_drain_mode` negative control) live in
+# `config_readers.py` (extracted from `config.py` for module-size headroom, ticket 02b7); this AST
+# probe follows them so it keeps finding the same function definitions it always has.
+_CONFIG_PY = REPO_ROOT / "src" / "rebar" / "llm" / "config_readers.py"
 
 # Read through `_llm_float`, and therefore invisible to the generator before b00f.
 _FLOAT_VARS = (
