@@ -81,18 +81,47 @@ def test_the_str_wrapped_variant_is_rejected(tmp_path: Path) -> None:
     assert violations[0].shape == "`str(tracker)`"
 
 
-def test_realpath_and_abspath_wrappers_are_not_unwrapped(tmp_path: Path) -> None:
-    """The realpath()/abspath() family is a separate, design-laden follow-up; the str()
-    extension must NOT flag those wrappers (a per-site root decision, tracked elsewhere)."""
+def test_realpath_and_abspath_wrappers_are_unwrapped(tmp_path: Path) -> None:
+    """flowered-basaltic-beagle: the realpath()/abspath() family names the same directory as
+    the bare form, so ``dirname(os.path.realpath(tracker))`` composes the store's parent
+    exactly like ``dirname(tracker)`` — now that every legitimate store-repo site routes
+    through the shared seam, these must be flagged."""
     source = (
         "import os\n"
         "a = os.path.dirname(os.path.realpath(tracker))\n"
         "b = os.path.dirname(os.path.abspath(tracker))\n"
     )
     violations, bare = _scan(tmp_path, source)
-    assert violations == [] and bare == [], (
-        f"must not flag realpath/abspath wrappers: {[v.text for v in violations + bare]}"
+    assert [v.shape for v in violations] == [
+        "`os.path.realpath(tracker)`",
+        "`os.path.abspath(tracker)`",
+    ], [v.text for v in violations]
+    assert bare == []
+
+
+def test_storepaths_canonical_is_flagged(tmp_path: Path) -> None:
+    """feisty-intense-mandrill: ``dirname(StorePaths(tracker).canonical)`` composes the repo
+    root from the resolved store path — the exact construct the guard exists to catch, and its
+    former blind spot. The bare/str-wrapped ``.canonical`` spellings are covered too."""
+    source = (
+        "import os\n"
+        "a = os.path.dirname(StorePaths(tracker).canonical)\n"
+        "b = os.path.dirname(str(StorePaths(tracker).canonical))\n"
     )
+    violations, bare = _scan(tmp_path, source)
+    assert [v.shape for v in violations] == [
+        "`StorePaths(tracker).canonical`",
+        "`str(StorePaths(tracker).canonical)`",
+    ], [v.text for v in violations]
+    assert bare == []
+
+
+def test_bare_storepaths_canonical_argument_is_not_flagged(tmp_path: Path) -> None:
+    """Passing ``StorePaths(tracker).canonical`` as an argument (the canonical store path a
+    detached child receives) is legitimate — only COMPOSING a root from it via ``dirname`` is
+    the defect, so the un-``dirname``-wrapped use must not be flagged."""
+    violations, bare = _scan(tmp_path, "spawn(StorePaths(tracker).canonical)\n")
+    assert violations == [] and bare == []
 
 
 def test_the_real_defect_shape_is_rejected(tmp_path: Path) -> None:
@@ -161,6 +190,40 @@ def test_an_empty_reason_does_not_sanction(tmp_path: Path) -> None:
     assert len(violations) + len(bare) == 1
 
 
+# ────────────────────────── the shared seam marker ──────────────────────────
+
+
+def test_the_seam_marker_sanctions_the_realpath_seam(tmp_path: Path) -> None:
+    """flowered-basaltic-beagle: ``# repo-root-seam: <reason>`` exempts THE single canonical
+    helper that resolves the store's own repo root — the one place allowed to spell the
+    composition, which every other store-repo site routes through."""
+    violations, bare = _scan(
+        tmp_path,
+        "import os\n"
+        "# repo-root-seam: THE store-repo-root derivation; every store-repo site routes here.\n"
+        "root = os.path.dirname(os.path.realpath(tracker))\n",
+    )
+    assert violations == [] and bare == []
+
+
+def test_a_reasonless_seam_marker_is_reported(tmp_path: Path) -> None:
+    """A seam marker is a sanction too, so a reasonless one is a bare-marker finding — the
+    seam must document WHY it is the one exempt derivation."""
+    violations, bare = _scan(
+        tmp_path,
+        "import os\n# repo-root-seam\nroot = os.path.dirname(os.path.realpath(tracker))\n",
+    )
+    assert violations == []
+    assert len(bare) == 1
+
+
+def test_the_seam_marker_does_not_count_as_a_repo_root_ok_sanction() -> None:
+    """The seam marker is DISTINCT from ``# repo-root-ok`` so the deferral invariant below can
+    keep counting only the latter — a seam line must not read as a deferred config-root site."""
+    assert "# repo-root-ok" not in gate.SEAM_MARKER
+    assert gate.BARE_MARKER not in "# repo-root-seam:"
+
+
 # ─────────────────────── an unparseable source is loud, not silent ───────────────────────
 
 
@@ -226,4 +289,26 @@ def test_no_config_root_site_is_deferred_behind_a_sanction() -> None:
     assert set(marked) <= {"src/rebar/_store/sync.py"}, (
         "a new repo-root-ok sanction appeared outside the store's-own-git-repo reads; a "
         f"config root must be resolved, not deferred behind a marker: {sorted(marked)}"
+    )
+
+
+def test_exactly_one_shared_store_root_seam_exists() -> None:
+    """flowered-basaltic-beagle: the store-root derivation lives in exactly ONE place — the
+    shared ``rebar._proc.store_repo_root`` seam — so no caller hand-rolls ``dirname(tracker)``.
+    A ``# repo-root-seam`` marker anywhere else is a second choke point and a regression.
+    """
+    seam_files: dict[str, list[str]] = {}
+    for path in sorted((_REPO_ROOT / gate.SCAN_ROOT).rglob("*.py")):
+        lines = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if "# repo-root-seam" in line
+        ]
+        if lines:
+            seam_files[str(path.relative_to(_REPO_ROOT))] = lines
+    assert set(seam_files) == {"src/rebar/_proc.py"}, (
+        f"the shared store-root seam must be the single site in _proc.py: {sorted(seam_files)}"
+    )
+    assert len(seam_files["src/rebar/_proc.py"]) == 1, (
+        f"more than one seam marker in _proc.py: {seam_files['src/rebar/_proc.py']}"
     )

@@ -24,30 +24,38 @@ WHAT IS FLAGGED — only the COMPOSING expression, never prose. A call of the sh
 
   1. the name ``tracker``                       ``os.path.dirname(tracker)``
   2. a ``*.tracker_dir(...)`` resolver call      ``os.path.dirname(reads.tracker_dir())``
-  3. either of the above wrapped in ``str(...)`` ``os.path.dirname(str(tracker))``
+  3. any of the above wrapped in a path-normaliser — ``str(...)``, ``os.path.realpath(...)``,
+     ``os.path.abspath(...)`` (and bare ``realpath``/``abspath``) — which name the SAME
+     directory, e.g. ``os.path.dirname(os.path.realpath(tracker))``
+  4. ``StorePaths(<tracker>).canonical`` — the resolved store path — wrapped or bare, e.g.
+     ``os.path.dirname(StorePaths(tracker).canonical)``
 
-The ``str()`` wrapper (case 3) merely normalises the path — it names the same directory — so
-it composes the store's parent exactly as the bare form does. It was the variant the
-enumerated ``auspicial-friended-merganser`` list missed (composer.py / _store/sync.py), split
-to ``injurious-pugnacious-azurevase``. (``os.path.realpath`` / ``os.path.abspath`` wrappers are
-a separate, design-laden family — each site needs a per-site root decision — tracked as a
-follow-up and NOT unwrapped here.)
+The wrappers in cases 3–4 merely normalise the path — they name the same directory — so they
+compose the store's parent exactly as the bare form does. ``str()`` was the variant the
+enumerated ``auspicial-friended-merganser`` list missed (composer.py / _store/sync.py); the
+``realpath()``/``abspath()`` family and the ``StorePaths(...).canonical`` spelling (the
+``feisty-intense-mandrill`` blind spot) are unwrapped by ``flowered-basaltic-beagle`` so the
+gate is airtight for the WHOLE class: the only places allowed to derive a root from a tracker
+are the shared seam and the sanctioned store-repo sites below.
 
 Docstrings, comments, and error text are NOT flagged — they compose nothing, and comments never
 reach the AST at all.
 
 SANCTION — ``# repo-root-ok: <reason>``, with a MANDATORY reason, honoured on the offending
 line, the line above, or the enclosing statement's first line (mirrors
-``# tickets-boundary-ok:`` / ``# raw-git-ok:``). Exactly one sanctioned site remains: the
+``# tickets-boundary-ok:`` / ``# raw-git-ok:``). The sanctioned store-repo sites are the
 ``_store/sync.py`` ``tickets_branch`` / ``tickets_remote`` reads in ``reconverge``, which name
 the branch and remote of the STORE's own git repo (``git -C tracker``) with no code
-``repo_root`` in scope — the store's parent genuinely IS the right root there. The detached
-``run_sweep`` child in ``compact_trigger.py`` was sanctioned as a deferred spawn-contract
-decision and is now FIXED (``scathing-custommade-bobcat``): a detached child holding only
-``tracker`` still resolves its code root with the bare resolver, because ``REBAR_ROOT`` covers
-the relocated deployment and ``_proc.detached_child_cwd`` anchors the child at the durable
-canonical-store parent for the git-toplevel arm. No CONFIG-root site is allowlisted.
-A bare marker with no reason is itself reported.
+``repo_root`` in scope — the store's parent genuinely IS the right root there. No CONFIG-root
+site is allowlisted.
+
+SEAM — ``# repo-root-seam: <reason>`` exempts THE single canonical helper that resolves the
+store's own git-repo root from a tracker (``rebar._proc.store_repo_root``). Every legitimate
+store-repo site routes through that helper instead of hand-rolling ``dirname(...tracker...)``,
+so the composing expression exists in exactly one place. This marker is DISTINCT from
+``# repo-root-ok`` precisely so the "no deferred config-root site behind a marker" invariant
+keeps counting only ``# repo-root-ok`` sanctions. A bare marker with no reason is itself
+reported.
 """
 
 from __future__ import annotations
@@ -61,19 +69,32 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 MARKER = "# repo-root-ok:"
 BARE_MARKER = "# repo-root-ok"
+SEAM_MARKER = "# repo-root-seam:"
+#: Bare marker tokens (colon optional) whose ``:<reason>`` form sanctions a site and whose
+#: reasonless form is itself reported. ``# repo-root-seam`` exempts the single shared seam;
+#: it is intentionally SEPARATE from ``# repo-root-ok`` so the deferral invariant can keep
+#: counting only the latter.
+_SANCTION_TOKENS = (BARE_MARKER, "# repo-root-seam")
 SCAN_ROOT = "src"
 
 #: dirname callees that compose a parent path. ``_os`` is an occasional local alias.
 _DIRNAME_CALLEES = {"os.path.dirname", "dirname", "_os.path.dirname"}
 
 #: one-arg callees that merely NORMALISE a path without changing which directory it names,
-#: so ``dirname(str(tracker))`` composes the store's parent exactly as ``dirname(tracker)``
-#: does. The ``str()`` wrapper is the variant the enumerated auspicial-friended-merganser
-#: list missed (composer.py / _store/sync.py); unwrapping it keeps the gate airtight for the
-#: whole ``str()``-wrapped class. (``os.path.realpath`` / ``os.path.abspath`` wrappers are a
-#: separate, design-laden family tracked as a follow-up and are deliberately NOT unwrapped
-#: here.)
-_STORE_WRAPPER_CALLEES = {"str"}
+#: so ``dirname(str(tracker))`` / ``dirname(os.path.realpath(tracker))`` compose the store's
+#: parent exactly as ``dirname(tracker)`` does. ``str()`` was the auspicial-friended-merganser
+#: miss; the ``realpath``/``abspath`` family is the flowered-basaltic-beagle design-judgment
+#: subset — now that every legitimate store-repo site routes through the shared seam, these
+#: are unwrapped so no direct spelling can smuggle the construct past the gate.
+_STORE_WRAPPER_CALLEES = {
+    "str",
+    "os.path.realpath",
+    "realpath",
+    "_os.path.realpath",
+    "os.path.abspath",
+    "abspath",
+    "_os.path.abspath",
+}
 
 
 class _Finding:
@@ -98,12 +119,17 @@ def _callee_name(func: ast.AST) -> str:
 def _store_shape(arg: ast.AST) -> str | None:
     """Return a human label if ``arg`` names the STORE (a tracker), else None.
 
-    Unwraps a single path-normalising wrapper (``str(...)``) so ``dirname(str(tracker))``
-    is flagged exactly like ``dirname(tracker)`` — the wrapper does not change which
-    directory the composition names.
+    Unwraps the path-normalising wrappers (``str(...)`` / ``os.path.realpath(...)`` /
+    ``os.path.abspath(...)``) and the ``StorePaths(<tracker>).canonical`` property, all of
+    which name the same directory — so ``dirname(os.path.realpath(tracker))`` and
+    ``dirname(StorePaths(tracker).canonical)`` are flagged exactly like ``dirname(tracker)``.
     """
     if isinstance(arg, ast.Name) and arg.id == "tracker":
         return "`tracker`"
+    if isinstance(arg, ast.Attribute) and arg.attr == "canonical":
+        inner = _storepaths_store_shape(arg.value)
+        if inner is not None:
+            return f"`StorePaths({inner.strip('`')}).canonical`"
     if isinstance(arg, ast.Call):
         callee = _callee_name(arg.func)
         if callee == "tracker_dir" or callee.endswith(".tracker_dir"):
@@ -115,8 +141,22 @@ def _store_shape(arg: ast.AST) -> str | None:
     return None
 
 
+def _storepaths_store_shape(node: ast.AST) -> str | None:
+    """The store shape if ``node`` is ``StorePaths(<tracker>)``, else None."""
+    if isinstance(node, ast.Call):
+        callee = _callee_name(node.func)
+        if (callee == "StorePaths" or callee.endswith(".StorePaths")) and len(node.args) == 1:
+            return _store_shape(node.args[0])
+    return None
+
+
 def _marked(lines: list[str], line_no: int, stmt_line: int | None) -> tuple[bool, bool]:
-    """(sanctioned, bare_marker_seen) for a finding at ``line_no`` (1-based)."""
+    """(sanctioned, bare_marker_seen) for a finding at ``line_no`` (1-based).
+
+    A site is sanctioned by ``# repo-root-ok: <reason>`` (a store-repo site) OR
+    ``# repo-root-seam: <reason>`` (THE shared seam); either token without a reason is a
+    bare-marker finding.
+    """
     candidates = {line_no, line_no - 1}
     if stmt_line is not None:
         candidates.add(stmt_line)
@@ -126,10 +166,14 @@ def _marked(lines: list[str], line_no: int, stmt_line: int | None) -> tuple[bool
         if not 1 <= candidate <= len(lines):
             continue
         text = lines[candidate - 1]
-        if MARKER in text and text.split(MARKER, 1)[1].strip():
-            sanctioned = True
-        elif BARE_MARKER in text:
-            bare = True
+        for token in _SANCTION_TOKENS:
+            if token not in text:
+                continue
+            colon = f"{token}:"
+            if colon in text and text.split(colon, 1)[1].strip():
+                sanctioned = True
+            else:
+                bare = True
     return sanctioned, bare
 
 

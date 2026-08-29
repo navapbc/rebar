@@ -33,6 +33,7 @@ from rebar._commands import compact_plan, compact_recovery
 from rebar._commands._compact_policy import is_foldable
 from rebar._commands.compact_plan import Candidate
 from rebar._commands.fsck_repair import is_snapshot_orphan
+from rebar._proc import store_repo_root
 from rebar._store import compat, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git_write
@@ -520,7 +521,7 @@ def _compact_locked(
         # the raw files are retired. Derive repo_root from the tracker (no repo_root here).
         compiled_state["authorship_ledger"] = _build_authorship_ledger(
             fold_files,
-            os.path.dirname(os.path.realpath(tracker)),
+            store_repo_root(tracker),
             position_commits=position_commits,
         )
         status = compiled_state.get("status", "")

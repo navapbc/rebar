@@ -53,6 +53,7 @@ from rebar._commands.fsck_tracker_health import (  # noqa: F401
     foreign_store_path_list,
 )
 from rebar._engine_support.output import OutputFormatError, parse_output
+from rebar._proc import store_repo_root
 from rebar._store import compat
 from rebar._store.gitutil import (  # noqa: F401
     _resolve_tracker_git_dir,
@@ -285,7 +286,7 @@ def _missing_tracker_result(tracker: str, fmt: str) -> int | None:
         return None
     # Dir-mismatch hint: the configured tracker.dir is absent, but a default-named
     # store still exists alongside → tracker.dir was changed without migrating.
-    repo_guess = os.path.dirname(os.path.realpath(tracker))
+    repo_guess = store_repo_root(tracker)
     # The resolved store is `tracker`; this branch exists to warn that tracker.dir was
     # pointed AWAY from the default while a store still sits at the default name, so it
     # must name the default literally — resolving it would compare `tracker` to itself.

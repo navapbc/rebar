@@ -109,6 +109,30 @@ def reap_process_group(
         )
 
 
+def store_repo_root(tracker: str | os.PathLike[str]) -> str:
+    """THE canonical seam that resolves the STORE's OWN git-repo root from a tracker.
+
+    This is deliberately the ONE place in the tree allowed to compose a root from the store
+    path — the parent of the tracker resolved through symlinks. Every git op that acts on the
+    store's OWN repo (``git -C <tracker>`` sync/fsck/freshness, and event attribution derived
+    from that repo) routes through here so no caller hand-rolls ``dirname(...tracker...)`` and
+    the two roots (this store root vs. :func:`rebar.config.repo_root_or_none`'s CODE root)
+    cannot silently diverge. It is NOT the code/config root: on a relocated store
+    (``REBAR_TRACKER_DIR``) the tracker's parent holds no ``rebar.toml`` — anything reading
+    ``compose_config()`` must resolve the code root instead.
+
+    ``realpath`` is load-bearing: a provisioned worktree's ``.tickets-tracker`` is a SYMLINK
+    into the main checkout, so without it the "root" would be the doomed worktree. It raises
+    ``OSError`` only when a relative ``tracker`` is resolved from an already-dead cwd
+    (``realpath`` -> ``getcwd`` -> ``OSError``); callers that must never raise wrap the call.
+
+    Lives in this stdlib-only leaf (not ``rebar._store.paths``) so the leaf
+    :func:`detached_child_cwd` can route through it without importing ``rebar.*``.
+    """
+    # repo-root-seam: THE sanctioned store-repo-root derivation; every other site routes here.
+    return os.path.dirname(os.path.realpath(tracker))
+
+
 def detached_child_cwd(tracker: str) -> str:
     """Pick a working directory a detached child can still resolve after its parent's is gone.
 
@@ -138,7 +162,7 @@ def detached_child_cwd(tracker: str) -> str:
     already-dead cwd (``realpath`` -> ``getcwd`` -> ``OSError``) degrades to the root.
     """
     try:
-        root = os.path.dirname(os.path.realpath(tracker))
+        root = store_repo_root(tracker)
     except OSError:
         return os.sep
     while root and not os.path.isdir(root):

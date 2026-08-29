@@ -29,6 +29,7 @@ import os
 
 from rebar._commands import compact_plan, fsck_repair
 from rebar._commands.compact_txn import _build_authorship_ledger, _snapshot_strip_keys
+from rebar._proc import store_repo_root
 from rebar._store import compat, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar.reducer import reduce_ticket
@@ -135,7 +136,7 @@ def rebuild_snapshot_from_full_log(
         # Authorship ledger (epic gnu-whale-ichor / 3183): rebuild it from the FULL raw log
         # (active + retired) so a rebuilt SNAPSHOT preserves the signed-event ledger too.
         compiled_state["authorship_ledger"] = _build_authorship_ledger(
-            raw_paths, os.path.dirname(os.path.realpath(tracker))
+            raw_paths, store_repo_root(tracker)
         )
 
         snapshot_ts = hlc.next_tick(tracker, ticket_id)

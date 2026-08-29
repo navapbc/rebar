@@ -31,6 +31,7 @@ import uuid as _uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from rebar._proc import store_repo_root
 from rebar._store import event_append
 from rebar._store.gitutil import run_git_write
 from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
@@ -208,7 +209,7 @@ def build_snapshot_event(
             "compacted_at": snapshot_ts,
         },
     }
-    snapshot_event.update(_seam.attribution_fields(os.path.dirname(os.path.realpath(tracker))))
+    snapshot_event.update(_seam.attribution_fields(store_repo_root(tracker)))
     final_path = os.path.join(
         ticket_dir, event_append.event_filename(snapshot_ts, snapshot_uuid, "SNAPSHOT")
     )
