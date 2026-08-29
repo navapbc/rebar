@@ -64,10 +64,15 @@ def test_terraform_both_securestring_params_present() -> None:
         assert f'name  = "{name}"' in block or f'name = "{name}"' in block
         assert 'type  = "SecureString"' in block or 'type = "SecureString"' in block
 
-    # AC1(f): the KEY param is guarded by ignore_changes = [value]; the guard param is NOT.
+    # AC1(f): the KEY param uses write-only value_wo + value_wo_version (never in state, ADR
+    # 0105) and is NOT ignore_changes-guarded; the guard param is a generated value, neither.
     key_block = _resource_block(tf, "aws_ssm_parameter", "opcert_ed25519_key")
-    assert re.search(r"ignore_changes\s*=\s*\[\s*value\s*\]", key_block), (
-        "key param lacks ignore_changes"
+    assert re.search(r"value_wo\s*=", key_block), "key param lacks write-only value_wo"
+    assert re.search(r"value_wo_version\s*=", key_block), (
+        "key param lacks required value_wo_version"
+    )
+    assert not re.search(r"ignore_changes\s*=\s*\[\s*value\s*\]", key_block), (
+        "key param must NOT use ignore_changes = [value] (that persists the secret to state)"
     )
     guard_block = _resource_block(tf, "aws_ssm_parameter", "opcert_origin_guard")
     assert "ignore_changes" not in guard_block, (
@@ -119,9 +124,10 @@ def test_terraform_opcert_admin_role_ignores_assume_role_policy_drift() -> None:
     terraform-drift check runs `terraform plan` with NO -var, so it renders an empty
     principal and reports a permanent phantom `1 to change` against the live account-root
     principal — reddening the daily sweep forever and masking real drift. The role must carry
-    `lifecycle { ignore_changes = [assume_role_policy] }` (mirroring the operator-seeded key
-    param's ignore_changes = [value]) so plan/apply never diff on the operator-owned trust
-    list. Same class as the key-param guard asserted in
+    `lifecycle { ignore_changes = [assume_role_policy] }` (an operator-owned attribute terraform
+    should not fight, the same rationale the key param once used ignore_changes for before it
+    moved to write-only value_wo) so plan/apply never diff on the operator-owned trust
+    list. The key-param guard is now asserted as write-only value_wo in
     test_terraform_both_securestring_params_present."""
     tf = _TF.read_text()
     role = _resource_block(tf, "aws_iam_role", "opcert_admin")
@@ -151,7 +157,7 @@ def test_terraform_no_fixed_cost_resources() -> None:
 
 def test_assertion_script_present_executable_and_literal() -> None:
     """AC2: the operator assertion script exists, is executable, and carries the literal
-    AC1 jq queries (aggregated all() on route auth; the .lifecycle_meta_arguments (f) query)."""
+    AC1 jq queries (aggregated all() on route auth; the write-only value_wo_version (f) query)."""
     assert _ASSERT_SH.is_file()
     assert os.access(_ASSERT_SH, os.X_OK), "assertion script must be executable"
     body = _ASSERT_SH.read_text()
@@ -161,7 +167,7 @@ def test_assertion_script_present_executable_and_literal() -> None:
     assert 'all(. == "AWS_IAM")' in body  # aggregated route auth
     assert 'has("random")' in body
     assert 'label == "opcert_admin_invoke"' in body
-    assert ".lifecycle_meta_arguments.ignore_changes" in body  # (f) literal path
+    assert ".expressions.value_wo_version" in body  # (f) write-only literal path
 
 
 # --------------------------------------------------------------------------- compose service

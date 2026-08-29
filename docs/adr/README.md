@@ -101,6 +101,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0079 — Continuous auto-deploy: on-box systemd timer, copy-based build context, v1 = review-bot only](0079-autodeploy-on-box-timer.md)
 - [0089 — Activity-based liveness under run_sync; async idle-watchdog deferred](0089-async-liveness-watchdog.md)
 - [0104 — MCP on the AWS box: a self-contained `rebar-mcp` HTTP server for copilot/codex/claude](0104-mcp-on-box.md)
+- [0105 — SSM SecureString secrets use write-only arguments — secret values are never persisted to terraform state](0105-ssm-secrets-never-in-terraform-state.md)
 
 ## Store & event sourcing
 

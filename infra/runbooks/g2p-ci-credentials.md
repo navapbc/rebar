@@ -13,8 +13,8 @@ There are two independent legs of the CI path, each with its own secret:
 
 Both SSM slots already exist as `CHANGEME` placeholders (`infra/terraform/ssm.tf`);
 this runbook populates them. **Never** commit a real secret value — the repo only
-holds Terraform placeholders (`ignore_changes = [value]`) and templated/materialised
-files (ADR-0008 / ADR-0022 secrets invariant).
+holds Terraform placeholders (write-only `value_wo`, never in state — ADR 0105) and
+templated/materialised files (ADR-0008 / ADR-0022 secrets invariant).
 
 ---
 
@@ -178,7 +178,8 @@ good — the temporary back-out is in `two-vote-gate-rollback.md`):
    ```
    (Or remove it from **Service Users** so the `label-Verified` ACL no longer applies.)
 4. **SSM:** overwrite both slots back to `CHANGEME` (do NOT delete the params —
-   Terraform owns their existence; `ignore_changes = [value]` won't fight you):
+   Terraform owns their existence; the write-only `value_wo` won't fight you, and a
+   later apply won't revert your value unless `value_wo_version` is bumped — ADR 0105):
    ```bash
    aws ssm put-parameter --region us-east-1 --overwrite --type SecureString \
      --name /rebar/prod/g2p-github-pat --value CHANGEME
