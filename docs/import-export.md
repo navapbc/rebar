@@ -24,6 +24,15 @@ Each line is a compiled ticket state plus a `schema_version` discriminator
 (`schemas/export.schema.json`). Run metadata (`exported_at`, `source_env`, counts)
 goes to **stderr**, so every stdout line is a clean ticket object.
 
+**Timestamp wire form (`schema_version` 2+).** A nanosecond `time.time_ns()` timestamp
+(`created_at`, `updated_at`, `comments[].timestamp`, `signature.signed_at`,
+`source_created_at`) outside JavaScript's safe-integer range (`|n| > 2**53-1`) is emitted
+as its EXACT decimal **string**, not a bare JSON number — RFC 8259 §6 only guarantees
+numeric agreement inside that range, so a float64 loader (`jq`, `node`, DuckDB/pandas)
+would otherwise round a 19-digit int silently. Parse with `int(x)` / `BigInt(x)`; `rebar
+import` coerces it back with `int()`, so the round-trip preserves the exact digits
+(`schema_version` 1 emitted these as bare numbers — bug `guilty-pusslike-wyvern`).
+
 ## Export
 
 ```

@@ -12,6 +12,25 @@ from __future__ import annotations
 from typing import Any
 
 
+def _coerce_ns(value: Any) -> Any:
+    """Coerce a nanosecond-timestamp field to a canonical ``int`` (``None`` passes through).
+
+    The export wire form (bug ``guilty-pusslike-wyvern``) carries a ``time.time_ns()``
+    timestamp outside the JS-safe range as its EXACT decimal STRING, while older exports
+    (and in-range values) carry a bare JSON number. Coercing with ``int()`` accepts BOTH,
+    so an imported ticket's ``source_created_at`` provenance is always a canonical int with
+    the exact digits — the ``export | import`` round-trip cannot drift the type. A
+    non-numeric or absent value is left untouched (``None`` / malformed provenance is
+    tolerated by the write path rather than aborting the import row).
+    """
+    if value is None or isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
 def create_kwargs(record: dict[str, Any]) -> dict[str, Any]:
     """Keyword args for ``create_ticket`` from one export record (parent set later).
 
@@ -34,7 +53,7 @@ def create_kwargs(record: dict[str, Any]) -> dict[str, Any]:
         "_creation_channel": "import",
         "source": {
             "source_id": record.get("ticket_id"),
-            "source_created_at": record.get("created_at"),
+            "source_created_at": _coerce_ns(record.get("created_at")),
             "source_author": record.get("author"),
             "source_env": record.get("env_id"),
         },
@@ -45,5 +64,5 @@ def comment_source(entry: dict[str, Any]) -> dict[str, Any]:
     """Per-comment provenance kwargs (``source_author``/``source_created_at``)."""
     return {
         "source_author": entry.get("author"),
-        "source_created_at": entry.get("timestamp"),
+        "source_created_at": _coerce_ns(entry.get("timestamp")),
     }
