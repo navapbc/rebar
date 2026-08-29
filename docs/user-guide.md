@@ -255,6 +255,48 @@ Later appends from the same identified session use the same log. When rebar iden
 
 The `session_log` type is exempt from lifecycle gates, excluded from graph health, and never synchronized to Jira. These properties are documented in [event-schema.md](event-schema.md).
 
+### Ops error-sweep ledger
+
+Debugging-orchestration sessions periodically sweep for AWS and GitHub Actions errors "since the last sweep." The last-sweep timeline is carried across sessions in **one long-lived `session_log` ticket used as an append-only ledger** — currently `tomophobic-stilllife-mayfly` (`b2dc-b1ab-0bd9-47f6`), tagged `ops-sweep`. A `session_log` is chosen deliberately: it is excluded from the default `list`, from `ready` / `next-batch`, and from graph-health reductions, and is never synced to Jira (see [event-schema.md](event-schema.md), "The session_log ticket type"), so an always-open ledger creates zero work-queue noise — unlike an open `task`/`bug`, which would pollute the queues forever.
+
+**Find the last sweep with no prior knowledge:** search for the tag, open the ledger, read the newest comment.
+
+```sh
+rebar search "ops-sweep"                       # or: rebar search "error-sweep ledger"
+rebar session-logs                             # lists session_log tickets, newest first
+```
+
+Each sweep appends a comment whose first line is a header:
+
+```
+SWEEP <ISO-8601 timestamp> | window <start>..<end>
+```
+
+The **newest** comment's header is the last sweep; the next sweep starts its window at that comment's `window_end`.
+
+**Append a sweep entry by ticket id** — not with `session-log append`:
+
+```sh
+rebar comment <ledger-id> "SWEEP 2026-08-29T10:00-07:00 | window <start>..<end> ..."
+```
+
+`session-log append` is session-keyed and auto-rotates (a new session's first append starts a *new* log), which would scatter entries across many logs instead of keeping them in the one ledger; `rebar comment <ledger-id>` always targets the ledger itself.
+
+**Link every ticket a sweep files** to the ledger so its relations enumerate everything the sweeps have surfaced:
+
+```sh
+rebar link <filed-ticket> <ledger-id> relates_to
+```
+
+A `session_log` accepts only the non-blocking relations (`relates_to`, `discovered_from`, `caused_by`); `blocks` / `depends_on` are refused on either endpoint.
+
+**If the ledger is ever lost or archived, recreate it** — the `ops-sweep` tag plus search is the durable anchor, so the specific id is only a convenience pointer:
+
+```sh
+rebar session-log start --summary "OPS: error-sweep ledger (AWS + GitHub Actions)"
+rebar tag <new-id> ops-sweep
+```
+
 ## The quality gates as you experience them
 
 rebar has a few self-checks you can run on demand. The **per-ticket** gates take a

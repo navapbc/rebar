@@ -220,7 +220,8 @@ restated here:
   unpushed ticket commits, durable audit) and its human-only `--force=<reason>` break-glass →
   `docs/concurrency.md` §"Mutating the tracker: no AD-HOC raw git".
 - **Session logs** — the `session_log` type semantics and the `session-log` helper +
-  auto-rotation → `docs/event-schema.md` and `docs/user-guide.md`.
+  auto-rotation (incl. the ops error-sweep ledger convention) → `docs/event-schema.md`
+  and `docs/user-guide.md`.
 - **LLM agent operations** — `review-plan`, `verify-completion`, `review-code`, `scan-spec` (the
   optional `[agents]` framework; the old single-pass `review` verb is deprecated and now forwards
   to `review-plan`) → `docs/llm-framework.md`.
