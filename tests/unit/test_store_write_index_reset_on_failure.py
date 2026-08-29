@@ -60,7 +60,7 @@ def test_commit_failure_resets_index_and_next_write_has_no_phantom(tracker, monk
     def fake_run(cmd, *a, **kw):
         # Simulate the commit failing WITHOUT actually committing (so the only residue
         # is the git add-staged blob, which the failure path must reset out of the index).
-        if isinstance(cmd, list) and "commit" in cmd[:6]:
+        if isinstance(cmd, list) and "commit" in cmd:
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="injected commit failure")
         return real_run(cmd, *a, **kw)
 
@@ -91,7 +91,7 @@ def test_failed_add_never_runs_commit(tracker, monkeypatch):
             if "add" in cmd[:6]:
                 calls.append("add")
                 return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="injected add failure")
-            if "commit" in cmd[:6]:
+            if "commit" in cmd:
                 calls.append("commit")
         return real_run(cmd, *a, **kw)
 

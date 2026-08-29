@@ -33,7 +33,7 @@ from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
 from rebar._store import hlc
 from rebar._store.canonical import canonical_str
-from rebar._store.gitutil import run_git_write
+from rebar._store.gitutil import _AUTOMAINT_OFF, run_git_write
 from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_all_tickets
 from rebar.reducer.marker import write_marker
@@ -337,6 +337,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
                 _git(tracker, "add", *staged)
                 _git(
                     tracker,
+                    *_AUTOMAINT_OFF,
                     "commit",
                     "-q",
                     "--no-verify",
@@ -361,7 +362,15 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
 
         stage = [_rel(tracker, p) for p in written]
         _git(tracker, "add", *stage)
-        _git(tracker, "commit", "-q", "--no-verify", "-m", f"ticket: DELETE {ticket_id}")
+        _git(
+            tracker,
+            *_AUTOMAINT_OFF,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            f"ticket: DELETE {ticket_id}",
+        )
     except CommandError as exc:
         # Roll back: unstage + remove every file this (failed) delete wrote, so the
         # store is left exactly as before — no half-deleted, wedged-on-rerun state.

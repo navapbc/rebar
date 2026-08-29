@@ -67,6 +67,7 @@ from rebar._store.event_commit_git import (
     _restore_paths,
     _run_git,
     _unstage,
+    run_auto_maintenance,
 )
 from rebar._store.event_commit_git import (
     _is_transient_add_error as _is_transient_add_error,
@@ -89,19 +90,33 @@ from rebar._store.event_prepare import (
     event_filename as event_filename,
 )
 
-# Shared index.lock self-healing (bug fix-indexlock-retry). ``_INDEX_LOCK_STALE_S`` is
-# re-exported here (redundant alias) because a test reads ``event_append._INDEX_LOCK_STALE_S``.
-from rebar._store.gitutil import _INDEX_LOCK_STALE_S as _INDEX_LOCK_STALE_S
-
 # Used directly by the retained self-heal below — NOT part of the relocated verb set.
 from rebar._store.gitutil import (
+    _AUTOMAINT_OFF,
     _with_transient_fault_retry,
     discard_unmerged_paths,
     path_is_foreign_to_branch,
 )
+
+# Shared index.lock self-healing (bug fix-indexlock-retry). ``_INDEX_LOCK_STALE_S`` is
+# re-exported here (redundant alias) because a test reads ``event_append._INDEX_LOCK_STALE_S``.
+from rebar._store.gitutil import _INDEX_LOCK_STALE_S as _INDEX_LOCK_STALE_S
 from rebar._store.lock import LockTimeout, RebaseGuard  # re-export for callers
 
 _log = logging.getLogger(__name__)
+
+
+def _deferred_maintenance(tracker: str | os.PathLike) -> None:
+    """Run git's auto-maintenance as an explicit deferred step after a successful lock-held
+    commit (bd66), still UNDER the caller's write lock.
+
+    The lock-held commit runs with git's auto-maintenance suppressed (``_AUTOMAINT_OFF``) so
+    its tight ``_GIT_TIMEOUT`` covers only the O(1) commit, never an O(store) repack. This
+    replays the maintenance ADR 0051 wants FOREGROUND — but as a distinct step on the roomier
+    ``_LOCAL_GIT_TIMEOUT`` watchdog, and serialised under the SAME write lock (so calls MUST
+    stay inside the ``write_lock`` body). BEST-EFFORT: the write is already durable, so a
+    maintenance failure/timeout never fails the write."""
+    run_auto_maintenance(tracker)
 
 
 def delete_events(tracker: str | os.PathLike, relpaths: Iterable[str], commit_msg: str) -> int:
@@ -142,6 +157,7 @@ def delete_events(tracker: str | os.PathLike, relpaths: Iterable[str], commit_ms
                 "Error: git commit failed while holding lock" + (f": {git_err}" if git_err else ""),
                 1,
             )
+        _deferred_maintenance(tracker)
     return len(paths)
 
 
@@ -221,6 +237,7 @@ def stage_and_commit(
                         ),
                         1,
                     )
+            _deferred_maintenance(tracker)
     except (RebaseGuard, LockTimeout):
         staged.discard()
         raise
@@ -289,6 +306,7 @@ def _commit_prepared_batch_under_lock(
     except BaseException:
         _rollback_batch(tracker, renamed)
         raise
+    _deferred_maintenance(tracker)
     return len(prepared)
 
 
@@ -469,7 +487,9 @@ def _recover_from_unmerged(
     # Same runner-FS transient self-heals as _git_commit — this UU-recovery commit reads
     # HEAD and writes loose objects too, and must not lose a resolved write to a blip.
     retry = _with_transient_fault_retry(
-        lambda: _run_git(["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg])
+        lambda: _run_git(
+            ["git", "-C", tracker, *_AUTOMAINT_OFF, "commit", "-q", "--no-verify", "-m", commit_msg]
+        )
     )
     return (retry.returncode == 0, None)
 
@@ -534,7 +554,9 @@ def _recover_from_invalid_object(
     read_tree = _run_git(["git", "-C", tracker, "read-tree", "HEAD"])
     _git_add(tracker, list(event_relpaths))
     retry = _with_transient_fault_retry(
-        lambda: _run_git(["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg])
+        lambda: _run_git(
+            ["git", "-C", tracker, *_AUTOMAINT_OFF, "commit", "-q", "--no-verify", "-m", commit_msg]
+        )
     )
     healed = retry.returncode == 0
     # An orphan is an EARLIER failed write's file dropped from the index by the reset but left

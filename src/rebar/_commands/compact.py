@@ -49,6 +49,7 @@ from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._store import hlc
 from rebar._store import lock as _lock
 from rebar._store import lock_owner as _lock_owner
+from rebar._store.gitutil import _AUTOMAINT_OFF
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +323,7 @@ def _commit_backfill(tracker: str, compacted: int, folded_ids: set[str] | None =
     else:
         _git(
             tracker,
+            *_AUTOMAINT_OFF,
             "commit",
             "-q",
             "--no-verify",

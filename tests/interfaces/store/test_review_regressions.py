@@ -32,7 +32,7 @@ def test_delete_aborts_and_rolls_back_on_commit_failure(
     real = d._git
 
     def fail_on_commit(tracker, *args):
-        if args[:1] == ("commit",):
+        if "commit" in args:
             raise CommandError("Error: git operation failed during delete: boom", returncode=2)
         return real(tracker, *args)
 
@@ -58,7 +58,7 @@ def test_transition_unstages_orphaned_event_on_commit_failure(
     real = txn._git
 
     def fail_on_commit(td, *args):
-        if args[:1] == ("commit",):
+        if "commit" in args:
             raise CommandError("Error: git operation failed: boom", returncode=2)
         return real(td, *args)
 

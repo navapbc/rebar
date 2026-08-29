@@ -735,6 +735,16 @@ def run_git_write(
     return result
 
 
+# ── deferred auto-maintenance (bd66) ─────────────────────────────────────────────────────
+# git >= 2.47 runs ``git maintenance run --auto`` FOREGROUND at the end of ``git commit`` (ADR
+# 0051 forces it foreground so the repack serialises UNDER the store write lock). On a mature
+# store past git's ``gc.auto`` threshold that inline repack is O(store), charged to the commit's
+# tight bound (event_append's 30s ``_GIT_TIMEOUT``, c2ba), which SIGKILLs it mid-repack and loses
+# the write. The fix SPLITS the two: this flag tuple suppresses auto-maintenance on the O(1)
+# lock-held commit; ``event_commit_git.run_auto_maintenance`` replays it under the write lock.
+_AUTOMAINT_OFF: tuple[str, ...] = ("-c", "gc.auto=0", "-c", "maintenance.auto=false")
+
+
 # ── stranded-index classification (bug 2fa6) ────────────────────────────────────────────
 # The tickets branch has a KNOWN SHAPE: per-ticket event directories (several id styles —
 # `b636-f31a-d590-4642`, `jira-reb-1001`) plus a small set of store dotfiles. Rather than
