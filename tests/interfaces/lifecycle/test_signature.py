@@ -2,7 +2,8 @@
 
 Pins that all three interfaces sign a manifest of verified steps with the
 environment-specific key, that ``verify-signature`` certifies a clean manifest
-and rejects tampering / foreign-environment keys / unsigned tickets, that the
+(including one signed by another environment — bug c21f) and rejects tampering / unsigned
+tickets, that the
 signature survives compaction, and that the MCP write tool is gated by
 REBAR_MCP_READONLY while the read tool is not.
 """
@@ -125,16 +126,21 @@ def test_tampered_manifest_is_rejected(rebar_repo: Path) -> None:
     assert out["verdict"] == "mismatch"
 
 
-def test_foreign_environment_key_cannot_certify(
+def test_foreign_environment_certifies_when_the_signature_is_valid(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Bug c21f / operator policy: "certification environment should not currently be a gate. Any
+    # certification is as good as any other certification right now." A different environment (a
+    # different op-cert principal) certifies, because the SIGNATURE is what is gated. The trusted-
+    # set restriction is a future, opt-in feature (verify.require_environment), not live policy.
     tid = _seed(rebar_repo)
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
-    # A different environment (a different op-cert principal) must not be able to certify.
     monkeypatch.setenv("REBAR_OPCERT_ENV_ID", "a-totally-different-environment")
     out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
-    assert out["verified"] is False
-    assert out["verdict"] == "foreign_key"
+    assert out["verified"] is True
+    assert out["verdict"] == "certified"
+    # ...and the acceptance is VISIBLE: the result names which key certified it.
+    assert out["trust_basis"] in ("own_key", "envelope_key")
 
 
 def test_injected_env_key_round_trips(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,10 +225,13 @@ def test_concurrent_signatures_converge_by_basename(rebar_repo: Path) -> None:
     assert out["verdict"] == "certified"
 
 
-# ── cross-environment via a REAL .env-id swap (op-cert principal, story 8d8e) ──
-def test_foreign_key_round_trip_via_file_swap(rebar_repo: Path) -> None:
-    # The op-cert principal is the environment's .env-id; a store carrying a cert whose principal
-    # differs from THIS environment's reads foreign_key (no scheme invoked).
+# ── cross-environment via a REAL .env-id swap (op-cert principal, story 8d8e; policy: bug c21f) ──
+def test_cross_environment_round_trip_via_file_swap(rebar_repo: Path) -> None:
+    # The op-cert principal is the environment's .env-id. Under the operator's current policy the
+    # principal is NOT a gate, so a cert travels in both directions: whichever environment reads
+    # the store, a validly signed cert certifies. (The old rule — a principal mismatch reading
+    # foreign_key without invoking the scheme — was bug c21f; it blocked the ordinary deployment
+    # shape where the MCP server signs and a local CLI worktree claims.)
     tid = _seed(rebar_repo)
     envid_file = rebar_repo / ".tickets-tracker" / ".env-id"
     env_a = envid_file.read_text()
@@ -230,15 +239,19 @@ def test_foreign_key_round_trip_via_file_swap(rebar_repo: Path) -> None:
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))  # signed under principal A
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
 
-    # Become environment B (different .env-id → different principal).
+    # Become environment B (different .env-id → different principal): A's cert still certifies.
     envid_file.write_text("environment-b\n")
-    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "foreign_key"
+    out_b = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out_b["verdict"] == "certified", out_b["reason"]
+    assert out_b["key_id"] != "environment-b"  # ANCHOR: genuinely a cert from the OTHER principal
 
-    # B re-signs → certified in B; A's restored id then sees B's signature foreign.
+    # B re-signs → certified in B; A's restored id then also certifies B's signature.
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
     envid_file.write_text(env_a)
-    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "foreign_key"
+    out_a = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    assert out_a["verdict"] == "certified", out_a["reason"]
+    assert out_a["key_id"] == "environment-b"  # ANCHOR: B's cert, read back in A
 
 
 def test_readonly_verify_does_not_mint_key(

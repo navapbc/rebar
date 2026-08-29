@@ -74,9 +74,12 @@ they can be re-closed to re-earn a signed op-cert if certification is needed aga
 
 The required-environment policy is **opt-in and defaults off**. With no
 `.rebar/trusted_environments.yaml` present and `verify.require_environment` unset, the
-process keeps the low-security, process-record behavior (an op-cert signed by the local
-environment certifies locally without a pinned trust root). This means the contract change
-does not force any deployment to adopt trusted-environment pinning; that remains a separate,
+process keeps the low-security, process-record behavior: an op-cert certifies locally without a
+pinned trust root, **whichever environment signed it** — Certification environment is **not** a gate under current operator policy (bug `c21f-6f29-5d2d-4a5a`): *"Any certification is as good as any other certification right now. Limited to a trusted set of environments is a future feature, but not currently in use."* (The earlier wording
+here said "an op-cert signed by the *local* environment certifies locally", which described the
+future restriction as if it were live and blocked the ordinary shape where one environment signs
+and another consumes.) A signature that does not verify is still refused. This means the contract
+change does not force any deployment to adopt trusted-environment pinning; that remains a separate,
 opt-in hardening step. Turning the policy off again is a safe rollback of that hardening.
 
 ## `rebar.authorship.v1` is unaffected

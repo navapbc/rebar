@@ -207,9 +207,12 @@ def verify_signature(
     """Certify a ticket's recorded verified steps against its signature.
 
     Returns a verdict dict ``{ticket_id, verified, verdict, reason, manifest,
-    ...}``. ``verdict`` is ``certified`` (steps match the signature under this
-    environment's key), ``mismatch`` (steps altered / signature invalid),
-    ``foreign_key`` (signed by a different environment), or ``unsigned``. Raises
+    ...}``. ``verdict`` is ``certified`` (steps match the signature under the
+    signer's key — which need NOT be this environment's: bug c21f, the signing
+    environment is not a gate), ``mismatch`` (steps altered / signature invalid),
+    ``foreign_key`` (no usable signer key, or the opt-in
+    ``verify.require_environment`` restriction excludes its signer), or
+    ``unsigned``. ``trust_basis`` names which key certified. Raises
     :class:`RebarError` only when the ticket id cannot be resolved.
 
     ``kind`` selects which attestation to verify (epic dark-acme-lumen): ``None`` (default)
