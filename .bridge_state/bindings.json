@@ -2014,9 +2014,17 @@
       "updated_at": "2026-08-15T14:51:40Z"
     },
     "097b-de23-bf12-4c38": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Operator remediation \u2014 apply the value_wo migration, scrub existing cleartext from remote state, and rotate the exposed crown-jewel secrets\n\nThis is the PROD-mutation follow-through for the code change landed under `finedrawn-closed-stud` (eb67-b96c-dcf0-4f86), which migrated every SSM SecureString **secret** parameter to terraform write-only arguments (`value_wo` / `value_wo_version`) so secret values are never persisted to terraform state (ADR 0105). The code change alone does NOT mutate prod; this ticket is the operator cutover.\n\n**Run this only AFTER the value_wo code change has landed on main.** Follow the procedure in `infra/runbooks/ssm-secret-write-only.md` \u00a7\"REMEDIATE the existing exposure\".\n\n### Steps\n1. `terraform apply` the value_wo migration. NOTE the one-time cutover reset: on this apply\n   `value_wo_version` goes absent -> 1 for each migrated slot, so the provider re-sends\n   `value_wo = \"CHANGEME\"` once and RESETS each live seeded secret to the placeholder. This is\n   intended (we rotate these secrets in the same window). `user_data.sh`'s CHANGEME fail-fast is\n   the safety net.\n2. In the SAME maintenance window, re-seed/ROTATE every affected secret out-of-band\n   (`aws ssm put-parameter --overwrite`). Rotate the crown-jewels explicitly \u2014 they were exposed\n   in cleartext in state and must be treated as compromised: Gerrit admin password, opcert\n   Ed25519 signing key, rebar-bot signing key, Anthropic API key, jira-api-token, SSH host keys.\n   Update every external system that trusts an old value (Gerrit account, Jira token, bot public\n   key, Anthropic console).\n3. VERIFY no SecureString value appears in state: `terraform state pull` must show `value: null`\n   (and no `value_wo`) for every migrated secret. Only the generated `opcert_origin_guard`\n   legitimately still resolves (via its random_password).\n4. SCRUB the historical cleartext from the state backend: the prior values persist in the retained\n   versions of `s3://rebar-tfstate-896586841071/rebar/prod/terraform.tfstate` (bucket versioning,\n   ~149 versions). Permanently delete the affected object versions (or roll the bucket / lifecycle-\n   expire old versions per data-handling policy). Rotated values are retired but still purge them.\n\n### Coordination\n- Coordinate with the SEPARATE \"rubied\" apply that is seeding 4 new MCP-PAT SSM params so the\n  state scrub covers those params too (they are also SecureString secrets under /rebar/prod/).\n- Cross-reference: ADR 0105 (docs/adr/0105-ssm-secrets-never-in-terraform-state.md) and the runbook\n  infra/runbooks/ssm-secret-write-only.md.\n\n### Acceptance criteria\n- [ ] value_wo migration applied to prod.\n- [ ] Every migrated secret re-seeded/rotated; crown-jewels rotated and external trust updated.\n- [ ] `terraform state pull` shows no SecureString secret value (all `value: null`, no `value_wo`).\n- [ ] Historical cleartext purged from the state bucket's retained versions.\n- [ ] rubied MCP-PAT params covered by the same scrub.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Operator: apply value_wo SSM migration, scrub cleartext from remote tfstate, rotate exposed crown-jewel secrets"
+      },
       "created_at": "2026-08-29T18:34:33Z",
       "jira_id": "4590634",
       "jira_key": "REB-3891",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:34:36Z"
     },
@@ -11596,7 +11604,7 @@
         },
         "description": "## Context\n\nCritically evaluate six architecture recommendations derived from the audit at code snapshot 5fb693345b0cd1b48d1e9d20b292fd15761c7624. Assess both the historical snapshot and the current main/worktree so that already-landed changes or stale premises are not presented as current facts. This is a read-only research task; no production or documentation files will be changed.\n\n## Plan\n\n- Establish the audited snapshot, current HEAD, and repository/ADR context for each recommendation.\n- Verify cited implementation claims, size/complexity claims, compatibility paths, and stated ADR intent from source, tests, history, and ticket evidence.\n- Research the external dependency claims material to Burr, DSSE/in-toto, controller-runtime, git-bug, and Pluggy before judging those options.\n- For each recommendation, separate factual accuracy, recommendation validity, future-code impact, stability/bug impact, and maintenance/confusion impact.\n- Identify hidden migration costs, boundary risks, overclaims, and safer sequencing; give an evidence-weighted disposition rather than accepting hotspot counts as causation.\n- Record findings and final conclusions on this ticket.\n\n## Acceptance Criteria\n\n- [x] Each of the six recommendations has a source-cited accuracy assessment against snapshot 5fb6933 and current code.\n- [x] Each has an explicit disposition and qualitative confidence.\n- [x] Forecasts cover future code shape, stability/bugs, maintenance burden, and confusion, including migration risk.\n- [x] Historical commit heuristics are distinguished from causal defect evidence.\n- [x] External-framework claims used in the evaluation are verified from primary sources.\n- [x] The final synthesis prioritizes actions by expected net value and identifies prerequisites or ADR research needed.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Critically evaluate the 2026-08-29 architecture recommendations"
       },
       "created_at": "2026-08-29T17:29:20Z",
@@ -12607,9 +12615,17 @@
       "updated_at": "2026-08-15T14:56:34Z"
     },
     "3a08-4016-0a3a-4be0": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nADR 0098 defines one immutable non-secret `OperationSnapshot` per operation. Today CLI and shared command-write entry points still call `emit_shadow_snapshot()`, while store/config helpers can resolve ambient state independently. The reconciler runtime already demonstrates snapshot-derived bindings; reuse that pattern.\n\nThis story cuts ordinary CLI, MCP/Python command, and store-opening operations over. LLM-specific resolution is the dependent follow-up.\n\n## Approach\n\n- Census the command/store consumers and identify the public composition boundaries for CLI, MCP, and Python.\n- Compose exactly once after input parsing and before lock/network/write, then pass focused immutable projections/context through shared command/store seams.\n- Preserve explicit-input > environment > project > user > schema precedence and independent repository-root selection from ADR 0098.\n- Add consumer-level metamorphic and effect-spy tests.\n- Remove migrated shadow calls and ambient reloads; extend the existing ownership checker with red-proven detections rather than a second registry.\n\n## Scope\n\n- `src/rebar/_operation_config.py` and `src/rebar/config.py` \u2014 existing composer/projections and approved compatibility boundary.\n- `src/rebar/_cli/`, `src/rebar/_commands/`, `src/rebar/_store/`, and MCP command entry modules \u2014 compose once and thread focused context.\n- `tests/interfaces/contracts/` and focused config/store/CLI/MCP tests.\n- `scripts/check_config_ownership.py` and its exact exception registry.\n\n## Testing\n\nHappy path: equivalent CLI, MCP, and Python operations resolve one identical snapshot and produce existing effects. Metamorphic edge: mutate environment, selected files, and CWD after capture; the active operation remains unchanged and the next operation changes. Failure edge: malformed selected configuration causes zero lock, subprocess, network, or store effects.\n\n## Acceptance Criteria\n\n- [ ] Representative CLI, MCP, and Python ticket/store reads and writes each compose one snapshot/context, proven by call-count tests through production entry points.\n- [ ] Given environment/config/CWD mutation after composition, the active operation's selected tracker directory, branch, remote, push mode, and observable effects remain unchanged; a new operation observes the change.\n- [ ] Explicit operation input remains authoritative and malformed selected config fails before lock, subprocess, network, or store write.\n- [ ] Store helpers receive focused projections/context and do not call `load_config`, environment, or CWD beneath the approved boundary.\n- [ ] Migrated `emit_shadow_snapshot` calls and compatibility resolution branches are deleted, with no stored ticket/event/bridge format change.\n- [ ] The structural ownership checker catches a synthetic below-boundary ambient read and has zero new legacy exceptions.\n- [ ] Existing config, tracker layout, concurrency, CLI/MCP/library parity, lint, typecheck, and default suites pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Make OperationSnapshot authoritative for CLI, command, and store operations"
+      },
       "created_at": "2026-08-29T18:34:36Z",
       "jira_id": "4590635",
       "jira_key": "REB-3892",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:34:39Z"
     },
@@ -13811,9 +13827,17 @@
       "updated_at": "2026-08-24T04:39:59Z"
     },
     "3f27-cb3c-8023-4f57": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nUse the portable shadow corpus as the prerequisite for live differential evidence, then complete the typed reconciler migration in this story. Legacy deletion is a completion condition, not deferred cleanup.\n\nReuse the existing real Jira 8.17.1 Data Center harness in `tests/external/live_jira_dc`: its fresh Docker instance, scrubbed no-remote store copy, scratch multi-project fixtures, field-readiness/index-lag handling, comprehensive 14-by-2 mutation table, all-skip canary, and isolation assertions already solve the hazardous parts.\n\n## Approach\n\n- Add an exact-patchset CI entry to the existing DC harness so the implementation under review\u2014not only merged `main`\u2014can be exercised.\n- Compare legacy and typed behavior only on isolated projects or fresh instances. Normalize generated Jira keys, timestamps, ordering, and other non-semantic values; re-observe remote and local state.\n- Exercise representative real-store volume while scoping writes so copied unbound tickets cannot be filed en masse.\n- After parity, flip the one production route to typed payloads/adapters and delete the compatibility paths in the same epic.\n- Rerun a typed-only live convergence/idempotence pass after deletion.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/` \u2014 typed production route and removal of compatibility dispatch.\n- `tests/unit/rebar_reconciler/` \u2014 typed-only contracts after deletion.\n- `tests/external/live_jira_dc/` \u2014 isolated differential and convergence scenarios.\n- `.github/workflows/` \u2014 exact-patchset DC execution.\n- `docs/architecture.md` and any accepted ADR status/consequence updates.\n\n## Testing\n\nFast proof: the portable corpus remains green after the production flip and after each deletion. Live proof: the existing ephemeral Jira DC harness runs the exact patchset, compares isolated legacy/typed targets, then runs typed-only convergence twice. Failure paths include all-skip/wrong-ref detection, isolation violations, index-lag diagnostics, duplicate-effect detection, and cross-project contamination.\n\n## Acceptance Criteria\n\n- [ ] CI checks out and records the exact Gerrit patchset SHA used for the ephemeral DC run; an all-skipped or wrong-ref run fails.\n- [ ] Both outer and ticket-store repos have no remotes, `REBAR_SYNC_PUSH=off`, Cloud/live-project credentials are absent, and every Jira target is a disposable harness project or instance.\n- [ ] Legacy and typed runs never write the same issue. Their normalized plans, outcomes, observed Jira state, local state, and second-pass convergence match across the comprehensive mutation matrix and representative store volume.\n- [ ] The typed-only post-cutover DC run converges twice without duplicate effects, lost fields, cross-project contamination, or unexplained diagnostics.\n- [ ] Portable/default CI remains authoritative when Docker/DC is unavailable; the live lane is additive evidence.\n- [ ] Production no longer converts typed mutations to dictionaries or selects behavior by `apply()` argument shape.\n- [ ] `_mutation_to_batch_dict`, duplicate CREATE shapes, obsolete legacy batch leaves/facades, and test-only compatibility re-exports with no supported consumers are deleted; remaining compatibility is explicitly public and justified.\n- [ ] Full reconciler suites, default suite, lint, typecheck, and the exact-patchset DC lane pass before the story closes.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Prove Jira DC parity, cut over the reconciler, and delete legacy dispatch"
+      },
       "created_at": "2026-08-29T18:34:42Z",
       "jira_id": "4590636",
       "jira_key": "REB-3893",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:34:44Z"
     },
@@ -15620,6 +15644,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:05Z"
     },
+    "471c-f71f-342c-45ed": {
+      "created_at": "2026-08-29T19:29:20Z",
+      "jira_id": "4590643",
+      "jira_key": "REB-3900",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:29:23Z"
+    },
     "472f-33f1-509e-462a": {
       "created_at": "2026-08-15T14:58:05Z",
       "jira_key": "REB-1098",
@@ -16540,6 +16571,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:34Z"
     },
+    "4bd8-a2bb-813b-427e": {
+      "created_at": "2026-08-29T19:29:27Z",
+      "jira_id": "4590644",
+      "jira_key": "REB-3901",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:29:30Z"
+    },
     "4bf4-db7d-ce69-45e1": {
       "baseline": {
         "assignee": {
@@ -16698,6 +16736,13 @@
       "peer_parent": "REB-1173",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:40Z"
+    },
+    "4c80-edd3-20f1-4dff": {
+      "created_at": "2026-08-29T19:29:32Z",
+      "jira_id": "4590645",
+      "jira_key": "REB-3902",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:29:35Z"
     },
     "4ca2-97b4-51fb-41c9": {
       "baseline": {
@@ -18187,6 +18232,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:33Z"
     },
+    "53ab-bdf6-de1c-4bb1": {
+      "created_at": "2026-08-29T19:29:40Z",
+      "jira_id": "4590646",
+      "jira_key": "REB-3903",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:29:42Z"
+    },
     "542e-fb17-6f5d-4ced": {
       "created_at": "2026-08-15T14:59:34Z",
       "jira_key": "REB-1258",
@@ -18337,9 +18389,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Summary\n\nThe MCP container image installs no `acli` (Atlassian CLI) binary, so every Jira-MUTATING bridge operation on the deployed box fails at the transport with `[Errno 2] No such file or directory: 'acli'`. The Jira credentials are now correctly wired and authenticate; the binary that would use them is absent.\n\n## How it was found\n\nDiscovered while verifying `colourless-hasteless-lamb`, whose fix wired `JIRA_URL`, `JIRA_USER`, `JIRA_PROJECT` and `JIRA_API_TOKEN` into the container. That fix moved `bridge_check_access` past its credential gate and, in doing so, EXPOSED this defect \u2014 it was previously masked, because the probe fail-closed on `missing_credentials` before ever reaching the transport.\n\n## Observed (live, deployed container `rebar-mcp-25ea12c200ae-8092`, one run)\n\n    rebar.bridge_check_access()\n    {\n      \"steps\": [\n        {\n          \"step\": \"STEP_CREATE\",\n          \"passed\": false,\n          \"reason\": \"exception\",\n          \"detail\": \"[Errno 2] No such file or directory: 'acli'\"\n        }\n      ],\n      \"verdict\": \"FAIL\"\n    }\n\nIt fails at the FIRST step, `STEP_CREATE`, so `issue_key` stays `None`, the `finally` cleanup is a no-op and nothing is left behind in Jira. Independently confirmed: a JQL census of `project = REB AND summary ~ \"rebar capability probe\"` returned 0 before and 0 after.\n\n## Established by inspection\n\n- `infra/compose/Dockerfile.mcp` installs `git`, `openssh-client`, `ca-certificates`, `uv`, and the\n  rebar package (`uv sync --locked --no-dev --extra agents --extra mcp --extra bedrock`). There is\n  no `acli` install step.\n- `grep -rn \"acli\\|atlassian\" infra/compose/Dockerfile.*` returns NOTHING \u2014 no image in the compose\n  stack provisions it, not just the mcp one.\n- The dependency is real and load-bearing: `applier._load_acli()` resolves the transport, and\n  `_backend.py:218` documents the CRUD transport against the remote tracker as\n  \"today: `acli.AcliClient`\".\n\n## Scope of the impact\n\nThe credentials themselves are proven good, so this is narrower than \"Jira is broken\":\n\n- Jira-MUTATING paths are DEAD on the box: `bridge_check_access`, and `reconcile` in\n  `bootstrap-strict` / `bootstrap-throttle` / `live`.\n- Direct-REST paths still work. Verified live from inside the same container: authenticated\n  `GET /rest/api/3/myself` -> 200 and `GET /rest/api/3/project/REB` -> 200, and a JQL search via\n  `POST /rest/api/3/search/jql` returned 12 real REB issues.\n\nSo the failure is specifically the `acli` subprocess transport, not connectivity, not the credentials, and not the project scope.\n\n## Acceptance Criteria\n\n- [ ] The mcp container image provisions an `acli` binary on `PATH`, pinned to an explicit version\n      (no floating \"latest\"), with its provenance recorded the way the other pinned tools in the\n      image are.\n- [ ] A test asserts the image declares the `acli` install, so its removal cannot regress silently.\n- [ ] `bridge_check_access` run in the deployed container reaches a verdict WITHOUT a\n      `No such file or directory: 'acli'` exception at `STEP_CREATE`.\n- [ ] If `acli` is deliberately NOT to be installed, that decision is recorded instead, together\n      with what the bridge transport should be on the box, and the tools that depend on it report a\n      typed \"transport unavailable\" verdict rather than surfacing a raw `FileNotFoundError` detail.\n- [ ] No credential value is logged, printed, or committed by the fix or its verification.",
+        "description": "## Summary\n\nThe MCP container image installs no `acli` (Atlassian CLI) binary, so every Jira-MUTATING bridge operation on the deployed box fails at the transport with `[Errno 2] No such file or directory: 'acli'`. The Jira credentials are now correctly wired and authenticate; the binary that would use them is absent.\n\n## How it was found\n\nDiscovered while verifying `colourless-hasteless-lamb`, whose fix wired `JIRA_URL`, `JIRA_USER`, `JIRA_PROJECT` and `JIRA_API_TOKEN` into the container. That fix moved `bridge_check_access` past its credential gate and, in doing so, EXPOSED this defect \u2014 it was previously masked, because the probe fail-closed on `missing_credentials` before ever reaching the transport.\n\n## Observed (live, deployed container `rebar-mcp-25ea12c200ae-8092`, one run)\n\n    rebar.bridge_check_access()\n    {\n      \"steps\": [\n        {\n          \"step\": \"STEP_CREATE\",\n          \"passed\": false,\n          \"reason\": \"exception\",\n          \"detail\": \"[Errno 2] No such file or directory: 'acli'\"\n        }\n      ],\n      \"verdict\": \"FAIL\"\n    }\n\nIt fails at the FIRST step, `STEP_CREATE`, so `issue_key` stays `None`, the `finally` cleanup is a no-op and nothing is left behind in Jira. Independently confirmed: a JQL census of `project = REB AND summary ~ \"rebar capability probe\"` returned 0 before and 0 after.\n\n## Established by inspection\n\n- `infra/compose/Dockerfile.mcp` installs `git`, `openssh-client`, `ca-certificates`, `uv`, and the\n  rebar package (`uv sync --locked --no-dev --extra agents --extra mcp --extra bedrock`). There is\n  no `acli` install step.\n- `grep -rn \"acli\\|atlassian\" infra/compose/Dockerfile.*` returns NOTHING \u2014 no image in the compose\n  stack provisions it, not just the mcp one.\n- The dependency is real and load-bearing: `applier._load_acli()` resolves the transport, and\n  `_backend.py:218` documents the CRUD transport against the remote tracker as\n  \"today: `acli.AcliClient`\".\n\n## Scope of the impact\n\nThe credentials themselves are proven good, so this is narrower than \"Jira is broken\":\n\n- Jira-MUTATING paths are DEAD on the box: `bridge_check_access`, and `reconcile` in\n  `bootstrap-strict` / `bootstrap-throttle` / `live`.\n- Direct-REST paths still work. Verified live from inside the same container: authenticated\n  `GET /rest/api/3/myself` -> 200 and `GET /rest/api/3/project/REB` -> 200, and a JQL search via\n  `POST /rest/api/3/search/jql` returned 12 real REB issues.\n\nSo the failure is specifically the `acli` subprocess transport, not connectivity, not the credentials, and not the project scope.\n\n## Acceptance Criteria\n\n- [x] The mcp container image provisions an `acli` binary on `PATH`, pinned to an explicit version\n      (no floating \"latest\"), with its provenance recorded the way the other pinned tools in the\n      image are. \u2014 DONE: `infra/compose/Dockerfile.mcp` installs `acli` to `/usr/local/bin/acli`,\n      pinned `ACLI_VERSION=1.3.19-stable` (rejects \"latest\") with per-arch `sha256sum -c --strict`.\n- [x] A test asserts the image declares the `acli` install, so its removal cannot regress silently.\n      \u2014 DONE: `tests/unit/test_mcp_on_box_infra.py::test_dockerfile_mcp_provisions_pinned_acli_on_path`\n      (RED\u2192GREEN; mutation-checked: deleting the install block turns it RED).\n- [x] `bridge_check_access` run in the deployed container reaches a verdict WITHOUT a\n      `No such file or directory: 'acli'` exception at `STEP_CREATE`. [non-codebase] \u2014 VERIFIED by\n      replication: a native-arch `docker build` of the acli layer resolves `acli --version` at\n      `/usr/local/bin/acli`; the pre-fix base image reproduces the `FileNotFoundError`. Live-box\n      re-run of the probe is a deploy step outside this snapshot.\n- [x] If `acli` is deliberately NOT to be installed, that decision is recorded instead, together\n      with what the bridge transport should be on the box, and the tools that depend on it report a\n      typed \"transport unavailable\" verdict rather than surfacing a raw `FileNotFoundError` detail.\n      [non-codebase] \u2014 N/A branch: `acli` WAS installed (decision recorded in the Phase 1 RCA\n      comment). The typed \"transport unavailable\" hardening of `access_check.py` is tracked as\n      follow-up `naval-cankered-stud` (ac93-8afd-1666-4866), linked discovered_from this ticket.\n- [x] No credential value is logged, printed, or committed by the fix or its verification. \u2014 DONE:\n      the build downloads a public tarball pinned by sha256 and uses no credentials; the diff and\n      test contain no secrets.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "MCP container image installs no acli binary, so every Jira-mutating bridge operation fails at the transport"
       },
       "created_at": "2026-08-29T01:01:46Z",
@@ -20244,6 +20296,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:21Z"
     },
+    "5d19-52e0-7c26-47fb": {
+      "created_at": "2026-08-29T19:29:47Z",
+      "jira_id": "4590647",
+      "jira_key": "REB-3904",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:29:50Z"
+    },
     "5d55-15ab-8ec1-4622": {
       "baseline": {
         "assignee": {
@@ -21881,9 +21940,17 @@
       "updated_at": "2026-08-15T15:01:08Z"
     },
     "6586-9fdb-18b6-4470": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nImplement only the lifecycle/ownership shape approved by the runner research story. This is a behavior-preserving ownership refactor plus any fault-proven correctness fixes; it is not a line-count exercise.\n\n## Approach\n\n- Add the fault-matrix tests before movement.\n- Move cohesive call-graph clusters into the existing owner selected by the research, or introduce one adequately sized sibling only if no existing owner fits.\n- Preserve one provider-resource owner, fallback model close-before-provider close ordering, failure spend/step accounting, answer-model attribution, success logging before potentially-raising finalization, final usage/run-shape/spend updates, and provider provenance.\n- Replace string monkeypatch/re-export dependencies with narrow injection only where the same change migrates every consumer.\n- Record before/after method/module measurements as evidence, never as a gate.\n\n## Scope\n\n- Only the runner-cluster files named by the prerequisite's approved ownership map [rebar:patriotic-valued-hog].\n- Focused runner/provider/cache/fallback/telemetry tests in `tests/unit/` and `tests/interfaces/`.\n- No project-wide policy, config-schema, provider API, or workflow-engine change.\n\n## Testing\n\nStart with the prerequisite's full fault matrix. Exercise a normal structured call, text call, fallback success, provider/capability failure, external-call failure after usage, finalization failure, and telemetry failure. Compare result/provenance/accounting shapes before and after; run the default suite plus lint/typecheck/complexity/module-size gates.\n\n## Acceptance Criteria\n\n- [ ] Every fault-matrix test fails against the deliberately broken ordering/cleanup variant it guards and passes on the implementation.\n- [ ] Provider clients and fallback-owned clients close exactly once in the established order on success and every injected failure path.\n- [ ] Failed calls retain failure spend and step-failure accounting; successful calls retain answer attribution, pre-finalization log semantics, final result shape, usage, and spend.\n- [ ] The implementation follows the research-approved owner map and deletes superseded orchestration; it does not duplicate `ProviderSession`, `ExitStack`, settings builders, telemetry helpers, or provider/capability selection.\n- [ ] Every moved string/monkeypatch consumer is migrated in the same change; no compatibility re-export is retained solely to hide a broken test seam.\n- [ ] No function-size ratchet, per-file headroom check, hook/plugin bus, mechanically split sub-100-LOC module, or padding is added.\n- [ ] Default suite, focused runner/provider/cache/fallback/telemetry tests, lint, typecheck, complexity, and module-size gates pass with no behavioral delta except separately fault-proven fixes.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Refactor runner orchestration along the proven lifecycle seam"
+      },
       "created_at": "2026-08-29T18:34:47Z",
       "jira_id": "4590637",
       "jira_key": "REB-3894",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:34:49Z"
     },
@@ -25247,6 +25314,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:46Z"
     },
+    "759e-7dc1-675c-4877": {
+      "created_at": "2026-08-29T19:29:54Z",
+      "jira_id": "4590648",
+      "jira_key": "REB-3905",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:29:57Z"
+    },
     "75a9-01c2-304d-4532": {
       "baseline": {
         "assignee": null,
@@ -26225,6 +26299,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:16Z"
     },
+    "7a95-b393-e571-4dfb": {
+      "created_at": "2026-08-29T19:30:03Z",
+      "jira_id": "4590649",
+      "jira_key": "REB-3906",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:30:06Z"
+    },
     "7aa7-0371-01ed-4159": {
       "baseline": {
         "assignee": null,
@@ -26281,10 +26362,24 @@
     },
     "7b43-6e34-26a6-43de": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Why\n\nDebugging-orchestration sessions periodically sweep for AWS + GitHub Actions errors \"since the last sweep.\" Passing the last-sweep timeline across sessions needs a durable, zero-noise carrier. We already use a dedicated long-lived `session_log` ticket (`tomophobic-stilllife-mayfly` / `b2dc-b1ab-0bd9-47f6`, tagged `ops-sweep`) as an append-only ledger, but the convention is undocumented, so future sessions cannot reliably discover or extend it. `session_log` is the right carrier precisely because it is excluded from default `list`, `ready`/`next-batch`, and graph-health, and never syncs to Jira \u2014 an always-open ledger creates zero work-queue noise.\n\n## What\n\nDocument the \"ops error-sweep ledger\" convention in the docs and add a one-line pointer in AGENTS.md so debug sessions discover it. This is a DOCS-ONLY change \u2014 no source or test code is touched.\n\n- `docs/user-guide.md`: add a new subsection (e.g. \"### Ops error-sweep ledger\") in/after\n  the existing \"## Session logs\" section, matching that section's concise, example-driven\n  style. Cover: the ledger is a `session_log` ticket (and why \u2014 queue/graph/Jira\n  exclusion); the current ledger id/alias + `ops-sweep` tag; discovery via\n  `rebar search \"ops-sweep\"`; the newest comment / `SWEEP <ISO-8601> | window <start>..<end>`\n  header convention and next-window rule; appending with `rebar comment <ledger-id>` (NOT\n  `session-log append`, which is session-keyed and auto-rotates); linking filed tickets\n  with `rebar link <filed> <ledger-id> relates_to` (non-blocking relations only); and how\n  to recreate the ledger (`session-log start` + `tag ... ops-sweep`), with the tag+search\n  as the durable anchor.\n- `AGENTS.md`: extend ONLY the existing one-line \"Session logs\" pointer bullet under\n  \"Where to read\" to mention the ops error-sweep ledger convention. Keep it a pointer, not\n  restated content (AGENTS.md policy: already-documented topics are one-line pointers into\n  docs/).\n\n## Scope\n\n- Files: `docs/user-guide.md` (new subsection), `AGENTS.md` (one-line pointer extension).\n- Out of scope: any code/test change; restating the full convention in AGENTS.md.\n\n## Acceptance Criteria\n\n- [ ] `docs/user-guide.md` has a new subsection under \"## Session logs\" documenting the\n      ops error-sweep ledger convention accurately: session_log rationale, ledger id/alias\n      + `ops-sweep` tag, discovery via search, the `SWEEP ... | window ...` header +\n      next-window rule, append via `rebar comment` (not `session-log append`), link via\n      `relates_to`, and recreation via `session-log start` + tag.\n- [ ] `AGENTS.md`'s existing \"Session logs\" pointer bullet is extended by one line/clause\n      to mention the ops error-sweep ledger convention \u2014 a pointer only, no restated body.\n- [ ] The convention text matches the mechanics in docs/event-schema.md (\"The session_log\n      ticket type\") and docs/user-guide.md (\"Session logs\") \u2014 no contradictions.\n- [ ] `make lint` passes; no new tooling added; no source/test files changed.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Document the ops error-sweep ledger convention (session_log-based)"
       },
       "created_at": "2026-08-29T17:29:31Z",
@@ -28731,6 +28826,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:28Z"
     },
+    "860f-8886-a17b-48f1": {
+      "created_at": "2026-08-29T19:30:11Z",
+      "jira_id": "4590650",
+      "jira_key": "REB-3907",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:30:14Z"
+    },
     "8625-7bea-67db-4cdc": {
       "baseline": {
         "assignee": {
@@ -29058,9 +29160,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nSplit out of `d26a-8ffa-97cd-4b2a` (`dire-expectable-terrapin`), where these were carried as its DEFERRED AC5 and AC6. That bug fixed the key-path DIVERGENCE that made the deployed MCP server sign op-certs it could never verify (Gerrit 2337, merged as `83edf9972728ae1e0729a39098ec70e4fab4617a`): verification now resolves the public half from the same ordered chain the signing side resolves the private half.\n\nWhat that fix did NOT add is any GUARD. `sign_manifest` still mints a certificate without checking that the environment can resolve a public counterpart for the key it just signed under, and nothing at deploy/startup surfaces it when it cannot. So the CLASS of defect \u2014 a silently uncertifiable attestation \u2014 can regress the moment a new deployment shape puts the signing key somewhere the resolution chain does not reach. Signing succeeds; only a later `verify_signature` (or a refused claim) reveals the problem, potentially long after the certificates were minted.\n\n## Approach\nTwo independent, additive guards, neither of which changes an existing success path:\n\n1. At MINT: after `ensure_opcert_key` resolves the SPECIFIC signing key path used for this\n   mint, read THAT key's own public line with `_read_opcert_pub(key_path)` and check whether it\n   is a MEMBER of the verify-side resolvable set `_opcert_own_public_keys`\n   (`src/rebar/_opcert_signing.py`). Matching is on the key TYPE+BASE64 BODY (comment-\n   insensitive), mirroring ssh `allowed_signers`. The check is membership of the specific\n   signing key's public counterpart, NOT merely the non-emptiness of the aggregate chain \u2014 a\n   chain where a DIFFERENT key resolves a pub must NOT satisfy the guard for the key actually\n   signed under. When the specific key's counterpart is absent, emit an explicit WARNING naming\n   the resolved key path and the principal. It must NOT refuse \u2014 refusing would break every\n   existing sign flow and is a behaviour change beyond this bug's scope.\n\n   Worked example (specification by example). Own-key chain = [binding-key `K_b`, genesis\n   `K_g`]. `ensure_opcert_key` selects `K_g` for this mint (binding absent), but only `K_b`'s\n   `.pub` is derivable (K_g lives on a path the resolver cannot reach). Aggregate\n   `_opcert_own_public_keys` = {body(K_b)} \u2014 NON-EMPTY. A non-emptiness check would stay\n   SILENT (wrong). The specified membership check computes `body(_read_opcert_pub(path_of\n   K_g))` \u2209 {body(K_b)} \u2192 WARNS (correct), naming `path_of K_g` and the principal.\n\n2. At STARTUP/DEPLOY: the MCP server's existing health surface (`src/rebar/_mcp_health.py`)\n   reports a DEGRADED field and logs a boot WARNING when the bound startup signer's public key\n   is not the pinned trusted-environment key for its principal \u2014 the ONE same-environment\n   failure the (derivative) public key cannot otherwise catch. SERVE-DEGRADED, never abort\n   boot (operator ruling; ADR 0104 decision 3 makes required-environment binding advisory\n   today), mirroring `store_status` / `run_startup_store_sweep`.\n\nBoth are in-process checks driven by an operation and by server startup, with no dependency on any particular CI provider.\n\n### AC3 reframing (operator ruling, recorded here)\nThe op-cert public key is DERIVATIVE (`_derive_opcert_pub` = `ssh-keygen -y`, re-derivable on demand from the private key), and `compose_startup_opcert_binding` already fails closed on a bad/missing/encrypted/non-Ed25519 private key. So a \"can we resolve/derive a public cert?\" startup probe would be REDUNDANT. The one genuinely non-redundant condition is whether the bound signer's public key MATCHES the environment's pinned/published trusted-environment key (`rebar.attest.trusted_env`) \u2014 the key required-environment verify checks against. Even that is non-blocking: those are still valid signed attestations that only fail an advisory environment-binding check, so AC3 emits a degraded health field + a warning and does NOT refuse to serve or abort boot.\n\n## Scope\n- In scope: the mint-time warning and the startup/health serve-degraded surface.\n- Out of scope: the key-resolution chain itself (already fixed by 2337); any change to the\n  cross-environment `foreign_key` verdict, which is documented intended behaviour (ADR 0104),\n  not a defect; extending `compose_startup_opcert_binding` to abort; a redundant derive probe.\n\n## Testing\nUnit tests: a mint under a key whose SPECIFIC public half cannot be resolved (even when another chain key's pub resolves) emits the warning and still returns a signature; a mint under a resolvable key emits no warning; the startup/health check reports degraded (and warns) for a bound signer whose public key is not the pinned key, and is quiet/non-degraded for a matched key, for an unbound signer, and for a deployment that has not opted into pinning; key matching is on the key type+base64 body (comment-insensitive); a resolution fault is surfaced as degraded (not swallowed); a `RemovedInputError` fails hard.\n\n## Acceptance Criteria\n- [ ] AC1: `sign_manifest` emits an explicit WARNING \u2014 naming the resolved signing key path and the principal \u2014 when the SPECIFIC key it just signed under has no public counterpart in the verify-side resolvable set (`_read_opcert_pub(key_path)` body \u2209 `_opcert_own_public_keys`), even if a different chain key's pub resolves; it still returns the signature (no refusal, no existing sign flow broken).\n- [ ] AC2: `sign_manifest` emits no such warning when the specific signing key's public counterpart IS resolvable.\n- [ ] AC3: the MCP server's startup/health surface reports a DEGRADED `opcert` field and logs a boot WARNING when the bound signer's public key is not the pinned trusted-environment key for its principal, and is non-degraded/quiet when it matches (or when unbound / pinning not configured). Non-blocking: it NEVER aborts boot (serve-degraded; ADR 0104 decision 3).\n- [ ] AC4: both guards are in-process and operation-linked, with no dependency on a specific CI provider.\n\n## Definition of Done\n- [ ] DD1: AC1 and AC2 covered by a test that is RED before the change and GREEN after it, including the specific-key case where a different chain key's pub resolves (aggregate non-empty) yet the signed key's own counterpart is absent.\n- [ ] DD2: AC3 covered by a test over the startup/health check (degraded, matched, unbound, and not-pinned cases).\n- [ ] DD3: AC4 verified by the observable proxy that both guards execute with no CI-provider environment present \u2014 the unit tests exercise mint and startup/health with no CI env vars set and assert the warning/degraded behaviour purely from in-process log/dict output (no network, no CI API), confirming operation/startup-linked triggers.",
+        "description": "## Context / Problem\nSplit out of `d26a-8ffa-97cd-4b2a` (`dire-expectable-terrapin`), where these were carried as its DEFERRED AC5 and AC6. That bug fixed the key-path DIVERGENCE that made the deployed MCP server sign op-certs it could never verify (Gerrit 2337, merged as `83edf9972728ae1e0729a39098ec70e4fab4617a`): verification now resolves the public half from the same ordered chain the signing side resolves the private half.\n\nWhat that fix did NOT add is any GUARD. `sign_manifest` still mints a certificate without checking that the environment can resolve a public counterpart for the key it just signed under, and nothing at deploy/startup surfaces it when it cannot. So the CLASS of defect \u2014 a silently uncertifiable attestation \u2014 can regress the moment a new deployment shape puts the signing key somewhere the resolution chain does not reach. Signing succeeds; only a later `verify_signature` (or a refused claim) reveals the problem, potentially long after the certificates were minted.\n\n## Approach\nTwo independent, additive guards, neither of which changes an existing success path:\n\n1. At MINT: after `ensure_opcert_key` resolves the SPECIFIC signing key path used for this\n   mint, read THAT key's own public line with `_read_opcert_pub(key_path)` and check whether it\n   is a MEMBER of the verify-side resolvable set `_opcert_own_public_keys`\n   (`src/rebar/_opcert_signing.py`). Matching is on the key TYPE+BASE64 BODY (comment-\n   insensitive), mirroring ssh `allowed_signers`. The check is membership of the specific\n   signing key's public counterpart, NOT merely the non-emptiness of the aggregate chain \u2014 a\n   chain where a DIFFERENT key resolves a pub must NOT satisfy the guard for the key actually\n   signed under. When the specific key's counterpart is absent, emit an explicit WARNING naming\n   the resolved key path and the principal. It must NOT refuse \u2014 refusing would break every\n   existing sign flow and is a behaviour change beyond this bug's scope.\n\n   Worked example (specification by example). Own-key chain = [binding-key `K_b`, genesis\n   `K_g`]. `ensure_opcert_key` selects `K_g` for this mint (binding absent), but only `K_b`'s\n   `.pub` is derivable (K_g lives on a path the resolver cannot reach). Aggregate\n   `_opcert_own_public_keys` = {body(K_b)} \u2014 NON-EMPTY. A non-emptiness check would stay\n   SILENT (wrong). The specified membership check computes `body(_read_opcert_pub(path_of\n   K_g))` \u2209 {body(K_b)} \u2192 WARNS (correct), naming `path_of K_g` and the principal.\n\n2. At STARTUP/DEPLOY: the MCP server's existing health surface (`src/rebar/_mcp_health.py`)\n   reports a DEGRADED field and logs a boot WARNING when the bound startup signer's public key\n   is not the pinned trusted-environment key for its principal \u2014 the ONE same-environment\n   failure the (derivative) public key cannot otherwise catch. SERVE-DEGRADED, never abort\n   boot (operator ruling; ADR 0104 decision 3 makes required-environment binding advisory\n   today), mirroring `store_status` / `run_startup_store_sweep`.\n\nBoth are in-process checks driven by an operation and by server startup, with no dependency on any particular CI provider.\n\n### AC3 reframing (operator ruling, recorded here)\nThe op-cert public key is DERIVATIVE (`_derive_opcert_pub` = `ssh-keygen -y`, re-derivable on demand from the private key), and `compose_startup_opcert_binding` already fails closed on a bad/missing/encrypted/non-Ed25519 private key. So a \"can we resolve/derive a public cert?\" startup probe would be REDUNDANT. The one genuinely non-redundant condition is whether the bound signer's public key MATCHES the environment's pinned/published trusted-environment key (`rebar.attest.trusted_env`) \u2014 the key required-environment verify checks against. Even that is non-blocking: those are still valid signed attestations that only fail an advisory environment-binding check, so AC3 emits a degraded health field + a warning and does NOT refuse to serve or abort boot.\n\n## Scope\n- In scope: the mint-time warning and the startup/health serve-degraded surface.\n- Out of scope: the key-resolution chain itself (already fixed by 2337); any change to the\n  cross-environment `foreign_key` verdict, which is documented intended behaviour (ADR 0104),\n  not a defect; extending `compose_startup_opcert_binding` to abort; a redundant derive probe.\n\n## Testing\nUnit tests: a mint under a key whose SPECIFIC public half cannot be resolved (even when another chain key's pub resolves) emits the warning and still returns a signature; a mint under a resolvable key emits no warning; the startup/health check reports degraded (and warns) for a bound signer whose public key is not the pinned key, and is quiet/non-degraded for a matched key, for an unbound signer, and for a deployment that has not opted into pinning; key matching is on the key type+base64 body (comment-insensitive); a resolution fault is surfaced as degraded (not swallowed); a `RemovedInputError` fails hard.\n\n## Acceptance Criteria\n- [x] AC1: `sign_manifest` emits an explicit WARNING \u2014 naming the resolved signing key path and the principal \u2014 when the SPECIFIC key it just signed under has no public counterpart in the verify-side resolvable set (`_read_opcert_pub(key_path)` body \u2209 `_opcert_own_public_keys`), even if a different chain key's pub resolves; it still returns the signature (no refusal, no existing sign flow broken).\n- [x] AC2: `sign_manifest` emits no such warning when the specific signing key's public counterpart IS resolvable.\n- [x] AC3: the MCP server's startup/health surface reports a DEGRADED `opcert` field and logs a boot WARNING when the bound signer's public key is not the pinned trusted-environment key for its principal, and is non-degraded/quiet when it matches (or when unbound / pinning not configured). Non-blocking: it NEVER aborts boot (serve-degraded; ADR 0104 decision 3).\n- [x] AC4: both guards are in-process and operation-linked, with no dependency on a specific CI provider.\n\n## Definition of Done\n- [x] DD1: AC1 and AC2 covered by a test that is RED before the change and GREEN after it, including the specific-key case where a different chain key's pub resolves (aggregate non-empty) yet the signed key's own counterpart is absent.\n- [x] DD2: AC3 covered by a test over the startup/health check (degraded, matched, unbound, and not-pinned cases).\n- [x] DD3: AC4 verified by the observable proxy that both guards execute with no CI-provider environment present \u2014 the unit tests exercise mint and startup/health with no CI env vars set and assert the warning/degraded behaviour purely from in-process log/dict output (no network, no CI API), confirming operation/startup-linked triggers.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "No guard surfaces a signing key with no usable public counterpart: sign_manifest stays silent and startup does not fail"
       },
       "created_at": "2026-08-28T23:28:14Z",
@@ -32419,6 +32521,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-19T21:43:59Z"
+    },
+    "96f3-af59-ba26-4159": {
+      "created_at": "2026-08-29T19:30:18Z",
+      "jira_id": "4590651",
+      "jira_key": "REB-3908",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:30:21Z"
     },
     "96fe-14c6-4c35-4936": {
       "baseline": {
@@ -42377,9 +42486,17 @@
       "updated_at": "2026-08-15T20:35:12Z"
     },
     "c465-b475-acc8-48a6": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nADR 0056 already extracted `interpret_failure`, settings/usage builders, Agent kwargs, success logging, spend recording, and the provider session guard. ADR 0058 later removed per-file headroom assertions and made the locked 800-LOC module limit the only LOC ceiling. Current `origin/main` nevertheless has a 785-line `runner.py` and a 388-line `PydanticAIRunner.run()`.\n\nThis second pass must identify an ownership improvement in today's call graph. It must not repeat prior extraction, duplicate `ProviderSession` or `ExitStack`, introduce a generic hook/plugin bus, revive rejected frozen carriers without new evidence, or add a function-size ratchet.\n\n## Approach\n\n- Map the exact effect/resource timeline: event-loop displacement; config/preflight; tracing; provider/session construction; model/fallback scope; capability/cache/web settings; Agent execution; failure accounting; answer attribution; pre-finalization logging; finalization; run-shape/spend recording.\n- Inventory semantic references plus string imports, monkeypatch targets, compatibility re-exports, globals mutated by alias, and tests that inspect source.\n- Build a fault matrix for every raising boundary and identify the current owner of cleanup, accounting, provenance, and error translation.\n- Compare candidate seams against `providers`, `model_classes`, `structured_run`, `agent_call`, `runner_support`, and ADRs 0056/0058. Prefer strengthening an existing owner.\n- Record the ADR disposition before implementation. If the structure changes an accepted decision, complete the full ADR lifecycle.\n\n## Scope\n\n- `src/rebar/llm/runner.py`, `agent_call.py`, `structured_run.py`, `providers.py`, `model_classes.py`, and `runner_support.py`.\n- Runner/provider/cache/fallback/telemetry tests under `tests/unit/` and `tests/interfaces/`.\n- `docs/adr/0056-*.md`, `docs/adr/0058-*.md`, and one new/amending ADR only if the research changes an accepted boundary.\n\n## Testing\n\nBuild the fault matrix as executable characterization where possible. Happy path records the current effect/telemetry order. Each edge injects a raise at one boundary and observes resource closure, failure accounting, provenance, and downstream effects. Red-prove any proposed new guard against a deliberately broken local variant before treating it as useful.\n\n## Acceptance Criteria\n\n- [ ] The research record names every effect/resource boundary, its owner, its required ordering, and the observed behavior when it raises.\n- [ ] Semantic and text/string consumer censuses agree or every discrepancy is explained; monkeypatch and compatibility hazards are assigned to the change that moves/removes them.\n- [ ] A red-capable fault matrix covers raises before/after provider creation, fallback entry, external execution, finalization, and telemetry/accounting.\n- [ ] The selected design states exactly which existing module/class/function gains responsibility and which code is deleted; it does not create a second session owner or generic lifecycle framework.\n- [ ] Mutable provenance/settings and post-call answer attribution are modeled honestly; no decorative frozen carrier is proposed.\n- [ ] No function-NLOC ratchet, per-file headroom assertion, or new hard size threshold is proposed. Size measurements may be reported as advisory debt signals only.\n- [ ] The research critique identifies unanswered assumptions and conflicts; any necessary ADR amendment is explicitly approved/merged before implementation, or the record explains why ADR 0056 already authorizes the seam.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Revalidate PydanticAIRunner lifecycle ownership against current architecture"
+      },
       "created_at": "2026-08-29T18:34:52Z",
       "jira_id": "4590638",
       "jira_key": "REB-3895",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:34:55Z"
     },
@@ -51091,9 +51208,17 @@
       "updated_at": "2026-08-15T15:14:36Z"
     },
     "e9d5-c850-d505-4a5a": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nImplement the contract decided by the preceding architecture story without changing the production write route yet. The key deliverable is sufficient deterministic parity evidence to make the later cutover/deletion safe within this epic.\n\nExisting useful assets include the real store-copy scrub/isolation fixtures, canonical serialization, route census, verified Cloud/DC fakes, and comprehensive mutation tests. Reuse them rather than creating a parallel reconciler harness.\n\n## Approach\n\n- Introduce the approved direction/action payload union and thread it through planner and coordinator boundaries up to a side-effect-free adapter projection seam.\n- Build a versioned corpus from deterministic synthetic tickets plus a scrubbed representative store snapshot. Include edge and failure shapes, not credentials or live bindings.\n- Drive legacy and typed planning/serialization over identical observations. Capture canonical normalized intent/outcome traces without invoking either writer.\n- Compare ordering, fields, identity scopes, diagnostics, follow-ons, suppression, retry dispositions, and modeled final state.\n- Run this oracle in default portable CI with no Jira, Docker, external service, or CI-provider dependency.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/` \u2014 typed payloads and the effect-free trace projection.\n- `tests/unit/rebar_reconciler/` \u2014 portable replay and verified adapter contracts.\n- `tests/fixtures/` \u2014 versioned synthetic/scrubbed corpus with no credentials or live bindings.\n\n## Testing\n\nHappy path: representative inbound and outbound mutations produce matching normalized legacy/typed traces and modeled state. Edge/failure paths: malformed payloads, ambiguous commits, exhaustion, suppression, follow-ons, and cross-project routes either match or produce an approved named delta. Effect spies fail if the shadow path reaches Jira, the ticket store, a subprocess, clock sleep, or network.\n\n## Acceptance Criteria\n\n- [ ] Planners and coordinator use named payload types for every supported direction/action pair; construction rejects missing, extra critical, or wrong-action fields before effects.\n- [ ] The shadow comparator executes no Jira transport or ticket-store write, proven with failing spies on every effect seam.\n- [ ] The corpus covers create/update/delete/probe/conflict, inbound-only actions, links/comments/labels/status/parent/assignee/binding fields, duplicate and malformed inputs, suppression/follow-ons, ambiguous outcomes, retry exhaustion, and multi-project routing.\n- [ ] Replaying the same corpus is deterministic and idempotent; corpus version/provenance and normalization rules are explicit.\n- [ ] Legacy and typed traces have zero unexplained differences. Each intentional delta has a named test, rationale, and approval recorded on the ticket.\n- [ ] Verified-fake Jira Cloud and Data Center adapter contract tests pass without selecting a live backend.\n- [ ] Production continues to use the pre-cutover route in this story, and no temporary bridge is presented as the final architecture.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Build typed reconciler payloads and a portable shadow-replay corpus"
+      },
       "created_at": "2026-08-29T18:34:57Z",
       "jira_id": "4590639",
       "jira_key": "REB-3896",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:35:00Z"
     },
@@ -51336,18 +51461,40 @@
       "updated_at": "2026-08-15T15:14:41Z"
     },
     "eb64-844b-ab7a-4915": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nImplement the accepted scope from architecture recommendations 2, 4, and 6, following the evidence on `expecting-renowned-buzzard`.\n\nCurrent `origin/main` still has three related sources of protocol complexity:\n\n- Reconciler `Mutation` has typed direction/action but a generic `Mapping[str, Any]` payload. Outbound typed mutations are converted through `_mutation_to_batch_dict()` into the legacy batch shape; two CREATE shapes and a polymorphic `applier.apply()` remain.\n- `PydanticAIRunner.run()` has regrown after ADR 0056. Existing ownership seams already include `ProviderSession`, `model_classes`, `structured_run`, `agent_call`, `runner_support`, capability modules, and ordered success/failure telemetry. The next change must improve those boundaries, not duplicate them.\n- ADR 0098's `OperationSnapshot` is authoritative for reconciler runtime bindings, but CLI/shared command paths still call `emit_shadow_snapshot()`, and many LLM operations independently resolve `LLMConfig.from_env()`.\n\nThis epic completes these migrations. It extends ADR 0103 rather than reopening its retry/coordinator decision, works within ADRs 0056 and 0058 unless the runner research child proves an amendment is needed, and completes ADR 0098's expand/contract migration.\n\n## Outcomes\n\n### A. One typed reconciler representation and one production route\n\nDefine payload types as a discriminated union by `(direction, action)`, carry them through planner/coordinator/adapter boundaries, prove behavior against a broad corpus in side-effect-free shadow mode, then cut production over and delete dictionary translation and legacy dispatch in this epic. Deletion is part of the cutover, not a follow-up.\n\n### B. Runner lifecycle ownership grounded in current architecture\n\nFirst produce a current effect/resource timeline and fault matrix. Then reshape only call-graph seams that the evidence supports, preserving `ProviderSession` as provider-resource owner, fallback `ExitStack` ordering, failure accounting, pre-finalization success logging, final spend/result-shape updates, provider provenance, and existing injection contracts.\n\nNo function-NLOC ratchet or per-file headroom assertion is in scope. ADR 0058's single 800-LOC ceiling remains the hard gate and a debt signal. Any future function-size metric requires separate evidence and approval; this epic must not turn it into a build failure.\n\n### C. Authoritative operation configuration\n\nMake the existing `OperationSnapshot` and focused runtime bindings behavior-bearing at the CLI, MCP, Python, shared command/store, and LLM operation boundaries. An operation composes once; downstream code consumes projections/context and cannot reread environment, files, or CWD. Remove diagnostic shadow composition and migrated ambient-resolution paths after parity.\n\n## Verification strategy\n\n- Portable/default-CI: replay a versioned synthetic and scrubbed-store corpus through legacy and typed planning/serialization without executing either against Jira. Compare canonical normalized intents, outcomes, diagnostics, ordering, idempotence, and final modeled state.\n- Ephemeral Jira DC: extend the existing `tests/external/live_jira_dc` harness, its no-remote scrubbed store copy, multi-project scratch fixtures, and comprehensive mutation table. Run the exact implementation patchset in CI against disposable projects/instances. Legacy and typed paths must never dual-send to the same target: compare isolated projects or fresh instances, normalize generated keys/timestamps, re-observe final state, and run a typed-only convergence pass after deletion.\n- Runner: inject failures before/after provider construction, fallback entry, external call, result finalization, and each telemetry/accounting boundary; assert close order, no duplicate effect, and preserved accounting/provenance.\n- Configuration: consumer-level metamorphic tests mutate environment/config/CWD after composition; the active operation's outputs/effects remain unchanged while a new operation observes the change.\n\nThe Jira DC lane is additive evidence, not the only gate: the portable synthetic oracle must run without a CI provider or external service. No project's live Jira environment or credentials may be reachable from these tests.\n\n## Constraints\n\n- No production dual-write/double-send comparison.\n- Reuse the existing ephemeral Jira DC harness and isolation assertions; do not build a second DC test environment.\n- Preserve Jira Cloud behavior with verified fakes/transport contracts even though large-scale live mutation testing uses disposable DC.\n- Reuse `OperationSnapshot`, central schema/provenance, `LLMRuntime`, `ProviderSession`, and current runner leaf modules; no second config schema, generic hook bus, plugin framework, or decorative frozen lifecycle carriers.\n- String imports, monkeypatch targets, and compatibility re-exports require a census before movement/deletion.\n- New structural decisions complete the ADR lifecycle before dependent implementation; accepted ADRs are constraints, not prose to reimplement.\n- Keep every intermediate Gerrit change independently testable and green.\n\n## Acceptance Criteria\n\n- [ ] Every supported reconciler `(direction, action)` has one typed payload contract, and planners, coordinator, adapters, manifest/diagnostic code, and tests consume it without generic action payload dictionaries.\n- [ ] The portable shadow corpus covers create/update/delete/probe/conflict, inbound-only actions, links/comments/labels/status/parent/binding fields, retries/ambiguous outcomes, malformed inputs, suppression/follow-ons, and multi-project routing; legacy and typed normalized traces match or every intentional delta is documented and approved.\n- [ ] An exact-patchset ephemeral Jira DC CI run proves large-scale isolated differential parity and typed-only post-deletion convergence without any route to the project's live Jira or ticket remote.\n- [ ] `_mutation_to_batch_dict`, polymorphic legacy `apply` selection, duplicate CREATE shapes, and obsolete compatibility dispatch/re-exports are deleted in this epic; one production route remains.\n- [ ] Runner research records the current ownership/effect timeline and an ADR disposition before refactoring; implementation reuses established seams, preserves lifecycle/telemetry order under the fault matrix, and adds no function-size or per-file headroom gate.\n- [ ] CLI, MCP, Python, shared command/store, and LLM operations compose one authoritative snapshot/context; behavior-bearing consumers do not reread ambient configuration during the operation.\n- [ ] Diagnostic shadow composition and migrated legacy resolution paths are deleted, with structural ownership checks and consumer-level metamorphic tests preventing reintroduction.\n- [ ] Existing focused suites, the full default suite, lint, typecheck, complexity/module-size gates, portable reconciler oracles, and the Jira DC lane pass; documentation and ADR status match the landed architecture.\n- [ ] Final epic evidence reports deleted representations/routes/ambient authorities and demonstrates that no cleanup item was deferred solely to keep both old and new paths live.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Converge reconciler, runner, and operation boundaries"
+      },
       "created_at": "2026-08-29T18:35:03Z",
       "jira_id": "4590640",
       "jira_key": "REB-3897",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:35:06Z"
     },
     "eb67-b96c-dcf0-4f86": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nEvery operator-seeded SSM `SecureString` secret in `infra/terraform` persists its CLEARTEXT value in the remote terraform state (S3 `rebar-tfstate-896586841071`, key `rebar/prod/terraform.tfstate`, SSE-S3 not a CMK). The `value = \"CHANGEME\"` + `lifecycle { ignore_changes = [value] }` pattern stops terraform WRITING the secret from git, but terraform still READS the live value into `attributes.value` on every refresh/import, so the plaintext lands in state \u2014 `terraform state pull` renders 23 secrets in cleartext to any state-bucket reader, collapsing the secret tier to the bucket ACL. Root cause is proven (see evidence comments).\n\n## Decision (operator-approved \u2014 Option 1)\n\nMigrate every operator-seeded `SecureString` SECRET from `value = \"CHANGEME\"` + `ignore_changes = [value]` to terraform WRITE-ONLY arguments `value_wo` + `value_wo_version`, which the AWS provider NEVER stores to state (\"write-only values are never stored to state\"). Non-secret `String` params (`jira-url`, `jira-user`, `jira-project`) and the terraform-GENERATED `SecureString` `opcert_origin_guard` (value = `random_password.opcert_guard.result`, already in state via the random resource + API-Gateway header, so `value_wo` gives no net benefit) stay as-is.\n\n## Approach\n\nThree resources carry the antipattern and move to `value_wo` + `value_wo_version = 1` (dropping `value` and the `ignore_changes` lifecycle block):\n- `aws_ssm_parameter.rebar_secrets` (for_each, 18 params) \u2014 `infra/terraform/ssm.tf:90`\n- `aws_ssm_parameter.opcert_ed25519_key` \u2014 `infra/terraform/opcert.tf:52`\n- `aws_ssm_parameter.cookie_signing_secret` \u2014 `infra/terraform/auth_sso.tf:39`\n\n`value_wo` needs AWS provider \u2265 5.79 and write-only args need terraform \u2265 1.11 (host: terraform 1.15.8, provider/lock 5.100.0). `versions.tf` floors sit below both today, so raise them: `required_version >= 1.10` \u2192 `>= 1.11`; AWS `~> 5.0` \u2192 `~> 5.79`. Rationale: write-only args are the provider-native mechanism purpose-built for keeping a secret out of state \u2014 no new dependency, secrets-manager, or KMS CMK; minimal blast radius.\n\n**Steady-state vs. cutover (G6, addressed):** in steady state the write-only value is re-sent only when `value_wo_version` changes, so an out-of-band-seeded value is never reverted and `user_data.sh`'s `CHANGEME` fail-fast still fires on an unseeded slot. The ONE migration apply is different: because `value_wo_version` goes ABSENT\u21921, the provider re-sends `value_wo = \"CHANGEME\"` once and RESETS each already-seeded live value to the placeholder. That is intended and safe here because the exposure mandates ROTATING these secrets anyway \u2014 the deferred operator ticket does the apply + re-seed/rotate in one window; the code change runs no apply. Detail in the round-1 comment + the new runbook.\n\n**Unenumerated consumers (G1G2, addressed):** `infra/terraform/opcert-plan-assertions.sh` (f) and `tests/unit/test_opcert_deploy_infra.py` assert the opcert key's `ignore_changes = [value]`; both move to the `value_wo` invariant in lockstep. Directly-related docs `infra/runbooks/sso-auth-host.md` and `infra/runbooks/gerrit-auth-hardening.md` are refreshed off the stale `ignore_changes` wording.\n\n## Scope (files)\n\n- `infra/terraform/ssm.tf`, `opcert.tf`, `auth_sso.tf` \u2014 migrate the three secret resources.\n- `infra/terraform/versions.tf` \u2014 raise terraform + AWS-provider floors.\n- `infra/terraform/opcert-plan-assertions.sh` \u2014 assertion (f) \u2192 `value_wo` invariant.\n- `scripts/check_ssm_secret_state.py` (NEW) \u2014 hermetic structural guard (no live AWS) over\n  `infra/terraform/*.tf`: every `SecureString` `aws_ssm_parameter` is flagged for a quoted\n  string-literal `value` and/or `ignore_changes = [value]`, must pair `value_wo` with\n  `value_wo_version`, and the generated-value case (unquoted-expression `value`, no `ignore_changes`)\n  is allowed. Modeled on `scripts/check_templatefile_escapes.py`.\n- `Makefile` \u2014 wire the guard into `make lint` (next to `check_templatefile_escapes.py`, line 302).\n- `tests/unit/test_check_ssm_secret_state.py` (NEW) \u2014 RED\u2192GREEN + mutation teeth + committed-tree\n  clean + make-lint wiring, mirroring `tests/unit/test_check_templatefile_escapes.py`.\n- `tests/unit/test_opcert_deploy_infra.py` \u2014 the two consumers \u2192 `value_wo` invariant.\n- `docs/adr/0105-ssm-secrets-never-in-terraform-state.md` + `docs/adr/.numbers/0105` + regenerated\n  `docs/adr/README.md` \u2014 record the decision, extending ADR 0008, relating to ADR 0046.\n- `infra/runbooks/ssm-secret-write-only.md` (NEW) \u2014 declare/seed/rotate + remediation cutover.\n- `infra/runbooks/sso-auth-host.md`, `infra/runbooks/gerrit-auth-hardening.md` \u2014 refresh stale wording.\n\n## Testing\n\n- RED first: guard/test fail on the CURRENT tree for the right reason (three secrets persist a\n  `value` literal + `ignore_changes`), proven before the fix.\n- GREEN after: guard + test pass once the three resources use `value_wo`/`value_wo_version`.\n- Mutation teeth: reverting any one param to `value = \"\u2026\" + ignore_changes = [value]` returns the\n  guard to RED (asserted by the new test).\n- `terraform validate` in `infra/terraform` passes (static; no plan/apply against the real backend).\n- Updated `tests/unit/test_opcert_deploy_infra.py` passes; `make lint` passes.\n- No secret VALUE is printed, logged, or committed \u2014 the guard inspects HCL structure only.\n\n## Acceptance Criteria\n\n- [ ] The three seeded-secret resources use `value_wo` + `value_wo_version` and carry no\n      `value`/`ignore_changes = [value]`; verified by `scripts/check_ssm_secret_state.py` exit 0 + diff.\n- [ ] The guard is RED pre-fix, GREEN post-fix, and RED again on a one-param revert; verified by\n      `tests/unit/test_check_ssm_secret_state.py`.\n- [ ] The guard is wired into `make lint`; verified by a wiring test and `make lint` exit 0.\n- [ ] `versions.tf` floors are terraform `>= 1.11` and AWS `~> 5.79`; verified by reading the file.\n- [ ] `terraform validate` in `infra/terraform` exits 0.\n- [ ] `opcert-plan-assertions.sh` (f) + `tests/unit/test_opcert_deploy_infra.py` assert the `value_wo`\n      invariant and pass; verified by running the opcert test file.\n- [ ] ADR 0105 + marker `docs/adr/.numbers/0105` exist, the index is regenerated, and\n      `scripts/check_adr_numbers.py` + `python scripts/gen_adr_index.py --check` pass.\n- [ ] `infra/runbooks/ssm-secret-write-only.md` covers declare/seed/rotate + the remediation cutover\n      and cross-links ADR 0105; verified by reading it.\n- [ ] A deferred OPERATOR `task` ticket (apply \u2192 re-seed/rotate in one window \u2192 verify no SecureString\n      value in `terraform state pull` \u2192 rotate crown-jewels) exists, linked `discovered_from` this\n      ticket; verified by `show_ticket`. [non-codebase] evidence: the new ticket id in a comment.\n- [ ] No credential value is printed, logged, or committed by the fix or its verification.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Terraform state stores every SSM SecureString value in cleartext, collapsing the secret tier to the state-bucket ACL"
       },
       "created_at": "2026-08-29T01:02:23Z",
@@ -51589,9 +51736,17 @@
       "updated_at": "2026-08-15T15:14:46Z"
     },
     "ec44-b572-1067-4c52": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nComplete ADR 0098 for LLM execution after the command/store cutover. Many LLM operations currently call `LLMConfig.from_env()` independently, even though `LLMRuntime`, `ProviderSession`, gate config scoping, and snapshot composition already exist.\n\nThe goal is one behavior-bearing snapshot/context per public operation, not deletion of a legitimate top-level composition convenience. Ambient compatibility may remain only at an explicitly approved boundary and must delegate to the central composer.\n\n## Approach\n\n- Derive a focused LLM config projection from the existing snapshot/schema/provenance; pair it with existing non-serializable `LLMRuntime`.\n- Thread that context through gate/workflow/runner entry points so subcalls inherit operation policy rather than re-resolving it.\n- Preserve ProviderSession/provider-native auth, budgets, cache/output/retry behavior, tracing, and secret exclusions.\n- Add consumer-level metamorphic tests covering multi-step runs and failure/retry paths.\n- Delete the shadow switch/function and migrated ambient-resolution branches after parity; tighten the existing ownership gate and documentation.\n\n## Scope\n\n- `src/rebar/_operation_config.py` \u2014 remove diagnostic shadow machinery after cutover.\n- `src/rebar/llm/` plus CLI/MCP LLM entry modules \u2014 derive and thread one snapshot/config/runtime context.\n- Focused LLM/provider/cache/fallback/workflow tests and cross-surface contract tests.\n- `scripts/check_config_ownership.py`, `docs/config.md`, and `docs/architecture.md`.\n\n## Testing\n\nHappy path: CLI, MCP, and Python multi-step gates use one snapshot and preserve current provider/cache/retry/output behavior. Metamorphic edge: mutate every behavior-bearing LLM setting after composition and prove the active run is stable while the next observes it. Failure edges cover missing/conflicting auth, retries, fallback, workflow subcalls, and secret/non-secret boundary leakage.\n\n## Acceptance Criteria\n\n- [ ] Each public CLI, MCP, and Python LLM/gate operation composes one snapshot/context; every subcall and workflow step receives its projection/runtime without rereading environment/files/CWD.\n- [ ] Mutating model/provider class, timeout, retry, cache, headers, tracing, or repository settings after composition cannot change an in-progress multi-step run; the next operation observes the mutation.\n- [ ] Explicit supplied config/snapshot stays authoritative, and missing/conflicting decision-bearing provider/auth composition fails before an external call without anonymous/cross-provider fallback.\n- [ ] `LLMRuntime` and `ProviderSession` remain the live-auth and provider-resource owners; no secret/live capability enters snapshot bytes, fingerprints, repr, logs, exceptions, or schemas.\n- [ ] `emit_shadow_snapshot`, its migration switch, diagnostic-only production call sites, and migrated below-boundary `LLMConfig.from_env` branches are deleted. Any retained `from_env` public composition wrapper delegates once to the central composer and is structurally allowlisted by exact symbol/rationale.\n- [ ] The ownership gate fails on synthetic direct/aliased ambient reloads and carries zero post-cutover legacy exceptions.\n- [ ] Consumer-level metamorphic tests plus focused LLM/provider/cache/fallback/workflow suites, default suite, lint, typecheck, complexity, and module-size gates pass; docs and ADR 0098 describe the authoritative state rather than shadow mode.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Make OperationSnapshot authoritative for LLM operations and retire shadow resolution"
+      },
       "created_at": "2026-08-29T18:35:11Z",
       "jira_id": "4590641",
       "jira_key": "REB-3898",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:35:14Z"
     },
@@ -52372,6 +52527,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:08Z"
     },
+    "efd4-847d-f7ad-47bc": {
+      "created_at": "2026-08-29T19:30:26Z",
+      "jira_id": "4590652",
+      "jira_key": "REB-3909",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:30:29Z"
+    },
     "f020-0960-2c42-4d61": {
       "baseline": {
         "assignee": {
@@ -52789,6 +52951,13 @@
       "peer_parent": "REB-3233",
       "state": "confirmed",
       "updated_at": "2026-08-21T21:35:20Z"
+    },
+    "f1d6-cfcc-a9c6-416d": {
+      "created_at": "2026-08-29T19:30:33Z",
+      "jira_id": "4590653",
+      "jira_key": "REB-3910",
+      "state": "confirmed",
+      "updated_at": "2026-08-29T19:30:36Z"
     },
     "f1da-3f9d-8f64-4f4f": {
       "baseline": {
@@ -53332,9 +53501,17 @@
       "updated_at": "2026-08-15T15:15:31Z"
     },
     "f448-b336-e1c7-4ead": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe current reconciler has typed `MutationDirection` and `MutationAction`, but `Mutation.payload` remains `Mapping[str, Any]`. Outbound typed mutations are translated back into the legacy batch dictionary, two CREATE shapes coexist, and string/monkeypatch consumers make deletion non-local. ADR 0103 already owns retry, coordinator, and observe-before-replay policy; this story must not redesign those decisions.\n\nThis is the architecture prerequisite for the typed cutover. It completes RESEARCH and any required ADR lifecycle before dependent implementation begins.\n\n## Approach\n\n- Enumerate every valid `(direction, action)` pair, producer, consumer, serialization/manifest field, compatibility re-export, string import, standalone-loaded test module, and transport boundary. Use semantic references plus string search.\n- Define the smallest discriminated payload union that makes invalid field/action combinations unrepresentable while preserving necessary provenance and canonical comparison.\n- Decide ownership of payload validation, canonical serialization, adapter projection, follow-ons/suppression, binding identity, and provider-neutral outcomes.\n- Specify expand/compare/cut/delete sequencing, rollback, and exact legacy deletion targets. Production dual-send is forbidden.\n- Reconcile the design with ADRs 0004, 0026\u20130029, 0083, 0092, and 0103. If a new structural decision is required, complete the architecture-decision RESEARCH -> critique -> DRAFT -> HOLD -> MERGE lifecycle before closing this story.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/` \u2014 mutation producers, planners, coordinator, adapters, manifests, and compatibility surfaces.\n- `tests/unit/rebar_reconciler/` \u2014 consumer census and existing contract evidence.\n- `docs/adr/` \u2014 one atomic decision record only if accepted ADRs do not already decide the representation boundary.\n\n## Testing\n\nThis story produces architecture evidence rather than production behavior. Verify the consumer census with both Serena semantic references and repository text search; verify the direction/action matrix against the enum allowlist and every planner/adapter route; run plan review on the resulting implementation stories after the ADR disposition is settled.\n\n## Acceptance Criteria\n\n- [ ] A checked-in or ticket-recorded census covers every mutation producer/consumer and all string, dynamic-load, monkeypatch, manifest, and transport consumers; an empty semantic result is confirmed by text search.\n- [ ] Every valid direction/action pair has a named payload contract with required/optional fields and validation rules; no proposed contract relies on one option-heavy generic action payload.\n- [ ] The design states which current canonical bytes/hashes are compatibility requirements and which normalized representation is comparison-only.\n- [ ] Retry/idempotency/fuse ownership remains with ADR 0103's coordinator; no adapter or payload type introduces a second retry owner.\n- [ ] Shadow comparison is side-effect-free, and live comparison uses isolated Jira targets/instances rather than dual-sending to one issue.\n- [ ] The migration has explicit entry/exit criteria and names `_mutation_to_batch_dict`, legacy batch dispatch, duplicate CREATE handling, obsolete re-exports, and compatibility tests as deletion targets.\n- [ ] Any required ADR is merged with explicit approval before dependent code work; otherwise the evidence records why accepted ADRs already decide the shape.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Specify the typed reconciler payload and cutover contract"
+      },
       "created_at": "2026-08-29T18:35:17Z",
       "jira_id": "4590642",
       "jira_key": "REB-3899",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T18:35:20Z"
     },
@@ -57531,7 +57708,15 @@
     "1788027411549083392": "__rebar_unknown_comment_id__",
     "1788027462165650027": "__rebar_unknown_comment_id__",
     "1788027479716549620": "__rebar_unknown_comment_id__",
-    "1788027697136855001": "__rebar_unknown_comment_id__"
+    "1788027697136855001": "__rebar_unknown_comment_id__",
+    "1788029198290571687": "__rebar_unknown_comment_id__",
+    "1788029504044412420": "__rebar_unknown_comment_id__",
+    "1788029507777802038": "__rebar_unknown_comment_id__",
+    "1788029511756380697": "__rebar_unknown_comment_id__",
+    "1788029515491094451": "__rebar_unknown_comment_id__",
+    "1788029518347627764": "__rebar_unknown_comment_id__",
+    "1788029522409372707": "__rebar_unknown_comment_id__",
+    "1788029527544602796": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -59811,7 +59996,18 @@
     "REB-3899": "f448-b336-e1c7-4ead",
     "REB-39": "1acc-81fe-1a5d-4e0e",
     "REB-390": "f5df-0069-6339-4973",
+    "REB-3900": "471c-f71f-342c-45ed",
+    "REB-3901": "4bd8-a2bb-813b-427e",
+    "REB-3902": "4c80-edd3-20f1-4dff",
+    "REB-3903": "53ab-bdf6-de1c-4bb1",
+    "REB-3904": "5d19-52e0-7c26-47fb",
+    "REB-3905": "759e-7dc1-675c-4877",
+    "REB-3906": "7a95-b393-e571-4dfb",
+    "REB-3907": "860f-8886-a17b-48f1",
+    "REB-3908": "96f3-af59-ba26-4159",
+    "REB-3909": "efd4-847d-f7ad-47bc",
     "REB-391": "f6f6-bc8e-ff37-4d60",
+    "REB-3910": "f1d6-cfcc-a9c6-416d",
     "REB-392": "f724-f752-9cc8-4a6f",
     "REB-393": "f765-b3f2-e6ab-4842",
     "REB-394": "f803-63ea-816b-479a",
