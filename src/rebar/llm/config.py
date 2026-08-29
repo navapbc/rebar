@@ -113,15 +113,8 @@ def resolve_gate_config(repo_root: str | os.PathLike[str] | None = None) -> LLMC
 # both the LLMConfig field default and the env/table resolution fallback so the
 # default lives in ONE place (docs/config.md documents the same value).
 DEFAULT_MAX_TOKENS = 16000
-# Same single-source-of-truth pattern for the agent step cap + per-call wall-clock
-# timeout (each previously duplicated the literal across field default + resolution).
-# Raised 50 → 250 (≈125 tool-call cycles): 50 (≈25 cycles) is far too low for an agentic
-# REVIEW — a code-grounding finder or a multi-child container call exhausts it mid-work and
-# raises a step-budget LLMRunnerError. The sibling gates already floor higher per-op
-# (completion 480, review/operations 120); raising the framework default safeguards every
-# agentic caller (incl. plan-review's Pass-1, which never applied its own floor) so the
-# default behavior is "do more tool use" rather than "fail". An operator can still lower it
-# via REBAR_LLM_MAX_STEPS; a per-op floor still wins via max(floor, configured).
+# Same single-source-of-truth pattern for the agent step cap + per-call wall-clock timeout.
+# REBAR_LLM_MAX_STEPS lowers it; a per-op floor still wins via max(floor, configured).
 DEFAULT_MAX_ITERATIONS = 250
 DEFAULT_TIMEOUT_S = 600
 # Cross-ticket overlap detection (epic only-crave-art) — LLM-feature tunables live on
@@ -137,27 +130,26 @@ DEFAULT_OVERLAP_PROPOSITIONS_MAX = 6
 DEFAULT_OVERLAP_K = 20
 DEFAULT_OVERLAP_MAX_DOC_FREQ = 0.5
 DEFAULT_OVERLAP_MIN_SHOULD_MATCH = 0.15
-# Enrichment queue (e1f4): the soak (debounce) between plan-review certification and drain
-# eligibility, and the claim lease TTL (a crashed drainer's claim is treated as unclaimed
-# after it expires — self-healing, no separate reaper process).
+# Enrichment queue (e1f4): the soak between plan-review cert and drain eligibility, and the
+# claim lease TTL (a crashed drainer's claim is treated as unclaimed once it expires).
 DEFAULT_OVERLAP_SOAK_MIN = 60
 DEFAULT_OVERLAP_LEASE_TTL_MIN = 15
+# Self-heal re-enrichment debounce (bug 8bef): minimum wall-clock gap between a ticket's last
+# DONE_ENRICH and a self-heal re-enrichment of it — bounds churn-driven re-firing to once per
+# window; 0 disables. Rationale: enrich_drain._stale_digest_ids docstring.
+DEFAULT_OVERLAP_REENRICH_DEBOUNCE_MIN = 1440
 # Stage-2 pairwise judge (9022): the per-ordering confidence a candidate must clear to be
 # surfaced, and the max number of advisory link suggestions surfaced per query ticket.
 DEFAULT_OVERLAP_CONF_THRESHOLD = 0.7
 DEFAULT_OVERLAP_SURFACE_CAP = 3
-# Tier-1 opportunistic drain (c1de): the drain mode (off|async|always), the per-run batch
-# cap, and the cheap gate-check latency budget (ms) for the write-path maybe_drain no-op.
+# Tier-1 opportunistic drain (c1de): mode (off|async|always), per-run batch cap, gate budget ms.
 DEFAULT_OVERLAP_DRAIN = "async"
-# 20, not 5 (operator ruling OQ3 on bug 6148-5d81-8e80-41e8): with LLM calls outside the
-# drain lock the batch is the claim-window size, raised toward the lease-derived bound
-# (enrich_drain._lease_bounded_batch clamps any configured value to lease_ttl_s // 40 = 22
-# at the default 15-minute lease) so a run can never outlive its claims.
+# 20, not 5 (operator ruling OQ3 on bug 6148): with LLM calls outside the drain lock the batch
+# is clamped to the lease-derived bound (enrich_drain._lease_bounded_batch = lease_ttl_s // 40).
 DEFAULT_OVERLAP_DRAIN_BATCH = 20
 DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS = 20
-# Transport-layer retry for Anthropic gate calls (story arcticduck, epic jira-reb-687):
-# the tenacity retry envelope wrapping the httpx transport (SDK max_retries=0). Attempts
-# counts the first try; max wait caps the Retry-After / exponential backoff per sleep.
+# Transport-layer retry for Anthropic gate calls (story arcticduck): tenacity envelope over the
+# httpx transport (SDK max_retries=0). Attempts counts the first try; max wait caps each sleep.
 DEFAULT_LLM_RETRY_MAX_ATTEMPTS = 4
 DEFAULT_LLM_RETRY_MAX_WAIT_S = 60
 DEFAULT_LLM_TOOL_TIMEOUT_S = 120
@@ -549,6 +541,7 @@ class LLMConfig:
     # Enrichment queue (e1f4).
     overlap_soak_min: int = DEFAULT_OVERLAP_SOAK_MIN
     overlap_lease_ttl_min: int = DEFAULT_OVERLAP_LEASE_TTL_MIN
+    overlap_reenrich_debounce_min: int = DEFAULT_OVERLAP_REENRICH_DEBOUNCE_MIN
     # Stage-2 pairwise judge (9022).
     overlap_conf_threshold: float = DEFAULT_OVERLAP_CONF_THRESHOLD
     overlap_surface_cap: int = DEFAULT_OVERLAP_SURFACE_CAP
@@ -731,6 +724,13 @@ class LLMConfig:
                 "REBAR_LLM_OVERLAP_LEASE_TTL_MIN",
                 "overlap_lease_ttl_min",
                 DEFAULT_OVERLAP_LEASE_TTL_MIN,
+            ),
+            overlap_reenrich_debounce_min=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_REENRICH_DEBOUNCE_MIN",
+                "overlap_reenrich_debounce_min",
+                DEFAULT_OVERLAP_REENRICH_DEBOUNCE_MIN,
             ),
             overlap_conf_threshold=_llm_float(
                 table,
