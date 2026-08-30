@@ -61,10 +61,19 @@ replay, so it is never double-counted (the `fsck` repair is hygiene, not a read 
 **`.retired` lifecycle.** Retired files are kept **permanently** for now — an
 accepted storage tradeoff that guarantees a folded source is never lost and can
 never be resurrected into a `SNAPSHOT_INCONSISTENT`. A branch-wide `.retired`
-garbage-collection sweep is a documented **follow-up** — tracked as
-`polite-antivirus-bedbug` (`536b-8930-b922-4063`, status `idea`, linked
-`discovered_from` b306) — safe only past causal stability (once no clone can still
-be mid-reconvergence against the pre-compaction events). `.retired` files are **benign under a code rollback**:
+garbage-collection sweep is a **secondary companion** to the pack lever, not the lever
+itself: `.retired` files are blobs and the pack the CI budget guards is blobless, so
+reclaiming them removes ~0 from that pack. The real pack lever — **remote-anchored
+below-horizon commit/tree history reclamation** — is specified by **ADR 0106**
+(`docs/adr/0106-remote-anchored-history-reclamation.md`), which defines the N-day
+horizon, the remote-reachability anchor, the stale-clone forced-override reconnect
+protocol, the C1–C5 causal-stability boundary at the commit/tree-rewrite level (a
+superset of the "past causal stability" condition below), and the SNAPSHOT
+authorship-ledger carriage + `enforce_since` re-anchor that keep signature/authorship
+verification intact across the rewrite. Both are tracked under
+`polite-antivirus-bedbug` (`536b-8930-b922-4063`), safe only past causal stability
+(once no clone can still be mid-reconvergence against the pre-compaction events).
+`.retired` files are **benign under a code rollback**:
 an older clone whose reducer/fsck predate `is_active_event` still ignores them,
 because it lists events by the `*.json` glob / `.endswith(".json")` filter and a
 `*.json.retired` name matches neither.
