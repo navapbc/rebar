@@ -194,6 +194,7 @@ def apply_failclosed(
                     {
                         "criteria": [crit],
                         "severity": "critical",
+                        "priority": 1.0,
                         "decision": "block",
                         "tier": "DET",
                         "finding": (

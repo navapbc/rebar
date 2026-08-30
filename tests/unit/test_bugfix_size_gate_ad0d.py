@@ -241,6 +241,7 @@ def test_oversized_bug_fix_without_attestation_blocks(monkeypatch: pytest.Monkey
     finding = verdict["blocking"][0]
     assert finding["criteria"] == [bsg.CRITERION_ID]
     assert finding["decision"] == "block"
+    assert finding["priority"] == 0.9  # strong-but-not-maximal DET signal
     assert finding["tier"] == "DET"
     # The teaching message names the size, the ticket, the verdict, and the remediation path.
     text = finding["finding"]

@@ -194,6 +194,7 @@ def test_failclosed_forces_block_on_detector_match(monkeypatch):
     entry = v["blocking"][0]
     assert entry["criteria"] == ["high-critical-security"]  # the criterion is named
     assert entry["severity"] == "critical" and entry["decision"] == "block"
+    assert entry["priority"] == 1.0  # always-block DET finding pinned above every block_threshold
     assert "high-critical-security" in entry["finding"] and "app.py" in entry["finding"]
     assert entry["location"] == "app.py"  # the matched changed file
 
