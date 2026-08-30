@@ -266,6 +266,47 @@ def test_distribution_shift_impact_uses_categorical_severity_attributes():
     assert prod_impact_shift["total_variation_distance"] == 1.0
 
 
+def test_distribution_shift_priority_uses_era_correct_impact_fn_for_stored_side():
+    """A pre-v5 stored row's ordinal severity grade (`undecomposed: "high"`) collapses
+    to 0.0 under the CURRENT `decide.impact_plan` (KIND-graded), but scores nonzero
+    under `legacy_v4_baseline.legacy_impact_plan` (ordinal-graded) -- the exact
+    era-mismatch Tier-0's `impact_fn_for_row` exists to avoid. The stored side of the
+    priority axis must route through the row's era-correct impact fn; the candidate
+    side (always freshly generated) must always use the current injected `impact_fn`."""
+    pre_v5_row = {
+        "stored_answers": [
+            {"binary": _all_yes_binary(), "severity_attributes": {"undecomposed": "high"}}
+        ],
+        "candidate_answers": [
+            {"binary": _all_yes_binary(), "severity_attributes": {"undecomposed": "high"}}
+        ],
+        "impact_model_version": None,  # missing/old -> pre-v5
+    }
+    current_era_row = {
+        "stored_answers": [
+            {"binary": _all_yes_binary(), "severity_attributes": {"undecomposed": "high"}}
+        ],
+        "candidate_answers": [
+            {"binary": _all_yes_binary(), "severity_attributes": {"undecomposed": "high"}}
+        ],
+        "impact_model_version": "plan-v5",
+    }
+
+    shift = tier1.distribution_shift([pre_v5_row, current_era_row])
+    priority_shift = shift["priority"]
+
+    # Pre-v5 stored: legacy formula scores undecomposed="high" nonzero (bucket [0.9,1.0]).
+    # Current-era stored: shipped impact_plan scores the SAME kind-graded axis 0.0
+    # (bucket [0.0,0.1)) -- the two stored rows land in DIFFERENT buckets despite
+    # identical severity_attributes, proving the era-correct routing actually fired.
+    # Both candidate sides always use the CURRENT impact_fn, so both candidate answers
+    # (identical severity_attributes) score 0.0 -> both land in [0.0,0.1).
+    # stored: {[0.9,1.0]: 1, [0.0,0.1): 1}; candidate: {[0.0,0.1): 2}
+    # count_delta = candidate - stored per bucket:
+    assert priority_shift["count_delta"]["[0.9,1.0]"] == -1
+    assert priority_shift["count_delta"]["[0.0,0.1)"] == 1
+
+
 # ── ledger pre-flight ─────────────────────────────────────────────────────────────
 def test_run_tier1_refuses_before_any_call_when_estimate_exceeds_budget(tmp_path, monkeypatch):
     ledger_path = str(tmp_path / "ledger.jsonl")

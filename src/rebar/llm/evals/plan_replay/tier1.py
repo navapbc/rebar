@@ -28,6 +28,7 @@ from rebar.llm.evals.plan_replay.sampling import stratified_sample
 from rebar.llm.evals.plan_replay.tier0 import (
     _load_cache_rows,
     build_event_index,
+    impact_fn_for_row,
     sidecar_data_for_row,
 )
 from rebar.llm.evals.plan_replay.verifier_candidates import VerifierCandidate
@@ -171,6 +172,7 @@ def replay_review(row: dict[str, Any], run_chunk: Callable, model_id: str) -> di
         "stored_answers": stored_answers,
         "candidate_answers": candidate_answers,
         "model_id": model_id,
+        "impact_model_version": data.get("impact_model_version"),
     }
 
 
@@ -337,12 +339,23 @@ def distribution_shift(
     candidate answer: ``validity``/``priority`` are continuous [0,1] scalars binned
     into the fixed ``_N_BUCKETS`` equal-width buckets; ``impact`` uses its underlying
     categorical severity-attribute/binary answers directly (see
-    :func:`_categorical_axis_shift`)."""
+    :func:`_categorical_axis_shift`).
+
+    The STORED side's priority uses the row's ERA-CORRECT impact function
+    (:func:`rebar.llm.evals.plan_replay.tier0.impact_fn_for_row`, keyed off the row's
+    ``impact_model_version``) -- a pre-v5 stored row's ordinal severity grades collapse
+    to 0.0 under the current ``decide.impact_plan`` formula, the same era-mismatch
+    Tier-0 guards against. The CANDIDATE side always uses the injected (current)
+    ``impact_fn``, since a candidate answer is always freshly generated now, never
+    era-mismatched."""
     stored_validity: list[float] = []
     candidate_validity: list[float] = []
     stored_priority: list[float] = []
     candidate_priority: list[float] = []
     for r in replayed:
+        stored_impact_fn = impact_fn_for_row(
+            {"impact_model_version": r.get("impact_model_version")}
+        )
         for stored, cand in zip(r["stored_answers"], r["candidate_answers"], strict=True):
             if cand is None:
                 continue
@@ -355,7 +368,7 @@ def distribution_shift(
             c_val = decide.validity(c_binary)
             stored_validity.append(s_val)
             candidate_validity.append(c_val)
-            stored_priority.append(round(s_val * impact_fn(s_attrs), 4))
+            stored_priority.append(round(s_val * stored_impact_fn(s_attrs), 4))
             candidate_priority.append(round(c_val * impact_fn(c_attrs), 4))
 
     return {
