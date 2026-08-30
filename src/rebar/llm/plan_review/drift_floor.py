@@ -86,7 +86,6 @@ def drift_floor_candidate(
     not be computed) so the floor keeps any novel finding that cites a drifted file. NEVER raises:
     any read error leaves the failing precondition False and yields ``eligible=False`` → full
     review (a broken signal can only DENY convergence, never suppress incorrectly)."""
-    from rebar import config as _config
     from rebar import signing
 
     from . import attest, sidecar
@@ -120,10 +119,21 @@ def drift_floor_candidate(
             and current_material == signed_material
         )
 
-        # code DRIFTED: the signed verified_at_sha and current HEAD both present and DIFFER. This
-        # mirrors compute_validity's unscoped whole-HEAD "stale-head" trigger anchor exactly.
+        # code DRIFTED: the signed verified_at_sha and the current gate-ref sha both present and
+        # DIFFER. Sources the current anchor from the SHARED gate_source.current_head_sha so this
+        # and compute_validity's unscoped whole-HEAD "stale-head" trigger CANNOT diverge (bug
+        # 1137): for an attested manifest that is the current gate-ref sha read from the local
+        # object DB (no fetch), NOT git rev-parse HEAD of the evaluator's working tree. An
+        # unresolvable gate ref -> "unknown" -> not drifted -> full review (fail-safe: a broken
+        # signal only DENIES convergence, never suppresses incorrectly).
+        from rebar._snapshot.repo_snapshot import SnapshotError
+        from rebar.llm import gate_source
+
         signed_sha = signing.verified_at_sha_from_manifest(manifest)
-        current_sha = signing.head_sha(_config.repo_root(repo_root))
+        try:
+            current_sha = gate_source.current_head_sha(manifest, repo_root)
+        except SnapshotError:
+            current_sha = "unknown"
         reasons["code_drifted"] = (
             bool(signed_sha)
             and bool(current_sha)

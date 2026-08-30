@@ -86,6 +86,29 @@ def default_source(repo_root: str | None = None) -> str:
     return val if val in (SOURCE_ATTESTED, SOURCE_LOCAL) else SOURCE_ATTESTED
 
 
+def current_head_sha(auth_manifest: list[str] | None, repo_root: str | None = None) -> str:
+    """The sha the signed ``verified_at_sha`` must be compared against for the unscoped
+    whole-HEAD plan-review freshness check (bug 1137). For an ATTESTED manifest this is the
+    CURRENT gate-ref sha read from the LOCAL object DB (NO fetch) -- NOT ``git rev-parse HEAD`` of
+    whatever working tree the evaluator sits in (a feature worktree or a foreign enclosing repo
+    would read a stranger sha and report a spurious ``stale-head``). For a LEGACY manifest (no
+    ``verified_at_sha``) or ``source=local`` it is the working-tree HEAD. Raises ``SnapshotError``
+    when an attested gate ref cannot be resolved locally -- callers choose fail-open vs
+    fail-closed. This is the SINGLE source of the unscoped current-head anchor so
+    ``attest.compute_validity`` and ``drift_floor`` cannot drift apart (both consumers of the
+    ticket's ``code_drifted`` axis read the same value)."""
+    from rebar import config as _config
+    from rebar import signing as _signing
+    from rebar._snapshot.repo_snapshot import resolve_ref
+
+    if not _signing.verified_at_sha_from_manifest(auth_manifest):
+        return _signing.head_sha(_config.repo_root(repo_root))
+    working = str(_config.repo_root(repo_root))
+    if default_source(working) != SOURCE_ATTESTED:
+        return _signing.head_sha(working)
+    return resolve_ref(default_ref(working), working, fetch=False)
+
+
 def resolve_gate_handle(
     ref: str | None,
     source: str | None,

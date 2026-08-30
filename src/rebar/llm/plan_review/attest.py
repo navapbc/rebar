@@ -457,33 +457,28 @@ def _unscoped_head_drift(
     attestation: Mapping[str, Any], auth_manifest: list[str], repo_root
 ) -> str | None:
     """The unscoped (whole-HEAD, no per-file ``deps``) half of the plan-review freshness
-    check: ``None`` when fresh, else the ``stale-head`` reason. For an ATTESTED attestation the
-    CURRENT side is the gate-ref sha from the LOCAL object DB (NO fetch), not the working-tree
-    HEAD — a stranger sha in a feature worktree/foreign enclosing repo reading as spuriously
-    stale (bug 1137); ``source=local``/LEGACY keep the working-tree comparison."""
-    from rebar import config as _config
-    from rebar import signing as _signing
-    from rebar._snapshot.repo_snapshot import SnapshotError, resolve_ref
+    check: ``None`` when fresh, else the ``stale-head`` reason. The CURRENT-head anchor comes
+    from the shared ``gate_source.current_head_sha`` (an ATTESTED attestation resolves the
+    gate-ref sha from the LOCAL object DB, NO fetch, not the working-tree HEAD — a stranger sha
+    in a feature worktree/foreign enclosing repo reading as spuriously stale, bug 1137;
+    ``source=local``/LEGACY keep the working-tree comparison). An unresolvable attested gate ref
+    fails CLOSED here (never certifies against the working tree)."""
+    from rebar._snapshot.repo_snapshot import SnapshotError
     from rebar.llm import gate_source
 
     signed_head = _authoritative_head(attestation)
-    if not _signing.verified_at_sha_from_manifest(auth_manifest):
-        head = _signing.head_sha(_config.repo_root(repo_root))
-    else:
-        working = str(_config.repo_root(repo_root))
-        if gate_source.default_source(working) != gate_source.SOURCE_ATTESTED:
-            head = _signing.head_sha(working)
-        else:
-            ref = gate_source.default_ref(working)
-            try:
-                head = resolve_ref(ref, working, fetch=False)
-            except SnapshotError:
-                named = f"'{ref}'" if ref else "the configured gate ref"
-                return (
-                    "cannot confirm the code the plan was reviewed against is current: the gate "
-                    f"ref {named} could not be resolved to a snapshot, so the attestation cannot "
-                    "be re-checked (refusing to certify against the working tree)"
-                )
+    try:
+        head = gate_source.current_head_sha(auth_manifest, repo_root)
+    except SnapshotError:
+        from rebar import config as _config
+
+        ref = gate_source.default_ref(str(_config.repo_root(repo_root)))
+        named = f"'{ref}'" if ref else "the configured gate ref"
+        return (
+            "cannot confirm the code the plan was reviewed against is current: the gate "
+            f"ref {named} could not be resolved to a snapshot, so the attestation cannot "
+            "be re-checked (refusing to certify against the working tree)"
+        )
     if head == "unknown" or signed_head != head:
         return f"attestation is stale (unscoped; signed at {signed_head}, HEAD is {head})"
     return None
