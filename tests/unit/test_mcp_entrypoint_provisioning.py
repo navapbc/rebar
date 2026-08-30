@@ -489,7 +489,12 @@ def test_a_concurrent_reclone_is_not_interleaved(tmp_path: Path) -> None:
         _release(fd)
         os.close(fd)
 
-    assert run.ran_to_completion, f"script did not finish: {run.stderr}"
+    # Liveness anchor: the terminal log line, NOT `ran_to_completion`. Under a held store lock
+    # the ensure step is now (correctly) suppressed too — it takes the same lock — so its
+    # invocation can no longer stand in for "the script got to the end". `provisioning
+    # finished` is emitted on the soft-failure path regardless, so it still proves the run
+    # reached the bottom rather than dying on line one.
+    assert "provisioning finished" in run.stderr, f"script did not finish: {run.stderr}"
     assert not run.tickets_cloned, (
         f"a container must not clone while a peer holds the lock; git calls={run.git_calls}"
     )
@@ -546,6 +551,83 @@ def test_a_peer_finishing_the_clone_while_we_wait_skips_the_redundant_reclone(
         f"a store the peer already re-cloned must NOT be cloned again; git calls={run.git_calls}"
     )
     assert run.returncode == 0
+
+
+def test_the_ensure_step_does_not_run_while_a_peer_holds_the_store_lock(
+    tmp_path: Path,
+) -> None:
+    """The residual defect this ticket (beton-inversive-stag) tracks.
+
+    provision_store serializes the clear+clone but historically RELEASED the lock and then ran
+    the ensure helper UNLOCKED. That helper is not read-only: its last step takes rebar's own
+    write lock by creating `.ticket-write.lock` (and the `.ticket-write.lock.d` dot-directory)
+    INSIDE the store (src/rebar/_store/lock.py). A single stray entry makes a peer's
+    `git clone` into the same volume fail `destination path ... already exists and is not an
+    empty directory`, and the peer's clear (`rm -rf ./.[!.]*`) in turn unlinks a live rebar
+    lock, breaking mutual exclusion in the other direction. So the ensure step must run under
+    the SAME store lock the clear+clone hold, and must NOT run while a peer holds it.
+
+    Assert the helper was not INVOKED, not merely that the directory survived: with a stubbed
+    ensure helper a contents check passes whether or not the call was even attempted.
+    """
+    tracker = tmp_path / "tracker"
+    (tracker / ".git").mkdir(parents=True)  # healthy store: no tickets re-clone fires
+    (tmp_path / "code" / ".git").mkdir(parents=True)  # healthy code: no code clone fires
+    fd = _peer_lock_fd(tracker)  # a peer holds the store lock, exactly as a real container does
+
+    try:
+        run = _provision(tmp_path, head_resolves=True)
+    finally:
+        _release(fd)
+        os.close(fd)
+
+    assert not run.ensure_calls, (
+        "the ensure step writes into the shared store (it takes rebar's write lock there), so "
+        f"it must not run while a peer holds the store lock; ensure_calls={run.ensure_calls}"
+    )
+    assert "timed out waiting for the tickets ensure lock" in run.stderr, (
+        f"the ensure step must contend for the store lock and time out: {run.stderr}"
+    )
+    # Liveness: the soft posture still emits the terminal line even though ensure was skipped,
+    # so this absence assertion is not passing merely because the script died early.
+    assert "provisioning finished" in run.stderr, f"script did not finish: {run.stderr}"
+    assert run.returncode != 0, "a skipped ensure must surface in the exit status"
+
+
+def test_the_code_checkout_is_not_cloned_while_a_peer_holds_its_lock(
+    tmp_path: Path,
+) -> None:
+    """The code checkout volume is shared across containers exactly as the tickets store is
+    (blue/green overlap, a restart racing a rollout, a `restart: always` container that takes
+    no deploy lock). Its clear+clone must be serialized on the checkout directory's OWN INODE
+    too. The code side had ZERO contention coverage — deleting its lock left the whole suite
+    green — so this pins it.
+
+    The peer holds the lock the way a real one does: an `flock` on the code directory's inode.
+    The tracker is healthy so only the code side contends.
+    """
+    code = tmp_path / "code"
+    code.mkdir()
+    peer_work = code / "peer-partial-clone"
+    peer_work.write_text("another container is cloning into this directory")
+    fd = os.open(code, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+
+    try:
+        run = _provision(tmp_path, head_resolves=True, code_dir=str(code))
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+    assert not run.code_cloned, (
+        f"a container must not clone the code checkout while a peer holds its lock; "
+        f"git calls={run.git_calls}"
+    )
+    assert peer_work.exists(), (
+        "the peer's in-flight code clone must not be cleared out from under it"
+    )
+    assert "timed out waiting for the code checkout lock" in run.stderr
+    assert run.returncode != 0
 
 
 # ------------------------------------------------------------------ credential helper
