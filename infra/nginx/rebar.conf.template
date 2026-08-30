@@ -117,6 +117,18 @@ server {
         proxy_redirect default;
         proxy_redirect http://$host/ https://$host/;
         proxy_redirect http://127.0.0.1:${REVIEW_BOT_PORT}/ https://$host/;
+        # Prefix backstop (bug 4d8c-c1f9-5ea4-454d). The prefix-STRIPPING proxy_pass mounts
+        # the review-bot at the server root, so the app's absolute self-redirects come back
+        # WITHOUT the /review/ prefix (e.g. Location: https://$host/health); this restores
+        # the lost /review/ prefix on those same-host absolute redirects. Ordered LAST: its
+        # https://$host/ left-hand side overlaps none of a61d's http://... rules above, so it
+        # neither shadows nor is shadowed by them. This broad same-host rewrite is safe ONLY
+        # because the review-bot's SOLE absolute redirects are Starlette slash-307s to its OWN
+        # routes (plain `uvicorn rebar.review_bot.app:app` — no root_path/--root-path, no
+        # redirect_slashes override, no RedirectResponse). If the app ever emitted an absolute
+        # redirect to a genuine non-/review/ same-host target, this rule would wrongly prefix
+        # it, so that precondition is pinned by a test.
+        proxy_redirect https://$host/ https://$host/review/;
     }
 
     # --- op-cert gate: /opcert/ -> the FastAPI gate service (story 76d2) --
