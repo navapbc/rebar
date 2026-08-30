@@ -2,8 +2,13 @@
 
 Three helpers exist as byte- or AST-identical twins across modules that never share code:
 
-* ``_shadow`` — three identical MCP copies (``_mcp_llm``, ``_mcp_reads``, ``_mcp_writes``)
-  plus ``_lib_ops``' variant that forwards an explicit ``repo_root``;
+* ``_shadow`` — RP-04 S2 (ticket 3a08) migrated the MCP read/write surfaces
+  (``_mcp_reads``, ``_mcp_writes``) OFF this diagnostic-only helper onto the
+  authoritative ``compose_and_bind_operation_snapshot`` binding (via
+  ``bind_operation_snapshot_for_tools`` in ``mcp_server.py::build_server``), so they no
+  longer import or call it. The two REMAINING un-migrated copies — ``_mcp_llm`` (LLM
+  tools stay shadow pending ticket ec44) and ``_lib_ops``' variant (bridge/reconciler
+  library ops, out of this ticket's Scope) — still share the single definition;
 * ``_ticket_id`` — AST-identical in ``llm/workflow/steps.py`` and
   ``llm/plan_review/decide_ops.py``;
 * ``_positive_int`` — three identical argparse converters (``rebar_reconciler/request.py``,
@@ -43,17 +48,19 @@ def _definitions(name: str) -> list[str]:
 def test_shadow_forwards_the_surface_and_an_absent_repo_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The MCP surfaces have no ambient repo_root, so they pass only the surface."""
+    """The still-shadow MCP surface (LLM tools; read/write migrated away by ticket
+    3a08 — see ``test_mcp_reads_and_writes_no_longer_use_shadow`` below) has no
+    ambient repo_root, so it passes only the surface."""
     from rebar import _operation_config
 
     seen: list[dict] = []
     monkeypatch.setattr(
         _operation_config, "emit_shadow_snapshot", lambda **kw: seen.append(kw) or None
     )
-    from rebar import _mcp_reads
+    from rebar import _mcp_llm
 
-    _mcp_reads._shadow("show_ticket")
-    assert seen == [{"surface": "show_ticket", "repo_root": None}]
+    _mcp_llm._shadow("review_code")
+    assert seen == [{"surface": "review_code", "repo_root": None}]
 
 
 def test_shadow_forwards_an_explicit_repo_root(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,14 +99,27 @@ def test_the_argparse_positive_int_is_defined_once_and_its_namesake_survives() -
     assert any(d.startswith("rebar/_config_resolvers.py") for d in defs), defs
 
 
-def test_the_three_mcp_surfaces_share_one_shadow_object() -> None:
-    """Routing means IMPORTING, not re-declaring. Identity is what proves it: three modules
-    that each defined their own copy would still pass a behavioural test."""
-    from rebar import _lib_ops, _mcp_llm, _mcp_reads, _mcp_writes
+def test_the_remaining_shadow_surfaces_share_one_shadow_object() -> None:
+    """Routing means IMPORTING, not re-declaring. Identity is what proves it: modules
+    that each defined their own copy would still pass a behavioural test.
 
-    shared = _mcp_reads._shadow
-    for mod in (_mcp_llm, _mcp_writes, _lib_ops):
-        assert mod._shadow is shared, f"{mod.__name__} re-declares _shadow instead of importing it"
+    Only ``_mcp_llm`` and ``_lib_ops`` still route through ``_shadow`` (ticket 3a08
+    migrated ``_mcp_reads``/``_mcp_writes`` onto the authoritative binding instead —
+    see ``test_mcp_reads_and_writes_no_longer_use_shadow``)."""
+    from rebar import _lib_ops, _mcp_llm
+
+    assert _lib_ops._shadow is _mcp_llm._shadow
+
+
+def test_mcp_reads_and_writes_no_longer_use_shadow() -> None:
+    """RP-04 S2 (ticket 3a08): the migrated read/write MCP surfaces deleted their
+    ``_shadow``/``emit_shadow_snapshot`` call sites entirely (AC5) — they no longer
+    import the name at all, since every tool call is now composed-and-bound via
+    ``bind_operation_snapshot_for_tools`` around the whole tool body instead."""
+    from rebar import _mcp_reads, _mcp_writes
+
+    assert not hasattr(_mcp_reads, "_shadow")
+    assert not hasattr(_mcp_writes, "_shadow")
 
 
 def test_the_two_ticket_id_call_sites_share_one_object() -> None:

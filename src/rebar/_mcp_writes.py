@@ -31,7 +31,6 @@ from rebar._mcp_models import (
     WriteAckOut,
     tool_annotation_presets,
 )
-from rebar._operation_config import _shadow
 
 
 def _cross_session(ticket_id: str) -> str | None:
@@ -126,7 +125,6 @@ def _register_attach_commits(mcp, ann) -> None:
         attaching the SHAs records a COMMITS event so the close gate can still tie the
         ticket to its change. Every SHA must resolve to a commit in this repository —
         validation is ALL-OR-NOTHING, so if any SHA is bad, nothing is recorded."""
-        _shadow("mcp.write.attach_commits")
         return AttachCommitsResultOut.model_validate(rebar.attach_commits(ticket_id, commits))
 
 
@@ -141,14 +139,12 @@ def _register_bridge_projects_writes(mcp, ann) -> None:
     @mcp.tool(annotations=ann["MUTATE_IDEMPOTENT"])
     def bridge_projects_set(key: str, repos: list[str]) -> WriteAckOut:
         """Set a bridge project key's repos (REPLACE semantics; idempotent)."""
-        _shadow("mcp.write.bridge_projects_set")
         rebar.bridge_projects_set(key, repos)
         return _ack()
 
     @mcp.tool(annotations=ann["MUTATE"])
     def bridge_projects_remove(key: str) -> WriteAckOut:
         """Remove a bridge project key from the mapping (error if absent)."""
-        _shadow("mcp.write.bridge_projects_remove")
         rebar.bridge_projects_remove(key)
         return _ack()
 
@@ -186,7 +182,6 @@ def register_write_tools(mcp, ctx) -> None:
         non-null duplicate_warning means another ticket with the same normalized title
         was created inside the recency window — advisory only; the named candidate may
         already cover this work."""
-        _shadow("mcp.write.create_ticket")
         created = rebar.create_ticket(
             ticket_type,
             title,
@@ -213,7 +208,6 @@ def register_write_tools(mcp, ctx) -> None:
         person/agent. ``name`` is the title; ``email`` plus ``mappings`` (list of
         {provider, external_id}) and ``keys`` (OpenSSH authorized-keys lines) ride the
         CREATE and surface in show_ticket. Returns {id, alias}."""
-        _shadow("mcp.write.create_identity")
         created = rebar.create_identity(
             name,
             email,
@@ -232,7 +226,6 @@ def register_write_tools(mcp, ctx) -> None:
         'open'/claimable), is excluded from ready/next-batch, and 'idea -> closed'
         (reject) skips the completion gates. Promote a kept idea with
         transition_ticket(id, "idea", "open"). Returns {id, alias}."""
-        _shadow("mcp.write.create_idea")
         return CreateResultOut.model_validate(
             _with_push(
                 cast(
@@ -286,7 +279,6 @@ def register_write_tools(mcp, ctx) -> None:
 
         ``caused_by`` records the explicit culprit for a bug close. ``ref`` selects
         the committed tree used by completion verification; it defaults to HEAD."""
-        _shadow("mcp.write.transition_ticket")
         warning = _cross_session(ticket_id)
         result = _with_push(
             cast(
@@ -318,7 +310,6 @@ def register_write_tools(mcp, ctx) -> None:
         bypassing the plan-review gate; when it replaces certification, the absent
         certified attestation is the durable audit signal.
         """
-        _shadow("mcp.write.claim_ticket")
         return ClaimResultOut.model_validate(
             _with_push(
                 cast(
@@ -332,7 +323,6 @@ def register_write_tools(mcp, ctx) -> None:
     def reopen_ticket(ticket_id: str) -> dict:
         """Reopen a closed ticket (closed -> open). Optimistic-concurrency:
         raises a tool error if the ticket is not currently closed."""
-        _shadow("mcp.write.reopen_ticket")
         warning = _cross_session(ticket_id)
         result = _with_push(cast("dict[str, Any]", rebar.reopen(ticket_id)))
         return _attach_cross_session(result, warning)
@@ -340,7 +330,6 @@ def register_write_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=_ANN["MUTATE"])
     def comment_ticket(ticket_id: str, body: str) -> WriteAckOut:
         """Append a comment to a ticket."""
-        _shadow("mcp.write.comment_ticket")
         warning = _cross_session(ticket_id)
         rebar.comment(ticket_id, body)
         return _ack(cross_session_warning=warning)
@@ -356,7 +345,6 @@ def register_write_tools(mcp, ctx) -> None:
         first use (write-gated: refused under REBAR_MCP_READONLY=1). Returns the
         log's {id, alias}; optional relates_to / discovered_from link it to the
         work it documents."""
-        _shadow("mcp.write.log_session")
         res = rebar.append_session_log(
             entry,
             summary=summary,
@@ -400,7 +388,6 @@ def register_write_tools(mcp, ctx) -> None:
         admission cap while the claim gate is on: the edit still succeeded, but claiming
         the ticket will need a review that refuses it until the description is shorter.
         """
-        _shadow("mcp.write.edit_ticket")
         warning = _cross_session(ticket_id)
         description_warning = rebar.edit_ticket(
             ticket_id,
@@ -431,7 +418,6 @@ def register_write_tools(mcp, ctx) -> None:
         A ``caused_by`` link whose target has no commit referencing it is refused;
         ``force`` (a reason string) bypasses that check.
         """
-        _shadow("mcp.write.link_tickets")
         warning = _cross_session(id1)
         record = rebar.link(id1, id2, relation, force=force)
         if not record:
@@ -452,7 +438,6 @@ def register_write_tools(mcp, ctx) -> None:
         other active relation between the pair. When omitted, removes the pair's
         most-recent active relation (the legacy pair-scoped behavior).
         """
-        _shadow("mcp.write.unlink_tickets")
         warning = _cross_session(id1)
         rebar.unlink(id1, id2, relation)
         return _ack(cross_session_warning=warning)
@@ -460,7 +445,6 @@ def register_write_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def tag_ticket(ticket_id: str, tag: str) -> WriteAckOut:
         """Add a tag to a ticket."""
-        _shadow("mcp.write.tag_ticket")
         warning = _cross_session(ticket_id)
         rebar.tag(ticket_id, tag)
         return _ack(cross_session_warning=warning)
@@ -468,7 +452,6 @@ def register_write_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def untag_ticket(ticket_id: str, tag: str) -> WriteAckOut:
         """Remove a tag from a ticket."""
-        _shadow("mcp.write.untag_ticket")
         warning = _cross_session(ticket_id)
         rebar.untag(ticket_id, tag)
         return _ack(cross_session_warning=warning)
@@ -476,7 +459,6 @@ def register_write_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=_ANN["DESTRUCTIVE"])
     def archive_ticket(ticket_id: str) -> WriteAckOut:
         """Archive a ticket (excludes it from the default list)."""
-        _shadow("mcp.write.archive_ticket")
         warning = _cross_session(ticket_id)
         rebar.archive(ticket_id)
         return _ack(cross_session_warning=warning)
@@ -484,7 +466,6 @@ def register_write_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=_ANN["DESTRUCTIVE"])
     def compact_ticket(ticket_id: str | None = None) -> WriteAckOut:
         """Compact a ticket's event log (or all tickets if id omitted)."""
-        _shadow("mcp.write.compact_ticket")
         rebar.compact(ticket_id)
         return _ack()
 
@@ -495,7 +476,6 @@ def register_write_tools(mcp, ctx) -> None:
     def set_file_impact(ticket_id: str, impact: list[FileImpactItemOut]) -> WriteAckOut:
         """Record file impact (list of {path, reason}) for conflict-aware
         next-batch scheduling."""
-        _shadow("mcp.write.set_file_impact")
         warning = _cross_session(ticket_id)
         rebar.set_file_impact(ticket_id, [_dump(e) for e in impact])
         return _ack(cross_session_warning=warning)
@@ -503,14 +483,12 @@ def register_write_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"], structured_output=False)
     def declare_no_file_impact(ticket_id: str, reason: str) -> str:
         """Declare that a ticket has no repository-file impact, with a reason."""
-        _shadow("mcp.write.declare_no_file_impact")
         rebar.declare_no_file_impact(ticket_id, reason)
         return "ok"
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def set_verify_commands(ticket_id: str, commands: list[VerifyCommandItemOut]) -> WriteAckOut:
         """Record DD-level verify commands (list of {dd_id, dd_text, command})."""
-        _shadow("mcp.write.set_verify_commands")
         warning = _cross_session(ticket_id)
         rebar.set_verify_commands(ticket_id, [_dump(e) for e in commands])
         return _ack(cross_session_warning=warning)
@@ -530,7 +508,6 @@ def register_write_tools(mcp, ctx) -> None:
         completion-verifier) are signed and accepted ONLY as op-certs — the
         legacy symmetric HMAC scheme is retired for them (story 8f1d). Use
         verify_signature to certify it later."""
-        _shadow("mcp.write.sign_manifest")
         return SignResultOut.model_validate(
             _with_push(cast("dict[str, Any]", rebar.sign_manifest(ticket_id, manifest)))
         )
@@ -563,7 +540,6 @@ def register_write_tools(mcp, ctx) -> None:
         mutable checkout — and is DISABLED unless REBAR_MCP_ALLOW_LLM=1 (it makes
         live, billable LLM calls), exactly like the other agentic tools. A
         deterministic-only workflow needs neither."""
-        _shadow("mcp.write.run_workflow")
         import threading
 
         from rebar.llm.workflow import executor as _wf_exec
