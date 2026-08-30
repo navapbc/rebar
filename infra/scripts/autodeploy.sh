@@ -968,7 +968,10 @@ print("missing" if st.get("expected") and not st.get("present") else "ok")' 2>/d
   if [ "$mcp_store" = "missing" ]; then
     err mcp-store-missing "new mcp container $mcp_newname is healthy but reports NO ticket store while one is configured; removing it, leaving the OLD upstream live"
     docker rm -f "$mcp_newname" >/dev/null 2>&1 || true
-    record_backoff_failure; exit 1
+    # Records the MCP backoff, NOT $BACKOFF_FILE (which gates the whole script and would throttle
+    # a review-bot deploy that never ran this tick — see MCP_BACKOFF_FILE, and the sibling
+    # mcp-run / mcp-unhealthy / mcp-handshake / mcp-flip branches which all record it too).
+    record_mcp_backoff_failure; exit 1
   fi
 
   # 5c. A 200 from /health still does not prove this container can serve an MCP REQUEST. The

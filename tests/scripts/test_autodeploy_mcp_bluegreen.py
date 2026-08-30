@@ -694,6 +694,42 @@ def test_storeless_container_is_not_promoted_when_a_store_is_expected(
     assert any("rm-f" in c for c in cmds), f"the refused container must be removed\n{ctx}"
 
 
+def test_storeless_refusal_backs_off_mcp_not_the_review_bot(
+    mcp_box: dict[str, object],
+) -> None:
+    """The 5b store-readiness refusal must throttle the MCP path, not the review-bot.
+
+    Like every other mcp failure branch (mcp-run-failed / mcp-unhealthy / mcp-handshake-failed
+    / mcp-flip-failed), the store-readiness refusal must record the mcp-scoped backoff
+    (`mcp-deploy-backoff`, `MCP_BACKOFF_FILE`) and leave the review-bot's shared `deploy-backoff`
+    ABSENT: `$BACKOFF_FILE` gates the WHOLE script at the top, so writing it from the mcp path
+    would suppress a review-bot deploy that never even ran this tick (autodeploy.sh:64-69).
+    """
+    state: Path = mcp_box["state"]  # type: ignore[assignment]
+    # New container comes up healthy but reports a store it was SUPPOSED to have and lacks.
+    (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
+        '{"in_flight":0,"store":{"path":"/var/gerrit/site/mcp-tickets",'
+        '"present":false,"expected":true}}'
+    )
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert "mcp-store-missing" in result.stdout + result.stderr, (
+        f"precondition: the storeless container must be refused by name\n{ctx}"
+    )
+    assert (state / "mcp-deploy-backoff").exists(), (
+        f"the store-readiness refusal must record the MCP backoff (mcp-deploy-backoff)\n{ctx}"
+    )
+    review_bot_backoff = state / "deploy-backoff"
+    written = review_bot_backoff.read_text().strip() if review_bot_backoff.exists() else ""
+    assert not written, (
+        "the store-readiness refusal must NOT write the review-bot deploy-backoff: that file "
+        "gates the whole script at the top, so it would suppress a review-bot deploy that never "
+        f"ran this tick. got {written!r}\n{ctx}"
+    )
+
+
 def test_storeless_container_IS_promoted_when_no_store_is_expected(
     mcp_box: dict[str, object],
 ) -> None:
