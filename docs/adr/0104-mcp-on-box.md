@@ -93,6 +93,24 @@ The `in_flight` gauge counts only **long-running / certified / LLM** ops (`revie
 not counted (killing them is harmless — the client retries). The gauge drives the **retire**
 check, not the deploy gate. The paired ADR 0079 amendment records this `mcp` target.
 
+> **Threading model of a tool body (why the drain can fire at all).** A retire-path SIGTERM
+> drain that polls the `in_flight` gauge is only meaningful if the certified op body runs on a
+> thread *other* than the one servicing the signal and the poll. The rebar MCP tools are all
+> plain sync `def`, and the `mcp` SDK invokes a sync `@mcp.tool` body DIRECTLY inside the ASGI
+> request coroutine (no thread offload), so a naive reading would have a 15–20 minute
+> `review_plan` occupy the event-loop thread for its whole duration and starve `/health`, the
+> drain poll, and every other request. That is **not** how it runs: `offload_sync_tools`
+> (`src/rebar/_mcp_health.py`, bug `dewy-rotatable-tarsier`) rewrites every sync tool body into
+> an async wrapper that runs it on an `anyio.to_thread.run_sync` worker and marks the tool
+> `is_async`, so the SDK `await`s it and the loop stays free. `anyio.to_thread.run_sync` (not
+> `asyncio.to_thread`) is used because it copies the caller's contextvars into the worker,
+> which the op-cert signer binding depends on. `wire_health` applies `instrument_certified_tools`
+> **first** and `offload_sync_tools` **second** — load-bearing, because the gauge wrapper only
+> wraps a sync body; `instrument_certified_tools` now fails loud rather than silently skipping a
+> certified tool that is already async at instrument time (ticket `wounded-resident-bushbaby`).
+> The drain contract below therefore holds because of **that off-loop execution plus the
+> bounded grace window** (`drain_then_exit`), not because the SDK offloads on its own.
+
 > **Amendment (2026-08-28) — the server holds NO per-container session state.** The MCP HTTP
 > transport runs **stateless**: no `Mcp-Session-Id` is minted, so no client session is bound to
 > the container that served it (ticket `aca0-6a66-0a27-47cf`, commit `4af91ec2e799`). The
@@ -177,7 +195,10 @@ not overlooked — see the store-provisioning bugs discovered from this decision
   slice as it wires the concrete keys).
 - The deploy path never kills an in-flight certified op, because retirement is decoupled from
   the deploy (Decision 2); the cost is a custom blue-green loop (recorded as the ADR 0079 `mcp`
-  target) instead of reusing the review-bot's stop-and-drain.
+  target) instead of reusing the review-bot's stop-and-drain. This is only coherent because a
+  sync certified-op body runs OFF the event-loop thread (`offload_sync_tools`, see Decision 2's
+  threading-model note), so the retire path's bounded SIGTERM drain can observe the gauge and
+  wait for it — it does not depend on the SDK offloading tool bodies itself, which it does not.
 - Op-certs minted via MCP are enforceable **without** touching ADR 0049's single-environment
   model, because the box reuses the existing environment rather than registering a distinct one
   (Decision 3). No `verify.require_environment` widening is needed or performed.
