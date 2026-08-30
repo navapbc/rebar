@@ -379,6 +379,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:50:51Z"
     },
+    "029d-126b-d781-42f7": {
+      "created_at": "2026-08-30T18:36:09Z",
+      "jira_id": "4590708",
+      "jira_key": "REB-3964",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T18:36:12Z"
+    },
     "02a3-9004-ed30-4395": {
       "baseline": {
         "assignee": null,
@@ -4399,9 +4406,17 @@
       "updated_at": "2026-08-15T14:52:45Z"
     },
     "162e-57c3-f7d4-4457": {
+      "baseline": {
+        "assignee": null,
+        "description": "Discovered while implementing e9d5-c850-d505-4a5a (typed reconciler mutation payload contracts, ADR 0107). Two producers construct (outbound, update) Mutation payloads with different shapes:\n\n- differ.py's older _compute_mutations_emit_both path emits a flat,\n  unwrapped \"changed\" dict directly as Mutation.payload.\n- outbound_pass.py / binding_walk.py wrap the same information as\n  {\"changed_fields\": {...}, \"comments\": [...], \"labels\": [...], \"links\": [...]}.\n\nADR 0107's typed OutboundUpdatePayload contract standardizes on the wrapped shape (changed_fields); the flat legacy shape from differ.py's older path would fail typed validation today. This is a pre-existing inconsistency, NOT introduced by e9d5 -- e9d5 only documents it (see the corpus README and e9d5's ticket comment recording approved intentional deltas) and does not reconcile it, since producer rewiring is ADR 0107's deferred \"Cut\" step and out of e9d5's own scope (AC7).\n\nSuggested follow-up: decide (a) which shape is canonical going forward, and (b) migrate differ.py's _compute_mutations_emit_both to emit the wrapped changed_fields shape so both producers agree before any producer is rewired to construct OutboundUpdatePayload directly (that \"Cut\" step is a separate, later ticket).\n\nAcceptance criteria:\n- A decision is recorded on which shape is canonical for (outbound, update)\n  Mutation payloads.\n- differ.py's _compute_mutations_emit_both and outbound_pass.py /\n  binding_walk.py agree on payload shape, verified by a test asserting both\n  producers emit the same normalized shape for an equivalent update.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Reconcile dual outbound-update payload shapes (differ.py flat vs outbound_pass.py wrapped)"
+      },
       "created_at": "2026-08-30T17:28:57Z",
       "jira_id": "4590703",
       "jira_key": "REB-3959",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-30T17:28:59Z"
     },
@@ -5042,9 +5057,17 @@
       "updated_at": "2026-08-15T14:53:02Z"
     },
     "192c-d606-b72e-470f": {
+      "baseline": {
+        "assignee": null,
+        "description": "Discovered while implementing e9d5-c850-d505-4a5a (typed reconciler mutation payload contracts, ADR 0107). Two producers construct (inbound, create) Mutation payloads with different shapes:\n\n- differ.py's inbound-create path emits a FLAT dict of Jira fields (no\n  wrapper key): {f: v for f, v in jira_fields.items() if f not in excluded}.\n- binding_walk.py's ADOPT path emits a nested shape:\n  {\"fields\": _fields, \"jira_fields\": _fields}.\n\napply_inbound.py's _apply_inbound_create leaf already explicitly tolerates BOTH shapes (fields = payload.get(\"fields\") or payload), which is how this has stayed silently correct in production. ADR 0107's typed InboundCreatePayload contract picks the flat shape (differ.py's) as canonical, per e9d5's own corpus/contract decision -- so binding_walk.py's nested shape would fail typed validation today.\n\nThis is a pre-existing inconsistency, NOT introduced by e9d5 -- e9d5 only documents it (see the corpus README and e9d5's ticket comment recording approved intentional deltas) and does not reconcile it, since producer rewiring is ADR 0107's deferred \"Cut\" step and out of e9d5's own scope (AC7).\n\nSuggested follow-up: migrate binding_walk.py's ADOPT path to emit the flat shape (matching differ.py and the ADR 0107 InboundCreatePayload contract), then simplify apply_inbound.py's _apply_inbound_create leaf to drop its dual-shape tolerance, before any producer is rewired to construct InboundCreatePayload directly (that \"Cut\" step is a separate, later ticket).\n\nAcceptance criteria:\n- binding_walk.py's ADOPT path and differ.py's inbound-create path agree on\n  payload shape, verified by a test asserting both producers emit the same\n  normalized shape for an equivalent inbound create.\n- apply_inbound.py's _apply_inbound_create no longer needs to tolerate two\n  shapes (or, if kept for defense-in-depth, the tolerance is documented as\n  intentional rather than load-bearing for a live producer).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Reconcile dual inbound-create payload shapes (differ.py flat vs binding_walk.py nested)"
+      },
       "created_at": "2026-08-30T17:28:59Z",
       "jira_id": "4590704",
       "jira_key": "REB-3960",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-30T17:29:01Z"
     },
@@ -9362,6 +9385,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:15Z"
+    },
+    "2bd6-ff87-d48c-4a65": {
+      "created_at": "2026-08-30T18:36:13Z",
+      "jira_id": "4590709",
+      "jira_key": "REB-3965",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T18:36:15Z"
     },
     "2be7-80d6-208a-4737": {
       "baseline": {
@@ -14054,9 +14084,17 @@
       "updated_at": "2026-08-15T14:57:13Z"
     },
     "3e92-b7f4-dede-4c17": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Prevent a recurrence of the 2026-08-26 /var/gerrit disk-fill (from 5a05)\n\n## Why\nThe acute /var/gerrit disk-fill incident (5a05) was dominated by **one-off investigation evidence written to the Gerrit DATA volume**: `/var/gerrit/rebar-quiet-window-evidence/` held two `epoch-probe-20260826T*` dumps (5.2G each = ~11G, 65% of used space), created during the Aug-26 fill window. They were reclaimed (operator-approved 2026-08-30), taking /var/gerrit from 37% -> 15%. Nothing prevents this class of debris from recurring, and there is no runbook for reclaiming the data volume.\n\n## Acceptance criteria\n1. **Investigation/probe output must never land on the Gerrit DATA volume** (`/var/gerrit`).\n   Establish where probe evidence *should* go (root ephemeral scratch or a size-capped\n   temp), and add a guard/policy so a probe writing under `/var/gerrit` is prevented or\n   loudly flagged. Bound probe artifacts at spawn (cf. AGENTS.md bounded-background-process\n   rule) so they self-clean rather than accumulate.\n2. **Add a `/var/gerrit` DATA-disk reclaim/headroom runbook.** `infra/runbooks/review-bot-ops.md`\n   currently covers ONLY the root volume (`rebar-root-disk-pressure`, docker prunes); the\n   data volume has no reclaim runbook \u2014 this GAP was called out during 5a05 remediation.\n3. (Optional/consider) An alarm or check on `/var/gerrit` NON-`site/` subdirectory growth,\n   so debris is caught before it drives the disk-high alarm.\n\n## Notes / scope boundary\nThis is PREVENTION only. The slower data-disk GROWTH driver (tickets-branch enrichment fan-out, blob-inclusive store) is a SEPARATE root cause tracked in 4520/536b/0754 \u2014 do not duplicate that here.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Prevent investigation evidence on /var/gerrit + add data-disk reclaim runbook"
+      },
       "created_at": "2026-08-30T17:29:02Z",
       "jira_id": "4590705",
       "jira_key": "REB-3961",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-30T17:29:04Z"
     },
@@ -14676,6 +14714,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:28Z"
+    },
+    "41b1-a615-51bd-474c": {
+      "created_at": "2026-08-30T18:36:19Z",
+      "jira_id": "4590710",
+      "jira_key": "REB-3966",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T18:36:22Z"
     },
     "41be-a71e-3074-4e7d": {
       "created_at": "2026-08-15T14:57:28Z",
@@ -18920,7 +18965,7 @@
         },
         "description": "Split from 35ab-f0e0-3e4a-4b72 (fightable-nirvanic-kitten) \u2014 the executor unknown-step site was fixed there; THIS site was escalated because it needs a NEW error-code design decision the operator directed not be made inline.\n\n## Site\n`src/rebar/llm/workflow/editor.py:475` \u2014 `raise WorkflowError(\"the editor front-end bundle is missing (.../editor.js). Build it with: npm ... build\")` (raised when `assets_available()` is False).\n\n## Why escalated, not fixed inline\n1. **Design decision required.** The correct error code is genuinely ambiguous \u2014 a missing LOCAL BUILD ARTIFACT is neither `invalid_input` (the caller's path is fine) nor caller-`not_found` (the caller named no missing resource; the environment is unbuilt). It may warrant a NEW vocabulary code (e.g. a dependency/asset-unavailable code) or a deliberate mapping to an existing one (`command_failed`?). Choosing is a `KNOWN_ERROR_CODES` vocabulary/design decision.\n2. **Not observably misclassified today.** `edit_workflow` is CLI-only \u2014 it is NOT registered as an MCP tool. The CLI `_workflow_edit` (`src/rebar/_cli/_workflow_commands.py:128`) catches `WorkflowError` and prints the raw `Error: <msg>` (exit 1); it never routes through `error_code_for`. So the bare `WorkflowError` here never actually surfaces as `llm_unavailable` on any live surface \u2014 the `error_code_for` mapping is latent. Fixing it would change behavior only for a hypothetical future MCP exposure, which is speculative rather than restoration of an observed misclassification.\n\n## Acceptance (needs operator input)\n- [ ] Operator decides the intended error code for a missing editor build artifact (new code vs existing; and whether this site should even be classified given it is CLI-only today).\n- [ ] If a code is chosen: dedicated `WorkflowError` subclass mirroring `WorkflowNotFoundError`, mapped in `error_code_for`/`_workflow_caller_code`, tested through the actual surface, execute-time outages still `llm_unavailable`, vocabulary + docs (mcp-reference / common.schema.json) updated.\n\ncaused_by shares the parent's origin (8a31-e1c3-cf31-4239) \u2014 the blanket LLMError\u2192llm_unavailable mapping.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Editor missing-bundle WorkflowError: decide error code (escalated design decision; currently CLI-only/latent)"
       },
       "created_at": "2026-08-29T23:30:42Z",
@@ -18929,6 +18974,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T23:30:44Z"
+    },
+    "5524-e353-2e2d-4dbe": {
+      "created_at": "2026-08-30T18:36:26Z",
+      "jira_id": "4590711",
+      "jira_key": "REB-3967",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T18:36:29Z"
     },
     "5528-bcbc-ffaf-4063": {
       "baseline": {
@@ -20182,7 +20234,7 @@
           "timeZone": "America/Los_Angeles"
         },
         "description": "# /var/gerrit data disk filled and has stayed near-full; review-bot went unhealthy\n\n## Impact (stated first)\nThe Gerrit/review-bot box (`i-00880b2c7f13527c5`, region us-east-1) suffered a box-wide disk-fill starting **2026-08-26 ~15:00 PDT**. The `/var/gerrit` data disk jumped from a ~55\u201359% baseline to **93\u201395% within ~6h and has NOT recovered** \u2014 it is still **94%** and the alarm `rebar-gerrit-data-disk-high` is **still in ALARM** at the time of this sweep (2026-08-29 10:00 PDT). During the fill, `rebar/host:reviewbot_healthy` **dropped to 0** (unhealthy) for two multi-hour windows, so LLM-Review capacity was degraded. Gerrit itself stayed up (`gerrit_healthy`=1, `Rebar/Gate:GerritReachable`=1 throughout).\n\n## Evidence \u2014 CloudWatch (namespace rebar/host, InstanceId i-00880b2c7f13527c5)\n\n### `rebar-gerrit-data-disk-high` alarm\n- `describe-alarm-history`: **OK -> ALARM at 2026-08-26T17:55:32 PDT**; no return-to-OK since.\n- StateReason: \"1 datapoint [88.0 (27/08/26 00:50Z)] >= threshold (85.0)\".\n\n### `disk_used_percent` mount=/var/gerrit (Maximum/hour, PDT)\n- Baseline: 52% (08-25 17:00) rising slowly to 59% (08-26 14:00).\n- **Sharp climb**: 08-26 15:00 = 64% -> 16:00 = 81% -> 17:00 = **88%** -> 18:00-20:00 = 89% ->\n  21:00 = **93%**.\n- **Plateau, unrecovered**: 93-95% continuously from 08-26 21:00 through 08-29 10:00\n  (latest datapoint **94%**). Trend: plateaued high, not draining.\n\n### `reviewbot_healthy` (Min/hour = 0 means unhealthy) \u2014 service impact\n- **0** for 08-26 15:00,16:00,17:00,18:00,20:00,21:00 PDT (coincides with the data-disk climb).\n- **0** again for 08-28 16:00-20:00 PDT (coincides with the root-disk thrash + deploy backpressure below).\n\n### Correlated root-disk pressure on the same box (30-GiB gp3 root, `root_disk_used_percent`)\n- `rebar-root-disk-pressure` **flapped into ALARM ~18 times** 08-26 20:41 -> 08-28 10:45 PDT.\n- Root usage oscillated 76-**98%** (peaks: 98% @08-26 15:00, 98% @08-28 01:00), then relaxed\n  to ~72-82% after 08-28 11:00.\n- `disk_pressure_prunes` ran **continuously ~5-6/hour for ~24h** (08-27 10:00 -> 08-28 10:00 PDT)\n  \u2014 the automated reclaim was working overtime and the root disk still sat near-full, matching\n  the \"reclaim frees nothing\" symptom of the closed root-disk tickets.\n\n### Downstream backpressure (08-28 16:00-20:00 PDT, review-bot unhealthy again)\n- `deploy_errors`: Sum=1 at 08-28 16:00 and 17:00 PDT -> `rebar-autodeploy-errors` ALARM\n  17:07->17:47 PDT.\n- `review_interrupts_bound_exceeded`: 08-28 16:00, 18:00, 19:00 (alarm flapped 3x);\n  `review_interrupts_signal_unavailable`: 08-28 17:00 (alarm 17:07->17:22).\n- `deploy_deferrals` climbed to Max 19-20/period on 08-28 evening \u2014 autodeploy repeatedly\n  deferred, consistent with disk pressure + in-flight reviews.\n  (Caveat: some marker-delta counters can over-report on a cold-start republish per closed\n  bug e2a6 widespread-zealous-narwhal; but the co-timed `reviewbot_healthy`=0 and root-disk\n  peaks make a real backpressure episode the stronger reading.)\n\n## Likely common cause (hypothesis)\nA large repository/pack growth landed on the box around 08-26 15:00 PDT, filling both `/var/gerrit` and root simultaneously. This is corroborated by CI's repo-growth guard tripping the same day: `.github/workflows/verify-identity.yml` step **\"Fail closed if the blobless checkout pack exceeds its limit\"** (`REBAR_CHECKOUT_PACK_LIMIT_KIB`, git `size-pack`), plus the mirror pack-size limits. Candidate on-disk consumers to confirm on the box: git repo/pack growth under `/var/gerrit` (tickets-branch and mirrors), Gerrit review artifacts/caches, docker layers/build cache, and journald/logs.\n\n## What this ticket is NOT (dedup)\n- No existing ticket covers the **`/var/gerrit` data disk** mount; all prior disk tickets are\n  the **root** volume or docker cache (3a52 masonic-abeyant-stagbeetle, 9bc0\n  taurine-smiling-hamadryad, 7a41 forgivable-nerdy-genet \u2014 all closed). The data-disk high +\n  sustained-non-recovery is a distinct, currently-active condition.\n- The 08-28 root-disk flapping recurs the closed root-disk-pressure symptom (3a52); linked\n  relates_to for context rather than as this ticket's headline.\n\n## Acceptance criteria\n- [ ] Identify what consumed `/var/gerrit` on 08-26 (du breakdown on the box: git/packs vs\n      review artifacts vs docker vs logs) and confirm/deny the pack-growth hypothesis.\n- [ ] Reclaim or grow `/var/gerrit` so `disk_used_percent` returns below the 85% threshold and\n      `rebar-gerrit-data-disk-high` clears (operator action \u2014 READ-ONLY sweep did not remediate).\n- [ ] Confirm `reviewbot_healthy` returns to steady 1 and stays there.\n- [ ] Add a guard/headroom or growth alarm so a repeat pack-growth event does not silently sit\n      at 93-95% for days (portable: not tied to a single CI provider).\n\n## Constraints / notes\n- Filed by a READ-ONLY AWS ops sweep (window 2026-08-26T17:55 PDT -> 2026-08-29T10:00 PDT). No\n  AWS mutation performed. Remediation (disk cleanup / volume resize) is an operator action.\n- Box logs are NOT shipped to CloudWatch Logs in us-east-1 (only lmn-*/snap-* groups exist), so\n  on-box `du`/journald inspection is required to finish root-cause \u2014 see sweep blind-spot note.",
-        "priority": "High",
+        "priority": "Low",
         "status": "In Progress",
         "summary": "[gerrit-data-disk-high] /var/gerrit sustained \u226593% since 2026-08-26 (still ALARM at 94%); box-wide disk-fill drove review-bot unhealthy"
       },
@@ -24263,9 +24315,17 @@
       "updated_at": "2026-08-15T15:02:02Z"
     },
     "6d60-2d0c-6ff7-444b": {
+      "baseline": {
+        "assignee": null,
+        "description": "Captured 2026-08-30 as the deferred \"Option B\" from Decision 4 (nginx-edge cluster). Idea/undesigned \u2014 needs its own design + ADR before promotion.\n\n## Context\nADR 0079 (autodeploy-on-box-timer, from story 8903 gall-plume-adder) deliberately scoped v1 auto-apply to the review-bot container ONLY; Gerrit config (CONFIG_PATHS) is DETECT-ONLY (signal via AUTODEPLOY_ERROR, never auto-applied) because auto-applying config to a box hosting a live FAIL-CLOSED submit gate is high-risk. ADR 0079 names \"config auto-apply\" as an explicit deferred v2. The nginx edge (`infra/nginx/rebar.conf.template`) is in the SAME deferred bucket.\n\nBug 1d1b (downy-feminist-leopard) is being fixed under Option A (detect-and-signal only): add the edge template to a detect-only manifest so a merged edge change raises AUTODEPLOY_ERROR for an operator to apply, closing the SILENT-failure defect without expanding the unattended auto-apply surface. This idea is the follow-on: make autodeploy actually render + validate + reload the edge unattended.\n\n## Why this is a design project, not a bug fix\n- Blast radius spans every port-443 surface (MCP, /review/, /opcert/, Gerrit) including the submit gate \u2014 a bad reload could freeze all submissions.\n- Needs: template render step, `nginx -t` validation, atomic reload, rollback-to-prior-conf on failure (deployed-sha not advanced), and the ADR 0079 stability constraints (bounded blast radius = never touch the gerrit container; self-heal; SHA-keyed backoff; flock serialisation).\n- OSS precedent to weigh: Argo CD makes auto-sync opt-in per-app with explicit automated-rollback/self-heal toggles (drift DETECTION is always on; APPLY is deliberate); Terraform separates plan (detect) from apply (mutate); ingress controllers gate reload behind `nginx -t`. Design should mirror that \"detect always, apply as a deliberate, separately-designed step\" posture.\n\n## Scope sketch (to be designed)\n- NGINX_PATHS/EDGE_PATHS manifest + render pipeline in autodeploy.sh (infra/scripts/, outside eb64 scope).\n- Validate-then-atomic-swap with rollback; leave prior working edge serving on failure.\n- Live-validation harness analogous to a61d's AC5 (probe the edge post-deploy).\n- ADR amendment/new ADR recording the v1->v2 boundary crossing.\n\n## Relations\nFollow-on to 1d1b (downy-feminist-leopard); would fully automate what a61d (enchanting-phantastic-weevil) currently needs an operator deploy for. Discovered-from lineage: 8903 (v1 scoping) -> 1d1b.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "v2: autodeploy full auto-apply of the nginx edge (render + nginx -t + atomic reload + rollback)"
+      },
       "created_at": "2026-08-30T17:29:08Z",
       "jira_id": "4590706",
       "jira_key": "REB-3962",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-30T17:29:10Z"
     },
@@ -33552,6 +33612,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:21Z"
+    },
+    "96f9-e324-c22f-49a2": {
+      "created_at": "2026-08-30T18:36:29Z",
+      "jira_id": "4590712",
+      "jira_key": "REB-3968",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T18:36:33Z"
     },
     "96fe-14c6-4c35-4936": {
       "baseline": {
@@ -45800,6 +45867,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:43Z"
     },
+    "ce15-28c5-80e0-49c2": {
+      "created_at": "2026-08-30T18:36:34Z",
+      "jira_id": "4590713",
+      "jira_key": "REB-3969",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T18:36:38Z"
+    },
     "ce38-2914-d2f4-4826": {
       "baseline": {
         "assignee": {
@@ -45900,9 +45974,17 @@
       "updated_at": "2026-08-15T15:11:46Z"
     },
     "ce6b-cffa-6450-4fa5": {
+      "baseline": {
+        "assignee": null,
+        "description": "Spun from 73d8 (brainy-convulsant-unicorn) and 551b (sanidine-cilium-eland) during the 2026-08-30 error-code decision pass.\n\n## Problem\n`error_code_for` (`src/rebar/_errors.py`) branch 6 maps ANY `LLMError \u2192 llm_unavailable`. That over-claims an AI-provider outage for many faults that are not outages \u2014 every non-availability `LLMError`/`WorkflowError` subclass (editor missing-bundle, workflow parse/wiring, etc.). This is the residual of origin 8a31's blanket mapping and the systematic completion of epic 3405's descriptiveness intent.\n\n## Fix\nNarrow branch 6 so `llm_unavailable` fires ONLY for `LLMUnavailableError` (the true transient-outage type). Every other `LLMError` subclass falls through to its explicit `error_code` attribute (branch 5) if it has one, else to `command_failed` (branch 7) \u2014 honest \"unclassified\", not a false outage.\n\n## Blast radius (must sweep)\nEnumerate ALL `LLMError` subclasses (`src/rebar/llm/errors.py` + workflow error classes). For each, confirm the post-change code is correct: a genuine transient outage must remain `LLMUnavailableError \u2192 llm_unavailable`; anything else must land on an accurate code. Add held-out tests through real surfaces proving (a) an execute-time outage still returns `llm_unavailable`, (b) a non-outage `WorkflowError` (e.g. the editor missing-bundle at `editor.py:475`) returns `command_failed`.\n\n## Resolves 551b\nThis delivers 551b's ruling: editor missing-bundle \u2192 `command_failed`, no new vocabulary. The finer `environment_unready` code for a missing local build artifact stays DEFERRED (revisit trigger: `edit_workflow` becoming classifier-reachable on a live MCP surface); analysis retained on 551b.\n\n## Coordination\nTouches `src/rebar/llm/` = eb64 (financial-stoneware-brant) DECLARED SCOPE. Implement in coordination with eb64. `_errors.py` itself is top-level (not eb64).\n\n## Acceptance\n- [ ] branch 6 narrowed to `LLMUnavailableError`; all other `LLMError` subclasses sweep-verified to accurate codes.\n- [ ] Held-out tests: outage \u2192 `llm_unavailable`; editor missing-bundle \u2192 `command_failed`; through real surfaces.\n- [ ] caused_by 8a31 recorded at close.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Reserve llm_unavailable for true outages: narrow error_code_for branch 6 to LLMUnavailableError"
+      },
       "created_at": "2026-08-30T17:29:10Z",
       "jira_id": "4590707",
       "jira_key": "REB-3963",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-30T17:29:12Z"
     },
@@ -49360,6 +49442,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:06Z"
     },
+    "dc2c-0bb5-4272-46f3": {
+      "created_at": "2026-08-30T18:36:38Z",
+      "jira_id": "4590714",
+      "jira_key": "REB-3970",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T18:36:42Z"
+    },
     "dc33-4adf-4e4b-4fd0": {
       "baseline": {
         "assignee": null,
@@ -50351,6 +50440,13 @@
       "peer_parent": "REB-309",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:33Z"
+    },
+    "e0d5-2b29-2814-4421": {
+      "created_at": "2026-08-30T18:36:42Z",
+      "jira_id": "4590715",
+      "jira_key": "REB-3971",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T18:36:46Z"
     },
     "e0e2-7205-48cc-4480": {
       "baseline": {
@@ -52572,10 +52668,24 @@
     },
     "e9d5-c850-d505-4a5a": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context / Problem\n\nImplement the contract decided by the preceding architecture story without changing the production write route yet. The key deliverable is sufficient deterministic parity evidence to make the later cutover/deletion safe within this epic.\n\nExisting useful assets include the real store-copy scrub/isolation fixtures, canonical serialization, route census, verified Cloud/DC fakes, and comprehensive mutation tests. Reuse them rather than creating a parallel reconciler harness.\n\n## Approach\n\n- Introduce the approved direction/action payload union and thread it through planner and coordinator boundaries up to a side-effect-free adapter projection seam.\n- Build a versioned corpus from deterministic synthetic tickets plus a scrubbed representative store snapshot. Include edge and failure shapes, not credentials or live bindings.\n- Drive legacy and typed planning/serialization over identical observations. Capture canonical normalized intent/outcome traces without invoking either writer.\n- Compare ordering, fields, identity scopes, diagnostics, follow-ons, suppression, retry dispositions, and modeled final state.\n- Run this oracle in default portable CI with no Jira, Docker, external service, or CI-provider dependency.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/` \u2014 typed payloads and the effect-free trace projection.\n- `tests/unit/rebar_reconciler/` \u2014 portable replay and verified adapter contracts.\n- `tests/fixtures/` \u2014 versioned synthetic/scrubbed corpus with no credentials or live bindings.\n\n## Testing\n\nHappy path: representative inbound and outbound mutations produce matching normalized legacy/typed traces and modeled state. Edge/failure paths: malformed payloads, ambiguous commits, exhaustion, suppression, follow-ons, and cross-project routes either match or produce an approved named delta. Effect spies fail if the shadow path reaches Jira, the ticket store, a subprocess, clock sleep, or network.\n\n## Acceptance Criteria\n\n- [ ] Planners and coordinator use named payload types for every supported direction/action pair; construction rejects missing, extra critical, or wrong-action fields before effects.\n- [ ] The shadow comparator executes no Jira transport or ticket-store write, proven with failing spies on every effect seam.\n- [ ] The corpus covers create/update/delete/probe/conflict, inbound-only actions, links/comments/labels/status/parent/assignee/binding fields, duplicate and malformed inputs, suppression/follow-ons, ambiguous outcomes, retry exhaustion, and multi-project routing.\n- [ ] Replaying the same corpus is deterministic and idempotent; corpus version/provenance and normalization rules are explicit.\n- [ ] Legacy and typed traces have zero unexplained differences. Each intentional delta has a named test, rationale, and approval recorded on the ticket.\n- [ ] Verified-fake Jira Cloud and Data Center adapter contract tests pass without selecting a live backend.\n- [ ] Production continues to use the pre-cutover route in this story, and no temporary bridge is presented as the final architecture.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\nImplement the contract decided by the preceding architecture story without changing the production write route yet. The key deliverable is sufficient deterministic parity evidence to make the later cutover/deletion safe within this epic.\n\nExisting useful assets include the real store-copy scrub/isolation fixtures, canonical serialization, route census, verified Cloud/DC fakes, and comprehensive mutation tests. Reuse them rather than creating a parallel reconciler harness.\n\n## Approach\n\n- Introduce the approved direction/action payload union and thread it through planner and coordinator boundaries up to a side-effect-free adapter projection seam.\n- Build a versioned corpus from deterministic synthetic tickets plus a scrubbed representative store snapshot. Include edge and failure shapes, not credentials or live bindings.\n- Drive legacy and typed planning/serialization over identical observations. Capture canonical normalized intent/outcome traces without invoking either writer.\n- Compare ordering, fields, identity scopes, diagnostics, follow-ons, suppression, retry dispositions, and modeled final state.\n- Run this oracle in default portable CI with no Jira, Docker, external service, or CI-provider dependency.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/` \u2014 typed payloads and the effect-free trace projection.\n- `tests/unit/rebar_reconciler/` \u2014 portable replay and verified adapter contracts.\n- `tests/fixtures/` \u2014 versioned synthetic/scrubbed corpus with no credentials or live bindings.\n\n## Testing\n\nHappy path: representative inbound and outbound mutations produce matching normalized legacy/typed traces and modeled state. Edge/failure paths: malformed payloads, ambiguous commits, exhaustion, suppression, follow-ons, and cross-project routes either match or produce an approved named delta. Effect spies fail if the shadow path reaches Jira, the ticket store, a subprocess, clock sleep, or network.\n\n## Acceptance Criteria\n\n- [ ] Planners and coordinator use named payload types for every supported direction/action pair; construction rejects missing, extra critical, or wrong-action fields before effects.\n- [ ] The shadow comparator executes no Jira transport or ticket-store write, proven with failing spies on every effect seam.\n- [ ] The corpus covers create/update/delete/probe/conflict, inbound-only actions, links/comments/labels/status/parent/assignee/binding fields, duplicate and malformed inputs, suppression/follow-ons, ambiguous outcomes, retry exhaustion, and multi-project routing.\n- [ ] Replaying the same corpus is deterministic and idempotent; corpus version/provenance and normalization rules are explicit.\n- [ ] Legacy and typed traces have zero unexplained differences. Each intentional delta has a named test, rationale, and approval recorded on the ticket.\n- [ ] Verified-fake Jira Cloud and Data Center adapter contract tests pass without selecting a live backend.\n- [ ] Production continues to use the pre-cutover route in this story: the story's diff touches no production dispatch entry point (`typed_dispatch._LEAVES`, `batch_dispatch._mutation_to_batch_dict`, `applier.apply()`, or any producer in `differ.py` / `outbound_mutation_builders.py` / `run_differs.py` / `outbound_pass.py` / `binding_walk.py` / `invariants.py`) \u2014 verified by an explicit route-census check (a test asserting each of those callables is byte-identical / import-reachable and unmodified in this change) \u2014 and no module introduced by this story is later relied upon as a permanent production write path (verified by: every new module lives under the shadow-only seam named in Scope, is exercised only by tests, and is not imported by any of the production entry points just named).",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Build typed reconciler payloads and a portable shadow-replay corpus"
       },
       "created_at": "2026-08-29T18:34:57Z",
@@ -56792,6 +56902,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:10Z"
     },
+    "fc84-a6a6-14c3-4bc8": {
+      "created_at": "2026-08-30T18:36:46Z",
+      "jira_id": "4590716",
+      "jira_key": "REB-3972",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T18:36:49Z"
+    },
     "fc9e-677e-a271-4678": {
       "baseline": {
         "assignee": null,
@@ -59435,7 +59552,21 @@
     "1788109187216395001": "__rebar_unknown_comment_id__",
     "1788109331108636036": "__rebar_unknown_comment_id__",
     "1788110203745730394": "__rebar_unknown_comment_id__",
-    "1788110544788464229": "__rebar_unknown_comment_id__"
+    "1788110544788464229": "__rebar_unknown_comment_id__",
+    "1788111118258972737": "__rebar_unknown_comment_id__",
+    "1788111164141565880": "__rebar_unknown_comment_id__",
+    "1788111243321312629": "__rebar_unknown_comment_id__",
+    "1788111410524074297": "__rebar_unknown_comment_id__",
+    "1788111523609659030": "__rebar_unknown_comment_id__",
+    "1788111573982315098": "__rebar_unknown_comment_id__",
+    "1788112024255189644": "__rebar_unknown_comment_id__",
+    "1788112377180339824": "__rebar_unknown_comment_id__",
+    "1788112548972277287": "__rebar_unknown_comment_id__",
+    "1788112826722374375": "__rebar_unknown_comment_id__",
+    "1788112928644830047": "__rebar_unknown_comment_id__",
+    "1788113090134215004": "__rebar_unknown_comment_id__",
+    "1788114356094419001": "__rebar_unknown_comment_id__",
+    "1788114703454512001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -61780,7 +61911,16 @@
     "REB-3961": "3e92-b7f4-dede-4c17",
     "REB-3962": "6d60-2d0c-6ff7-444b",
     "REB-3963": "ce6b-cffa-6450-4fa5",
+    "REB-3964": "029d-126b-d781-42f7",
+    "REB-3965": "2bd6-ff87-d48c-4a65",
+    "REB-3966": "41b1-a615-51bd-474c",
+    "REB-3967": "5524-e353-2e2d-4dbe",
+    "REB-3968": "96f9-e324-c22f-49a2",
+    "REB-3969": "ce15-28c5-80e0-49c2",
     "REB-397": "fa52-fec3-ac13-49b3",
+    "REB-3970": "dc2c-0bb5-4272-46f3",
+    "REB-3971": "e0d5-2b29-2814-4421",
+    "REB-3972": "fc84-a6a6-14c3-4bc8",
     "REB-398": "faa8-1361-0718-47a7",
     "REB-399": "fd2b-b26e-9fef-4bae",
     "REB-4": "0224-f86e-2098-4b4e",
