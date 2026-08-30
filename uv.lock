@@ -1778,6 +1778,7 @@ adf = [
     { name = "mistune" },
 ]
 agents = [
+    { name = "anthropic" },
     { name = "json-repair" },
     { name = "pydantic" },
     { name = "pydantic-ai-slim", extra = ["anthropic", "duckduckgo", "retries"] },
@@ -1786,6 +1787,7 @@ bedrock = [
     { name = "pydantic-ai-slim", extra = ["bedrock"] },
 ]
 dev = [
+    { name = "anthropic" },
     { name = "boto3" },
     { name = "botocore" },
     { name = "build" },
@@ -1855,6 +1857,7 @@ wiki = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anthropic", marker = "extra == 'agents'", specifier = ">=0.121.0,<1" },
     { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.43.0" },
     { name = "boto3", marker = "extra == 'reviewbot'" },
     { name = "botocore", marker = "extra == 'dev'", specifier = ">=1.43.0" },
