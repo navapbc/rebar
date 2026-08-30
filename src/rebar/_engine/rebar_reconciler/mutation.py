@@ -86,6 +86,24 @@ class Mutation:
         return hash((self.direction, self.action, self.target))
 
 
+def _payload_as_dict(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Project a ``Mutation.payload`` (typed or legacy dict) to its dict shape.
+
+    A typed payload (ADR 0107, ``mutation_payloads.py``) exposes
+    ``as_legacy_dict()``; a duck-typed check — rather than an import of
+    ``mutation_payloads`` — avoids adding a load-order dependency to this
+    module, which is itself dynamically loaded under a canonical
+    ``sys.modules`` key elsewhere in the package (ADR 0083). A plain
+    ``Mapping`` (the pre-existing untyped-dict shape) is copied via
+    ``dict(...)`` unchanged, so an already-shipped manifest's bytes are
+    unaffected by whether its payload happens to be typed or a raw dict.
+    """
+    projector = getattr(payload, "as_legacy_dict", None)
+    if callable(projector):
+        return projector()
+    return dict(payload)
+
+
 def serialize_manifest(mutations: Iterable[Mutation]) -> tuple[str, str]:
     """Serialize a list of Mutations to a canonical JSON manifest + sha256 hash.
 
@@ -98,7 +116,7 @@ def serialize_manifest(mutations: Iterable[Mutation]) -> tuple[str, str]:
             "direction": m.direction.value,
             "action": m.action.value,
             "target": m.target,
-            "payload": dict(m.payload),
+            "payload": _payload_as_dict(m.payload),
             "provenance": dict(m.provenance),
         }
         for m in sorted_muts
