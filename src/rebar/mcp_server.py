@@ -654,12 +654,19 @@ def build_server(cfg=None):
     # them through a proxy that runs each tool under suppress_cross_session_warning():
     # a scoped guard makes the field the single advisory without a process-global
     # warnings filter (which would silence CrossSessionWarning for other import-rebar
-    # callers sharing this process).
+    # callers sharing this process). They are ALSO registered through a second proxy
+    # that composes-and-binds ONE authoritative OperationSnapshot per tool call (RP-04
+    # S2, ticket 3a08) — read+write only; LLM tools intentionally stay on the
+    # diagnostic-only shadow path pending ticket ec44.
     from rebar._lib_warn import suppress_library_double_advisory
+    from rebar._operation_config import bind_operation_snapshot_for_tools
 
-    register_read_tools(suppress_library_double_advisory(mcp), ctx)
+    def _instrumented(inner_mcp):
+        return bind_operation_snapshot_for_tools(suppress_library_double_advisory(inner_mcp))
+
+    register_read_tools(_instrumented(mcp), ctx)
     register_llm_tools(mcp, ctx)
-    register_write_tools(suppress_library_double_advisory(mcp), ctx)
+    register_write_tools(_instrumented(mcp), ctx)
 
     # Box-facing health/gauge/grace (ADR deft-evolutive-mosasaur): expose /health with
     # the certified-op in-flight gauge and instrument the LLM tools. Harmless for stdio
