@@ -125,7 +125,7 @@ def _run_tier1(args: argparse.Namespace) -> int:
         seed=args.seed,
     )
 
-    report_path = out_dir / f"tier1-{candidate_name.replace('/', '_')}-{result['run_id']}.md"
+    report_path = out_dir / f"{result['run_id']}.md"
     report_path.write_text(tier1.render_tier1_report(result), encoding="utf-8")
     sys.stdout.write(
         f"wrote {report_path}\n"
