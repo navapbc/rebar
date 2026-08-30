@@ -114,3 +114,8 @@ infra/terraform/tf.plan
 infra/terraform/tf.plan.json
 infra/terraform/.terraform/
 .tools/
+
+# plan-review replay corpus cache (celestine-treasonous-ewe): the compact per-manifest-hash
+# JSONL corpus is a rebuildable local cache, keyed by content hash — never committed. The
+# manifest itself (docs/experiments/plan-review-gate/replay/corpus-*.manifest.json) is.
+docs/experiments/plan-review-gate/replay/cache/
