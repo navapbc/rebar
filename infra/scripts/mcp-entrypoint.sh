@@ -129,6 +129,58 @@ clear_tracker_dir() {
 # directory ENTRY, so it cannot make the clone target non-empty. Being a kernel lock, it is
 # released automatically when the holder dies -- so a container killed mid-clone cannot wedge
 # the store, and there is no stale-lock detection, timestamp, or marker file to get wrong.
+#
+# THE INVARIANT, stated so a future author can CHECK it rather than infer it: EVERY step that
+# writes into a shared-volume directory runs through `with_dir_lock` below. The deploy mutex
+# cannot stand in for it. `autodeploy.sh` (exec 9>"$LOCK"; flock -n 9) guards ONE deploy TICK
+# on the host, but this entrypoint is reached by launch paths that take NO deploy lock at all:
+#
+#   * dockerd restarting the `restart: always` compose `mcp:` service (a daemon restart, a host
+#     reboot, or the documented crash-loop when mcp-static-tokens.json is absent);
+#   * an operator runbook restart (infra/runbooks/mcp-client-pats.md);
+#   * autodeploy's OWN provisioning, which is backgrounded and OUTLIVES the tick that started
+#     it (/health answers before the store exists), so the deploy flock is already released
+#     while this entrypoint is still cloning, and the next 2-minute tick can start a second
+#     container into the same volume.
+#
+# Serialization therefore has to live HERE, per step. The residual defect that proved this was
+# the ensure step (reviewbot-ensure-tickets.sh -> rebar._store.ensures.run_ensures): it takes
+# rebar's OWN write lock by creating `.ticket-write.lock` inside the store, so running it
+# unlocked wrote into a directory a peer container was clearing and cloning into. It now runs
+# through `with_dir_lock` on the tracker inode, exactly like the clear+clone.
+#
+# AC2 DECISION (recorded here because this is where an author reasons about the launch paths):
+# the compose `mcp:` service KEEPS `restart: always` on host 8091 and is NOT reduced to a
+# boot-only backend. dockerd-managed restart is the only thing that restores the endpoint after
+# a reboot or daemon restart when no autodeploy tick has fired, and 8091 is reserved for it in
+# the managed port pool (autodeploy.sh MCP_PORT/MCP_RELEASES_CAP). What makes that restart safe
+# alongside blue/green containers on the same volume is THIS file's per-step serialization, not
+# the deploy mutex. Revisiting the policy (e.g. demoting 8091 to boot-only) is an operator
+# call, not a change to make silently from here.
+
+# with_dir_lock <dir> <label> <cmd> [args...] — run <cmd args...> while holding an exclusive
+# `flock` on <dir>'s OWN INODE, then ALWAYS release it. This is the single reuse seam every
+# shared-volume writer routes through (AC3): a new step reuses it rather than hand-rolling
+# another `flock` block. <dir> MUST already exist -- the lock IS the inode, so there is nothing
+# to open otherwise; callers create the leaf before calling. fd 9 is used throughout: these
+# calls are strictly SEQUENTIAL (never nested), so one call fully acquires and releases before
+# the next opens the fd, and a single fd cannot alias another. The `|| wdl_rc=$?` keeps `set -e`
+# from aborting on a non-zero <cmd>, matching the soft-failure posture of the whole script.
+with_dir_lock() {
+  wdl_dir="$1"
+  wdl_label="$2"
+  shift 2
+  exec 9<"$wdl_dir"
+  if ! flock -w "$MCP_RECLONE_LOCK_WAIT" 9; then
+    echo "mcp: timed out waiting for the ${wdl_label} lock" >&2
+    exec 9<&-
+    return 1
+  fi
+  wdl_rc=0
+  "$@" || wdl_rc=$?
+  exec 9<&-
+  return "$wdl_rc"
+}
 
 store_head_resolves() {
   git -C "${REBAR_TRACKER_DIR}" rev-parse --verify -q HEAD >/dev/null 2>&1
@@ -149,31 +201,29 @@ reclone_store() {
     echo "mcp: tickets store directory is unavailable" >&2
     return 1
   fi
-  # Serialized: another container may already be clearing/cloning this same volume.
-  exec 9<"$dir"
-  if ! flock -w "$MCP_RECLONE_LOCK_WAIT" 9; then
-    echo "mcp: timed out waiting for the tickets re-clone lock" >&2
-    exec 9<&-
-    return 1
-  fi
+  # Serialized on the tracker directory's inode: another container may already be
+  # clearing/cloning this same volume.
+  with_dir_lock "$dir" "tickets re-clone" reclone_store_locked
+}
+
+# The clear+clone body, run while holding the tracker-directory lock (via with_dir_lock).
+reclone_store_locked() {
   # Double-checked: the container that held the lock may have finished the clone while we
   # waited, in which case re-cloning ~200k commits again would be pure waste.
   if store_head_resolves; then
-    exec 9<&-
     echo "mcp: tickets store was re-cloned by another container" >&2
     return 0
   fi
-  rc=0
+  reclone_rc=0
   if clear_tracker_dir; then
     git clone --single-branch --branch tickets "${MCP_TICKETS_URL}" "${REBAR_TRACKER_DIR}" || {
       echo "mcp: tickets store clone deferred (deploy canary)" >&2
-      rc=1
+      reclone_rc=1
     }
   else
-    rc=1
+    reclone_rc=1
   fi
-  exec 9<&-
-  return "$rc"
+  return "$reclone_rc"
 }
 
 # --- code checkout ------------------------------------------------------------------
@@ -224,16 +274,14 @@ clone_code() {
   fi
   # Serialized on the checkout directory's OWN INODE, for the same reasons the tickets
   # re-clone is (shared volume, blue/green overlap, `restart: always` containers that take no
-  # deploy lock). Separate fd from the tickets lock so the two never alias.
-  exec 8<"$code_dir"
-  if ! flock -w "$MCP_RECLONE_LOCK_WAIT" 8; then
-    echo "mcp: timed out waiting for the code checkout lock" >&2
-    exec 8<&-
-    return 1
-  fi
+  # deploy lock).
+  with_dir_lock "$code_dir" "code checkout" clone_code_locked
+}
+
+# The clear+clone body for the code checkout, run while holding the checkout-directory lock.
+clone_code_locked() {
   # Double-checked: a peer may have finished the clone while we waited.
   if code_repo_present; then
-    exec 8<&-
     echo "mcp: code checkout was cloned by another container" >&2
     return 0
   fi
@@ -248,7 +296,6 @@ clone_code() {
     echo "mcp: refusing to clear the code checkout — MCP_CODE_DIR is not a safe absolute path" >&2
     code_rc=1
   fi
-  exec 8<&-
   return "$code_rc"
 }
 
@@ -259,6 +306,12 @@ provision_code() {
   [ -e "${MCP_CODE_DIR}/.git" ] &&
     echo "mcp: unusable code checkout (no resolvable HEAD) — re-cloning" >&2
   clone_code
+}
+
+# Converge the freshly-cloned worktree into a writable rebar store. Factored so it can be
+# handed to `with_dir_lock` as the command run under the tracker-directory lock.
+ensure_store() {
+  sh "${MCP_ENSURE_SCRIPT}" "${REBAR_TRACKER_DIR}"
 }
 
 provision_store() {
@@ -299,11 +352,31 @@ provision_store() {
   # swallowed into a success and never allowed to stop the container booting.
   provision_code || rc=1
   # Converge the (possibly freshly-cloned) worktree into a WRITABLE rebar store:
-  # repo-local git identity + the `.env-id` marker. Idempotent.
-  sh "${MCP_ENSURE_SCRIPT}" "${REBAR_TRACKER_DIR}" || {
-    echo "mcp: tickets store ensure deferred (see logs)" >&2
-    rc=1
-  }
+  # repo-local git identity + the `.env-id` marker. Idempotent. This step is NOT read-only:
+  # run_ensures takes rebar's own write lock by creating `.ticket-write.lock` inside the store,
+  # so it mutates the shared volume and MUST be serialized on the tracker inode, exactly like
+  # the clear+clone above -- otherwise it interleaves with a peer container's clear+clone
+  # (bug beton-inversive-stag). Only a SAFE, existing absolute tracker dir can be locked (the
+  # lock is the inode); an unsafe/relative dir has no real shared volume behind it, so the
+  # helper -- which no-ops on a missing/non-git dir -- runs unlocked to preserve the soft
+  # posture the surrounding tests pin.
+  if tracker_dir_is_safe; then
+    ensure_dir="$(tracker_dir)"
+    mkdir -p "$ensure_dir" 2>/dev/null || true
+  else
+    ensure_dir=""
+  fi
+  if [ -n "$ensure_dir" ] && [ -d "$ensure_dir" ]; then
+    with_dir_lock "$ensure_dir" "tickets ensure" ensure_store || {
+      echo "mcp: tickets store ensure deferred (see logs)" >&2
+      rc=1
+    }
+  else
+    ensure_store || {
+      echo "mcp: tickets store ensure deferred (see logs)" >&2
+      rc=1
+    }
+  fi
   echo "mcp: tickets store provisioning finished" >&2
   return "$rc"
 }
