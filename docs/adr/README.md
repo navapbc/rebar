@@ -21,6 +21,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0082 — Code-review impact is a two-lane, tier-tagged, severity-first MAX](0082-code-review-two-lane-tier-tagged-impact.md)
 - [0086 — Store-wide cross-ticket overlap detection (Cupid digests, no embeddings)](0086-cross-ticket-overlap.md)
 - [0088 — Code-review novelty convergence (per-citation region-gated rising floor)](0088-code-review-novelty-convergence.md)
+- [0108 — Retire the severity label; priority + blocking/advisory is the canonical signal](0108-retire-severity-label.md)
 
 ## Plan review & criteria
 
