@@ -1,0 +1,30 @@
+{
+  "content_hash": "8a7fc73b3292c6fbb0ac8d3284302411757a840799864644576761083f1c5646",
+  "row_count": 6482,
+  "schema_histogram": {
+    "plan_review_result_v1": 1833,
+    "plan_review_result_v2": 4649
+  },
+  "stores": {
+    "legacy-modernization-navigator": 74,
+    "rebar": 6408
+  },
+  "stores_attempted": {
+    "legacy-modernization-navigator": "/Users/joeoakhart/legacy-modernization-navigator/.tickets-tracker",
+    "rebar": "/Users/joeoakhart/rebar/.tickets-tracker"
+  },
+  "unverified_count": 280,
+  "verdict_histogram": {
+    "BLOCK": 2803,
+    "INDETERMINATE": 321,
+    "PASS": 3358
+  },
+  "verified_by_generation": {
+    "current": 5754,
+    "post_2be7_pre_reason": 0,
+    "post_330c_pre_2be7": 9,
+    "pre_330c": 439
+  },
+  "verified_count": 6202,
+  "verified_ratio": 0.9568034557235421
+}
