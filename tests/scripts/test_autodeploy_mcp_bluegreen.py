@@ -2185,3 +2185,69 @@ def test_container_with_no_handshake_field_still_promotes(mcp_box: dict[str, obj
     assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
         f"a mixed-version deploy must not be blocked by the new gate\n{ctx}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# manifest completeness: the mcp ENTRYPOINT source triggers a rebuild          #
+# --------------------------------------------------------------------------- #
+
+# git stub for the entrypoint test: `main` advanced and ONLY infra/scripts/mcp-entrypoint.sh
+# changed. The diff HONORS the pathspec, so `mcp_delta` fires ONLY if MCP_PATHS enumerates the
+# entrypoint source; every other manifest's diff names other files and stays empty.
+_GIT_STUB_ENTRYPOINT_ONLY = r"""
+args=("$@"); sub=""
+for ((i=0; i<${#args[@]}; i++)); do
+  case "${args[i]}" in -C) ((i++)) ;; -*) ;; *) sub="${args[i]}"; break ;; esac
+done
+case "$sub" in
+  remote) echo "https://github.com/navapbc/rebar.git"; exit 0 ;;
+  fetch) exit 0 ;;
+  rev-parse) cat "__TARGET_FILE__"; exit 0 ;;
+  checkout) exit 0 ;;
+  diff)
+    case "$*" in
+      *infra/scripts/mcp-entrypoint.sh*) echo "infra/scripts/mcp-entrypoint.sh" ;;
+    esac
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+"""
+
+
+def test_entrypoint_source_change_rebuilds_the_mcp_image(mcp_box: dict[str, object]) -> None:
+    """A change to ONLY ``infra/scripts/mcp-entrypoint.sh`` — the MCP container ENTRYPOINT baked
+    into the image by ``Dockerfile.mcp`` (``install ... mcp-entrypoint.sh /usr/local/bin`` +
+    ``ENTRYPOINT``) — must rebuild and blue-green cut over the mcp image, exactly as a
+    ``Dockerfile.mcp`` change does. Before the fix the entrypoint source was absent from
+    ``MCP_PATHS`` (and every other manifest), so ``mcp_delta`` stayed false and the running
+    container kept the stale entrypoint with no rebuild (bug 5d4c-a25b-b612-4aca)."""
+    bin_dir: Path = mcp_box["bin_dir"]  # type: ignore[assignment]
+    target_file: Path = mcp_box["target_file"]  # type: ignore[assignment]
+    _stub(
+        bin_dir,
+        "git",
+        _GIT_STUB_ENTRYPOINT_ONLY.replace("__TARGET_FILE__", str(target_file)),
+    )
+
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "stop compose-mcp-1")
+    upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, (
+        f"an entrypoint-source change must drive a healthy blue-green cutover\n{ctx}"
+    )
+    assert "compose-build-mcp" in cmds, (
+        "an entrypoint-source change must REBUILD the immutable mcp image — otherwise the "
+        f"running container keeps the stale entrypoint\n{ctx}"
+    )
+    run_line = _run_line(cmds)
+    assert "-p 8092" in run_line, (
+        f"the rebuilt image must start on the free blue/green port 8092\n{ctx}"
+    )
+    assert "nginx-reload" in cmds, (
+        f"the upstream must be flipped to the rebuilt container with an nginx reload\n{ctx}"
+    )
+    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+        f"the materialized include must now point at the rebuilt container's port\n{ctx}"
+    )
