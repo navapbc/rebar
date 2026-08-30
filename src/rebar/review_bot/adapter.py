@@ -66,6 +66,7 @@ _TAG_SUFFIXES: dict[str, str] = {
     "finding": "BLOCK — finding",
     "gate-disabled": "BLOCK — coverage-gap (gate-disabled)",
     "llm-unavailable": "BLOCK — coverage-gap (llm-unavailable)",
+    "input-rejected": "BLOCK — coverage-gap (input-rejected)",
     "scanner": "BLOCK — coverage-gap (scanner)",
     "review-error": "BLOCK — coverage-gap (review-error)",
     "indeterminate": "BLOCK — coverage-gap (indeterminate)",
@@ -113,6 +114,8 @@ def _coverage_gap_reason(coverage: dict[str, Any]) -> str | None:
         return "gate-disabled"
     if coverage.get("llm_unavailable"):
         return "llm-unavailable"
+    if coverage.get("input_rejected"):
+        return "input-rejected"
     for note in coverage.get("security_detectors") or []:
         if note.get("reason") == "fail-closed-abstain":
             return "scanner"
@@ -180,6 +183,8 @@ def _summarize(reason: str, verdict: dict[str, Any]) -> str:
         detail = {
             "gate-disabled": "the code-review gate is disabled — cannot certify",
             "llm-unavailable": f"the review LLM was unavailable ({llm_err})",
+            "input-rejected": "the review input was rejected (deterministic — oversized or "
+            "policy-blocked; re-running the same input will be rejected identically)",
             "indeterminate": "the review returned INDETERMINATE with no blocking findings "
             "(could not establish coverage — not a code finding)",
         }.get(reason, "the code review could not run")
