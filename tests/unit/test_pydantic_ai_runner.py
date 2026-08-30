@@ -537,6 +537,60 @@ def test_usage_is_surfaced_on_the_result_dict():
     }
 
 
+# ── Fault-matrix: a raise AT finalization (ticket c465) ─────────────────────────
+# `finalize_outcome` runs OUTSIDE the ProviderSession `with` block and OUTSIDE the
+# try/except that does failure accounting (runner.py:605-707) — both have already
+# exited by the time it's called (runner.py:708 sits at the SAME indent as the `with`
+# at :452, and finalize_outcome itself follows two statements later at :725). This
+# characterizes — pins as CURRENT behavior, does not change it — what a raise THERE
+# does and does not do: log_call_success (:716) already fired by design (its own
+# docstring: "called BEFORE finalize_outcome ... this line is already emitted when
+# it does" raise), but record_call_spend (:751) sits AFTER finalize_outcome and so
+# never runs — a call that burned tokens and then failed schema validation leaves no
+# spend row. This is the mirror gap to bug 8455 (which covers a raise during the
+# agent call itself, inside the except block) and is NOT fixed by 8455's fix.
+
+
+def test_a_raise_in_finalize_outcome_still_logs_but_skips_the_spend_row(monkeypatch, caplog):
+    from rebar.llm import runner as runner_mod
+
+    def _explode_finalize(outcome, **kw):
+        raise ValueError("schema validation blew up in finalize_outcome")
+
+    spend_calls: list[dict] = []
+
+    def _record_spend(usage, **kw):
+        spend_calls.append({"usage": usage, **kw})
+
+    monkeypatch.setattr(runner_mod._findings, "finalize_outcome", _explode_finalize)
+    monkeypatch.setattr(runner_mod, "record_call_spend", _record_spend)
+
+    runner = PydanticAIRunner(
+        _cfg(),
+        model_override=_function_model('{"verdict": "PASS", "findings": [], "summary": "ok"}'),
+    )
+    with caplog.at_level("INFO", logger="rebar.llm.agent_call"):
+        with pytest.raises(ValueError, match="schema validation blew up in finalize_outcome"):
+            runner.run(
+                RunRequest(
+                    system_prompt="x",
+                    instructions="y",
+                    config=runner._config,
+                    reviewers=["v"],
+                    mode="structured",
+                    output_schema="completion_verdict",
+                )
+            )
+    assert any("llm call" in rec.message and "ok in" in rec.message for rec in caplog.records), (
+        "log_call_success must still fire even though finalize_outcome goes on to raise"
+    )
+    assert spend_calls == [], (
+        "record_call_spend runs AFTER finalize_outcome in run(), so a raise there must "
+        "leave no spend row today — a call this test would catch as a silent behavior "
+        "change (see the module docstring above for the gap this pins, filed separately)"
+    )
+
+
 # ── Read-only gate is config-aware (regression: ticket 9d7a-d09d-835f-484c) ─────
 # _readonly_gate() must honor `[mcp] readonly` from the CONFIG FILE, not just the
 # env var — otherwise a server set read-only via the file alone still hands the
