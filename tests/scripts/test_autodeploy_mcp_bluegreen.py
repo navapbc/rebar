@@ -484,6 +484,87 @@ def test_both_ports_busy_does_not_start_a_third_container(mcp_box: dict[str, obj
 
 
 # --------------------------------------------------------------------------- #
+# routine backoffs (retire-cap / mem-abort) must NOT inflate deploy_errors    #
+# (bug 6ada-6015-8ac3-44f5)                                                    #
+# --------------------------------------------------------------------------- #
+#
+# observability.sh (mcp blue-green counters) documents the contract these two paths must obey:
+# the AUTODEPLOY_MCP_RETIRE_CAP and AUTODEPLOY_MCP_MEM_ABORT markers are "each kept out of
+# AUTODEPLOY_ERROR so a routine retire-cap / memory abort never inflates deploy_errors" (the
+# sustained case is covered by the dedicated mcp_retire_cap / mcp_mem_abort alarms). deploy_errors
+# counts `^AUTODEPLOY_ERROR {` markers, so emitting one on these routine deferrals false-pages the
+# general rebar-autodeploy-errors alarm during a normal landing burst. These tests assert the
+# observable outcome: each routine path emits ITS OWN marker but NOT AUTODEPLOY_ERROR.
+
+
+def _deploy_failed_errors(result: subprocess.CompletedProcess[str]) -> list[dict[str, object]]:
+    """The AUTODEPLOY_ERROR markers whose parsed payload carries reason `deploy_failed` — i.e.
+    exactly what observability.sh counts into rebar/host:deploy_errors."""
+    payloads = [json.loads(ln.split(" ", 1)[1]) for ln in _markers(result, "AUTODEPLOY_ERROR")]
+    return [p for p in payloads if p.get("reason") == "deploy_failed"]
+
+
+def test_port_exhausted_routine_backoff_does_not_inflate_deploy_errors(
+    mcp_box: dict[str, object],
+) -> None:
+    """A routine port-exhausted (retire-cap) backoff is a safe deferral, not a deploy failure:
+    it must emit AUTODEPLOY_MCP_RETIRE_CAP but NOT AUTODEPLOY_ERROR/deploy_failed, so it never
+    inflates deploy_errors and false-pages the general alarm during a landing burst."""
+    # Both blue/green ports held by draining containers — the routine port-exhausted path.
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(mcp_box["dstate"], "rebar-mcp-old-a-8092", 8092, in_flight=2)  # type: ignore[arg-type]
+    _seed_container(mcp_box["dstate"], "rebar-mcp-old-b-8093", 8093, in_flight=2)  # type: ignore[arg-type]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    # Liveness anchor: the routine path was actually reached (its own marker fired).
+    assert _markers(result, "AUTODEPLOY_MCP_RETIRE_CAP"), (
+        f"the routine port-exhausted path must still emit its own retire-cap marker\n{ctx}"
+    )
+    assert not _deploy_failed_errors(result), (
+        "a routine port-exhausted backoff must NOT emit AUTODEPLOY_ERROR/deploy_failed — "
+        "observability.sh keeps retire-cap OUT of deploy_errors so it never false-pages the "
+        f"general autodeploy-errors alarm\n{ctx}"
+    )
+    assert not _markers(result, "AUTODEPLOY_ERROR"), (
+        f"a routine retire-cap deferral must emit no AUTODEPLOY_ERROR marker at all\n{ctx}"
+    )
+    # The throttle still engages so ticks don't hammer during a drain (AC #4).
+    assert result.returncode != 0, f"a routine backoff still defers + retries next tick\n{ctx}"
+    assert (mcp_box["state"] / "mcp-deploy-backoff").exists(), (  # type: ignore[operator]
+        f"the mcp backoff timer must still be scheduled on the routine path\n{ctx}"
+    )
+
+
+def test_low_memory_routine_backoff_does_not_inflate_deploy_errors(
+    mcp_box: dict[str, object],
+) -> None:
+    """A routine low-memory abort is a safe deferral of the 2x overlap, not a deploy failure: it
+    must emit AUTODEPLOY_MCP_MEM_ABORT but NOT AUTODEPLOY_ERROR/deploy_failed, so it never inflates
+    deploy_errors."""
+    result = _run(mcp_box, {"MCP_MEM_AVAILABLE_MB": "512", "MCP_MEM_MIN_MB": "1024"})
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+
+    assert _markers(result, "AUTODEPLOY_MCP_MEM_ABORT"), (
+        f"the routine low-memory path must still emit its own mem-abort marker\n{ctx}"
+    )
+    assert not _deploy_failed_errors(result), (
+        "a routine low-memory abort must NOT emit AUTODEPLOY_ERROR/deploy_failed — "
+        "observability.sh keeps mem-abort OUT of deploy_errors so it never false-pages the "
+        f"general autodeploy-errors alarm\n{ctx}"
+    )
+    assert not _markers(result, "AUTODEPLOY_ERROR"), (
+        f"a routine mem-abort deferral must emit no AUTODEPLOY_ERROR marker at all\n{ctx}"
+    )
+    assert result.returncode != 0, f"a routine backoff still defers + retries next tick\n{ctx}"
+    assert (mcp_box["state"] / "mcp-deploy-backoff").exists(), (  # type: ignore[operator]
+        f"the mcp backoff timer must still be scheduled on the routine path\n{ctx}"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # health / nginx failure rolls back (old include byte-identical)              #
 # --------------------------------------------------------------------------- #
 
