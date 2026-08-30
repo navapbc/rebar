@@ -467,6 +467,8 @@ def finalize_verdict(
         verdict = "INDETERMINATE"
     elif coverage.get("llm_unavailable"):
         verdict = "INDETERMINATE"
+    elif coverage.get("input_rejected"):
+        verdict = "INDETERMINATE"
     elif coverage.get("hierarchy_incomplete"):
         # The ticket hierarchy failed to load (enumeration or a per-child fetch exhausted its
         # retries) — the review is missing real context it needs for P5/P8, so it can never

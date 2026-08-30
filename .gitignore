@@ -119,3 +119,4 @@ infra/terraform/.terraform/
 # JSONL corpus is a rebuildable local cache, keyed by content hash — never committed. The
 # manifest itself (docs/experiments/plan-review-gate/replay/corpus-*.manifest.json) is.
 docs/experiments/plan-review-gate/replay/cache/
+.git-msg/
