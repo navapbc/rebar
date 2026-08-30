@@ -18,7 +18,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, resolve_gate_config
 
 # Field weights are a stable ALGORITHMIC constant, deliberately NOT a config knob (a
 # dict-typed config value has no from_env resolution helper, and BM25F weights do not need
@@ -171,7 +171,7 @@ def retrieve(
     to be returned (else the floor yields ``[]``). Returns ``[]`` on any scoring error — this
     is advisory retrieval and must never block the caller."""
     try:
-        cfg = config or LLMConfig.from_env()
+        cfg = config or resolve_gate_config()
         docs = {
             tid: dg for tid, dg in corpus.items() if tid not in exclude and isinstance(dg, dict)
         }

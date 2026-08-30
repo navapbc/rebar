@@ -92,12 +92,13 @@ def _composed_by(run: Callable[[], object]) -> list[OperationSnapshot]:
     """Every snapshot the SHARED composer produced while ``run`` executed.
 
     Instrumentation point: the module global
-    ``rebar._operation_config.compose_operation_snapshot``. ``emit_shadow_snapshot``
-    — the seam the MCP tools and the reconciler entry point call — resolves that
-    name from its module's globals at CALL time, so rebinding the attribute
-    genuinely reaches code entered through the real surfaces; it is not merely this
-    test module's import-time binding (which the direct ``compose_operation_snapshot``
-    calls elsewhere in this file deliberately keep using, so they stay uninstrumented).
+    ``rebar._operation_config.compose_operation_snapshot``.
+    ``compose_and_bind_operation_snapshot`` — the seam the MCP tools and the reconciler
+    entry point call — resolves that name from its module's globals at CALL time, so
+    rebinding the attribute genuinely reaches code entered through the real surfaces;
+    it is not merely this test module's import-time binding (which the direct
+    ``compose_operation_snapshot`` calls elsewhere in this file deliberately keep
+    using, so they stay uninstrumented).
 
     The real composer still runs and its result is returned unchanged, so the driven
     surface behaves exactly as in production. An EMPTY list therefore means the
@@ -153,9 +154,10 @@ def _assert_surface(
     assert snapshots, (
         f"the {surface} surface produced no operation snapshot. Either it no longer "
         "routes through compose_operation_snapshot, or the composer raised and "
-        "emit_shadow_snapshot swallowed it (that swallow is deliberate — the shadow "
-        "must never break the legacy op — which is exactly why the surface cannot be "
-        "trusted to report its own failure and this capture has to)"
+        "compose_and_bind_operation_snapshot swallowed it (that fail-open swallow is "
+        "deliberate — a malformed/insecure config must never break the legacy op — "
+        "which is exactly why the surface cannot be trusted to report its own failure "
+        "and this capture has to)"
     )
     for other in snapshots:
         _assert_snapshot_content(surface, other, expected_root)

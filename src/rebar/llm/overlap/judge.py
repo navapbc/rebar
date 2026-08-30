@@ -14,7 +14,7 @@ import logging
 from dataclasses import replace
 from typing import Any
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, resolve_gate_config
 from rebar.llm.model_classes import STANDARD_CLASS, resolve_model_string
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
@@ -297,7 +297,7 @@ def judge(
     """Judge each candidate in both orderings and return up to ``overlap_surface_cap``
     highest-confidence advisory findings (each a ready-to-run ``rebar link`` command).
     ``candidates`` may be ``OverlapCandidate``s or bare ticket-id strings."""
-    cfg = config or LLMConfig.from_env()
+    cfg = config or resolve_gate_config()
     pairs: list[tuple[str, dict]] = []
     for cand in candidates:
         cand_id = getattr(cand, "ticket_id", cand)

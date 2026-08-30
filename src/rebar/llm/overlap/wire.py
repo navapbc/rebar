@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, resolve_gate_config
 from rebar.llm.runner import Runner
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ def overlap_findings(
         from rebar.llm.overlap import judge as judge_mod
         from rebar.llm.overlap import retrieve as retrieve_mod
 
-        cfg = config or LLMConfig.from_env(repo_root=repo_root)
+        cfg = config or resolve_gate_config(repo_root)
         tracker = str(tracker_dir(repo_root))
 
         # Stage 0: the query ticket's fresh digest (query side; corpus side is cached).

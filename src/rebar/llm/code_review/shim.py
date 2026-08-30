@@ -149,30 +149,32 @@ def review_code(
     ``target_ticket`` anchors the durable ``code_review`` sidecar directly; ``session_id`` (story
     paradoxal-balsamic-bubblefish) instead keys a LOCAL session artifact so ``rebar review-code``
     gains cross-run memory — both are forwarded to the gate request."""
+    from rebar.llm.config_binding import compose_and_bind_llm_config
     from rebar.llm.workflow import gate_dispatch
 
-    cfg = config or LLMConfig.from_env(repo_root=repo_root)
     # An explicit `ref` selects the reviewed commit (see the docstring): the gate resolves its
     # ONE snapshot ref from `request.head`, so `ref` must land there or it is silently dropped.
     reviewed_head = ref or head
-    verdict = gate_dispatch.produce_code_review_verdict(
-        gate_dispatch.CodeReviewRequest(
-            cfg,
-            # An explicit invocation always runs: never defer to `verify.enable_code_review`
-            # (which keeps its enablement meaning for dispatch callers that leave enabled=None).
-            enabled=True,
-            base=base,
-            head=reviewed_head,
-            source=source,
-            diff_text=diff_text,
-            changed_files=changed_files,
-            commit_message=commit_message,
-            runner=runner,
-            target_ticket=target_ticket,
-            session_id=session_id,
-            repo_root=repo_root,
+    with compose_and_bind_llm_config(repo_root=repo_root, explicit=config) as cfg:
+        verdict = gate_dispatch.produce_code_review_verdict(
+            gate_dispatch.CodeReviewRequest(
+                cfg,
+                # An explicit invocation always runs: never defer to `verify.enable_code_review`
+                # (which keeps its enablement meaning for dispatch callers that leave
+                # enabled=None).
+                enabled=True,
+                base=base,
+                head=reviewed_head,
+                source=source,
+                diff_text=diff_text,
+                changed_files=changed_files,
+                commit_message=commit_message,
+                runner=runner,
+                target_ticket=target_ticket,
+                session_id=session_id,
+                repo_root=repo_root,
+            )
         )
-    )
     from rebar.llm.code_review import assemble
 
     cf = changed_files

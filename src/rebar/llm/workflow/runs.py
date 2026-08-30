@@ -160,11 +160,11 @@ class RunnerAgentStep(_ex.AgentStepRunner):
     def run(self, ctx: _ex.StepContext) -> _ex.StepResult:
         from dataclasses import replace as _replace
 
-        from rebar.llm.config import LLMConfig, resolve_model
+        from rebar.llm.config import resolve_gate_config, resolve_model
         from rebar.llm.prompting import prompts
         from rebar.llm.runner import get_runner
 
-        cfg = self._config or LLMConfig.from_env(repo_root=self._repo_root)
+        cfg = self._config or resolve_gate_config(self._repo_root)
         cfg = _replace(
             cfg,
             model=resolve_model(
@@ -455,7 +455,7 @@ def run(
     import contextlib
 
     from rebar.llm import gate_source
-    from rebar.llm.config import LLMConfig
+    from rebar.llm.config_binding import compose_and_bind_llm_config
 
     doc = load_workflow_doc(source, repo_root)
     run_id = run_id or _ex.new_run_id()
@@ -467,13 +467,11 @@ def run(
     # which never reads real files). dry_run uses the offline FakeAgentRunner.
     gate = has_llm_steps(doc) and not dry_run
     handle = gate_source.resolve_gate_handle(ref, source_mode, repo_root) if gate else None
-    cfg = (
-        gate_source.apply_handle(LLMConfig.from_env(repo_root=repo_root), handle)
-        if handle is not None
-        else None
+    read_ctx = (
+        gate_source.gate_read_root(handle) if handle is not None else contextlib.nullcontext()
     )
-    ctx = gate_source.gate_read_root(handle) if handle is not None else contextlib.nullcontext()
-    with ctx:
+    with read_ctx, compose_and_bind_llm_config(repo_root=repo_root) as bound_cfg:
+        cfg = gate_source.apply_handle(bound_cfg, handle) if handle is not None else bound_cfg
         res = _ex.run_workflow(
             doc,
             inputs,

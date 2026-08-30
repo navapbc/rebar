@@ -149,10 +149,10 @@ def latest_ticket_digest(
 
 
 def _active_model(repo_root) -> str:
-    from rebar.llm.config import DEFAULT_MODEL, LLMConfig
+    from rebar.llm.config import DEFAULT_MODEL, resolve_gate_config
 
     try:
-        return LLMConfig.from_env(repo_root=repo_root).model
+        return resolve_gate_config(repo_root).model
     except Exception:  # noqa: BLE001 — config resolution fallback
         return DEFAULT_MODEL
 

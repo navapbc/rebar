@@ -16,7 +16,6 @@ plain ``dict`` (a model-produced result), so no output models are imported here.
 from __future__ import annotations
 
 from rebar._mcp_models import tool_annotation_presets
-from rebar._operation_config import _shadow
 
 
 def _structured_llm_failure(exc: Exception) -> dict:
@@ -110,7 +109,6 @@ def register_llm_tools(mcp, ctx) -> None:
         a plain dict and advertises NO outputSchema by design (documented
         NO_SCHEMA_EXEMPT) — its CLI/library --output json is pinned to
         review_result."""
-        _shadow("mcp.llm.review_code")
         if not _allow_llm():
             raise ValueError(
                 "review_code is disabled: it makes live, billable LLM call(s). "
@@ -141,7 +139,6 @@ def register_llm_tools(mcp, ctx) -> None:
         DISABLED unless REBAR_MCP_ALLOW_LLM=1 (live, billable LLM call(s)). Needs
         the 'agents' extra + an API key. Returns a plain dict and advertises NO
         outputSchema by design (documented NO_SCHEMA_EXEMPT)."""
-        _shadow("mcp.llm.scan_spec")
         if not _allow_llm():
             raise ValueError(
                 "scan_spec is disabled: it makes live, billable LLM call(s). "
@@ -190,7 +187,6 @@ def register_llm_tools(mcp, ctx) -> None:
         the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
         dict and advertises NO outputSchema by design — the result is model-produced, so it is
         a documented NO_SCHEMA_EXEMPT and is not auto-driven in CI."""
-        _shadow("mcp.llm.verify_completion")
         if not _allow_llm():
             raise ValueError(
                 "verify_completion is disabled: it makes a live, billable LLM call. "
@@ -252,7 +248,6 @@ def register_llm_tools(mcp, ctx) -> None:
         DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes live, billable LLM calls and reaches
         the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
         dict and advertises NO outputSchema by design (model-produced result; NO_SCHEMA_EXEMPT)."""
-        _shadow("mcp.llm.review_plan")
         if not _allow_llm():
             raise ValueError(
                 "review_plan is disabled: it makes live, billable LLM calls. "
@@ -286,7 +281,6 @@ def register_llm_tools(mcp, ctx) -> None:
 
         Unlike review_plan this is NOT gated on REBAR_MCP_ALLOW_LLM (it makes no LLM call), but it
         WRITES a SIGNATURE event, so it is disabled in REBAR_MCP_READONLY mode."""
-        _shadow("mcp.llm.sign_review")
         if _readonly():
             raise ValueError(
                 "sign_review is disabled: it writes a SIGNATURE event (readonly mode)."

@@ -300,22 +300,7 @@ def _unwrap_model_transparent(expr: str) -> str | None:
 # Sites that inherit `cfg.model` ON PURPOSE. Registration is a DELIBERATE act, and it is the
 # ONLY way a raw site passes: a new hand-built sub-call fails until someone either declares a
 # class or writes down why the operator's bare model is the right one there.
-_CFG_MODEL_BY_DESIGN: dict[str, str] = {
-    "llm/operations.py::_review_ticket_impl": (
-        "`rebar.llm.review_ticket`'s PRIMARY op call, not a sub-call (story 316a split the "
-        "public wrapper, which warns, from this implementation, which is what the deprecated "
-        "op and its internal callers actually run). A top-level op makes ONE call, so there "
-        "are no passes to differentiate and the operator's configured model is the right knob; "
-        "the class vocabulary exists to spend differently ACROSS a gate's passes. Same "
-        "reasoning as spec_scan below. The op's CLI verb (`rebar review`) is already retired "
-        "as a forwarding shim over `rebar review-plan`."
-    ),
-    "llm/spec_scan.py::_scan_epics_inner": (
-        "`scan-spec`'s PRIMARY op call, not a sub-call — a top-level op runs the operator's "
-        "configured model. It was also the one site the ticket's measurement could not exercise "
-        "(it needs a --spec-file), so afeb scoped it out rather than change it unmeasured."
-    ),
-}
+_CFG_MODEL_BY_DESIGN: dict[str, str] = {}
 
 # Sites whose config provenance this analysis cannot follow — it stops at attribute access
 # (`self._config`) and at parameters whose callers are outside `src/rebar` — each with the reason
@@ -348,6 +333,25 @@ _UNFOLLOWABLE: dict[str, str] = {
     "llm/evals/eval_solver.py::_run_code_review_case": "eval harness: pins the model under eval",
     "llm/plan_review/fidelity_spot_eval.py::_relocation_requests": (
         "eval harness: compares two prompts on ONE fixed model, so cfg.model is the control"
+    ),
+    "llm/operations.py::_review_ticket_impl": (
+        "`rebar.llm.review_ticket`'s PRIMARY op call, not a sub-call (story 316a split the "
+        "public wrapper, which warns, from this implementation, which is what the deprecated "
+        "op and its internal callers actually run). ec44 cut this over from bare "
+        "`LLMConfig.from_env()` to `resolve_gate_config()` (the boundary-composed snapshot), so "
+        "the analysis no longer traces to a bare raw origin — it stops at the opaque resolver "
+        "call. A top-level op makes ONE call, so there are no passes to differentiate and the "
+        "operator's configured model is the right knob; the class vocabulary exists to spend "
+        "differently ACROSS a gate's passes. Same reasoning as spec_scan below. The op's CLI "
+        "verb (`rebar review`) is already retired as a forwarding shim over `rebar review-plan`."
+    ),
+    "llm/spec_scan.py::_scan_epics_inner": (
+        "`scan-spec`'s PRIMARY op call, not a sub-call — a top-level op runs the operator's "
+        "configured model. ec44 moved the compose/bind onto the `scan_epics_for_spec` wrapper "
+        "(`compose_and_bind_llm_config` + `gate_source.apply_handle`), so `cfg` now arrives here "
+        "as a parameter bound through a `with ... as` binding this analysis does not follow. It "
+        "was also the one site the ticket's measurement could not exercise (it needs a "
+        "--spec-file), so afeb scoped it out rather than change it unmeasured."
     ),
 }
 
@@ -574,7 +578,7 @@ _EXPECTED_RUN_REQUEST_SITES = [
     ("llm/epic_bug_screen.py::_screen_one", "cfg", "bound"),
     ("llm/evals/eval_solver.py::_run_code_review_case", "cfg", "unresolved"),
     ("llm/evals/eval_solver.py::_run_novelty_case", "cfg", "unresolved"),
-    ("llm/operations.py::_review_ticket_impl", "max_output_cfg(cfg)", "raw"),
+    ("llm/operations.py::_review_ticket_impl", "max_output_cfg(cfg)", "unresolved"),
     ("llm/overlap/judge.py::judge_one", "cfg", "bound"),
     ("llm/overlap/judge.py::judge_batch", "cfg", "bound"),
     (
@@ -595,7 +599,7 @@ _EXPECTED_RUN_REQUEST_SITES = [
     ("llm/plan_review/prerequisites.py::run_focused_finder", "call_cfg", "unresolved"),
     ("llm/plan_review/xcheck.py::_assess_contradictions", "vcfg", "bound"),
     ("llm/plan_review/xcheck.py::_assess_comment_trail", "vcfg", "bound"),
-    ("llm/spec_scan.py::_scan_epics_inner", "cfg", "raw"),
+    ("llm/spec_scan.py::_scan_epics_inner", "cfg", "unresolved"),
     (
         "llm/workflow/completion_recovery.py::_run_one_successor",
         "self._config",

@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, resolve_gate_config
 from rebar.llm.errors import LLMError
 from rebar.llm.prompting import prompts
 from rebar.llm.prompting.prompts import select_reviewers  # re-export (rules layer)
@@ -153,7 +153,7 @@ def _review_ticket_impl(
 
     handle = gate_source.resolve_gate_handle(ref, source, repo_root)
     with gate_source.gate_read_root(handle):
-        cfg = config or LLMConfig.from_env(repo_root=repo_root)
+        cfg = config or resolve_gate_config(repo_root)
         cfg = gate_source.apply_handle(cfg, handle)
         # Runs the OPERATOR'S configured model, deliberately — no class is bound here. This is a
         # top-level op's single LLM call, so there are no passes to differentiate, and the class

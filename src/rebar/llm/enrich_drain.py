@@ -305,21 +305,21 @@ def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> d
     (lease expiry) and the batch continues; a per-item PERMANENT input rejection is
     tombstoned so it is attempted exactly once (see :func:`_record_item_failure`). Returns a
     summary dict."""
-    from rebar.llm.config import LLMConfig
+    from rebar.llm.config_binding import compose_and_bind_llm_config
     from rebar.llm.overlap import queue as _queue
 
-    cfg = LLMConfig.from_env(repo_root=repo_root)
-    now = _queue._now_ns()
-    batch = 1 if once else _lease_bounded_batch(cfg)
-    skip, items = _collect_claims(tracker, batch=batch, cfg=cfg, repo_root=repo_root, now=now)
-    if skip is not None:
-        return skip
-    results = _enrich_claims(items, cfg=cfg, repo_root=repo_root, runner=runner)
-    processed, stale_skipped = _finalize_claims(results, cfg=cfg, repo_root=repo_root)
-    summary = {"processed": processed, "batch": batch}
-    if stale_skipped:
-        summary["stale_skipped"] = stale_skipped
-    return summary
+    with compose_and_bind_llm_config(repo_root=repo_root) as cfg:
+        now = _queue._now_ns()
+        batch = 1 if once else _lease_bounded_batch(cfg)
+        skip, items = _collect_claims(tracker, batch=batch, cfg=cfg, repo_root=repo_root, now=now)
+        if skip is not None:
+            return skip
+        results = _enrich_claims(items, cfg=cfg, repo_root=repo_root, runner=runner)
+        processed, stale_skipped = _finalize_claims(results, cfg=cfg, repo_root=repo_root)
+        summary = {"processed": processed, "batch": batch}
+        if stale_skipped:
+            summary["stale_skipped"] = stale_skipped
+        return summary
 
 
 # The maximum number of drain processes allowed to spend LLM $ concurrently (operator ruling
@@ -543,7 +543,7 @@ def maybe_drain(tracker: str, *, repo_root=None) -> None:
     fcntl would crash a drain child). NEVER raises — a drain concern must not fail a write."""
     try:
         from rebar import config as _root_config
-        from rebar.llm.config import LLMConfig, agents_extra_installed
+        from rebar.llm.config import agents_extra_installed, resolve_gate_config
         from rebar.llm.overlap import queue as _queue
 
         # Windows drain is a v1 no-op (lock.py's fcntl import would crash a drain child) —
@@ -555,7 +555,7 @@ def maybe_drain(tracker: str, *, repo_root=None) -> None:
         # only one config read: no enrichment $ is spent unless overlap detection is on.
         if not _root_config.compose_config(repo_root).verify.suggest_duplicate_tickets:
             return
-        cfg = LLMConfig.from_env(repo_root=repo_root)
+        cfg = resolve_gate_config(repo_root)
         if cfg.overlap_drain == "off":
             return
         if not agents_extra_installed():

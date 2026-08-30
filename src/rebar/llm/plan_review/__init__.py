@@ -264,10 +264,14 @@ def review_plan(
     veiny-trout-brink; the gate ops read it via ``resolve_gate_config``).
     """
     from rebar.llm import gate_source
+    from rebar.llm.config_binding import compose_and_bind_llm_config
 
     handle = gate_source.resolve_gate_handle(ref, source, repo_root)
-    with gate_source.gate_read_root(handle):
-        cfg = gate_source.apply_handle(config or LLMConfig.from_env(repo_root=repo_root), handle)
+    with (
+        gate_source.gate_read_root(handle),
+        compose_and_bind_llm_config(repo_root=repo_root, explicit=config) as bound,
+    ):
+        cfg = gate_source.apply_handle(bound, handle)
         verdict = _run_plan_review(
             ticket_id,
             cfg=cfg,

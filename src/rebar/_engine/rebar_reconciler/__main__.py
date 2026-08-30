@@ -538,18 +538,22 @@ def _run_with_last_pass(
     return finalize(repo_root, pass_id, run)
 
 
-def _emit_operation_shadow(repo_root) -> None:
-    """Compose ONE diagnostic shadow snapshot for the reconcile pass (RP-04 S1).
+def _bind_operation_snapshot(repo_root) -> None:
+    """Compose ONE :class:`OperationSnapshot` for the reconcile pass and bind it active
+    for the remainder of this process (ticket ec44 — authoritative counterpart to the
+    retired diagnostic-only shadow).
 
-    Guarded and side-effect-free apart from the DEBUG diagnostic; it does NOT control
-    the pass. Import + composition errors are swallowed at this compatibility boundary
-    so a shadow fault can never break reconciliation."""
-    try:
-        from rebar._operation_config import emit_shadow_snapshot
+    Entered manually (not a ``with`` wrapping the rest of :func:`main`) because the
+    process exits shortly after the pass completes, so there is no meaningful
+    "the rest of the block" to indent — a one-shot subprocess never explicitly unwinds
+    this binding, which is harmless since the interpreter is about to exit. Fails OPEN
+    exactly like the composer it wraps: a malformed/insecure config leaves nothing
+    bound and the pass falls back to ambient resolution exactly as it did before this
+    seam existed (AC3 of ticket 3a08 — unchanged fail-open contract for this general,
+    non-LLM snapshot)."""
+    from rebar._operation_config import compose_and_bind_operation_snapshot
 
-        emit_shadow_snapshot(repo_root=repo_root, surface="reconciler")
-    except Exception:  # noqa: BLE001 — the compatibility boundary must never break on shadow
-        pass
+    compose_and_bind_operation_snapshot(repo_root=repo_root).__enter__()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -580,10 +584,10 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = request.repo_root
     route = getattr(request, "route", None)
 
-    # Shadow-mode operation snapshot (RP-04 S1): one diagnostic snapshot from the
-    # resolved request root at this compatibility boundary. Guarded and side-effect-free
-    # apart from the DEBUG diagnostic — it does NOT control the reconcile pass.
-    _emit_operation_shadow(repo_root)
+    # Authoritative operation snapshot (ticket ec44, succeeding the RP-04 S1 shadow):
+    # one composed-and-bound snapshot from the resolved request root at this
+    # compatibility boundary, active for the rest of this process.
+    _bind_operation_snapshot(repo_root)
 
     # This compatibility path remains before mode and advisory-lock checks.
     enumeration_exit = _dry_run_enumeration_exit(request)
