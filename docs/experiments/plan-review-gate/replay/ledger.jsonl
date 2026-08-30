@@ -1,0 +1,1 @@
+{"run_id": "tier1-current-ddc8fb442281", "tier": "tier1", "candidate": "current", "sample_n": 60, "models": {"pass2": "bedrock:us.anthropic.claude-sonnet-4-6"}, "usd": 6.723824249999999, "input_tokens": 622413, "output_tokens": 265196, "cache_read_tokens": 0, "cache_write_tokens": 356518, "finished": "2026-08-30T18:35:38.758194+00:00"}
