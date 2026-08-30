@@ -20,9 +20,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-import rebar
+from _repo_root import REPO_ROOT
 
-SCRIPT = Path(rebar.__file__).resolve().parents[2] / "scripts" / "check_build_env_locked.py"
+SCRIPT = REPO_ROOT / "scripts" / "check_build_env_locked.py"
 
 # A minimal hash-locked lock file (name==version + --hash lines + comments, like pip-compile).
 LOCK = """\

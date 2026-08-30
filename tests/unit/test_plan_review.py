@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from _repo_root import REPO_ROOT
 
 from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.plan_review import (
@@ -886,11 +887,8 @@ def test_non_t15_finding_cannot_select_out_of_loop_proof(criteria: list[str]) ->
 def test_move_registry_matches_docs_table() -> None:
     # WS8 AC: docs/plan-review-gate.md's move table mirrors MOVE_REGISTRY id -> template.
     import re
-    from pathlib import Path
 
-    from rebar.llm.plan_review import passes
-
-    doc = (Path(passes.__file__).parents[4] / "docs" / "plan-review-gate.md").read_text()
+    doc = (REPO_ROOT / "docs" / "plan-review-gate.md").read_text()
     rows = dict(re.findall(r"^\|\s*(\d+)\s*\|[^|]+\|\s*\"(.+?)\"\s*\|$", doc, re.MULTILINE))
     reg = orchestrator.MOVE_REGISTRY
     assert rows, "no move-table rows parsed from the doc"

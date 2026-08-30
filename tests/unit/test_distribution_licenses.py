@@ -5,10 +5,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from _repo_root import REPO_ROOT
 
-import rebar
-
-REPO_ROOT = Path(rebar.__file__).resolve().parents[2]
 LICENSE_SOURCES = (
     Path("LICENSE"),
     Path("docs/licenses/adjective-adjective-animal-LICENSE.txt"),
