@@ -61,6 +61,7 @@
         "'invalid_ticket_type'",
         "'llm_unavailable'",
         "'not_found'",
+        "'pinned_ticket_read_failed'",
         "'response_too_large'",
         "'show_failed'",
         "'store_uninitialized'",
