@@ -1,10 +1,10 @@
 # ADR 0107 — Reconciler typed mutation payload: a discriminated union by `(direction, action)`
 
-- **Status:** Proposed (DRAFT — awaiting explicit human MERGE authorization per the
-  architecture-decision RESEARCH → DRAFT → HOLD → MERGE lifecycle; this record was produced
-  by an autonomous agent session with no human reviewer present, so it cannot self-certify
-  past DRAFT/HOLD. `earthborn-statuelike-boutu` — the dependent implementation story — MUST
-  NOT begin until a human operator moves this ADR to Accepted.)
+- **Status:** Accepted (2026-08-30, human operator review via chat session; explicit
+  approval to proceed given for `earthborn-statuelike-boutu`, the dependent implementation
+  story). Moved from Proposed/DRAFT per the architecture-decision RESEARCH → DRAFT → HOLD →
+  MERGE lifecycle — the record's reasoning (census, contract enumeration, and disposition of
+  the two dead-by-design combinations) was reviewed and is approved as-is with no changes.
 - **Context:** Story *Specify the typed reconciler payload and cutover contract*
   (`f448-b336-e1c7-4ead`, alias `scummy-ultrashort-tuatara`); epic *Converge reconciler,
   runner, and operation boundaries* (`eb64-844b-ab7a-4915`, alias
