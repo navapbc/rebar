@@ -48,6 +48,7 @@ class ConcurrencyError(RebarError):
 KNOWN_ERROR_CODES: frozenset[str] = frozenset(
     {
         "ticket_not_found",
+        "pinned_ticket_read_failed",
         "store_uninitialized",
         "show_failed",
         "deps_failed",
