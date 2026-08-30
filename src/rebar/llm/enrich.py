@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, resolve_gate_config
 from rebar.llm.model_classes import TRIVIAL_CLASS, resolve_model_string
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
@@ -147,7 +147,7 @@ def enrich(
     if (ticket_id is None) == (text is None):
         raise ValueError("enrich() requires exactly one of ticket_id or text")
 
-    cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    cfg = config or resolve_gate_config(repo_root)
     # MODEL CLASS: `trivial`. Chosen on the prompt's shape: ticket-digest is `execution_mode:
     # single_turn`, has NO tools, is explicitly "Not a reviewer", and extracts four constrained
     # structured fields from text it is handed — narrow, canonicalizing work with no open-ended

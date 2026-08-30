@@ -205,16 +205,15 @@ def _run_completion_at_handle(
 ) -> dict:
     """Execute and annotate one verifier run inside its paired code/ticket read roots."""
     from rebar.llm import gate_source
+    from rebar.llm.config_binding import compose_and_bind_llm_config
 
     read_kwargs: dict[str, Any] = {"phase_metrics": phase_metrics}
     if ticket_view is not None:
         read_kwargs["ticket_view"] = ticket_view
     read_context = gate_source.gate_read_root(handle, **read_kwargs)
-    with read_context:
+    with read_context, compose_and_bind_llm_config(repo_root=repo_root, explicit=config) as bound:
         started_ns = monotonic_ns()
-        resolved_config = gate_source.apply_handle(
-            config or LLMConfig.from_env(repo_root=repo_root), handle
-        )
+        resolved_config = gate_source.apply_handle(bound, handle)
         if ticket_view is not None:
             resolved_config = replace(resolved_config, ticket_view=ticket_view)
         _record_elapsed(phase_metrics, "verifier_handle_apply_ms", started_ns)

@@ -62,10 +62,14 @@ def scan_epics_for_spec(
     read-root (attested snapshot at the pinned SHA by default; ``local`` reads the checkout).
     """
     from rebar.llm import gate_source
+    from rebar.llm.config_binding import compose_and_bind_llm_config
 
     handle = gate_source.resolve_gate_handle(ref, source, repo_root)
-    with gate_source.gate_read_root(handle):
-        cfg = gate_source.apply_handle(config or LLMConfig.from_env(repo_root=repo_root), handle)
+    with (
+        gate_source.gate_read_root(handle),
+        compose_and_bind_llm_config(repo_root=repo_root, explicit=config) as bound,
+    ):
+        cfg = gate_source.apply_handle(bound, handle)
         return gate_source.annotate_result(
             _scan_epics_inner(
                 spec_text,

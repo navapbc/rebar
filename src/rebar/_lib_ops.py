@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, cast
 from rebar import config
 from rebar._engine import engine_dir, engine_env
 from rebar._errors import RebarError
-from rebar._operation_config import _shadow
 
 if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING.
@@ -55,7 +54,6 @@ def run_workflow(
     See :mod:`rebar.llm.workflow.runs`."""
     from rebar.llm.workflow import runs
 
-    _shadow("lib.run_workflow", repo_root=repo_root)
     return runs.run(
         source,
         inputs,
@@ -73,7 +71,6 @@ def get_workflow_status(
     """A workflow run's current status, read via replay (no execution)."""
     from rebar.llm.workflow import runs
 
-    _shadow("lib.get_workflow_status", repo_root=repo_root)
     return cast("WorkflowRun", runs.status(run_id, ticket_id, repo_root=repo_root))
 
 
@@ -83,7 +80,6 @@ def get_workflow_result(
     """A workflow run's outputs (the terminal step's output is the result)."""
     from rebar.llm.workflow import runs
 
-    _shadow("lib.get_workflow_result", repo_root=repo_root)
     return cast("WorkflowRun", runs.result(run_id, ticket_id, repo_root=repo_root))
 
 
@@ -98,19 +94,22 @@ def bridge_fsck(*, repo_root=None) -> BridgeFsck:
     from pathlib import Path
 
     from rebar._engine_support.bridge_fsck import audit_bridge_mappings
+    from rebar._operation_config import compose_and_bind_operation_snapshot
 
-    _shadow("lib.bridge_fsck", repo_root=repo_root)
-    tracker = config.tracker_dir(repo_root)
-    findings = audit_bridge_mappings(Path(tracker))
-    return cast("BridgeFsck", findings)
+    with compose_and_bind_operation_snapshot(repo_root=repo_root):
+        tracker = config.tracker_dir(repo_root)
+        findings = audit_bridge_mappings(Path(tracker))
+        return cast("BridgeFsck", findings)
 
 
 def bridge_projects_list(*, repo_root=None) -> dict:
     """Return the store's bridge-projects mapping ``{key: {"repos": [...]}}``."""
-    _shadow("lib.bridge_projects_list", repo_root=repo_root)
-    store = _engine_module("rebar_reconciler.projects_store")
-    root = Path(config.repo_root(repo_root))
-    return store.read_projects(root)
+    from rebar._operation_config import compose_and_bind_operation_snapshot
+
+    with compose_and_bind_operation_snapshot(repo_root=repo_root):
+        store = _engine_module("rebar_reconciler.projects_store")
+        root = Path(config.repo_root(repo_root))
+        return store.read_projects(root)
 
 
 def bridge_projects_set(key, repos, *, repo_root=None) -> None:
@@ -121,18 +120,19 @@ def bridge_projects_set(key, repos, *, repo_root=None) -> None:
     consumers already handle for ``remove``'s absent-key ``KeyError`` — and no lock is
     held for a commit/publish, so nothing is persisted or pushed.
     """
+    from rebar._operation_config import compose_and_bind_operation_snapshot
     from rebar._store import lock, push
 
     store = _engine_module("rebar_reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
     tracker = config.tracker_dir(repo_root)
-    _shadow("lib.bridge_projects_set", repo_root=repo_root)
-    try:
-        with lock.write_lock(tracker):
-            store.set_project(root, key, list(repos))
-    except ValueError as exc:
-        raise _invalid_bridge(str(exc)) from exc
-    push.commit_and_push_tickets_branch(tracker, message="bridge: update projects mapping")
+    with compose_and_bind_operation_snapshot(repo_root=repo_root):
+        try:
+            with lock.write_lock(tracker):
+                store.set_project(root, key, list(repos))
+        except ValueError as exc:
+            raise _invalid_bridge(str(exc)) from exc
+        push.commit_and_push_tickets_branch(tracker, message="bridge: update projects mapping")
 
 
 def bridge_projects_remove(key, *, repo_root=None) -> None:
@@ -142,21 +142,22 @@ def bridge_projects_remove(key, *, repo_root=None) -> None:
     syntactically-invalid ``key`` (rejected by ``remove_project``) to a ``RebarError``
     (returncode 2) so the CLI/MCP consumers get one clean error contract.
     """
+    from rebar._operation_config import compose_and_bind_operation_snapshot
     from rebar._store import lock, push
 
     store = _engine_module("rebar_reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
     tracker = config.tracker_dir(repo_root)
-    _shadow("lib.bridge_projects_remove", repo_root=repo_root)
-    try:
-        with lock.write_lock(tracker):
-            store.remove_project(root, key)
-    except KeyError as exc:
-        message = f"bridge project {key!r} is not in the mapping"
-        raise RebarError(message, returncode=2, stderr=message) from exc
-    except ValueError as exc:
-        raise _invalid_bridge(str(exc)) from exc
-    push.commit_and_push_tickets_branch(tracker, message="bridge: update projects mapping")
+    with compose_and_bind_operation_snapshot(repo_root=repo_root):
+        try:
+            with lock.write_lock(tracker):
+                store.remove_project(root, key)
+        except KeyError as exc:
+            message = f"bridge project {key!r} is not in the mapping"
+            raise RebarError(message, returncode=2, stderr=message) from exc
+        except ValueError as exc:
+            raise _invalid_bridge(str(exc)) from exc
+        push.commit_and_push_tickets_branch(tracker, message="bridge: update projects mapping")
 
 
 def _engine_module(module_name: str):
@@ -221,30 +222,32 @@ def _bridge_run(
 ) -> BridgeRun:
     _validate_positive("max_changes", max_changes)
     _validate_selection_args(only, exclude)
-    _shadow(f"lib.bridge_{route}", repo_root=repo_root)
-    root = Path(config.repo_root(repo_root))
-    selection_kind, selection_ids = _bridge_selection(root, only, exclude)
-    orchestrator = _engine_module("rebar_reconciler.__main__")
-    mode_mod = _engine_module("rebar_reconciler.mode")
-    result = orchestrator.run_pass_result(
-        repo_root=root,
-        target_mode=mode_mod.Mode.DRY_RUN if route == "preview" else mode_mod.Mode.LIVE,
-        selection_kind=selection_kind,
-        selection_ids=selection_ids,
-        max_changes=max_changes,
-        route=route,
-    )
-    returncode = result.disposition.canonical_exit
-    payload = {
-        "route": route,
-        "state": result.disposition.state,
-        "returncode": returncode,
-        "details": result.details,
-    }
-    if returncode:
-        message = result.canonical_message or result.legacy_message or f"bridge {route} failed"
-        raise RebarError(message, returncode=returncode, stderr=message)
-    return cast("BridgeRun", payload)
+    from rebar._operation_config import compose_and_bind_operation_snapshot
+
+    with compose_and_bind_operation_snapshot(repo_root=repo_root):
+        root = Path(config.repo_root(repo_root))
+        selection_kind, selection_ids = _bridge_selection(root, only, exclude)
+        orchestrator = _engine_module("rebar_reconciler.__main__")
+        mode_mod = _engine_module("rebar_reconciler.mode")
+        result = orchestrator.run_pass_result(
+            repo_root=root,
+            target_mode=mode_mod.Mode.DRY_RUN if route == "preview" else mode_mod.Mode.LIVE,
+            selection_kind=selection_kind,
+            selection_ids=selection_ids,
+            max_changes=max_changes,
+            route=route,
+        )
+        returncode = result.disposition.canonical_exit
+        payload = {
+            "route": route,
+            "state": result.disposition.state,
+            "returncode": returncode,
+            "details": result.details,
+        }
+        if returncode:
+            message = result.canonical_message or result.legacy_message or f"bridge {route} failed"
+            raise RebarError(message, returncode=returncode, stderr=message)
+        return cast("BridgeRun", payload)
 
 
 def bridge_preview(
@@ -260,9 +263,10 @@ def bridge_preview(
 def bridge_run(profile: str | None = None, *, repo_root=None) -> BridgeRun:
     """Run one scheduled bridge profile with captured output and strict delivery."""
     from rebar._bridge_runner import run_bridge
+    from rebar._operation_config import compose_and_bind_operation_snapshot
 
-    _shadow("lib.bridge_run", repo_root=repo_root)
-    return run_bridge(profile, repo_root=repo_root)
+    with compose_and_bind_operation_snapshot(repo_root=repo_root):
+        return run_bridge(profile, repo_root=repo_root)
 
 
 def bridge_sync(
@@ -286,18 +290,20 @@ def bridge_status(
 ) -> BridgeStatus:
     """Read the durable last-pass, pause, and live-lock status snapshot."""
     _validate_positive("max_age_seconds", max_age_seconds)
-    _shadow("lib.bridge_status", repo_root=repo_root)
-    root = Path(config.repo_root(repo_root))
-    last_pass = _engine_module("rebar_reconciler.last_pass")
-    try:
-        result = last_pass.snapshot(
-            root,
-            target_environment_id=target_environment_id,
-            max_age_seconds=max_age_seconds,
-        )
-    except Exception as exc:
-        raise RebarError(f"cannot read bridge status: {exc}", stderr=str(exc)) from exc
-    return cast("BridgeStatus", result)
+    from rebar._operation_config import compose_and_bind_operation_snapshot
+
+    with compose_and_bind_operation_snapshot(repo_root=repo_root):
+        root = Path(config.repo_root(repo_root))
+        last_pass = _engine_module("rebar_reconciler.last_pass")
+        try:
+            result = last_pass.snapshot(
+                root,
+                target_environment_id=target_environment_id,
+                max_age_seconds=max_age_seconds,
+            )
+        except Exception as exc:
+            raise RebarError(f"cannot read bridge status: {exc}", stderr=str(exc)) from exc
+        return cast("BridgeStatus", result)
 
 
 def _bridge_remote(root: Path) -> str:

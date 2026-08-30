@@ -100,7 +100,6 @@ from rebar._config_writer import _emit_nested_toml as _emit_nested_toml
 from rebar._config_writer import _emit_toml as _emit_toml
 from rebar._config_writer import write_jira_config as write_jira_config
 from rebar._operation_config import ENVELOPE_VERSION as ENVELOPE_VERSION
-from rebar._operation_config import SHADOW_ENV as SHADOW_ENV
 from rebar._operation_config import OperationSnapshot as OperationSnapshot
 from rebar._operation_config import active_snapshot
 from rebar._operation_config import bind_operation_snapshot as bind_operation_snapshot
@@ -108,7 +107,6 @@ from rebar._operation_config import (
     compose_and_bind_operation_snapshot as compose_and_bind_operation_snapshot,
 )
 from rebar._operation_config import compose_operation_snapshot as compose_operation_snapshot
-from rebar._operation_config import shadow_enabled as shadow_enabled
 
 # Plan-review criteria authoring-guide deep-links (epic cite-stone-sea / WS10). A NARROW env-read
 # — the base URL for the generated guide's per-criterion anchors — NOT a typed TOML config key

@@ -9,9 +9,11 @@ exactly once per operation and binds it to a context-local "active operation" so
 downstream store helpers (``rebar.config.tracker_dir`` / ``tickets_branch`` /
 ``tickets_remote``) consume the SAME already-resolved values instead of re-reading
 ambient env/config, for the duration of that operation. LLM-specific resolution (the
-``rebar.llm`` / reconciler surfaces) is intentionally NOT cut over here — those remain
-on the diagnostic-only :func:`emit_shadow_snapshot` shadow path pending the dependent
-follow-up story (ticket ec44).
+``rebar.llm`` / reconciler surfaces) has its own AUTHORITATIVE composer —
+:func:`rebar.llm.config_binding.compose_and_bind_llm_config` (ticket ec44) — because
+``llm`` is a reserved config section this general snapshot never carries; the
+diagnostic-only shadow path (:func:`emit_shadow_snapshot`) that both migrations
+started from has been retired now that every production call site is cut over.
 
 The snapshot delegates rather than reimplements:
 
@@ -39,34 +41,14 @@ from contextlib import contextmanager
 from types import MappingProxyType
 from typing import Any
 
-from rebar._config_coercion import ConfigError, _as_bool
+from rebar._config_coercion import ConfigError
 from rebar._store import canonical as _canonical
 
 logger = logging.getLogger(__name__)
 
 ENVELOPE_VERSION: int = 1
 
-SHADOW_ENV: str = "REBAR_OPERATION_SNAPSHOT_SHADOW"
-
 _SOURCE_KINDS = frozenset({"default", "user", "project", "env", "cli"})
-
-
-def shadow_enabled() -> bool:
-    """Whether per-operation shadow snapshots are composed this run.
-
-    Reads :data:`SHADOW_ENV` at call time. UNSET ⇒ ``True`` (enabled by default);
-    a canonical false spelling (``false``/``0``/``no``/``off``/``""``) ⇒ ``False``;
-    a canonical true spelling (``true``/``1``/``yes``/``on``) ⇒ ``True``. Reuses the
-    shared boolean coercion so the switch reads exactly like every other rebar
-    boolean; an unrecognized value defaults to enabled (the diagnostic is guarded and
-    side-effect-free, so failing open is safe)."""
-    raw = os.environ.get(SHADOW_ENV)  # read-via: subsystem-kill-switch
-    if raw is None:
-        return True
-    try:
-        return _as_bool(raw, SHADOW_ENV)
-    except ConfigError:
-        return True
 
 
 def _freeze(mapping: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Mapping[str, Any]]:
@@ -226,74 +208,6 @@ def compose_operation_snapshot(
         values=values,
         sources=sources,
     )
-
-
-def emit_shadow_snapshot(
-    *,
-    cli_overrides: dict | None = None,
-    repo_root: str | os.PathLike[str] | None = None,
-    surface: str,
-) -> OperationSnapshot | None:
-    """Compose + diagnostically log ONE shadow snapshot, guarded, never behavioral.
-
-    Returns the composed snapshot, or ``None`` when shadow mode is disabled or the
-    assembly fails. The shadow is diagnostic-only and MUST NOT change legacy behavior:
-    ANY exception from assembly/serialization/fingerprint/diagnostic — including a
-    :class:`~rebar.config.ConfigError` (or its ``InsecureUrlError`` subclass) from
-    ``resolve_with_sources`` on malformed/insecure config — is caught, logged REDACTED
-    (only the exception type name — never values, paths, or secrets), and the untouched
-    legacy operation continues. Some legacy operations tolerate a config the strict
-    schema rejects (e.g. ``bridge setup --reset``, which only clears a section, or a
-    completion gate that is off and merely warns); the shadow must never promote that
-    into a raised error. This does not contradict ``docs/config.md``'s "malformed config
-    fails fast before effects": that fail-fast is the *real* operation's own config read
-    (via :func:`compose_operation_snapshot`, which DOES propagate ``ConfigError``); the
-    swallow here applies only to this diagnostic shadow, which runs beside — never in
-    place of — that real path.
-
-    The emitted diagnostic carries ONLY the envelope version, the distinct source
-    kinds, and a redacted (truncated) fingerprint — never input values, secrets, or
-    file paths."""
-    if not shadow_enabled():
-        return None
-    try:
-        snapshot = compose_operation_snapshot(cli_overrides=cli_overrides, repo_root=repo_root)
-    except Exception as exc:  # noqa: BLE001 — shadow must never break the legacy op
-        logger.warning("operation snapshot shadow (%s) skipped: %s", surface, type(exc).__name__)
-        return None
-    try:
-        kinds = sorted({label for keys in snapshot.sources.values() for label in keys.values()})
-        logger.debug(
-            "operation snapshot shadow (%s): envelope=%d sources=%s fingerprint=%s…",
-            surface,
-            snapshot.envelope_version,
-            kinds,
-            snapshot.fingerprint()[:12],
-        )
-    except Exception as exc:  # noqa: BLE001 — diagnostic must never break the legacy op
-        logger.warning(
-            "operation snapshot shadow (%s) diagnostic skipped: %s", surface, type(exc).__name__
-        )
-    return snapshot
-
-
-def _shadow(surface: str, repo_root: str | os.PathLike[str] | None = None) -> None:
-    """Emit ONE diagnostic shadow snapshot for an operation (RP-04 S1).
-
-    The single definition behind every surface that shadows — the MCP read/write/LLM
-    tool wrappers and the public library operations. Guarded and side-effect-free
-    apart from the DEBUG diagnostic; it does NOT gate, control, or alter the
-    operation. A malformed/insecure config is swallowed by
-    :func:`emit_shadow_snapshot` (logged redacted, never raised), so the shadow never
-    changes what the operation does — the operation's own config read still fails fast
-    on its own path if it must.
-
-    ``repo_root`` is optional because the surfaces differ: the MCP tools have no
-    ambient root and let :func:`emit_shadow_snapshot` select one, while the library
-    operations already hold the caller's explicit root and MUST forward it, or the
-    snapshot would be composed against the wrong repository. Passing ``None`` is
-    identical to omitting it — ``emit_shadow_snapshot`` declares the same default."""
-    emit_shadow_snapshot(surface=surface, repo_root=repo_root)
 
 
 # ── Authoritative binding (RP-04 S2, ticket 3a08) ──────────────────────────────
