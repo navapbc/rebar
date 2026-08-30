@@ -140,7 +140,13 @@ fi
 # OPTIONAL: the Rebar Bot ed25519 authorship signing key (story 245e). A multi-line
 # OpenSSH PEM key cannot live in a single-line .env value, so materialize it to a 0600
 # FILE next to the .env (the ci-gerrit-ssh-key / g2p-github-pat materialize-to-file
-# precedent) and export only its PATH via REBAR_IDENTITY_SIGNING_KEY in the .env. Blank ⇒
+# precedent). This script does NOT emit REBAR_IDENTITY_SIGNING_KEY into the shared .env:
+# each service owns its OWN container-side path explicitly (the review-bot's compose
+# `environment:` → /run/secrets/rebar-bot-signing-key; the MCP container's `docker run -e`
+# → /run/secrets/opcert-ed25519-key). Emitting it here too would define the variable TWICE
+# for the MCP container — `docker run` keeps BOTH the `--env-file` .env entry and the `-e`
+# flag in Config.Env (unlike compose's env-over-env_file merge), leaving the effective value
+# resting on docker's last-wins ordering (bug calcite-farsighted-goose). Blank SSM slot ⇒
 # the reviewbot writes unsigned (its types are gate-exempt, so this is attribution only).
 rebar_bot_signing_key="$(get_param_optional rebar-bot-signing-key)"
 # ALWAYS create the file, even when the SSM slot is blank (bug beb1). docker creates a
@@ -267,8 +273,9 @@ chmod 600 "${tmp}"
   echo "GITHUB_OAUTH_CLIENT_SECRET=${github_oauth_client_secret}"
   echo "REVIEWBOT_TICKETS_PAT=${reviewbot_tickets_pat}"
   echo "MCP_TICKETS_PAT=${mcp_tickets_pat}"
-  # Path (not the key material) to the materialized bot signing key; empty ⇒ unsigned.
-  echo "REBAR_IDENTITY_SIGNING_KEY=${signing_key_path}"
+  # REBAR_IDENTITY_SIGNING_KEY is deliberately NOT emitted here: each service sets its own
+  # container-side path (compose `environment:` / `docker run -e`), and a shared .env entry
+  # would define it twice for the MCP container's `docker run` (bug calcite-farsighted-goose).
   # Per-client MCP bearer PATs (blank ⇒ that client's record was omitted from the tokens file).
   # The tokens file references these env-var NAMES via token_env; the raw values live only here.
   echo "MCP_CLIENT_PAT_COPILOT=${mcp_pat_copilot}"
