@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from rebar.config import repo_root_or_none, tracker_dir
-from rebar.llm.evals.plan_replay import report, tier0, tier1
+from rebar.llm.evals.plan_replay import report, tier0, tier1, tier2
 from rebar.llm.evals.plan_replay.candidates import CANDIDATES
 from rebar.llm.evals.plan_replay.verifier_candidates import load_verifier_candidate
 
@@ -71,6 +71,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tier1_parser.add_argument("--cache-dir", default=str(_DEFAULT_CACHE_DIR))
     tier1_parser.add_argument("--out-dir", default=str(_DEFAULT_OUT_DIR))
+
+    tier2_parser = subparsers.add_parser("tier2", help="replay Pass-1 over a fixed sample")
+    tier2_parser.add_argument(
+        "--candidate",
+        default=None,
+        help="path to a candidate .rebar/ override dir; omit for current",
+    )
+    tier2_parser.add_argument(
+        "--criteria", default=None, help="single-criterion mode: one criterion id"
+    )
+    tier2_parser.add_argument(
+        "--sample-path",
+        default=str(_DEFAULT_OUT_DIR / "tier2-sample.json"),
+        help="fixed sample file",
+    )
+    tier2_parser.add_argument(
+        "--store",
+        action="append",
+        default=[],
+        type=_parse_store,
+        help="name=path tracker store (repeatable); defaults to REBAR_ROOT's own tracker",
+    )
+    tier2_parser.add_argument("--cache-dir", default=str(_DEFAULT_CACHE_DIR))
+    tier2_parser.add_argument("--out-dir", default=str(_DEFAULT_OUT_DIR))
 
     return parser
 
@@ -135,6 +159,40 @@ def _run_tier1(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_tier2(args: argparse.Namespace) -> int:
+    store_roots = dict(args.store) if args.store else _default_store_roots()
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ticket_repo_root = repo_root_or_none() or os.getcwd()
+
+    if args.criteria:
+        result = tier2.run_tier2_single_criterion(
+            store_roots,
+            cache_dir=args.cache_dir,
+            sample_path=args.sample_path,
+            criterion_id=args.criteria,
+            ticket_repo_root=ticket_repo_root,
+        )
+    else:
+        result = tier2.run_tier2_full(
+            store_roots,
+            cache_dir=args.cache_dir,
+            sample_path=args.sample_path,
+            candidate_dir=args.candidate,
+            candidate_name=args.candidate or "current",
+            ticket_repo_root=ticket_repo_root,
+        )
+
+    report_path = out_dir / f"{result['run_id']}.md"
+    report_path.write_text(tier2.render_tier2_report(result), encoding="utf-8")
+    sys.stdout.write(
+        f"wrote {report_path}\n"
+        f"sampled {result['sample_n']}, "
+        f"ledger cost ${result['ledger_entry']['usd']:.2f}\n"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -142,6 +200,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tier0(args)
     if args.command == "tier1":
         return _run_tier1(args)
+    if args.command == "tier2":
+        return _run_tier2(args)
     parser.print_help()
     return 2
 

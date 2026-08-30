@@ -338,6 +338,12 @@ _UNFOLLOWABLE: dict[str, str] = {
         "standard-class model string constructed just above this call, not the operator's "
         "configured model"
     ),
+    "llm/evals/plan_replay/tier2.py::run_tier2_full": (
+        "eval harness (ticket peaceable-choppy-sapsucker): cfg.model is "
+        "`parity.resolve_pinned_model('pass1').model_id`, a fully-resolved Bedrock "
+        "frontier-class model string constructed just above this call, not the operator's "
+        "configured model"
+    ),
     "llm/plan_review/fidelity_spot_eval.py::_relocation_requests": (
         "eval harness: compares two prompts on ONE fixed model, so cfg.model is the control"
     ),
@@ -587,6 +593,7 @@ _EXPECTED_RUN_REQUEST_SITES = [
     ("llm/evals/eval_solver.py::_run_novelty_case", "cfg", "unresolved"),
     ("llm/evals/eval_solver.py::_run_verifier_case", "cfg", "unresolved"),
     ("llm/evals/plan_replay/tier1.py::build_candidate_runner", "cfg", "unresolved"),
+    ("llm/evals/plan_replay/tier2.py::run_tier2_full", "cfg", "unresolved"),
     ("llm/operations.py::_review_ticket_impl", "max_output_cfg(cfg)", "unresolved"),
     ("llm/overlap/judge.py::judge_one", "cfg", "bound"),
     ("llm/overlap/judge.py::judge_batch", "cfg", "bound"),
@@ -638,7 +645,7 @@ def test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work(
 
     sites = _run_request_sites()
 
-    assert len(_EXPECTED_RUN_REQUEST_SITES) == 26
+    assert len(_EXPECTED_RUN_REQUEST_SITES) == 27
     assert all(expr for _, expr, _ in _EXPECTED_RUN_REQUEST_SITES)
     assert sites == _EXPECTED_RUN_REQUEST_SITES
     assert len(module_walks) >= 400, "the oracle did not exercise the real source corpus"
