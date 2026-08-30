@@ -355,7 +355,9 @@ def test_health_is_unauthenticated_even_with_auth_enabled(tmp_path):
 def test_certified_tool_instrumentation_moves_the_gauge():
     """instrument_certified_tools wraps a certified tool's fn so running it moves
     the gauge; a non-certified tool's fn is left untouched. Uses a blocking stub so
-    the increment is observable while the call is in flight."""
+    the increment is observable while the call is in flight. (An already-async CERTIFIED
+    tool is NOT a silent skip — it fails loud; that path is pinned separately by
+    test_instrument_certified_tools_fails_loud_on_an_already_async_certified_tool.)"""
     import threading
     from types import SimpleNamespace
 
@@ -374,14 +376,11 @@ def test_certified_tool_instrumentation_moves_the_gauge():
 
     certified = SimpleNamespace(fn=_blocking_review_plan, is_async=False)
     trivial = SimpleNamespace(fn=_trivial, is_async=False)
-    async_certified_fn = object()
-    async_certified = SimpleNamespace(fn=async_certified_fn, is_async=True)
     tools = {
         "review_plan": certified,
         "list_tickets": trivial,
-        # verify_completion is a certified name but marked async → must be left alone;
-        # review_code / scan_spec are absent (get_tool → None) → skipped, not an error.
-        "verify_completion": async_certified,
+        # verify_completion / review_code / scan_spec are absent (get_tool → None) →
+        # skipped, not an error.
     }
     manager = SimpleNamespace(get_tool=lambda n: tools.get(n))
     mcp = SimpleNamespace(_tool_manager=manager)
@@ -391,7 +390,6 @@ def test_certified_tool_instrumentation_moves_the_gauge():
 
     assert trivial.fn is _trivial  # non-certified tool untouched
     assert certified.fn is not _blocking_review_plan  # certified tool wrapped
-    assert async_certified.fn is async_certified_fn  # async certified tool left untouched
 
     assert gauge.value == 0
     worker = threading.Thread(target=certified.fn)
@@ -401,6 +399,29 @@ def test_certified_tool_instrumentation_moves_the_gauge():
     release.set()
     worker.join(timeout=5)
     assert gauge.value == 0  # drained after the op returns
+
+
+def test_instrument_certified_tools_fails_loud_on_an_already_async_certified_tool():
+    """Regression guard for the graceful-drain contract (ticket wounded-resident-bushbaby).
+
+    ``wire_health`` instruments FIRST, then offloads — that order is load-bearing, because
+    the offload marks every sync body async and ``instrument_certified_tools`` refuses to
+    touch an async tool. If a future change ever reversed that order (offload first), or a
+    certified tool were natively converted to ``async def``, the instrumenter would meet an
+    already-async CERTIFIED tool and — before this guard — SILENTLY skip it, so the
+    in-flight gauge would stop counting billable work and the SIGTERM drain would fail
+    OPEN with no signal. The guard makes that condition raise, so the misordering fails a
+    test rather than shipping a blind drain."""
+    from types import SimpleNamespace
+
+    from rebar._mcp_health import InFlightGauge, instrument_certified_tools
+
+    async_certified = SimpleNamespace(fn=object(), is_async=True)
+    manager = SimpleNamespace(get_tool=lambda n: {"review_plan": async_certified}.get(n))
+    mcp = SimpleNamespace(_tool_manager=manager)
+
+    with pytest.raises(RuntimeError, match="review_plan"):
+        instrument_certified_tools(mcp, gauge=InFlightGauge())
 
 
 def test_wrap_tool_fn_passes_args_and_kwargs_through_and_counts():
