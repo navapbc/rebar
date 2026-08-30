@@ -77,6 +77,7 @@ DECLARED_EXTRAS: frozenset[str] = frozenset(
         "tracing",
         "mcp",
         "reviewbot",
+        "evals",
     }
 )
 

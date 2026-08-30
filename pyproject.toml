@@ -151,6 +151,15 @@ bedrock = [
 pricing = [
     "genai-prices",
 ]
+# Plan-review replay eval suite (ticket fizzy-hypnotic-boto): the eval package's
+# entry point (`python -m rebar.llm.evals.plan_replay`, wired up by ticket
+# bouncy-peacockish-titmouse) needs `ledger.py`'s spend accounting, which needs
+# genai-prices to price actual token usage -- so the eval extra pulls the same
+# dependency the `pricing` extra ships, rather than making every eval caller
+# separately remember to install it.
+evals = [
+    "genai-prices",
+]
 # OTLP trace sink (epic a88f / WS-J). Net-new extra. WRITE-ONLY by rule —
 # OpenTelemetry is a sink, never read back into a rebar decision (oracle
 # discipline). Imported lazily behind guard_import(..., extra="tracing").

@@ -1809,6 +1809,9 @@ dev = [
     { name = "shellcheck-py" },
     { name = "zizmor" },
 ]
+evals = [
+    { name = "genai-prices" },
+]
 grounding = [
     { name = "tree-sitter" },
     { name = "tree-sitter-language-pack" },
@@ -1858,6 +1861,7 @@ requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "fastapi", marker = "extra == 'reviewbot'" },
     { name = "fastapi", marker = "extra == 'ui'" },
+    { name = "genai-prices", marker = "extra == 'evals'" },
     { name = "genai-prices", marker = "extra == 'pricing'" },
     { name = "git-remote-s3", marker = "extra == 's3'", specifier = ">=0.3.2" },
     { name = "hatchling", marker = "extra == 'dev'", specifier = ">=1.18" },
@@ -1901,7 +1905,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'ui'" },
     { name = "zizmor", marker = "extra == 'dev'", specifier = "==1.29.0" },
 ]
-provides-extras = ["mcp", "reviewbot", "ui", "agents", "bedrock", "pricing", "tracing", "grounding", "metrics", "wiki", "adf", "jira-datacenter", "grounding-t2", "s3", "dev"]
+provides-extras = ["mcp", "reviewbot", "ui", "agents", "bedrock", "pricing", "evals", "tracing", "grounding", "metrics", "wiki", "adf", "jira-datacenter", "grounding-t2", "s3", "dev"]
 
 [[package]]
 name = "nodeenv"
