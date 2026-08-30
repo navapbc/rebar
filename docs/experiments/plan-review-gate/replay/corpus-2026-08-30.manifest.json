@@ -1,23 +1,23 @@
 {
-  "content_hash": "4f89fe873d09b8ee4c5893d189c4d355ff73d8637778c53eded7d54bf71b8430",
-  "generated_at": "2026-08-29T23:58:42.537432+00:00",
-  "row_count": 6378,
+  "content_hash": "b17e50f8a4b5a472186cbd242bc7a88872d46eb8066c1b396e6a23c51e30ea50",
+  "generated_at": "2026-08-30T01:49:52.254827+00:00",
+  "row_count": 6400,
   "schema_histogram": {
     "plan_review_result_v1": 1833,
-    "plan_review_result_v2": 4545
+    "plan_review_result_v2": 4567
   },
   "stores": {
-    "rebar": 6378
+    "rebar": 6400
   },
   "stores_attempted": {
     "legacy-modernization-navigator": "unavailable on this host (~/legacy-modernization-navigator does not exist)",
     "rebar": "/Users/joeoakhart/rebar/.tickets-tracker"
   },
-  "unverified_count": 5521,
+  "unverified_count": 5543,
   "verdict_histogram": {
-    "BLOCK": 2742,
+    "BLOCK": 2758,
     "INDETERMINATE": 321,
-    "PASS": 3315
+    "PASS": 3321
   },
   "verified_by_generation": {
     "current": 798,
@@ -26,5 +26,5 @@
     "pre_330c": 55
   },
   "verified_count": 857,
-  "verified_ratio": 0.13436814048291001
+  "verified_ratio": 0.13390625
 }

@@ -388,3 +388,35 @@ def test_build_corpus_recovers_a_review_result_deleted_from_the_tree(tmp_path):
     assert manifest["stores"]["main"] == 1
     assert manifest["verified_count"] == 1
     assert manifest["schema_histogram"]["plan_review_result_v2"] == 1
+
+
+# ── reconstruction failure (no recoverable CREATE) is not "empty material" ──────
+def test_build_corpus_marks_unverified_when_no_create_event_recoverable(tmp_path):
+    """A REVIEW_RESULT with no recoverable CREATE event (a gap in the recovered
+    history) is a RECONSTRUCTION FAILURE and must be marked unverified even when the
+    stored fingerprint happens to equal the fingerprint of EMPTY material — a naive
+    implementation that reconstructs missing-CREATE as description="" would spuriously
+    VERIFY this row purely by coincidence, which is worse than not matching at all."""
+    tracker = TrackerBuilder(tmp_path / "store")
+    ticket_id = "0000-0000-0000-0009"
+    # Deliberately skip tracker.create(): no CREATE event exists for this ticket.
+    # This is material_fingerprint() of a PlanContext with empty description/file_impact/
+    # children — the exact value a "reconstruct missing CREATE as empty" implementation
+    # would spuriously match against.
+    empty_material_fingerprint = "3be6beba619b59e5"
+    tracker.review_result(
+        ticket_id,
+        data={
+            "schema": "plan_review_result_v2",
+            "ticket_id": ticket_id,
+            "verdict": "PASS",
+            "material_fingerprint": empty_material_fingerprint,
+            "reviewed_related_material": [],
+        },
+    )
+
+    manifest = corpus.build_corpus({"main": str(tracker.path)}, cache_dir=tmp_path / "cache")
+
+    assert manifest["row_count"] == 1
+    assert manifest["verified_count"] == 0
+    assert manifest["unverified_count"] == 1

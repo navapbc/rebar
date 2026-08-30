@@ -154,11 +154,17 @@ def _load_ticket_events(tracker_path: str) -> dict[str, dict[str, list[dict[str,
 
 def _reconstruct_material(
     ticket_events: dict[str, list[dict[str, Any]]], review_ts: int
-) -> tuple[str, str, list[Any], str | None, str | None, list[str]]:
+) -> tuple[str, str, list[Any], str | None, str | None, list[str], bool]:
     """Replay CREATE + EDITs up to ``review_ts`` (inclusive), oldest-first, into the
     reconstructed ``(ticket_type, description, file_impact, file_impact_scope,
-    no_file_impact_reason, children)`` state as of the review."""
+    no_file_impact_reason, children, create_found)`` state as of the review.
+
+    ``create_found=False`` (no recoverable CREATE event) is a RECONSTRUCTION FAILURE,
+    distinct from a ticket that genuinely has an empty description — the caller must
+    not attempt fingerprint matching against the resulting empty material, which would
+    conflate "we can't tell" with "the material changed" (or worse, a spurious match)."""
     creates = ticket_events.get("CREATE", [])
+    create_found = bool(creates)
     create_data = creates[0]["data"] if creates else {}
     ticket_type = create_data.get("ticket_type", "")
     description = create_data.get("description", "")
@@ -181,7 +187,15 @@ def _reconstruct_material(
         if "no_file_impact_reason" in fields:
             no_file_impact_reason = fields["no_file_impact_reason"]
 
-    return ticket_type, description, file_impact, file_impact_scope, no_file_impact_reason, []
+    return (
+        ticket_type,
+        description,
+        file_impact,
+        file_impact_scope,
+        no_file_impact_reason,
+        [],
+        create_found,
+    )
 
 
 def _build_context(
@@ -233,14 +247,19 @@ def _build_sidecar_row(
     data = review_event["data"]
     review_ts = review_event["ts"]
 
-    ttype, description, file_impact, scope, reason, _ = _reconstruct_material(
+    ttype, description, file_impact, scope, reason, _, create_found = _reconstruct_material(
         ticket_events, review_ts
     )
     children = _child_ids(data.get("reviewed_related_material"))
-    ctx = _build_context(ticket_id, ttype, description, file_impact, scope, reason, children)
-
     signed_fingerprint = data.get("material_fingerprint", "")
-    generation = _match_generation(ctx, signed_fingerprint)
+
+    if create_found:
+        ctx = _build_context(ticket_id, ttype, description, file_impact, scope, reason, children)
+        generation = _match_generation(ctx, signed_fingerprint)
+    else:
+        # No recoverable CREATE event: reconstruction failed, not "the material is
+        # empty" — never attempt a fingerprint match against fabricated empty material.
+        generation = None
 
     return {
         "store": store_name,
@@ -258,6 +277,8 @@ def _build_sidecar_row(
         "material_fingerprint": signed_fingerprint,
         "verified": generation is not None,
         "generation": generation,
+        "reconstructed": create_found,
+        "ran_model": (data.get("provider_provenance") or {}).get("ran_model"),
     }
 
 
