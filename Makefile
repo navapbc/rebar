@@ -274,6 +274,13 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# `dirname(<tracker>)` composition only; sanction is `# repo-root-ok: <reason>` (reason
 	@# MANDATORY), used for the one detached-child site whose cwd IS the store.
 	python scripts/check_repo_root_from_tracker.py
+	@# Repo root derived from the PACKAGE LOCATION (bug impressive-doddering-alpinegoat, c0b9):
+	@# `Path(__file__).resolve().parents[N]` is the checkout ONLY under an editable install;
+	@# under a wheel install it climbs into site-packages, so the reconciler silently resolved
+	@# repo_root=<venv>/lib/pythonX. Flags the `Path(__file__).parents[...]` subscript root-climb
+	@# only (the singular `.parent` package-data idiom is untouched); sanction is
+	@# `# pkg-root-ok: <reason>` / `# pkg-root-seam: <reason>` (reason MANDATORY).
+	python scripts/check_repo_root_from_package.py
 	@# CLI --output json JS-safe-integer gate (bug unhelping-creviced-rhino, e127-a3ad-895a-4a2f).
 	@# rebar's 19-digit nanosecond timestamps are outside the RFC 8259 §6 interoperable range,
 	@# so a bare JSON number on a CLI --output json stream is silently rounded by float64
