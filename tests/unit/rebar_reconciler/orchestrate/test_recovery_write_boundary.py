@@ -580,17 +580,17 @@ def test_the_repair_is_invoked_from_reconcile_and_not_from_run_differs() -> None
     from "tidying" the call into the diff phase beside the create-recovery call it
     superficially resembles, since the two have deliberately different boundaries.
 
-    The PRESENCE half matters more, and for a specific reason. ``reconcile.py`` is at 799
-    of the 800-line cap, so the next change that needs room there is forced into an
-    extraction (RP-03 S5 `diamond-flavoured-esok` is already queued against this file).
-    An extraction can relocate this call without breaking a single other assertion in the
-    suite, and if it lands after the first remote fetch S3's whole ordering guarantee is
-    silently void — the repair would still work, still be tested, and still be wrong.
-    Whoever splits this file must keep the call after the under-lock staleness gate and
+    The PRESENCE half matters more, and for a specific reason. ``reconcile.py`` WAS at 799
+    of the 800-line cap; ticket piscine-bullish-cowbird performed exactly the extraction
+    this docstring anticipated, moving the load phase (and this call) to load_phase.py.
+    The repair call itself was relocated along with the rest of ``_load_snapshots`` —
+    verbatim, same call shape, same position relative to the staleness gate and the
+    fetch — so this anchor now checks load_phase.py instead of reconcile.py. Whoever
+    next relocates this call must keep it after the under-lock staleness gate and
     before the fetch; the behavioural oracle for that is
     ``test_repair_runs_before_the_first_remote_observation`` in this module.
     """
-    assert "repair_at_write_boundary" in (_ENGINE / "reconcile.py").read_text(encoding="utf-8")
+    assert "repair_at_write_boundary" in (_ENGINE / "load_phase.py").read_text(encoding="utf-8")
 
     run_differs_source = (_ENGINE / "run_differs.py").read_text(encoding="utf-8")
     assert "repair_at_write_boundary" not in run_differs_source

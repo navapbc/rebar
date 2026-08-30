@@ -283,14 +283,16 @@ def test_preflight_tolerates_config_remap(
     a spurious 'not mapped' warning for it — the same config-only false-alarm class the
     fetcher known-set fixes. A genuinely unmapped status still warns (negative control).
     """
-    from rebar_reconciler import reconcile_helpers
+    # preflight_status_mapping moved to pass_support.py (ticket
+    # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
+    from rebar_reconciler import pass_support
 
     proj = _proj(
         tmp_path,
         '[mapping.projects.REB.status_map]\nin_progress = "Doing"\n',
     )
     # A remapped Jira NAME the mapper legitimately emits post-remap.
-    reconcile_helpers.preflight_status_mapping(
+    pass_support.preflight_status_mapping(
         [{"action": "update", "key": "REB-1", "fields": {"status": "Doing"}}],
         repo_root=proj,
     )
@@ -298,7 +300,7 @@ def test_preflight_tolerates_config_remap(
     assert "Doing" not in err  # config-declared name is tolerated, no false alarm
 
     # Negative control: a status declared NOWHERE still warns.
-    reconcile_helpers.preflight_status_mapping(
+    pass_support.preflight_status_mapping(
         [{"action": "update", "key": "REB-2", "fields": {"status": "Nowhere"}}],
         repo_root=proj,
     )

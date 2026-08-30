@@ -473,7 +473,9 @@ def test_the_record_file_is_staged_for_commit_back(monkeypatch):
     while every unit test still passed. This cell pins the commit-back wiring.
     """
     git_adapter = importlib.import_module("rebar_reconciler.git_adapter")
-    helpers = importlib.import_module("rebar_reconciler.reconcile_helpers")
+    # _commit_binding_store_snapshot moved to pass_support.py (ticket
+    # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
+    helpers = importlib.import_module("rebar_reconciler.pass_support")
 
     assert git_adapter.IMPOSSIBLE_LINKS_FILE == ".bridge_state/impossible_links.json"
 

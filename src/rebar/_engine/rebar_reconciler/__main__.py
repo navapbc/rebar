@@ -59,7 +59,9 @@ except ImportError:  # pragma: no cover - bare-interpreter fallback
 _ADVISORY_LOCK_KEY = "rebar_reconciler._advisory_lock"
 _MODE_KEY = "rebar_reconciler.mode"
 _REQUEST_KEY = "rebar_reconciler.request"
-_HELPERS_KEY = "rebar_reconciler.reconcile_helpers"
+# resolve_selection/SelectionError moved to pass_support.py (ticket
+# piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
+_PASS_SUPPORT_KEY = "rebar_reconciler.pass_support"
 
 
 class _Disposition(Enum):
@@ -493,7 +495,7 @@ def _resolve_request_selection(request) -> tuple[set[str] | None, str | None]:
     """Resolve canonical selection tokens before any pass-lock inspection."""
     if not request.selection_tokens:
         return None, None
-    helpers = _load_sibling_keyed(_HELPERS_KEY, "reconcile_helpers.py")
+    helpers = _load_sibling_keyed(_PASS_SUPPORT_KEY, "pass_support.py")
     try:
         return helpers.resolve_selection(request.repo_root, request.selection_tokens), None
     except helpers.SelectionError as exc:

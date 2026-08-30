@@ -201,7 +201,9 @@ def _bridge_selection(
     selected = only if only is not None else exclude
     if selected is None:
         return None, None
-    helpers = _engine_module("rebar_reconciler.reconcile_helpers")
+    # resolve_selection/SelectionError moved to pass_support.py (ticket
+    # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
+    helpers = _engine_module("rebar_reconciler.pass_support")
     try:
         resolved = helpers.resolve_selection(root, tuple(item.strip() for item in selected))
     except helpers.SelectionError as exc:

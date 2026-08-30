@@ -473,7 +473,9 @@ def test_read_local_tickets_live_path_strips_ambient_sync_pull(tmp_path, monkeyp
     A no_sync=True read must still set REBAR_SYNC_PULL=off."""
     import subprocess
 
-    rh = _load("reconcile_wiring_helpers", "reconcile_helpers.py")
+    # _read_local_tickets moved to pass_support.py (ticket
+    # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
+    rh = _load("reconcile_wiring_pass_support", "pass_support.py")
 
     fake_cli = tmp_path / "rebar-cli"
     fake_cli.write_text("#!/bin/sh\n")  # must exist so the CLI branch runs
@@ -502,7 +504,7 @@ def test_read_local_tickets_live_path_strips_ambient_sync_pull(tmp_path, monkeyp
 
 def test_read_local_ticket_full_live_path_strips_ambient_sync_pull(tmp_path, monkeypatch):
     """AI-1 regression (sibling site): run_differs._read_local_ticket_full has the same
-    env-inheritance contract as reconcile_helpers._read_local_tickets — the live
+    env-inheritance contract as pass_support._read_local_tickets — the live
     (no_sync=False) read must strip an ambient REBAR_SYNC_PULL=off."""
     import subprocess
 

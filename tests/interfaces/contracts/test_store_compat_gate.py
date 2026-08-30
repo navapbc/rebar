@@ -390,8 +390,11 @@ def test_gate_wired_at_all_write_chokepoints() -> None:
     recover_txt = (src / "_commands" / "fsck_recover.py").read_text()
     assert "check_store_compat" in recover_txt, "fsck_recover missing explicit gate"
 
-    reconcile_txt = (src / "_engine" / "rebar_reconciler" / "reconcile.py").read_text()
-    assert "check_store_compat" in reconcile_txt, "reconcile._apply_mutations missing explicit gate"
+    # check_store_compat's reconciler chokepoint moved from reconcile.py to
+    # apply_phase.py (ticket piscine-bullish-cowbird, reconcile.py module-size
+    # headroom): apply_mutations still calls it before any write dispatch.
+    reconcile_txt = (src / "_engine" / "rebar_reconciler" / "apply_phase.py").read_text()
+    assert "check_store_compat" in reconcile_txt, "reconcile apply_mutations missing explicit gate"
 
     # No OTHER definition of acquire()/write_lock() bypasses the gate: there is exactly
     # one of each, both in lock.py.

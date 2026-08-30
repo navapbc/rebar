@@ -411,11 +411,12 @@ def test_reconcile_once_legacy_caller_omits_mode_kwarg(
     """Finding #2 (3307050261): legacy callers (target_mode=None) must
     call applier.apply WITHOUT a ``mode`` kwarg.
 
-    Exercises the if/else branch in reconcile.py around line 440-445 that
-    preserves backward compatibility for tests stubbing applier.apply with
-    a signature that does not accept ``mode``.
+    Exercises the if/else branch in apply_phase.py's ``apply_mutations`` (moved
+    from reconcile.py by ticket piscine-bullish-cowbird) that preserves backward
+    compatibility for tests stubbing applier.apply with a signature that does
+    not accept ``mode``.
     """
-    # The branch under test in reconcile.py (around lines 440-445):
+    # The branch under test in apply_phase.py's apply_mutations:
     #
     #     if target_mode is None:
     #         manifest_path = applier.apply(mutations, pass_id, repo_root)
@@ -425,11 +426,11 @@ def test_reconcile_once_legacy_caller_omits_mode_kwarg(
     #         )
     #
     # We assert the legacy branch (target_mode is None) invokes apply WITHOUT
-    # a ``mode`` kwarg. Read reconcile.py's source directly so the test is
+    # a ``mode`` kwarg. Read apply_phase.py's source directly so the test is
     # resilient to reconcile.py's lazy loader plumbing — what we actually
     # care about is the textual call-shape contract that protects legacy
     # test stubs.
-    reconcile_src = (RECONCILER_DIR / "reconcile.py").read_text()
+    reconcile_src = (RECONCILER_DIR / "apply_phase.py").read_text()
     # Bug 85a1: the legacy-branch call may carry backward-compatible kwargs
     # (e.g. binding_store=), so the literal-string assertion is too brittle.
     # Use a regex that allows trailing kwargs but explicitly rejects mode=.

@@ -219,7 +219,9 @@ def test_commit_only_peer_confirmations_is_staged_and_committed(tmp_path, monkey
     pass. This test drives a real tracker repo where ONLY the sidecar changed
     and requires the commit to land.
     """
-    helpers = importlib.import_module("rebar_reconciler.reconcile_helpers")
+    # _commit_binding_store_snapshot moved to pass_support.py (ticket
+    # piscine-bullish-cowbird, reconcile_helpers.py module-size headroom).
+    helpers = importlib.import_module("rebar_reconciler.pass_support")
     git_adapter = importlib.import_module("rebar_reconciler.git_adapter")
 
     assert "PEER_CONFIRMATIONS_FILE" in git_adapter.__all__

@@ -9,7 +9,6 @@ mutation_count=0 on both passes (second call sees prev==curr snapshot).
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,26 +52,30 @@ def _tracker_dir(repo_root: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Leaf-helper re-exports. reconcile_helpers.py holds the pure pass-support
-# utilities that carry no back-edge to the reconcile_once spine (status
-# preflight, binding-store commit-back, the ticket-CLI reader, the filter-scope
-# builders, the no-write plan renderer, and the cap-0 sync-logger stand-in). Load
-# it once by path and bind its names at module level so (a) the staying phase
-# helpers call them as bare names — preserving the monkeypatch seam tests rely on —
-# and (b) attribute access (``reconcile.<name>``, used by tests that load this
-# module by path) keeps resolving all eight names.
+# Leaf-helper re-exports. reconcile_helpers.py and its sibling pass_support.py
+# (ticket piscine-bullish-cowbird split reconcile_helpers.py to restore its own
+# module-size headroom) hold the pure pass-support utilities that carry no
+# back-edge to the reconcile_once spine — status preflight, binding-store
+# commit-back, the ticket-CLI reader, the selection/filter-scope builders (now
+# pass_support.py), and the no-write plan renderer + cap-0 sync-logger stand-in
+# (still reconcile_helpers.py). Load both once by path and bind their names at
+# module level so (a) the staying phase helpers call them as bare names —
+# preserving the monkeypatch seam tests rely on — and (b) attribute access
+# (``reconcile.<name>``, used by tests that load this module by path) keeps
+# resolving every name regardless of which sibling file now defines it.
 # ---------------------------------------------------------------------------
 _helpers = _load("reconcile_helpers", "reconcile_helpers.py")
+_pass_support = _load("pass_support", "pass_support.py")
 
-StatusMappingError = _helpers.StatusMappingError
-preflight_status_mapping = _helpers.preflight_status_mapping
-_commit_binding_store_snapshot = _helpers._commit_binding_store_snapshot
-_read_local_tickets = _helpers._read_local_tickets
-SelectionStaleError = _helpers.SelectionStaleError
-ensure_selection_current = _helpers.ensure_selection_current
-narrow_selection_inputs = _helpers.narrow_selection_inputs
-_build_filter_target_set = _helpers._build_filter_target_set
-_mutation_matches_filter = _helpers._mutation_matches_filter
+StatusMappingError = _pass_support.StatusMappingError
+preflight_status_mapping = _pass_support.preflight_status_mapping
+_commit_binding_store_snapshot = _pass_support._commit_binding_store_snapshot
+_read_local_tickets = _pass_support._read_local_tickets
+SelectionStaleError = _pass_support.SelectionStaleError
+ensure_selection_current = _pass_support.ensure_selection_current
+narrow_selection_inputs = _pass_support.narrow_selection_inputs
+_build_filter_target_set = _pass_support._build_filter_target_set
+_mutation_matches_filter = _pass_support._mutation_matches_filter
 _build_plan_entries = _helpers._build_plan_entries
 _NoOpSyncLogger = _helpers._NoOpSyncLogger
 _write_prev_snapshot_key_set = _helpers._write_prev_snapshot_key_set
@@ -242,134 +245,52 @@ def reconcile_once(
     return _persist_and_log(ctx)
 
 
+# ---------------------------------------------------------------------------
+# Phase-function seams. reconcile_once's three write-bearing phases (load,
+# apply, persist) moved to sibling modules load_phase.py / apply_phase.py /
+# persist_phase.py (ticket piscine-bullish-cowbird: reconcile.py was at the
+# locked 800-line cap). reconcile_once itself is untouched above — it remains
+# the single lifecycle facade calling these four names, exactly as before.
+#
+# _apply_mutations and _confirm_peer_links are simple alias-binds: no test
+# monkeypatches either function's OWN sub-dependencies through
+# ``reconcile.<name>`` expecting the patch to alter that function's behavior,
+# so the implementation can live entirely in its new sibling module.
+#
+# _load_snapshots, _save_and_commit_bindings, and _persist_and_log are thin
+# WRAPPERS instead: existing tests patch collaborators these functions call
+# internally — e.g. ``monkeypatch.setattr(reconcile, "_read_local_tickets",
+# ...)`` and expect ``reconcile._load_snapshots`` to observe it — and a bare
+# name resolves against its DEFINING module's globals, not the caller's. Each
+# wrapper below resolves every patchable collaborator as a bare name in ITS
+# OWN body (so it reads reconcile.py's current globals, picking up any
+# monkeypatch applied before the call) and forwards it into the real
+# implementation as an explicit keyword argument. This preserves every
+# existing patch seam unchanged while the implementation itself lives outside
+# this file.
+# ---------------------------------------------------------------------------
+_load_phase = _load("reconcile_load_phase", "load_phase.py")
+_apply_phase = _load("reconcile_apply_phase", "apply_phase.py")
+_persist_phase = _load("reconcile_persist_phase", "persist_phase.py")
+
+_apply_mutations = _apply_phase.apply_mutations
+_confirm_peer_links = _persist_phase.confirm_peer_links
+
+
 def _load_snapshots(ctx: _PassContext) -> None:
     """Load phase: sibling modules + persist flag + sync logger + local tickets +
     binding store + the prev/curr snapshots (aborting via _handle_corrupt_snapshot
     on a corrupt prev_snapshot). Populates ctx for the diff/apply/persist phases.
     """
-    pass_id = ctx.pass_id
-    repo_root = ctx.repo_root
-    target_mode = ctx.target_mode
-    filter_local_ids = ctx.filter_local_ids
-    selection_ids = ctx.selection_ids
-    fetcher = _load("reconcile_fetcher", "fetcher.py")
-    differ = _load("reconcile_differ", "differ.py")
-    applier = _load("reconcile_applier", "applier.py")
-    invariants_mod = _load("reconcile_invariants", "invariants.py")
-    binding_store_mod = _load("reconcile_binding_store", "binding_store.py")
-    outbound_differ_mod = _load("reconcile_outbound_differ", "outbound_differ.py")
-    inbound_differ_mod = _load("reconcile_inbound_differ", "inbound_differ.py")
-    local_label_intent_mod = _load("reconcile_local_label_intent", "local_label_intent.py")
-    sync_logger_mod = _load("reconcile_sync_logger", "sync_logger.py")
-
-    # -----------------------------------------------------------------------
-    # Persistence gating (ticket yaw-plait-doe).
-    #
-    # cap-0 modes (dry-run, reconcile-check) are documented as read-only: they
-    # run the full differ COMPUTATION and PRODUCE the report, but must write
-    # NOTHING to the local store. Every write point below is gated on `persist`.
-    #
-    # target_mode None defaults to LIVE → persists. dry-run / reconcile-check
-    # → cap 0 → persist=False. bootstrap-* / live → non-zero/None cap → persist.
-    # -----------------------------------------------------------------------
-    mode_mod = _load("rebar_reconciler.mode", "mode.py")
-    if target_mode is None:
-        persist = True
-    else:
-        persist = mode_mod.MODE_CAPS.get(target_mode) != 0
-
-    # -----------------------------------------------------------------------
-    # Read local tickets from the ticket CLI.
-    # -----------------------------------------------------------------------
-    local_tickets = _read_local_tickets(repo_root, no_sync=(not persist) or bool(selection_ids))
-
-    # -----------------------------------------------------------------------
-    # Load and recover binding store.
-    # -----------------------------------------------------------------------
-    binding_store = binding_store_mod.load_binding_store(repo_root)
-    if selection_ids:
-        ensure_selection_current(selection_ids, local_tickets)
-
-    # Create write-bearing pass artifacts only after the under-lock staleness check.
-    log_path = repo_root / "bridge_state" / f"sync-log-{pass_id}.jsonl"
-    sync_logger = sync_logger_mod.SyncLogger(log_path) if persist else _NoOpSyncLogger()
-    scoped_ids = selection_ids or filter_local_ids
-    sync_logger.log(
-        "sync_pass_start",
-        pass_id=pass_id,
-        mode=target_mode.value if target_mode else "live",
-        filtered=bool(scoped_ids),
-        filter_count=len(scoped_ids) if scoped_ids else 0,
+    _load_phase.load_snapshots(
+        ctx,
+        load=_load,
+        read_local_tickets=_read_local_tickets,
+        ensure_selection_current=ensure_selection_current,
+        narrow_selection_inputs=narrow_selection_inputs,
+        no_op_sync_logger_cls=_NoOpSyncLogger,
+        handle_corrupt_snapshot=_handle_corrupt_snapshot,
     )
-    # Interrupted-retirement repair (RP-02 S3 T2): after the under-lock staleness gate,
-    # and BEFORE the first remote fetch below — so no pass can interleave fresh liveness
-    # evidence for a retired issue with completing that issue's retirement.
-    binding_store.repair_at_write_boundary(persist=persist, scoped=bool(scoped_ids))
-    if scoped_ids:
-        print(
-            f"FILTERED PASS: scope restricted to {len(scoped_ids)} "
-            f"local IDs — not a production reconciliation."
-        )
-
-    snapshots_dir = repo_root / "bridge_state" / "snapshots"
-    snapshots_dir.mkdir(parents=True, exist_ok=True)
-
-    # Previous snapshot: kept in the ticket store so it survives between GHA runs (the
-    # commit-back step commits that directory; bridge_state/snapshots/ on the main-branch
-    # worktree was ephemeral, so the differ re-derived every mutation each pass). RESOLVED,
-    # not composed — this also seeds ``ctx.tracker_dir`` (consumed by run_differs).
-    tracker_dir = _tracker_dir(repo_root)
-    prev_dir = tracker_dir / ".bridge_state"
-    prev_dir.mkdir(parents=True, exist_ok=True)
-    prev_path = prev_dir / "prev_snapshot.json"
-    if prev_path.exists():
-        try:
-            prev_snapshot: dict = json.loads(prev_path.read_text())
-        except (json.JSONDecodeError, ValueError, OSError) as _exc:
-            # A corrupt / conflict-marked prev_snapshot must NEVER let the pass
-            # proceed with an unknown Jira state — alert + abort (see helper).
-            _handle_corrupt_snapshot(pass_id, repo_root, prev_path, _exc)
-    else:
-        prev_snapshot = {}
-
-    # Fetch current remote state. In no-write mode use compute_snapshot so no
-    # snapshot file is written; the differ runs identically on curr_snapshot.
-    if persist:
-        curr_path = fetcher.fetch_snapshot(pass_id, repo_root)
-        curr_snapshot: dict = json.loads(curr_path.read_text())
-    else:
-        curr_path = None
-        curr_snapshot = fetcher.compute_snapshot(pass_id, repo_root)
-
-    if selection_ids and ctx.selection_kind:
-        local_tickets, prev_snapshot, curr_snapshot = narrow_selection_inputs(
-            ctx.selection_kind,
-            selection_ids,
-            local_tickets,
-            prev_snapshot,
-            curr_snapshot,
-            binding_store,
-        )
-
-    ctx.persist = persist
-    ctx.fetcher = fetcher
-    ctx.differ = differ
-    ctx.applier = applier
-    ctx.invariants_mod = invariants_mod
-    ctx.binding_store_mod = binding_store_mod
-    ctx.outbound_differ_mod = outbound_differ_mod
-    ctx.inbound_differ_mod = inbound_differ_mod
-    ctx.local_label_intent_mod = local_label_intent_mod
-    ctx.sync_logger_mod = sync_logger_mod
-    ctx.mode_mod = mode_mod
-    ctx.sync_logger = sync_logger
-    ctx.local_tickets = local_tickets
-    ctx.binding_store = binding_store
-    ctx.tracker_dir = tracker_dir
-    ctx.prev_path = prev_path
-    ctx.prev_snapshot = prev_snapshot
-    ctx.curr_path = curr_path
-    ctx.curr_snapshot = curr_snapshot
 
 
 def _handle_corrupt_snapshot(
@@ -382,227 +303,7 @@ def _handle_corrupt_snapshot(
     ``RuntimeError``. The pass must NEVER proceed with an unknown Jira state, so
     this always raises.
     """
-    # SAFETY INVARIANT: a corrupt or conflict-marked prev_snapshot.json
-    # must NEVER cause the pass to proceed with an unknown Jira comment
-    # state.  If we continued with prev_snapshot={}, the inbound differ
-    # would re-derive all create mutations (expensive but safe).  However,
-    # the outbound differ uses curr_snapshot (the live fetch), not
-    # prev_snapshot, for comment dedup — so comment mutations would be
-    # correct IF we could reach that point.  The problem is we cannot
-    # trust that even prev_snapshot corruption is the only issue; the
-    # tickets branch may be in a partially-merged state that makes curr
-    # state unknown too.  Abort the pass with a loud ERROR and alert.
-    _alert_key = f"corrupt_prev_snapshot:{pass_id}"
-    print(
-        f"ERROR: prev_snapshot.json is corrupt or contains git conflict "
-        f"markers and cannot be parsed. Aborting reconcile pass "
-        f"'{pass_id}' to prevent emitting mutations against unknown "
-        f"Jira state. File: {prev_path}. Error: {_exc}. "
-        f"Recovery: resolve the merge conflict or delete the file to "
-        f"force a full re-fetch on the next pass.",
-        file=sys.stderr,
-    )
-    try:
-        _alert_store = _load(
-            "rebar_reconciler.alert_store",
-            "alert_store.py",
-        )
-        _alert_store.append(
-            {
-                "key": _alert_key,
-                "severity": "critical",
-                "reason": (f"prev_snapshot.json corrupt/unparseable at {prev_path}: {_exc}"),
-                "pass_id": pass_id,
-                "file": str(prev_path),
-                "resolved": False,
-                "timestamp_ns": __import__("time").time_ns(),
-            },
-            repo_root,
-        )
-    except Exception as _alert_exc:  # noqa: BLE001 — best-effort alert; original corruption still raises
-        print(
-            f"ERROR: alert_store write also failed ({_alert_exc}); "
-            f"corruption event not persisted to bridge_alerts.",
-            file=sys.stderr,
-        )
-    raise RuntimeError(
-        f"Aborting reconcile pass '{pass_id}': prev_snapshot.json "
-        f"is corrupt or contains git conflict markers at {prev_path}. "
-        f"Original parse error: {_exc}. "
-        f"Recovery: resolve the merge conflict or delete the file."
-    ) from _exc
-
-
-def _apply_mutations(ctx: _PassContext) -> None:
-    """Apply phase: optional filter-scope narrowing + status preflight + the single
-    applier.apply dispatch and normalize its write/no-write return shapes.
-    Records manifest_path / nowrite_plan / the unfiltered count back onto ctx.
-    """
-    mutations = ctx.mutations
-    filter_local_ids = ctx.filter_local_ids
-    binding_store = ctx.binding_store
-    pass_id = ctx.pass_id
-    repo_root = ctx.repo_root
-    target_mode = ctx.target_mode
-    persist = ctx.persist
-    applier = ctx.applier
-    sync_logger = ctx.sync_logger
-
-    # Story 21dd: the reconciler's outbound apply publishes ticket writes externally
-    # (and to Jira), so fail CLOSED on a store this rebar cannot interpret BEFORE any
-    # mutation. Guarded by `persist` so dry-run / cap-0 previews are excluded. RESOLVED,
-    # not composed: a repo-root path would compat-check an unconfigured directory.
-    if persist:
-        from rebar._store.compat import check_store_compat
-
-        check_store_compat(_tracker_dir(repo_root))
-
-    # -------------------------------------------------------------------
-    # Post-filter: when filter_local_ids is set, discard mutations that
-    # target tickets outside the filter scope.  All three differs ran on
-    # their full, unfiltered inputs (same code paths as production); only
-    # the dispatch set is narrowed.
-    # -------------------------------------------------------------------
-    unfiltered_count = len(mutations)
-    if filter_local_ids:
-        target_set = _build_filter_target_set(filter_local_ids, binding_store)
-        mutations = [m for m in mutations if _mutation_matches_filter(m, target_set)]
-        print(
-            f"filter: {unfiltered_count} mutations computed, "
-            f"{len(mutations)} match filter ({len(filter_local_ids)} local IDs, "
-            f"{len(target_set)} target keys)",
-            file=sys.stderr,
-        )
-        sync_logger.log(
-            "filter_applied",
-            unfiltered=unfiltered_count,
-            filtered=len(mutations),
-            target_keys=len(target_set),
-        )
-
-    # Preflight: WARN (non-fatally) if any update mutation references a status
-    # not present in config.local_to_jira_status. Runs exactly once per pass,
-    # before any applier dispatch. It no longer aborts the pass (Facet 3): an
-    # unmapped status flows to the applier and is recorded there as a
-    # per-mutation failure rather than taking down every later mutation.
-    preflight_status_mapping(mutations, repo_root)
-
-    # Direction-aware dispatch lives inside applier.apply (PR #371 / defect
-    # #8): the applier partitions typed Mutations by direction internally and
-    # routes inbound via _apply_typed per-mutation, outbound via the batch
-    # path. The previous reconcile_once-level typed/legacy split was a
-    # parallel workaround for the same gap; with cap
-    # enforcement landing in applier.apply (story 286b), all mutations must
-    # flow through that single entry point so caps apply uniformly across
-    # both directions.
-    manifest_path = None
-    nowrite_plan: dict | None = None
-    # Bug c903: LIVE returns its applied/failed tally here instead of a Path.
-    apply_tally: dict | None = None
-    try:
-        # Each optional kwarg below is forwarded ONLY when the resolved applier accepts
-        # it (narrow test stubs use fixed signatures; an unexpected kwarg would raise
-        # TypeError and abort the pass). mode is likewise only passed when target_mode is
-        # set (cap enforcement requested). Refs: abort_check epic dust-troth-naval,
-        # synced_fields_out bug e6e9, client RP-04 S3 AC1, ticket_plans RP-03 S2 T3.
-        _abort_kw = {"abort_check": ctx.abort_check} if ctx.abort_check is not None else {}
-        _synced_kw = (
-            {"synced_fields_out": ctx.synced_fields}
-            if _accepts_synced_fields_out(applier.apply)
-            else {}
-        )
-        _client_kw = (
-            {"client": ctx.runtime_transport}
-            if ctx.runtime_transport is not None and _accepts_client(applier.apply)
-            else {}
-        )
-        _ticket_plans_kw = (
-            {"ticket_plans": getattr(ctx, "ticket_plans", None)}
-            if getattr(ctx, "ticket_plans", None) is not None
-            and _accepts_ticket_plans(applier.apply)
-            else {}
-        )
-        if target_mode is None:
-            manifest_path = applier.apply(
-                mutations,
-                pass_id,
-                repo_root,
-                binding_store=binding_store,
-                **_abort_kw,
-                **_synced_kw,
-                **_client_kw,
-            )
-        else:
-            _max_kw = {"max_changes": ctx.max_changes} if ctx.max_changes is not None else {}
-            _route_kw = {"route": ctx.route} if ctx.route is not None else {}
-            manifest_path = applier.apply(
-                mutations,
-                pass_id,
-                repo_root,
-                mode=target_mode,
-                binding_store=binding_store,
-                persist=persist,
-                **_max_kw,
-                **_route_kw,
-                **_abort_kw,
-                **_synced_kw,
-                **_client_kw,
-                **_ticket_plans_kw,
-            )
-    finally:
-        # In no-write mode, apply() returns the computed plan dict instead of
-        # a manifest Path. Capture it for the report and treat manifest_path
-        # as None so no on-disk manifest is expected by the tally below.
-        if not persist and isinstance(manifest_path, dict):
-            nowrite_plan = manifest_path
-            manifest_path = None
-        # Bug c903: in LIVE (persist=True) apply() returns the applied/failed tally
-        # read out of the manifest just before it was unlinked, NOT a Path. Route it
-        # to ctx.apply_tally so _persist_and_log can count failures without an
-        # on-disk manifest. Discriminated from the no-write plan dict above by
-        # `persist`, which is False there and True here.
-        elif persist and isinstance(manifest_path, dict):
-            apply_tally = manifest_path
-            manifest_path = None
-
-    ctx.mutations = mutations
-    ctx.unfiltered_count = unfiltered_count
-    ctx.manifest_path = manifest_path
-    ctx.nowrite_plan = nowrite_plan
-    ctx.apply_tally = apply_tally
-
-
-def _confirm_peer_links(ctx: _PassContext) -> int:
-    """Record peer-confirmation evidence from this pass's snapshot (epic a4bd).
-
-    Kept as a named seam rather than inlined so the persist phase reads as a list of
-    steps and so tests can drive it directly. Opening the store here (not once per
-    pass elsewhere) keeps the whole feature inside the ``persist`` branch: a no-write
-    pass must not write evidence any more than it writes bindings.
-
-    ONE STORE INSTANCE FOR BOTH HALVES (epic a4bd, story f6e9). The upgrade backfill
-    and the snapshot confirmation MUST share a single instance. Two instances would
-    each load a pre-write copy of the file, so (a) records backfilled this pass would
-    be invisible to snapshot confirmation, defeating the same-pass provenance upgrade,
-    and (b) — worse — whichever instance saved last would silently discard the other's
-    records: a lost update. Sharing one instance makes the upgrade fall out of plain
-    in-memory ordering, since snapshot ``record()`` overwrites the backfilled entry
-    before anything is written to disk.
-
-    Backfill runs FIRST for that reason, and saving happens ONCE at the end.
-    """
-    from rebar_reconciler.peer_confirmations import (
-        backfill_from_managed_refs,
-        confirm_from_snapshot,
-        open_store,
-    )
-
-    store = open_store(ctx.repo_root)
-    written = backfill_from_managed_refs(store, ctx.local_tickets, ctx.binding_store)
-    written += confirm_from_snapshot(store, ctx.curr_snapshot, ctx.binding_store)
-    if written:
-        store.save()
-    return written
+    return _load_phase.handle_corrupt_snapshot(pass_id, repo_root, prev_path, _exc)
 
 
 def _save_and_commit_bindings(ctx: _PassContext) -> None:
@@ -614,82 +315,11 @@ def _save_and_commit_bindings(ctx: _PassContext) -> None:
     fail-open — a store-write hiccup must never break a pass that otherwise succeeded — and
     the whole block runs ONLY under the persistence gate (skipped in no-write mode).
     """
-    binding_store = ctx.binding_store
-    repo_root = ctx.repo_root
-    pass_id = ctx.pass_id
-    prev_path = ctx.prev_path
-
-    # Convergence rollout retired (story d6bd): ALWAYS advance the per-binding
-    # baselines from the current snapshot (formerly gated on the removed
-    # reconciler.baseline_dual_write). This records the last-synced Jira-side
-    # ancestor the outbound field differ arbitrates against (ADR 0026). Runs
-    # BEFORE save() so they persist this pass; fail-open (never break a sync pass).
-    try:
-        _advance_baselines(binding_store, ctx.curr_snapshot, ctx.synced_fields)
-    except Exception as exc:  # noqa: BLE001 — baseline advance is best-effort; never break sync
-        print(
-            f"reconcile: baseline advance failed ({exc})",
-            file=sys.stderr,
-        )
-    # Epic a4bd: learn peer-link evidence from THIS pass's authoritative fetch,
-    # so a link the peer carries is provably synchronized even when this clone
-    # never pushed it. Sits beside the baseline advance because it is the same
-    # kind of step — "record what the current snapshot proves" — and runs before
-    # save() for the same reason. Fail-open: losing evidence costs safety on a
-    # later removal, whereas raising would break a sync pass that succeeded.
-    try:
-        _confirm_peer_links(ctx)
-    except Exception as exc:  # noqa: BLE001 — evidence is best-effort; never break sync
-        print(
-            f"reconcile: peer-link confirmation failed ({exc})",
-            file=sys.stderr,
-        )
-    try:
-        binding_store.save()
-        # Commit the updated bindings.json to the tickets orphan branch so
-        # it survives a concurrent ``git merge origin/tickets`` in the
-        # ticket-CLI's _push_tickets_branch() between reconciler passes.
-        # Without this commit, local probe runs lose newly-created bindings
-        # on the next ticket-CLI push, causing the next reconciler pass to
-        # see bound tickets as unbound and generate CREATE rather than
-        # UPDATE mutations (regression: outbound scalar edits never land).
-        if not _commit_binding_store_snapshot(binding_store, repo_root, pass_id):
-            # Commit failed — bindings are on disk but NOT on the tickets
-            # branch. A concurrent ``git merge origin/tickets`` between now
-            # and the next pass can clobber the working-tree bindings.json
-            # with the remote version, making bound tickets appear unbound
-            # (the clobbered-bindings class that
-            # test_commit_binding_store_failure.py pins). The helper already
-            # logged the error and filed the alert. Do NOT abort the pass —
-            # commit failure must never break sync.
-            print(
-                "ERROR: reconcile: binding-store commit to tickets branch failed; "
-                "bindings are at risk of clobber on the next 'git merge origin/tickets'. "
-                "The current pass will complete normally. Check git state in "
-                ".tickets-tracker and ensure the GHA commit-back step runs to persist "
-                "bindings before the next reconciler pass.",
-                file=sys.stderr,
-            )
-    except Exception as exc:  # noqa: BLE001 — fail-open: save failure must never break sync, log only
-        print(
-            f"reconcile: binding store save failed ({exc})",
-            file=sys.stderr,
-        )
-
-    # Ticket 0fa2: outbound-comment recording invariant (posts succeeded, comment_ids
-    # gained none), debounced across 2 consecutive passes. Fail-open: never break sync.
-    try:
-        ctx.invariants_mod.check_comment_id_recording(binding_store, repo_root, pass_id)
-    except Exception as exc:  # noqa: BLE001 — invariant check is best-effort; never break sync
-        print(f"reconcile: comment-id invariant check failed ({exc})", file=sys.stderr)
-
-    # Advance only Jira-key membership so the next call preserves edge detection
-    # without retaining remote field bodies. The full current snapshot remains
-    # available as the per-pass diagnostic artifact under bridge_state/snapshots/.
-    # In no-write mode prev_path must stay untouched, so this remains inside the
-    # persistence gate.
-    assert prev_path is not None
-    _write_prev_snapshot_key_set(prev_path, ctx.curr_snapshot)
+    _persist_phase.save_and_commit_bindings(
+        ctx,
+        commit_binding_store_snapshot=_commit_binding_store_snapshot,
+        confirm_peer_links=_confirm_peer_links,
+    )
 
 
 def _persist_and_log(ctx: _PassContext) -> dict:
@@ -697,104 +327,7 @@ def _persist_and_log(ctx: _PassContext) -> dict:
     (idempotency), tally the truthful applied/failure counts from the manifest,
     close the sync logger, and assemble the result dict.
     """
-    persist = ctx.persist
-    manifest_path = ctx.manifest_path
-    nowrite_plan = ctx.nowrite_plan
-    apply_tally = ctx.apply_tally
-    mutations = ctx.mutations
-    pass_id = ctx.pass_id
-    sync_logger = ctx.sync_logger
-    target_mode = ctx.target_mode
-    filter_local_ids = ctx.filter_local_ids
-    unfiltered_count = ctx.unfiltered_count
-
-    # -------------------------------------------------------------------
-    # Post-apply: save binding store, advance snapshot, close sync logger.
-    # -------------------------------------------------------------------
-    # binding_store.save() writes .bridge_state/bindings.json; the commit
-    # helper writes/commits it to the tickets branch. Both are store writes —
-    # skip the entire block in no-write mode (ticket yaw-plait-doe).
-    if persist:
-        _save_and_commit_bindings(ctx)
-
-    # Bug 85a1: surface the truthful applied-count and failure-count by parsing
-    # the manifest written by _apply_batch. Before this fix, sync_pass_end and
-    # the result dict reported mutations_applied=len(mutations) — the COMPUTED
-    # count, not the count that actually reached a handler. The "OK: converged"
-    # message in __main__ inherited that lie.
-    #
-    # Semantics: a manifest outcome with no "error" key counts as applied (the
-    # handler ran without raising — even update_one's comment-fallback path that
-    # returns result=None on 400 illegal-transition counts as applied because a
-    # comment was added). An outcome with an "error" key counts as a failure.
-    #
-    # Degrades gracefully: if manifest_path is None (rare paths), or the JSON
-    # cannot be parsed, the counts conservatively default to (mutation_count, 0)
-    # so existing callers reading mutations_applied receive a number consistent
-    # with the prior contract.
-    # No-write (cap-0) mode: nothing is applied, so the tally is (0, 0) and the
-    # computed plan comes from the in-memory rendered dict (no manifest file).
-    from rebar_reconciler.apply_planning import derive_pass_tally
-
-    tally = derive_pass_tally(nowrite_plan, apply_tally, manifest_path, len(mutations))
-    mutation_failures = tally["failed"]
-    mutations_deferred = tally["deferred"]
-    mutations_skipped = tally["skipped"]
-    pass_degraded = tally["degraded"]
-    # RP-03 S5 T2 (AC5): keep ``recovered`` OUT of applied so the five reported buckets are
-    # DISJOINT and sum to ``mutation_count`` (exact tallies). ``derive_pass_tally``'s applied
-    # is the legacy folded count (``build_pass_tally`` sets ``applied_count = applied +
-    # recovered``; the non-error manifest count includes recovered too), so subtract the
-    # explicit ``recovered_count`` back out — legacy/no-write passes carry none → 0.
-    mutations_recovered = int((apply_tally or {}).get("recovered_count", 0) or 0)
-    mutations_applied = max(0, tally["applied"] - mutations_recovered)
-
-    # Story 9622: pending-binding recovery failures (set by run_differs on ctx) are
-    # surfaced as a tally — observability-only, NOT an exit gate (recovery is
-    # best-effort/fail-open; a transient Jira search hiccup must not fail the pass).
-    recovery_failures = int(getattr(ctx, "recovery_failures", 0) or 0)
-
-    sync_logger.log(
-        "sync_pass_end",
-        pass_id=pass_id,
-        mutations_computed=len(mutations),
-        mutations_applied=mutations_applied,
-        mutation_failures=mutation_failures,
-        mutations_deferred=mutations_deferred,
-        mutations_skipped=mutations_skipped,
-        mutations_recovered=mutations_recovered,
-        recovery_failures=recovery_failures,
+    return _persist_phase.persist_and_log(
+        ctx,
+        save_and_commit_bindings=_save_and_commit_bindings,
     )
-    sync_logger.close()
-
-    result = {
-        "pass_id": pass_id,
-        "mutation_count": len(mutations),
-        "mutations_applied": mutations_applied,
-        "mutation_failures": mutation_failures,
-        "mutations_deferred": mutations_deferred,
-        "mutations_skipped": mutations_skipped,
-        "mutations_recovered": mutations_recovered,
-        "recovery_failures": recovery_failures,
-        "manifest_path": str(manifest_path) if manifest_path is not None else None,
-    }
-    # RP-03 S3 T3: a degraded cutover pass (any failure OR an opened fuse) must exit
-    # non-zero even when its ``failed`` bucket is empty; surface the flag for __main__'s
-    # exit gate. Only a cutover apply_tally sets it, so every legacy path stays converged.
-    if pass_degraded:
-        result["degraded"] = True
-    # No-write (cap-0) mode: surface the COMPUTED plan in the result so callers
-    # (rebar.reconcile / MCP) receive the detailed mutation plan even though no
-    # manifest file was written (ticket yaw-plait-doe).
-    if nowrite_plan is not None:
-        result["no_write"] = True
-        if ctx.route == "preview":
-            result.update(nowrite_plan)
-        else:
-            result["mode"] = getattr(target_mode, "value", str(target_mode))
-            result["plan"] = _build_plan_entries(mutations)
-    if filter_local_ids:
-        result["filtered"] = True
-        result["filter_local_ids"] = sorted(filter_local_ids)
-        result["unfiltered_mutation_count"] = unfiltered_count
-    return result
