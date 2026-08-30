@@ -189,6 +189,8 @@ def test_shim_translates_kernel_findings_to_common_findings():
                 "evidence": ["q.py:42"],
                 "location": "q.py:42",
                 "severity": "critical",
+                "priority": 0.91,
+                "decision": "block",
                 "reviewer_id": "code-review-security",
             }
         ],
@@ -200,6 +202,8 @@ def test_shim_translates_kernel_findings_to_common_findings():
     schemas.validator(schemas.REVIEW_RESULT).validate(r)
     f = r["findings"][0]
     assert f["severity"] == "critical"  # the POST-Pass-3 severity
+    assert f["priority"] == 0.91  # threaded through unchanged from the kernel finding
+    assert f["decision"] == "block"  # threaded through unchanged from the kernel finding
     assert f["dimension"] == "security"  # criteria[0]
     assert "SQL injection" in f["detail"]
     assert f["citations"][0] == {"kind": "file", "path": "q.py", "line_start": 42}
