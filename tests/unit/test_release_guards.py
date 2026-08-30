@@ -24,10 +24,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _repo_root import REPO_ROOT
 
-import rebar
-
-ROOT = Path(rebar.__file__).resolve().parents[2]
+ROOT = REPO_ROOT
 _SCRIPT = ROOT / "scripts" / "release_guards.py"
 
 

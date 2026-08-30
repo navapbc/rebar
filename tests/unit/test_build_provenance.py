@@ -19,11 +19,10 @@ from pathlib import Path
 
 import pytest
 from _build_provenance_fixture import materialize_build_hook_package
+from _repo_root import REPO_ROOT
 from _subprocess_env import subprocess_env
 
-import rebar
-
-REPO = Path(rebar.__file__).resolve().parents[2]
+REPO = REPO_ROOT
 
 
 def _build(tree: Path, outdir: Path, env_extra: dict) -> subprocess.CompletedProcess:

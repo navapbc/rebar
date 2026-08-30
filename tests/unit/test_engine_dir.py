@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from _nested_pytest import nested_basetemp, run_nested_pytest
+from _repo_root import REPO_ROOT
 
 from rebar import _engine
 
@@ -104,8 +105,7 @@ def test_wheel_contains_no_compiled_bytecode(tmp_path):
 
     hatchling_wheel = pytest.importorskip("hatchling.builders.wheel")
 
-    # _engine.__file__ = <repo>/src/rebar/_engine.py -> parents[2] is <repo>.
-    repo_root = Path(_engine.__file__).resolve().parents[2]
+    repo_root = REPO_ROOT
     assert (repo_root / "pyproject.toml").is_file(), repo_root
 
     builder = hatchling_wheel.WheelBuilder(str(repo_root))
@@ -134,7 +134,7 @@ def test_wheel_ships_author_guides(tmp_path):
 
     hatchling_wheel = pytest.importorskip("hatchling.builders.wheel")
 
-    repo_root = Path(_engine.__file__).resolve().parents[2]
+    repo_root = REPO_ROOT
     builder = hatchling_wheel.WheelBuilder(str(repo_root))
     built = list(builder.build(directory=str(tmp_path)))
     wheels = [p for p in built if str(p).endswith(".whl")]
@@ -175,7 +175,7 @@ def test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active(tmp_path
     only the reducer test actually runs.
     """
 
-    repo_root = Path(_engine.__file__).resolve().parents[2]
+    repo_root = REPO_ROOT
     scripts_test = repo_root / "tests" / "scripts" / "reducer" / "test_managed_refs.py"
     assert scripts_test.is_file(), scripts_test
     assert (repo_root / "tests" / "unit" / "rebar_reconciler" / "__init__.py").is_file(), (

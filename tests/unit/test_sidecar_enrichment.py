@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 
 import pytest
+from _repo_root import REPO_ROOT
 
 from rebar.llm.plan_review import sidecar
 
@@ -195,9 +196,8 @@ def test_cohort_contamination_rate_skips_missing() -> None:
     """The blocking-tier contamination-rate script: cohort>1 = contaminated, missing = unknown
     (excluded from the denominator), advisory findings ignored."""
     import importlib.util
-    from pathlib import Path
 
-    path = Path(sidecar.__file__).parents[4] / "scripts" / "plan_review_contamination_rate.py"
+    path = REPO_ROOT / "scripts" / "plan_review_contamination_rate.py"
     spec = importlib.util.spec_from_file_location("_contam", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
