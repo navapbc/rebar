@@ -4619,6 +4619,15 @@
       "source_id": "1cf6-f902-5bfa-438f",
       "target_id": "6f18-05de-beaf-42be"
     },
+    "1d1b-a719-b675-4a1f|6d60-2d0c-6ff7-444b|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788118122942116685,
+      "link_id": "50749",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "1d1b-a719-b675-4a1f",
+      "target_id": "6d60-2d0c-6ff7-444b"
+    },
     "1d1b-a719-b675-4a1f|a61d-adf9-3725-4847|relates_to": {
       "direction": "snapshot",
       "first_confirmed_at": 1787971000499124862,
@@ -17463,6 +17472,24 @@
       "source_id": "6d56-8c12-9953-4d25",
       "target_id": "fa49-2687-4daf-4afc"
     },
+    "6d60-2d0c-6ff7-444b|1d1b-a719-b675-4a1f|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788118122942459075,
+      "link_id": "50749",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "6d60-2d0c-6ff7-444b",
+      "target_id": "1d1b-a719-b675-4a1f"
+    },
+    "6d60-2d0c-6ff7-444b|a61d-adf9-3725-4847|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788118122942456610,
+      "link_id": "50748",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "6d60-2d0c-6ff7-444b",
+      "target_id": "a61d-adf9-3725-4847"
+    },
     "6e2f-2814-4f92-4873|93c4-2b9f-749a-4243|depends_on": {
       "direction": "snapshot",
       "first_confirmed_at": 1787560930897806244,
@@ -25654,6 +25681,15 @@
       "source": "snapshot",
       "source_id": "a61d-adf9-3725-4847",
       "target_id": "1d1b-a719-b675-4a1f"
+    },
+    "a61d-adf9-3725-4847|6d60-2d0c-6ff7-444b|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788118122941977625,
+      "link_id": "50748",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "a61d-adf9-3725-4847",
+      "target_id": "6d60-2d0c-6ff7-444b"
     },
     "a62f-8041-be72-4e0f|a38f-e290-9585-40be|depends_on": {
       "confirmed_at": 1787445662414889984,
