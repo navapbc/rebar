@@ -266,6 +266,47 @@ def test_distribution_shift_impact_uses_categorical_severity_attributes():
     assert prod_impact_shift["total_variation_distance"] == 1.0
 
 
+def test_distribution_shift_priority_uses_era_correct_impact_fn_for_stored_side():
+    """A pre-v5 stored row's ordinal severity grade (`undecomposed: "high"`) collapses
+    to 0.0 under the CURRENT `decide.impact_plan` (KIND-graded), but scores nonzero
+    under `legacy_v4_baseline.legacy_impact_plan` (ordinal-graded) -- the exact
+    era-mismatch Tier-0's `impact_fn_for_row` exists to avoid. The stored side of the
+    priority axis must route through the row's era-correct impact fn; the candidate
+    side (always freshly generated) must always use the current injected `impact_fn`."""
+    pre_v5_row = {
+        "stored_answers": [
+            {"binary": _all_yes_binary(), "severity_attributes": {"undecomposed": "high"}}
+        ],
+        "candidate_answers": [
+            {"binary": _all_yes_binary(), "severity_attributes": {"undecomposed": "high"}}
+        ],
+        "impact_model_version": None,  # missing/old -> pre-v5
+    }
+    current_era_row = {
+        "stored_answers": [
+            {"binary": _all_yes_binary(), "severity_attributes": {"undecomposed": "high"}}
+        ],
+        "candidate_answers": [
+            {"binary": _all_yes_binary(), "severity_attributes": {"undecomposed": "high"}}
+        ],
+        "impact_model_version": "plan-v5",
+    }
+
+    shift = tier1.distribution_shift([pre_v5_row, current_era_row])
+    priority_shift = shift["priority"]
+
+    # Pre-v5 stored: legacy formula scores undecomposed="high" nonzero (bucket [0.9,1.0]).
+    # Current-era stored: shipped impact_plan scores the SAME kind-graded axis 0.0
+    # (bucket [0.0,0.1)) -- the two stored rows land in DIFFERENT buckets despite
+    # identical severity_attributes, proving the era-correct routing actually fired.
+    # Both candidate sides always use the CURRENT impact_fn, so both candidate answers
+    # (identical severity_attributes) score 0.0 -> both land in [0.0,0.1).
+    # stored: {[0.9,1.0]: 1, [0.0,0.1): 1}; candidate: {[0.0,0.1): 2}
+    # count_delta = candidate - stored per bucket:
+    assert priority_shift["count_delta"]["[0.9,1.0]"] == -1
+    assert priority_shift["count_delta"]["[0.0,0.1)"] == 1
+
+
 # ── ledger pre-flight ─────────────────────────────────────────────────────────────
 def test_run_tier1_refuses_before_any_call_when_estimate_exceeds_budget(tmp_path, monkeypatch):
     ledger_path = str(tmp_path / "ledger.jsonl")
@@ -433,3 +474,45 @@ def test_replay_review_no_answer_finding_from_omitted():
     result = tier1.replay_review(row, fake_run_chunk, "bedrock:x")
     assert result["candidate_answers"][0] is not None
     assert result["candidate_answers"][1] is None  # omitted -> no answer, not imputed
+
+
+def test_replay_review_sources_impact_model_version_from_sidecar_data():
+    """`replay_review`'s returned `impact_model_version` must be SOURCED from the row's
+    actual `sidecar_data` (not merely present in the return dict) -- the field
+    `distribution_shift` relies on to route stored priority through the era-correct
+    impact fn."""
+
+    def fake_run_chunk(instructions: str, context: str) -> list[dict]:
+        return [{"index": 0, "binary": _all_yes_binary(), "severity_attributes": {}}]
+
+    def _row(impact_model_version):
+        return {
+            "ticket_id": "t0",
+            "review_event_uuid": "u0",
+            "description": "plan text",
+            "sidecar_data": {
+                "impact_model_version": impact_model_version,
+                "findings": [
+                    {
+                        "finding": "f0",
+                        "criteria": [],
+                        "evidence": [],
+                        "impact": "x",
+                        "verification": {"binary": _all_yes_binary(), "severity_attributes": {}},
+                    }
+                ],
+            },
+        }
+
+    pre_v5_result = tier1.replay_review(_row("plan-v3"), fake_run_chunk, "bedrock:x")
+    assert pre_v5_result["impact_model_version"] == "plan-v3"
+
+    from rebar.llm.plan_review import sidecar
+
+    current_result = tier1.replay_review(
+        _row(sidecar.IMPACT_MODEL_VERSION), fake_run_chunk, "bedrock:x"
+    )
+    assert current_result["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION
+
+    missing_result = tier1.replay_review(_row(None), fake_run_chunk, "bedrock:x")
+    assert missing_result["impact_model_version"] is None
