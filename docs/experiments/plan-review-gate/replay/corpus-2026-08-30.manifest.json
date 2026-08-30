@@ -1,0 +1,30 @@
+{
+  "content_hash": "aaba58b1bcef5cd35741858ce6830c740cbc60e33c77808f77e482d76a0fb873",
+  "generated_at": "2026-08-30T02:01:55.872066+00:00",
+  "row_count": 6401,
+  "schema_histogram": {
+    "plan_review_result_v1": 1833,
+    "plan_review_result_v2": 4568
+  },
+  "stores": {
+    "rebar": 6401
+  },
+  "stores_attempted": {
+    "legacy-modernization-navigator": "unavailable on this host (~/legacy-modernization-navigator does not exist)",
+    "rebar": "/Users/joeoakhart/rebar/.tickets-tracker"
+  },
+  "unverified_count": 5544,
+  "verdict_histogram": {
+    "BLOCK": 2759,
+    "INDETERMINATE": 321,
+    "PASS": 3321
+  },
+  "verified_by_generation": {
+    "current": 798,
+    "post_2be7_pre_reason": 0,
+    "post_330c_pre_2be7": 4,
+    "pre_330c": 55
+  },
+  "verified_count": 857,
+  "verified_ratio": 0.13388533041712233
+}
