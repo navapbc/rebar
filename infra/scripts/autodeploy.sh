@@ -196,6 +196,15 @@ MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/compose/docker-compose.y
 # change reached /opt/rebar and then silently did nothing, with no signal at all
 # (bug 1630-0279-85ba-4e15); detect-only at least makes that visible.
 CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh infra/compose/gerrit.config'
+# nginx edge source of truth: rebar.conf.template is rendered into
+# /etc/nginx/conf.d/rebar.conf. Its rendered copy lives OUTSIDE the compose build context,
+# so an edge change reaches no other trigger above and would otherwise never be detected.
+# It is DETECT-ONLY in v1 (the same boundary as CONFIG_PATHS): applying the edge means a
+# host `nginx -t` + reload, deferred to the v2 auto-apply epic (sprucing-wise-dikkops /
+# 6d60-2d0c-6ff7-444b). Before this, a merged edge change reached /opt/rebar and then
+# silently did nothing, with NO signal at all (bug 1d1b-a719-b675-4a1f); detect-only at
+# least makes it visible.
+EDGE_PATHS='infra/nginx/rebar.conf.template'
 # host observability probe: re-materialized (idempotent installer) on a source change.
 # Its installed copy at /usr/local/bin lives OUTSIDE the compose build context, so a probe
 # change reaches no trigger above and would otherwise never be refreshed on the box.
@@ -728,6 +737,12 @@ log "main advanced $DEPLOYED -> $TARGET; computing component deltas"
 if changed "$CONFIG_PATHS"; then
   err config_manual "infra config changed in $TARGET — replication/g2p/refs-meta/gerrit.config need a MANUAL operator apply (auto-apply is a v2 follow-up)"
   log "infra config change detected + signalled (not auto-applied in v1)"
+fi
+
+# ── nginx edge (rebar.conf.template): DETECT-ONLY (v1 boundary) ───────────────
+if changed "$EDGE_PATHS"; then
+  err nginx_edge_manual "nginx edge changed in $TARGET — infra/nginx/rebar.conf.template needs a MANUAL operator render + nginx reload (auto-apply is a v2 follow-up: epic 6d60-2d0c-6ff7-444b)"
+  log "nginx edge change detected + signalled (not auto-applied in v1)"
 fi
 
 # ── review-bot: rebuild + restart ONLY on a source change ─────────────────────
