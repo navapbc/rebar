@@ -1228,6 +1228,7 @@ def _make_repo(root: Path, touched: list[str]) -> tuple[Path, str, str]:
         "pyproject.toml",
         "uv.lock",
         "infra/scripts/fetch-secrets.sh",
+        "infra/terraform/ssm.tf",
     ]
     for rel in baseline:
         p = repo / rel
@@ -1359,6 +1360,78 @@ def test_shared_src_change_triggers_both_targets(tmp_path: Path) -> None:
     )
     assert any("compose-build-mcp" in c for c in cmds), (
         f"a shared src/rebar change must ALSO build mcp — independently\n{ctx}"
+    )
+
+
+@pytest.mark.parametrize(
+    "secrets_path",
+    ["infra/scripts/fetch-secrets.sh", "infra/terraform/ssm.tf"],
+)
+def test_secrets_only_change_redeploys_mcp(tmp_path: Path, secrets_path: str) -> None:
+    """A commit touching ONLY a SECRETS_PATHS file must redeploy mcp.
+
+    mcp consumes two SSM-sourced, rsync-EXCLUDED artifacts — `.env` (via `--env-file`) and
+    `mcp-static-tokens.json` (via a read-only bind-mount) — both read ONCE at container init, so a
+    refreshed secret reaches the running server only through a NEW container. This mirrors the
+    review-bot gate, which has ORed `SECRETS_PATHS` since f600 / incident 2731. Refreshing the
+    on-disk files WITHOUT starting a new container is precisely the non-fix, so assert BOTH the
+    rebuild AND a new mcp container start."""
+    box = _real_git_box(tmp_path, [secrets_path])
+    result = subprocess.run(
+        ["bash", str(AUTODEPLOY)],
+        env=box["env"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,  # type: ignore[arg-type]
+    )
+    cmds = (box["cmd_log"]).read_text().splitlines() if (box["cmd_log"]).exists() else []  # type: ignore[operator]
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+    assert any("compose-build-mcp" in c for c in cmds), (
+        f"a secrets-only change must rebuild mcp so the refreshed .env reaches it\n{ctx}"
+    )
+    assert any(c.startswith("run --name") and "rebar-mcp" in c for c in cmds), (
+        f"a secrets-only change must start a NEW mcp container — refreshing the files on disk "
+        f"without a new container leaves the running server on the stale secret\n{ctx}"
+    )
+
+
+def test_secrets_only_delta_is_pending_during_mcp_backoff(tmp_path: Path) -> None:
+    """The backoff-active mcp gate arm must ALSO see a secrets-only delta.
+
+    Both mcp gate arms call `mcp_delta`. When an mcp backoff window is open the arm does not
+    deploy — it reports the delta as PENDING and holds the mcp marker so the change is retried,
+    rather than being silently dropped. Drive that arm with a secrets-only delta by pre-seeding
+    the mcp backoff file at the target sha with a far-future next-attempt time."""
+    box = _real_git_box(tmp_path, ["infra/scripts/fetch-secrets.sh"])
+    env = box["env"]  # type: ignore[assignment]
+    target = subprocess.run(
+        ["git", "-C", str(env["MIRROR_DIR"]), "rev-parse", "HEAD"],  # type: ignore[index]
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    # sha matches TARGET and next-attempt is far in the future -> mcp_backoff_active is true.
+    (Path(env["STATE_DIR"]) / "mcp-deploy-backoff").write_text(f"{target} 1 9999999999\n")  # type: ignore[index]
+    result = subprocess.run(
+        ["bash", str(AUTODEPLOY)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,  # type: ignore[arg-type]
+    )
+    cmds = (box["cmd_log"]).read_text().splitlines() if (box["cmd_log"]).exists() else []  # type: ignore[operator]
+    out = result.stdout + result.stderr
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{out}"
+    assert "mcp backoff active" in out and "is still PENDING" in out, (
+        f"a secrets-only delta must be detected and reported PENDING during an mcp backoff "
+        f"window, not silently dropped\n{ctx}"
+    )
+    # The open backoff window suppresses the actual deploy — the point of the arm is that the
+    # delta is not lost, not that it deploys now.
+    assert not any("compose-build-mcp" in c for c in cmds), (
+        f"an open mcp backoff window must defer the deploy, not run it\n{ctx}"
     )
 
 
