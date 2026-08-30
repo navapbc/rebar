@@ -351,6 +351,35 @@ def _is_coverage_artifact(name: str) -> bool:
     return name == ".coverage" or name.startswith(".coverage.") or name == "coverage.xml"
 
 
+# Tool/framework cache directories the toolchain may materialize under REPO_ROOT
+# during a run. Like coverage.py's data files (``_is_coverage_artifact``) these are
+# gitignored (see ``.gitignore``) and written by the framework, not by a test body,
+# so their appearance is not a REPO_ROOT leak. ``.pytest_cache`` in particular is
+# written by the floor-leg pytest despite ``-p no:cacheprovider``, tripping the
+# guard at teardown (piecemeal-mycologic-duckling); exempting the whole gitignored
+# tool-cache class keeps the guard portable across pytest versions and CI providers.
+_TOOLING_CACHE_ARTIFACTS = frozenset(
+    {
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".mutmut-cache",
+        "__pycache__",
+    }
+)
+
+
+def _is_framework_artifact(name: str) -> bool:
+    """A framework/tooling artifact under REPO_ROOT is not a test leak.
+
+    Covers coverage.py's data files (``_is_coverage_artifact``) and the gitignored
+    tool-cache directories in ``_TOOLING_CACHE_ARTIFACTS`` (pytest/ruff/mypy/mutmut
+    caches and ``__pycache__``) — all produced by the toolchain, never authored by a
+    test body. Any other new entry is still reported as a potential leak.
+    """
+    return _is_coverage_artifact(name) or name in _TOOLING_CACHE_ARTIFACTS
+
+
 @pytest.fixture(autouse=True)
 def _no_repo_root_leaks() -> Iterator[None]:
     from _isolation import repo_leak_snapshot as _repo_leak_snapshot
@@ -360,7 +389,7 @@ def _no_repo_root_leaks() -> Iterator[None]:
         yield
     finally:
         after = _repo_leak_snapshot(_REPO_ROOT)
-        leaked = {name for name in (after - before) if not _is_coverage_artifact(name)}
+        leaked = {name for name in (after - before) if not _is_framework_artifact(name)}
         if leaked:
             # REPORT ONLY — never delete. Do not "restore cleanup" here.
             #

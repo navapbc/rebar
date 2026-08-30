@@ -475,6 +475,71 @@ def test_leak_guard_still_fails_and_names_every_entry(request, tmp_path):
     assert "tmp_path" in message  # still tells an actually-leaking test how to fix itself
 
 
+# ── framework/tooling artifacts are not leaks (piecemeal-mycologic-duckling) ──
+#
+# The guard diffs REPO_ROOT top-level entries around each test. On the floor
+# `sweep (declared lower-bound resolution)` leg a `.pytest_cache` directory
+# materializes under REPO_ROOT during a test's wall-clock window (the floor pytest
+# writes it despite `-p no:cacheprovider`), so an un-exempted guard fails several
+# tests at teardown with `['.pytest_cache']`. Like coverage.py's own data files it
+# is gitignored and produced by the framework, not the test body — so it must be
+# exempt, while genuine pollution appearing in the same window still fails.
+
+
+def _run_leak_guard(request: pytest.FixtureRequest, root: Path, during: Callable[[], None]):
+    """Drive the REAL ``_no_repo_root_leaks`` teardown against *root*.
+
+    Same hand-driven shape as ``_drive_leak_guard`` but does not presume the
+    outcome: returns the guard's failure message when it fails, or ``None`` when it
+    passes (no un-exempted entry appeared). This lets a test assert the *passing*
+    branch — that an exempt artifact does not trip the guard.
+    """
+    conftest = _root_conftest(request)
+    guard = getattr(conftest._no_repo_root_leaks, "__wrapped__", conftest._no_repo_root_leaks)
+    with patch.object(conftest, "_REPO_ROOT", root):
+        generator = guard()
+        next(generator)
+        during()
+        try:
+            next(generator)
+        except StopIteration:
+            return None
+        except pytest.fail.Exception as failure:
+            return str(failure)
+    raise AssertionError("guard teardown neither passed nor failed")
+
+
+def test_leak_guard_exempts_pytest_cache(request, tmp_path):
+    """`.pytest_cache` is a pytest-framework artifact — gitignored and written by
+    pytest itself, never authored by a test body — so its appearance under
+    REPO_ROOT is not a test leak. The guard must pass, exactly as it does for
+    coverage.py's data files; otherwise the floor sweep leg fails at teardown."""
+
+    def pytest_writes_its_cache() -> None:
+        cache = tmp_path / ".pytest_cache"
+        cache.mkdir()
+        (cache / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55\n")
+        (cache / "v").mkdir()
+
+    assert _run_leak_guard(request, tmp_path, pytest_writes_its_cache) is None
+
+
+def test_leak_guard_still_fails_on_real_pollution_beside_pytest_cache(request, tmp_path):
+    """Exempting the framework artifact must not blind the guard: a genuine stray
+    entry appearing in the same window still fails the guard and is still named,
+    while the exempt `.pytest_cache` is not reported."""
+
+    def cache_plus_a_real_leak() -> None:
+        (tmp_path / ".pytest_cache").mkdir()
+        (tmp_path / "stray_report.json").write_text("{}")
+
+    message = _run_leak_guard(request, tmp_path, cache_plus_a_real_leak)
+
+    assert message is not None, "a real leak beside .pytest_cache must still fail the guard"
+    assert "stray_report.json" in message
+    assert ".pytest_cache" not in message
+
+
 def _drive_working_tree_backstop(
     request: pytest.FixtureRequest, root: Path, during: Callable[[], None]
 ) -> tuple[str, SimpleNamespace]:
