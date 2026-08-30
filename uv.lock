@@ -1864,7 +1864,7 @@ requires-dist = [
     { name = "genai-prices", marker = "extra == 'evals'" },
     { name = "genai-prices", marker = "extra == 'pricing'" },
     { name = "git-remote-s3", marker = "extra == 's3'", specifier = ">=0.3.2" },
-    { name = "hatchling", marker = "extra == 'dev'", specifier = ">=1.18" },
+    { name = "hatchling", marker = "extra == 'dev'", specifier = ">=1.27" },
     { name = "jinja2", marker = "extra == 'ui'" },
     { name = "jira", marker = "extra == 'jira-datacenter'", specifier = ">=3.8,<4" },
     { name = "json-repair", marker = "extra == 'agents'", specifier = ">=0.61" },

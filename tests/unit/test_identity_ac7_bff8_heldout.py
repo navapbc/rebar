@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _repo_root import REPO_ROOT
 from _subprocess_env import subprocess_env
 
 import rebar
@@ -124,7 +125,7 @@ def test_json_report_shape_and_schema(repo: Path) -> None:
 # ── CI merge-gate workflow file ───────────────────────────────────────────────
 def test_ci_merge_gate_workflow_exists() -> None:
     """A CI workflow under .github/workflows/ invokes the verify-identity merge-gate."""
-    root = Path(rebar.__file__).resolve().parent.parent.parent  # repo root
+    root = REPO_ROOT
     wf_dir = root / ".github" / "workflows"
     hits = [p for p in wf_dir.glob("*.y*ml") if "verify-identity" in p.read_text(encoding="utf-8")]
     assert hits, "expected a .github/workflows/*.yaml invoking `rebar verify-identity`"
