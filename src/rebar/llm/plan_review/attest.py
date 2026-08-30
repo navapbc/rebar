@@ -453,6 +453,42 @@ def _scoped_code_drift(deps: Mapping[str, str], auth_manifest: list[str], repo_r
     )
 
 
+def _unscoped_head_drift(
+    attestation: Mapping[str, Any], auth_manifest: list[str], repo_root
+) -> str | None:
+    """The unscoped (whole-HEAD, no per-file ``deps``) half of the plan-review freshness
+    check: ``None`` when fresh, else the ``stale-head`` reason. For an ATTESTED attestation the
+    CURRENT side is the gate-ref sha from the LOCAL object DB (NO fetch), not the working-tree
+    HEAD — a stranger sha in a feature worktree/foreign enclosing repo reading as spuriously
+    stale (bug 1137); ``source=local``/LEGACY keep the working-tree comparison."""
+    from rebar import config as _config
+    from rebar import signing as _signing
+    from rebar._snapshot.repo_snapshot import SnapshotError, resolve_ref
+    from rebar.llm import gate_source
+
+    signed_head = _authoritative_head(attestation)
+    if not _signing.verified_at_sha_from_manifest(auth_manifest):
+        head = _signing.head_sha(_config.repo_root(repo_root))
+    else:
+        working = str(_config.repo_root(repo_root))
+        if gate_source.default_source(working) != gate_source.SOURCE_ATTESTED:
+            head = _signing.head_sha(working)
+        else:
+            ref = gate_source.default_ref(working)
+            try:
+                head = resolve_ref(ref, working, fetch=False)
+            except SnapshotError:
+                named = f"'{ref}'" if ref else "the configured gate ref"
+                return (
+                    "cannot confirm the code the plan was reviewed against is current: the gate "
+                    f"ref {named} could not be resolved to a snapshot, so the attestation cannot "
+                    "be re-checked (refusing to certify against the working tree)"
+                )
+    if head == "unknown" or signed_head != head:
+        return f"attestation is stale (unscoped; signed at {signed_head}, HEAD is {head})"
+    return None
+
+
 def compute_validity(
     attestation: Mapping[str, Any] | None,
     ticket_state: dict[str, Any],
@@ -465,8 +501,6 @@ def compute_validity(
 
     Plan-review profiles differ only on code freshness; completion ignores the profile.
     """
-    from rebar import config as _config
-    from rebar import signing
 
     if not isinstance(attestation, dict):
         return {"valid": False, "reason": f"no certified {kind} attestation", "verdict": "unsigned"}
@@ -653,14 +687,9 @@ def compute_validity(
                 if scoped is not None:
                     return _result(False, scoped, "stale-code")
             elif manifest_file_scope(auth_manifest) != "none":
-                head = signing.head_sha(_config.repo_root(repo_root))
-                signed_head = _authoritative_head(attestation)
-                if head == "unknown" or signed_head != head:
-                    return _result(
-                        False,
-                        f"attestation is stale (unscoped; signed at {signed_head}, HEAD is {head})",
-                        "stale-head",
-                    )
+                unscoped = _unscoped_head_drift(attestation, auth_manifest, repo_root)
+                if unscoped is not None:
+                    return _result(False, unscoped, "stale-head")
         # Material-edit invalidation (fail closed if the fingerprint can't be recomputed).
         signed = _authoritative_material(attestation)
         if signed is not None:

@@ -420,6 +420,135 @@ def test_signed_empty_scope_head_drift_contract(
     assert result["verdict"] == expected_verdict
 
 
+def _push_main_to_origin(store: Path) -> str:
+    """Publish an ``origin`` remote at the current ``main`` and return its sha (the gate ref).
+
+    Mirrors production: the attested plan-review's ``verified_at_sha`` is the ``origin/main``
+    sha at review time, not the sha of whatever working tree the evaluator later sits in."""
+    from rebar._snapshot.repo_snapshot import resolve_ref
+
+    origin = store.parent / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True, capture_output=True)
+    subprocess.run(["git", "branch", "-M", "main"], cwd=store, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(origin)],
+        cwd=store,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "push", "-q", "origin", "main"], cwd=store, check=True, capture_output=True
+    )
+    return resolve_ref("origin/main", str(store), fetch=False)
+
+
+def _diverge_working_tree(store: Path, message: str) -> str:
+    """Commit a NEW head on a side branch WITHOUT moving ``origin/main``; return its sha."""
+    subprocess.run(
+        ["git", "checkout", "-q", "-b", f"feat-{message}"],
+        cwd=store,
+        check=True,
+        capture_output=True,
+    )
+    (store / f"{message}.txt").write_text(f"{message}\n", encoding="utf-8")
+    subprocess.run(["git", "add", f"{message}.txt"], cwd=store, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", message], cwd=store, check=True, capture_output=True
+    )
+    return signing.head_sha(str(store))
+
+
+def _attested_unscoped_record(store: Path, ticket_id: str, gate_ref_sha: str) -> dict:
+    """An ATTESTED unscoped plan-review opcert pinned to ``gate_ref_sha`` (verified-at-sha)."""
+    material = attest.current_material_fingerprint(ticket_id, repo_root=str(store))
+    assert material is not None
+    from rebar._signing_manifest import verified_at_sha_step
+
+    manifest = [
+        "plan-review: PASS",
+        f"material: {material}",
+        f"regver: {attest.registry_version(str(store))}",
+        verified_at_sha_step(gate_ref_sha),
+    ]
+    return _sign_scope_opcert(
+        store,
+        ticket_id,
+        manifest,
+        material=material,
+        commit=gate_ref_sha,
+    )
+
+
+def test_attested_unscoped_head_freshness_reads_gate_ref_not_working_tree(
+    store: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bug 1137: an attested unscoped ('fail-safe' whole-HEAD) attestation certified at an
+    UNMOVED gate ref must stay valid even when evaluated from a working tree whose HEAD is a
+    FOREIGN commit (a feature worktree, the MCP server's own cwd, or a walked-up enclosing
+    repo). The currency check must resolve the CURRENT gate ref, not ``git rev-parse HEAD`` of
+    the evaluator's tree. RED before the fix: it read the working-tree HEAD and reported a
+    spurious ``stale-head``."""
+    # Production models a REMOTE gate ref (origin/main); the suite default pins it to HEAD.
+    monkeypatch.setenv("REBAR_GATE_REF", "origin/main")
+    ticket_id = rebar.create_ticket("epic", "attested unscoped freshness", repo_root=str(store))
+    state = rebar.show_ticket(ticket_id, repo_root=str(store))
+    gate_ref_sha = _push_main_to_origin(store)
+    record = _attested_unscoped_record(store, ticket_id, gate_ref_sha)
+
+    # Diverge the working tree onto a foreign HEAD; origin/main (the gate ref) is UNMOVED.
+    foreign_head = _diverge_working_tree(store, "foreign")
+    from rebar._snapshot.repo_snapshot import resolve_ref
+
+    assert resolve_ref("origin/main", str(store), fetch=False) == gate_ref_sha
+    assert foreign_head != gate_ref_sha
+
+    verified = verify_opcert_record(
+        record, state["ticket_id"], kind="plan-review", repo_root=str(store)
+    )
+    result = attest.compute_validity(verified, state, "plan-review", repo_root=str(store))
+
+    assert result["valid"] is True, result
+    assert result["verdict"] == "certified"
+
+
+def test_attested_unscoped_head_freshness_still_invalidates_on_moved_gate_ref(
+    store: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control for bug 1137: the fix must PRESERVE whole-HEAD invalidation semantics.
+    When the gate ref (``origin/main``) genuinely advances after review, the attested unscoped
+    attestation is still ``stale-head`` — the fix corrects only the foreign VALUE read, not the
+    invalidation granularity (the ticket's declared non-goal)."""
+    monkeypatch.setenv("REBAR_GATE_REF", "origin/main")
+    ticket_id = rebar.create_ticket("epic", "attested unscoped moved ref", repo_root=str(store))
+    state = rebar.show_ticket(ticket_id, repo_root=str(store))
+    gate_ref_sha = _push_main_to_origin(store)
+    record = _attested_unscoped_record(store, ticket_id, gate_ref_sha)
+
+    # The gate ref genuinely moves: commit on main and push, so origin/main advances past the
+    # signed verified_at_sha.
+    (store / "moved.txt").write_text("gate ref advanced\n", encoding="utf-8")
+    subprocess.run(["git", "add", "moved.txt"], cwd=store, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "advance main"], cwd=store, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "push", "-q", "origin", "main"], cwd=store, check=True, capture_output=True
+    )
+    from rebar._snapshot.repo_snapshot import resolve_ref
+
+    assert resolve_ref("origin/main", str(store), fetch=False) != gate_ref_sha
+
+    verified = verify_opcert_record(
+        record, state["ticket_id"], kind="plan-review", repo_root=str(store)
+    )
+    result = attest.compute_validity(verified, state, "plan-review", repo_root=str(store))
+
+    assert result["valid"] is False, result
+    assert result["verdict"] == "stale-head"
+
+
 def test_plaintext_none_scope_cannot_override_authenticated_unscoped_manifest(
     store: Path,
 ) -> None:
