@@ -665,15 +665,31 @@ clear_backoff() { rm -f "$BACKOFF_FILE"; }
 read -r mcp_bo_sha mcp_bo_cnt mcp_bo_next < <(cat "$MCP_BACKOFF_FILE" 2>/dev/null || echo "- 0 0")
 [ "$mcp_bo_sha" != "$TARGET" ] && { mcp_bo_cnt=0; }   # new target -> reset (fix-forward)
 mcp_backoff_active() { [ "$mcp_bo_sha" = "$TARGET" ] && [ "$(now)" -lt "${mcp_bo_next:-0}" ]; }
+# Schedule the mcp backoff throttle (write $MCP_BACKOFF_FILE + prune caches) WITHOUT emitting an
+# AUTODEPLOY_ERROR. Shared by the genuine-failure recorder and the routine-backoff variant below:
+# both must throttle ticks so they don't hammer during a drain, but ONLY a genuine failure is a
+# deploy_error. Sets MCP_BACKOFF_N / MCP_BACKOFF_WAIT for the caller's log/metric line.
+schedule_mcp_backoff() {
+  MCP_BACKOFF_N=$(( ${mcp_bo_cnt:-0} + 1 ))
+  MCP_BACKOFF_WAIT=$(( BACKOFF_BASE * (BACKOFF_FACTOR ** (MCP_BACKOFF_N - 1)) ))
+  [ "$MCP_BACKOFF_WAIT" -gt "$BACKOFF_CAP" ] && MCP_BACKOFF_WAIT=$BACKOFF_CAP
+  echo "$TARGET $MCP_BACKOFF_N $(( $(now) + MCP_BACKOFF_WAIT ))" > "$MCP_BACKOFF_FILE"
+  prune_docker_caches
+}
 record_mcp_backoff_failure() {
-  local n=$(( ${mcp_bo_cnt:-0} + 1 ))
-  local wait=$(( BACKOFF_BASE * (BACKOFF_FACTOR ** (n-1)) )); [ "$wait" -gt "$BACKOFF_CAP" ] && wait=$BACKOFF_CAP
-  echo "$TARGET $n $(( $(now) + wait ))" > "$MCP_BACKOFF_FILE"
+  schedule_mcp_backoff
   # Same metric name as the global recorder so existing deploy_failed alarming still fires;
   # the component= marker is what tells an operator which path failed.
-  err deploy_failed "component=mcp target=$TARGET fail#$n backoff=${wait}s"
-  log "mcp deploy failed; mcp backoff ${wait}s (fail #$n); OLD mcp upstream stays live, review-bot path unaffected"
-  prune_docker_caches
+  err deploy_failed "component=mcp target=$TARGET fail#$MCP_BACKOFF_N backoff=${MCP_BACKOFF_WAIT}s"
+  log "mcp deploy failed; mcp backoff ${MCP_BACKOFF_WAIT}s (fail #$MCP_BACKOFF_N); OLD mcp upstream stays live, review-bot path unaffected"
+}
+# Routine (non-error) backoff for the retire-cap / mem-abort paths. These are DOCUMENTED routine
+# deferrals that observability.sh deliberately keeps OUT of deploy_errors (their sustained case is
+# covered by the dedicated mcp_retire_cap / mcp_mem_abort alarms), so they schedule the SAME
+# throttle but must NOT emit AUTODEPLOY_ERROR/deploy_failed and false-page rebar-autodeploy-errors.
+record_mcp_routine_backoff() {
+  schedule_mcp_backoff
+  log "mcp deploy deferred (routine backoff; not a deploy_error); mcp backoff ${MCP_BACKOFF_WAIT}s (fail #$MCP_BACKOFF_N); OLD mcp upstream stays live, review-bot path unaffected"
 }
 clear_mcp_backoff() { rm -f "$MCP_BACKOFF_FILE"; }
 
@@ -896,7 +912,7 @@ if ! mcp_backoff_active && changed_range "$mcp_deployed" "$TARGET" "$MCP_PATHS";
   mcp_mem="$(mcp_mem_available_mb)"
   if [ "$mcp_mem" -ge 0 ] && [ "$mcp_mem" -lt "$MCP_MEM_MIN_MB" ]; then
     marker AUTODEPLOY_MCP_MEM_ABORT low-memory "MemAvailable=${mcp_mem}MB < min ${MCP_MEM_MIN_MB}MB on the 8GiB box; refusing the blue-green 2x overlap"
-    record_mcp_backoff_failure; exit 1
+    record_mcp_routine_backoff; exit 1
   fi
   [ "$mcp_mem" -lt 0 ] && log "mcp mem-check: MemAvailable UNREADABLE; failing OPEN (proceeding with the 2x overlap without a memory guarantee)"
 
@@ -905,7 +921,7 @@ if ! mcp_backoff_active && changed_range "$mcp_deployed" "$TARGET" "$MCP_PATHS";
   mcp_newport="$(mcp_free_port)"
   if [ -z "$mcp_newport" ]; then
     marker AUTODEPLOY_MCP_RETIRE_CAP port-exhausted "both $MCP_PORT_A and $MCP_PORT_B held by un-reaped mcp containers; not starting a colliding 3rd (cap=$MCP_RELEASES_CAP)"
-    record_mcp_backoff_failure; exit 1
+    record_mcp_routine_backoff; exit 1
   fi
   mcp_newname="${MCP_CONTAINER_PREFIX}-${TARGET:0:12}-${mcp_newport}"
 
