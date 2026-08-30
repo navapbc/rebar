@@ -1,12 +1,17 @@
-"""The per-operation, immutable, NON-SECRET configuration authority (RP-04 S1).
+"""The per-operation, immutable, NON-SECRET configuration authority (RP-04 S1/S2).
 
 One concern: compose ONE ``OperationSnapshot`` per operation — a frozen, serializable
 record of the effective non-secret config values, their source-kind provenance, the
-selected repository root, and an envelope version — and thread it through the entry
-points in **shadow mode**: diagnostic only, it does NOT control execution and no
-behavior-bearing consumer is cut over to it here. This is the walking skeleton for the
-RP-04 epic; the switchover (and removal of the ``REBAR_OPERATION_SNAPSHOT_SHADOW``
-rollback switch) happens in later stories (S7).
+selected repository root, and an envelope version — and thread it through the CLI,
+MCP, and shared command/store entry points as the AUTHORITATIVE binding for that
+operation (RP-04 S2, ticket 3a08): :func:`compose_and_bind_operation_snapshot` composes
+exactly once per operation and binds it to a context-local "active operation" so
+downstream store helpers (``rebar.config.tracker_dir`` / ``tickets_branch`` /
+``tickets_remote``) consume the SAME already-resolved values instead of re-reading
+ambient env/config, for the duration of that operation. LLM-specific resolution (the
+``rebar.llm`` / reconciler surfaces) is intentionally NOT cut over here — those remain
+on the diagnostic-only :func:`emit_shadow_snapshot` shadow path pending the dependent
+follow-up story (ticket ec44).
 
 The snapshot delegates rather than reimplements:
 
@@ -23,10 +28,14 @@ that is not a JSON primitive (or a nested list/dict of primitives), so a pydanti
 
 from __future__ import annotations
 
+import contextvars
 import dataclasses
+import functools
+import inspect
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from types import MappingProxyType
 from typing import Any
 
@@ -285,3 +294,126 @@ def _shadow(surface: str, repo_root: str | os.PathLike[str] | None = None) -> No
     snapshot would be composed against the wrong repository. Passing ``None`` is
     identical to omitting it — ``emit_shadow_snapshot`` declares the same default."""
     emit_shadow_snapshot(surface=surface, repo_root=repo_root)
+
+
+# ── Authoritative binding (RP-04 S2, ticket 3a08) ──────────────────────────────
+#
+# The reconciler runtime (``_engine/rebar_reconciler/runtime.py``) already demonstrates
+# the pattern this reuses: compose ONE snapshot, derive a binding from it, and hold that
+# binding for the whole operation instead of re-resolving ambient state per read. Here
+# the "binding" is the snapshot itself, held in a context-local (``contextvars``) slot so
+# nested store/config calls within the SAME operation observe it without threading an
+# explicit parameter through every intermediate call site.
+_active_snapshot: contextvars.ContextVar[OperationSnapshot | None] = contextvars.ContextVar(
+    "rebar_active_operation_snapshot", default=None
+)
+
+
+def active_snapshot() -> OperationSnapshot | None:
+    """The :class:`OperationSnapshot` bound for the CURRENTLY-EXECUTING operation, or
+    ``None`` when no operation has composed-and-bound one (e.g. a bare Python-library
+    call made outside the CLI/MCP entry points, or a malformed config that made
+    composition fail — see :func:`compose_and_bind_operation_snapshot`). Store/config
+    helpers consult this FIRST, before falling back to their own ambient resolution, so
+    they see the one value composed for this operation rather than a fresh live read."""
+    return _active_snapshot.get()
+
+
+@contextmanager
+def bind_operation_snapshot(snapshot: OperationSnapshot) -> Iterator[OperationSnapshot]:
+    """Bind an already-composed *snapshot* as the active operation for the block.
+
+    Not reentrant-aware by itself (that policy lives in
+    :func:`compose_and_bind_operation_snapshot`) — this is the low-level primitive:
+    set, yield, and ALWAYS reset via the token on exit (including on an exception),
+    so a nested binding never leaks past its own scope."""
+    token = _active_snapshot.set(snapshot)
+    try:
+        yield snapshot
+    finally:
+        _active_snapshot.reset(token)
+
+
+@contextmanager
+def compose_and_bind_operation_snapshot(
+    *,
+    cli_overrides: dict | None = None,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> Iterator[OperationSnapshot | None]:
+    """Compose the ONE :class:`OperationSnapshot` for an operation and bind it active
+    for the block — the authoritative counterpart to :func:`emit_shadow_snapshot`.
+
+    Reentrant BY DESIGN: if an operation snapshot is ALREADY bound (e.g. the CLI's
+    top-level dispatch already composed one and a nested command/store seam calls this
+    again for the same operation), the EXISTING snapshot is reused verbatim — never
+    recomposed — so "compose exactly once per operation" holds even when multiple seams
+    call this helper while serving the same operation.
+
+    Fails OPEN, matching :func:`emit_shadow_snapshot`'s existing swallow discipline:
+    some legacy operations (e.g. ``bridge setup --reset``, which only clears a
+    malformed section) must keep working even when the ambient config does not parse.
+    A malformed/insecure config (or any other composition failure) is caught here,
+    logged REDACTED (exception type name only), and the block runs with NO snapshot
+    bound — downstream store/config helpers then fall back to their own ambient
+    resolution exactly as they did before this seam existed, so a real operation that
+    NEEDS a valid config still fails fast on ITS OWN read, at the same point it always
+    did (AC3); this seam merely stops SUCCESSFUL composition from being re-done."""
+    existing = active_snapshot()
+    if existing is not None:
+        yield existing
+        return
+    try:
+        snapshot = compose_operation_snapshot(cli_overrides=cli_overrides, repo_root=repo_root)
+    except Exception as exc:  # noqa: BLE001 — fail open; see docstring above
+        logger.warning("operation snapshot composition skipped: %s", type(exc).__name__)
+        yield None
+        return
+    with bind_operation_snapshot(snapshot):
+        yield snapshot
+
+
+def bind_operation_snapshot_for_tools(mcp: Any) -> Any:
+    """Wrap an MCP server so every tool it registers runs under
+    :func:`compose_and_bind_operation_snapshot`.
+
+    Applied ONLY to the read/write tool registrars in ``mcp_server.py::build_server``
+    (mirroring :func:`rebar._lib_warn.suppress_library_double_advisory`'s exact proxy
+    pattern) — NOT to the LLM registrar, which intentionally stays on the diagnostic-only
+    shadow path pending ticket ec44. Each tool call composes-and-binds ONE snapshot for
+    its own duration (MCP tools have no ambient caller-supplied root, so ``repo_root`` is
+    left unset and resolved the same way :func:`emit_shadow_snapshot` already does for
+    this surface); nested command/store seams invoked from within the tool body reuse
+    this SAME binding via ``compose_and_bind_operation_snapshot``'s reentrancy guarantee,
+    rather than recomposing. The returned proxy delegates every attribute other than
+    ``tool`` to ``mcp`` unchanged and preserves async tools."""
+
+    class _BindingRegistrar:
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+
+        def tool(self, *args: Any, **kwargs: Any) -> Callable[[Callable], Any]:
+            inner_deco = self._inner.tool(*args, **kwargs)
+
+            def deco(fn: Callable) -> Any:
+                if inspect.iscoroutinefunction(fn):
+
+                    @functools.wraps(fn)
+                    async def awrapper(*a: Any, **k: Any) -> Any:
+                        with compose_and_bind_operation_snapshot():
+                            return await fn(*a, **k)
+
+                    return inner_deco(awrapper)
+
+                @functools.wraps(fn)
+                def wrapper(*a: Any, **k: Any) -> Any:
+                    with compose_and_bind_operation_snapshot():
+                        return fn(*a, **k)
+
+                return inner_deco(wrapper)
+
+            return deco
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._inner, name)
+
+    return _BindingRegistrar(mcp)

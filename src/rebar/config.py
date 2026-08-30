@@ -102,6 +102,11 @@ from rebar._config_writer import write_jira_config as write_jira_config
 from rebar._operation_config import ENVELOPE_VERSION as ENVELOPE_VERSION
 from rebar._operation_config import SHADOW_ENV as SHADOW_ENV
 from rebar._operation_config import OperationSnapshot as OperationSnapshot
+from rebar._operation_config import active_snapshot
+from rebar._operation_config import bind_operation_snapshot as bind_operation_snapshot
+from rebar._operation_config import (
+    compose_and_bind_operation_snapshot as compose_and_bind_operation_snapshot,
+)
 from rebar._operation_config import compose_operation_snapshot as compose_operation_snapshot
 from rebar._operation_config import shadow_enabled as shadow_enabled
 
@@ -135,27 +140,60 @@ def plan_review_guide_anchor(
     return f"{plan_review_docs_url(explicit_root)}#{criterion_id.lower()}"
 
 
+def _bound_snapshot_for_root(root: str | os.PathLike[str] | None) -> OperationSnapshot | None:
+    """The active operation's bound :class:`OperationSnapshot`, but ONLY when it was
+    composed for the SAME repository *root* this call is resolving for (RP-04 S2;
+    AC3 "explicit operation input remains authoritative"). ``root=None`` means "resolve
+    for whatever this call would ambiently pick" — exactly what the bound snapshot
+    already captured — so it always qualifies; an EXPLICIT root that resolves to a
+    DIFFERENT repository (an unusual cross-repo utility call) bypasses the binding and
+    falls through to the caller's own fresh ambient resolution for that other root."""
+    snapshot = active_snapshot()
+    if snapshot is None:
+        return None
+    if root is None:
+        return snapshot
+    try:
+        if str(repo_root(root)) == snapshot.repo_root:
+            return snapshot
+    except Exception:  # noqa: BLE001 — resolution failure falls through to the legacy path
+        return None
+    return None
+
+
 def tracker_dir(root: str | os.PathLike[str] | None = None) -> Path:
     """Path to the ticket event store, resolved through the full config precedence:
     the explicit env override (``REBAR_TRACKER_DIR``) wins verbatim; otherwise the
     configured ``tracker.dir``
     (``-c`` flag > project/user config > default ``.tickets-tracker``) — an absolute
     value relocates the store (EV-3b), a relative one is the dir name under the repo
-    root. Previously this consulted env only; it now reads the typed config too."""
+    root. Previously this consulted env only; it now reads the typed config too.
+
+    When an operation snapshot is bound for this root (RP-04 S2: the CLI/MCP/command
+    entry points compose-and-bind ONE snapshot per operation), the configured value is
+    read from THAT already-resolved snapshot instead of a fresh ``load_config`` — so a
+    later env/project/CWD mutation cannot change the tracker dir mid-operation. With no
+    snapshot bound (a bare library call outside those entry points, or a malformed
+    config the binding swallowed), this falls back to the pre-existing ambient read."""
     env = tracker_dir_override()
     if env:
         return Path(env)
-    try:
-        name = load_config(root).tracker.dir
-    except ConfigError:
-        # Locating the store must not be coupled to config validity (it was env-only
-        # before): a malformed config falls back to the default name. The fail-closed
-        # gates (close/verify) surface the ConfigError via their own load_config.
-        # Relocation is applied BY THIS FUNCTION: REBAR_TRACKER_DIR already returned
-        # above, and an absolute tracker.dir is returned verbatim below. Only a config
-        # that will not parse reaches here, and then there is no configured value.
-        # tickets-boundary-ok: the ConfigError-only default INSIDE tracker_dir() itself
-        name = ".tickets-tracker"
+    snapshot = _bound_snapshot_for_root(root)
+    if snapshot is not None:
+        name = snapshot.values.get("tracker", {}).get("dir") or ".tickets-tracker"
+    else:
+        try:
+            name = load_config(root).tracker.dir
+        except ConfigError:
+            # Locating the store must not be coupled to config validity (it was
+            # env-only before): a malformed config falls back to the default name.
+            # The fail-closed gates (close/verify) surface the ConfigError via their
+            # own load_config. Relocation is applied BY THIS FUNCTION: REBAR_TRACKER_DIR
+            # already returned above, and an absolute tracker.dir is returned verbatim
+            # below. Only a config that will not parse reaches here, and then there is
+            # no configured value.
+            # tickets-boundary-ok: the ConfigError-only default INSIDE tracker_dir() itself
+            name = ".tickets-tracker"
     return Path(name) if os.path.isabs(name) else repo_root(root) / name
 
 
@@ -168,7 +206,13 @@ def tickets_branch(root: str | os.PathLike[str] | None = None) -> str:
 
     Unlike :func:`tracker_dir`, a malformed config is NOT swallowed here: silently
     defaulting the branch could mis-route writes to the wrong branch (a data-integrity
-    risk), so the ``ConfigError`` propagates and the operation fails loudly."""
+    risk), so the ``ConfigError`` propagates and the operation fails loudly.
+
+    Reads from the bound operation snapshot when one is active for this root (see
+    :func:`tracker_dir`'s snapshot note); otherwise resolves live via ``load_config``."""
+    snapshot = _bound_snapshot_for_root(root)
+    if snapshot is not None:
+        return snapshot.values["tracker"]["branch"]
     return load_config(root).tracker.branch
 
 
@@ -179,11 +223,17 @@ def tickets_remote(root: str | os.PathLike[str] | None = None) -> str:
     project/user config > default ``origin``). The single source of the remote name for
     every ticket git-network path; the remote counterpart to :func:`tickets_branch`.
 
+    Reads from the bound operation snapshot when one is active for this root (see
+    :func:`tracker_dir`'s snapshot note); otherwise resolves live via ``load_config``.
+
     Split-residency setups (code reviewed on a ``gerrit`` remote; the tickets branch's
     source of truth on a ``github``/``origin`` remote for a downstream sync) set this so
     the store no longer hard-assumes ``origin`` is the ticket remote. Like
     :func:`tickets_branch`, a malformed config is NOT swallowed here: silently defaulting
     could mis-route a push to the wrong remote, so the ``ConfigError`` propagates."""
+    snapshot = _bound_snapshot_for_root(root)
+    if snapshot is not None:
+        return snapshot.values["sync"]["remote"]
     return load_config(root).sync.remote
 
 
