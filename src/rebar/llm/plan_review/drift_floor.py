@@ -209,7 +209,7 @@ def _recompute_verdict_after_drop(verdict: dict[str, Any]) -> None:
     if verdict.get("verdict") != "BLOCK" or verdict.get("blocking"):
         return
     cov = verdict.get("coverage") or {}
-    if cov.get("llm_unavailable"):
+    if cov.get("llm_unavailable") or cov.get("input_rejected"):
         verdict["verdict"] = "INDETERMINATE"
     elif cov.get("hierarchy_incomplete"):
         # Checked before verify_failed's fail-open path, mirroring finalize_verdict: a missing

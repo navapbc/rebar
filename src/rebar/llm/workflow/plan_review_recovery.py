@@ -459,7 +459,7 @@ def _degraded_plan_review_verdict(
     coverage = {
         "det": det_floor.det_coverage(det_results),
         "llm_ran": False,
-        "llm_unavailable": True,
+        **_failure.degrade_cause_flags(error),
         "llm_error": str(error),
         **_failure.resolution_fields(outcome),
         "hierarchy_incomplete": getattr(ctx, "hierarchy_incomplete", False),

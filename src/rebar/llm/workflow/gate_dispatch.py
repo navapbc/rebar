@@ -333,7 +333,7 @@ def _degraded_code_review_verdict(*, error, runner_name: str | None) -> dict[str
         "coaching": [],
         "coverage": {
             "llm_ran": False,
-            "llm_unavailable": True,
+            **_failure.degrade_cause_flags(error),
             "llm_error": str(error),
             **_failure.resolution_fields(outcome),
         },
