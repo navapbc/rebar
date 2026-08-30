@@ -1,18 +1,18 @@
 """Single definitions for the token-identical helpers (story 7931-faee-53ba-47b1).
 
-Three helpers exist as byte- or AST-identical twins across modules that never share code:
+Two helpers exist as byte- or AST-identical twins across modules that never share code:
 
-* ``_shadow`` — RP-04 S2 (ticket 3a08) migrated the MCP read/write surfaces
-  (``_mcp_reads``, ``_mcp_writes``) OFF this diagnostic-only helper onto the
-  authoritative ``compose_and_bind_operation_snapshot`` binding (via
-  ``bind_operation_snapshot_for_tools`` in ``mcp_server.py::build_server``), so they no
-  longer import or call it. The two REMAINING un-migrated copies — ``_mcp_llm`` (LLM
-  tools stay shadow pending ticket ec44) and ``_lib_ops``' variant (bridge/reconciler
-  library ops, out of this ticket's Scope) — still share the single definition;
 * ``_ticket_id`` — AST-identical in ``llm/workflow/steps.py`` and
   ``llm/plan_review/decide_ops.py``;
 * ``_positive_int`` — three identical argparse converters (``rebar_reconciler/request.py``,
   ``_cli/_parsers/advanced/bridge.py``, ``_cli/_parsers/advanced/reconcile.py``).
+
+(The diagnostic-only ``_shadow``/``emit_shadow_snapshot`` twin this file used to guard was
+retired once ticket ec44 migrated its last two callers — ``_mcp_llm`` and ``_lib_ops`` — onto
+the authoritative ``compose_and_bind_llm_config`` / ``compose_and_bind_operation_snapshot``
+bindings; see ``tests/unit/test_operation_snapshot.py`` and
+``tests/interfaces/contracts/test_llm_config_authoritative_binding.py`` for its successor
+coverage.)
 
 These helpers carry no distinctive atom to scan for, so the guard is the definition COUNT —
 branch 4 of the parent epic's guard rule. The behavioural tests below exist because a
@@ -43,49 +43,13 @@ def _definitions(name: str) -> list[str]:
 
 
 # ======================================================================================
-# HAPPY PATH
-# ======================================================================================
-def test_shadow_forwards_the_surface_and_an_absent_repo_root(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The still-shadow MCP surface (LLM tools; read/write migrated away by ticket
-    3a08 — see ``test_mcp_reads_and_writes_no_longer_use_shadow`` below) has no
-    ambient repo_root, so it passes only the surface."""
-    from rebar import _operation_config
-
-    seen: list[dict] = []
-    monkeypatch.setattr(
-        _operation_config, "emit_shadow_snapshot", lambda **kw: seen.append(kw) or None
-    )
-    from rebar import _mcp_llm
-
-    _mcp_llm._shadow("review_code")
-    assert seen == [{"surface": "review_code", "repo_root": None}]
-
-
-def test_shadow_forwards_an_explicit_repo_root(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The library surface DOES have one and must keep forwarding it — dropping it would
-    silently compose the snapshot against the wrong repository."""
-    from rebar import _operation_config
-
-    seen: list[dict] = []
-    monkeypatch.setattr(
-        _operation_config, "emit_shadow_snapshot", lambda **kw: seen.append(kw) or None
-    )
-    from rebar import _lib_ops
-
-    _lib_ops._shadow("create_ticket", repo_root="/tmp/some-repo")
-    assert seen == [{"surface": "create_ticket", "repo_root": "/tmp/some-repo"}]
-
-
-# ======================================================================================
 # HELD OUT
 # ======================================================================================
 def test_each_helper_is_defined_exactly_once() -> None:
     """The guard. A count, not a token scan: these helpers have no distinctive atom, which is
     branch 4 of the parent epic's guard rule. A fourth copy pasted into a new module must fail
     here even though no test happens to execute it."""
-    for name in ("_shadow", "_ticket_id"):
+    for name in ("_ticket_id",):
         assert len(_definitions(name)) == 1, f"{name}: {_definitions(name)}"
 
 
@@ -99,34 +63,22 @@ def test_the_argparse_positive_int_is_defined_once_and_its_namesake_survives() -
     assert any(d.startswith("rebar/_config_resolvers.py") for d in defs), defs
 
 
-def test_the_remaining_shadow_surfaces_share_one_shadow_object() -> None:
-    """Routing means IMPORTING, not re-declaring. Identity is what proves it: modules
-    that each defined their own copy would still pass a behavioural test.
-
-    Only ``_mcp_llm`` and ``_lib_ops`` still route through ``_shadow`` (ticket 3a08
-    migrated ``_mcp_reads``/``_mcp_writes`` onto the authoritative binding instead —
-    see ``test_mcp_reads_and_writes_no_longer_use_shadow``)."""
-    from rebar import _lib_ops, _mcp_llm
-
-    assert _lib_ops._shadow is _mcp_llm._shadow
-
-
-def test_mcp_reads_and_writes_no_longer_use_shadow() -> None:
-    """RP-04 S2 (ticket 3a08): the migrated read/write MCP surfaces deleted their
-    ``_shadow``/``emit_shadow_snapshot`` call sites entirely (AC5) — they no longer
-    import the name at all, since every tool call is now composed-and-bound via
-    ``bind_operation_snapshot_for_tools`` around the whole tool body instead."""
-    from rebar import _mcp_reads, _mcp_writes
-
-    assert not hasattr(_mcp_reads, "_shadow")
-    assert not hasattr(_mcp_writes, "_shadow")
-
-
 def test_the_two_ticket_id_call_sites_share_one_object() -> None:
     from rebar.llm.plan_review import decide_ops
     from rebar.llm.workflow import steps
 
     assert steps._ticket_id is decide_ops._ticket_id
+
+
+def test_no_surface_still_imports_the_retired_shadow_helper() -> None:
+    """Ticket ec44 migrated the last two shadow callers (``_mcp_llm``, ``_lib_ops``) onto
+    the authoritative bindings and deleted ``_shadow``/``emit_shadow_snapshot`` entirely —
+    no module may still import or expose it."""
+    from rebar import _lib_ops, _mcp_llm, _mcp_reads, _mcp_writes, _operation_config
+
+    for module in (_mcp_reads, _mcp_writes, _mcp_llm, _lib_ops, _operation_config):
+        assert not hasattr(module, "_shadow")
+        assert not hasattr(module, "emit_shadow_snapshot")
 
 
 def test_the_argparse_converter_rejects_non_positive_values() -> None:
@@ -156,31 +108,6 @@ def test_the_config_namesake_still_returns_its_default_rather_than_raising() -> 
     assert cfg_positive_int("not-a-number", 7) == 7
     assert cfg_positive_int("0", 7) == 7
     assert cfg_positive_int("12", 7) == 12
-
-
-def test_every_library_shadow_call_site_forwards_its_repo_root() -> None:
-    """Completeness, not just correctness. The behavioural test above proves the shared helper
-    CAN forward a repo_root; it cannot prove all ten library call sites DO. A consolidation that
-    rewired nine correctly and dropped the tenth would leave that operation composing its
-    snapshot against the wrong repository, silently — and no runtime test would notice unless it
-    happened to drive that one operation.
-
-    Structural by necessity: the contract is "EVERY library call site forwards it", and there is
-    no single runtime path that crosses all ten.
-    """
-    import ast
-
-    src = (_SRC / "_lib_ops.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    missing = [
-        f"_lib_ops.py:{node.lineno}"
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_shadow"
-        and not any(kw.arg == "repo_root" for kw in node.keywords)
-    ]
-    assert missing == [], f"library _shadow call sites that drop repo_root: {missing}"
 
 
 def test_ticket_id_prefers_the_explicit_input_then_falls_back_to_the_target() -> None:

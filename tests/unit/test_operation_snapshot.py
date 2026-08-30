@@ -9,9 +9,9 @@ precedence/provenance to ``config.resolve_with_sources``, root selection to
 ``_store.canonical`` — it must not reimplement any of them.
 
 These are the AC2–AC4 unit/property oracles: precedence, root, immutability,
-deterministic canonical serialization, fingerprint, envelope-version rejection,
-secret/live-object exclusion, and the temporary shadow switch. Observable behavior
-only — no assertions on private names or source text.
+deterministic canonical serialization, fingerprint, envelope-version rejection, and
+secret/live-object exclusion. Observable behavior only — no assertions on private
+names or source text.
 """
 
 from __future__ import annotations
@@ -24,11 +24,8 @@ import pytest
 import rebar.config as cfg
 from rebar._operation_config import (
     ENVELOPE_VERSION,
-    SHADOW_ENV,
     OperationSnapshot,
     compose_operation_snapshot,
-    emit_shadow_snapshot,
-    shadow_enabled,
 )
 
 
@@ -245,64 +242,3 @@ def test_secret_sentinels_absent_from_every_named_boundary(
     ]
     for boundary in boundaries:
         assert sentinel not in boundary
-
-
-# ── AC6/AC7: the temporary shadow switch ──────────────────────────────────────
-def test_shadow_enabled_by_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(SHADOW_ENV, raising=False)
-    assert shadow_enabled() is True
-
-
-@pytest.mark.parametrize("false_spelling", ["false", "0", "no", "off", ""])
-def test_shadow_disabled_by_canonical_false_spellings(
-    monkeypatch: pytest.MonkeyPatch, false_spelling: str
-) -> None:
-    monkeypatch.setenv(SHADOW_ENV, false_spelling)
-    assert shadow_enabled() is False
-
-
-@pytest.mark.parametrize("true_spelling", ["true", "1", "yes", "on"])
-def test_shadow_enabled_by_canonical_true_spellings(
-    monkeypatch: pytest.MonkeyPatch, true_spelling: str
-) -> None:
-    monkeypatch.setenv(SHADOW_ENV, true_spelling)
-    assert shadow_enabled() is True
-
-
-# ── AC6/AC7: the shadow diagnostic must never change legacy behavior ──────────
-def test_emit_shadow_never_raises_on_malformed_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A diagnostic-only shadow must be invisible: a malformed config that the
-    legacy operation tolerates (e.g. a gate that is off and only warns) must NOT
-    be turned into a hard failure by the shadow. emit_shadow_snapshot swallows
-    the ConfigError, returns None, and lets the legacy operation continue."""
-    monkeypatch.setenv(SHADOW_ENV, "on")
-    proj = _proj(tmp_path)
-    (proj / "rebar.toml").write_text("this is not = valid toml\n", encoding="utf-8")
-    assert emit_shadow_snapshot(repo_root=str(proj), surface="unit") is None
-
-
-def test_emit_shadow_never_raises_on_insecure_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An insecure-URL config raises InsecureUrlError (a ConfigError subclass) when
-    the schema is built. Legacy operations that never build that schema on their path
-    (e.g. a bridge-setup --reset that only clears the section) must not be broken by
-    the shadow: emit_shadow_snapshot swallows it, returns None, and the legacy op runs."""
-    from rebar._config_schema import InsecureUrlError
-
-    monkeypatch.setenv(SHADOW_ENV, "on")
-
-    def _boom(**_kw: object) -> object:
-        raise InsecureUrlError("jira.url: 'x' uses scheme '', not 'https'")
-
-    monkeypatch.setattr("rebar._operation_config.compose_operation_snapshot", _boom)
-    assert emit_shadow_snapshot(repo_root=str(_proj(tmp_path)), surface="unit") is None
-
-
-def test_emit_shadow_returns_none_when_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv(SHADOW_ENV, "off")
-    assert emit_shadow_snapshot(repo_root=str(_proj(tmp_path)), surface="unit") is None

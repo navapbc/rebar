@@ -654,10 +654,13 @@ def build_server(cfg=None):
     # them through a proxy that runs each tool under suppress_cross_session_warning():
     # a scoped guard makes the field the single advisory without a process-global
     # warnings filter (which would silence CrossSessionWarning for other import-rebar
-    # callers sharing this process). They are ALSO registered through a second proxy
-    # that composes-and-binds ONE authoritative OperationSnapshot per tool call (RP-04
-    # S2, ticket 3a08) — read+write only; LLM tools intentionally stay on the
-    # diagnostic-only shadow path pending ticket ec44.
+    # callers sharing this process). All three clusters are ALSO registered through a
+    # second proxy that composes-and-binds ONE authoritative OperationSnapshot per tool
+    # call (RP-04 S2, ticket 3a08) — the LLM registrar now gets this too (ticket ec44
+    # closed the "pending ec44" gap: its 5 tools now delegate to the SAME
+    # rebar.llm.* functions the CLI/library use, and those functions bind their own
+    # authoritative LLMConfig via compose_and_bind_llm_config; this general snapshot
+    # binding covers the non-LLM (store/ticket) config those tool bodies also touch).
     from rebar._lib_warn import suppress_library_double_advisory
     from rebar._operation_config import bind_operation_snapshot_for_tools
 
@@ -665,7 +668,7 @@ def build_server(cfg=None):
         return bind_operation_snapshot_for_tools(suppress_library_double_advisory(inner_mcp))
 
     register_read_tools(_instrumented(mcp), ctx)
-    register_llm_tools(mcp, ctx)
+    register_llm_tools(_instrumented(mcp), ctx)
     register_write_tools(_instrumented(mcp), ctx)
 
     # Box-facing health/gauge/grace (ADR deft-evolutive-mosasaur): expose /health with

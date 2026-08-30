@@ -37,7 +37,9 @@ Behavioral (the disposals must be pure refactors of the read seam; asserted thro
 entry points that survive them):
 
 5. ``REBAR_LOG_LEVEL`` still resolves the handler level (name / number / default).
-6. ``shadow_enabled()`` still reads its kill-switch LIVE (unset ⇒ enabled).
+6. (retired — ``shadow_enabled()`` and its kill-switch were deleted by ticket ec44 once
+   every production caller of the diagnostic-only shadow migrated to the authoritative
+   ``compose_and_bind_llm_config`` / ``compose_and_bind_operation_snapshot`` bindings.)
 7. The op-cert key-path / principal deployment overrides still apply when UNBOUND.
 8. ``signing_key`` still honors an injected ``REBAR_SIGNING_KEY``.
 9. ``mirror_guard`` still threads ``GITHUB_TOKEN`` from its CLI boundary.
@@ -167,19 +169,6 @@ def test_log_level_resolution_is_preserved(monkeypatch: pytest.MonkeyPatch) -> N
     assert _resolve_level() == logging.DEBUG, "a symbolic level name must resolve"
     monkeypatch.setenv("REBAR_LOG_LEVEL", "10")
     assert _resolve_level() == 10, "a numeric level must resolve"
-
-
-def test_shadow_kill_switch_is_read_live(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``shadow_enabled()`` keeps reading its kill-switch LIVE: unset ⇒ enabled, a false
-    spelling ⇒ disabled, and a mid-run flip is observed on the next call."""
-    from rebar._operation_config import shadow_enabled
-
-    monkeypatch.delenv("REBAR_OPERATION_SNAPSHOT_SHADOW", raising=False)
-    assert shadow_enabled() is True, "unset shadow switch must default to enabled"
-    monkeypatch.setenv("REBAR_OPERATION_SNAPSHOT_SHADOW", "0")
-    assert shadow_enabled() is False, "a false spelling must disable shadow snapshots"
-    monkeypatch.setenv("REBAR_OPERATION_SNAPSHOT_SHADOW", "1")
-    assert shadow_enabled() is True, "a true spelling must re-enable — read is live"
 
 
 def test_opcert_overrides_apply_when_unbound(

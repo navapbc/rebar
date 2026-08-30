@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from rebar.llm import gate_source, parity
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, resolve_gate_config
 from rebar.llm.parity import ItemRecord
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
@@ -159,7 +159,7 @@ def relocation_spot_eval(
     ``local`` = the in-place checkout) — the raze-vet-ditch guard refuses tool-using runs
     outside it. An injected ``runner`` (FakeRunner) is non-agentic, so the context is a
     harmless no-op there."""
-    cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    cfg = config or resolve_gate_config(repo_root)
     handle = gate_source.resolve_gate_handle(None, source, repo_root)
 
     def _record(req, label, sel):
@@ -214,7 +214,7 @@ def packing_spot_eval(
 
     The agentic container runs execute inside the gate-source read context (``source``
     default ``local``) — the raze-vet-ditch guard refuses tool-using runs outside it."""
-    cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    cfg = config or resolve_gate_config(repo_root)
     handle = gate_source.resolve_gate_handle(None, source, repo_root)
     container = [registry.by_id()["G3"], registry.by_id()["G4"]]
     # The ONE shared builder (pass1.build_sibling_roster) — a local copy would send
@@ -389,7 +389,7 @@ def prerequisite_packing_spot_eval(
 ) -> parity.ParityReport:
     """Run the focused finder over the same corpus singleton and packed, then compare."""
     if baseline is None or candidate is None:
-        cfg = config or LLMConfig.from_env()
+        cfg = config or resolve_gate_config()
         selected = get_runner(cfg, override=runner)
         baseline = _run_prerequisite_mode(packed=False, cfg=cfg, runner=selected)
         candidate = (
