@@ -185,6 +185,23 @@ def run_span(operation: str, *, ticket_id: str | None = None):
         _close_span(cm, capture=False)
 
 
+# Attribute stamped on any exception raised by a NON-PRIMARY (fallback) leg — a candidate at
+# order >= 1 — by :class:`_TracedCandidateModel` below. `should_fall_back` reads it (via
+# :func:`is_fallback_leg_failure`) to ALWAYS retain a fallback leg's failure into the
+# `FallbackExceptionGroup`, instead of letting pydantic-ai bare-reraise the terminal leg alone
+# and DISCARD the primary's retained (possibly retryable) cause (bug 1c0d). Stamped here on the
+# EXISTING per-candidate wrapper — which already carries `_candidate_order` (0 = primary) and
+# already catches in `request()` — rather than in a second, parallel wrapper stack.
+_FALLBACK_LEG_ATTR = "_rebar_fallback_leg_failure"
+
+
+def is_fallback_leg_failure(exc: BaseException) -> bool:
+    """True if ``exc`` was raised by a NON-PRIMARY (fallback) leg, i.e. tagged by
+    :class:`_TracedCandidateModel` when its ``_candidate_order > 0`` (bug 1c0d). Best-effort
+    read: an unstamped or slotted exception simply reads ``False``."""
+    return bool(getattr(exc, _FALLBACK_LEG_ATTR, False))
+
+
 def wrap_candidate(model: Any, order: int, candidate: str) -> Any:
     """Wrap ``model`` in a transparent ``WrapperModel`` subclass that opens a
     :func:`candidate_span` around each ``request``.
@@ -240,6 +257,15 @@ def _candidate_wrapper_class() -> Any:
                     resp = await super().request(messages, model_settings, model_request_parameters)
                 except Exception as exc:
                     h.raised(exc)
+                    # Tag a NON-PRIMARY leg's failure so `should_fall_back` retains it into the
+                    # FallbackExceptionGroup rather than let pydantic-ai bare-reraise this leg
+                    # and DISCARD the primary's retained cause (bug 1c0d). Best-effort: a
+                    # slotted exception that rejects assignment degrades to the narrow predicate.
+                    if self._candidate_order > 0:
+                        try:
+                            setattr(exc, _FALLBACK_LEG_ATTR, True)
+                        except Exception:  # noqa: BLE001 — tagging must never break the chain
+                            pass
                     raise
                 h.returned(resp)
                 return resp

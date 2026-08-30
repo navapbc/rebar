@@ -241,6 +241,33 @@ def _map_http(exc: Any) -> ResolutionClass:  # exc is a pydantic_ai ModelHTTPErr
     return ResolutionClass.NEEDS_INVESTIGATION
 
 
+# Precedence for aggregating a FallbackExceptionGroup, MOST-recoverable first: a retryable
+# leg wins so a chain's terminal disposition is the BEST any leg could achieve, never the
+# accident of which leg happened to be raised last (bug 1c0d).
+_GROUP_RECOVERABILITY: tuple[ResolutionClass, ...] = (
+    ResolutionClass.WAIT_AND_RETRY,
+    ResolutionClass.RETRY_NOW,
+)
+
+
+def _classify_fallback_group(group: Any) -> ResolutionClass:
+    """Aggregate a ``FallbackExceptionGroup`` (an EXHAUSTED chain) by its MOST-RECOVERABLE
+    leg. A retryable leg (``WAIT_AND_RETRY``/``RETRY_NOW``) on ANY candidate wins, so a
+    fallback leg's non-retryable failure (e.g. a keyless provider's auth error) can no
+    longer MASK a retryable primary throttle as a hard INDETERMINATE (bug 1c0d). A group
+    whose legs are ALL non-retryable keeps the ``CHANGE_PROVIDER_OR_MODEL`` disposition —
+    the whole chain is unavailable, which is what switching model/provider would address.
+
+    Each leg is classified through the TOTAL public classifier (so a tenacity-wrapped or
+    nested-group leg is unwrapped/recursed, never raised)."""
+    legs = getattr(group, "exceptions", ()) or ()
+    leg_classes = [classify_llm_failure(leg).resolution_class for leg in legs]
+    for candidate in _GROUP_RECOVERABILITY:
+        if candidate in leg_classes:
+            return candidate
+    return ResolutionClass.CHANGE_PROVIDER_OR_MODEL
+
+
 def _map(exc: BaseException | None, ctx: ClassifyContext) -> ResolutionClass:
     # A content-filter / truncation finish_reason carried from the structured seam — the
     # primary use when NO exception was raised (exc is None).
@@ -288,7 +315,7 @@ def _map(exc: BaseException | None, ctx: ClassifyContext) -> ResolutionClass:
     if isinstance(exc, UserError):
         return ResolutionClass.CHANGE_SETTINGS
     if isinstance(exc, FallbackExceptionGroup):
-        return ResolutionClass.CHANGE_PROVIDER_OR_MODEL
+        return _classify_fallback_group(exc)
     if isinstance(exc, ModelAPIError):  # no status_code (ModelHTTPError handled above)
         return ResolutionClass.RETRY_NOW
     return ResolutionClass.NEEDS_INVESTIGATION
