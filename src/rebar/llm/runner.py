@@ -725,39 +725,48 @@ class PydanticAIRunner:
             eff_max_iter=eff_max_iter,
             started_at=_t0,
         )
-        result = _findings.finalize_outcome(
-            outcome,
-            mode=req.mode,
-            output_schema=req.output_schema,
-            runner=self.name,
-            model=ran_model,
-            provider_provenance=provider_provenance,
-            # trace_id off `req.config`, not `cfg` (the runner-instance policy copy).
-            trace_id=req.config.trace_id,
-            target=req.target,
-            reviewers=req.reviewers,
-            repo_path=cfg.repo_path,
-            reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
-        )
-        # Surface per-run token usage (incl. anthropic cache read/write) so callers can
-        # record cache efficacy into coverage/observability. Private key — non-breaking
-        # for every existing consumer of the review_result/structured dict.
-        result["_usage"] = usage
-        _merge_success_run_shape(
-            usage,
-            run_messages,
-            request_limit=req_limit,
-            tool_calls_limit=max(8, eff_max_iter),
-            call_label=_call_label,
-        )
-        # The opt-in spend row (rules, and the step-attribution rationale, in its docstring).
-        record_call_spend(
-            usage,
-            call_label=_call_label,
-            ran_model=ran_model,
-            duration_s=time.monotonic() - _t0,
-            ticket=(_target_ticket_ids[0] if _target_ticket_ids else None),
-        )
+        # Bug fe75 (mirror of 8455): `record_call_spend` must run even when `finalize_outcome`
+        # raises (e.g. schema validation) — the model call already burned real tokens, so the
+        # spend row is owed. `try/finally` runs the recording on BOTH paths without moving it:
+        # on success the finally fires last (after the shape merge, so the row keeps its
+        # run-shape), and on a finalize raise the success statements are skipped, the finally
+        # still records the token-count spend row, then the ORIGINAL exception propagates
+        # unchanged (the ValueError the caller sees is preserved).
+        try:
+            result = _findings.finalize_outcome(
+                outcome,
+                mode=req.mode,
+                output_schema=req.output_schema,
+                runner=self.name,
+                model=ran_model,
+                provider_provenance=provider_provenance,
+                # trace_id off `req.config`, not `cfg` (the runner-instance policy copy).
+                trace_id=req.config.trace_id,
+                target=req.target,
+                reviewers=req.reviewers,
+                repo_path=cfg.repo_path,
+                reviewer_id=req.reviewers[0] if len(req.reviewers) == 1 else None,
+            )
+            # Surface per-run token usage (incl. anthropic cache read/write) so callers can
+            # record cache efficacy into coverage/observability. Private key — non-breaking
+            # for every existing consumer of the review_result/structured dict.
+            result["_usage"] = usage
+            _merge_success_run_shape(
+                usage,
+                run_messages,
+                request_limit=req_limit,
+                tool_calls_limit=max(8, eff_max_iter),
+                call_label=_call_label,
+            )
+        finally:
+            # The opt-in spend row (rules, and the step-attribution rationale, in its docstring).
+            record_call_spend(
+                usage,
+                call_label=_call_label,
+                ran_model=ran_model,
+                duration_s=time.monotonic() - _t0,
+                ticket=(_target_ticket_ids[0] if _target_ticket_ids else None),
+            )
         return result
 
 

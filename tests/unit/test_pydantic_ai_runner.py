@@ -537,21 +537,20 @@ def test_usage_is_surfaced_on_the_result_dict():
     }
 
 
-# ── Fault-matrix: a raise AT finalization (ticket c465) ─────────────────────────
+# ── Fault-matrix: a raise AT finalization (ticket fe75, mirror of bug 8455) ──────
 # `finalize_outcome` runs OUTSIDE the ProviderSession `with` block and OUTSIDE the
 # try/except that does failure accounting (runner.py:605-707) — both have already
-# exited by the time it's called (runner.py:708 sits at the SAME indent as the `with`
-# at :452, and finalize_outcome itself follows two statements later at :725). This
-# characterizes — pins as CURRENT behavior, does not change it — what a raise THERE
-# does and does not do: log_call_success (:716) already fired by design (its own
-# docstring: "called BEFORE finalize_outcome ... this line is already emitted when
-# it does" raise), but record_call_spend (:751) sits AFTER finalize_outcome and so
-# never runs — a call that burned tokens and then failed schema validation leaves no
-# spend row. This is the mirror gap to bug 8455 (which covers a raise during the
-# agent call itself, inside the except block) and is NOT fixed by 8455's fix.
+# exited by the time it's called. `log_call_success` already fired by design (its
+# own docstring: "called BEFORE finalize_outcome ... this line is already emitted
+# when it does" raise). The MODEL call itself SUCCEEDED — it burned real tokens —
+# and only the post-call finalization (e.g. schema validation) failed, so the spend
+# for those consumed tokens must STILL be recorded before the raise propagates.
+# Bug fe75 fixes exactly this: a raise in finalize_outcome now records a spend row
+# on the way out (mirroring bug 8455, which covers a raise DURING the agent call).
+# The ValueError still propagates unchanged — the fix does not swallow it.
 
 
-def test_a_raise_in_finalize_outcome_still_logs_but_skips_the_spend_row(monkeypatch, caplog):
+def test_a_raise_in_finalize_outcome_still_logs_and_records_the_spend_row(monkeypatch, caplog):
     from rebar.llm import runner as runner_mod
 
     def _explode_finalize(outcome, **kw):
@@ -584,10 +583,20 @@ def test_a_raise_in_finalize_outcome_still_logs_but_skips_the_spend_row(monkeypa
     assert any("llm call" in rec.message and "ok in" in rec.message for rec in caplog.records), (
         "log_call_success must still fire even though finalize_outcome goes on to raise"
     )
-    assert spend_calls == [], (
-        "record_call_spend runs AFTER finalize_outcome in run(), so a raise there must "
-        "leave no spend row today — a call this test would catch as a silent behavior "
-        "change (see the module docstring above for the gap this pins, filed separately)"
+    # FIXED behavior (fe75): the tokens the call consumed leave exactly one spend row
+    # even though finalization raised — the mirror of bug 8455's failure-path spend row.
+    assert len(spend_calls) == 1, (
+        "a raise in finalize_outcome must still record ONE spend row for the tokens the "
+        "call already consumed — the silent spend-row loss this bug (fe75) fixes"
+    )
+    spend = spend_calls[0]
+    # The row carries the call's real usage and its identifying attribution, exactly as
+    # the success-path spend row would (token counts are known before finalize_outcome).
+    assert set(spend["usage"]) >= {"input_tokens", "output_tokens"}, (
+        "the recorded spend row must carry the call's real token usage"
+    )
+    assert spend.get("ran_model") and spend.get("call_label"), (
+        "the recorded spend row must be attributed (call_label + ran_model)"
     )
 
 
