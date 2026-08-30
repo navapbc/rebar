@@ -1,0 +1,402 @@
+[
+  {
+    "id": "outbound_create_happy",
+    "category": "happy_path",
+    "direction": "outbound",
+    "action": "create",
+    "target": "local-1001",
+    "payload": {
+      "summary": "New ticket from local",
+      "status": "To Do",
+      "assignee": "user-a@example.com",
+      "_bridge_target_project": "PROJ",
+      "comments": [{"body": "seed comment"}],
+      "labels": [{"action": "add", "label": "team-a"}],
+      "local_id": "local-1001"
+    },
+    "provenance": {"source": "outbound_differ", "local_id": "local-1001"},
+    "expect": "match",
+    "source_reference": "outbound_pass.py:_run_differs_outbound create branch"
+  },
+  {
+    "id": "outbound_create_multi_project_routing",
+    "category": "multi_project_routing",
+    "direction": "outbound",
+    "action": "create",
+    "target": "local-1002",
+    "payload": {
+      "summary": "Cross-project ticket",
+      "_bridge_target_project": "OTHERPROJ",
+      "comments": [],
+      "labels": [],
+      "local_id": "local-1002"
+    },
+    "provenance": {"source": "outbound_differ", "local_id": "local-1002"},
+    "expect": "match",
+    "source_reference": "outbound_mutation_builders.py:_compute_outbound_create_mutation (project stamping)"
+  },
+  {
+    "id": "outbound_update_happy_status_and_assignee",
+    "category": "happy_path",
+    "direction": "outbound",
+    "action": "update",
+    "target": "ABC-1",
+    "payload": {
+      "changed_fields": {"status": "Done", "assignee": "user-b@example.com", "parent": "ABC-0"},
+      "comments": [{"body": "closing out"}],
+      "labels": [{"action": "add", "label": "rebar-status:done"}],
+      "links": [{"type": "blocks", "target": "ABC-9"}]
+    },
+    "provenance": {"source": "outbound_differ", "local_id": "local-2001", "jira_key": "ABC-1"},
+    "expect": "match",
+    "source_reference": "outbound_pass.py:_run_differs_outbound update branch"
+  },
+  {
+    "id": "outbound_update_binding_field_only",
+    "category": "happy_path",
+    "direction": "outbound",
+    "action": "update",
+    "target": "ABC-2",
+    "payload": {
+      "changed_fields": {},
+      "comments": [],
+      "labels": [],
+      "links": [{"type": "relates_to", "target": "ABC-3"}]
+    },
+    "provenance": {"source": "outbound_differ", "local_id": "local-2002", "jira_key": "ABC-2"},
+    "expect": "match",
+    "source_reference": "outbound_pass.py:_run_differs_outbound update branch (link-only diff)"
+  },
+  {
+    "id": "outbound_update_suppressed_follow_on",
+    "category": "suppression_follow_on",
+    "direction": "outbound",
+    "action": "update",
+    "target": "ABC-3",
+    "payload": {
+      "changed_fields": {"status": "Cancelled"},
+      "comments": [],
+      "labels": [],
+      "links": []
+    },
+    "provenance": {
+      "source": "outbound_differ",
+      "local_id": "local-2003",
+      "jira_key": "ABC-3",
+      "follow_on": {"kind": "suppress_pair", "reason": "just_emitted_outbound_change"}
+    },
+    "expect": "match",
+    "source_reference": "run_differs.py bug-3bf8 bidirectional suppression comment"
+  },
+  {
+    "id": "outbound_update_retry_exhaustion_metadata",
+    "category": "retry_exhaustion",
+    "direction": "outbound",
+    "action": "update",
+    "target": "ABC-4",
+    "payload": {
+      "changed_fields": {"status": "Blocked"},
+      "comments": [],
+      "labels": [],
+      "links": []
+    },
+    "provenance": {
+      "source": "outbound_differ",
+      "local_id": "local-2004",
+      "jira_key": "ABC-4",
+      "retry_exhausted": true,
+      "attempts": 3,
+      "retry_owner": "ADR-0103-RetryBudget"
+    },
+    "expect": "match",
+    "source_reference": "ADR 0103 RetryBudget/coordinator (retry ownership reaffirmed, not modeled by payload)"
+  },
+  {
+    "id": "outbound_delete_happy",
+    "category": "happy_path",
+    "direction": "outbound",
+    "action": "delete",
+    "target": "ABC-5",
+    "payload": {},
+    "provenance": {"source": "outbound_differ", "local_id": "local-2005", "jira_key": "ABC-5"},
+    "expect": "match",
+    "source_reference": "outbound_pass.py:_run_differs_outbound delete branch"
+  },
+  {
+    "id": "outbound_probe_ambiguous_local_binding",
+    "category": "ambiguous_outcome",
+    "direction": "outbound",
+    "action": "probe",
+    "target": "local-2006",
+    "payload": {},
+    "provenance": {
+      "source": "differ",
+      "reason": "ambiguous_local_binding",
+      "local_id": "local-2006",
+      "jira_sibling_key": "local-2006"
+    },
+    "expect": "match",
+    "source_reference": "differ.py:_compute_mutations_emit_local_only ambiguous-binding branch"
+  },
+  {
+    "id": "outbound_conflict_happy",
+    "category": "happy_path",
+    "direction": "outbound",
+    "action": "conflict",
+    "target": "local-2007",
+    "payload": {"reason": "both_sides_changed_same_field", "local_id": "local-2007"},
+    "provenance": {"source": "conflict_resolver"},
+    "expect": "match",
+    "source_reference": "differ.py conflict_resolver (*, conflict) emission"
+  },
+  {
+    "id": "inbound_create_happy",
+    "category": "happy_path",
+    "direction": "inbound",
+    "action": "create",
+    "target": "ABC-6",
+    "payload": {
+      "summary": "New Jira-native issue",
+      "status": "In Progress",
+      "assignee": "user-c@example.com"
+    },
+    "provenance": {"source": "differ", "reason": "jira_new"},
+    "expect": "match",
+    "source_reference": "differ.py:_compute_mutations_emit_jira_only happy path"
+  },
+  {
+    "id": "inbound_create_all_fields_excluded",
+    "category": "edge_malformed",
+    "direction": "inbound",
+    "action": "create",
+    "target": "ABC-7",
+    "payload": {},
+    "provenance": {"source": "differ", "reason": "jira_new"},
+    "expect": "match",
+    "source_reference": "differ.py: 'the target itself is the signal' comment (empty-but-meaningful create)"
+  },
+  {
+    "id": "inbound_update_happy_full_fields",
+    "category": "happy_path",
+    "direction": "inbound",
+    "action": "update",
+    "target": "ABC-8",
+    "payload": {
+      "local_id": "local-2008",
+      "fields": {"summary": "Updated from Jira", "parent": "local-2000"},
+      "labels": [{"action": "add", "label": "urgent"}],
+      "comments": [{"body": "inbound comment", "jira_comment_id": "9001"}],
+      "links": [{"type": "blocks", "target": "local-2009"}]
+    },
+    "provenance": {"source": "inbound_differ", "jira_key": "ABC-8", "local_id": "local-2008"},
+    "expect": "match",
+    "source_reference": "run_differs.py InboundMutation -> typed Mutation conversion"
+  },
+  {
+    "id": "inbound_update_null_local_id_override",
+    "category": "edge_malformed",
+    "direction": "inbound",
+    "action": "update",
+    "target": "ABC-9",
+    "payload": {
+      "local_id": null,
+      "fields": {"status": "Done"},
+      "labels": [],
+      "comments": [],
+      "links": []
+    },
+    "provenance": {"source": "inbound_differ", "jira_key": "ABC-9", "local_id": null},
+    "expect": "match",
+    "source_reference": "run_differs.py (bug-1bb2 local_id override may be absent)"
+  },
+  {
+    "id": "inbound_clean_label_happy",
+    "category": "happy_path",
+    "direction": "inbound",
+    "action": "clean_label",
+    "target": "ABC-10",
+    "payload": {"labels_to_remove": ["rebar-id-1", "rebar-id-2"]},
+    "provenance": {"source": "label_audit"},
+    "expect": "match",
+    "source_reference": "apply_inbound.py:_apply_inbound_clean_label payload contract"
+  },
+  {
+    "id": "inbound_repair_property_happy",
+    "category": "happy_path",
+    "direction": "inbound",
+    "action": "repair_property",
+    "target": "ABC-11",
+    "payload": {"local_id": "local-2010"},
+    "provenance": {"reason": "missing_back_pointer", "local_key": "local-2010", "peer": "ABC-11"},
+    "expect": "match",
+    "source_reference": "invariants.py:check_dual_identity_complete repair emission"
+  },
+  {
+    "id": "inbound_conflict_duplicate_local_id_1",
+    "category": "edge_duplicate",
+    "direction": "inbound",
+    "action": "conflict",
+    "target": "local-3001",
+    "payload": {"reason": "duplicate_local_id", "jira_key": "ABC-12"},
+    "provenance": {
+      "source": "differ",
+      "reason": "duplicate_local_id",
+      "local_id": "dup-id-1",
+      "colliding_keys": ["ABC-12", "ABC-13"]
+    },
+    "expect": "match",
+    "source_reference": "differ.py duplicate_local_id branch, re-shaped to the ADR-decided payload contract"
+  },
+  {
+    "id": "inbound_conflict_duplicate_local_id_2",
+    "category": "edge_duplicate",
+    "direction": "inbound",
+    "action": "conflict",
+    "target": "local-3001",
+    "payload": {"reason": "duplicate_local_id", "jira_key": "ABC-12"},
+    "provenance": {
+      "source": "differ",
+      "reason": "duplicate_local_id",
+      "local_id": "dup-id-1",
+      "colliding_keys": ["ABC-12", "ABC-13"]
+    },
+    "expect": "match",
+    "source_reference": "duplicate of inbound_conflict_duplicate_local_id_1 -- replay must be idempotent for a repeated identical scenario"
+  },
+  {
+    "id": "inbound_conflict_dangling_jira_local_id",
+    "category": "ambiguous_outcome",
+    "direction": "inbound",
+    "action": "conflict",
+    "target": "ABC-14",
+    "payload": {"reason": "dangling_jira_local_id", "jira_key": "ABC-14", "local_id": "dangling-9001"},
+    "provenance": {"source": "differ", "reason": "dangling_jira_local_id", "dangling_local_id": "dangling-9001"},
+    "expect": "match",
+    "source_reference": "differ.py:_compute_mutations_emit_jira_only dangling-jira-ref branch, re-shaped to the ADR-decided payload contract"
+  },
+  {
+    "id": "outbound_update_rejects_empty_payload",
+    "category": "edge_malformed",
+    "direction": "outbound",
+    "action": "update",
+    "target": "ABC-15",
+    "payload": {},
+    "provenance": {"source": "outbound_differ", "local_id": "local-4001", "jira_key": "ABC-15"},
+    "expect": "reject",
+    "rationale": "An (outbound, update) Mutation with every diff field excluded away is technically constructible today (payload={}); the typed contract requires at least one of changed_fields/comments/labels/links to be nonempty -- a no-op update is not a meaningful typed Mutation.",
+    "source_reference": "ADR 0107 Decision table: OutboundUpdatePayload required-nonempty rule"
+  },
+  {
+    "id": "outbound_update_rejects_unknown_field",
+    "category": "edge_malformed",
+    "direction": "outbound",
+    "action": "update",
+    "target": "ABC-16",
+    "payload": {"changed_fields": {"status": "Done"}, "unexpected_extra_key": true},
+    "provenance": {"source": "outbound_differ", "local_id": "local-4002", "jira_key": "ABC-16"},
+    "expect": "reject",
+    "rationale": "ADR 0107 defect #2: an (outbound, update) payload carrying an undeclared key is now rejected at construction instead of being silently ignored by the leaf.",
+    "source_reference": "ADR 0107 Decision table: OutboundUpdatePayload allowlist"
+  },
+  {
+    "id": "outbound_delete_rejects_stray_field",
+    "category": "edge_malformed",
+    "direction": "outbound",
+    "action": "delete",
+    "target": "ABC-17",
+    "payload": {"changed_fields": {"status": "Done"}},
+    "provenance": {"source": "outbound_differ", "local_id": "local-4003", "jira_key": "ABC-17"},
+    "expect": "reject",
+    "rationale": "ADR 0107 defect #2: an (outbound, delete) Mutation could technically carry a changed_fields key today and nothing would reject it before the leaf silently ignored it. The typed contract now rejects any nonempty payload for this action at construction.",
+    "source_reference": "ADR 0107 Context, defect #2"
+  },
+  {
+    "id": "outbound_probe_rejects_stray_field",
+    "category": "edge_malformed",
+    "direction": "outbound",
+    "action": "probe",
+    "target": "local-4004",
+    "payload": {"reason": "leaked field"},
+    "provenance": {"source": "differ", "reason": "ambiguous_local_binding", "local_id": "local-4004"},
+    "expect": "reject",
+    "rationale": "Mirrors the (outbound, delete) stray-field rejection above for (outbound, probe): the ambiguity reason belongs in Mutation.provenance, never in payload.",
+    "source_reference": "ADR 0107 Decision table: OutboundProbePayload has no fields"
+  },
+  {
+    "id": "outbound_conflict_rejects_missing_reason",
+    "category": "edge_malformed",
+    "direction": "outbound",
+    "action": "conflict",
+    "target": "local-4005",
+    "payload": {"local_id": "local-4005"},
+    "provenance": {"source": "conflict_resolver"},
+    "expect": "reject",
+    "rationale": "OutboundConflictPayload requires a non-empty 'reason' -- a conflict Mutation with no human-readable reason is not actionable.",
+    "source_reference": "ADR 0107 Decision table: OutboundConflictPayload required fields"
+  },
+  {
+    "id": "inbound_conflict_legacy_shape_has_no_payload_reason",
+    "category": "edge_malformed",
+    "direction": "inbound",
+    "action": "conflict",
+    "target": "ABC-18",
+    "payload": {},
+    "provenance": {
+      "source": "differ",
+      "reason": "duplicate_local_id",
+      "local_id": "dup-id-2",
+      "colliding_keys": ["ABC-18", "ABC-19"]
+    },
+    "expect": "reject",
+    "rationale": "Today's live differ.py inbound-conflict producers put 'reason' in Mutation.provenance and ship an empty payload -- never 'reason'/'jira_key' in the payload itself. ADR 0107's decision table requires InboundConflictPayload(reason, jira_key) in the PAYLOAD, so the typed contract rejects today's actual legacy shape. This is the approval-recorded delta named in the corpus README and the ticket comment; reconciling producers to populate payload['reason']/payload['jira_key'] is the ADR's deferred 'Cut' step.",
+    "source_reference": "differ.py:_compute_mutations_emit_local_only duplicate_local_id branch (real production shape)"
+  },
+  {
+    "id": "inbound_clean_label_rejects_empty",
+    "category": "edge_malformed",
+    "direction": "inbound",
+    "action": "clean_label",
+    "target": "ABC-20",
+    "payload": {"labels_to_remove": []},
+    "provenance": {"source": "label_audit"},
+    "expect": "reject",
+    "rationale": "InboundCleanLabelPayload requires a non-empty labels_to_remove -- a clean_label Mutation with nothing to remove is a no-op that should never have been emitted.",
+    "source_reference": "ADR 0107 Decision table: InboundCleanLabelPayload required fields"
+  },
+  {
+    "id": "inbound_repair_property_rejects_missing_local_id",
+    "category": "edge_malformed",
+    "direction": "inbound",
+    "action": "repair_property",
+    "target": "ABC-21",
+    "payload": {},
+    "provenance": {"reason": "missing_back_pointer"},
+    "expect": "reject",
+    "rationale": "InboundRepairPropertyPayload requires a non-empty local_id -- the whole point of this action is writing the local_id back onto the Jira issue.",
+    "source_reference": "invariants.py:check_dual_identity_complete repair emission (payload={'local_id': rebar_id} always populated in production)"
+  },
+  {
+    "id": "inbound_delete_is_dead_by_design",
+    "category": "dead_by_design",
+    "direction": "inbound",
+    "action": "delete",
+    "target": "ABC-22",
+    "payload": {},
+    "provenance": {"source": "synthetic-corpus-only"},
+    "expect": "reject",
+    "rationale": "(inbound, delete) is allowed by _VALID_COMBINATIONS but never registered by typed_dispatch._LEAVES and never constructed anywhere in production (ADR 0028 / bug 3b5f -- a confirmed hard-delete tombstones the pairing in outbound_differ instead). This story deliberately does not model a payload type for it; narrowing _VALID_COMBINATIONS is bug 3b5f's job.",
+    "source_reference": "ADR 0107 census: (direction, action) combinations"
+  },
+  {
+    "id": "inbound_probe_is_dead_by_design",
+    "category": "dead_by_design",
+    "direction": "inbound",
+    "action": "probe",
+    "target": "ABC-23",
+    "payload": {},
+    "provenance": {"source": "synthetic-corpus-only"},
+    "expect": "reject",
+    "rationale": "(inbound, probe) is allowed by _VALID_COMBINATIONS but never registered by typed_dispatch._LEAVES and never constructed anywhere in production (ADR 0028 / bug 3b5f). See inbound_delete_is_dead_by_design for the same reasoning.",
+    "source_reference": "ADR 0107 census: (direction, action) combinations"
+  }
+]
