@@ -1202,3 +1202,117 @@ def test_compose_sibling_services_trust_the_edge_forwarded_proto(service: str) -
         f"address can drift and silently re-open the scheme downgrade; "
         f"got {env['FORWARDED_ALLOW_IPS']!r}"
     )
+
+
+# --- /review/ prefix restoration on absolute redirects (bug 4d8c-c1f9-5ea4-454d) ---
+#
+# Sibling of a61d on the SAME /review/ block. a61d guaranteed the Location SCHEME
+# (http -> https); this fixes the residual it deliberately left: the Location PREFIX.
+#
+# `location /review/` proxies with the prefix-STRIPPING form
+# `proxy_pass http://127.0.0.1:${REVIEW_BOT_PORT}/;`, so the review-bot app is mounted at the
+# server root and never sees `/review/`. Its only absolute redirects are Starlette's
+# `redirect_slashes` 307s to its OWN routes, built from the forwarded Host — post-a61d
+# `https://$host/<route>`, with NO `/review/` prefix. REPRODUCED on the deployed edge:
+#
+#     GET https://<host>/review/health/  ->  307, location: https://<host>/health   (prefix LOST)
+#
+# `…/health` matches no review-bot location, falls through to `location /` -> Gerrit, 404s.
+# Fix: one per-location `proxy_redirect https://$host/ https://$host/review/;` restoring the
+# prefix on the app's self-referential absolute redirects. It coexists with a61d's rules:
+# nginx applies the FIRST matching proxy_redirect, and this rule's `https://$host/` left-hand
+# side overlaps none of a61d's (which match `http://…`) — so it neither shadows nor is
+# shadowed by them, and `default` stays first. Confirmed behaviourally on nginx 1.27-alpine.
+
+_REVIEW_BOT_DIR = _REPO / "src" / "rebar" / "review_bot"
+_REVIEWBOT_DOCKERFILE = _REPO / "infra" / "compose" / "Dockerfile.reviewbot"
+
+
+def test_nginx_review_location_restores_the_review_prefix_on_absolute_redirects() -> None:
+    """AC2: a `/review/<route>/` redirect Location retains the `/review/` prefix.
+
+    Oracle: the rendered `/review/` block carries
+    `proxy_redirect https://$host/ https://$host/review/;`. Post-a61d the app emits
+    `https://$host/<route>` (correct scheme, no prefix); this rule rewrites that same-host
+    Location to `https://$host/review/<route>`, so a client that follows it lands on the
+    review-bot route instead of falling through to Gerrit and 404ing.
+
+    Deleting the rule turns this RED — which is exactly the reported defect.
+    """
+    body = _location_body(_render_nginx(), "/review/")
+    assert re.search(r"proxy_redirect\s+https://\$host/\s+https://\$host/review/\s*;", body), (
+        "`location /review/` lacks `proxy_redirect https://$host/ https://$host/review/;` — "
+        f"an absolute app redirect loses the /review/ prefix and 404s on Gerrit: {body}"
+    )
+
+
+def test_nginx_review_prefix_restore_coexists_with_a61d_rules_default_first() -> None:
+    """The prefix-restore rule must COEXIST with a61d's rules, not replace or reorder them.
+
+    nginx evaluates `proxy_redirect` rules in order and applies the FIRST match, so:
+      * `default` must stay FIRST (it rewrites a loopback-upstream Location back to
+        `/review/…`; a61d relied on it — losing it regresses that behaviour), and
+      * a61d's two http->https scheme upgrades must remain present, AHEAD of the new
+        https->https prefix rule.
+    Pinning the whole ordered chain means a mutant that moves `default` after the explicit
+    rules, drops a scheme rule, or places the prefix rule before the scheme rules turns RED.
+    """
+    body = _location_body(_render_nginx(), "/review/")
+    rules = [r.strip() for r in re.findall(r"proxy_redirect\s+([^;]+);", body)]
+    assert rules and rules[0] == "default", (
+        f"`location /review/` must restate `proxy_redirect default;` FIRST; got {rules!r}"
+    )
+    scheme_rule = "http://$host/ https://$host/"
+    prefix_rule = "https://$host/ https://$host/review/"
+    assert scheme_rule in rules, f"a61d's $host http->https rule missing from /review/: {rules!r}"
+    assert prefix_rule in rules, f"prefix-restore rule missing from /review/: {rules!r}"
+    assert rules.index(prefix_rule) > rules.index(scheme_rule), (
+        f"the prefix-restore rule must FOLLOW a61d's scheme rules, not precede them: {rules!r}"
+    )
+
+
+def test_nginx_review_request_path_stays_prefix_stripping() -> None:
+    """AC3: the existing prefix-STRIPPING REQUEST path is unchanged.
+
+    The response-header `proxy_redirect` fix must not touch request handling. `/review/`
+    must keep the trailing-slash `proxy_pass http://127.0.0.1:PORT/;` form, which strips the
+    `/review/` prefix so `GET /review/health` reaches the app as `GET /health`. A "fix" that
+    instead stopped stripping (dropping the trailing slash, or mounting the app under
+    `/review`) would break every existing review-bot request — this guards against it.
+    """
+    body = _location_body(_render_nginx("8081"), "/review/")
+    assert re.search(r"proxy_pass\s+http://127\.0\.0\.1:8081/\s*;", body), (
+        "`location /review/` must keep the trailing-slash (prefix-stripping) proxy_pass so "
+        f"GET /review/health still reaches the app as /health: {body}"
+    )
+
+
+def test_review_bot_redirect_surface_is_same_app_only() -> None:
+    """Guard for the residual of the broad prefix-restore rewrite (bug 4d8c).
+
+    `proxy_redirect https://$host/ https://$host/review/;` rewrites EVERY same-host absolute
+    redirect the review-bot emits. That is safe ONLY because the app's sole absolute redirects
+    are Starlette trailing-slash 307s to its OWN routes: it is a plain
+    `uvicorn rebar.review_bot.app:app` FastAPI service with NO `root_path`/`--root-path`, NO
+    `redirect_slashes` override, and NO `RedirectResponse`/cross-host redirect anywhere. If the
+    app ever grew an absolute redirect to a genuine non-`/review/` target on the same host, the
+    broad rewrite would wrongly prefix it — this test turns RED the moment that precondition
+    changes, so the rewrite and the app cannot silently drift apart.
+    """
+    sources = list(_REVIEW_BOT_DIR.glob("*.py"))
+    assert sources, "no review_bot sources found — the guard would be vacuous"
+    blob = "\n".join(p.read_text() for p in sources)
+    assert "RedirectResponse" not in blob, (
+        "review_bot emits a RedirectResponse: re-verify the /review/ prefix-restore rewrite "
+        "cannot corrupt an off-/review/ or cross-host Location (bug 4d8c residual)"
+    )
+    for needle in ("root_path", "redirect_slashes"):
+        assert needle not in blob, (
+            f"review_bot sets `{needle}`: the /review/ prefix-restore rewrite assumes the app "
+            f"is mounted at root with default slash redirects — re-verify (bug 4d8c residual)"
+        )
+    dockerfile = _REVIEWBOT_DOCKERFILE.read_text()
+    assert "--root-path" not in dockerfile, (
+        "Dockerfile.reviewbot mounts the app under --root-path: the /review/ prefix-restore "
+        "rewrite assumes root mounting — re-verify (bug 4d8c residual)"
+    )
