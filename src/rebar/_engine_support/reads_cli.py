@@ -8,7 +8,6 @@ delegates here for backward compatibility.
 
 from __future__ import annotations
 
-import os
 import sys
 from typing import Any
 
@@ -27,6 +26,7 @@ from rebar._engine_support.reads import (
 )
 from rebar._engine_support.ticket_query import TicketQuery
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.store_usability import store_is_usable
 from rebar.reducer.llm_format import to_llm
 from rebar.reducer.search import search_result_to_llm
 
@@ -337,7 +337,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
             )
             return 2
 
-    if not os.path.isdir(tracker):
+    if not store_is_usable(tracker):
         print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
         return 1
 
@@ -381,7 +381,7 @@ def _cmd_session_logs(argv: list[str], tracker: str) -> int:
             return 2
         limit = int(ns.limit)
 
-    if not os.path.isdir(tracker):
+    if not store_is_usable(tracker):
         print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
         return 1
 
