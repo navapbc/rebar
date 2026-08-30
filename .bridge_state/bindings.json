@@ -18663,10 +18663,24 @@
     },
     "53ab-bdf6-de1c-4bb1": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context / Problem\n\nPass 2 (`src/rebar/llm/review_kernel/verify.py`, questions in `verify_models.py`, prompts `reviewers/plan_review_verifier*.md`, `temperature: 0`, standard class = Sonnet on Bedrock) is the cheapest LLM pass (~$0.5/review uncached, ~1 call with ~12 requests) and the one whose questions most directly set validity/impact. A question or prompt change can be measured by re-verifying the *stored* Pass-1 findings and comparing to the stored answers \u2014 no Opus needed. `verify_findings(findings, context, run_chunk=\u2026)` already exposes the pure seam; `plan-review-verifier.eval.yaml` has no `run_case` arm yet.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/tier1.py`:\n\n- Sample selection: deterministic stratified sample from the corpus (strata: verdict, leaf/container, finding count bucket, project overlay/store, `impact_model_version`), size N given on the command line, seed fixed; only `verified` rows (reconstructed plan text) are eligible; only rows whose `provider_provenance.ran_model` is the current standard-class model.\n- For each sampled review: build the verifier context from reconstructed plan text + stored findings (`finding, criteria, evidence, impact, location`), run the candidate verifier (prompt/questions from a candidate path; default = current) through the production `PydanticAIRunner` pinned to the standard class on Bedrock, collect `{binary, severity_attributes}`.\n- Compare to stored answers: per-question agreement (Cohen \u03ba and raw agreement per graded binary and veto question; per-attribute agreement for severity attributes), validity/impact/priority distribution shift, then hand both answer sets to Tier 0 for the downstream verdict/label metrics.\n- A **reproduction run** (candidate = current) is the first commissioning run: its agreement is the verifier noise floor at temperature 0 and is stored with the labels.\n- All calls go through the budget ledger pre-flight (estimate = stored `metrics` tokens \u00d7 current price \u00d7 N) and record the model id per result.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/tier1.py`, `sampling.py` (new)\n- `src/rebar/llm/evals/eval_solver.py` (add the verifier `run_case` arm)\n- `docs/experiments/plan-review-gate/replay/tier1-*.md` (generated)\n- `tests/unit/evals/test_plan_replay_tier1.py` (new)\n\n## Testing\n\nUnit: sampling is deterministic for a seed and respects strata; a `FakeRunner` returning canned verifications yields the expected per-question agreement table; a run whose pre-flight estimate exceeds the ledger allocation is refused before any call; a result with a non-standard-class model id is rejected at diff time. Live (commissioning, \u2264$40): the reproduction run on N=60.\n\n## Acceptance Criteria\n\n- [ ] `python -m rebar.llm.evals.plan_replay tier1 --candidate <path> --n N` produces per-question agreement, distribution shift and downstream Tier-0 metrics for a stratified sample; checked by one generated report.\n- [ ] The reproduction run (current questions) is recorded with its per-question agreement as the Pass-2 noise floor; checked by the report and the labels file.\n- [ ] Every call in the run is priced in the ledger and uses the Bedrock standard-class model id; checked by the ledger rows for the run.\n- [ ] Commissioning spend for this ticket \u2264 $40; checked by the ledger.\n- [ ] Unit tests pass in `make test`.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\nPass 2 (`src/rebar/llm/review_kernel/verify.py`, questions in `verify_models.py`, prompts `reviewers/plan_review_verifier*.md`, `temperature: 0`, standard class = Sonnet on Bedrock) is the cheapest LLM pass. A question/prompt change can be measured by re-verifying the *stored* Pass-1 findings and comparing to the stored answers.\n\n**Production input, byte-identical \u2014 exact seam call.** `verify.finding_listing(batch)` (verify.py:101-108) renders ONLY `claim`/`criteria`/`evidence`/`impact` per finding \u2014 NOT `location`. The real signature (verify.py:345) is `verify_findings(findings, *, context, run_chunk, window_tokens, est_tokens, headroom=DEFAULT_VERIFY_WINDOW_HEADROOM)`. Production's plan-review wrapper (`sizing.verify_request_chunks`, sizing.py:187-206) supplies `window_tokens=sizing.largest_window_tokens(model)` and `est_tokens=det_floor.est_tokens` (`from rebar.llm.plan_review import det_floor, sizing`). The replay calls `verify_findings(stored_findings, context=plan_context, run_chunk=<candidate runner>, window_tokens=sizing.largest_window_tokens(standard_class_model), est_tokens=det_floor.est_tokens)`.\n\n**Missing-answer handling.** `verify_findings` returns `{index: {severity_attributes, binary}}` plus `\"omitted\": [index, ...]`; a chunk whose `run_chunk` raises contributes NO verifications (absent from the result dict). Excluded from \u03ba/agreement with a reported \"no-answer\" count per question.\n\n**Ledger \u2014 flat per-sample, not token-derived.** `ledger.estimate(tier, sample_n)` returns `PER_SAMPLE_ESTIMATE_USD[tier] * sample_n` \u2014 a FIXED historical constant. Pre-flight is `ledger.reserve(ledger.estimate(\"tier1\", n))`, exactly as tier0/labels/parity already do.\n\n**Tier1's candidate is a NEW concept, not Pass-3's `Candidate`/`CANDIDATES`.** Tier1 introduces its own `VerifierCandidate` in a NEW `src/rebar/llm/evals/plan_replay/verifier_candidates.py`: `@dataclass(frozen=True) class VerifierCandidate: prompt_path: str | None = None` (`None` = production's shipped prompt/questions) plus `load_verifier_candidate(path_or_none) -> VerifierCandidate`.\n\n**Distribution shift, defined \u2014 categorical vs continuous axes.** `decide.validity(binary)` (decide.py:67-74) returns a CONTINUOUS `round(mean(graded scores), 4) \u2208 [0,1]`; `priority = round(validity * impact, 4)` (decide.py:681) is likewise a continuous derived scalar \u2014 NEITHER has a categorical vocabulary the verifier emits. Only the severity-attribute/binary answers (impact's inputs) are categorical (`verify_models.py`'s closed Literal sets). Distribution shift is therefore computed uniformly over FIXED bins for every axis: impact's underlying categorical severity-attribute/binary answers use their own closed vocabulary directly as \"bins\"; validity and priority are binned into 10 FIXED, equal-width `[0.0,0.1), [0.1,0.2), ..., [0.9,1.0]` buckets. For every axis: per-bucket COUNT DELTA (stored vs candidate) plus TOTAL VARIATION DISTANCE between the two bucketed distributions, computed per stratum and overall.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/tier1.py`, `sampling.py`, `verifier_candidates.py`:\n\n- Sample selection: deterministic stratified sample (strata: verdict, leaf/container, finding-count bucket, project overlay/store, `impact_model_version`), size N, seed fixed; only `verified` rows; only rows whose `provider_provenance.ran_model` is the current standard-class model.\n- Pre-flight: `ledger.reserve(ledger.estimate(\"tier1\", n))` before any call.\n- For each sampled review: `verify_findings(stored_findings, context=plan_context, run_chunk=<candidate's PydanticAIRunner pinned to standard-class Bedrock>, window_tokens=sizing.largest_window_tokens(model), est_tokens=det_floor.est_tokens)`. Collect the result dict + `omitted`.\n- Compare to stored answers per question: \u03ba + raw agreement, EXCLUDING (with a reported count) any finding absent from the candidate result or in `omitted`; per-attribute agreement for severity attributes; distribution shift (per-axis bucketing above) for validity/impact/priority; hand both answer sets to Tier-0 for downstream verdict/label metrics.\n- Reproduction run (`VerifierCandidate(prompt_path=None)`) is the commissioning run: its agreement is the Pass-2 noise floor at temperature 0, stored with the labels.\n- Record the model id per result; reject a result whose model id isn't the standard class at diff time.\n\n`src/rebar/llm/evals/plan_replay/__main__.py`: add a `tier1` subparser (`--candidate <path-or-omitted-for-current>`, `--n`, `--seed`, plus the shared `--store`/`--cache-dir`/`--out-dir`) and an `args.command == \"tier1\"` dispatch branch, mirroring `tier0`'s structure.\n\n`src/rebar/llm/evals/eval_solver.py`: add the verifier `run_case` arm.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/tier1.py`, `sampling.py`, `verifier_candidates.py` (new)\n- `src/rebar/llm/evals/plan_replay/__main__.py` (edited \u2014 `tier1` subparser + dispatch)\n- `src/rebar/llm/evals/eval_solver.py` (verifier `run_case` arm)\n- `docs/experiments/plan-review-gate/replay/tier1-*.md` (generated)\n- `tests/unit/evals/test_plan_replay_tier1.py` (new)\n\n## Testing\n\nUnit: sampling is deterministic for a seed and respects strata; a `FakeRunner` returning canned verifications yields the expected per-question agreement table with the correct \u03ba/raw-agreement numbers on a known fixture; a finding present in stored but absent/omitted from candidate results is excluded from agreement and counted; distribution shift for validity/priority correctly buckets a known set of continuous values into the 10 fixed bins and computes count-delta/TVD; a run whose `ledger.estimate(\"tier1\", n)` exceeds the ledger allocation is refused before any call; a result with a non-standard-class model id is rejected at diff time; `VerifierCandidate(prompt_path=None)` reproduces the production `finding_listing`/`verify_request_chunks` input byte-for-byte (regression test comparing against `sizing.verify_request_chunks`'s own chunking on the same fixture); `__main__.py`'s `tier1` subcommand dispatches correctly. Live (commissioning, \u2264$40): the reproduction run on N=60.\n\n## Acceptance Criteria\n\n- [ ] `python -m rebar.llm.evals.plan_replay tier1 --candidate <path> --n N` produces per-question agreement (with no-answer counts), distribution shift, and downstream Tier-0 metrics for a stratified sample; checked by one generated report.\n- [ ] The reproduction run (`VerifierCandidate(prompt_path=None)`) is recorded with its per-question agreement as the Pass-2 noise floor; checked by the report and the labels file.\n- [ ] Every call in the run is priced via `ledger.estimate(\"tier1\", n)`/`ledger.reserve` and uses the Bedrock standard-class model id; checked by the ledger rows for the run.\n- [ ] Commissioning spend for this ticket \u2264 $40; checked by the ledger.\n- [ ] Unit tests pass in `make test`.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Tier-1 harness: replay Pass-2 impact/validity questions on stored Pass-1 findings (Sonnet via Bedrock, budgeted)"
       },
       "created_at": "2026-08-29T19:29:40Z",
@@ -25354,7 +25368,7 @@
         "assignee": null,
         "description": "line one\n- `echo hello` should stay literal\nline three",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "closed",
         "summary": "backtick test"
       },
       "created_at": "2026-08-30T01:11:11Z",
@@ -29379,7 +29393,7 @@
         },
         "description": "Scratch ticket created solely to exercise the rebar MCP tool surface end-to-end. Safe to archive/reject.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "closed",
         "summary": "MCP tool exercise scratch task (safe to reject) - session test"
       },
       "created_at": "2026-08-28T12:17:36Z",
@@ -34691,7 +34705,7 @@
         "assignee": null,
         "description": "line one\n- `echo hello` should stay literal\nline three",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "closed",
         "summary": "backtick test2"
       },
       "created_at": "2026-08-30T01:11:22Z",
@@ -40467,7 +40481,7 @@
         "assignee": null,
         "description": "Scratch idea for MCP tool testing.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "closed",
         "summary": "MCP tool exercise scratch idea (safe to reject)"
       },
       "created_at": "2026-08-28T12:17:39Z",
@@ -56833,7 +56847,7 @@
         "assignee": null,
         "description": "## Acceptance Criteria\\n- [ ] N/A - scratch ticket for link/dep testing",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "closed",
         "summary": "MCP tool exercise scratch ticket #2 (link target, safe to archive)"
       },
       "created_at": "2026-08-28T12:17:49Z",
