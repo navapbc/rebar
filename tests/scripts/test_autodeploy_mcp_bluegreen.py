@@ -28,9 +28,11 @@ import time
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 AUTODEPLOY = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "autodeploy.sh"
 COMPOSE_FILE = Path(__file__).resolve().parents[2] / "infra" / "compose" / "docker-compose.yml"
+FETCH_SECRETS = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "fetch-secrets.sh"
 _DEPLOYED = "d" * 40
 _TARGET = "e" * 40
 
@@ -946,6 +948,141 @@ def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> N
     )
     assert "--stop-timeout 1260" in run_line, (
         f"docker run must set the 1260s stop-timeout so Docker never SIGKILLs mid-drain\n{ctx}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# REBAR_IDENTITY_SIGNING_KEY single-definition guard                          #
+# (bug calcite-farsighted-goose / e5c3-eb11-7521-4df7).                       #
+#                                                                             #
+# The MCP container's environment must define the signing-key selector        #
+# EXACTLY ONCE, from a single owning layer. `docker run` APPENDS both         #
+# `--env-file` entries AND `-e` entries to the container's Config.Env (unlike #
+# `docker compose`, which MERGES a service's `environment:` OVER `env_file:`  #
+# into a single value), so a key present in BOTH the SSM-rendered .env and an #
+# `-e` flag is defined TWICE and correctness rests on docker's unasserted     #
+# last-wins ordering — a latent defect in a variable whose whole job is to    #
+# select which private key this server signs under. Assert on the COMPOSED    #
+# container env (rendered .env ∪ mcp_run_new `-e` flags), never the source    #
+# templates alone: the duplication is only visible after composition.         #
+# --------------------------------------------------------------------------- #
+
+
+def _write_exec(path: Path, body: str) -> None:
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.chmod(0o755)
+
+
+def _render_mcp_env_file(tmp_path: Path) -> list[tuple[str, str]]:
+    """Run the REAL fetch-secrets.sh under stubbed aws/curl (no live AWS) to render the on-box
+    .env exactly as a deploy would, then parse it into ordered (key, value) pairs — the
+    `--env-file` half of the MCP container's composed Config.Env."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    compose = tmp_path / "compose"
+    compose.mkdir(parents=True, exist_ok=True)
+    env_file = compose / ".env"
+    # Satisfy fetch-secrets' IMDSv2 token + region reads.
+    _write_exec(
+        bin_dir / "curl",
+        """
+        case "$*" in
+          *api/token*)        echo "imds-token" ;;
+          *placement/region*) echo "us-east-1" ;;
+          *) exit 0 ;;
+        esac
+        """,
+    )
+    # Every SSM leaf resolves to a non-empty stub value (no secret material).
+    _write_exec(bin_dir / "aws", "printf 'stub-value'\n")
+    env = subprocess_env(
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+        ENV_FILE=str(env_file),
+    )
+    res = subprocess.run(
+        ["bash", str(FETCH_SECRETS)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert res.returncode == 0, f"fetch-secrets.sh failed: rc={res.returncode}\n{res.stderr}"
+    pairs: list[tuple[str, str]] = []
+    for ln in env_file.read_text().splitlines():
+        m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", ln)
+        if m:
+            pairs.append((m.group(1), m.group(2)))
+    return pairs
+
+
+def _mcp_run_e_flags() -> list[tuple[str, str]]:
+    """Parse the `-e KEY=VALUE` flags from `mcp_run_new()` in autodeploy.sh — the `-e` half of
+    the MCP container's composed Config.Env — resolving compose-style `${VAR:-default}` to its
+    default (a bare `docker run` does not interpolate)."""
+    text = AUTODEPLOY.read_text().splitlines()
+    start = next(i for i, ln in enumerate(text) if re.match(r"^mcp_run_new\(\)", ln))
+    end = next(j for j in range(start + 1, len(text)) if re.match(r"^\}", text[j]))
+    body = "\n".join(text[start:end])
+    pairs: list[tuple[str, str]] = []
+    for m in re.finditer(r'-e\s+(?:"([^"]*)"|(\S+))', body):
+        tok = m.group(1) if m.group(1) is not None else m.group(2)
+        if "=" not in tok:
+            continue
+        key, raw = tok.split("=", 1)
+        if not re.match(r"^[A-Z0-9_]+$", key):
+            continue
+        dm = re.match(r"^\$\{[^:}]+:-(.*)\}$", raw)
+        pairs.append((key, dm.group(1) if dm else raw))
+    return pairs
+
+
+def test_mcp_container_defines_signing_key_exactly_once(tmp_path: Path) -> None:
+    """The MCP container's COMPOSED env must define REBAR_IDENTITY_SIGNING_KEY exactly once,
+    from a single owning layer (the `-e` in mcp_run_new). A second definition from the shared
+    SSM-rendered .env makes the effective value rest on docker's last-wins ordering."""
+    KEY = "REBAR_IDENTITY_SIGNING_KEY"
+    OPCERT = "/run/secrets/opcert-ed25519-key"
+
+    env_file_pairs = _render_mcp_env_file(tmp_path)
+    e_flag_pairs = _mcp_run_e_flags()
+
+    # Anti-vacuity: each probe must have recovered REAL content from the RIGHT source, else the
+    # uniqueness assertion below could pass trivially on an empty input.
+    env_keys = {k for k, _ in env_file_pairs}
+    e_keys = {k for k, _ in e_flag_pairs}
+    assert "ANTHROPIC_API_KEY" in env_keys, (
+        f"the rendered-.env probe recovered no known key (got {sorted(env_keys)}) — the "
+        f"uniqueness check would be vacuous"
+    )
+    assert "REBAR_OPCERT_ENV_ID" in e_keys, (
+        f"the mcp_run_new `-e` probe recovered no known flag (got {sorted(e_keys)}) — the "
+        f"uniqueness check would be vacuous or inspecting the wrong container"
+    )
+
+    # docker builds Config.Env by APPENDING the --env-file entries, then the -e entries.
+    composed = env_file_pairs + e_flag_pairs
+    definitions = [(k, v) for k, v in composed if k == KEY]
+
+    # Anti-vacuity anchor (ticket Testing note): prove the probe SEES the variable on the
+    # right container first, so `== 1` can never pass on zero matches (a rename / name typo).
+    assert definitions, (
+        f"{KEY} is not defined in the MCP container's composed env at all — the probe is "
+        f"inspecting the wrong container or the variable was renamed"
+    )
+
+    # THE GUARD: exactly one owning layer.
+    assert len(definitions) == 1, (
+        f"{KEY} must be defined EXACTLY ONCE for the MCP container, but is defined "
+        f"{len(definitions)} times: {[f'{k}={v}' for k, v in definitions]}. `docker run` keeps "
+        f"BOTH a `--env-file` entry and an `-e` flag in Config.Env, so correctness would rest "
+        f"on docker's last-wins ordering. Own it in a single layer (the `-e` in mcp_run_new); "
+        f"fetch-secrets.sh must not also emit {KEY} into the shared .env."
+    )
+
+    # AC #2: the single definition is the op-cert key — the effective value is UNCHANGED.
+    assert definitions[0][1] == OPCERT, (
+        f"the MCP container's {KEY} must be {OPCERT!r}, got {definitions[0][1]!r}"
     )
 
 
