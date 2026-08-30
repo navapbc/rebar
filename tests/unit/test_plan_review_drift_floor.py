@@ -14,7 +14,7 @@ import types
 import pytest
 
 from rebar import config as core_config
-from rebar.llm import plan_review
+from rebar.llm import gate_source, plan_review
 from rebar.llm.plan_review import attest, drift_floor, sidecar
 from rebar.llm.plan_review.attest import compute_validity
 from rebar.llm.review_kernel import decide
@@ -189,6 +189,11 @@ def _patch_candidate(
     )
     monkeypatch.setattr(signing, "verified_at_sha_from_manifest", lambda m: signed_sha)
     monkeypatch.setattr(signing, "head_sha", lambda repo_root: current_sha)
+    # The unscoped current-head anchor now flows through the shared gate_source seam (bug 1137);
+    # patch it so these eligibility tests exercise the code_drifted LOGIC for a given head.
+    monkeypatch.setattr(
+        gate_source, "current_head_sha", lambda manifest, repo_root=None: current_sha
+    )
     monkeypatch.setattr(attest, "manifest_regver", lambda m: regver)
     monkeypatch.setattr(attest, "registry_version", lambda repo_root: cur_regver)
     monkeypatch.setattr(
@@ -246,6 +251,41 @@ def test_candidate_not_eligible_without_signature(monkeypatch) -> None:
     _patch_candidate(monkeypatch, verified=False)
     cand = drift_floor.drift_floor_candidate("t", window_minutes=60)
     assert cand["eligible"] is False and cand["drifted_files"] is None
+
+
+def test_candidate_reads_shared_gate_ref_anchor_not_working_tree(monkeypatch) -> None:
+    """Bug 1137 (drift_floor consumer): ``code_drifted`` must be sourced from the SHARED
+    ``gate_source.current_head_sha`` gate-ref anchor, NOT ``git rev-parse HEAD`` of the evaluator
+    working tree. With the gate ref UNMOVED (shared anchor == signed) but a FOREIGN working-tree
+    HEAD, the code has NOT drifted → not eligible → full review. RED before the fix: drift_floor
+    read the foreign working-tree head and spuriously armed the finding-drop (suppressing a
+    finding it must not), violating its own 'never suppress incorrectly' contract."""
+    from rebar import signing
+
+    _patch_candidate(monkeypatch, signed_sha="shaGATE", current_sha="shaGATE")
+    # The evaluator's working tree sits on a FOREIGN commit; the shared anchor (gate ref) is the
+    # unmoved signed sha. Only code that reads the working tree instead of the anchor drifts.
+    monkeypatch.setattr(signing, "head_sha", lambda repo_root: "shaFOREIGN")
+    cand = drift_floor.drift_floor_candidate("t", window_minutes=60)
+    assert cand["reasons"]["code_drifted"] is False
+    assert cand["eligible"] is False
+
+
+def test_candidate_gate_ref_unresolvable_denies_convergence(monkeypatch) -> None:
+    """Bug 1137 fail-SAFE: when the attested gate ref cannot be resolved locally the shared anchor
+    raises, and drift_floor treats the head as unknown → not drifted → not eligible → full review.
+    A broken freshness signal DENIES convergence, never suppresses a finding."""
+    from rebar._snapshot.repo_snapshot import SnapshotError
+
+    _patch_candidate(monkeypatch, signed_sha="shaGATE", current_sha="shaGATE")
+
+    def _raise(manifest, repo_root=None):
+        raise SnapshotError("gate ref unresolvable")
+
+    monkeypatch.setattr(gate_source, "current_head_sha", _raise)
+    cand = drift_floor.drift_floor_candidate("t", window_minutes=60)
+    assert cand["reasons"]["code_drifted"] is False
+    assert cand["eligible"] is False
 
 
 # ── entry gate ────────────────────────────────────────────────────────────────────────────────

@@ -479,6 +479,35 @@ def _attested_unscoped_record(store: Path, ticket_id: str, gate_ref_sha: str) ->
     )
 
 
+def test_current_head_sha_attested_resolves_gate_ref_not_working_tree(
+    store: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bug 1137 (SHARED anchor): ``gate_source.current_head_sha`` for an ATTESTED manifest returns
+    the current gate-ref sha from the LOCAL object DB, NOT the evaluator's (possibly foreign)
+    working-tree HEAD. This single anchor is read by BOTH ``compute_validity``'s unscoped
+    freshness check AND ``drift_floor``'s ``code_drifted`` axis, so neither consumer can read a
+    stranger sha. A LEGACY manifest (no ``verified_at_sha``) keeps the working-tree read."""
+    from rebar._signing_manifest import verified_at_sha_step
+    from rebar._snapshot.repo_snapshot import resolve_ref
+    from rebar.llm import gate_source
+
+    monkeypatch.setenv("REBAR_GATE_REF", "origin/main")
+    gate_ref_sha = _push_main_to_origin(store)
+    foreign_head = _diverge_working_tree(store, "shared-anchor")
+    assert resolve_ref("origin/main", str(store), fetch=False) == gate_ref_sha
+    assert foreign_head != gate_ref_sha
+
+    attested_manifest = ["plan-review: PASS", verified_at_sha_step(gate_ref_sha)]
+    got = gate_source.current_head_sha(attested_manifest, repo_root=str(store))
+    assert got == gate_ref_sha, got
+    assert got != foreign_head
+
+    # Legacy (no verified_at_sha) still reads the working-tree HEAD unchanged.
+    legacy_head = gate_source.current_head_sha(["plan-review: PASS"], repo_root=str(store))
+    assert legacy_head == foreign_head, legacy_head
+
+
 def test_attested_unscoped_head_freshness_reads_gate_ref_not_working_tree(
     store: Path,
     monkeypatch: pytest.MonkeyPatch,
