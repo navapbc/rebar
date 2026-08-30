@@ -185,6 +185,49 @@ def _run_novelty_case(case: dict, *, runner: Runner, repo_root: str | None) -> d
     return {"novelty": novelty_map.get(0, 0.0)}
 
 
+def _run_verifier_case(case: dict, *, runner: Runner, repo_root: str | None) -> dict:
+    """Run the plan-review Pass-2 VERIFIER over one case's ``findings`` and return the
+    kernel's native ``{"verifications": {index: {severity_attributes, binary}},
+    "omitted": [...], "contract_violations": {...}, "outcome_counts": {...}}`` shape
+    (:func:`rebar.llm.review_kernel.verify.verify_findings`). Inline text -- no
+    ``case_store`` scaffolding. Mirrors the ``RunRequest`` wiring in
+    ``tests/external/test_review_kernel_rules_live.py``'s ``_run_chunk_factory``, and
+    the ``window_tokens``/``est_tokens`` production's plan-review wrapper supplies
+    (``sizing.largest_window_tokens``/``det_floor.est_tokens``)."""
+    from rebar.llm.config import resolve_gate_config
+    from rebar.llm.plan_review import det_floor, passes, sizing
+    from rebar.llm.prompting import prompts
+    from rebar.llm.review_kernel.verify import verify_findings
+    from rebar.llm.runner import RunRequest
+
+    cfg = resolve_gate_config(repo_root)
+    plan_context = case.get("plan") or case.get("input") or ""
+    findings = case.get("findings") or []
+    prompt = prompts.get_prompt(passes.PASS_VERIFIER, repo_root=repo_root)
+
+    def run_chunk(instructions: str, context: str) -> list[dict]:
+        system, _meta = prompts.resolve_prompt(
+            prompt, {"shared_prefix": prompts.shared_plan_prefix(context)}, repo_root=repo_root
+        )
+        req = RunRequest.for_structured(
+            system_prompt=prompts.strip_volatile_marker(system),
+            instructions=instructions,
+            config=cfg,
+            reviewers=["plan-reviewer"],
+            output_schema="plan_review_verification",
+            bounds=RunRequest.INHERIT_POLICY,
+        )
+        return runner.run(req).get("verifications", []) or []
+
+    return verify_findings(
+        findings,
+        context=plan_context,
+        run_chunk=run_chunk,
+        window_tokens=sizing.largest_window_tokens(cfg.model),
+        est_tokens=det_floor.est_tokens,
+    )
+
+
 def _code_review_prompt_id(prompt_id: str, *, repo_root: str | None = None) -> str | None:
     """Resolve ``prompt_id`` to a code-review PROMPT id this arm can eval as a single-prompt
     run over a case's diff, else ``None``. The evaluable set is the base reviewer
@@ -306,6 +349,13 @@ def run_case(
 
     if prompt_id == _passes.PASS_NOVELTY:
         return _run_novelty_case(case, runner=runner, repo_root=repo_root)
+
+    # Verifier arm (ticket presolar-finable-binturong): the Pass-2 verifier scores a
+    # case's ``findings`` against inline plan/diff ``context`` -- no disposable store.
+    # Checked before the criterion arm for the same reason the novelty arm is: an EXACT
+    # id match, never mistaken for a criterion.
+    if prompt_id == _passes.PASS_VERIFIER:
+        return _run_verifier_case(case, runner=runner, repo_root=repo_root)
 
     # Criterion arm (story 55b8): a plan-review criterion is a finder over inline text — no
     # disposable store. Checked before case_store so a criterion id never falls through.
