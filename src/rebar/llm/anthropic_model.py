@@ -80,6 +80,62 @@ def _local_proxy_bypass_base_url() -> str | None:
 _RETRY_STATUSES = frozenset({429, 529, 500, 502, 503, 504})
 
 
+def _build_retry_wait(*, max_wait: float, rng=None):
+    """Build the tenacity wait strategy for the Anthropic transport (ticket
+    ``254e-1770-854b-47a2``). Hardens pydantic-ai's ``wait_retry_after`` against two
+    thundering-herd vectors that surface when many agent processes share ONE throttled
+    account (incident 1c0d):
+
+    1. **Jittered fallback.** With no ``Retry-After``, pydantic-ai's default fallback is a
+       NON-jittered ``wait_exponential``, so co-throttled clients back off by the identical
+       amount and retry in lockstep. Replace it with Equal Jitter ``rng.uniform(cap / 2, cap)``
+       over an exponential cap (Marc Brooker's AWS taxonomy; the gobifrost/bifrost pattern) so
+       concurrent clients scatter.
+    2. **Zero/expired ``Retry-After`` guard.** A ``Retry-After: 0`` (or negative) integer is
+       honored verbatim by ``wait_retry_after`` as an IMMEDIATE replay — re-forming the herd.
+       Treat a non-positive integer ``Retry-After`` as ABSENT and fall through to the jittered
+       fallback. (An already-expired HTTP-date already falls through inside ``wait_retry_after``.)
+
+    A positive in-window ``Retry-After`` is still honored (capped at ``max_wait``) by delegating
+    to ``wait_retry_after``. ``rng`` defaults to the process-global ``random`` module, which
+    Python seeds from OS entropy once per interpreter start — so the N SEPARATE agent processes
+    that form the herd draw from independent streams; it is an injection seam for deterministic
+    tests only, never threaded from production config.
+    """
+    import random as _random
+
+    import httpx
+    from pydantic_ai.retries import wait_retry_after
+
+    _rng = rng if rng is not None else _random
+
+    def _jittered_fallback(state) -> float:
+        cap = min(2.0 ** (state.attempt_number - 1), max_wait)
+        if cap <= 0:
+            return 0.0
+        return _rng.uniform(cap / 2.0, cap)
+
+    delegate = wait_retry_after(fallback_strategy=_jittered_fallback, max_wait=max_wait)
+
+    def _wait(state) -> float:
+        exc = state.outcome.exception() if state.outcome else None
+        if isinstance(exc, httpx.HTTPStatusError):
+            retry_after = exc.response.headers.get("retry-after")
+            if retry_after:
+                try:
+                    # A zero/negative integer Retry-After would collapse the backoff to an
+                    # immediate synchronized replay; treat it as absent -> jittered fallback.
+                    if int(retry_after) <= 0:
+                        return _jittered_fallback(state)
+                except ValueError:
+                    # Non-integer -> an HTTP-date; wait_retry_after already falls an expired
+                    # date through to the (now jittered) fallback, so just delegate.
+                    pass
+        return delegate(state)
+
+    return _wait
+
+
 def _build_retrying_anthropic_provider(
     *, base_url: str | None, cfg: LLMConfig, http_timeout=None, _wrapped_transport=None, auth=None
 ):
@@ -97,8 +153,10 @@ def _build_retrying_anthropic_provider(
     the loopback-proxy-bypass direct URL. ``http_timeout`` is story hoopoe's per-attempt
     ``httpx.Timeout`` when present, else a bounded default from ``cfg.timeout_s`` (never
     unbounded). A transient ``{429,529,5xx}``/``httpx.TimeoutException``/``httpx.NetworkError``
-    blip is re-sent BELOW the agent loop, so completed tool calls are never re-executed;
-    ``Retry-After`` is honored (capped at ``llm_retry_max_wait_s``), else exponential backoff.
+    blip is re-sent BELOW the agent loop, so completed tool calls are never re-executed; a
+    positive ``Retry-After`` is honored (capped at ``llm_retry_max_wait_s``), else a jittered
+    exponential backoff (``_build_retry_wait``; a zero/negative/expired ``Retry-After`` is
+    guarded to that jittered fallback rather than an immediate replay — ticket 254e).
 
     ``auth`` is the optional RP-04 S4 :class:`~rebar.llm.auth.AnthropicAuth` carrier. When
     SUPPLIED it is fail-closed-validated (exactly one of ``api_key``/``auth_token`` — a
@@ -109,7 +167,7 @@ def _build_retrying_anthropic_provider(
     import httpx
     from anthropic import AsyncAnthropic
     from pydantic_ai.providers.anthropic import AnthropicProvider
-    from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
+    from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig
     from tenacity import retry_if_exception_type, stop_after_attempt
 
     # Fail-closed BEFORE building the client so an invalid carrier never falls back to ambient.
@@ -139,7 +197,7 @@ def _build_retrying_anthropic_provider(
                 | retry_if_exception_type(httpx.TimeoutException)
                 | retry_if_exception_type(httpx.NetworkError)
             ),
-            wait=wait_retry_after(fallback_strategy=None, max_wait=float(cfg.llm_retry_max_wait_s)),
+            wait=_build_retry_wait(max_wait=float(cfg.llm_retry_max_wait_s)),
             stop=stop_after_attempt(attempts),
             reraise=True,
             before_sleep=_before_sleep,
