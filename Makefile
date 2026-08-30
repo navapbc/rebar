@@ -301,6 +301,15 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# ShellCheck ships via `shellcheck-py`, pinned exactly in pyproject's [dev] extra, so it
 	@# is a REQUIRED tool here and the gate FAILS (never skips) when it is absent.
 	python scripts/check_shellcheck.py
+	@# Deploy-manifest completeness gate (ticket 0a6a-04d3-8fd9-4cd5). autodeploy.sh's
+	@# hand-curated *_PATHS lists have silently drifted from reality four times (a
+	@# deploy-relevant infra file added but never listed, so a later change reaches the box
+	@# with no signal). This DERIVES the expected path set from Dockerfile/compose COPY/
+	@# install/ENTRYPOINT refs + materialize-*.sh / *-entrypoint.sh / compose-up.sh globs and
+	@# fails on any derived path in NO manifest — the same derive-and-diff shape as
+	@# check_server_manifest.py. Stdlib only, no CI provider required (portable), so `make
+	@# lint` and the pre-commit hook both enforce it.
+	python scripts/check_deploy_manifest.py
 	@# templatefile() escape gate (bug dd30-f10d-69f3-4c36). Sibling to the ShellCheck gate
 	@# above, and deliberately NOT covered by it: `templatefile()` interpolates the WHOLE
 	@# template — comments included, because `#` means nothing to it — so an unescaped
