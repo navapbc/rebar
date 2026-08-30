@@ -467,6 +467,9 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
             file=sys.stderr,
         )
         return 2
+    if not store_is_usable(tracker):
+        print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
+        return 1
     states = ready_states(tracker, epic=epic, sort=sort)
     if fmt == "json":
         print(js_safe_dumps(states, ensure_ascii=False))
@@ -538,6 +541,9 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
             file=sys.stderr,
         )
         return 2
+    if not store_is_usable(tracker):
+        print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
+        return 1
     results = search_state(
         tracker,
         query,
