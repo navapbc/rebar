@@ -85,7 +85,12 @@ def _run(model) -> object:
 @pytest.mark.parametrize("base_url", [None, "https://api.anthropic.com"])
 def test_429_with_retry_after_retries_below_the_sdk(base_url):
     """A 429 with Retry-After:0 then a 200 is retried at the transport, within one agent
-    turn, on BOTH the normal (base_url=None) and loopback-bypass paths."""
+    turn, on BOTH the normal (base_url=None) and loopback-bypass paths.
+
+    Retry-After:0 is now GUARDED (ticket 254e — a zero/negative Retry-After is treated as
+    absent so it can never collapse the backoff to an immediate synchronized replay), so this
+    mechanics test pins backoff at zero via ``llm_retry_max_wait_s=0`` to stay instant while
+    still exercising the retry."""
     transport, state = _sequence_transport(
         [
             lambda: httpx.Response(
@@ -97,16 +102,20 @@ def test_429_with_retry_after_retries_below_the_sdk(base_url):
         ]
     )
     model, _http_client = _build_retrying_anthropic_model(
-        "claude-sonnet-4-6", base_url=base_url, cfg=_cfg(), _wrapped_transport=transport
+        "claude-sonnet-4-6",
+        base_url=base_url,
+        cfg=_cfg(llm_retry_max_wait_s=0),
+        _wrapped_transport=transport,
     )
     out = _run(model)
     assert state["n"] == 2  # one retry
     assert "HEALED" in str(out.output)
 
 
-def test_500_without_retry_after_retries_via_exponential_fallback():
-    """A 500 with NO Retry-After header is retried via the exponential fallback
-    (fallback_strategy=None -> wait_exponential), not zero-wait hammering."""
+def test_500_without_retry_after_retries_via_jittered_fallback():
+    """A 500 with NO Retry-After header is retried via the Equal-Jitter fallback (ticket 254e —
+    ``uniform(cap/2, cap)`` over the exponential cap), not zero-wait hammering and not the old
+    non-jittered fixed backoff."""
     transport, state = _sequence_transport(
         [
             lambda: httpx.Response(500, json={"type": "error", "error": {"type": "api_error"}}),
@@ -118,9 +127,13 @@ def test_500_without_retry_after_retries_via_exponential_fallback():
     )
     t0 = time.monotonic()
     out = _run(model)
+    elapsed = time.monotonic() - t0
     assert state["n"] == 2
     assert "OK500" in str(out.output)
-    assert time.monotonic() - t0 >= 0.9  # ~1s exponential backoff, not zero
+    # First-retry cap = min(2**0, 60) = 1 → Equal-Jitter window [0.5, 1.0]; a positive jittered
+    # backoff occurred (not zero-hammer). Lower bound only — the exact window and de-correlation
+    # are asserted deterministically in test_transport_retry_jitter.py with an injected RNG.
+    assert elapsed >= 0.4
 
 
 # ── Non-retriable statuses are NOT retried ────────────────────────────────────
@@ -155,7 +168,7 @@ def test_exhaustion_reraises_after_all_attempts():
     model, _ = _build_retrying_anthropic_model(
         "claude-sonnet-4-6",
         base_url=None,
-        cfg=_cfg(llm_retry_max_attempts=3),
+        cfg=_cfg(llm_retry_max_attempts=3, llm_retry_max_wait_s=0),
         _wrapped_transport=transport,
     )
     with pytest.raises(Exception):  # noqa: B017 — the last attempt's error is re-raised (reraise=True)
@@ -176,7 +189,10 @@ def test_retry_attempt_is_logged(caplog):
         ]
     )
     model, _ = _build_retrying_anthropic_model(
-        "claude-sonnet-4-6", base_url=None, cfg=_cfg(), _wrapped_transport=transport
+        "claude-sonnet-4-6",
+        base_url=None,
+        cfg=_cfg(llm_retry_max_wait_s=0),
+        _wrapped_transport=transport,
     )
     with caplog.at_level("WARNING", logger="rebar.llm.runner"):
         _run(model)
@@ -302,7 +318,10 @@ def test_midrun_429_self_heals_without_duplicate_comment():
 
     transport = httpx.MockTransport(handler)
     model, _ = _build_retrying_anthropic_model(
-        "claude-sonnet-4-6", base_url=None, cfg=_cfg(), _wrapped_transport=transport
+        "claude-sonnet-4-6",
+        base_url=None,
+        cfg=_cfg(llm_retry_max_wait_s=0),
+        _wrapped_transport=transport,
     )
 
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = True
