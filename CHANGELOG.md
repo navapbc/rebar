@@ -8,6 +8,32 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 [docs/release-notes.md](docs/release-notes.md).
 
+## [0.13.1] - 2026-08-30
+
+### Fixed
+
+- **MCP Registry publish no longer fails on description length.** `server.json`'s top-level
+  `description` exceeded the MCP Registry's 100-character limit, causing the 0.13.0 release's
+  `mcp_registry` publish job to reject the manifest with HTTP 422. Shortened the description
+  to fit, and added a `release_guards.py` guard (wired into `release.yml`'s `authorize` job)
+  that now catches an over-length description before build.
+- **Plan-review and other gate LLM calls no longer silently lose prompt caching on fallback.**
+  A mixed Bedrock-primary / Anthropic-fallback model chain collapsed prompt caching to "none"
+  whenever the fallback candidate didn't share the primary's cache-key style, even though the
+  primary (which serves the overwhelming majority of calls) supports it fine. This had silently
+  doubled the median cost of gate LLM calls since 2026-08-12. Caching now follows the primary
+  candidate's capability, while genuinely cross-provider-incompatible settings still fail safe.
+
+### Ops
+
+- Migrated operator-seeded SSM `SecureString` secrets (Gerrit admin password, signing keys,
+  API tokens, etc.) to Terraform write-only arguments so their values are no longer read into
+  cleartext state on every plan/refresh; imported the live `mcp-client-pat-*` SSM parameters
+  that a prior apply had left undeclared.
+- Internal module-size cleanup: split oversized `llm/config.py` and `llm/plan_review/__init__.py`
+  ahead of the 800-LOC hard cap, and bounded the ticket-enrichment self-heal's re-enqueue
+  fan-out to stop a churn-driven event-volume surge on the tracker's `tickets` branch.
+
 ## [Unreleased]
 
 ## [0.13.0] - 2026-08-28
@@ -1705,7 +1731,8 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 - Harden concurrency, extract txn, rename to rebar, agent-fitness features
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
-[unreleased]: https://github.com/navapbc/rebar/compare/v0.13.0...HEAD
+[unreleased]: https://github.com/navapbc/rebar/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/navapbc/rebar/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/navapbc/rebar/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/navapbc/rebar/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/navapbc/rebar/compare/v0.10.1...v0.11.0
