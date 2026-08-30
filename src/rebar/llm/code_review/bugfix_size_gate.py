@@ -411,6 +411,7 @@ def apply_bugfix_size_gate(
             {
                 "criteria": [CRITERION_ID],
                 "severity": "high",
+                "priority": 0.9,
                 "decision": "block",
                 "tier": "DET",
                 "finding": _teaching_finding(ticket_id, non_test, classification, reason, priors),
