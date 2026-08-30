@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from rebar.llm.errors import LLMConfigError, UnretryableOutputError
+from rebar.llm.errors import LLMConfigError, LLMInputRejectedError, UnretryableOutputError
 
 # `httpx` + `pydantic_ai` are [agents]-extra deps, NOT core. They are imported LAZILY
 # (call-boundary) inside `_map` / `_base_diagnostic` so this boundary module imports
@@ -417,6 +417,18 @@ def resolution_fields(outcome: LLMOutcome | None) -> dict:
         "retryable": outcome.retryable,
         "diagnostic": outcome.diagnostic,
     }
+
+
+def degrade_cause_flags(error: object) -> dict:
+    """The split coverage cause-flags a degraded verdict carries (ticket 5f96-25aa-af9d-4f57).
+    ``llm_unavailable`` is reserved for a genuine availability fault (RETRYABLE). A deterministic
+    ``LLMInputRejectedError`` — the provider answered and rejected the INPUT (oversized prompt,
+    content-policy refusal) — is a DISTINCT, NON-retryable cause flagged ``input_rejected``
+    instead. Exactly one flag is True; a non-``LLMInputRejectedError`` (including a string-error
+    degrade tail) defaults to the availability flag so the signal is never silently dropped."""
+    if isinstance(error, LLMInputRejectedError):
+        return {"llm_unavailable": False, "input_rejected": True}
+    return {"llm_unavailable": True, "input_rejected": False}
 
 
 # ── Sampling-parameter rejection translation (story S3/2932) ────────────────────
