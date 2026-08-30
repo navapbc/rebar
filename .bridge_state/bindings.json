@@ -4398,6 +4398,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:45Z"
     },
+    "162e-57c3-f7d4-4457": {
+      "created_at": "2026-08-30T17:28:57Z",
+      "jira_id": "4590703",
+      "jira_key": "REB-3959",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T17:28:59Z"
+    },
     "1630-0279-85ba-4e15": {
       "baseline": {
         "assignee": null,
@@ -5033,6 +5040,13 @@
       "peer_parent": "REB-155",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:02Z"
+    },
+    "192c-d606-b72e-470f": {
+      "created_at": "2026-08-30T17:28:59Z",
+      "jira_id": "4590704",
+      "jira_key": "REB-3960",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T17:29:01Z"
     },
     "192d-9083-c64b-4f65": {
       "baseline": {
@@ -14038,6 +14052,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:13Z"
+    },
+    "3e92-b7f4-dede-4c17": {
+      "created_at": "2026-08-30T17:29:02Z",
+      "jira_id": "4590705",
+      "jira_key": "REB-3961",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T17:29:04Z"
     },
     "3eb6-6e65-539a-4be1": {
       "baseline": {
@@ -24241,6 +24262,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:02Z"
     },
+    "6d60-2d0c-6ff7-444b": {
+      "created_at": "2026-08-30T17:29:08Z",
+      "jira_id": "4590706",
+      "jira_key": "REB-3962",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T17:29:10Z"
+    },
     "6dac-d0d9-1a60-4998": {
       "created_at": "2026-08-15T15:02:03Z",
       "jira_key": "REB-1396",
@@ -25368,7 +25396,7 @@
         "assignee": null,
         "description": "line one\n- `echo hello` should stay literal\nline three",
         "priority": "Medium",
-        "status": "closed",
+        "status": "Done",
         "summary": "backtick test"
       },
       "created_at": "2026-08-30T01:11:11Z",
@@ -29393,7 +29421,7 @@
         },
         "description": "Scratch ticket created solely to exercise the rebar MCP tool surface end-to-end. Safe to archive/reject.",
         "priority": "Medium",
-        "status": "closed",
+        "status": "Done",
         "summary": "MCP tool exercise scratch task (safe to reject) - session test"
       },
       "created_at": "2026-08-28T12:17:36Z",
@@ -34705,7 +34733,7 @@
         "assignee": null,
         "description": "line one\n- `echo hello` should stay literal\nline three",
         "priority": "Medium",
-        "status": "closed",
+        "status": "Done",
         "summary": "backtick test2"
       },
       "created_at": "2026-08-30T01:11:22Z",
@@ -40481,7 +40509,7 @@
         "assignee": null,
         "description": "Scratch idea for MCP tool testing.",
         "priority": "Medium",
-        "status": "closed",
+        "status": "Done",
         "summary": "MCP tool exercise scratch idea (safe to reject)"
       },
       "created_at": "2026-08-28T12:17:39Z",
@@ -45870,6 +45898,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:46Z"
+    },
+    "ce6b-cffa-6450-4fa5": {
+      "created_at": "2026-08-30T17:29:10Z",
+      "jira_id": "4590707",
+      "jira_key": "REB-3963",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T17:29:12Z"
     },
     "ce75-9119-5361-4fc7": {
       "created_at": "2026-08-15T15:11:46Z",
@@ -56847,7 +56882,7 @@
         "assignee": null,
         "description": "## Acceptance Criteria\\n- [ ] N/A - scratch ticket for link/dep testing",
         "priority": "Medium",
-        "status": "closed",
+        "status": "Done",
         "summary": "MCP tool exercise scratch ticket #2 (link target, safe to archive)"
       },
       "created_at": "2026-08-28T12:17:49Z",
@@ -59393,7 +59428,14 @@
     "1788089111232974812": "__rebar_unknown_comment_id__",
     "1788089302402465541": "__rebar_unknown_comment_id__",
     "1788090259324365788": "__rebar_unknown_comment_id__",
-    "1788091291423945538": "__rebar_unknown_comment_id__"
+    "1788091291423945538": "__rebar_unknown_comment_id__",
+    "1788108059444473497": "__rebar_unknown_comment_id__",
+    "1788108471077898482": "__rebar_unknown_comment_id__",
+    "1788108886242336453": "__rebar_unknown_comment_id__",
+    "1788109187216395001": "__rebar_unknown_comment_id__",
+    "1788109331108636036": "__rebar_unknown_comment_id__",
+    "1788110203745730394": "__rebar_unknown_comment_id__",
+    "1788110544788464229": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -61732,7 +61774,12 @@
     "REB-3956": "69e6-c32f-2634-4f30",
     "REB-3957": "c0b9-33b0-f968-450d",
     "REB-3958": "1d88-7113-4f8e-4e73",
+    "REB-3959": "162e-57c3-f7d4-4457",
     "REB-396": "f8a2-bf40-4cc4-479b",
+    "REB-3960": "192c-d606-b72e-470f",
+    "REB-3961": "3e92-b7f4-dede-4c17",
+    "REB-3962": "6d60-2d0c-6ff7-444b",
+    "REB-3963": "ce6b-cffa-6450-4fa5",
     "REB-397": "fa52-fec3-ac13-49b3",
     "REB-398": "faa8-1361-0718-47a7",
     "REB-399": "fd2b-b26e-9fef-4bae",
