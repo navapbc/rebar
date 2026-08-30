@@ -366,16 +366,34 @@ def resolve_model_string(value: str, repo_root: str | None = None) -> str:
 def should_fall_back(exc: Exception) -> bool:
     """The ``fallback_on`` predicate: should ``exc`` move the chain to its next candidate?
 
-    Deliberately NARROW. pydantic-ai's own docs warn that provider SDK retry logic can delay
-    failover substantially — a 429 may be retried inside the SDK (and, for rebar's Anthropic
-    path, inside the ``AsyncTenacityTransport``) for up to ~60s before the fallback is ever
-    reached — so switching providers is only worth that latency for the AVAILABILITY classes.
-    Everything else must fail LOUDLY: a credential error (``CHANGE_SETTINGS``) must not be
-    masked by shopping for a provider whose key happens to work; an oversized request
-    (``CHANGE_INPUT``) is the size ladder's problem and another provider will not fix it; and
-    a quota/payment failure (``INCREASE_PROVIDER_LIMITS`` — which is where a 429 carrying
-    ``insufficient_quota`` lands, unlike a plain rate-limit 429) is a SPEND problem, where
-    silently relocating spend is worse than stopping.
+    Two rules, one for each LEG position:
+
+    **A NON-PRIMARY (fallback) leg's failure is ALWAYS retained.** When a fallback leg is the
+    one raising, returning ``True`` here makes pydantic-ai COLLECT the exception and, at
+    chain exhaustion, bundle every leg into a ``FallbackExceptionGroup`` — instead of
+    BARE-RERAISING this leg alone and DISCARDING the primary's retained cause. That discard
+    is bug 1c0d: a keyless fallback's non-retryable auth ``TypeError`` masked a retryable
+    primary throttle (429), turning an ``exit 11`` (wait-and-retry the primary) into a hard
+    INDETERMINATE fleet-wide. The retained group is then classified by its MOST-RECOVERABLE
+    leg (see :func:`rebar.llm.failure._classify_fallback_group`). The leg is recognised via
+    :func:`rebar.llm.tracing.is_fallback_leg_failure`, which reads the marker that the
+    EXISTING per-candidate wrapper (:class:`~rebar.llm.tracing._TracedCandidateModel`, already
+    applied to every leg by :func:`build_fallback_model` and already carrying
+    ``_candidate_order``) stamps in its ``request()`` catch when ``_candidate_order > 0`` — so
+    this rule never fires for the primary (order 0, unstamped).
+
+    **The PRIMARY leg keeps the deliberately NARROW guard.** pydantic-ai's own docs warn that
+    provider SDK retry logic can delay failover substantially — a 429 may be retried inside
+    the SDK (and, for rebar's Anthropic path, inside the ``AsyncTenacityTransport``) for up to
+    ~60s before the fallback is ever reached — so switching providers is only worth that
+    latency for the AVAILABILITY classes. Everything else must fail LOUDLY: a credential error
+    (``CHANGE_SETTINGS``) must not be masked by shopping for a provider whose key happens to
+    work; an oversized request (``CHANGE_INPUT``) is the size ladder's problem and another
+    provider will not fix it; and a quota/payment failure (``INCREASE_PROVIDER_LIMITS`` — which
+    is where a 429 carrying ``insufficient_quota`` lands, unlike a plain rate-limit 429) is a
+    SPEND problem, where silently relocating spend is worse than stopping. This decides whether
+    a fallback is TRIED AT ALL; the retain-the-group rule above governs only what happens once
+    a fallback leg has itself failed.
 
     Derived from :mod:`rebar.llm.failure`'s taxonomy at CALL time — the existing ``_RETRYABLE``
     frozenset (``WAIT_AND_RETRY`` + ``RETRY_NOW``, the latter covering the down-local-endpoint
@@ -383,6 +401,10 @@ def should_fall_back(exc: Exception) -> bool:
     than a hand-maintained tuple of exception types. That is what keeps the two from drifting:
     a future taxonomy change reaches failover without editing this function.
     """
+    from rebar.llm.tracing import is_fallback_leg_failure
+
+    if is_fallback_leg_failure(exc):
+        return True
     from rebar.llm.failure import _RETRYABLE, ResolutionClass, classify_llm_failure
 
     resolution_class = classify_llm_failure(exc).resolution_class
@@ -480,6 +502,10 @@ def build_fallback_model(
         wrap_candidate(m, i, candidate)
         for i, (m, candidate) in enumerate(zip(models, candidates, strict=True))
     ]
+    # `wrap_candidate` (above) tags every NON-PRIMARY leg's failures (order >= 1) so
+    # `should_fall_back` retains them into the FallbackExceptionGroup rather than let a
+    # fallback leg's non-retryable error bare-reraise and DISCARD the primary's retained
+    # (possibly retryable) cause (bug 1c0d).
     return FallbackModel(*models, fallback_on=should_fall_back), candidates
 
 
