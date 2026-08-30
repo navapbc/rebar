@@ -105,6 +105,28 @@ def _workflow_caller_code(exc: BaseException) -> str | None:
     return None
 
 
+def _llm_error_code(exc: BaseException) -> str | None:
+    """Classify an ``LLMError``-family exception (branch 7 of :func:`error_code_for`).
+
+    The ``LLMRunnerError`` subtree — input-rejection, self-imposed budget/tool-loop stops,
+    context-window overflow, and structured-output defects — is NOT a provider-availability
+    fault: those types' own docstrings forbid the "provider call failed / outage" framing, so
+    they map to the honest broad ``command_failed`` (bug f75f-5509-10c0-4430), never
+    ``llm_unavailable``. A genuine ``LLMUnavailableError`` (and its ``LLMConfigError`` subclass),
+    and the bare ``LLMError`` base, stay ``llm_unavailable``. Returns ``None`` when ``exc`` is
+    not an ``LLMError`` (or the ``agents`` extra is absent), so the caller falls through.
+    """
+    try:
+        from rebar.llm.errors import LLMError, LLMRunnerError
+    except ImportError:
+        return None
+    if isinstance(exc, LLMRunnerError):
+        return "command_failed"
+    if isinstance(exc, LLMError):
+        return "llm_unavailable"
+    return None
+
+
 def error_code_for(exc: BaseException) -> str:
     """Classify a rebar exception to a machine-readable error code (ticket 8a31).
 
@@ -187,14 +209,10 @@ def error_code_for(exc: BaseException) -> str:
     if workflow_code is not None:
         return workflow_code
 
-    # 7. LLMError
-    try:
-        from rebar.llm.errors import LLMError
-
-        if isinstance(exc, LLMError):
-            return "llm_unavailable"
-    except ImportError:
-        pass
+    # 7. LLMError family — availability vs. runner-fault discrimination (f75f)
+    llm_code = _llm_error_code(exc)
+    if llm_code is not None:
+        return llm_code
 
     # 8. Fallback
     return "command_failed"
