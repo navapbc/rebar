@@ -278,6 +278,7 @@ def _build_sidecar_row(
         "verified": generation is not None,
         "generation": generation,
         "reconstructed": create_found,
+        "ran_model": (data.get("provider_provenance") or {}).get("ran_model"),
     }
 
 
