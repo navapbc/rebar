@@ -30,6 +30,8 @@ def render_report(result: dict[str, Any], *, now: datetime | None = None) -> str
         "## Harness self-check",
         "",
         f"- replayed-stored vs stored mismatches: {matrix['self_check_mismatches']}",
+        f"- not replayed (prerequisite-coverage override, review-level, not a mismatch): "
+        f"{matrix['not_replayed_prerequisite_coverage']}",
         "",
         "## Flip matrix",
         "",

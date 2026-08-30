@@ -29,6 +29,7 @@ thresholds against the candidate's overlay-merged registry instead of the live o
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -88,15 +89,39 @@ def mirrored_threshold_for(
     return _threshold_for
 
 
-def replayed_stored_decision(finding: dict[str, Any], *, execution_review: bool) -> dict[str, Any]:
+def impact_fn_for_row(data: dict[str, Any]) -> Callable[[dict[str, Any]], float]:
+    """The impact model that was ACTUALLY IN EFFECT when a row's decision was
+    persisted. ``data["impact_model_version"]`` (``sidecar.IMPACT_MODEL_VERSION``,
+    currently ``"plan-v5"``) is only present/current from plan-v5 onward -- a row
+    predating it (an absent field, or any older literal value) was judged under
+    plan-v4's ``impact_plan`` formula. The SHIPPED ``decide.impact_plan`` scores such a
+    row's pre-v5 ordinal grades as 0.0 (the exact collapse
+    ``legacy_v4_baseline.legacy_impact_plan``'s docstring warns about), so replaying an
+    old row through the current formula is not a self-check at all -- it silently
+    changes what is being checked."""
+    from rebar.llm.evals.plan_replay import legacy_v4_baseline
+
+    if data.get("impact_model_version") == sidecar.IMPACT_MODEL_VERSION:
+        return decide.impact_plan
+    return legacy_v4_baseline.legacy_impact_plan
+
+
+def replayed_stored_decision(
+    finding: dict[str, Any],
+    *,
+    execution_review: bool,
+    impact_fn: Callable[[dict[str, Any]], float] = decide.impact_plan,
+) -> dict[str, Any]:
     """Replay one finding's decision from its PERSISTED ``block_threshold``/
     ``blocking_enabled`` (no threshold re-resolution) -- the harness self-check that
-    must always equal ``stored``, independent of registry drift."""
+    must always equal ``stored``, independent of registry drift. ``impact_fn`` defaults
+    to the current model for direct/unit-test callers; :func:`replay_row` passes the
+    row's era-correct model via :func:`impact_fn_for_row`."""
     return decide.pass3_decide(
         finding.get("verification"),
         block_threshold=float(finding.get("block_threshold") or decide.DEFAULT_BLOCK_THRESHOLD),
         blocking_enabled=bool(finding.get("blocking_enabled")),
-        impact_fn=decide.impact_plan,
+        impact_fn=impact_fn,
         execution_review=execution_review,
     )
 
@@ -194,19 +219,26 @@ def replay_row(
 ) -> dict[str, Any] | None:
     """Replay one corpus row's whole finding set through all three lenses (``stored``,
     ``replayed-stored``, ``live-baseline``) plus ``candidate``. Returns ``None`` when
-    the sidecar body carries no usable ``block_threshold`` (a v1 sidecar, pre-lossless
-    persistence) -- such rows are skipped and counted by the caller, not replayed."""
-    findings = data.get("findings")
-    if not isinstance(findings, list) or not findings:
+    NO finding in the sidecar body carries a usable ``block_threshold`` (a v1 sidecar,
+    pre-lossless persistence) -- such rows are skipped and counted by the caller, not
+    replayed. Within a row, an individual finding lacking a numeric ``block_threshold``
+    (e.g. a DET-tier finding decided by a deterministic floor check, never through
+    Pass-3 at all) is likewise excluded from every lens -- Pass-3 never scored it, so
+    this harness has no decision to replay for it."""
+    raw_findings = data.get("findings")
+    if not isinstance(raw_findings, list) or not raw_findings:
         return None
-    if not any(isinstance(f.get("block_threshold"), (int, float)) for f in findings):
+    findings = [f for f in raw_findings if isinstance(f.get("block_threshold"), (int, float))]
+    if not findings:
         return None
 
     execution_review = execution_review_for(data)
     verifs = verifs_from_findings(findings)
 
+    era_impact_fn = impact_fn_for_row(data)
     replayed_stored = [
-        replayed_stored_decision(f, execution_review=execution_review) for f in findings
+        replayed_stored_decision(f, execution_review=execution_review, impact_fn=era_impact_fn)
+        for f in findings
     ]
     live_baseline = live_baseline_decisions(findings, verifs, execution_review=execution_review)
     candidate_result = candidate_decisions(
@@ -218,6 +250,7 @@ def replay_row(
         "review_event_uuid": row["review_event_uuid"],
         "execution_review": execution_review,
         "stored": [f.get("decision") for f in findings],
+        "stored_reason": [f.get("reason") for f in findings],
         "replayed_stored": [d["decision"] for d in replayed_stored],
         "live_baseline": [d["decision"] for d in live_baseline],
         "candidate": [d["decision"] for d in candidate_result],
@@ -226,28 +259,45 @@ def replay_row(
 
 _BLOCKING = "block"
 
+#: A finding whose STORED reason is this is not a raw Pass-3 decision: it was
+#: reclassified by the prerequisite-coverage post-verdict floor
+#: (``decide_ops._decide_gated_findings``), a REVIEW-LEVEL override spanning every
+#: prerequisite's coverage disposition -- an input never persisted per-finding in the
+#: sidecar, so it cannot be replayed from the finding alone. Per the harness's own
+#: scope ("post-verdict floors replayed only when their inputs are present in the
+#: sidecar; otherwise reported as not replayed"), such findings are excluded from
+#: ``self_check_mismatches`` and counted separately.
+_PREREQUISITE_COVERAGE_OVERRIDE_REASON = "prerequisite-coverage-indeterminate"
+
 
 def flip_matrix(replayed_rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate flip counts across every replayed row: ``self_check_mismatches``
-    (``replayed_stored`` vs ``stored`` -- must be zero), ``registry_drift_flips``
+    (``replayed_stored`` vs ``stored`` -- must be zero over the findings this harness
+    can actually replay), ``not_replayed_prerequisite_coverage`` (findings whose stored
+    decision was reclassified by the prerequisite-coverage floor -- not counted as a
+    mismatch, since its input isn't in the sidecar), ``registry_drift_flips``
     (``stored`` vs ``live_baseline``), and ``candidate_newly_blocking``/``friction_rate``/
     ``relief_count`` (``live_baseline`` vs ``candidate`` -- the primary signal)."""
     self_check_mismatches = 0
+    not_replayed_prerequisite_coverage = 0
     registry_drift_flips = 0
     candidate_newly_blocking = 0
     candidate_relief = 0
     total_findings = 0
 
     for row in replayed_rows:
-        for stored, replayed, live, cand in zip(
+        for stored, stored_reason, replayed, live, cand in zip(
             row["stored"],
+            row["stored_reason"],
             row["replayed_stored"],
             row["live_baseline"],
             row["candidate"],
             strict=True,
         ):
             total_findings += 1
-            if replayed != stored:
+            if stored_reason == _PREREQUISITE_COVERAGE_OVERRIDE_REASON:
+                not_replayed_prerequisite_coverage += 1
+            elif replayed != stored:
                 self_check_mismatches += 1
             if live != stored:
                 registry_drift_flips += 1
@@ -263,6 +313,7 @@ def flip_matrix(replayed_rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "total_findings": total_findings,
         "self_check_mismatches": self_check_mismatches,
+        "not_replayed_prerequisite_coverage": not_replayed_prerequisite_coverage,
         "registry_drift_flips": registry_drift_flips,
         "candidate_newly_blocking": candidate_newly_blocking,
         "friction_rate": friction_rate,

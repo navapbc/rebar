@@ -166,6 +166,57 @@ def test_execution_review_for_invalid_phase_value_defaults_to_planning():
 # ── replayed_stored_decision (the self-check invariant) ──────────────────────────
 
 
+# ── impact_fn_for_row (the era-correct impact model) ──────────────────────────────
+
+
+def test_impact_fn_for_row_current_version_uses_shipped_impact_plan():
+    from rebar.llm.review_kernel import decide
+
+    assert tier0.impact_fn_for_row({"impact_model_version": "plan-v5"}) is decide.impact_plan
+
+
+def test_impact_fn_for_row_older_version_uses_legacy_impact_plan():
+    from rebar.llm.evals.plan_replay import legacy_v4_baseline
+
+    resolved = tier0.impact_fn_for_row({"impact_model_version": "plan-v4"})
+    assert resolved is legacy_v4_baseline.legacy_impact_plan
+
+
+def test_impact_fn_for_row_absent_version_uses_legacy_impact_plan():
+    from rebar.llm.evals.plan_replay import legacy_v4_baseline
+
+    assert tier0.impact_fn_for_row({}) is legacy_v4_baseline.legacy_impact_plan
+
+
+def test_replayed_stored_decision_reproduces_pre_v5_ordinal_grade_via_era_impact_fn():
+    # dod_uncertifiable="high" is an ordinal grade the SHIPPED decide.impact_plan
+    # scores as 0.0 (a kind-graded axis in plan-v5) -- silently collapsing a pre-v5
+    # finding's impact unless replayed with the era-correct legacy_impact_plan.
+    f = {
+        "id": "f1",
+        "criteria": ["E2"],
+        "block_threshold": 0.7,
+        "blocking_enabled": True,
+        "decision": "block",
+        "verification": {
+            "binary": _ALL_YES_BINARY,
+            "severity_attributes": {"dod_uncertifiable": "high"},
+        },
+    }
+    data = {"impact_model_version": "plan-v4"}
+    era_impact_fn = tier0.impact_fn_for_row(data)
+    result = tier0.replayed_stored_decision(f, execution_review=False, impact_fn=era_impact_fn)
+    assert result["decision"] == "block"
+
+    # Replaying the SAME finding under the current (wrong-era) formula collapses it.
+    from rebar.llm.review_kernel import decide as _decide
+
+    wrong_era = tier0.replayed_stored_decision(
+        f, execution_review=False, impact_fn=_decide.impact_plan
+    )
+    assert wrong_era["decision"] != "block"
+
+
 def test_replayed_stored_decision_matches_stored_for_blocking_finding():
     f = _finding(
         criteria=["E2"],
@@ -302,6 +353,7 @@ def test_flip_matrix_self_check_mismatches_zero_by_construction():
         "review_event_uuid": "u1",
         "execution_review": False,
         "stored": [f["decision"] for f in findings],
+        "stored_reason": [None for f in findings],
         "replayed_stored": [
             tier0.replayed_stored_decision(f, execution_review=False)["decision"] for f in findings
         ],
@@ -339,6 +391,7 @@ def test_flip_matrix_registry_drift_detected_without_self_check_mismatch():
         "review_event_uuid": "u1",
         "execution_review": False,
         "stored": [f["decision"]],
+        "stored_reason": [None],
         "replayed_stored": [tier0.replayed_stored_decision(f, execution_review=False)["decision"]],
         "live_baseline": [live[0]["decision"]],
         "candidate": [live[0]["decision"]],
@@ -355,6 +408,7 @@ def test_flip_matrix_friction_rate_and_relief_count_on_known_ratio():
             "review_event_uuid": "u1",
             "execution_review": False,
             "stored": ["advisory", "advisory"],
+            "stored_reason": [None, None],
             "replayed_stored": ["advisory", "advisory"],
             "live_baseline": ["advisory", "block"],
             "candidate": ["block", "advisory"],
@@ -367,11 +421,35 @@ def test_flip_matrix_friction_rate_and_relief_count_on_known_ratio():
     assert matrix["friction_rate"] == 0.5
 
 
+def test_flip_matrix_excludes_prerequisite_coverage_override_from_self_check():
+    # A finding whose STORED decision was reclassified by the prerequisite-coverage
+    # post-verdict floor (a review-level override with an input never persisted
+    # per-finding) never matches a raw Pass-3 replay -- it must be reported separately,
+    # not counted as a harness self-check mismatch.
+    row = {
+        "ticket_id": "t1",
+        "review_event_uuid": "u1",
+        "execution_review": False,
+        "stored": ["indeterminate", "block"],
+        "stored_reason": [
+            "prerequisite-coverage-indeterminate",
+            "high-priority+criterion-opted-in",
+        ],
+        "replayed_stored": ["block", "block"],
+        "live_baseline": ["block", "block"],
+        "candidate": ["block", "block"],
+    }
+    matrix = tier0.flip_matrix([row])
+    assert matrix["self_check_mismatches"] == 0
+    assert matrix["not_replayed_prerequisite_coverage"] == 1
+
+
 def test_flip_matrix_empty_rows():
     matrix = tier0.flip_matrix([])
     assert matrix == {
         "total_findings": 0,
         "self_check_mismatches": 0,
+        "not_replayed_prerequisite_coverage": 0,
         "registry_drift_flips": 0,
         "candidate_newly_blocking": 0,
         "friction_rate": 0.0,
@@ -492,6 +570,30 @@ def test_run_tier0_skips_v1_sidecar_lacking_block_threshold(tmp_path):
     assert result["skipped"] == 1
 
 
+def test_replay_row_excludes_individual_findings_lacking_block_threshold():
+    # A row with ONE valid Pass-3 finding (proceeds) plus a DET-tier finding carrying
+    # no block_threshold at all -- the DET finding must be excluded from every lens,
+    # not silently scored against a fabricated DEFAULT_BLOCK_THRESHOLD fallback.
+    scored = _finding(criteria=["E2"], block_threshold=0.6, blocking_enabled=True, decision="block")
+    det_finding = {
+        "id": "det1",
+        "criteria": ["P4"],
+        "tier": "DET",
+        "decision": "advisory",
+        "verification": None,
+    }
+    data = {
+        "findings": [scored, det_finding],
+        "review_phase": "planning",
+        "impact_model_version": "plan-v5",
+    }
+    row = {"ticket_id": "t1", "review_event_uuid": "u1"}
+    replayed = tier0.replay_row(row, data, CANDIDATES["current"])
+    assert replayed is not None
+    assert len(replayed["stored"]) == 1
+    assert replayed["stored"][0] == "block"
+
+
 def test_run_tier0_labels_path_populates_label_proxy_metrics(tmp_path):
     from rebar.llm.evals.plan_replay import labels as labels_mod
 
@@ -575,6 +677,7 @@ def test_render_report_omits_label_proxy_when_absent():
         "flip_matrix": {
             "total_findings": 1,
             "self_check_mismatches": 0,
+            "not_replayed_prerequisite_coverage": 0,
             "registry_drift_flips": 0,
             "candidate_newly_blocking": 0,
             "friction_rate": 0.0,
@@ -596,6 +699,7 @@ def test_render_report_includes_label_proxy_when_present():
         "flip_matrix": {
             "total_findings": 1,
             "self_check_mismatches": 0,
+            "not_replayed_prerequisite_coverage": 0,
             "registry_drift_flips": 0,
             "candidate_newly_blocking": 0,
             "friction_rate": 0.0,
