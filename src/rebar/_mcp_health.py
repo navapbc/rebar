@@ -160,17 +160,28 @@ def _wrap_tool_fn(fn: Callable[..., Any], gauge: InFlightGauge, name: str):
 def instrument_certified_tools(mcp: Any, gauge: InFlightGauge) -> None:
     """Replace each certified tool's ``fn`` with a gauge-tracking wrapper.
 
-    All four certified tools are sync ``def`` functions; if one is missing (a build
-    that did not register the LLM tools) it is skipped. An already-async tool is left
-    untouched rather than mis-wrapped."""
+    All four certified tools are sync ``def``; a missing one (a build that did not
+    register the LLM tools) is skipped. An already-async CERTIFIED tool here is
+    FAIL-LOUD, not a silent skip (ticket ``wounded-resident-bushbaby``):
+    :func:`wire_health` instruments FIRST and offloads SECOND so the bodies are still
+    sync here, and a reversed order — or a certified tool made ``async def`` — would make
+    the SYNC gauge wrapper a no-op on it, so the gauge stops counting billable work and
+    the SIGTERM drain fails OPEN with no signal. Raising surfaces that in a test."""
 
     manager = getattr(mcp, "_tool_manager", None)
     if manager is None:
         return
     for name in CERTIFIED_TOOLS:
         tool = manager.get_tool(name)
-        if tool is None or getattr(tool, "is_async", False):
+        if tool is None:
             continue
+        if getattr(tool, "is_async", False):
+            raise RuntimeError(
+                f"certified tool {name!r} is already async at instrument time; the "
+                "in-flight gauge only wraps SYNC bodies, so the SIGTERM drain would go "
+                "blind to this billable op. wire_health must instrument BEFORE it "
+                "offloads; make a certified tool async only with async gauge instrumentation."
+            )
         tool.fn = _wrap_tool_fn(tool.fn, gauge, name)
 
 

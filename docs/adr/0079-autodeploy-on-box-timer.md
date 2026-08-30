@@ -114,3 +114,15 @@ therefore **cannot orphan a client session** — a request that lands on the new
 served normally instead of 404-ing `Session expired`. The retire path's graceful SIGTERM drain
 consequently covers **in-flight operations only**; it neither needs nor claims to protect
 sessions.
+
+**Threading model the SIGTERM drain relies on.** The graceful SIGTERM drain waits for the
+`in_flight` gauge to reach 0 (bounded by a grace window) before the retiring container exits.
+That is only meaningful because a sync certified-op body runs on a WORKER thread, not the
+event-loop thread: rebar's MCP tools are plain sync `def` and the `mcp` SDK calls a sync body
+directly inside the ASGI request coroutine, so `offload_sync_tools`
+(`src/rebar/_mcp_health.py`, bug `dewy-rotatable-tarsier`) rewrites each sync body to run on an
+`anyio.to_thread.run_sync` worker and marks the tool `is_async` so the loop stays free to
+service the signal, the drain poll, and `/health`. `anyio.to_thread.run_sync` is used (not
+`asyncio.to_thread`) so the op-cert signer contextvars reach the worker. The drain is BOUNDED
+(`drain_then_exit`'s `grace_seconds`/`deadline`): a never-idle op cannot hang shutdown forever
+— see ADR 0104's Decision 2 threading-model note and ticket `wounded-resident-bushbaby`.
