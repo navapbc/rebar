@@ -372,7 +372,7 @@ services:
   #
   # MCP_PATHS (autodeploy change-detector, consumed by panicky-sylphish-foxterrier — NOT by
   # compose): the paths whose change should trigger an mcp blue-green redeploy.
-  #   MCP_PATHS="src/rebar infra/compose/Dockerfile.mcp infra/compose/docker-compose.yml uv.lock pyproject.toml"
+  #   MCP_PATHS="src/rebar infra/compose/Dockerfile.mcp infra/scripts/mcp-entrypoint.sh infra/compose/docker-compose.yml uv.lock pyproject.toml"
   mcp:
     build:
       # Build context is the REPO ROOT so the locked install sees the whole package.

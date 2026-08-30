@@ -181,7 +181,13 @@ SECRETS_PATHS='infra/scripts/fetch-secrets.sh infra/terraform/ssm.tf'
 # set. `src/rebar` and `infra/compose/docker-compose.yml` are SHARED with BOT_PATHS on purpose: a
 # shared change triggers BOTH the review-bot AND the mcp target, in INDEPENDENT `if changed`
 # blocks (neither touches the gerrit container or gerrit review flow).
-MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/compose/docker-compose.yml uv.lock pyproject.toml'
+# infra/scripts/mcp-entrypoint.sh is the container ENTRYPOINT baked into the image by
+# Dockerfile.mcp (`install -m 0755 … mcp-entrypoint.sh /usr/local/bin/mcp-entrypoint.sh` +
+# `ENTRYPOINT`), so an entrypoint-source change needs the SAME image rebuild as a Dockerfile.mcp
+# change — apply-parity inside the mcp target's v1 auto-apply scope (ADR 0079). Before it was
+# listed here an entrypoint-only change reached /opt/rebar and the running container kept the
+# stale entrypoint with no rebuild (bug 5d4c-a25b-b612-4aca).
+MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/scripts/mcp-entrypoint.sh infra/compose/docker-compose.yml uv.lock pyproject.toml'
 # NOTE: the mcp delta gate ORs SECRETS_PATHS in on top of MCP_PATHS (see mcp_delta() below),
 # exactly as the review-bot gate does — mcp is the other consumer of fetch-secrets output, so a
 # secrets-only change must redeploy it too (bug f910). SECRETS_PATHS is intentionally kept a
@@ -195,7 +201,12 @@ MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/compose/docker-compose.y
 # not something the unattended loop may do. Before it was listed here a gerrit.config
 # change reached /opt/rebar and then silently did nothing, with no signal at all
 # (bug 1630-0279-85ba-4e15); detect-only at least makes that visible.
-CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh infra/compose/gerrit.config'
+# infra/gerrit/materialize-deploy-key.sh is the SSM→file deploy-key materializer, a direct
+# sibling of materialize-g2p-config.sh already in this list; applying it also touches gerrit
+# (it writes into the gerrit user's dir), so it is the SAME detect-only boundary. Before it was
+# listed here a deploy-key-materializer change reached /opt/rebar and silently did nothing, with
+# no signal at all (bug 408c-9c78-c523-4d1c); detect-only at least makes that visible.
+CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh infra/gerrit/materialize-deploy-key.sh infra/compose/gerrit.config'
 # nginx edge source of truth: rebar.conf.template is rendered into
 # /etc/nginx/conf.d/rebar.conf. Its rendered copy lives OUTSIDE the compose build context,
 # so an edge change reaches no other trigger above and would otherwise never be detected.
