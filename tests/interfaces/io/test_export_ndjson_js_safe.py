@@ -34,6 +34,17 @@ pytestmark = pytest.mark.interface
 #: RFC 8259 §6 interoperable integer range; also JS ``Number.MAX_SAFE_INTEGER``.
 JS_SAFE_MAX = 2**53 - 1
 
+#: A fixed nanosecond instant injected into the ``ns_ticket`` fixture through the HLC
+#: clock seam (``REBAR_HLC_NOW``) so the fixture's stored timestamps are DETERMINISTIC
+#: rather than a wall-clock draw. It is a multiple of 256: in ``[2**60, 2**61)`` the
+#: float64 grid spacing (ULP) is 256, so an integer is float64-exact iff it is
+#: ``≡ 0 mod 256``. Injecting this base makes the CREATE tick ``base + 1`` and the
+#: comment tick ``base + 2`` — both float64-INEXACT — which is exactly the round-trip
+#: hazard this suite must demonstrate. A raw wall-clock draw is float64-exact ~1/256 of
+#: the time, which made ``test_export_timestamps_round_trip_exactly`` a data-dependent
+#: flake (bug ``crashing-arachnidan-impala`` / ``d101-729a``).
+_HLC_INEXACT_BASE_NS = 1788072768731609344  # % 256 == 0  →  base+1, base+2 are inexact
+
 
 def _unsafe_ints(node: Any, path: str = "$") -> list[tuple[str, int]]:
     """Every integer in ``node`` that JSON cannot carry interoperably."""
@@ -70,16 +81,35 @@ def _export_line(repo: Path, ticket_id: str) -> dict:
 
 
 @pytest.fixture
-def ns_ticket(rebar_repo: Path) -> str:
-    """A real ticket whose stored ns timestamps are all beyond the JS-safe range."""
+def ns_ticket(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """A real ticket whose stored ns timestamps are all beyond the JS-safe range AND
+    deterministically float64-INEXACT.
+
+    The stored instants are pinned via the ``REBAR_HLC_NOW`` clock seam (see
+    ``_HLC_INEXACT_BASE_NS``) instead of a wall-clock draw. A wall-clock draw is
+    float64-exact ~1/256 of the time near 1.79e18 (ULP == 256), which left the
+    round-trip-hazard premise in ``test_export_timestamps_round_trip_exactly``
+    undemonstrable on those draws — a data-dependent flake
+    (bug ``crashing-arachnidan-impala`` / ``d101-729a``). The precondition below asserts
+    the determinism so a regression to a raw wall-clock draw fails HERE, deterministically.
+    """
+    monkeypatch.setenv("REBAR_HLC_NOW", str(_HLC_INEXACT_BASE_NS))
     ticket_id = str(rebar.create_ticket("task", "a ticket carrying a nanosecond timestamp"))
     rebar.comment(ticket_id, "a comment, so comments[].timestamp is exercised too")
-    created_at = rebar.show_ticket(ticket_id)["created_at"]
+    stored = rebar.show_ticket(ticket_id)
+    created_at = stored["created_at"]
     assert isinstance(created_at, int), f"created_at is not an int: {created_at!r}"
     assert created_at > JS_SAFE_MAX, (
         f"fixture precondition failed: created_at {created_at} is inside the JS-safe range, "
         "so this test could not detect the defect"
     )
+    for field in ("created_at", "updated_at"):
+        value = stored[field]
+        assert int(float(value)) != value, (
+            f"fixture precondition failed: stored {field} {value} is float64-EXACT, so the "
+            "round-trip hazard is undemonstrable — the deterministic clock injection regressed "
+            "(bug crashing-arachnidan-impala)"
+        )
     return ticket_id
 
 
@@ -133,6 +163,29 @@ def test_export_timestamps_round_trip_exactly(ns_ticket: str, rebar_repo: Path) 
     comment_wire = line["comments"][0]["timestamp"]
     assert isinstance(comment_wire, str), f"comment timestamp still a bare number: {comment_wire!r}"
     assert int(comment_wire) == stored["comments"][0]["timestamp"]
+
+
+def test_ns_ticket_timestamps_are_deterministically_float64_inexact(ns_ticket: str) -> None:
+    """Regression guard for bug ``crashing-arachnidan-impala`` (``d101-729a``).
+
+    The round-trip-hazard premise in ``test_export_timestamps_round_trip_exactly`` requires
+    the stored ns instants to be float64-INEXACT. A raw wall-clock draw is float64-exact
+    ~1/256 of the time (ULP == 256 near 1.79e18), which made that test a data-dependent
+    flake. The ``ns_ticket`` fixture now injects a deterministic clock; this pins that
+    guarantee so a regression to a wall-clock draw fails HERE, deterministically, rather
+    than in ~1/256 of CI runs. It does not weaken any lossless-string assertion — it only
+    proves the *premise's* data is deterministic.
+    """
+    stored = rebar.show_ticket(ns_ticket)
+    for field in ("created_at", "updated_at"):
+        value = stored[field]
+        assert isinstance(value, int) and value > JS_SAFE_MAX, (
+            f"{field} {value!r} is not an out-of-JS-range int; the hazard is unexercised"
+        )
+        assert int(float(value)) != value, (
+            f"stored {field} {value} is float64-EXACT; the round-trip hazard is not "
+            "deterministically demonstrable — the fixture's clock injection regressed"
+        )
 
 
 def test_export_import_round_trip_preserves_exact_ns(tmp_path: Path) -> None:

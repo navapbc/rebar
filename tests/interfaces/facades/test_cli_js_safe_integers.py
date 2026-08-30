@@ -33,6 +33,17 @@ pytestmark = pytest.mark.interface
 #: RFC 8259 section 6 interoperable integer range; also JS ``Number.MAX_SAFE_INTEGER``.
 JS_SAFE_MAX = 2**53 - 1
 
+#: A fixed nanosecond instant injected into the ``ns_ticket`` fixture through the HLC
+#: clock seam (``REBAR_HLC_NOW``) so the fixture's stored timestamps are DETERMINISTIC
+#: rather than a wall-clock draw. It is a multiple of 256: in ``[2**60, 2**61)`` the
+#: float64 grid spacing (ULP) is 256, so an integer is float64-exact iff it is
+#: ``≡ 0 mod 256``. Injecting this base makes the CREATE tick ``base + 1`` and the
+#: comment tick ``base + 2`` -- both float64-INEXACT -- so the round-trip-hazard premise in
+#: ``test_show_timestamp_round_trips_exactly`` is always demonstrable. A raw wall-clock draw
+#: is float64-exact ~1/256 of the time, which made that test a data-dependent flake
+#: (bug ``crashing-arachnidan-impala`` / ``d101-729a``).
+_HLC_INEXACT_BASE_NS = 1788072768731609344  # % 256 == 0  ->  base+1, base+2 are inexact
+
 
 def _unsafe_ints(node: Any, path: str = "$") -> list[tuple[str, int]]:
     """Every integer in ``node`` that JSON cannot carry interoperably."""
@@ -65,17 +76,36 @@ def _cli_json(*args: str) -> Any:
 
 
 @pytest.fixture
-def ns_ticket(rebar_repo: Path) -> str:
-    """A real ticket whose stored ``created_at`` is a nanosecond int beyond the JS range."""
+def ns_ticket(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """A real ticket whose stored ``created_at``/``updated_at`` are nanosecond ints beyond
+    the JS range AND deterministically float64-INEXACT.
+
+    The stored instants are pinned via the ``REBAR_HLC_NOW`` clock seam (see
+    ``_HLC_INEXACT_BASE_NS``) instead of a wall-clock draw. A wall-clock draw is
+    float64-exact ~1/256 of the time near 1.79e18 (ULP == 256), which left the
+    round-trip-hazard premise in ``test_show_timestamp_round_trips_exactly`` undemonstrable
+    on those draws -- a data-dependent flake (bug ``crashing-arachnidan-impala`` /
+    ``d101-729a``). The precondition below asserts the determinism so a regression to a raw
+    wall-clock draw fails HERE, deterministically.
+    """
+    monkeypatch.setenv("REBAR_HLC_NOW", str(_HLC_INEXACT_BASE_NS))
     ticket_id = str(rebar.create_ticket("task", "a ticket carrying a nanosecond timestamp"))
     rebar.comment(ticket_id, "a comment, so comments[].timestamp is exercised too")
-    created_at = rebar.show_ticket(ticket_id)["created_at"]
+    stored = rebar.show_ticket(ticket_id)
+    created_at = stored["created_at"]
     # Prove the precondition: without an out-of-range value there is nothing to assert on.
     assert isinstance(created_at, int), f"created_at is not an int: {created_at!r}"
     assert created_at > JS_SAFE_MAX, (
         f"fixture precondition failed: created_at {created_at} is inside the JS-safe range, "
         "so this test could not detect the defect"
     )
+    for field in ("created_at", "updated_at"):
+        value = stored[field]
+        assert int(float(value)) != value, (
+            f"fixture precondition failed: stored {field} {value} is float64-EXACT, so the "
+            "round-trip hazard is undemonstrable -- the deterministic clock injection regressed "
+            "(bug crashing-arachnidan-impala)"
+        )
     return ticket_id
 
 
