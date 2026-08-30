@@ -214,12 +214,12 @@ def sign_plan_review(
             verdict["ticket_id"], manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root
         )
     try:
-        from rebar.llm.config import LLMConfig
+        from rebar.llm.config import resolve_gate_config
         from rebar.llm.overlap import queue as _enqueue_queue
 
         _enqueue_queue.enqueue(
             verdict["ticket_id"],
-            soak_min=LLMConfig.from_env(repo_root=repo_root).overlap_soak_min,
+            soak_min=resolve_gate_config(repo_root).overlap_soak_min,
             repo_root=repo_root,
         )
     except Exception:

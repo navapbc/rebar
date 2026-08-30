@@ -48,7 +48,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import Any
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, resolve_gate_config
 from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.model_classes import TRIVIAL_CLASS, resolve_model_string
 from rebar.llm.prompting import prompts
@@ -325,7 +325,7 @@ def screen_candidates(
         return []
     if screen_fn is None:
         if cfg is None:
-            cfg = LLMConfig.from_env()
+            cfg = resolve_gate_config()
         bound_cfg, bound_runner = cfg, runner
         prompt = prompts.get_prompt(_PROMPT_ID, repo_root=cfg.repo_path)
         prompt_body, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)

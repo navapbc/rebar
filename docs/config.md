@@ -393,6 +393,27 @@ on it (nor rejects it under `REBAR_CONFIG_UNKNOWN_KEYS=error`), but does not par
 it into `Config`. The non-secret knobs are settable in the file and resolved
 `rebar -c llm.KEY=VALUE` > `REBAR_LLM_<KEY>` env > config file > default:
 
+**Authoritative composition, not per-call re-resolution (ADR 0098, ticket ec44).**
+`LLMConfig.from_env()` is a below-boundary factory now called from exactly ONE place
+per public operation: `rebar.llm.config_binding.compose_and_bind_llm_config` composes
+it once for `review_code`/`verify_completion`/`review_plan`/`scan_epics_for_spec` (each
+reached identically from the CLI, the matching MCP tool, and the Python API) and for
+`run_workflow` (bound inside `workflow/runs.py::run()`), then binds it active
+(`rebar.llm.config.gate_config`) for the whole operation so nested subcalls and
+multi-step workflow runs observe the SAME resolved `LLMConfig` — a later env/config-file
+mutation never reaches an in-progress operation; only the NEXT operation observes it.
+Every below-boundary call site (`enrich`, `epic_bug_screen`, the `overlap/*` workers,
+`plan_review/attest.py`, the completion/plan-review agent-step bridge, etc.) now calls
+`rebar.llm.config.resolve_gate_config(repo_root)` instead of `LLMConfig.from_env()`
+directly — it returns the bound operation's config when one is active, else falls back
+to a fresh `from_env()` for a genuinely standalone call. Composition failure (a missing/
+conflicting decision-bearing provider or credential) propagates uncaught — unlike the
+general operation snapshot's fail-open swallow, an LLM op never degrades to unbound
+ambient resolution; it fails before any external call. A small, explicitly allowlisted
+set of standalone composition roots (the eval/calibration harness in `llm/evals/`, and
+`plan_review/fidelity_spot_eval.py`'s CLI `main()`) retain a direct `from_env()` call —
+each is a genuine top-level entry point outside any gate run, not a migration gap.
+
 ```toml
 [tool.rebar.llm]
 model          = "claude-opus-4-8"   # top-level model (config/CLI only — the bare
@@ -735,15 +756,22 @@ standard names.)
   invocation-specific runtime override, so it stays an env var and is **not** a
   persistent `[tool.rebar]` setting.
 
-### `REBAR_OPERATION_SNAPSHOT_SHADOW` temporary diagnostic switch
+### `REBAR_OPERATION_SNAPSHOT_SHADOW` — retired (ADR 0098 complete)
 
-`REBAR_OPERATION_SNAPSHOT_SHADOW` is an active, temporary operational environment variable rather than a `[tool.rebar]` config key. It gates diagnostic-only composition and redacted logging of a `rebar.config.OperationSnapshot` beside each operation. The snapshot does not control execution.
-
-- **Default:** Unset and the canonical true spellings `true`, `1`, `yes`, and `on` enable shadow snapshots.
-- **Disable:** The canonical false spellings `false`, `0`, `no`, `off`, and the empty string disable shadow snapshots.
-- **Unrecognized values:** Any other value defaults to enabled.
-- **Failure isolation:** The diagnostic emitter catches every `Exception`, including `ConfigError` and `InsecureUrlError`, then lets the legacy operation continue. The normal `compose_operation_snapshot()` composer remains fail-fast and propagates configuration errors.
-- **Lifecycle:** The switch remains active until a future behavior-bearing cutover retires the diagnostic shadow and this switch.
+`REBAR_OPERATION_SNAPSHOT_SHADOW` no longer exists. It was a temporary diagnostic switch
+(the RP-04 S1 shadow ticket, 3a08) that composed and redact-logged a `rebar.config.
+OperationSnapshot`/`rebar.llm.config.LLMConfig` beside each operation WITHOUT controlling
+execution. ADR 0098's authoritative cutover (3a08 for CLI/command/store operations; ec44 for
+the LLM/gate/workflow surface) replaced the diagnostic shadow entirely: every public
+operation now composes ONE authoritative snapshot/config up front — via
+`rebar._operation_config.compose_and_bind_operation_snapshot` (general ops, fail-open on
+composition failure — an established, unchanged 3a08 behavior) or
+`rebar.llm.config_binding.compose_and_bind_llm_config` (LLM/gate/workflow ops, fail-fast:
+propagates a composition failure before any external call, never falls back to unbound
+ambient resolution) — and binds it for the whole operation, so nested subcalls/workflow
+steps observe the identical instance instead of re-reading the environment per call.
+`emit_shadow_snapshot`, `_shadow`, `shadow_enabled`, and this env var were deleted with the
+cutover; there is nothing left to configure.
 
 ## `ticket.default_assignee` — applied at CLAIM, not at create
 

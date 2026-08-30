@@ -303,6 +303,42 @@ def test_reconcile_check_returns_before_pause_and_pass_lock_reads(main_mod, tmp_
     pause_read.assert_not_called()
 
 
+def test_operation_snapshot_binding_does_not_leak_past_main_return(main_mod, tmp_path):
+    """Regression for the ticket-ec44 LLM-Review finding: an early ``compose_and_bind_
+    operation_snapshot()`` CM whose ``__enter__`` return value nobody references is
+    collectible immediately, which silently unwinds the binding right away — but the
+    naive fix (keep the CM alive forever at module scope) trades that bug for a worse
+    one, since this module is loaded and ``main()`` is invoked IN-PROCESS by tests
+    sharing a single interpreter/pytest-xdist worker: a binding left active past
+    ``main()``'s return would leak the bound snapshot's repo root into every later
+    test in that process, exactly the cascading "ticket system not initialized"
+    failures a leaked binding produces. Asserts BOTH halves of the contract: the
+    snapshot is actively bound to THIS call's repo root while ``main()`` is still
+    running, and it is fully unbound again once ``main()`` returns."""
+    from rebar._operation_config import active_snapshot
+
+    assert active_snapshot() is None, "no snapshot should be bound before this test runs"
+
+    observed: dict[str, object] = {}
+
+    def _run_check(repo_root: Path) -> int:
+        snapshot = active_snapshot()
+        observed["snapshot"] = snapshot
+        observed["repo_root"] = str(snapshot.repo_root) if snapshot is not None else None
+        return 0
+
+    with patch.object(main_mod, "_run_reconcile_check", _run_check):
+        rc = main_mod.main(["--mode=reconcile-check", "--repo-root", str(tmp_path)])
+
+    assert rc == 0
+    assert observed["snapshot"] is not None, "snapshot must be bound while main() runs"
+    assert observed["repo_root"] == str(tmp_path)
+    assert active_snapshot() is None, (
+        "the binding must not survive main()'s return — a lingering binding leaks "
+        "this call's repo root into every later test sharing this process"
+    )
+
+
 def test_lock_released_on_exception(main_mod, tmp_path):
     """When reconcile_once raises, release_pass_lock is still called (finally block)."""
     release_mock = MagicMock()
