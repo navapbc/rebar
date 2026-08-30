@@ -205,6 +205,21 @@ CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/
 # silently did nothing, with NO signal at all (bug 1d1b-a719-b675-4a1f); detect-only at
 # least makes it visible.
 EDGE_PATHS='infra/nginx/rebar.conf.template'
+# host-nginx include materializers + seed: compose-up.sh runs materialize-opcert-guard.sh
+# (writes /etc/nginx/opcert-guard.map.conf) and materialize-mcp-upstream.sh (installs the
+# infra/nginx/mcp-upstream.conf seed into /etc/nginx/mcp-upstream.conf), both reloading host
+# nginx. Their installed copies live OUTSIDE the compose build context and this loop never
+# invokes compose-up.sh, so a change to any of these SOURCES reaches no trigger above and
+# would otherwise never re-materialize on the box. DETECT-ONLY in v1 (the same boundary as
+# CONFIG_PATHS/EDGE_PATHS): applying means re-running an infra/ script that calls
+# `nginx -s reload`, deferred to the v2 auto-apply epic (sprucing-wise-dikkops /
+# 6d60-2d0c-6ff7-444b). compose-up.sh is enumerated for signal parity only — the loop must
+# NEVER re-run it (it brings up the Gerrit container; BOT_SERVICE is "NEVER 'gerrit'"), so
+# like CONFIG_PATHS a change is signalled for a MANUAL operator apply, never auto-applied.
+# Before this, a merged materializer-source change reached /opt/rebar and then silently did
+# nothing, with NO signal at all (bug 5524-e353-2e2d-4dbe); detect-only at least makes it
+# visible.
+MATERIALIZER_PATHS='infra/scripts/compose-up.sh infra/scripts/materialize-opcert-guard.sh infra/scripts/materialize-mcp-upstream.sh infra/nginx/mcp-upstream.conf'
 # host observability probe: re-materialized (idempotent installer) on a source change.
 # Its installed copy at /usr/local/bin lives OUTSIDE the compose build context, so a probe
 # change reaches no trigger above and would otherwise never be refreshed on the box.
@@ -743,6 +758,12 @@ fi
 if changed "$EDGE_PATHS"; then
   err nginx_edge_manual "nginx edge changed in $TARGET — infra/nginx/rebar.conf.template needs a MANUAL operator render + nginx reload (auto-apply is a v2 follow-up: epic 6d60-2d0c-6ff7-444b)"
   log "nginx edge change detected + signalled (not auto-applied in v1)"
+fi
+
+# ── host-nginx materializers (compose-up + materialize-*.sh + seed): DETECT-ONLY ──
+if changed "$MATERIALIZER_PATHS"; then
+  err nginx_materializer_manual "host-nginx materializer source changed in $TARGET — compose-up.sh / materialize-opcert-guard.sh / materialize-mcp-upstream.sh / mcp-upstream.conf need a MANUAL operator re-materialize + nginx reload (auto-apply is a v2 follow-up: epic 6d60-2d0c-6ff7-444b)"
+  log "host-nginx materializer change detected + signalled (not auto-applied in v1)"
 fi
 
 # ── review-bot: rebuild + restart ONLY on a source change ─────────────────────
