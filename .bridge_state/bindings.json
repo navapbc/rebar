@@ -1836,9 +1836,17 @@
       "updated_at": "2026-08-28T21:08:08Z"
     },
     "0894-b9b8-6590-4904": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nThe `Verify Authorship Identity` CI gate (`.github/workflows/verify-identity.yml`) enforces a blobless-checkout pack-size budget via `REBAR_CHECKOUT_PACK_LIMIT_KIB`. The deliberate budget is **100 MiB (102400 KiB)** \u2014 an intentional growth canary (commit `16a1a385`, ticket `037b`).\n\nAs part of epic `536b-8930-b922-4063` (causal-stability history reclaim), the budget was **temporarily raised to 550 MiB (563200 KiB)** as a bridge, because the `tickets`-branch blobless pack is ~481 MiB and safe causal-stability compaction alone cannot bring it under 100 MiB (proof on 536b: even N=30d coalescing lands ~365-380 MiB). The bridge keeps the health lane green while the reclaim mechanism (below-horizon commit/tree collapse) plus structural fixes W1 (batch write lane) and W2 (shard the root tree) land.\n\n## Scope of THIS ticket\n\nThis ticket tracks the **REVERSAL** of that bridge. It is a follow-up: once the 536b history reclaim + W1/W2 have landed and the measured blobless pack is back under 100 MiB, restore `REBAR_CHECKOUT_PACK_LIMIT_KIB` to `102400` and remove the bridge comment. This ticket stays open until then; it is the durable, self-documenting reminder that the raised value is temporary.\n\n## Acceptance Criteria\n\n- [ ] The 536b history-reclaim swap has landed on the `tickets` remote and the measured blobless CI-checkout pack is verified under 100 MiB.\n- [ ] `REBAR_CHECKOUT_PACK_LIMIT_KIB` in `.github/workflows/verify-identity.yml` is restored to `102400`.\n- [ ] The temporary-bridge comment referencing this ticket is removed from the workflow.\n- [ ] The verify-identity gate passes green at the restored 100 MiB budget.\n\n## Portability\n\nThe budget is a plain GitHub Actions workflow env var; restoring it is a one-line workflow edit with no dependence on any single CI provider.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Restore verify-identity pack budget to 100 MiB after 536b history reclaim lands"
+      },
       "created_at": "2026-08-29T23:30:35Z",
       "jira_id": "4590660",
       "jira_key": "REB-3917",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T23:30:38Z"
     },
@@ -3561,10 +3569,24 @@
     },
     "1137-8215-ec04-4ca0": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nRunning `rebar review-plan` on epic `759e-7dc1-675c-4877` (compliant-lemon-grunion, an epic with no `file_impact`, so it falls to the `CURRENCY_BASIS_FAIL_SAFE` / unscoped-whole-HEAD path in `attest.py:648-663`) produces a PASS verdict, but signing then fails with `stale-head`: the \"current HEAD\" reported does not match the code repo's real state.\n\nConcretely: `rebar ls-remote origin main` and `rebar ls-remote gerrit main` both confirm the real, current `main` tip is `4dafd36d2aa1f0e264634392698a1a4ba952c70b` \u2014 matching `verified_at_sha` in the attestation. But the `stale-head` error reports the \"current HEAD\" as `f1dd41a8f09967dd60c7aefb5e43c6f62fa119af`, a commit titled \"Diagnose MCP client PAT wiring in doctor\" that:\n\n- exists as a git object (`git cat-file -t f1dd41a8... ` \u2192 `commit`) \u2014 so it is reachable in the shared object store \u2014 but\n- is not the tip of `origin/main`, `gerrit/main`, nor the reviewing worktree's own branch/HEAD (`compliant-lemon-grunion-impl`, confirmed at `9a94ef9737fb` throughout, via `git reflog`).\n\nThis value was **identical across two independent `review-plan` invocations ~15 minutes apart** (different `signed_at` timestamps, same reported \"HEAD\"), which rules out an ordinary live race (a live race would show a *different*, more-recent HEAD each retry as `main` continued to move) and instead points at a **stuck/foreign value being read**, not a genuinely fresh git query against the reviewing worktree.\n\n`attest.py`'s `stale-head` path calls `signing.head_sha(_config.repo_root(repo_root))`, where `head_sha` (`src/rebar/_signing_manifest.py:202`) runs `git -C <repo_root> rev-parse HEAD`. `_config.repo_root(None)` resolves, in order, `explicit arg > REBAR_ROOT env > git toplevel of cwd` (`src/rebar/_config_sources.py:74`). `REBAR_ROOT` was confirmed unset in the reviewing shell and in `~/.zshrc`/`~/.zprofile`/`~/.bashrc`/`~/.bash_profile`. The reviewing worktree's own `git rev-parse --show-toplevel` should return its own linked-worktree root, so `repo_root` should resolve correctly to the reviewing worktree \u2014 yet the returned HEAD belongs to neither that worktree nor either remote's main.\n\nWorking hypothesis (unconfirmed \u2014 needs a maintainer with instrumentation access): the attested-mode review path may use an internal temporary checkout/worktree to pin `ref=origin/main` for the review, and that temp path may not be uniquely namespaced per invocation. On a host running ~90 concurrent agent worktrees (confirmed via `git worktree list` at the time of this report) each independently running `rebar review-plan`, two concurrent invocations could collide on a shared temp-checkout path, leaving one invocation's HEAD-freshness check reading another invocation's (or another ticket's) checked-out commit.\n\n## Impact\n\nAn epic-level (or any ticket with no scoped `file_impact`) plan-review can PASS its content review yet permanently fail to sign under concurrent multi-agent load, because the currency check races against unrelated concurrent reviews rather than the reviewing worktree's own state. This blocks `claim` (directly, and via the parent-claim cascade for every child ticket) with no available remediation path other than the disallowed `--force`.\n\n## Reproduction\n\n1. On a host running many concurrent `git worktree`-based rebar checkouts, each with active agent sessions.\n2. From one worktree, run `rebar review-plan <epic-id>` on an epic with no `file_impact` (forces the unscoped/fail-safe currency path).\n3. Review computes and signs a PASS, but the sign step's freshness check reports a `stale-head` error whose \"current HEAD\" does not match `git rev-parse HEAD` in the reviewing worktree, nor `origin/main`, nor `gerrit/main`.\n4. Retry immediately: the SAME foreign HEAD value is reported again (not a newer one), indicating a stuck/foreign read rather than a live race against `main` continuing to move.\n\n## Scope (proposed, needs confirmation by whoever picks this up)\n\n- `src/rebar/llm/plan_review/attest.py` (the `stale-head` currency check, `CURRENCY_BASIS_FAIL_SAFE` path)\n- Whatever attested-mode temp-checkout mechanism backs `source=attested` review (not yet located in this investigation \u2014 needs tracing from the review entry point through to wherever an attested snapshot's local checkout path is constructed)\n- `src/rebar/_signing_manifest.py::head_sha` (confirm whether `repo_root` passed to it is ever something other than the reviewing worktree's cwd-derived root)\n\n## Non-goals\n\nFixing the underlying \"unscoped whole-HEAD invalidation is a blunt/racy proxy\" design tension (that's a legitimate design choice per `drift_floor.py`'s own docs) \u2014 this bug is specifically about the HEAD VALUE READ being wrong/foreign, not about whether whole-HEAD invalidation is the right granularity.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Unscoped plan-review \"fail-safe\" HEAD check resolves to a foreign, unrelated commit under concurrent multi-worktree review"
       },
       "created_at": "2026-08-29T21:29:17Z",
@@ -5417,9 +5439,17 @@
       "updated_at": "2026-08-15T14:53:18Z"
     },
     "1c0d-fe83-0254-444a": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Report\n\nMultiple concurrent sessions simultaneously report `rebar review-plan` returning **INDETERMINATE** (unsigned, no determinate PASS/FAIL verdict). Sudden fleet-wide onset during a period of heavy concurrent multi-worktree activity (~70 worktrees; multiple sessions + a fanned-out batch of debug agents each running review-plan).\n\n## Observed (descriptive; not yet root-caused)\n\n- INDETERMINATE affects MULTIPLE independent sessions at once (systemic, not per-ticket).\n- Local host resources are HEALTHY: load avg ~3.5, disk 28% used (1.3Ti free), no orphaned/leaked busy-loops (scripts/check_orphaned_load.py clean bar system daemons). So NOT local CPU/disk/leak exhaustion on this box.\n- Provider config: rebar DEFAULTS TO AWS BEDROCK (`[llm] model = bedrock:us.anthropic.claude-opus-4-8`, acct 896586841071/us-east-1; rebar.toml ~L145-222). Config explicitly states the chain does NOT fail over on a credential error ('a credential error must not be masked by shopping for a provider whose key happens to work'). frontier class (review-plan) = opus on Bedrock; mixed-provider chains disable prompt caching.\n- Tickets branch shows three-way divergence at report time (local cb530119, remote-tracking af98dfad, actual origin/tickets 4fbe6114) \u2014 heavy concurrent ticket writes from many sessions.\n\n## Leads to test (for the investigator \u2014 do NOT confirm from source alone; these are dynamic)\n\n1. **Bedrock account-level throttling** (ThrottlingException / 429 / TPM/RPM quota) from a burst of concurrent frontier/opus review-plan runs across sessions sharing ONE Bedrock account, mis-surfaced as INDETERMINATE with no failover. Likely SELF-INFLICTED by concurrent fan-out. Check the runner's exception classification (src/rebar/llm/runner.py, structured_run.py, review_kernel/verify.py+decide.py) for how a provider throttle/timeout/truncation degrades to INDETERMINATE.\n2. **Stale-store gate refusal** \u2014 recent main commit 'Refuse gate certification on a stale store' (2598909d) + 'Fail closed on an unobtainable claim-gate basis' (1c0a202b). Under concurrent tickets-branch write contention the store could read stale for many sessions at once, refusing certification \u2192 INDETERMINATE. Check whether a stale-store refusal path returns INDETERMINATE.\n3. Truncation/length collapse (structured_run.py:522 'finish_reason=length ... collapses to INDETERMINATE') under a degraded/throttled provider returning partial turns.\n\n## Impact\n\nFleet-wide: no session can pass the plan-review claim gate \u2192 cannot claim tickets \u2192 work stalls across all sessions. Agents cannot --force (disallowed).\n\n## Investigate WITHOUT adding Bedrock load\n\nDo NOT reproduce by running live review-plan storms against Bedrock \u2014 that aggravates the incident. Reproduce the CLASSIFICATION path with an injected/mocked provider throttle/timeout/truncation and assert the resulting verdict, and inspect the stale-store refusal path locally.\n\nReported against origin/main at commit 55589c15 (current HEAD at report time).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "review-plan returns INDETERMINATE fleet-wide under concurrent multi-session load"
+      },
       "created_at": "2026-08-29T23:30:39Z",
       "jira_id": "4590661",
       "jira_key": "REB-3918",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T23:30:41Z"
     },
@@ -11233,6 +11263,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:55Z"
     },
+    "334d-71ba-589f-4eea": {
+      "created_at": "2026-08-30T01:11:00Z",
+      "jira_id": "4590667",
+      "jira_key": "REB-3924",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:03Z"
+    },
     "3350-90b1-2651-4c50": {
       "baseline": {
         "assignee": {
@@ -11374,6 +11411,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:21Z"
+    },
+    "3409-9824-6d4e-469f": {
+      "created_at": "2026-08-30T01:11:03Z",
+      "jira_id": "4590668",
+      "jira_key": "REB-3925",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:05Z"
     },
     "341a-1ba5-b7e8-4e15": {
       "baseline": {
@@ -11751,10 +11795,24 @@
     },
     "3581-9cf1-d4c0-4082": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem\n\n`acli` (the Atlassian CLI) is a hard runtime prerequisite for rebar's Jira **Cloud** paths, and nothing at install time says so.\n\n- It is invoked as a bare binary resolved from `PATH`: `_DEFAULT_ACLI_CMD: list[str] = [\"acli\"]` (`src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py:32`), used throughout `adapters/jira/acli_cli_ops.py`.\n- It **cannot** be a Python dependency \u2014 it is an external binary \u2014 so no extra can pull it in.\n- The Jira-related extras declare only Python packages: `jira-datacenter = [\"jira>=3.8,<4\"]` and `adf = [\"marklas\", \"mistune\"]`. There is **no** extra for the Cloud/acli path at all, and no extra mentions the binary.\n- It IS documented in `docs/jira-sync-setup.md` (pinned version + sha256, download URL) \u2014 but in a **CI-setup** context (`gh variable set ACLI_VERSION`), not as a prerequisite for someone installing the package.\n\n**Consequence.** A user installs a Jira extra, gets a successful install, and then every Jira-mutating operation fails at runtime with `[Errno 2] No such file or directory: 'acli'`. That errno names a file, not a missing dependency, and gives no install instruction \u2014 so the user has no path from the failure to the fix.\n\nObserved 2026-08-28 on the deployed box: with credentials finally reaching the container, `bridge_check_access` returned `{\"verdict\":\"FAIL\",\"steps\":[{\"step\":\"STEP_CREATE\",\"reason\":\"exception\",\"detail\":\"[Errno 2] No such file or directory: 'acli'\"}]}`. The box case is filed separately as `royalistic-gorgeable-norwayrat` (54e6-ecb0-10c7-451f) \u2014 this ticket is the **package-level** sibling: the same gap as it reaches anyone who installs rebar.\n\n## Why it matters for the release\n\nDocumentation and error messages ship. Telling a user to `pip install nava-rebar[...]` for Jira and leaving them to discover an undocumented binary via an errno is a defect in the installed product, not in our deployment.\n\n## Two parts, both wanted\n\n**1. Document it.** State `acli` as a prerequisite wherever the Jira extras are described (extras documentation, install docs, and the packaging metadata description if extras are listed there), with an install pointer. Say plainly WHICH paths need it: the Cloud adapter needs `acli`; the Data Center adapter uses the `jira` Python library and does not.\n\n**2. Fail usefully.** Replace the bare `FileNotFoundError` with a typed, actionable failure at the point of use or in a preflight: name the missing binary, say it is required for Jira Cloud operations, and point at the install docs. `access_check` already fail-closes with typed verdicts (`missing_credentials`, `missing_project`), so a `missing_acli` verdict fits the existing shape rather than inventing one. This is the same principle just landed on `potential-powellite-mouflon` (dbca): a caller-visible failure should carry the class that tells the caller what to do.\n\n## Acceptance Criteria\n\n- [ ] The Jira extras' documentation names `acli` as a required external binary for the Cloud path, with an install pointer, and states that the Data Center path does not need it.\n- [ ] A missing `acli` produces a typed, actionable failure naming the binary and the remedy \u2014 not a bare `[Errno 2]`.\n- [ ] The typed failure is distinguishable from `missing_credentials` and `missing_project`, so a caller can tell \"not installed\" from \"not configured\".\n- [ ] The Data Center path is demonstrably unaffected \u2014 it must not acquire a dependency on `acli`.\n\n## Testing\n\n- Drive the failure with `acli` genuinely absent from `PATH` (manipulate `PATH`, do not monkeypatch the check away) and assert the typed code and message content.\n- **Anchor against vacuity:** a test asserting \"an error was raised\" passes for the WRONG error, which is the defect being fixed. Assert the specific code, and prove the three states are distinguished from each other \u2014 missing-binary vs missing-credentials vs missing-project must produce three different results, not merely three failures.\n- Add a positive control: with a stub `acli` on `PATH`, the preflight passes \u2014 otherwise the check could be unconditionally failing and the test would not notice.\n- Mutation-check: collapse the new code into the existing ones and confirm the discrimination test fails.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "acli is an undeclared, undocumented runtime prerequisite of the Jira extras: install succeeds, then every Cloud path dies with a bare errno"
       },
       "created_at": "2026-08-29T01:01:38Z",
@@ -11800,11 +11858,25 @@
     },
     "35ab-f0e0-3e4a-4b72": {
       "baseline": {
-        "assignee": null,
-        "description": "Discovered while fixing dbca-97ac-ad96-4d6d (potential-powellite-mouflon). Two additional sites raise a bare `WorkflowError`, so error_code_for still maps them to `llm_unavailable` even though neither is an LLM outage:\n\n1. src/rebar/llm/workflow/executor.py:541 \u2014 `raise WorkflowError(\"unknown scripted step {name!r} (not in the step registry)\")`. This is a caller/plan-authoring error (an unknown `uses:` step) \u2014 arguably `invalid_input`.\n2. src/rebar/llm/workflow/editor.py:475 \u2014 `raise WorkflowError(\"the editor front-end bundle is missing ...\")`. This is a local build/environment setup condition \u2014 neither `invalid_input` nor `not_found` cleanly fit; may warrant a new code or a different mapping.\n\nBoth are OUT OF SCOPE for dbca because each needs a NEW error-code design decision (what code should each map to?), which the operator directed to escalate rather than decide inline. The dbca fix deliberately left the bare `WorkflowError` base mapping to `llm_unavailable` to protect execute-time genuine LLM outages (AC3).\n\nAcceptance: decide the correct error code for each site (likely a new WorkflowError subclass per site, mirroring WorkflowNotFoundError), add tests through the actual surfaces proving the code, and keep execute-time outages mapping to llm_unavailable.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "Discovered while fixing dbca-97ac-ad96-4d6d (potential-powellite-mouflon). This ticket is now **scoped to the one reachable, unambiguous site**; the two design-decision siblings were split out (see \"Split-out siblings\" below), following the /rebar-debug escalate-design-decisions guard.\n\n## Problem (in scope)\n`src/rebar/llm/workflow/executor.py:541` raises a **bare** `WorkflowError(\"unknown scripted step {name!r} (not in the step registry)\")`. Because `WorkflowError` subclasses `LLMError`, `error_code_for` (`src/rebar/_errors.py`, branch 7) maps it to `llm_unavailable`. An unknown scripted `uses:` step is a caller/plan-authoring fault, not an LLM outage.\n\n## Mechanism / reachability (proven, see Phase-1 RCA comment)\n- The linter (`lint_refs.py`) validates step shape/fields but NOT scripted-step registry membership, so an unknown `uses:` name passes lint and is only caught at execute time by this raise.\n- It reaches the classification seam through the generic MCP guard (`_mcp_errors._envelope_error`) and the LLM-tier gate surface (`_mcp_llm._structured_llm_failure`, used by review_plan/verify_completion/review_code/scan_spec). Runtime-confirmed: all three surfaces currently return `llm_unavailable`.\n\n## Contract violated\ndbca established the per-subclass taxonomy: a workflow that WAS found but is invalid (parse/lint/migrate) is caller `invalid_input`; only the bare execute base stays `llm_unavailable` (protects genuine execute-time outages, dbca AC3). An unknown `uses:` step is a found-but-invalid workflow \u2014 the same class as `WorkflowValidationError`\u2192`invalid_input`. `invalid_input` is already in `KNOWN_ERROR_CODES` (no new vocabulary).\n\n## Fix plan\n1. `src/rebar/llm/errors.py`: add `WorkflowUnknownStepError(WorkflowError)` \u2014 a caller/plan-authoring invalid-workflow error for an unknown scripted step; simple message passthrough (preserve the exact text), mirroring `WorkflowNotFoundError`.\n2. `src/rebar/_errors.py`: add `WorkflowUnknownStepError` to the `invalid_input` group in `_workflow_caller_code` (extends the existing isinstance tuple \u2014 no new branch, no complexity increase). Update the docstring/comment.\n3. `src/rebar/llm/workflow/executor.py`: raise `WorkflowUnknownStepError(...)` instead of the bare base, preserving the message; import it.\n4. Held-out regression test (new): assert the executor unknown-step classifies as `invalid_input` through `error_code_for` AND `_structured_llm_failure` (and `!= llm_unavailable`), and that the bare `WorkflowError` execute base + genuine outages STILL map to `llm_unavailable` (AC3 unchanged).\n\n## Acceptance Criteria\n- [ ] AC1: An unknown scripted `uses:` step (executor.py:541) classifies as `invalid_input`, not `llm_unavailable`, via `error_code_for` and the `_structured_llm_failure` LLM-tier surface.\n- [ ] AC2: The bare `WorkflowError` execute base and genuine LLM outages (`LLMUnavailableError`, `LLMError`) still classify as `llm_unavailable` (dbca AC3 preserved).\n- [ ] AC3: The emitted code is a member of `rebar.KNOWN_ERROR_CODES`; no new vocabulary added.\n- [ ] AC4: Held-out RED\u2192GREEN regression test asserts on the error CODE (not message text) and had teeth (mutation returns it to RED).\n\n## Split-out siblings (escalated design decisions \u2014 NOT in this ticket)\n- **551b-1a30-ac2b-4127** (sanidine-cilium-eland): editor.py:475 missing-bundle `WorkflowError`. CLI-only (not MCP-exposed; the CLI prints the raw message and never classifies), so not observably misclassified; correct code needs a NEW-vocabulary design decision the operator directed to escalate.\n- **73d8-4871-1b49-4047** (brainy-convulsant-unicorn): `ExpressionError` (execute-time workflow wiring) also classifies as `llm_unavailable`; whether to reclassify an execute-time expression fault is a design decision.\n\nOrigin: caused_by 8a31-e1c3-cf31-4239 (blanket LLMError\u2192llm_unavailable), class plan_defect \u2014 same as dbca.",
         "priority": "Medium",
-        "status": "To Do",
-        "summary": "Two more bare WorkflowError sites misclassify as llm_unavailable (executor unknown-step, editor missing-bundle)"
+        "status": "In Progress",
+        "summary": "Bare WorkflowError at executor unknown-step misclassifies as llm_unavailable (should be invalid_input)"
       },
       "created_at": "2026-08-28T23:28:10Z",
       "jira_id": "4590600",
@@ -16387,6 +16459,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:26Z"
     },
+    "4b2a-3ae8-14ee-463a": {
+      "created_at": "2026-08-30T01:11:06Z",
+      "jira_id": "4590669",
+      "jira_key": "REB-3926",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:08Z"
+    },
     "4b2f-cb7b-ac31-44de": {
       "baseline": {
         "assignee": null,
@@ -18534,9 +18613,17 @@
       "updated_at": "2026-08-15T14:59:38Z"
     },
     "551b-1a30-ac2b-4127": {
+      "baseline": {
+        "assignee": null,
+        "description": "Split from 35ab-f0e0-3e4a-4b72 (fightable-nirvanic-kitten) \u2014 the executor unknown-step site was fixed there; THIS site was escalated because it needs a NEW error-code design decision the operator directed not be made inline.\n\n## Site\n`src/rebar/llm/workflow/editor.py:475` \u2014 `raise WorkflowError(\"the editor front-end bundle is missing (.../editor.js). Build it with: npm ... build\")` (raised when `assets_available()` is False).\n\n## Why escalated, not fixed inline\n1. **Design decision required.** The correct error code is genuinely ambiguous \u2014 a missing LOCAL BUILD ARTIFACT is neither `invalid_input` (the caller's path is fine) nor caller-`not_found` (the caller named no missing resource; the environment is unbuilt). It may warrant a NEW vocabulary code (e.g. a dependency/asset-unavailable code) or a deliberate mapping to an existing one (`command_failed`?). Choosing is a `KNOWN_ERROR_CODES` vocabulary/design decision.\n2. **Not observably misclassified today.** `edit_workflow` is CLI-only \u2014 it is NOT registered as an MCP tool. The CLI `_workflow_edit` (`src/rebar/_cli/_workflow_commands.py:128`) catches `WorkflowError` and prints the raw `Error: <msg>` (exit 1); it never routes through `error_code_for`. So the bare `WorkflowError` here never actually surfaces as `llm_unavailable` on any live surface \u2014 the `error_code_for` mapping is latent. Fixing it would change behavior only for a hypothetical future MCP exposure, which is speculative rather than restoration of an observed misclassification.\n\n## Acceptance (needs operator input)\n- [ ] Operator decides the intended error code for a missing editor build artifact (new code vs existing; and whether this site should even be classified given it is CLI-only today).\n- [ ] If a code is chosen: dedicated `WorkflowError` subclass mirroring `WorkflowNotFoundError`, mapped in `error_code_for`/`_workflow_caller_code`, tested through the actual surface, execute-time outages still `llm_unavailable`, vocabulary + docs (mcp-reference / common.schema.json) updated.\n\ncaused_by shares the parent's origin (8a31-e1c3-cf31-4239) \u2014 the blanket LLMError\u2192llm_unavailable mapping.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Editor missing-bundle WorkflowError: decide error code (escalated design decision; currently CLI-only/latent)"
+      },
       "created_at": "2026-08-29T23:30:42Z",
       "jira_id": "4590662",
       "jira_key": "REB-3919",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T23:30:44Z"
     },
@@ -21824,10 +21911,24 @@
     },
     "6485-fd81-5f58-4f55": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Suspected sibling of 7dea-2f00-db57-4a96 (completion-cache shared-tmp collision)\n\n`src/rebar/llm/plan_review/sizing.py::save_checkpoint` writes `tmp = d / f'.tmp-{envelope.digest}.json'` then `tmp.replace(path)`, where `_checkpoint_dir` is `.rebar/cache/plan-review/<ticket_id>` \u2014 keyed by ticket only, NOT run-scoped. Two concurrent plan-review workers saving a checkpoint for the SAME (ticket, digest) therefore target the SAME temp file: both write it, both call `tmp.replace(path)`, and the second raises `FileNotFoundError` (the first replace consumed the temp), which the outer `except Exception: return False` swallows \u2014 a silently lost checkpoint. This is the exact construct proven in 7dea (shared deterministic temp name + concurrent writers), in a different subsystem.\n\n## Mandatory reproduction before remediation\nMirror 7dea's experiment: drive two concurrent save_checkpoint writers for the same ticket+digest with a barrier forcing both temp writes before either replace; capture each writer's return value, suppressed exceptions, final JSON validity, and orphaned temp files. Include a cross-process case.\n\n## Remediation if reproduced\nSame fix shape as 7dea: unique same-directory temp via a stdlib tempfile primitive (`tempfile.mkstemp(dir=d, ...)`), retain atomic replace onto the shared final `<digest>.json`, and bounded cleanup of only the writer's own temp on failure. No contract/output change.\n\n## Acceptance Criteria\n- [ ] A deterministic two-writer experiment proves or falsifies the collision (thread + cross-process).\n- [ ] If reproduced, a RED regression test fails against the shared `.tmp-<digest>.json` implementation before the fix.\n- [ ] If reproduced, writers use unique same-directory temp paths and atomically replace the shared final key; concurrent stress leaves one valid record, no partial, no residue.\n- [ ] If falsified, no production change; close with the falsifying evidence.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "plan-review checkpoint save_checkpoint shares a .tmp-<digest>.json path across concurrent same-ticket writers"
       },
       "created_at": "2026-08-28T21:08:11Z",
@@ -22748,6 +22849,13 @@
       "peer_parent": "REB-2658",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:24Z"
+    },
+    "6816-69bf-460d-4db1": {
+      "created_at": "2026-08-30T01:11:09Z",
+      "jira_id": "4590670",
+      "jira_key": "REB-3927",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:11Z"
     },
     "6818-615f-555e-4bb9": {
       "baseline": {
@@ -24807,6 +24915,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-18T05:38:54Z"
     },
+    "72d2-25a6-cfc3-4fb6": {
+      "created_at": "2026-08-30T01:11:11Z",
+      "jira_id": "4590671",
+      "jira_key": "REB-3928",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:14Z"
+    },
     "72d5-79ec-9e2e-4a2b": {
       "baseline": {
         "assignee": null,
@@ -25093,9 +25208,17 @@
       "updated_at": "2026-08-15T15:02:30Z"
     },
     "73d8-4871-1b49-4047": {
+      "baseline": {
+        "assignee": null,
+        "description": "Discovered during the Step 7 sibling sweep of 35ab-f0e0-3e4a-4b72 (fightable-nirvanic-kitten).\n\n## Site\n`ExpressionError(WorkflowError)` \u2014 defined at `src/rebar/llm/workflow/executor.py:251`, raised from `src/rebar/llm/workflow/interpreter.py` (lines ~144-205) and `executor.py` (~262-307) for execute-time expression-resolution failures: an input not set, a step that produced no such output, a loop/map var not in scope, a secret/env var not available, an unresolvable `${{ }}` expression.\n\n## Symptom\n`error_code_for(ExpressionError(...))` \u2192 `llm_unavailable` (it is a `WorkflowError` subclass and falls through to branch 7). An execute-time wiring/output-resolution failure is not an LLM outage, so this is arguably a misclassification of the same family as 35ab.\n\n## Why a follow-up rather than an inline fix\nThe correct code is a design decision. Unlike the executor unknown-step (a plan-authoring invalid workflow \u2192 `invalid_input`, fixed under 35ab), an `ExpressionError` fires at EXECUTE time \u2014 the same phase dbca deliberately kept mapping to `llm_unavailable` to protect genuine outages (AC3). Whether an execute-time expression-resolution failure should become `invalid_input` (caller wiring bug), a new code, or legitimately stay on the execute base needs an operator ruling. Its docstring notes it is \"a value the linter could not have known was missing,\" i.e. a runtime-state fault, which blurs the caller-vs-execute line.\n\n## Acceptance (needs operator input)\n- [ ] Operator decides whether ExpressionError should be reclassified (and to what) or intentionally remain `llm_unavailable` as an execute-base failure.\n- [ ] If reclassified: subclass + `error_code_for` mapping + tests through the real surface; execute-time genuine outages still `llm_unavailable`.\n\nShares the parent's origin 8a31-e1c3-cf31-4239 (blanket LLMError\u2192llm_unavailable).",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "ExpressionError (execute-time workflow wiring) also classifies as llm_unavailable \u2014 decide correct code"
+      },
       "created_at": "2026-08-29T23:30:45Z",
       "jira_id": "4590663",
       "jira_key": "REB-3920",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T23:30:48Z"
     },
@@ -25501,7 +25624,7 @@
     "759e-7dc1-675c-4877": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\n\nEvery change to the plan-review gate \u2014 a Pass-1 criterion prompt, a Pass-2 impact/validity question, a Pass-3 formula or threshold \u2014 lands on a handful of live dogfood reviews. No standing instrument answers \"did this change make the gate better or worse?\" before it ships; the prior calibration epic (`pastoral-aquatic-viper`, 6982) rejected live A/B batches on cost and parked the human gold set. The work is scattered across six epics and several orphan stories (`jira-reb-529`, `jira-reb-1589`, `fort-wisp-wren`, `spin-cub-usher`, `ridiculous-expert-mouse`, `auspicious-torrid-curlew`). This epic unifies them behind one harness.\n\nThe instrument already mostly exists as data. The live rebar store holds ~4,300 `plan_review_result_v2` sidecars on ~1,280 tickets (2026-06-27 \u2192 now; ~2,000 older ones pruned from the tree but recoverable from `origin/tickets` history) and `~/legacy-modernization-navigator` holds 74 more. Each v2 sidecar retains the raw Pass-1 findings (prose + evidence + scenarios + criteria), the complete Pass-2 answer vector (graded binaries + severity attributes), and the Pass-3 outputs (validity, impact, priority, the exact `block_threshold`, decision). The reviewed plan text is not stored but is reconstructable from ticket `EDIT`/`SNAPSHOT` history and verifiable byte-exactly against the stored `material_fingerprint`. The store also carries free outcome labels: 2,483 revise\u2192re-review pairs (finding survival via `norm_id`), 208 verdict flips on byte-identical material (the reviewer-noise floor), 84 `plan_defect` bug closes, 89 `caused_by` links, 199 plan-PASS\u2192completion-FAIL tickets, 18 reopens.\n\n## Approach\n\nThree eval tiers, ordered by cost, each measuring one pass in isolation while holding the others fixed:\n\n- **Tier 0 \u2014 Pass-3 replay (zero LLM).** Re-run `review_kernel.decide.pass3_decide` (and the post-verdict floors) over the whole corpus with a candidate formula/threshold/routing overlay; diff against stored decisions. Generalises `docs/calibration/plan_v5_rescore.py` and `docs/experiments/calibrate_plan_review_thresholds.py`. Runs on every proposal, unlimited.\n- **Tier 1 \u2014 Pass-2 replay (Sonnet, ~$0.5/review uncached).** Re-run the verifier with candidate questions/prompt on the *stored* Pass-1 findings plus reconstructed plan text via the `verify_findings(run_chunk=\u2026)` seam; score per-question agreement against stored answers, then feed Tier 0.\n- **Tier 2 \u2014 Pass-1 replay (Opus, ~$3.4/review uncached, plus a Tier-1 run on the new findings).** Re-run finders with candidate criteria on a fixed stratified sample (~20 tickets); compare finding sets by `norm_id`/criterion; single-criterion mode (~$0.17/call) for per-criterion edits.\n\nNon-negotiable invariants, enforced by the harness rather than by convention:\n\n1. **Hard budget.** A committed ledger tracks every eval call priced via `genai-prices`; every run pre-flights a cost estimate and refuses to start if projected spend would exceed the remaining allocation. Epic-wide cap is **$200** total with a $30 reserve; commissioning spend is planned at \u2264$120 (one Tier-1 reproduction run to measure verifier noise, one Tier-2 baseline sample). Per-proposal costs are published.\n2. **Model parity.** Every LLM re-run uses the exact production model class for that pass (frontier Opus for Pass 1, standard Sonnet for Pass 2) through **Bedrock only**, on a homogeneous provider chain (the mixed Bedrock+Anthropic fallback silently disables prompt caching and roughly doubles cost). The harness records the per-pass model id in every result, refuses to diff runs whose per-pass model ids differ, and refuses to start when the configured model differs from the corpus baseline's `provider_provenance.ran_model`. Substituting a cheaper model to save budget is forbidden: it confounds the measurement.\n3. **Offline first.** Tier 0 and all label joins are pure functions of the frozen corpus; no proposal may be assessed on a live-only signal. Consistent with ADR 0054 (the field corpus is the instrument) and with 6982's rejection of live A/B.\n4. **Noise-aware acceptance.** A change is reported as regressing/improving only when its label-proxy deltas exceed the noise band measured from identical-material flips and the Tier-1 reproduction run; otherwise \"indistinguishable\".\n\n## Scope\n\nNew package `src/rebar/llm/evals/plan_replay/` (corpus, labels, tier runners, ledger, report) with a `python -m rebar.llm.evals.plan_replay` entry; frozen corpus manifest + ledger + reports under `docs/experiments/plan-review-gate/replay/`; an ADR and a contributor guide section; fixes to `usage_log` ticket attribution. No CI provider dependency \u2014 everything runs locally.\n\n## Acceptance Criteria\n\n- [ ] A frozen, versioned replay corpus exists covering both stores (tree + git-recovered sidecars), with at-review plan text reconstructed and fingerprint-verified for \u226595% of v2 sidecars; verified by the corpus manifest's coverage counts.\n- [ ] Outcome labels and a reviewer-noise floor are computed from the corpus with no LLM calls and joined to every review/finding; verified by a labels report listing counts per label source.\n- [ ] A Pass-3 change (formula, threshold, routing overlay) can be assessed over the entire corpus with zero LLM calls, producing a diff report (verdict flips, per-criterion deltas, label-proxy precision/recall, friction rate); verified by replaying current code against itself with zero diffs and replaying a known historical threshold change reproducing its documented effect.\n- [ ] A Pass-2 change can be assessed on a stratified sample using stored Pass-1 findings, with per-question agreement vs stored answers and downstream Tier-0 metrics; verified by a reproduction run (unchanged questions) whose agreement establishes the noise floor.\n- [ ] A Pass-1 change can be assessed on a fixed stratified sample with finding-set comparison by `norm_id`/criterion and downstream Tier-1/Tier-0 metrics; verified by one baseline sample run.\n- [ ] Every LLM eval call is priced and written to a committed ledger; a run whose pre-flight estimate exceeds remaining allocation is refused; total ledger spend at epic close is \u2264 $200; verified by the ledger file and a test of the refusal path.\n- [ ] Every eval result records the per-pass model id; the harness refuses to diff results with differing model ids and refuses to run a pass on a model other than its production class via Bedrock; verified by unit tests and by the ledger showing only Bedrock Opus/Sonnet ids.\n- [ ] Prompt caching is confirmed active for eval runs (cache_read_tokens > 0 on the second call of a run); verified from the usage log.\n- [ ] A contributor-facing protocol (ADR + docs) states which tier a proposal needs, the required report artifact, and the noise-band acceptance rule; verified by the docs landing and being referenced from `docs/plan-review-gate.md`.\n\n## Child decomposition\n\nCorpus builder (criterion 1) \u2192 outcome labels + noise floor (2) \u2192 Tier-0 harness (3) \u2192 Tier-1 harness (4) \u2192 Tier-2 harness (5) \u2192 budget ledger + model-parity guard + homogeneous Bedrock chain (6, 7, 8; includes the usage-log ticket-attribution bug) \u2192 change protocol ADR + docs (9). Folded-in existing work: `ridiculous-expert-mouse` (per-criterion fixture eval, a Tier-2 single-criterion consumer), `auspicious-torrid-curlew` (deterministic-floor candidates mined via Tier-0 replay), `brutal-idiocratic-rodent` (optional human-adjudicated gold subset, deferred enrichment). `jira-reb-529` is superseded: its recorded-LLM-response mocking is infeasible because prompts/responses are never persisted; the sidecar-replay tiers deliver its intent. `jira-reb-1589` and `fort-wisp-wren` are consumers that depend on this harness; `spin-cub-usher` and `yip-gem-teak` are related but out of scope.\n\n## Non-goals\n\nChanging any production criterion, question, or threshold (this epic builds the instrument); a full human-adjudicated gold set; live A/B in the production gate.",
+        "description": "## Context / Problem\n\nEvery change to the plan-review gate \u2014 a Pass-1 criterion prompt, a Pass-2 impact/validity question, a Pass-3 formula or threshold \u2014 lands on a handful of live dogfood reviews. No standing instrument answers \"did this change make the gate better or worse?\" before it ships; the prior calibration epic (`pastoral-aquatic-viper`, 6982) rejected live A/B batches on cost and parked the human gold set. The work is scattered across six epics and several orphan stories (`jira-reb-529`, `jira-reb-1589`, `fort-wisp-wren`, `spin-cub-usher`, `ridiculous-expert-mouse`, `auspicious-torrid-curlew`). This epic unifies them behind one harness.\n\nThe instrument already mostly exists as data. The live rebar store holds ~4,300 `plan_review_result_v2` sidecars on ~1,280 tickets (2026-06-27 \u2192 now; ~2,000 older ones pruned from the tree but recoverable from `origin/tickets` history) and `~/legacy-modernization-navigator` holds 74 more. Each v2 sidecar retains the raw Pass-1 findings, the complete Pass-2 answer vector, and the Pass-3 outputs (validity, impact, priority, `block_threshold`, decision). The reviewed plan text is not stored but is reconstructable from ticket `EDIT`/`SNAPSHOT` history and matchable against the stored `material_fingerprint` \u2014 a hash over a NORMALIZED, PARTIAL basis (description with checkbox-state/whitespace normalized away, file_impact, sorted child ids), so a match establishes normalized-material equivalence, not byte-exact text reconstruction. The store also carries free outcome labels: 2,483 revise\u2192re-review pairs, 208 verdict flips on byte-identical material (the reviewer-noise floor), 84 `plan_defect` bug closes, 89 `caused_by` links, 199 plan-PASS\u2192completion-FAIL tickets, 18 reopens.\n\n## Approach\n\nThree eval tiers, ordered by cost, each measuring one pass in isolation while holding the others fixed:\n\n- **Tier 0 \u2014 Pass-3 replay (zero LLM).** Re-run `review_kernel.decide.pass3_decide` (and the post-verdict floors) over the whole corpus with a candidate formula/threshold/routing overlay; diff against stored decisions. Generalises `docs/calibration/plan_v5_rescore.py` and `docs/experiments/calibrate_plan_review_thresholds.py`. Runs on every proposal, unlimited.\n- **Tier 1 \u2014 Pass-2 replay (Sonnet, ~$0.5/review uncached).** Re-run the verifier with candidate questions/prompt on the *stored* Pass-1 findings plus reconstructed plan text via the `verify_findings(run_chunk=\u2026)` seam; score per-question agreement against stored answers, then feed Tier 0. The model re-run consumes the same normalized material the corpus builder reconstructs \u2014 normalized-basis equivalence is what the replay needs, not byte-exact text.\n- **Tier 2 \u2014 Pass-1 replay (Opus, ~$3.4/review uncached, plus a Tier-1 run on the new findings).** Re-run finders with candidate criteria on a fixed stratified sample (~20 tickets); compare finding sets by `norm_id`/criterion; single-criterion mode (~$0.17/call) for per-criterion edits.\n\nNon-negotiable invariants, enforced by the harness rather than by convention:\n\n1. **Hard budget.** A committed ledger tracks every eval call priced via `genai-prices`; every run pre-flights a cost estimate and refuses to start if projected spend would exceed the remaining allocation. Epic-wide cap is **$200** total with a $30 reserve; commissioning spend is planned at \u2264$120. Per-proposal costs are published.\n2. **Model parity.** Every LLM re-run uses the exact production model class for that pass (frontier Opus for Pass 1, standard Sonnet for Pass 2) through **Bedrock only**, on a homogeneous provider chain (mixed Bedrock+Anthropic silently disables prompt caching and roughly doubles cost). The harness records the per-pass model id in every result, refuses to diff runs whose per-pass model ids differ, and refuses to start when the configured model differs from the corpus baseline's `provider_provenance.ran_model`. Substituting a cheaper model to save budget is forbidden.\n3. **Offline first.** Tier 0 and all label joins are pure functions of the frozen corpus; no proposal may be assessed on a live-only signal. Consistent with ADR 0054 and with 6982's rejection of live A/B.\n4. **Noise-aware acceptance.** A change is reported as regressing/improving only when its label-proxy deltas exceed the noise band measured from identical-material flips and the Tier-1 reproduction run; otherwise \"indistinguishable\".\n\n## Scope\n\nNew package `src/rebar/llm/evals/plan_replay/` (corpus, labels, tier runners, ledger, report) with a `python -m rebar.llm.evals.plan_replay` entry; frozen corpus manifest + ledger + reports under `docs/experiments/plan-review-gate/replay/`; an ADR and a contributor guide section; fixes to `usage_log` ticket attribution. No CI provider dependency \u2014 everything runs locally.\n\n## Acceptance Criteria\n\n- [ ] A frozen, versioned replay corpus exists covering both stores, with at-review plan text reconstructed and material-fingerprint-equivalent (normalized basis, full legacy generation ladder \u2014 see `celestine-treasonous-ewe`) for a majority of v2 sidecars; the builder reports the observed ratio without a hard threshold here \u2014 that ratio feeds `expectable-clownlike-ynambu` to decide if/where a floor is warranted; verified by the manifest's coverage counts and `verified_ratio`.\n- [ ] Outcome labels and a reviewer-noise floor are computed from the corpus with no LLM calls and joined to every review/finding; verified by a labels report listing counts per label source.\n- [ ] A Pass-3 change (formula, threshold, routing overlay) can be assessed over the entire corpus with zero LLM calls, producing a diff report (verdict flips, per-criterion deltas, label-proxy precision/recall, friction rate); verified by replaying current code against itself with zero diffs and replaying a known historical threshold change reproducing its documented effect.\n- [ ] A Pass-2 change can be assessed on a stratified sample using stored Pass-1 findings, with per-question agreement vs stored answers and downstream Tier-0 metrics; verified by a reproduction run whose agreement establishes the noise floor.\n- [ ] A Pass-1 change can be assessed on a fixed stratified sample with finding-set comparison by `norm_id`/criterion and downstream Tier-1/Tier-0 metrics; verified by one baseline sample run.\n- [ ] Every LLM eval call is priced and written to a committed ledger; a run whose pre-flight estimate exceeds remaining allocation is refused; total ledger spend at epic close is \u2264 $200; verified by the ledger file and a test of the refusal path.\n- [ ] Every eval result records the per-pass model id; the harness refuses to diff results with differing model ids and refuses to run a pass on a model other than its production class via Bedrock; verified by unit tests and the ledger showing only Bedrock Opus/Sonnet ids.\n- [ ] Prompt caching is confirmed active for eval runs (cache_read_tokens > 0 on the second call); verified from the usage log.\n- [ ] A contributor-facing protocol (ADR + docs) states which tier a proposal needs, the required report artifact, and the noise-band acceptance rule; verified by the docs landing and being referenced from `docs/plan-review-gate.md`.\n\n## Child decomposition\n\nCorpus (1) \u2192 labels/noise floor (2) \u2192 Tier-0 (3) \u2192 Tier-1 (4) \u2192 Tier-2 (5) \u2192 ledger + model-parity + Bedrock chain (6-8, incl. the usage-log bug) \u2192 protocol ADR + docs (9). Folded in: `ridiculous-expert-mouse` (Tier-2 single-criterion consumer), `auspicious-torrid-curlew` (Tier-0-mined deterministic-floor candidates), `brutal-idiocratic-rodent` (deferred human-gold enrichment). `jira-reb-529` superseded (recorded-LLM-response mocking is infeasible; sidecar-replay delivers its intent). `jira-reb-1589`/`fort-wisp-wren` are downstream consumers; `spin-cub-usher`/`yip-gem-teak` are related but out of scope.\n\n## Non-goals\n\nChanging any production criterion, question, or threshold; a full human-adjudicated gold set; live A/B in the production gate.",
         "priority": "High",
         "status": "To Do",
         "summary": "Plan-review process regression harness: replayable corpus + tiered evals under a hard $200 Bedrock budget"
@@ -26251,10 +26374,24 @@
     },
     "79a4-eae7-e5c7-4713": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem\n\nRemoving the `refresh_scoped_snapshot(ctx)` call at `src/rebar/_engine/rebar_reconciler/run_differs.py:237` **survives the entire reconciler suite \u2014 all 3,637 tests pass**. Only the live Jira DC lane catches it.\n\nMeasured 2026-08-28 while closing `seagreen-fortuitous-crayfish` (`f449-be6a-be56-4fef`), whose fix that call implements.\n\n## Why this matters more than a missing test\n\nThe overlay this call feeds has genuine teeth: mutating its *behaviour* is killed by 5 tests, including an anchored clobber pair with a negative control. So the logic is well covered. What is uncovered is the **wiring** \u2014 whether the call is made at all. That asymmetry is the dangerous shape: a reader sees a well-tested module and reasonably concludes the feature is protected, when in fact deleting its single invocation is invisible to every offline test.\n\nConcretely, `f449` fixed a live DC rich-text echo re-diffing against a stale JQL snapshot. If this call is ever dropped \u2014 by a refactor, a bad merge resolution, or an extraction moving code between modules \u2014 that bug returns silently and only a live-DC run reveals it. Several `src/rebar` modules are being split right now for module-size reasons, which is exactly the operation most likely to drop a call site.\n\n## Acceptance Criteria\n\n- [ ] An offline test fails when the `refresh_scoped_snapshot(ctx)` invocation is removed from `run_differs.py`.\n- [ ] That test asserts the CALL HAPPENED (and with the right ctx), not merely that the downstream data looks refreshed \u2014 otherwise a coincidentally-fresh fixture satisfies it.\n- [ ] The test does not require a live Jira DC instance or any CI-provider-specific trigger.\n- [ ] Existing behaviour coverage is retained, not replaced: the 5 tests that kill the behaviour mutant must still kill it.\n\n## Testing\n\n- **Mutation-first, and this is the whole point:** seed the deletion, confirm the new test goes RED, restore, confirm GREEN. Verify the seed actually applied (a replace landing in a comment produces a mutant that was never seeded, which reads as a false kill).\n- **Anchor against vacuity.** An assertion that the snapshot is fresh passes when the fixture was already fresh and the call never ran. Assert the invocation itself \u2014 spy/record the call \u2014 then separately assert its effect.\n- Prefer an assertion that survives a rename or a module move (the call site is likely to be relocated by an ongoing split), or state plainly why a location-coupled assertion is acceptable here.\n\n## Related\n\n- `f449-be6a-be56-4fef` \u2014 the ticket whose fix this call implements; NOT closed, blocked on an AC3 provenance split.\n- Separate small defect found alongside: the ADR citation \"ADR 0037 s3\" is WRONG in `f449`'s body and twice in `snapshot_lagfree_refresh.py`'s docstring. ADR 0037 is oss-contribution-intake-posture; the real support is `docs/adr/0055-jira-family-sub-seam.md:282`. Worth correcting in the same change since it is shipped source prose.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "refresh_scoped_snapshot wiring has NO offline coverage: deleting the call survives the entire 3637-test reconciler suite"
       },
       "created_at": "2026-08-29T04:35:55Z",
@@ -30922,6 +31059,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:16Z"
     },
+    "8dc4-1541-92a7-4351": {
+      "created_at": "2026-08-30T01:11:14Z",
+      "jira_id": "4590672",
+      "jira_key": "REB-3929",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:17Z"
+    },
     "8de5-31b4-aa13-4ed9": {
       "baseline": {
         "assignee": null,
@@ -31537,6 +31681,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:39Z"
+    },
+    "9097-2741-6462-424c": {
+      "created_at": "2026-08-30T01:11:17Z",
+      "jira_id": "4590673",
+      "jira_key": "REB-3930",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:19Z"
     },
     "90a5-6a33-5cda-4064": {
       "baseline": {
@@ -32265,9 +32416,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\nDuring the 0.13.0 release (ticket hyperbolic-pernicious-drongo, Gerrit change 2385 merged as 4dafd36d2aa1), release.yml's \"Publish to MCP Registry\" job failed all 5 retry attempts with:\n\n    Error: publish failed: server returned status 422: {\"title\":\"Unprocessable Entity\",\"status\":422,\n    \"detail\":\"validation failed\",\"errors\":[{\"message\":\"expected length <= 100\",\n    \"location\":\"body.description\",\"value\":\"Rebar can block work until an AI plan review passes,\n    require signed completion verification before close, and reconcile its event-sourced ticket\n    record with Jira across CLI, Python, and MCP.\"}]}\n\nserver.json's top-level \"description\" field (190 chars, identical to pyproject.toml's description) exceeds the registry's <= 100 char schema constraint. PyPI publish and the GitHub Release both succeeded (irreversible, already live for 0.13.0); only the MCP Registry publish step failed. Nothing in local CI (make lint, scripts/check_server_manifest.py, release_guards.py) catches this locally -- the 422 was only ever surfaced by the live registry's remote validation during the release, after PyPI was already published.\n\n## Plan\n- Shorten server.json's top-level description to <= 100 chars (keep pyproject.toml's longer,\n  descriptive form -- there is no lockstep guard requiring the two to match, confirmed by\n  inspection of scripts/release_guards.py and scripts/check_server_manifest.py).\n- Add a local guard (check_mcp_registry_description function + a \"mcp-registry-description\" CLI\n  subcommand in scripts/release_guards.py, alongside the existing check_version_lockstep /\n  check_env_protection helpers) asserting server.json's top-level description is <= 100 chars,\n  with a unit test in tests/unit/test_release_guards.py.\n- WIRE the new guard into release.yml's \"Authorize release source\" job (a new \"Guard \u2014 server.json\n  description fits the MCP Registry schema\" step, immediately after the existing version-lockstep\n  guard step) so a future release fails BEFORE PyPI publish (irreversible) rather than only at the\n  live registry's remote validation after publish. This wiring is IN scope for this ticket -- the\n  guard function must have a real runner, not just unit-test coverage.\n- Attest (as a ticket comment, once the fix lands) the run URL/timestamp of the successful re-run\n  of release.yml run 33273822041's \"Publish to MCP Registry\" job -- this is an external,\n  point-in-time confirmation and is recorded as evidence, not a codebase acceptance criterion.\n\n## File impact\n- server.json \u2014 shorten top-level description field to satisfy the MCP registry's <= 100 char schema\n- scripts/release_guards.py \u2014 add check_mcp_registry_description guard + CLI subcommand\n- tests/unit/test_release_guards.py \u2014 unit test for the new guard\n- .github/workflows/release.yml \u2014 wire the new guard into the Authorize release source job\n\n## Testing\n- pytest tests/unit/test_release_guards.py tests/unit/test_release_workflow_pins.py -q\n- make lint && make typecheck\n- Non-codebase attestation: re-run release.yml run 33273822041's \"Publish to MCP Registry\" job and\n  record its result URL/timestamp as a ticket comment (not gated by an in-repo AC).\n\n## Acceptance Criteria\n- [ ] server.json's top-level description is <= 100 characters.\n- [ ] scripts/release_guards.py exposes check_mcp_registry_description with a passing unit test in\n      tests/unit/test_release_guards.py.\n- [ ] .github/workflows/release.yml's Authorize release source job invokes\n      `release_guards.py mcp-registry-description` as a real guard step (verifiable via\n      `grep mcp-registry-description .github/workflows/release.yml`), so this class of failure is\n      caught before PyPI publish in future releases.\n- [ ] [non-codebase] The re-run \"Publish to MCP Registry\" job for release.yml run 33273822041 is\n      confirmed successful and its result URL/timestamp is recorded as a ticket comment.",
+        "description": "## Context\nDuring the 0.13.0 release (ticket hyperbolic-pernicious-drongo, Gerrit change 2385 merged as 4dafd36d2aa1), release.yml's \"Publish to MCP Registry\" job failed all 5 retry attempts with:\n\n    Error: publish failed: server returned status 422: {\"title\":\"Unprocessable Entity\",\"status\":422,\n    \"detail\":\"validation failed\",\"errors\":[{\"message\":\"expected length <= 100\",\n    \"location\":\"body.description\",\"value\":\"Rebar can block work until an AI plan review passes,\n    require signed completion verification before close, and reconcile its event-sourced ticket\n    record with Jira across CLI, Python, and MCP.\"}]}\n\nserver.json's top-level \"description\" field (190 chars, identical to pyproject.toml's description) exceeds the registry's <= 100 char schema constraint. PyPI publish and the GitHub Release both succeeded (irreversible, already live for 0.13.0); only the MCP Registry publish step failed. Nothing in local CI (make lint, scripts/check_server_manifest.py, release_guards.py) catches this locally -- the 422 was only ever surfaced by the live registry's remote validation during the release, after PyPI was already published.\n\n## Plan\n- Shorten server.json's top-level description to <= 100 chars (keep pyproject.toml's longer,\n  descriptive form -- there is no lockstep guard requiring the two to match, confirmed by\n  inspection of scripts/release_guards.py and scripts/check_server_manifest.py).\n- Add a local guard (check_mcp_registry_description function + a \"mcp-registry-description\" CLI\n  subcommand in scripts/release_guards.py, alongside the existing check_version_lockstep /\n  check_env_protection helpers) asserting server.json's top-level description is <= 100 chars,\n  with a unit test in tests/unit/test_release_guards.py.\n- WIRE the new guard into release.yml's \"Authorize release source\" job (a new \"Guard \u2014 server.json\n  description fits the MCP Registry schema\" step, immediately after the existing version-lockstep\n  guard step) so a future release fails BEFORE PyPI publish (irreversible) rather than only at the\n  live registry's remote validation after publish. This wiring is IN scope for this ticket -- the\n  guard function must have a real runner, not just unit-test coverage.\n- Attest (as a ticket comment, once the fix lands) the run URL/timestamp of the successful re-run\n  of release.yml run 33273822041's \"Publish to MCP Registry\" job -- this is an external,\n  point-in-time confirmation and is recorded as evidence, not a codebase acceptance criterion.\n\n## File impact\n- server.json \u2014 shorten top-level description field to satisfy the MCP registry's <= 100 char schema\n- scripts/release_guards.py \u2014 add check_mcp_registry_description guard + CLI subcommand\n- tests/unit/test_release_guards.py \u2014 unit test for the new guard\n- .github/workflows/release.yml \u2014 wire the new guard into the Authorize release source job\n\n## Testing\n- pytest tests/unit/test_release_guards.py tests/unit/test_release_workflow_pins.py -q\n- make lint && make typecheck\n- Non-codebase attestation: re-run release.yml run 33273822041's \"Publish to MCP Registry\" job and\n  record its result URL/timestamp as a ticket comment (not gated by an in-repo AC).\n\n## Acceptance Criteria\n- [x] server.json's top-level description is <= 100 characters.\n- [x] scripts/release_guards.py exposes check_mcp_registry_description with a passing unit test in\n      tests/unit/test_release_guards.py.\n- [x] .github/workflows/release.yml's Authorize release source job invokes\n      `release_guards.py mcp-registry-description` as a real guard step (verifiable via\n      `grep mcp-registry-description .github/workflows/release.yml`), so this class of failure is\n      caught before PyPI publish in future releases.\n(AC #4, a non-codebase attestation that the MCP Registry re-run job succeeded, was dropped: the parent release ticket hyperbolic-pernicious-drongo was abandoned before this could be attempted -- v0.13.0's MCP Registry entry was never published and the release will not be resumed. See comment history for detail.)",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "server.json top-level description exceeds MCP Registry's 100-char limit, blocking registry publish"
       },
       "created_at": "2026-08-29T21:29:27Z",
@@ -33963,6 +34114,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:48Z"
     },
+    "9c5f-b32d-80c6-448c": {
+      "created_at": "2026-08-30T01:11:22Z",
+      "jira_id": "4590674",
+      "jira_key": "REB-3931",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:24Z"
+    },
     "9c66-3e2b-d422-42c5": {
       "baseline": {
         "assignee": {
@@ -34934,10 +35092,24 @@
     },
     "a027-d86c-8a00-407c": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem\n\n`run_sweep`'s FALLBACK arm \u2014 `REBAR_ROOT` unset, root resolved from git-toplevel-of-cwd \u2014 has no seam assertion in the repository suite. The in-repo test covering it is **end-to-end only**, and measurement on 2026-08-28 showed it **survives the `repo_root=None` mutant**: the end-to-end outcome is accidentally correct even when the resolved root is discarded.\n\nOnly a seam test kills that mutant, and the existing seam test exercises the `REBAR_ROOT` arm, not the fallback. So the fallback arm's correctness is real behaviour but unpinned: a regression there would not fail the suite.\n\n## Why this is worth a ticket\n\nThis is the never-ran / vacuous class. The test's passing state is also reachable when the behaviour under test never ran, so it reports coverage it does not provide. That matters here specifically because the fallback arm is what makes the merged design's envelope wider than its alternatives \u2014 it is correct when `REBAR_ROOT` is unset provided cwd is inside the checkout \u2014 and that property is currently protected by nothing.\n\nContext: `scathing-custommade-bobcat` (6bf1-326b-7404-4034), merged as `c68cc1de3185`. The fallback behaviour WAS verified out-of-band during adjudication, against a real ephemeral worktree whose `.tickets-tracker` symlinks into the main checkout, anchored via `_proc.detached_child_cwd`; that verification lives only in a ticket comment.\n\n## Acceptance Criteria\n\n- [ ] A seam assertion pins the root `run_sweep` hands `compact_all_cli` on the FALLBACK arm (`REBAR_ROOT` unset, real symlinked store, real detached-child anchor).\n- [ ] That assertion kills the `repo_root=None` mutant AND the `repo_root=os.path.dirname(tracker)` mutant.\n- [ ] The existing end-to-end AC#4 test is retained or replaced deliberately, with the reason recorded \u2014 it is not deleted merely because it is weak.\n- [ ] The test uses a real worktree/symlink topology rather than a mock that cannot distinguish the arms.\n\n## Testing\n\n- RED first: add the seam assertion and observe it fail against each seeded mutant before any fix.\n- Mutation-check both mutants explicitly, checking the return code rather than eyeballing output, and confirm each seed actually applied.\n- Confirm the contrast is discriminating: pivot on the HORIZON, not the threshold \u2014 the backfill arm selects any snapshot-less ticket with at least one foldable event regardless of threshold, so a threshold-pivoted contrast does not discriminate.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "run_sweep fallback arm is unasserted in-repo: the AC#4 test survives the repo_root=None mutant"
       },
       "created_at": "2026-08-28T23:28:29Z",
@@ -36693,9 +36865,31 @@
       "updated_at": "2026-08-23T23:36:00Z"
     },
     "a8ba-a2a3-e9c8-4ffa": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\n\nThe `Verify Authorship Identity` CI gate (`.github/workflows/verify-identity.yml`) fails closed when the blobless CI-checkout pack of the `tickets` branch exceeds `REBAR_CHECKOUT_PACK_LIMIT_KIB` (today `102400` = 100 MiB, a deliberate growth canary from commit `16a1a385` / ticket `037b`). The pack is currently ~481 MiB, so the gate is RED (bug `defensive-buckskin-rhino` / `a453-193b-2864-451b`).\n\nThe proof on parent epic `536b-8930-b922-4063` establishes that the ONLY lever that shrinks this blobless pack is reducing reachable commit+tree objects via causal-stability history collapse, and that even maximal SAFE coalescing (N=30d horizon) lands at ~365-380 MiB \u2014 it cannot reach 100 MiB without an unsafe <4-day horizon. Therefore a temporary budget-raise bridge is unavoidable to get the health lane green while the reclaim mechanism + structural fixes (W1 batch write lane, W2 root tree shard) land.\n\n## Scope of THIS ticket (the bridge, this change only)\n\nRaise `REBAR_CHECKOUT_PACK_LIMIT_KIB` from `102400` (100 MiB) to `563200` (550 MiB) \u2014 ~70 MiB headroom over today's 481 MiB pack \u2014 and add a self-documenting comment immediately above the value that names the restore ticket (`fluorspar-comparable-zeren` / `0894-b9b8-6590-4904`) so the bridge is reversible and traceable. This is a temporary, deliberately-reversible loosening of the canary, NOT a permanent budget change; the restore is tracked separately.\n\nOne companion test is coupled to the declared budget: `tests/unit/test_ci_tickets_partial_clone_workflows.py::test_pack_guard_contract` reads the live workflow env and asserts it equals the parametrized value, so that expectation must move in lockstep (`102400` -> `563200`). The other `102400`/`_STANDALONE_LIMIT` occurrences in the test suite are subprocess-env fixtures passed as explicit guard overrides (not read from the workflow), so they are unaffected and stay as-is.\n\n## Out of scope\n\nThe history-reclaim mechanism (S0-S3), W1/W2 structural fixes, and the eventual restore to 100 MiB are separate tickets under the epic. This ticket does no history rewrite and no prod mutation of the `tickets` branch.\n\n## Acceptance Criteria\n\n- [ ] `REBAR_CHECKOUT_PACK_LIMIT_KIB` in `.github/workflows/verify-identity.yml` is set to `563200`.\n- [ ] A comment immediately above the value marks it as a TEMPORARY bridge and names restore ticket `fluorspar-comparable-zeren` (`0894-b9b8-6590-4904`).\n- [ ] The companion coupled expectation is updated: `test_pack_guard_contract` in `tests/unit/test_ci_tickets_partial_clone_workflows.py` moves its parametrized limit from `102400` to `563200` so it re-asserts the new declared budget.\n- [ ] The guard control flow is unchanged: only the threshold value, its self-documenting comment, and that one coupled test expectation change; the `git count-objects` fail-closed logic is untouched.\n- [ ] The commit carries a `rebar-ticket:` trailer for this ticket and a DCO sign-off.\n- [ ] The change is pushed to Gerrit for review (`LLM-Review +1` and `Verified +1`) and is NOT self-submitted.\n\n## Portability\n\n`REBAR_CHECKOUT_PACK_LIMIT_KIB` is a plain workflow environment variable consumed by a POSIX `bash`/`git count-objects` guard; changing its value introduces no dependence on any single CI provider and no new capability. The `project.portability` criterion is satisfied because the guard remains a provider-agnostic shell check whose only input is a git object count.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "W3 bridge: raise verify-identity pack budget to 550 MiB while 536b reclaim lands"
+      },
       "created_at": "2026-08-29T23:30:48Z",
       "jira_id": "4590664",
       "jira_key": "REB-3921",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T23:30:52Z"
     },
@@ -36820,6 +37014,13 @@
       "peer_parent": "REB-3233",
       "state": "confirmed",
       "updated_at": "2026-08-21T05:38:45Z"
+    },
+    "a945-15b8-ff0e-4bfc": {
+      "created_at": "2026-08-30T01:11:24Z",
+      "jira_id": "4590675",
+      "jira_key": "REB-3932",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:27Z"
     },
     "a991-09dd-aa6a-4a27": {
       "baseline": {
@@ -37522,10 +37723,24 @@
     },
     "ac93-8afd-1666-4866": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Summary\n\nObserved while fixing `royalistic-gorgeable-norwayrat` (the MCP image shipping without `acli`). When the `acli` transport binary is absent, the reconciler's bare `subprocess.Popen([\"acli\", ...])` (`adapters/jira/acli_subprocess.py`) raises `FileNotFoundError`, and `bridge_check_access`'s `STEP_CREATE` catch-all (`access_check.py:237-241`) reports it verbatim as `reason=exception, detail=\"[Errno 2] No such file or directory: 'acli'\"`.\n\nThat is a raw, untyped leak of an infrastructure fault into the probe verdict. `access_check` already has a typed `TransportUnavailableError` path elsewhere (e.g. `access_check.py:467,486`); a missing-transport binary should map to that typed \"transport unavailable\" verdict rather than a bare `FileNotFoundError` string.\n\nThis is AC #4's *alternative* branch on the parent bug (only strictly required if `acli` were deliberately NOT installed). The parent bug installs `acli`, so this is a **latent robustness / graceful-degradation** improvement, not a live failure \u2014 filed so it is not lost.\n\n## Acceptance Criteria\n\n- [ ] When the bridge transport binary (`acli`) is absent/unresolvable, `bridge_check_access`\n      reports a typed `transport_unavailable`-style verdict, not a raw `FileNotFoundError` detail.\n- [ ] A unit test drives the missing-transport path (e.g. PATH without `acli`) and asserts the\n      typed verdict.\n- [ ] No behavior change when `acli` is present.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "bridge_check_access STEP_CREATE surfaces raw FileNotFoundError instead of a typed transport-unavailable verdict"
       },
       "created_at": "2026-08-29T17:29:44Z",
@@ -41845,6 +42060,13 @@
       "peer_parent": "REB-368",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:25Z"
+    },
+    "bdf3-e7e3-c96f-4b9f": {
+      "created_at": "2026-08-30T01:11:27Z",
+      "jira_id": "4590676",
+      "jira_key": "REB-3933",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:29Z"
     },
     "be08-b46d-51be-419d": {
       "created_at": "2026-08-15T15:10:25Z",
@@ -55836,6 +56058,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-24T19:41:00Z"
     },
+    "fd5d-cd3d-871e-4c51": {
+      "created_at": "2026-08-30T01:11:30Z",
+      "jira_id": "4590677",
+      "jira_key": "REB-3934",
+      "state": "confirmed",
+      "updated_at": "2026-08-30T01:11:32Z"
+    },
     "fd71-a0a0-d9b0-4769": {
       "baseline": {
         "assignee": null,
@@ -58090,7 +58319,30 @@
     "1788045677847833001": "__rebar_unknown_comment_id__",
     "1788045677937480929": "__rebar_unknown_comment_id__",
     "1788045825864281255": "__rebar_unknown_comment_id__",
-    "1788045907940588899": "__rebar_unknown_comment_id__"
+    "1788045907940588899": "__rebar_unknown_comment_id__",
+    "1788046090945593022": "__rebar_unknown_comment_id__",
+    "1788046097204487001": "__rebar_unknown_comment_id__",
+    "1788046291208831366": "__rebar_unknown_comment_id__",
+    "1788046292818266932": "__rebar_unknown_comment_id__",
+    "1788046323506492988": "__rebar_unknown_comment_id__",
+    "1788046367054894686": "__rebar_unknown_comment_id__",
+    "1788046389721977910": "__rebar_unknown_comment_id__",
+    "1788046398458806295": "__rebar_unknown_comment_id__",
+    "1788046441167335062": "__rebar_unknown_comment_id__",
+    "1788046442143427257": "__rebar_unknown_comment_id__",
+    "1788046611816452001": "__rebar_unknown_comment_id__",
+    "1788047292866227216": "__rebar_unknown_comment_id__",
+    "1788047982100585001": "__rebar_unknown_comment_id__",
+    "1788047988837811001": "__rebar_unknown_comment_id__",
+    "1788048858392929921": "__rebar_unknown_comment_id__",
+    "1788049224912903190": "__rebar_unknown_comment_id__",
+    "1788049771154402359": "__rebar_unknown_comment_id__",
+    "1788049931670397001": "__rebar_unknown_comment_id__",
+    "1788050304667734180": "__rebar_unknown_comment_id__",
+    "1788051242475557001": "__rebar_unknown_comment_id__",
+    "1788051454186032039": "__rebar_unknown_comment_id__",
+    "1788051575312185001": "__rebar_unknown_comment_id__",
+    "1788051762452679001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -60394,7 +60646,18 @@
     "REB-392": "f724-f752-9cc8-4a6f",
     "REB-3920": "73d8-4871-1b49-4047",
     "REB-3921": "a8ba-a2a3-e9c8-4ffa",
+    "REB-3924": "334d-71ba-589f-4eea",
+    "REB-3925": "3409-9824-6d4e-469f",
+    "REB-3926": "4b2a-3ae8-14ee-463a",
+    "REB-3927": "6816-69bf-460d-4db1",
+    "REB-3928": "72d2-25a6-cfc3-4fb6",
+    "REB-3929": "8dc4-1541-92a7-4351",
     "REB-393": "f765-b3f2-e6ab-4842",
+    "REB-3930": "9097-2741-6462-424c",
+    "REB-3931": "9c5f-b32d-80c6-448c",
+    "REB-3932": "a945-15b8-ff0e-4bfc",
+    "REB-3933": "bdf3-e7e3-c96f-4b9f",
+    "REB-3934": "fd5d-cd3d-871e-4c51",
     "REB-394": "f803-63ea-816b-479a",
     "REB-395": "f81a-b3be-fd4a-465b",
     "REB-396": "f8a2-bf40-4cc4-479b",
