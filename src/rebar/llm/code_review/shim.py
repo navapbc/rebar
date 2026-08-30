@@ -75,6 +75,10 @@ def _to_common_finding(f: dict[str, Any]) -> dict[str, Any]:
         out["citations"] = [cit]
     if isinstance(f.get("reviewer_id"), str):
         out["reviewer_id"] = f["reviewer_id"]
+    if f.get("priority") is not None:
+        out["priority"] = f["priority"]
+    if f.get("decision") is not None:
+        out["decision"] = f["decision"]
     return out
 
 
