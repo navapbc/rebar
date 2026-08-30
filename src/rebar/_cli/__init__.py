@@ -412,10 +412,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _main_dispatch(argv: list[str]) -> int:
-    """The full CLI dispatch body: the ``-c`` override parse, the shadow snapshot, the
-    central store-mount gate, and ``return _dispatch(...)`` (which routes every command,
-    intercepts included, through the registry executor). Wrapped by :func:`main` in a
-    ``RemovedInputError`` handler (see there)."""
+    """The full CLI dispatch body: the ``-c`` override parse, composing-and-binding the
+    operation snapshot, the central store-mount gate, and ``return _dispatch(...)``
+    (which routes every command, intercepts included, through the registry executor).
+    Wrapped by :func:`main` in a ``RemovedInputError`` handler (see there)."""
     # Canonical help / overview / unknown pre-scan (RP-05 S2d): answer a help, bare-overview,
     # or unknown-subcommand request from the committed help artifacts BEFORE any operation
     # snapshot, config materialization, store mount, handler/factory resolution, or optional
@@ -448,31 +448,37 @@ def _main_dispatch(argv: list[str]) -> int:
             sys.stderr.write(f"Error: {exc}\n")
             return 1
 
-    # Shadow-mode operation snapshot (RP-04 S1): compose ONE diagnostic snapshot per
-    # invocation, after config is resolvable but before any dispatch/effects. Guarded
-    # and side-effect-free apart from the DEBUG diagnostic — it does NOT control
-    # execution, alter output, or change exit codes.
-    from rebar._operation_config import emit_shadow_snapshot
+    # Authoritative operation snapshot (RP-04 S2, ticket 3a08): compose ONE snapshot per
+    # invocation, after config is resolvable but before any dispatch/store-mount/write
+    # effect, and BIND it active for the whole invocation — store/config helpers
+    # (rebar.config.tracker_dir / tickets_branch / tickets_remote) consult it instead of
+    # a fresh ambient read, so a later env/project/CWD mutation cannot change this
+    # operation's selected tracker dir/branch/remote mid-flight. Fails OPEN on a
+    # malformed/insecure config (matching the prior shadow's discipline): some legacy
+    # operations (e.g. ``bridge setup --reset``, which only clears a bad section) must
+    # keep working even when composition itself cannot succeed — with no snapshot bound,
+    # downstream helpers fall back to their pre-existing ambient resolution and a real
+    # operation that NEEDS a valid config still fails on its own read, same as before.
+    from rebar._operation_config import compose_and_bind_operation_snapshot
 
-    emit_shadow_snapshot(surface="cli")
+    with compose_and_bind_operation_snapshot():
+        # Central store-mount gate (bug ad9f): every store-touching command — INCLUDING the
+        # pure intercepts (verify-commit-ticket, ...) that historically bypassed the per-arm
+        # ensure_initialized — mounts the store ONCE here, before dispatch, so none can
+        # silently skip it. Best-effort (attach-if-possible, never error, never first-time-init,
+        # never reconverge): the strict per-arm ensure_initialized calls remain and still own
+        # greenfield refusal + reconverge for store-REQUIRING arms. Excluded: no-store commands,
+        # help/usage rendering, and unknown subcommands (bug dd62 — see _store_mount_eligible).
+        if _store_mount_eligible(argv):
+            ensure_store_mounted_best_effort()
 
-    # Central store-mount gate (bug ad9f): every store-touching command — INCLUDING the pure
-    # intercepts (verify-commit-ticket, ...) that historically bypassed the per-arm
-    # ensure_initialized — mounts the store ONCE here, before dispatch, so none can silently skip
-    # it. Best-effort (attach-if-possible, never error, never first-time-init, never reconverge):
-    # the strict per-arm ensure_initialized calls remain and still own greenfield refusal +
-    # reconverge for store-REQUIRING arms. Excluded: no-store commands, help/usage rendering,
-    # and unknown subcommands (bug dd62 — see _store_mount_eligible).
-    if _store_mount_eligible(argv):
-        ensure_store_mounted_best_effort()
-
-    # Help, overview, and unknown-subcommand forms were already served by
-    # ``_help_route.pre_scan`` at the top of this function (before any snapshot/config/mount).
-    # Reaching here means a real command invocation — including the intercept commands, which
-    # now carry registry execution metadata and route through the executor like every other
-    # command (RP-05 S6); route it to the dispatcher.
-    sub, rest = argv[0], argv[1:]
-    return _dispatch(sub, rest)
+        # Help, overview, and unknown-subcommand forms were already served by
+        # ``_help_route.pre_scan`` at the top of this function (before any snapshot/config/mount).
+        # Reaching here means a real command invocation — including the intercept commands,
+        # which now carry registry execution metadata and route through the executor like every
+        # other command (RP-05 S6); route it to the dispatcher.
+        sub, rest = argv[0], argv[1:]
+        return _dispatch(sub, rest)
 
 
 if __name__ == "__main__":

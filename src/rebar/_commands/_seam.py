@@ -546,12 +546,6 @@ def append_event(
     write is distinguishable from a clean one. CLI-only by design — it is not exposed
     over MCP.
     """
-    from rebar._store import event_append as _store_append
-    from rebar._store import hlc
-    from rebar._store.compat import StoreIncompatibleError
-    from rebar._store.event_append import StoreError
-    from rebar._store.lock import LockTimeout, RebaseGuard
-
     # Init gate at the single write seam (bug roar-nurse-stomp): every write —
     # create/edit/link AND the leaf appends (comment/tag/set_*/sign/...) — flows
     # through here, so enforcing `.env-id` once keeps the precondition consistent
@@ -561,12 +555,45 @@ def append_event(
     if not (Path(tracker) / ".env-id").is_file():
         raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
 
-    # Shadow-mode operation snapshot (RP-04 S1): one diagnostic snapshot for the shared
-    # command write seam, composed before the event is appended. Guarded and
-    # side-effect-free apart from the DEBUG diagnostic — it does NOT gate the write.
-    from rebar._operation_config import emit_shadow_snapshot
+    # Authoritative operation snapshot (RP-04 S2, ticket 3a08): compose-and-bind ONE
+    # snapshot for this write, before the event is appended. Reentrant — a CLI/MCP
+    # caller that already bound one for the whole operation is reused verbatim; a bare
+    # Python-library caller reaching this seam directly composes its own here, so
+    # "Python...writes each compose one snapshot" (AC1) holds regardless of caller.
+    from rebar._operation_config import compose_and_bind_operation_snapshot
 
-    emit_shadow_snapshot(repo_root=repo_root, surface="command-write")
+    with compose_and_bind_operation_snapshot(repo_root=repo_root):
+        _append_event_body(
+            ticket_id,
+            event_type,
+            data,
+            tracker,
+            repo_root=repo_root,
+            author_fallback=author_fallback,
+            under_lock_check=under_lock_check,
+            allow_secret_pattern=allow_secret_pattern,
+        )
+
+
+def _append_event_body(
+    ticket_id: str,
+    event_type: str,
+    data: dict,
+    tracker: Path,
+    *,
+    repo_root,
+    author_fallback: str,
+    under_lock_check,
+    allow_secret_pattern: str,
+) -> None:
+    """The compose/finalize/commit body of :func:`append_event`, run under the bound
+    operation snapshot (split out so the binding wraps it via ONE ``with`` block rather
+    than re-indenting this whole body)."""
+    from rebar._store import event_append as _store_append
+    from rebar._store import hlc
+    from rebar._store.compat import StoreIncompatibleError
+    from rebar._store.event_append import StoreError
+    from rebar._store.lock import LockTimeout, RebaseGuard
 
     # The audited force override for the write-time secret screen (bug e7a9). The refusal
     # itself is enforced in ``finalize_event`` below — the ONE seam every writer routes
