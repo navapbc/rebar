@@ -142,3 +142,4 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0101 — `[non-codebase]` replaces `[operator-attested]` as the acceptance-criterion tag](0101-non-codebase-acceptance-criterion-tag.md)
 - [0102 — Review discovery reads ONE compiled effective-policy snapshot](0102-review-discovery-effective-policy.md)
 - [0106 — Remote-anchored below-horizon history reclamation for the `tickets` branch](0106-remote-anchored-history-reclamation.md)
+- [0108 — Retire the severity label; priority + blocking/advisory is the canonical signal](0108-retire-severity-label.md)
