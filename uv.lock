@@ -1,15 +1,15 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version == '3.14.*' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform != 'win32'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
     "(python_full_version < '3.12' and sys_platform == 'emscripten') or (python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32')",
 ]
 
@@ -896,8 +896,8 @@ name = "httpcore2"
 version = "2.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a9/83/a896fc59940fc5a6e2aff3a4be1d92fa890112936803b331cae75a993c34/httpcore2-2.10.0.tar.gz", hash = "sha256:13c0cc3d1919d4f28457f60cd2c2abe04113a8af184ccf1142811beba936f9dc", size = 67427, upload-time = "2026-08-09T09:11:32.123Z" }
 wheels = [
@@ -1809,6 +1809,9 @@ dev = [
     { name = "shellcheck-py" },
     { name = "zizmor" },
 ]
+evals = [
+    { name = "genai-prices" },
+]
 grounding = [
     { name = "tree-sitter" },
     { name = "tree-sitter-language-pack" },
@@ -1858,6 +1861,7 @@ requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "fastapi", marker = "extra == 'reviewbot'" },
     { name = "fastapi", marker = "extra == 'ui'" },
+    { name = "genai-prices", marker = "extra == 'evals'" },
     { name = "genai-prices", marker = "extra == 'pricing'" },
     { name = "git-remote-s3", marker = "extra == 's3'", specifier = ">=0.3.2" },
     { name = "hatchling", marker = "extra == 'dev'", specifier = ">=1.18" },
@@ -1901,7 +1905,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'ui'" },
     { name = "zizmor", marker = "extra == 'dev'", specifier = "==1.29.0" },
 ]
-provides-extras = ["mcp", "reviewbot", "ui", "agents", "bedrock", "pricing", "tracing", "grounding", "metrics", "wiki", "adf", "jira-datacenter", "grounding-t2", "s3", "dev"]
+provides-extras = ["mcp", "reviewbot", "ui", "agents", "bedrock", "pricing", "evals", "tracing", "grounding", "metrics", "wiki", "adf", "jira-datacenter", "grounding-t2", "s3", "dev"]
 
 [[package]]
 name = "nodeenv"
