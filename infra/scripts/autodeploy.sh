@@ -182,6 +182,10 @@ SECRETS_PATHS='infra/scripts/fetch-secrets.sh infra/terraform/ssm.tf'
 # shared change triggers BOTH the review-bot AND the mcp target, in INDEPENDENT `if changed`
 # blocks (neither touches the gerrit container or gerrit review flow).
 MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/compose/docker-compose.yml uv.lock pyproject.toml'
+# NOTE: the mcp delta gate ORs SECRETS_PATHS in on top of MCP_PATHS (see mcp_delta() below),
+# exactly as the review-bot gate does — mcp is the other consumer of fetch-secrets output, so a
+# secrets-only change must redeploy it too (bug f910). SECRETS_PATHS is intentionally kept a
+# separate variable rather than folded into MCP_PATHS so the two gates share one secrets list.
 # config paths are DETECT-ONLY in v1 (signalled, never auto-applied).
 # infra/compose/gerrit.config is in this list, NOT in a re-materializing trigger, on
 # purpose: compose-up.sh DOES re-seed it into the site etc dir, but only when compose-up
@@ -696,6 +700,16 @@ clear_mcp_backoff() { rm -f "$MCP_BACKOFF_FILE"; }
 # ── what changed? (computed in the mirror clone) ──────────────────────────────
 changed_range() { git -C "$MIRROR_DIR" diff --name-only "$1" "$2" -- $3 2>/dev/null | grep -q .; }
 changed() { changed_range "$DEPLOYED" "$TARGET" "$1"; }
+# mcp redeploys iff MCP_PATHS **or** SECRETS_PATHS changed over its component sha..target. mcp is
+# the OTHER consumer of fetch-secrets output — it starts with `--env-file .env` and a read-only
+# bind-mount of mcp-static-tokens.json, both read once at container init — so a secrets-only
+# change must reach it exactly as it reaches the review-bot. This mirrors the review-bot gate,
+# which has ORed SECRETS_PATHS since f600 / incident 2731 (bug f910). Uses $mcp_deployed and
+# $TARGET, both resolved at call time (defined below).
+mcp_delta() {
+  changed_range "$mcp_deployed" "$TARGET" "$MCP_PATHS" || \
+    changed_range "$mcp_deployed" "$TARGET" "$SECRETS_PATHS"
+}
 
 # The mcp component's OWN last-deployed sha (see $MCP_SHA_FILE above). Validated like the
 # first-run seed: an empty or garbage marker falls back to the global $DEPLOYED rather than
@@ -869,11 +883,11 @@ fi
 # is not advanced and the deploy retries next tick — on the mcp-SCOPED backoff, so a failure here
 # throttles only mcp and never suppresses the review-bot deploy. The gerrit container is never
 # touched (blast-radius assert); gerrit is never involved.
-if mcp_backoff_active && changed_range "$mcp_deployed" "$TARGET" "$MCP_PATHS"; then
+if mcp_backoff_active && mcp_delta; then
   log "mcp backoff active for $TARGET (fail #$mcp_bo_cnt); next mcp attempt at $mcp_bo_next; the mcp delta is still PENDING so deployed-sha will NOT advance"
   mcp_incomplete=1
 fi
-if ! mcp_backoff_active && changed_range "$mcp_deployed" "$TARGET" "$MCP_PATHS"; then
+if ! mcp_backoff_active && mcp_delta; then
   log "mcp sources changed $mcp_deployed -> $TARGET; blue-green deploy (blast radius = mcp containers + /mcp nginx upstream only)"
   gerrit_before_mcp="$(docker inspect -f '{{.Id}}' "$GERRIT_CONTAINER" 2>/dev/null || true)"
 
