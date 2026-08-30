@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -226,7 +226,11 @@ dev = [
     "mcp>=1.28.1,<2",
     # jsonschema/referencing moved to core [project.dependencies] — the schema
     # registry + workflow contract validation are lean-runtime paths, not dev-only.
-    "hatchling>=1.18",
+    # PEP 639 `license`/`license-files` (a table under the hood) require hatchling >= 1.27;
+    # earlier versions raise "Field project.license-files must be a table" when the tests
+    # build the real repo (WheelBuilder/SdistBuilder), which regressed the lower-bounds
+    # sweep leg (`--resolution lowest-direct`). 1.26.x is yanked, so 1.27.0 is the floor.
+    "hatchling>=1.27",
     # PEP 517 front-end used by the build-provenance E2E tests (they run `python -m build`
     # to exercise the sdist→wheel path and assert the baked COMMIT — story 6168). Also what
     # the release workflow's build-once job uses. A floor is fine: this is dev/CI-only.

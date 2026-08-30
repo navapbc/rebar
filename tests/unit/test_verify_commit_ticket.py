@@ -11,8 +11,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _repo_root import REPO_ROOT
 
-import rebar
 from rebar import config as cfg
 from rebar._commands import verify_commit as vc
 
@@ -231,7 +231,7 @@ def test_cli_merge_commit_is_exempt(
 
 # ── doc-drift: the shared constant is quoted verbatim in the reference doc ─────
 def test_expected_format_documented_in_reference() -> None:
-    doc = Path(rebar.__file__).parents[2] / "docs" / "commit-ticket-trailer.md"
+    doc = REPO_ROOT / "docs" / "commit-ticket-trailer.md"
     assert vc.EXPECTED_FORMAT in doc.read_text(encoding="utf-8"), (
         "docs/commit-ticket-trailer.md must quote EXPECTED_FORMAT verbatim (single source of truth)"
     )

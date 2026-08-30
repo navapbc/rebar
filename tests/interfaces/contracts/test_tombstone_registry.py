@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _repo_root import REPO_ROOT
 from _subprocess_env import subprocess_env
 
 import rebar
@@ -256,7 +257,7 @@ def test_unknown_toml_key_keeps_forwardcompat_policy(rebar_repo: Path) -> None:
 
 # ── docs are documented (deterministic proving check) ─────────────────────────
 def test_docs_config_md_documents_tombstones() -> None:
-    repo_root = Path(rebar.__file__).resolve().parents[2]
+    repo_root = REPO_ROOT
     text = (repo_root / "docs" / "config.md").read_text(encoding="utf-8")
     assert "tombstone" in text
     assert "rebar config validate" in text

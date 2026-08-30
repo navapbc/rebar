@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from _build_provenance_fixture import materialize_build_hook_package
+from _repo_root import REPO_ROOT
 from _subprocess_env import subprocess_env
 
 import rebar
@@ -94,7 +95,7 @@ def _load_hatch_build():
     import importlib.util
 
     pytest.importorskip("hatchling")  # hatch_build imports BuildHookInterface at module load
-    repo_root = Path(rebar.__file__).resolve().parents[2]
+    repo_root = REPO_ROOT
     spec = importlib.util.spec_from_file_location("hatch_build", repo_root / "hatch_build.py")
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
@@ -224,7 +225,7 @@ def test_built_wheel_bakes_build_info(tmp_path: Path) -> None:
 
     hatchling_wheel = pytest.importorskip("hatchling.builders.wheel")
 
-    repo_root = Path(rebar.__file__).resolve().parents[2]
+    repo_root = REPO_ROOT
     assert (repo_root / "pyproject.toml").is_file(), repo_root
     generated = repo_root / "src" / "rebar" / "_build_info.py"
     pre_existing = generated.exists()
@@ -351,7 +352,7 @@ def test_rebar_version_stamp_is_inert_to_validity_parsers() -> None:
 def _hook_module():
     import importlib.util
 
-    root = Path(rebar.__file__).resolve().parents[2]
+    root = REPO_ROOT
     spec = importlib.util.spec_from_file_location("_hb_probe", root / "hatch_build.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -393,7 +394,7 @@ import shutil  # noqa: E402
 import sys  # noqa: E402
 import zipfile  # noqa: E402
 
-_REPO_ROOT = Path(rebar.__file__).resolve().parents[2]
+_REPO_ROOT = REPO_ROOT
 
 
 def _has_build() -> bool:

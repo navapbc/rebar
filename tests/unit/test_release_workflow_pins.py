@@ -11,13 +11,10 @@ Static assertions over the workflow text + parsed YAML — no release run needed
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
+from _repo_root import REPO_ROOT
 
-import rebar
-
-ROOT = Path(rebar.__file__).resolve().parents[2]
+ROOT = REPO_ROOT
 RELEASE = ROOT / ".github" / "workflows" / "release.yml"
 RELEASING_DOC = ROOT / "docs" / "releasing.md"
 

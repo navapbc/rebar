@@ -238,27 +238,38 @@ def test_reconciler_repo_root_unset_fallback_is_cwd_independent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """With ``REBAR_ROOT`` unset and no explicit root, the reconciler's owned root
-    resolution must fall back to its OWN package root — a deterministic, cwd-independent
-    location — exactly as the pre-cut ``REBAR_ROOT or Path(__file__).parents[4]`` form
-    did. A cut that routes the unset fallback through ``config.repo_root()`` (whose
-    fallback is git-toplevel-of-cwd, then cwd) regresses a reconciler run from any other
-    working directory: it would resolve the CALLER's checkout instead of its own. Asserted
-    through the reconciler's owned ``_default_repo_root`` seam, from inside an unrelated git
-    work tree."""
+    resolution must fall back to a deterministic, CWD-independent location — NOT the
+    caller's working directory. A cut that routes the unset fallback through
+    ``config.repo_root()`` (whose fallback is git-toplevel-of-cwd, then cwd) regresses a
+    reconciler run from any other working directory: it would resolve the CALLER's checkout
+    instead of its own. Asserted through the reconciler's owned ``_default_repo_root`` seam
+    by resolving it from two different working directories (one an unrelated git work tree)
+    and requiring the answer to be identical and distinct from the caller's tree.
+
+    The equality is checked directly rather than against a ``Path(__file__).parents[N]``
+    literal on purpose: under a non-editable install the reconciler package and the rebar
+    library load from different trees, so an expected root derived from a package
+    ``__file__`` would spuriously diverge from production's own resolution."""
     from rebar_reconciler import invariants
 
     monkeypatch.delenv("REBAR_ROOT", raising=False)
     other_repo = tmp_path / "unrelated_checkout"
     other_repo.mkdir()
     subprocess.run(["git", "init", "-q", str(other_repo)], check=True)
-    monkeypatch.chdir(other_repo)
 
-    package_root = Path(invariants.__file__).resolve().parents[4]
-    resolved = invariants._default_repo_root().resolve()
-    assert resolved == package_root, (
-        "the reconciler repo-root fallback (REBAR_ROOT unset, no explicit arg) must be the "
-        f"deterministic package root {package_root}, independent of cwd; got {resolved} "
-        "(a git-toplevel-of-cwd fallback leaked the caller's working directory)"
+    baseline = invariants._default_repo_root().resolve()
+    monkeypatch.chdir(other_repo)
+    from_other_cwd = invariants._default_repo_root().resolve()
+
+    assert from_other_cwd == baseline, (
+        "the reconciler repo-root fallback (REBAR_ROOT unset, no explicit arg) must be "
+        f"cwd-independent; resolved to {from_other_cwd} from inside {other_repo} but to "
+        f"{baseline} from the original cwd (a git-toplevel-of-cwd fallback leaked the "
+        "caller's working directory)"
+    )
+    assert from_other_cwd != other_repo.resolve(), (
+        "the reconciler repo-root fallback resolved to the caller's unrelated checkout — "
+        "the cwd leaked into the owned root resolution"
     )
 
 
