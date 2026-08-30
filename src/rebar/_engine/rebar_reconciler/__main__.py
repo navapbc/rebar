@@ -49,6 +49,8 @@ from rebar_reconciler._pass_lock_lifecycle import (
 try:
     import rebar  # noqa: F401
 except ImportError:  # pragma: no cover - bare-interpreter fallback
+    # parents[3] is the PACKAGE PARENT prepended to sys.path (install-location relative by
+    # pkg-root-ok: design, correct under editable and wheel installs) — not a checkout root.
     _pkg_parent = str(Path(__file__).resolve().parents[3])
     if _pkg_parent not in sys.path:
         sys.path.insert(0, _pkg_parent)

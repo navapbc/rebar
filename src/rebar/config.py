@@ -7,6 +7,7 @@ engine on repo-root and config-file location.
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 from rebar._config_schema import _ALIASES as _ALIASES
@@ -586,13 +587,72 @@ def repo_root_env() -> str | None:
     return os.environ.get("REBAR_ROOT")
 
 
+def _is_repo_checkout(root: Path) -> bool:
+    """A candidate ``root`` is a real rebar checkout when it has BOTH a ``.git`` entry
+    (a ``.git`` dir OR a worktree ``.git`` file) AND the package dir ``src/rebar/``. This
+    pair is exactly what a venv/site-packages tree lacks."""
+    return (root / ".git").exists() and (root / "src" / "rebar").is_dir()
+
+
+def _git_toplevel_of_cwd() -> Path | None:
+    """The git toplevel of the current working directory, or ``None`` when the CWD is not
+    inside a git work tree, ``git`` is unavailable, or the probe fails/hangs.
+
+    Any subprocess failure — a missing ``git`` binary (``OSError``), a non-zero exit
+    (CWD not in a repo), or a timeout on a slow/networked filesystem — degrades to
+    ``None`` so :func:`reconciler_repo_root` falls through to its clear step-4 error
+    rather than surfacing an opaque traceback."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode == 0 and out.stdout.strip():
+        return Path(out.stdout.strip())
+    return None
+
+
 def reconciler_repo_root() -> Path:
-    """Repo root for the reconciler pass: ``REBAR_ROOT`` when set, else the deterministic,
-    CWD-INDEPENDENT package root (``parents[2]`` here == the reconciler modules' historical
-    ``Path(__file__).parents[4]`` fallback). Unlike :func:`repo_root` it never inherits the
-    caller's CWD — the reconciler can run as a daemon from anywhere."""
+    """Repo root for the reconciler pass, resolved as a VALIDATED LAYERED FALLBACK:
+
+    1. ``REBAR_ROOT`` when set → returned verbatim as ``Path(env)`` (the operator's
+       explicit choice, honored as-is and never validated).
+    2. else the deterministic, CWD-INDEPENDENT package root
+       (``Path(__file__).resolve().parents[2]``) IF it is a real checkout — this preserves
+       the editable/source-install path and the daemon-from-anywhere guarantee (the package
+       root is always tried before any CWD-based resolution).
+    3. else the git toplevel of the current working directory IF that is a real checkout —
+       a last-resort convenience for a non-editable dev install launched from inside a
+       checkout.
+    4. else raise a clear error — NEVER silently return a non-checkout path (e.g. the
+       ``site-packages`` tree of a wheel install).
+
+    The daemon-from-anywhere / CWD-independence rationale still holds: the package root is
+    tried before the CWD, so whenever it is a valid checkout (or ``REBAR_ROOT`` is set) the
+    result never depends on the caller's CWD. An arbitrary non-checkout CWD errors clearly
+    rather than reconciling the wrong tree."""
     env = os.environ.get("REBAR_ROOT")
-    return Path(env) if env else Path(__file__).resolve().parents[2]
+    if env:
+        return Path(env)
+    # reconciler_repo_root is THE validated resolver for the reconciler's repo root:
+    # pkg-root-seam: parents[2] is used only after _is_repo_checkout confirms a real checkout.
+    package_root = Path(__file__).resolve().parents[2]
+    if _is_repo_checkout(package_root):
+        return package_root
+    cwd_root = _git_toplevel_of_cwd()
+    if cwd_root is not None and _is_repo_checkout(cwd_root):
+        return cwd_root
+    raise RuntimeError(
+        "Cannot determine the rebar repo root for the reconciler: the package root "
+        f"{package_root} is not a checkout (a non-editable/wheel install lives in "
+        "site-packages), and the current working directory is not inside a rebar "
+        "checkout. Set REBAR_ROOT=<checkout> or pass --repo-root <checkout>."
+    )
 
 
 def reconciler_event_identity() -> tuple[str, str]:

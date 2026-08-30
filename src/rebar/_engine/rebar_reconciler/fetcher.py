@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 # ``outbound_differ``'s ``from rebar_reconciler._loader import lazy_load``) because
 # this module is also loaded standalone via ``importlib.util.spec_from_file_location``,
 # where a RELATIVE runtime import has no package to resolve against.
-from rebar.config import repo_root_env
+from rebar.config import reconciler_repo_root
 from rebar_reconciler._backend import BackendPaginationStallError
 from rebar_reconciler.fetch_paging import (  # noqa: F401
     _ACLI_CEILING,
@@ -504,7 +504,7 @@ def _build_snapshot(
             (see the base-query loop below).
     """
     if repo_root is None:
-        repo_root = Path(repo_root_env() or Path(__file__).resolve().parents[4])
+        repo_root = reconciler_repo_root()
 
     # S4: _load_acli returns the configured backend's transport directly (a
     # TicketTransport carrying its resolved connection settings).
@@ -623,7 +623,7 @@ def fetch_snapshot(
     depend on it.
     """
     if repo_root is None:
-        repo_root = Path(repo_root_env() or Path(__file__).resolve().parents[4])
+        repo_root = reconciler_repo_root()
 
     snapshot = _build_snapshot(pass_id, repo_root)
 
