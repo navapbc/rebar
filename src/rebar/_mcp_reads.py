@@ -29,6 +29,7 @@ from rebar._mcp_models import (
     FileImpactItemOut,
     FsckOut,
     GateResultOut,
+    GateRunOut,
     GroundingInfoOut,
     NextBatchOut,
     PlanReviewStatusOut,
@@ -36,6 +37,7 @@ from rebar._mcp_models import (
     TicketStateOut,
     ValidateReportOut,
     VerifyCommandItemOut,
+    VerifyCompletionStatusOut,
     VerifySignatureResultOut,
     WorkflowRunOut,
     tool_annotation_presets,
@@ -188,6 +190,44 @@ def _register_plan_review_tools(mcp, annotations) -> None:
         import rebar.llm
 
         return PlanReviewStatusOut.model_validate(rebar.llm.plan_review_status(ticket_id))
+
+    @mcp.tool(annotations=annotations["READ_ONLY"])
+    def verify_completion_status(ticket_id: str) -> VerifyCompletionStatusOut:
+        """Is this ticket's completion-verifier attestation current RIGHT NOW? Read-only.
+
+        The close-gate analog of `plan_review_status`: it delegates to
+        `rebar.llm.verify_completion_status`, a local HMAC verify of the
+        `completion-verifier` attestation — NO LLM and NO network, never a billable
+        re-run — so a caller can poll a `verify_completion` / `verify_completion_start`
+        run's DURABLE outcome without re-charging.
+
+        Returns {ok, verdict, reason, verified_at_sha, signed_at}. `verdict` is
+        'certified' when a valid attestation exists, else 'unsigned'; `verified_at_sha`
+        is the code anchor it was verified against and `signed_at` the sign timestamp,
+        both null when none exists."""
+        import rebar.llm
+
+        return VerifyCompletionStatusOut.model_validate(
+            rebar.llm.verify_completion_status(ticket_id)
+        )
+
+    @mcp.tool(annotations=annotations["READ_ONLY"])
+    def gate_status(job_id: str) -> GateRunOut:
+        """Poll an async gate run started by review_plan_start / verify_completion_start.
+
+        Reads the durable run handle via replay of the local `.rebar/gate_runs` index
+        (no LLM, no execution) -> {job_id, status, ticket_id, gate_type, verdict?,
+        error?, durable?}. `status` is 'running' while the background gate is in flight,
+        then 'passed' / 'failed'; 'stale-running' if the run's daemon died before
+        recording a terminal status; 'attaching' if a duplicate start attached to an
+        in-flight run whose index record has not landed yet (keep polling); 'unknown' if
+        the job_id is unrecognised. For a plan-review or completion job `durable` carries
+        the gate's own signed-attestation currency (the same answer plan_review_status /
+        verify_completion_status give), so a caller can confirm the verdict actually
+        persisted."""
+        import rebar.llm
+
+        return GateRunOut.model_validate(rebar.llm.gate_run_status(job_id))
 
 
 def _register_bridge_projects_read(mcp, ann) -> None:
