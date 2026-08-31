@@ -24,6 +24,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | `clarity_check` | Score ticket clarity (score / verdict / threshold / passed). |
 | `explain_criterion` | Explain a plan-review criterion — its authoring-guide section (epic cite-stone-sea / WS10) — OR print an author-facing prose guide when ``criterion_id`` is a guide name (``plan`` = how to write a passing plan; ``review`` = how to pass code review; ``commit-trailer`` = the required ``rebar-ticket:`` commit-trailer format). A pure registry/guide READ (no LLM, so it is NOT gated on REBAR_MCP_ALLOW_LLM); the SAME shared lookup as the `rebar explain` CLI. On failure returns a structured error ``{error, kind, message}`` (kind ∈ unknown-id / malformed-registry / missing-file). |
 | `fsck` | Check ticket-store integrity (JSON validity, CREATE presence, lock cleanup). Set recover=True to run the recovery path. _(the recover path is gated by `REBAR_MCP_READONLY` (plain fsck is read-only))_ |
+| `gate_status` | Poll an async gate run started by review_plan_start / verify_completion_start. |
 | `get_file_impact` | Get the file-impact array (consumed by next-batch conflict scheduling). |
 | `get_verify_commands` | Get the DD-level verify-commands array for a ticket. |
 | `get_workflow_result` | Read a workflow run's outputs via replay -> {run_id, status, terminal_step, terminal_output, outputs, error}. The terminal step's output is the run result. |
@@ -42,6 +43,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | `summary` | One-line-per-ticket summary [{ticket_id, alias, status, title, blocking_summary}]. |
 | `ticket_deps` | Show the dependency graph for a ticket. |
 | `validate` | Repo-wide quality health check (JSON report: score, critical/major/ minor issues, warnings, suggestions). Takes no ticket id. |
+| `verify_completion_status` | Is this ticket's completion-verifier attestation current RIGHT NOW? Read-only. |
 | `verify_signature` | Certify a ticket's verified-steps manifest against its signature. |
 
 ## LLM-gated (`REBAR_MCP_ALLOW_LLM`)
@@ -52,8 +54,10 @@ Registered by `register_llm_tools` and always present, but each makes a live, bi
 |------|---------|
 | `review_code` | Run a multi-reviewer LLM code review of a git range (base..head) -> an aggregated review_result dict (findings carry agreement + reviewers). |
 | `review_plan` | Run the plan-review gate on a ticket -> a plan_review_verdict dict {verdict: "PASS"\|"BLOCK"\|"INDETERMINATE", blocking[], advisory[], coaching[], indeterminate[], coverage, signature?, source, verified_at_sha, ...}. A deterministic Layer-1 floor (P1-P9) plus a four-pass (find -> verify -> decide -> coach) review of the ticket's whole plan — the inverse of verify_completion. On a non-blocking PASS it signs a plan-review attestation (so a subsequent claim passes the gate when enabled) and emits the REVIEW_RESULT sidecar; in READONLY mode it runs a pure read (no sign, no sidecar). |
+| `review_plan_start` | Start the plan-review gate ASYNC; returns {job_id, ticket_id, gate_type, status:'running'} IMMEDIATELY (in ms) — the review runs on a background daemon thread, so it OUTLIVES the client's request deadline. This is the timeout-proof way to run the gate: unlike the sync ``review_plan`` (which the ~60s client deadline can cut off with a ``-32001`` while the server keeps running), the caller gets a durable handle instead of a timeout, then POLLS — ``plan_review_status(ticket_id)`` for the durable attestation verdict, or ``gate_status(job_id)`` for the run handle (running -> passed/failed). PREFER this for a long review; the sync ``review_plan`` remains the dedup-protected fallback. |
 | `scan_spec` | Batch-scan the store's open epics against a specification -> a review_result dict (gaps/conflicts/overlaps), epics evaluated in batches. |
 | `verify_completion` | Verify a ticket's completion requirements are met -> a completion_verdict dict {verdict: "PASS"\|"FAIL", findings[], summary?, target, reviewers, runner, model, trace_id, source, verified_at_sha, signable}. Checks every acceptance/success/close criterion + definition of done (for bugs, that the bug is resolved) against the implementation; on FAIL, each finding carries the failing criterion, an explanation, and a source-code citation. In READONLY mode this runs a pure read (no sign, no sidecar); a writable server records (see below). |
+| `verify_completion_start` | Start the completion-verifier gate ASYNC; returns {job_id, ticket_id, gate_type, status:'running'} IMMEDIATELY (in ms) — the verification runs on a background daemon thread, so it OUTLIVES the client's request deadline. The timeout-proof way to run the close gate: the caller gets a durable handle instead of the ``-32001`` the sync ``verify_completion`` risks, then POLLS — ``verify_completion_status(ticket_id)`` for the durable attestation verdict, or ``gate_status(job_id)`` for the run handle (running -> passed/failed). PREFER this for a long verification; sync ``verify_completion`` is the dedup-protected fallback. |
 
 ## Write-gated (`REBAR_MCP_READONLY`)
 
@@ -96,6 +100,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 |----------|---------|
 | `REBAR_MCP_READONLY` | Set to 1 to expose only the read tools (no write/mutation tools). |
 | `REBAR_MCP_ALLOW_LLM` | Set to 1 to enable the billable LLM tools (review_code / scan_spec / verify_completion / review_plan); off by default. |
+| `REBAR_MCP_DEDUP` | In-flight de-duplication of the long-running gate tools (review_plan / verify_completion): a concurrent duplicate call for the same ticket+basis attaches to the running gate instead of launching a second billable LLM pass. On by default; set to 0 to disable (kill-switch). |
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only. |
 | `REBAR_MCP_TRANSPORT` | Transport for the MCP server: 'stdio' (default) or 'http' (the optional Streamable-HTTP transport). |
 | `REBAR_MCP_HTTP_HOST` | Bind host for the Streamable-HTTP transport (default 127.0.0.1). |
@@ -130,4 +135,4 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_PROXY_SCOPES` | Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes). |
 | `REBAR_MCP_AUTH_CUSTOM_IMPORT` | The `custom` strategy's `module:factory` import string, resolving to a factory that returns a TokenVerifier; a TRUSTED operator config value that loads and executes the operator-configured code at startup (fail-closed on any load error). |
 
-_61 tools._
+_65 tools._

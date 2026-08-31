@@ -15,8 +15,16 @@ plain ``dict`` (a model-produced result), so no output models are imported here.
 
 from __future__ import annotations
 
-from rebar._mcp_inflight import run_gate_singleflight
+import logging
+import threading
+import time
+from collections.abc import Callable
+from typing import Any
+
+from rebar._mcp_inflight import GateJobHandle, begin_gate_job, run_gate_singleflight
 from rebar._mcp_models import tool_annotation_presets
+
+logger = logging.getLogger(__name__)
 
 
 def _structured_llm_failure(exc: Exception) -> dict:
@@ -122,12 +130,202 @@ def _verify_completion_body(ticket_id: str, graph, ref, source, *, readonly: boo
     return _record_verify_completion(result, ticket_id, readonly=readonly)
 
 
+def _terminal_from_result(result: Any) -> tuple[str, Any]:
+    """Classify a completed gate ``result`` into a (status, verdict) pair for the run index.
+
+    A structured LLM-failure dict (an ``error`` key) settled the run without a verdict =>
+    ``failed``; any other completion => ``passed`` carrying the gate's own PASS/BLOCK
+    ``verdict`` (a BLOCK is a run that COMPLETED, not one that errored)."""
+    if isinstance(result, dict) and result.get("error"):
+        return "failed", result.get("error")
+    verdict = result.get("verdict") if isinstance(result, dict) else None
+    return "passed", verdict
+
+
+def _spawn_gate_daemon(
+    handle: GateJobHandle, gate_type: str, ticket_id: str, work: Callable[[], Any]
+) -> None:
+    """Run ``work`` on a background **daemon thread** (mirrors ``run_workflow``), recording
+    a terminal status to the durable ``.rebar/gate_runs`` index in a ``finally`` so a
+    poller always settles — even if the gate raises before producing a verdict — and
+    releasing any singleflight followers via ``handle.complete``.
+
+    DURABILITY IS LIMITED, exactly like ``run_workflow``: the daemon does not survive the
+    MCP process exiting and there is no reaper, so a process death mid-run leaves the index
+    at ``running`` — which ``gate_status`` surfaces as ``stale-running`` (the gate's own
+    attestation, read via the ``durable`` field, remains the authoritative verdict)."""
+    import rebar.llm
+
+    def _bg() -> None:
+        result: Any = None
+        error: BaseException | None = None
+        status, verdict = "failed", None
+        try:
+            result = work()
+            status, verdict = _terminal_from_result(result)
+        except BaseException as exc:  # noqa: BLE001 — reflected in the run index, not raised
+            error, verdict = exc, str(exc)
+        finally:
+            rebar.llm.record_gate_run(
+                {
+                    "job_id": handle.job_id,
+                    "ticket_id": ticket_id,
+                    "gate_type": gate_type,
+                    "status": status,
+                    "verdict": verdict,
+                    "error": str(error) if error is not None else None,
+                    "finished_at": time.time(),
+                }
+            )
+            handle.complete(result=result, error=error)
+
+    threading.Thread(target=_bg, daemon=True).start()
+
+
+def _start_gate_job(
+    gate_type: str,
+    ticket_id: str,
+    *,
+    ref: str | None,
+    source: str | None,
+    variant: str,
+    readonly: bool,
+    force: bool,
+    work: Callable[[], Any],
+) -> dict:
+    """Reserve a singleflight slot, record a ``running`` handle, and (only as the leader)
+    spawn the background gate. Returns ``{job_id, ticket_id, gate_type, status:"running"}``
+    in milliseconds. A concurrent ``*_start`` for the same key ATTACHES — it shares the
+    in-flight ``job_id`` and does NOT launch a second billable run (bug d80d Phase 2)."""
+    import rebar.llm
+
+    handle = begin_gate_job(
+        gate_type,
+        ticket_id,
+        ref=ref,
+        source=source,
+        variant=variant,
+        readonly=readonly,
+        force=force,
+    )
+    rebar.llm.record_gate_run(
+        {
+            "job_id": handle.job_id,
+            "ticket_id": ticket_id,
+            "gate_type": gate_type,
+            "status": "running",
+            "started_at": time.time(),
+        }
+    )
+    if handle.is_new:
+        _spawn_gate_daemon(handle, gate_type, ticket_id, work)
+    return {
+        "job_id": handle.job_id,
+        "ticket_id": ticket_id,
+        "gate_type": gate_type,
+        "status": "running",
+    }
+
+
+def _register_gate_start_tools(mcp, ann, allow_llm, readonly) -> None:
+    """Register the async ``*_start`` gate tools (bug d80d Phase 2).
+
+    A module-level registrar rather than two more nested ``def``\\s inside
+    ``register_llm_tools``: each nested tool costs that already-near-ceiling function a
+    McCabe point (the shrink-only complexity ratchet caps it), so the Phase-2 pair lives
+    here — the same factoring ``_mcp_reads`` uses for ``_register_plan_review_tools``."""
+
+    @mcp.tool(annotations=ann["READ_ONLY_OPEN_WORLD"])
+    async def review_plan_start(
+        ticket_id: str,
+        ref: str | None = None,
+        source: str | None = None,
+        force: bool = False,
+    ) -> dict:
+        """Start the plan-review gate ASYNC; returns {job_id, ticket_id, gate_type,
+        status:'running'} IMMEDIATELY (in ms) — the review runs on a background daemon
+        thread, so it OUTLIVES the client's request deadline. This is the timeout-proof
+        way to run the gate: unlike the sync ``review_plan`` (which the ~60s client
+        deadline can cut off with a ``-32001`` while the server keeps running), the
+        caller gets a durable handle instead of a timeout, then POLLS —
+        ``plan_review_status(ticket_id)`` for the durable attestation verdict, or
+        ``gate_status(job_id)`` for the run handle (running -> passed/failed). PREFER
+        this for a long review; the sync ``review_plan`` remains the dedup-protected
+        fallback.
+
+        A duplicate ``review_plan_start`` for the same ticket+basis while a run is in
+        flight ATTACHES to it — same ``job_id``, no second billable pass (bug d80d).
+        ``force=True`` starts a fresh run (bypasses de-dup). The verdict persists to the
+        durable event log (the signed attestation); the ``.rebar/gate_runs`` index is a
+        local handle only. DURABILITY IS LIMITED like ``run_workflow``: the daemon does
+        not survive the process exiting and there is no reaper.
+
+        DISABLED unless REBAR_MCP_ALLOW_LLM=1 (it makes live, billable LLM calls)."""
+        if not allow_llm():
+            raise ValueError(
+                "review_plan_start is disabled: it makes live, billable LLM calls. "
+                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
+            )
+        ro = readonly()
+        return _start_gate_job(
+            "plan_review",
+            ticket_id,
+            ref=ref,
+            source=source,
+            variant=f"source={source or 'attested'}",
+            readonly=ro,
+            force=force,
+            work=lambda: _review_plan_body(ticket_id, ref, source, force, readonly=ro),
+        )
+
+    @mcp.tool(annotations=ann["READ_ONLY_OPEN_WORLD"])
+    async def verify_completion_start(
+        ticket_id: str,
+        graph: bool = False,
+        ref: str | None = None,
+        source: str | None = None,
+    ) -> dict:
+        """Start the completion-verifier gate ASYNC; returns {job_id, ticket_id,
+        gate_type, status:'running'} IMMEDIATELY (in ms) — the verification runs on a
+        background daemon thread, so it OUTLIVES the client's request deadline. The
+        timeout-proof way to run the close gate: the caller gets a durable handle
+        instead of the ``-32001`` the sync ``verify_completion`` risks, then POLLS —
+        ``verify_completion_status(ticket_id)`` for the durable attestation verdict, or
+        ``gate_status(job_id)`` for the run handle (running -> passed/failed). PREFER
+        this for a long verification; sync ``verify_completion`` is the dedup-protected
+        fallback.
+
+        A duplicate ``verify_completion_start`` for the same ticket+basis while a run is
+        in flight ATTACHES to it — same ``job_id``, no second billable pass (bug d80d).
+        The verdict persists to the durable event log; the ``.rebar/gate_runs`` index is
+        a local handle only, with the same limited durability as ``run_workflow``.
+
+        DISABLED unless REBAR_MCP_ALLOW_LLM=1 (it makes live, billable LLM calls)."""
+        if not allow_llm():
+            raise ValueError(
+                "verify_completion_start is disabled: it makes a live, billable LLM call. "
+                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
+            )
+        ro = readonly()
+        return _start_gate_job(
+            "verify_completion",
+            ticket_id,
+            ref=ref,
+            source=source,
+            variant=f"graph={graph};source={source or 'attested'}",
+            readonly=ro,
+            force=False,
+            work=lambda: _verify_completion_body(ticket_id, graph, ref, source, readonly=ro),
+        )
+
+
 def register_llm_tools(mcp, ctx) -> None:
     """Register the LLM/agent tools on ``mcp`` (see module docstring)."""
     _allow_llm = ctx.allow_llm
     _readonly = ctx.readonly
 
     _ANN = tool_annotation_presets()
+    _register_gate_start_tools(mcp, _ANN, _allow_llm, _readonly)
 
     @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def review_code(

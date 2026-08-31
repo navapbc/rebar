@@ -51,6 +51,11 @@ from rebar.llm.errors import (
     StructuredOutputError,
 )
 from rebar.llm.findings import build_result, normalize_finding, validate_result
+from rebar.llm.gate_runs import (
+    gate_run_status,
+    record_gate_run,
+    verify_completion_status,
+)
 from rebar.llm.operations import select_reviewers
 from rebar.llm.plan_review import (
     claim_gate_check,
@@ -107,11 +112,13 @@ __all__ = [
     "enumerate_criteria",
     # prompt-library authoring (write + structured enumerate; story B-DM)
     "enumerate_library",
+    "gate_run_status",
     "get_prompt",
     "get_runner",
     "load_catalog",
     "normalize_finding",
     "plan_review_status",
+    "record_gate_run",
     "resign_plan_review",
     "review_code",
     "review_plan",
@@ -121,4 +128,5 @@ __all__ = [
     "update_prompt",
     "validate_result",
     "verify_completion",
+    "verify_completion_status",
 ]
