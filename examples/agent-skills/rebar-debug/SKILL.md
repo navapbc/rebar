@@ -941,10 +941,14 @@ right remedy for all of them, is the set complete — is never anyone's review. 
 has confirmed its siblings:
 
 1. **Every confirmed sibling becomes its own acceptance criterion** on the bug ticket — one
-   checkbox per sibling naming its path and symbol, plus one criterion asserting a structural
-   check over the class (a construct-uniqueness guard, or an equivalent that fails if a new
-   instance appears). The sibling list stops being sweep notes and becomes the scope the change
-   is judged against.
+   checkbox per sibling naming its path and symbol. Then decide whether the *class* also earns a
+   **structural guard** — a single check that fails if a new instance appears anywhere — by
+   working the bright-line test in **`structural-guards.md` in this skill's directory** (it also
+   covers naming the invariant, choosing a portable enforcement layer for any stack, and proving
+   the guard has teeth without becoming a change-detector). When the test says the class earns
+   one, add an acceptance criterion asserting that guard; when it does not, record the one-line
+   reason and rely on the per-sibling regression tests. Either way the sibling list stops being
+   sweep notes and becomes the scope the change is judged against.
 2. **Record the whole sibling set as the change's file impact, then put the class-level plan
    through plan review, before you fix past the first sibling.** When the project's tracker is
    rebar that is `rebar set-file-impact <bug> '[{"path":…,"reason":…},…]'` followed by
