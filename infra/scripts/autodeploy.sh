@@ -55,6 +55,14 @@ SHA_FILE="$STATE_DIR/deployed-sha"
 # (every box before this change), it READS AS $DEPLOYED, so the first tick after an upgrade
 # behaves exactly as it does today: no spurious redeploy, no skipped deploy.
 MCP_SHA_FILE="$STATE_DIR/mcp-deployed-sha"
+# The sha that was live IMMEDIATELY BEFORE the current mcp release — the deterministic
+# blue-green ROLLBACK target, recorded at cutover from the OUTGOING $mcp_deployed. Orphan
+# reconciliation (mcp_reconcile_orphans) preserves exactly {live, this} and retires the rest.
+# Recording deploy ORDER — not a build timestamp — is what makes "immediately-previous"
+# unambiguous: two releases can share a whole-second CreatedAt, but only one was live before
+# the current one. Until an mcp deploy records it (e.g. the first tick after this change lands),
+# reconciliation DEFERS rather than guess, so a rollback image is never removed by heuristic.
+MCP_PREV_SHA_FILE="$STATE_DIR/mcp-previous-sha"
 # The review-bot's OWN last-deployed sha. One footer-written marker cannot represent TWO
 # independently-deploying components: an mcp failure exits before the footer, so a bot that
 # deployed successfully seconds earlier was never recorded, and the next tick redeployed it —
@@ -488,7 +496,63 @@ mcp_retire_image() {
   return 0
 }
 
-# MemAvailable in MB (MCP_MEM_AVAILABLE_MB overrides for tests). Echoes -1 for "unreadable",
+# Every per-release image ref under the mcp repo, one `<repo>:<tag>` per line. No ordering is
+# implied or needed: the immediately-previous release is identified by RECORDED DEPLOY ORDER
+# ($MCP_PREV_SHA_FILE), not by a build timestamp, so this is a pure membership enumeration.
+mcp_image_tags() {
+  docker images "$MCP_IMAGE" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null
+}
+
+# Reconcile ORPHANED per-release image tags. mcp_retire_image only fires at the REAP of a
+# live-tracked container, so a `compose-mcp:<sha>` tag whose container was already reaped on an
+# earlier tick (or never had one on this box) leaks forever — `docker image prune` without `-a`
+# never touches a tagged image. Unbounded, these re-fill the 30GiB root once a SECOND blue-green
+# image family (the mcp target, ticket fd4a) shares it, re-tripping rebar-root-disk-pressure and
+# fail-closing LLM-Review (bug e4f3, a regression of 3a52). This sweeps them every tick.
+#
+# It PRESERVES blue-green rollback — the LIVE backend's image AND the immediately-previous
+# release are ALWAYS kept. Guards, any ONE sufficient:
+#   1. only true per-release `<40-hex-sha>` tags are ever candidates — this structurally
+#      excludes the bare `$MCP_IMAGE` build tag, `:latest` / `:prev`, and any `<none>` row
+#      `docker images` emits for a dangling image of the repo;
+#   2. never the LIVE backend's image ref;
+#   3. never the immediately-previous release ($MCP_PREV_SHA_FILE, the rollback image);
+#   4. `docker image rm` WITHOUT -f, so the daemon refuses while ANY container references it.
+# The previous release is identified by RECORDED DEPLOY ORDER, not by a build timestamp: docker's
+# CreatedAt has whole-second granularity, so two releases built in the same second would tie and
+# fall back to (arbitrary) sha ordering — picking the wrong rollback image. Deploy order is
+# unambiguous. FAIL SAFE twice over: touch nothing when (a) the live image cannot be identified
+# (upstream include missing/unreadable — a transient read must not delete the SERVING image), or
+# (b) no previous release has been recorded yet (e.g. the first tick after this change lands),
+# since without an authoritative rollback target a heuristic could delete it.
+mcp_reconcile_orphans() {
+  local live_ref prev_sha prev_ref ref tag removed=0 kept=0
+  live_ref="$(mcp_image_on_port "$(mcp_live_port)")"
+  [ -n "$live_ref" ] || { log "mcp reconcile: live image unknown; skipping orphan sweep (fail-safe)"; return 0; }
+  prev_sha="$(cat "$MCP_PREV_SHA_FILE" 2>/dev/null | tr -d '[:space:]')"
+  case "$prev_sha" in
+    *[!0-9a-f]*|"") log "mcp reconcile: no recorded previous release yet; deferring orphan sweep until a deploy records one"; return 0 ;;
+  esac
+  [ "${#prev_sha}" -eq 40 ] || { log "mcp reconcile: recorded previous sha malformed; deferring orphan sweep"; return 0; }
+  prev_ref="$MCP_IMAGE:$prev_sha"
+  while read -r ref; do
+    [ -n "$ref" ] || continue
+    case "$ref" in "$MCP_IMAGE:"*) tag="${ref#"$MCP_IMAGE":}" ;; *) continue ;; esac
+    case "$tag" in *[!0-9a-f]*|"") continue ;; esac   # only per-release <sha> tags (guard 1)
+    [ "${#tag}" -eq 40 ] || continue
+    { [ "$ref" = "$live_ref" ] || [ "$ref" = "$prev_ref" ]; } && { kept=$((kept + 1)); continue; }
+    if docker image rm "$ref" >/dev/null 2>&1; then
+      removed=$((removed + 1))
+      log "mcp reconcile: retired orphan image $ref (no container; live=$live_ref prev=$prev_ref preserved)"
+    else
+      log "mcp reconcile: orphan $ref not removed (still referenced, or already gone) — non-fatal"
+    fi
+  done < <(mcp_image_tags)
+  log "mcp reconcile: swept orphan mcp images (removed=$removed kept-live+prev=$kept)"
+  return 0
+}
+
+
 # which the caller treats as fail-OPEN.
 mcp_mem_available_mb() {
   if [ -n "${MCP_MEM_AVAILABLE_MB:-}" ]; then
@@ -631,6 +695,9 @@ mcp_retire_sweep() {
   if [ "$count" -gt "$MCP_RELEASES_CAP" ]; then
     marker AUTODEPLOY_MCP_RETIRE_CAP over-cap "managed mcp containers=$count > cap=$MCP_RELEASES_CAP; NOT forcing a kill (containers still draining/holding ports)"
   fi
+  # Reconcile leaked orphan tags AFTER the reap loop (reaps first free container refs, so a
+  # just-reaped image is removable this same tick) — see mcp_reconcile_orphans (bug e4f3).
+  mcp_reconcile_orphans
 }
 
 # ── single-flight ─────────────────────────────────────────────────────────────
@@ -1071,6 +1138,18 @@ print("failed" if hs.get("ok") is False else "ok")' 2>/dev/null || echo ok)"
     record_mcp_backoff_failure; exit 1
   fi
   log "mcp cutover complete: /mcp upstream now 127.0.0.1:${mcp_newport} (deploy DONE; not waiting on in-flight drain)"
+
+  # Record the OUTGOING release as the rollback target BEFORE the retire sweep runs, so the
+  # orphan reconcile inside it preserves exactly {new live, this previous}. $mcp_deployed still
+  # holds the sha that was live until the flip above; a valid, distinct 40-hex sha is the
+  # immediately-previous release (empty on the very first mcp deploy — nothing to roll back to).
+  case "$mcp_deployed" in
+    *[!0-9a-f]*|"") : ;;
+    *) if [ "${#mcp_deployed}" -eq 40 ] && [ "$mcp_deployed" != "$TARGET" ]; then
+         echo "$mcp_deployed" > "$MCP_PREV_SHA_FILE.tmp" && mv "$MCP_PREV_SHA_FILE.tmp" "$MCP_PREV_SHA_FILE"
+         log "mcp reconcile: recorded previous release $mcp_deployed (rollback target; preserved by orphan sweep)"
+       fi ;;
+  esac
 
   # 7. retire the OLD backend off the critical path (graceful docker stop, reap when drained).
   mcp_retire_sweep
