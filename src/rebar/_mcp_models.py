@@ -394,6 +394,28 @@ try:
         verified_at_sha: str | None = None
         signed_at: int | str | None = None  # str: JS-safe wire form (bug 6fe7)
 
+    class VerifyCompletionStatusOut(_Out):
+        # The completion-verifier close-gate analog of PlanReviewStatusOut, mirroring
+        # rebar.llm.verify_completion_status: a read-only, no-LLM attestation currency
+        # read. verdict is 'certified' when a valid completion-verifier attestation
+        # exists, else 'unsigned'; verified_at_sha / signed_at are None when none does.
+        ok: bool
+        verdict: str
+        reason: str
+        verified_at_sha: str | None = None
+        signed_at: int | str | None = None  # str: JS-safe wire form (bug 6fe7)
+
+    class GateRunOut(_Out):
+        # The durable handle for an async gate run started by review_plan_start /
+        # verify_completion_start, returned by those tools and by the gate_status poll
+        # (bug d80d Phase 2). extra=allow carries the poll-only fields (verdict / error /
+        # durable) a settled run adds. status is running / passed / failed /
+        # stale-running / unknown.
+        job_id: str
+        status: str
+        ticket_id: str | None = None
+        gate_type: str | None = None
+
     class GroundingBackendOut(_Out):
         # One backend entry of GroundingInfoOut.backends.
         name: str
@@ -443,6 +465,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     WorkflowRunOut = None  # type: ignore[assignment,misc]
     GroundingInfoOut = GroundingBackendOut = None  # type: ignore[assignment,misc]
     PlanReviewStatusOut = None  # type: ignore[assignment,misc]
+    VerifyCompletionStatusOut = GateRunOut = None  # type: ignore[assignment,misc]
     PushStatusOut = WriteAckOut = None  # type: ignore[assignment,misc]
 
 

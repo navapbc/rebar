@@ -161,6 +161,16 @@ def active_job_id(dedup_key: str) -> str | None:
         return hit.job_id if hit is not None and not hit.done else None
 
 
+def is_job_active(job_id: str) -> bool:
+    """True iff ``job_id`` names a run that is still in flight in THIS process.
+
+    The Phase-2 handle poll (``gate_status``) uses it to tell a live run from one
+    whose daemon already settled: an inactive job whose durable index still reads
+    ``running`` is a crashed leader (surfaced as ``stale-running``)."""
+    with _lock:
+        return any(e.job_id == job_id and not e.done for e in _registry.values())
+
+
 def _sweep_locked() -> None:
     """Evict entries older than the max-age ceiling. Caller holds ``_lock``."""
     now = time.monotonic()
@@ -260,3 +270,60 @@ def run_gate_singleflight(
     key = compute_key(gate_type, canonical_ticket_id(ticket_id), basis, variant, readonly)
     _job_id, result = run_singleflight(key, new_job_id, work, bypass=force)
     return result
+
+
+@dataclass
+class GateJobHandle:
+    """A reserved (or attached-to) singleflight slot for the Phase-2 ``*_start`` tools.
+
+    ``is_new`` is True for the LEADER — the caller that must spawn the background daemon
+    and, when it settles, call :meth:`complete` to release any attached followers. When
+    ``is_new`` is False the caller ATTACHED to a run already in flight (``job_id`` is that
+    run's id) and must NOT start a second billable pass — it just returns the shared
+    handle to be polled."""
+
+    job_id: str
+    is_new: bool
+    _dedup_key: str | None = None
+    _entry: _Inflight | None = None
+
+    def complete(self, result: Any = None, error: BaseException | None = None) -> None:
+        """Leader-only: publish the verdict to attached followers and purge the key.
+
+        A no-op for a follower handle or a bypassed (forced / kill-switch) job, which
+        own no registry entry. Idempotent — safe to call once from the daemon's
+        ``finally``."""
+        if self._entry is None or self._dedup_key is None:
+            return
+        self._entry.result = result
+        self._entry.error = error
+        _finish(self._entry, self._dedup_key)
+
+
+def begin_gate_job(
+    gate_type: str,
+    ticket_id: str,
+    *,
+    ref: str | None = None,
+    source: str | None = None,
+    variant: str = "",
+    readonly: bool = False,
+    force: bool = False,
+    repo_root: str | None = None,
+) -> GateJobHandle:
+    """Reserve (or attach to) a singleflight slot WITHOUT running work in the caller.
+
+    The Phase-2 ``*_start`` tools call this, then spawn the background daemon ONLY when
+    the returned handle ``is_new`` (the leader). A concurrent ``*_start`` for the same
+    key gets ``is_new=False`` and the EXISTING run's ``job_id``, so a duplicate start —
+    the very retry a client-side ``-32001`` timeout provokes — shares one billable run
+    instead of launching a second. ``force=True`` (or the ``REBAR_MCP_DEDUP=0``
+    kill-switch) always gets its own job and never attaches."""
+    if force or not dedup_enabled():
+        return GateJobHandle(new_job_id(), True)
+    basis = resolve_basis_sha(ref, source, repo_root)
+    key = compute_key(gate_type, canonical_ticket_id(ticket_id), basis, variant, readonly)
+    entry, leader = _attach_or_create(key, new_job_id)
+    if leader:
+        return GateJobHandle(entry.job_id, True, key, entry)
+    return GateJobHandle(entry.job_id, False)
