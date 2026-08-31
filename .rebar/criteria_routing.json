@@ -76,6 +76,28 @@
           ]
         }
       ]
+    },
+    "project.failure-disposition-contract": {
+      "exec": "1-TURN",
+      "facet": "project-invariants",
+      "applies_at": {
+        "scope": [
+          "container",
+          "leaf"
+        ]
+      },
+      "default_posture": "advisory",
+      "block_threshold": 0.9,
+      "checklist": [
+        {
+          "key": "affects_failure_disposition",
+          "check": "GATE: the plan ADDS or ALTERS failure/timeout/exception/retry/fallback/circuit-breaker semantics on some path (a new fallback arm, a changed exception type, a changed retry/backoff policy, a changed disposition a path surfaces). no (a plan that touches no such semantics \u2014 including a doc-only/test-only mention or a non-failure use of the word 'fallback') -> not-applicable -> PASS."
+        },
+        {
+          "key": "disposition_contract_stated",
+          "check": "Only when gated in: the plan states its FAILURE-DISPOSITION CONTRACT \u2014 (1) for EACH affected failure arm, the disposition it surfaces using an explicit disposition word (retryable/transient vs fatal/permanent); AND (2) [conditional \u2014 only when the plan adds/alters a SECONDARY/fallback arm] which disposition wins when the fallback itself fails, preserving the most-recoverable leg (a retryable primary is never masked by the fallback's own non-retryable failure \u2014 the 1c0d root cause). FIRE when an affected arm has no stated disposition, or a fallback chain omits the fallback-failure winner. ACCEPT an inline statement that unambiguously carries a disposition word per affected arm. Advisory \u2014 never blocks. Cite the disposition-contract gap specifically; do NOT double-flag T5b's error-handling-existence concern."
+        }
+      ]
     }
   },
   "code_review": {
@@ -119,6 +141,9 @@
       "plan_review"
     ],
     "project.measurement-provenance": [
+      "plan_review"
+    ],
+    "project.failure-disposition-contract": [
       "plan_review"
     ]
   }

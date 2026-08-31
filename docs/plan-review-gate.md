@@ -410,6 +410,71 @@ must-not-fire) is run live with `rebar criteria eval project.portability --runs 
 release thresholds are `recall: 1.0`, `false_accept: 0.0`, `agreement: 1.0`, per-case
 `stability >= 0.6666666667`, plus expected-vs-observed fire/no-fire `kappa >= 0.70`.
 
+### An advisory failure-disposition guard
+
+A second project criterion, `project.failure-disposition-contract` (ticket
+`slavish-unwieldy-mastiff`, incident `1c0d` prevention), dogfoods the same extension
+boundary but ships **advisory** rather than blocking. It flags a plan that **adds or
+alters** failure / timeout / exception / retry / fallback / circuit-breaker semantics but
+does not state its **failure-disposition contract** — per affected arm, whether the
+surfaced disposition is retryable/transient vs fatal/permanent; and, when a fallback chain
+exists, which leg wins on fallback-failure (a retryable primary must never be masked by the
+fallback's own non-retryable failure — the `1c0d` root cause, where a config flip enabled a
+fallback whose degraded terminal arm masked a retryable primary throttle). Like
+`project.portability` it is a **project** criterion authored in this repo's `.rebar/`
+overlay, and like `necessity` it carries **no DET trigger** in v1 — applicability is
+LLM-judged from the rubric, so the criterion self-gates (PASS when the plan touches no such
+semantics).
+
+Activated and routed in `.rebar/criteria_routing.json`, advisory and single-turn:
+
+```json
+{
+  "plan_review": {
+    "project.failure-disposition-contract": {
+      "exec": "1-TURN",
+      "facet": "project-invariants",
+      "applies_at": { "scope": ["container", "leaf"] },
+      "default_posture": "advisory",
+      "block_threshold": 0.9,
+      "checklist": [
+        { "key": "affects_failure_disposition", "check": "GATE ..." },
+        { "key": "disposition_contract_stated", "check": "REQ ..." }
+      ]
+    }
+  },
+  "activate": {
+    "project.failure-disposition-contract": ["plan_review"]
+  }
+}
+```
+
+Its rubric lives at `.rebar/prompts/plan-review-project-failure-disposition-contract.md`
+(`execution_mode: single_turn`, `dimension: project-invariants`) and answers two
+checklist sub-answers: the applicability **GATE** `affects_failure_disposition
+{yes|no|insufficient}` (no → not-applicable → PASS) and, only when gated in, the requirement
+`disposition_contract_stated {yes|no|insufficient}` — clause (1) a disposition word per
+affected arm, and clause (2), when a fallback chain exists, the fallback-failure winner
+preserving the most-recoverable leg. It carries **no** `suppress_types`, so it is silent on
+the light bug tier (only `registry.BUG_TIER_CRITERIA` run there) yet reviews an **escalated
+bug** — one whose `file_impact` declares a non-test path, like the `8fbd` `rebar.toml`
+config flip — under the full rubric with `ticket_type=None`. An explicit clause keeps it
+**orthogonal to T5b**: T5b asks whether error handling exists at all; this criterion asks
+whether an added/altered failure path's disposition contract is *stated* — a new call that
+ships retry/backoff *and* a per-arm disposition statement PASSES here.
+
+Because it ships advisory, it **never blocks**; promotion to a blocking posture is a future
+dogfood-gated `.rebar/criteria_routing.json` change, monitored with zero per-criterion
+wiring by the standing effectiveness recorder. **Calibration.** A bounded hand-authored
+seven-case sanity corpus at
+`.rebar/evals/plan-review-project-failure-disposition-contract.eval.yaml` (three must-fire,
+four must-not-fire) — NOT an E2/E3 batch eval — is run live with `rebar criteria eval
+project.failure-disposition-contract --runs 3`; the frozen operator-attested expected
+outcome is committed at
+`docs/experiments/plan-review-gate/runs/failure_disposition_sanity.json` (`recall: 1.0`,
+`false_accept: 0.0`), and the offline CI proxy proves the corpus TP/TN shape and calibration
+arithmetic under an injected perfect solve.
+
 ### The advisory cap
 
 The surfaced advisory findings are capped at the top-N by priority (default **20**,
