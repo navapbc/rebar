@@ -57,6 +57,14 @@ def _set_target(box: dict[str, object], sha: str) -> None:
     target_file.write_text(sha + "\n")
 
 
+def _set_bot_state(box: dict[str, object], token: str) -> None:
+    """Set the review-bot container's docker state token the docker stub reports, so a test
+    can present a MID-REDEPLOY bot (``starting``/``restarting``) vs a WEDGED one (``running``,
+    the default) to ``bot_unreachable_disposition`` (bug 2f46)."""
+    bot_state_file: Path = box["bot_state_file"]  # type: ignore[assignment]
+    bot_state_file.write_text(token)
+
+
 @pytest.fixture
 def box(tmp_path: Path) -> dict[str, object]:
     """A fake box where main advanced with a review-bot source change, so the redeploy block
@@ -80,8 +88,12 @@ def box(tmp_path: Path) -> dict[str, object]:
     cmd_log = tmp_path / "cmd-log"
     target_file = tmp_path / "target-sha"
     health_file = tmp_path / "health-body"
+    bot_state_file = tmp_path / "bot-state"
     target_file.write_text("e" * 40 + "\n")
     health_file.write_text('{"status":"ok","in_flight":0}')
+    # Default: the bot container is up and healthy, so an unreachable /health classifies as
+    # WEDGED (the pre-2f46 fail-open behaviour) unless a test sets this to a transient state.
+    bot_state_file.write_text("running")
     (state / "deployed-sha").write_text(_DEPLOYED + "\n")
 
     # git stub: the target tip is read from a FILE so a burst can advance it between ticks.
@@ -111,7 +123,23 @@ def box(tmp_path: Path) -> dict[str, object]:
         bin_dir,
         "docker",
         f"""
+        # bot_unreachable_disposition() (bug 2f46) reads the review-bot container state/health
+        # to tell a MID-REDEPLOY bot from a WEDGED one. Drive both from a file-backed token:
+        #   running     -> status=running, health=healthy   (wedged when /health unreachable)
+        #   starting     -> status=running, health=starting  (mid-redeploy via health)
+        #   restarting   -> status=restarting                (mid-redeploy via status)
+        #   nocontainer  -> `compose ps -q` empty            (wedged: deploy to create it)
+        st="$(cat "{bot_state_file}" 2>/dev/null || echo running)"
         case "$*" in
+          *"compose ps"*)
+            [ "$st" = nocontainer ] || echo "fake-bot-cid"
+            exit 0 ;;
+          *inspect*State.Health*)
+            case "$st" in starting) echo starting ;; *) echo healthy ;; esac
+            exit 0 ;;
+          *inspect*State.Status*)
+            case "$st" in restarting) echo restarting ;; *) echo running ;; esac
+            exit 0 ;;
           *"compose build"*)  echo "compose-build" >> "{cmd_log}" ;;
           *"compose up"*)
             echo "compose-up" >> "{cmd_log}"
@@ -162,6 +190,7 @@ def box(tmp_path: Path) -> dict[str, object]:
         "state": state,
         "target_file": target_file,
         "health_file": health_file,
+        "bot_state_file": bot_state_file,
     }
 
 
@@ -596,4 +625,104 @@ def test_a_persistently_unreachable_replacement_rolls_back_without_deferring(
     assert "compose-build" in commands and "tag-rollback-latest" in commands, (
         f"the deploy must be attempted, then the persistently-unhealthy replacement rolled back"
         f"\n{context}"
+    )
+
+
+# --- 2f46: mid-redeploy vs wedged when /health is unreadable ------------------
+
+
+def test_a_bot_that_is_mid_redeploy_is_deferred_not_recreated_2f46(
+    box: dict[str, object],
+) -> None:
+    """Bug 2f46 (Mechanism 3). A bot whose /health is unreadable ONLY because it is itself
+    being recreated (docker health ``starting``) must NOT be blindly recreated — that would
+    kill the very startup we should wait for and re-enter the blind window. It is DEFERRED
+    (retry next tick) with its own countable ``AUTODEPLOY_DEFERRED bot-redeploying`` marker,
+    NOT failed open with ``signal-unavailable``."""
+    _set_health_body(box, "DOWN")  # /health unreachable -> in_flight == -1
+    _set_bot_state(box, "starting")  # ...but only because the container is mid-(re)start
+    result = _run(box)
+    state: Path = box["state"]  # type: ignore[assignment]
+    commands = _commands(box)
+    deferrals = _markers(result, "AUTODEPLOY_DEFERRED")
+    interrupts = _markers(result, "AUTODEPLOY_REVIEW_INTERRUPT")
+    context = f"rc={result.returncode}\ncommands={commands}\n{result.stdout}\n{result.stderr}"
+
+    assert "compose-build" not in commands and "compose-up" not in commands, (
+        "a bot that is mid-redeploy must NOT be recreated blind — recreating it kills the "
+        f"startup we are waiting on\n{context}"
+    )
+    assert deferrals and "bot-redeploying" in deferrals[0], (
+        "a mid-redeploy deferral must be countable under its own reason, distinct from the "
+        f"busy-defer and the fail-open interrupt\n{context}"
+    )
+    assert not interrupts, (
+        f"a mid-redeploy bot must NOT emit signal-unavailable (it was not failed open)\n{context}"
+    )
+    assert (state / "deployed-sha").read_text().strip() == _DEPLOYED, (
+        f"a deferred tick must not advance deployed-sha\n{context}"
+    )
+    assert result.returncode == 0, f"a deferral is a normal outcome, not a failure\n{context}"
+
+
+def test_a_restarting_bot_is_treated_as_mid_redeploy_2f46(box: dict[str, object]) -> None:
+    """The docker STATUS branch of the disposition: a container in ``restarting`` (not merely
+    health ``starting``) is also transient and must be deferred, not recreated blind."""
+    _set_health_body(box, "DOWN")
+    _set_bot_state(box, "restarting")
+    result = _run(box)
+    commands = _commands(box)
+    deferrals = _markers(result, "AUTODEPLOY_DEFERRED")
+    context = f"commands={commands}\n{result.stdout}\n{result.stderr}"
+
+    assert "compose-build" not in commands, (
+        f"a restarting bot is transient — defer, do not recreate it blind\n{context}"
+    )
+    assert deferrals and "bot-redeploying" in deferrals[0], (
+        f"a restarting bot must be the countable mid-redeploy deferral\n{context}"
+    )
+
+
+def test_a_wedged_bot_still_fails_open_and_is_counted_2f46(box: dict[str, object]) -> None:
+    """Preservation guard: a genuinely WEDGED bot — its container up (``running``) but /health
+    unreadable — must STILL fail open and deploy (that is how a broken bot gets fixed),
+    emitting the countable ``signal-unavailable`` marker. The 2f46 change must not turn this
+    recovery path into a deferral."""
+    _set_health_body(box, "not-json-at-all")  # reachable but unparseable -> -1
+    _set_bot_state(box, "running")  # container up and healthy == not mid-redeploy == wedged
+    result = _run(box)
+    commands = _commands(box)
+    interrupts = _markers(result, "AUTODEPLOY_REVIEW_INTERRUPT")
+    context = f"commands={commands}\n{result.stdout}\n{result.stderr}"
+
+    assert "compose-build" in commands, (
+        f"a wedged bot must be redeployed (fail-open recovery), not deferred\n{context}"
+    )
+    assert interrupts and "signal-unavailable" in interrupts[0], (
+        f"the fail-open deploy must remain countable as signal-unavailable\n{context}"
+    )
+    assert not _markers(result, "AUTODEPLOY_DEFERRED"), (
+        f"a wedged bot must not be classified as a mid-redeploy deferral\n{context}"
+    )
+
+
+def test_a_mid_redeploy_defer_is_bounded_2f46(box: dict[str, object]) -> None:
+    """The mid-redeploy defer is bounded exactly like the busy defer: a bot that never finishes
+    starting cannot freeze the gate forever. Once ``DEPLOY_DEFER_MAX`` is spent it falls through
+    to the fail-open recreate + countable ``signal-unavailable`` — the safety valve is kept."""
+    _set_health_body(box, "DOWN_UNTIL_DEPLOY")  # unreachable now; healed once compose-up runs
+    _set_bot_state(box, "starting")
+    env: dict[str, str] = box["env"]  # type: ignore[assignment]
+    env["DEPLOY_DEFER_MAX"] = "0"  # bound already spent on this first tick
+    result = _run(box)
+    commands = _commands(box)
+    interrupts = _markers(result, "AUTODEPLOY_REVIEW_INTERRUPT")
+    context = f"rc={result.returncode}\ncommands={commands}\n{result.stdout}\n{result.stderr}"
+
+    assert "compose-build" in commands, (
+        f"once the mid-redeploy bound is spent the deploy must proceed — a bot stuck starting "
+        f"cannot freeze the gate indefinitely\n{context}"
+    )
+    assert interrupts and "signal-unavailable" in interrupts[0], (
+        f"the fall-through recreate must be counted as signal-unavailable\n{context}"
     )

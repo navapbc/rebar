@@ -450,11 +450,18 @@ def test_wrap_tool_fn_passes_args_and_kwargs_through_and_counts():
     assert gauge.value == 0  # balanced after the call returns
 
 
-def test_make_sigterm_handler_stops_intake_then_drains():
-    """The SIGTERM handler BODY built by make_sigterm_handler (used by
-    run_http_with_grace) is executed directly: it sets should_exit immediately (stop
-    accepting new connections) and does NOT return until the gauge drains — proving the
-    stop-then-drain ordering, not merely that a handler was installed."""
+def test_make_sigterm_handler_drains_gauge_before_stopping_intake_2f46():
+    """Bug 2f46: the SIGTERM handler BODY built by make_sigterm_handler (used by
+    run_http_with_grace) must DRAIN the in-flight gauge to 0 BEFORE it tells uvicorn to
+    exit — not the other way round. Setting ``should_exit`` first (the old behaviour) is
+    exactly what coupled a retiring container to uvicorn's ``timeout_graceful_shutdown``:
+    with the timeout equal to the 1200s certified-op grace, a Streamable-HTTP server then
+    burned the full 1200s waiting for idle held-open client streams even at 0 in-flight,
+    exhausting the two-port blue/green pool (``mcp_retire_cap`` / ``deploy_errors``).
+
+    Preservation invariant: while a real op is still in flight (gauge > 0) ``should_exit``
+    stays False (the op's streaming response completes normally, never cut short); it flips
+    True only once the gauge reaches 0. This is executed directly, not via a real signal."""
     import threading
 
     from rebar._mcp_health import InFlightGauge, make_sigterm_handler
@@ -471,16 +478,131 @@ def test_make_sigterm_handler_stops_intake_then_drains():
 
     def _release():
         time.sleep(0.15)
-        order.append(("should_exit_before_drain_done", server.should_exit))
+        # The op is STILL in flight here: should_exit must NOT have been set yet (the
+        # >0-in-flight preservation guard — uvicorn keeps serving so the op finishes).
+        order.append(("should_exit_while_inflight", server.should_exit))
         gauge._decrement()
 
     threading.Thread(target=_release, daemon=True).start()
     handler(15, None)  # execute the real handler body (SIGTERM == 15)
 
-    assert server.should_exit is True  # intake stopped
     assert gauge.value == 0  # handler waited for the in-flight op to finish
-    # should_exit was already True WHILE the op was still draining (intake-stop first).
-    assert order and order[0] == ("should_exit_before_drain_done", True)
+    assert server.should_exit is True  # intake stopped only AFTER the drain
+    # should_exit was still False WHILE the op was draining (drain-first, not intake-first).
+    assert order and order[0] == ("should_exit_while_inflight", False), (
+        "should_exit must not be set while a certified op is in flight — setting it first is "
+        "the 2f46 coupling that burned the full uvicorn graceful-shutdown grace"
+    )
+
+
+def test_run_http_with_grace_decouples_uvicorn_grace_from_op_grace_2f46(monkeypatch):
+    """Bug 2f46: uvicorn's ``timeout_graceful_shutdown`` must be a SHORT backstop,
+    DECOUPLED from the 1200s certified-op drain grace. Binding them (``= int(grace_seconds)``)
+    is what made a retiring container wait the full op grace for idle held-open streams even
+    at 0 in-flight. The certified-op drain is enforced by the in-flight gauge, not by this
+    uvicorn timeout, so shortening it never truncates a real op."""
+    import signal
+
+    import rebar._mcp_health as health
+    from rebar.mcp_server import build_server
+
+    captured = {}
+
+    class _FakeServer:
+        def __init__(self, config):
+            self.should_exit = False
+
+        def run(self):
+            captured["ran"] = True
+
+    class _FakeConfig:
+        def __init__(self, app, **kwargs):
+            captured["kwargs"] = kwargs
+
+    monkeypatch.setattr("uvicorn.Config", _FakeConfig)
+    monkeypatch.setattr("uvicorn.Server", _FakeServer)
+
+    prev = signal.getsignal(signal.SIGTERM)
+    try:
+        server = build_server(_http_config())
+        gauge = getattr(server, health._GAUGE_ATTR)
+        health.run_http_with_grace(server, gauge, grace_seconds=1200)
+        tgs = captured["kwargs"]["timeout_graceful_shutdown"]
+        assert tgs != 1200, (
+            "uvicorn timeout_graceful_shutdown must be DECOUPLED from the 1200s op grace (2f46)"
+        )
+        assert tgs == int(health.DEFAULT_UVICORN_GRACEFUL_SECONDS)
+        assert health.DEFAULT_UVICORN_GRACEFUL_SECONDS < health.DEFAULT_SHUTDOWN_GRACE_SECONDS
+    finally:
+        signal.signal(signal.SIGTERM, prev)
+
+
+def test_gauge_begin_draining_refuses_new_certified_ops_2f46():
+    """Bug 2f46 (Mechanism 1, intake-stop). Draining the gauge to 0 is only safe if NO new
+    certified op can arrive during the drain and push the gauge back above 0 — otherwise a
+    landing burst pins the retiring container for the full grace and re-creates the
+    port-exhaustion the fix targets. ``begin_draining`` closes NEW certified-op intake: a
+    subsequent ``track`` of a certified tool is REFUSED (raises, does not increment), while
+    an already-counted op and any non-certified call are unaffected."""
+    from rebar._mcp_health import InFlightGauge, MCPRetiringError
+
+    gauge = InFlightGauge()
+    with gauge.track("review_plan"):  # one op already in flight before retirement begins
+        assert gauge.value == 1
+        gauge.begin_draining()
+        assert gauge.draining is True
+        # A NEW certified op that lands during the drain window is refused, NOT counted.
+        with pytest.raises(MCPRetiringError):
+            with gauge.track("verify_completion"):
+                pass
+        assert gauge.value == 1  # the refused op never incremented the gauge
+        # A non-certified name is a no-op context either way — never blocked.
+        with gauge.track("sign_review"):
+            pass
+    assert gauge.value == 0  # the pre-existing op still drains normally to completion
+
+
+def test_make_sigterm_handler_stops_new_intake_immediately_2f46():
+    """Bug 2f46 (Mechanism 1, intake-stop). The SIGTERM handler must begin draining the
+    gauge (refuse new intake) IMMEDIATELY on signal — before/while it waits for the in-flight
+    op — so a burst arriving mid-drain cannot re-pin the port. Proven by observing that, while
+    the handler is still draining a >0 gauge, the gauge already reports ``draining`` and
+    refuses a new certified op."""
+    import threading
+
+    from rebar._mcp_health import InFlightGauge, MCPRetiringError, make_sigterm_handler
+
+    class _FakeServer:
+        should_exit = False
+
+    server = _FakeServer()
+    gauge = InFlightGauge()
+    gauge._increment()  # one op in flight when the signal arrives
+    handler = make_sigterm_handler(server, gauge, grace_seconds=5, poll_interval=0.02)
+
+    observed = {}
+
+    def _release():
+        time.sleep(0.15)  # while the handler is still draining the >0 gauge
+        observed["draining"] = gauge.draining
+        try:
+            with gauge.track("review_plan"):
+                pass
+        except MCPRetiringError:
+            observed["new_op_refused"] = True
+        gauge._decrement()
+
+    threading.Thread(target=_release, daemon=True).start()
+    handler(15, None)
+
+    assert observed.get("draining") is True, (
+        "the handler must begin draining (close new intake) immediately on SIGTERM, not only "
+        "after the gauge hits 0"
+    )
+    assert observed.get("new_op_refused") is True, (
+        "a certified op landing during the drain window must be refused so a burst cannot "
+        "re-pin the retiring container's port for the full grace (2f46)"
+    )
 
 
 def test_wired_server_moves_gauge_for_a_really_registered_certified_tool():
@@ -582,10 +704,11 @@ def test_drain_then_exit_is_bounded_when_gauge_never_drains():
 
 
 def test_run_http_with_grace_installs_sigterm_and_bounds_uvicorn(monkeypatch):
-    """run_http_with_grace builds a uvicorn server with a bounded graceful-shutdown
-    timeout equal to the grace, installs a SIGTERM handler, and joins the serving
-    thread. A fake uvicorn Server (run() returns immediately) keeps the test
-    port-free; the SIGTERM handler drains the gauge then sets should_exit."""
+    """run_http_with_grace builds a uvicorn server with a SHORT graceful-shutdown timeout
+    (the DEFAULT_UVICORN_GRACEFUL_SECONDS backstop, decoupled from the 1200s op grace — bug
+    2f46), installs a SIGTERM handler, and joins the serving thread. A fake uvicorn Server
+    (run() returns immediately) keeps the test port-free; the SIGTERM handler drains the
+    gauge then sets should_exit."""
     import signal
 
     import rebar._mcp_health as health
@@ -614,7 +737,10 @@ def test_run_http_with_grace_installs_sigterm_and_bounds_uvicorn(monkeypatch):
         gauge = getattr(server, health._GAUGE_ATTR)
         health.run_http_with_grace(server, gauge, grace_seconds=1200)
         assert captured.get("ran") is True
-        assert captured["config_kwargs"]["timeout_graceful_shutdown"] == 1200
+        assert captured["config_kwargs"]["timeout_graceful_shutdown"] == int(
+            health.DEFAULT_UVICORN_GRACEFUL_SECONDS
+        )
+        assert captured["config_kwargs"]["timeout_graceful_shutdown"] != 1200
         assert signal.getsignal(signal.SIGTERM) not in (prev, signal.SIG_DFL)
     finally:
         signal.signal(signal.SIGTERM, prev)
