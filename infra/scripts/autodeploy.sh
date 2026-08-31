@@ -488,7 +488,59 @@ mcp_retire_image() {
   return 0
 }
 
-# MemAvailable in MB (MCP_MEM_AVAILABLE_MB overrides for tests). Echoes -1 for "unreadable",
+# Every tag under the mcp image repo, NEWEST FIRST, as `<createdAt>|<repo:tag>`. Sorting on the
+# `docker`-format CreatedAt (ISO-ish, lexically sortable) lets the caller pick the
+# immediately-previous release deterministically without tracking extra state.
+mcp_image_tags() {
+  docker images "$MCP_IMAGE" --format '{{.CreatedAt}}|{{.Repository}}:{{.Tag}}' 2>/dev/null \
+    | sort -r
+}
+
+# Reconcile ORPHANED per-release image tags. mcp_retire_image only fires at the REAP of a
+# live-tracked container, so a `compose-mcp:<sha>` tag whose container was already reaped on an
+# earlier tick (or never had one on this box) leaks forever — `docker image prune` without `-a`
+# never touches a tagged image. Unbounded, these re-fill the 30GiB root once a SECOND blue-green
+# image family (the mcp target, ticket fd4a) shares it, re-tripping rebar-root-disk-pressure and
+# fail-closing LLM-Review (bug e4f3, a regression of 3a52). This sweeps them every tick.
+#
+# It PRESERVES blue-green rollback — the LIVE backend's image AND the immediately-previous
+# release (the newest non-live `<sha>` tag) are ALWAYS kept. Guards, any ONE sufficient:
+#   1. never the bare `$MCP_IMAGE` / `:latest` / `:prev` (build tag + rollback lifelines);
+#   2. never the LIVE backend's image ref;
+#   3. never the immediately-previous release (the rollback image);
+#   4. `docker image rm` WITHOUT -f, so the daemon refuses while ANY container references it.
+# FAIL SAFE: if the live image cannot be identified (upstream include missing/unreadable, so a
+# transient read could otherwise delete the SERVING image), touch nothing this tick.
+mcp_reconcile_orphans() {
+  local live_ref prev_ref ref
+  live_ref="$(mcp_image_on_port "$(mcp_live_port)")"
+  [ -n "$live_ref" ] || { log "mcp reconcile: live image unknown; skipping orphan sweep (fail-safe)"; return 0; }
+  prev_ref="$(mcp_image_tags | awk -F'|' -v live="$live_ref" '
+    { r=$2 }
+    r ~ /:latest$/ || r ~ /:prev$/ { next }   # rollback lifelines, never a per-release orphan
+    r !~ /:/ { next }                          # the bare build tag
+    r == live { next }                         # the live release
+    { print r; exit }                          # newest remaining = immediately-previous
+  ')"
+  while IFS='|' read -r _ ref; do
+    [ -n "$ref" ] || continue
+    case "$ref" in
+      "$MCP_IMAGE"|"$MCP_IMAGE:latest"|"$MCP_IMAGE:prev") continue ;;
+      "$MCP_IMAGE:"*) : ;;
+      *) continue ;;
+    esac
+    [ "$ref" = "$live_ref" ] && continue
+    [ -n "$prev_ref" ] && [ "$ref" = "$prev_ref" ] && continue
+    if docker image rm "$ref" >/dev/null 2>&1; then
+      log "mcp reconcile: retired orphan image $ref (no container; live=$live_ref prev=${prev_ref:-none} preserved)"
+    else
+      log "mcp reconcile: orphan $ref not removed (still referenced, or already gone) — non-fatal"
+    fi
+  done < <(mcp_image_tags)
+  return 0
+}
+
+
 # which the caller treats as fail-OPEN.
 mcp_mem_available_mb() {
   if [ -n "${MCP_MEM_AVAILABLE_MB:-}" ]; then
@@ -631,6 +683,9 @@ mcp_retire_sweep() {
   if [ "$count" -gt "$MCP_RELEASES_CAP" ]; then
     marker AUTODEPLOY_MCP_RETIRE_CAP over-cap "managed mcp containers=$count > cap=$MCP_RELEASES_CAP; NOT forcing a kill (containers still draining/holding ports)"
   fi
+  # Reconcile leaked orphan tags AFTER the reap loop (reaps first free container refs, so a
+  # just-reaped image is removable this same tick) — see mcp_reconcile_orphans (bug e4f3).
+  mcp_reconcile_orphans
 }
 
 # ── single-flight ─────────────────────────────────────────────────────────────

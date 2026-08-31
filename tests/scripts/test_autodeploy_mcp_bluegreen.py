@@ -92,6 +92,15 @@ case "$1" in
   ps)
     if printf ' %s ' "$@" | grep -q ' -a '; then names_all; else names_running; fi
     exit 0 ;;
+  images)
+    # Model `docker images <repo> --format '{{.CreatedAt}}|{{.Repository}}:{{.Tag}}'` from a
+    # seed file (DS/mcp-images: "createdAt|repo:tag" per line), honoring the repo-name filter
+    # ($2). Only tests that opt in by seeding images exercise the orphan-reconcile path; every
+    # pre-existing test seeds no image file, so this returns nothing and is inert for them.
+    IMG="$DS/mcp-images"; [ -f "$IMG" ] || exit 0
+    repo="$2"
+    awk -F'|' -v r="$repo" '{ split($2,a,":"); if (r=="" || a[1]==r) print $1"|"$2 }' "$IMG"
+    exit 0 ;;
   port) echo "127.0.0.1:$(port_of "$2")"; exit 0 ;;
   inspect)
     fmt=""; prev=""
@@ -227,6 +236,15 @@ def _seed_container(
     with ct.open("a") as fh:
         fh.write(f"{name}|{port}|{state}|{image}\n")
     (dstate / f"health-{port}").write_text(f'{{"in_flight":{in_flight}}}')
+
+
+def _seed_image(dstate: Path, ref: str, created: str) -> None:
+    """Seed one fake image row visible to `docker images` (an orphaned per-release tag has a row
+    here but NO container). ``created`` is a `docker`-style CreatedAt string; the reconcile path
+    sorts on it to pick the immediately-previous release, so pass larger timestamps for newer
+    builds."""
+    with (dstate / "mcp-images").open("a") as fh:
+        fh.write(f"{created}|{ref}\n")
 
 
 @pytest.fixture
@@ -2111,6 +2129,82 @@ def test_the_bare_build_tag_is_never_retired(mcp_box: dict[str, object]) -> None
     assert any(c == "rm compose-mcp-1" for c in cmds), f"the exited boot backend is reaped\n{ctx}"
     assert _image_removals(cmds) == [], (
         f"the bare `compose-mcp` build tag must never be retired\n{ctx}"
+    )
+
+
+def test_orphaned_per_release_tags_with_no_container_are_reconciled(
+    mcp_box: dict[str, object],
+) -> None:
+    """RED-first (bug e4f3): `mcp_retire_image` only fires at a container's REAP, so a
+    `compose-mcp:<sha>` tag whose container was already reaped on an earlier tick (or never had
+    one on this box) leaks forever — nothing reconciles container-less tags. Left alone they
+    accumulate and fill the 30GiB root once a SECOND blue-green image family (the mcp target,
+    fd4a) lands, re-triggering the disk-pressure alarm that fail-closes LLM-Review. The retire
+    sweep must reconcile these orphans on every tick.
+
+    A no-op tick (deployed==target) reaps nothing, so any image-rm here comes ONLY from the new
+    orphan-reconcile path, not from the at-reap retirement — isolating the behavior under test.
+    """
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    live = "compose-mcp:" + "a" * 40
+    prev = "compose-mcp:" + "b" * 40
+    orphans = ["compose-mcp:" + c * 40 for c in ("c", "d", "e")]
+    _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image=live)  # type: ignore[arg-type]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    _seed_image(mcp_box["dstate"], live, "2026-08-31 00:28:16 +0000 UTC")  # type: ignore[arg-type]
+    _seed_image(mcp_box["dstate"], "compose-mcp:latest", "2026-08-31 00:28:16 +0000 UTC")  # type: ignore[arg-type]
+    _seed_image(mcp_box["dstate"], prev, "2026-08-30 08:19:45 +0000 UTC")  # type: ignore[arg-type]
+    _seed_image(mcp_box["dstate"], orphans[0], "2026-08-29 12:00:00 +0000 UTC")  # type: ignore[arg-type]
+    _seed_image(mcp_box["dstate"], orphans[1], "2026-08-28 12:00:00 +0000 UTC")  # type: ignore[arg-type]
+    _seed_image(mcp_box["dstate"], orphans[2], "2026-08-27 12:00:00 +0000 UTC")  # type: ignore[arg-type]
+
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "image-rm compose-mcp:" + "c" * 40)
+    removed = set(_image_removals(cmds))
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, f"a no-op reconcile tick is a normal outcome\n{ctx}"
+    assert removed == set(orphans), (
+        f"every container-less orphan tag must be reconciled — this is the unbounded "
+        f"tagged-image leak that re-filled the root disk (e4f3)\n"
+        f"expected={sorted(orphans)} got={sorted(removed)}\n{ctx}"
+    )
+
+
+def test_reconcile_never_retires_live_or_immediately_previous(
+    mcp_box: dict[str, object],
+) -> None:
+    """The blue-green preservation INVARIANT: orphan reconciliation must ALWAYS keep the LIVE
+    backend's image AND the immediately-previous release (the rollback lifeline), plus the bare
+    build tag / `:latest`. Only true orphans older than the previous release may go. If this
+    ever fails, a reconcile could delete the image a rollback depends on."""
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    live = "compose-mcp:" + "a" * 40
+    prev = "compose-mcp:" + "b" * 40
+    orphan = "compose-mcp:" + "c" * 40
+    _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image=live)  # type: ignore[arg-type]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    _seed_image(mcp_box["dstate"], live, "2026-08-31 00:28:16 +0000 UTC")  # type: ignore[arg-type]
+    _seed_image(mcp_box["dstate"], "compose-mcp:latest", "2026-08-31 00:28:16 +0000 UTC")  # type: ignore[arg-type]
+    _seed_image(mcp_box["dstate"], prev, "2026-08-30 08:19:45 +0000 UTC")  # type: ignore[arg-type]
+    _seed_image(mcp_box["dstate"], orphan, "2026-08-29 12:00:00 +0000 UTC")  # type: ignore[arg-type]
+
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "image-rm compose-mcp:" + "c" * 40)
+    removed = set(_image_removals(cmds))
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, ctx
+    assert removed == {orphan}, f"only the true orphan may be reconciled\n{ctx}"
+    assert live not in removed, f"the LIVE image must never be retired by reconcile\n{ctx}"
+    assert prev not in removed, (
+        f"the immediately-previous release is the rollback lifeline and must never be "
+        f"retired\n{ctx}"
+    )
+    assert "compose-mcp:latest" not in removed, (
+        f"the :latest build tag must never be retired\n{ctx}"
     )
 
 
