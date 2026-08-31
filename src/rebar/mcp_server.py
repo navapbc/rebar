@@ -137,6 +137,16 @@ MCP_ENV_VARS: tuple[dict, ...] = (
         "deprecated": False,
     },
     {
+        "name": "REBAR_MCP_DEDUP",
+        "description": (
+            "In-flight de-duplication of the long-running gate tools (review_plan / "
+            "verify_completion): a concurrent duplicate call for the same ticket+basis "
+            "attaches to the running gate instead of launching a second billable LLM "
+            "pass. On by default; set to 0 to disable (kill-switch)."
+        ),
+        "deprecated": False,
+    },
+    {
         "name": "REBAR_MCP_ALLOW_JIRA_SYNC",
         "description": (
             "Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise "
