@@ -237,22 +237,24 @@ def test_owned_in_place_toggle_is_read_live(monkeypatch: pytest.MonkeyPatch) -> 
 def test_reconciler_repo_root_unset_fallback_is_cwd_independent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """With ``REBAR_ROOT`` unset and no explicit root, the reconciler's owned root
-    resolution must fall back to a deterministic, CWD-independent location — NOT the
-    caller's working directory. A cut that routes the unset fallback through
-    ``config.repo_root()`` (whose fallback is git-toplevel-of-cwd, then cwd) regresses a
-    reconciler run from any other working directory: it would resolve the CALLER's checkout
-    instead of its own. Asserted through the reconciler's owned ``_default_repo_root`` seam
-    by resolving it from two different working directories (one an unrelated git work tree)
-    and requiring the answer to be identical and distinct from the caller's tree.
-
-    The equality is checked directly rather than against a ``Path(__file__).parents[N]``
-    literal on purpose: under a non-editable install the reconciler package and the rebar
-    library load from different trees, so an expected root derived from a package
-    ``__file__`` would spuriously diverge from production's own resolution."""
+    """With ``REBAR_ROOT`` unset and no explicit root, a valid owned package-root
+    checkout must win before any CWD-based fallback — the caller's working directory must
+    not leak into the reconciler's root. The pure wheel/no-checkout case deliberately
+    raises (covered below), so this leg makes the valid package-root precondition
+    explicit and then resolves from an unrelated checkout to prove CWD-independence."""
     from rebar_reconciler import invariants
 
+    import rebar.config as cfg_mod
+
     monkeypatch.delenv("REBAR_ROOT", raising=False)
+    owned_checkout = tmp_path / "owned_checkout"
+    owned_checkout.mkdir()
+    subprocess.run(["git", "init", "-q", str(owned_checkout)], check=True)
+    owned_config = owned_checkout / "src" / "rebar" / "config.py"
+    owned_config.parent.mkdir(parents=True)
+    owned_config.write_text("# editable package stand-in\n", encoding="utf-8")
+    monkeypatch.setattr(cfg_mod, "__file__", str(owned_config))
+
     other_repo = tmp_path / "unrelated_checkout"
     other_repo.mkdir()
     subprocess.run(["git", "init", "-q", str(other_repo)], check=True)
@@ -270,6 +272,10 @@ def test_reconciler_repo_root_unset_fallback_is_cwd_independent(
     assert from_other_cwd != other_repo.resolve(), (
         "the reconciler repo-root fallback resolved to the caller's unrelated checkout — "
         "the cwd leaked into the owned root resolution"
+    )
+    assert from_other_cwd == owned_checkout.resolve(), (
+        "the valid owned package-root checkout must be the deterministic fallback when "
+        f"REBAR_ROOT is unset; got {from_other_cwd}, expected {owned_checkout.resolve()}"
     )
 
 
