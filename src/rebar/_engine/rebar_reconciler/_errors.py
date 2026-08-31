@@ -34,6 +34,12 @@ def parse_retry_after(value: str | None) -> float | None:
 
     The rarer HTTP-date form is not honored (-> None; caller falls back to
     jittered backoff). Jira Cloud does not guarantee the header at all.
+
+    A non-positive ``Retry-After`` (zero or negative) is treated as ABSENT
+    (-> None; caller falls back to its jittered backoff), so a server-sent ``0``
+    cannot collapse the backoff to an immediate synchronized replay (the
+    thundering-herd vector ADR 0036's jitter exists to avoid). Only a strictly
+    positive value is honored.
     """
     if not value:
         return None
@@ -41,7 +47,7 @@ def parse_retry_after(value: str | None) -> float | None:
         secs = float(value.strip())
     except (TypeError, ValueError):
         return None
-    return secs if secs >= 0 else None
+    return secs if secs > 0 else None
 
 
 # ── the unified reconciler error taxonomy (epic 5ca8 / romp-swath-wince) ────────────────────

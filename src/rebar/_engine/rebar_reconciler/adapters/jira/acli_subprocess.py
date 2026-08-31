@@ -161,11 +161,16 @@ def _rate_limit_backoff(attempt: int, stderr: str | None) -> float | None:
     m = _RETRY_AFTER_RE.search(stderr or "")
     if m:
         try:
-            delay = min(float(m.group(1)), _MAX_BACKOFF_S)
+            parsed = float(m.group(1))
+        except ValueError:
+            parsed = 0.0
+        # A non-positive Retry-After (0 or negative) is treated as ABSENT: fall
+        # through to the jittered backoff so a server-sent 0 can never collapse the
+        # delay to an immediate synchronized replay. Only a positive value is honored.
+        if parsed > 0:
+            delay = min(parsed, _MAX_BACKOFF_S)
             logger.warning("acli: 429 rate-limited; honoring Retry-After=%.1fs", delay)
             return delay
-        except ValueError:
-            pass
     delay = min(2.0 ** (attempt + 1), _MAX_BACKOFF_S) + random.uniform(0, 1)
     logger.warning(
         "acli: 429 rate-limited; no Retry-After — jittered backoff %.1fs (attempt %d)",
