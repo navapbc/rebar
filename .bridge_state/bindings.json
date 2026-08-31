@@ -308,6 +308,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:50:49Z"
     },
+    "0232-1407-4600-415c": {
+      "created_at": "2026-08-31T06:58:40Z",
+      "jira_id": "4590744",
+      "jira_key": "REB-3999",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:58:43Z"
+    },
     "0241-c6c1-0a20-491b": {
       "baseline": {
         "assignee": null,
@@ -450,6 +457,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:50:51Z"
+    },
+    "02aa-d30e-828a-4f21": {
+      "created_at": "2026-08-31T06:58:43Z",
+      "jira_id": "4590745",
+      "jira_key": "REB-4000",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:58:46Z"
     },
     "02b7-82ef-ca69-4aa8": {
       "baseline": {
@@ -812,6 +826,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-20T02:50:07Z"
+    },
+    "03ef-28e6-58f3-425b": {
+      "created_at": "2026-08-31T06:58:46Z",
+      "jira_id": "4590746",
+      "jira_key": "REB-4001",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:58:49Z"
     },
     "03ef-6fb5-158b-4abd": {
       "baseline": {
@@ -2060,6 +2081,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:38Z"
     },
+    "0924-f271-d664-4378": {
+      "created_at": "2026-08-31T06:58:49Z",
+      "jira_id": "4590747",
+      "jira_key": "REB-4002",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:58:52Z"
+    },
     "092b-3bb7-4890-4cb9": {
       "created_at": "2026-08-15T14:51:39Z",
       "jira_key": "REB-13",
@@ -2184,6 +2212,13 @@
       "peer_parent": "REB-368",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:42Z"
+    },
+    "0a56-e661-1861-44c4": {
+      "created_at": "2026-08-31T06:58:53Z",
+      "jira_id": "4590748",
+      "jira_key": "REB-4003",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:58:55Z"
     },
     "0a5c-eb00-8bf6-42b5": {
       "baseline": {
@@ -2348,6 +2383,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-30T02:41:06Z"
     },
+    "0b00-0aad-e5bb-421f": {
+      "created_at": "2026-08-31T06:58:56Z",
+      "jira_id": "4590749",
+      "jira_key": "REB-4004",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:58:58Z"
+    },
     "0b14-5c30-fe45-4fdf": {
       "created_at": "2026-08-15T14:51:46Z",
       "jira_key": "REB-1609",
@@ -2385,7 +2427,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Surface\nGitHub Actions, repo navapbc/rebar, workflow **Test Suite (mirror)** (scheduled/dispatch, non-blocking mirror tier), matrix `sweep (\u2026)` jobs. Blocking core tiers pass on main; only the experimental `sweep` matrix is red.\n\n## Signatures (two distinct sub-failures)\n1. **sweep (windows)** \u2014 `ModuleNotFoundError: No module named 'fcntl'` at collection; Windows tier cannot collect.\n2. **sweep (py3.14)** \u2014 `tests/scripts/graph/test_doctor_locks.py::test_a_contended_fcntl_leg_reads_as_held` fails `RuntimeError: Network access is forbidden in unit/scripts tests`.\n\n(The `sweep (macos, full suite)` / `sweep (declared lower-bound resolution)` legs are the recurrence of closed `e3e0-2e7c-b280-4b4a`, tracked there \u2014 not this ticket.)\n\n## Severity: P3\nMirror/experimental tier \u2014 non-blocking. CI-hygiene / cross-platform-portability signal.\n\n---\n\n## Fix plan (Phase 2) \u2014 two independent root causes, confirmed in Phase 1 RCA comment\n\n**RC#1 (Windows collection blackout):** 4 modules do an *unconditional* module-top `import fcntl`, violating the codebase's established portability-guard invariant (6 sibling modules already `try/except ImportError \u2192 None`). Because `import rebar` transitively hits `doctor_locks.py:69`, ALL collection dies on non-POSIX. Fix = guard the 4 imports (collectability only; Windows fcntl *locking* is out of scope \u2014 non-support-target). Zero behavior change on POSIX.\n\n**RC#2 (py3.14 red):** the autouse network guard (`tests/conftest.py`) patches `socket.socket.connect` for ALL families; py3.14's Linux default start-method change `fork`\u2192`forkserver` makes `multiprocessing` use an AF_UNIX (local IPC) connect, which the guard wrongly rejects. Fix = narrow the guard to block only AF_INET/AF_INET6 (real network), allow local IPC.\n\n## Acceptance Criteria\n- [ ] `src/rebar/_store/lock.py` \u2014 `import fcntl` guarded; POSIX behavior unchanged.\n- [ ] `src/rebar/_store/git_locking.py` \u2014 `import fcntl` guarded.\n- [ ] `src/rebar/reducer/marker.py` \u2014 `import fcntl` guarded.\n- [ ] `src/rebar/_commands/doctor_locks.py` \u2014 `import fcntl` guarded (the leaf that breaks `import rebar`).\n- [ ] RED\u2192GREEN: the 4 modules import under simulated non-POSIX (`sys.modules['fcntl']=None`) and `import rebar` succeeds \u2014 proven by `pytest tests/unit/test_fcntl_import_guard.py`.\n- [ ] Structural guard `scripts/check_fcntl_import_guard.py` (AST; stdlib-only, wired into `make lint`) fails on any unguarded module-level `import fcntl` in `src/rebar`; ships true-positive + true-negative + refactor-survival tests \u2014 proven by `python scripts/check_fcntl_import_guard.py` and its test.\n- [ ] Step7 test siblings `tests/unit/test_fetch_common_dir_coordination.py` and `tests/unit/test_mcp_entrypoint_provisioning.py` use `pytest.importorskip(\"fcntl\")` so they skip (not error) on non-POSIX.\n- [ ] `tests/conftest.py` \u2014 network guard blocks only AF_INET/AF_INET6; AF_UNIX allowed \u2014 proven by `pytest tests/unit/test_network_guard_local_ipc.py`.\n- [ ] RED\u2192GREEN: a `forkserver` `multiprocessing.Process` starts under the guard; a real AF_INET connect is still blocked (teeth).\n\n## Testing\n- `python scripts/check_fcntl_import_guard.py` \u2014 the new structural guard (also via `make lint`).\n- `pytest tests/unit/test_fcntl_import_guard.py tests/unit/test_network_guard_local_ipc.py` \u2014 the two RED\u2192GREEN regressions.\n- `pytest tests/scripts/graph/test_doctor_locks.py` \u2014 original-report replication (under forkserver).\n- `make lint` and `make typecheck` \u2014 clean.\n\n### Portability (project.portability)\nThe structural guard is a stdlib-only AST script wired into `make lint` \u2014 no CI provider required, runnable locally and under any CI. The network-guard narrowing is interpreter/OS-agnostic (a socket-family check).\n\n## Provenance\nPeriodic ops-error sweep. `caused_by` \u2192 `13ad-4c6f-4074-4f43` (added both red tiers). See Phase 1 RCA comment for full mechanism proofs + attribution.",
+        "description": "## Surface\nGitHub Actions, repo navapbc/rebar, workflow **Test Suite (mirror)** (scheduled/dispatch, non-blocking mirror tier), matrix `sweep (\u2026)` jobs. Blocking core tiers pass on main; only the experimental `sweep` matrix is red.\n\n## Signatures (two distinct sub-failures)\n1. **sweep (windows)** \u2014 `ModuleNotFoundError: No module named 'fcntl'` at collection; Windows tier cannot collect.\n2. **sweep (py3.14)** \u2014 `tests/scripts/graph/test_doctor_locks.py::test_a_contended_fcntl_leg_reads_as_held` fails `RuntimeError: Network access is forbidden in unit/scripts tests`.\n\n(The `sweep (macos, full suite)` / `sweep (declared lower-bound resolution)` legs are the recurrence of closed `e3e0-2e7c-b280-4b4a`, tracked there \u2014 not this ticket.)\n\n## Severity: P3\nMirror/experimental tier \u2014 non-blocking. CI-hygiene / cross-platform-portability signal.\n\n---\n\n## Fix plan (Phase 2) \u2014 two independent root causes, confirmed in Phase 1 RCA comment\n\n**RC#1 (Windows collection blackout):** 4 modules do an *unconditional* module-top `import fcntl` \u2014 `src/rebar/_store/lock.py`, `src/rebar/_store/git_locking.py`, `src/rebar/reducer/marker.py`, `src/rebar/_commands/doctor_locks.py`. Because `import rebar` transitively hits `doctor_locks.py`, ALL collection dies on non-POSIX. The codebase already establishes that a module-top fcntl import must be made *conditional*, and does so with **three distinct legitimate shapes** (none is a single uniform pattern):\n  - **module-top `try/except ImportError \u2192 fcntl = None`** \u2014 `_snapshot/janitor.py`, `_snapshot/repo_snapshot.py`, `_snapshot/git_fetch.py`, `rebar_reconciler/alert_store.py`'s sibling guarded modules;\n  - **`if sys.platform != \"win32\": import fcntl` / `else: fcntl = None`** \u2014 `_engine/rebar_reconciler/alert_store.py:12-15`;\n  - **function-local (lazy) `import fcntl`** \u2014 `_commands/recent_creates.py:64` (inside `_journal_lock`), `_store/hlc.py:106` (inside `_hlc_lock`); a deferred import never runs at collection time, so it never breaks collection.\n\nFix = guard the 4 unconditional imports with the module-top `try/except ImportError \u2192 None` shape (collectability only; Windows fcntl *locking* is out of scope \u2014 non-support-target). On non-POSIX, `fcntl` binds to `None`, so a subsequent `fcntl.flock(...)` call site inside those 4 modules would raise `AttributeError` at call time \u2014 that is acceptable and in-scope-excluded: Windows is not a declared support target and these are POSIX-only lock paths; the deliverable is import/collection success, not Windows locking. Zero behavior change on POSIX (fcntl stays the real module).\n\n**RC#2 (py3.14 red):** the autouse `_network_guard` (`tests/conftest.py`) patches **two** seams: `patch.object(socket.socket, \"connect\", _guard_socket_connect)` AND `patch(\"socket.create_connection\", side_effect=RuntimeError(...))`. The `connect` seam rejected **all** address families; py3.14's Linux default start-method change `fork`\u2192`forkserver` makes `multiprocessing` reach its server over an **AF_UNIX** (local IPC) connect, which the all-families guard wrongly rejects. Fix = narrow the **`connect`** seam only: block just `AF_INET`/`AF_INET6` (real network) and delegate every other family (AF_UNIX etc.) to the captured original `socket.socket.connect`. The **`create_connection`** seam is left AS-IS \u2014 it is a real-TCP-only helper (always builds an AF_INET/AF_INET6 socket), so it needs no family check and blocking it wholesale stays correct.\n\n## Acceptance Criteria\n- [ ] `src/rebar/_store/lock.py` \u2014 `import fcntl` guarded (module-top `try/except ImportError \u2192 None`); POSIX behavior unchanged.\n- [ ] `src/rebar/_store/git_locking.py` \u2014 `import fcntl` guarded.\n- [ ] `src/rebar/reducer/marker.py` \u2014 `import fcntl` guarded.\n- [ ] `src/rebar/_commands/doctor_locks.py` \u2014 `import fcntl` guarded (the leaf that breaks `import rebar`).\n- [ ] RED\u2192GREEN: the 4 modules import under simulated non-POSIX (`sys.modules['fcntl']=None`) and `import rebar` succeeds \u2014 proven by `pytest tests/unit/test_fcntl_import_guard.py`.\n- [ ] Structural guard `scripts/check_fcntl_import_guard.py` (AST; stdlib-only, wired into `make lint`) fails only on a genuinely **unconditional** module-top `import fcntl` in `src/rebar`. It treats an import as guarded when it is (a) inside a `try`, (b) inside an `if`/`else` (the `sys.platform` conditional), OR (c) function-local (never module-top). A `# fcntl-guard-ok: <reason>` marker is the sanctioned escape hatch. Ships true-positive + true-negative (one case for EACH of the three live shapes \u2014 try/except like `git_fetch.py`, `sys.platform` like `alert_store.py`, function-local like `hlc.py`) + refactor-survival tests \u2014 proven by `python scripts/check_fcntl_import_guard.py` and its test.\n- [ ] Step7 test siblings `tests/unit/test_fetch_common_dir_coordination.py` and `tests/unit/test_mcp_entrypoint_provisioning.py` use `pytest.importorskip(\"fcntl\")` so they skip (not error) on non-POSIX.\n- [ ] `tests/conftest.py` \u2014 the `connect` seam blocks only AF_INET/AF_INET6 and delegates other families to the real connect; the `create_connection` seam is unchanged \u2014 proven by `pytest tests/unit/test_network_guard_local_ipc.py`.\n- [ ] RED\u2192GREEN: a `forkserver` `multiprocessing.Process` starts under the guard; an AF_UNIX connect is allowed; a real AF_INET connect is still blocked (teeth).\n\n## Testing\n- `python scripts/check_fcntl_import_guard.py` \u2014 the new structural guard (also via `make lint`).\n- `pytest tests/unit/test_fcntl_import_guard.py tests/unit/test_network_guard_local_ipc.py` \u2014 the two RED\u2192GREEN regressions.\n- `pytest tests/scripts/graph/test_doctor_locks.py` \u2014 original-report replication (under forkserver).\n- `make lint` and `make typecheck` \u2014 clean.\n\n### Portability (project.portability)\nThe structural guard is a stdlib-only AST script wired into `make lint` \u2014 no CI provider required, runnable locally and under any CI. The network-guard narrowing is interpreter/OS-agnostic (a socket-family check).\n\n## Provenance\nPeriodic ops-error sweep. `caused_by` \u2192 `13ad-4c6f-4074-4f43` (added both red tiers). See Phase 1 RCA comment for full mechanism proofs + attribution.",
         "priority": "Low",
         "status": "In Progress",
         "summary": "[ci] Test Suite (mirror) sweep tiers red in-window: fcntl ModuleNotFoundError on Windows collection + py3.14 network-forbidden test failure"
@@ -2687,6 +2729,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-28T22:18:20Z"
+    },
+    "0cb5-0abd-c00f-4463": {
+      "created_at": "2026-08-31T06:58:59Z",
+      "jira_id": "4590750",
+      "jira_key": "REB-4005",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:01Z"
     },
     "0cc9-ffb7-8638-4a11": {
       "created_at": "2026-08-15T14:51:56Z",
@@ -5311,6 +5360,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:07Z"
+    },
+    "19d5-0c65-61e3-4b25": {
+      "created_at": "2026-08-31T06:59:02Z",
+      "jira_id": "4590751",
+      "jira_key": "REB-4006",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:04Z"
     },
     "19d7-6a4d-c891-4d68": {
       "baseline": {
@@ -8434,6 +8490,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:32Z"
     },
+    "272e-9531-f392-468d": {
+      "created_at": "2026-08-31T06:59:05Z",
+      "jira_id": "4590752",
+      "jira_key": "REB-4007",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:08Z"
+    },
     "2731-4c53-56b4-46cc": {
       "baseline": {
         "assignee": null,
@@ -9285,6 +9348,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T23:35:49Z"
     },
+    "2b0a-4f32-8420-46c0": {
+      "created_at": "2026-08-31T06:59:09Z",
+      "jira_id": "4590753",
+      "jira_key": "REB-4008",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:11Z"
+    },
     "2b15-9d27-90b1-4e7a": {
       "baseline": {
         "assignee": {
@@ -9972,6 +10042,13 @@
       "peer_parent": "REB-2574",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:11Z"
+    },
+    "2d32-f685-6c5f-48d3": {
+      "created_at": "2026-08-31T06:59:12Z",
+      "jira_id": "4590754",
+      "jira_key": "REB-4009",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:14Z"
     },
     "2d8c-4991-d6ff-4c58": {
       "created_at": "2026-08-15T14:55:11Z",
@@ -11712,6 +11789,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:56Z"
     },
+    "338c-cb62-8cfc-4226": {
+      "created_at": "2026-08-31T06:59:15Z",
+      "jira_id": "4590755",
+      "jira_key": "REB-4010",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:17Z"
+    },
     "3393-83ca-5501-4e6e": {
       "baseline": {
         "assignee": null,
@@ -12424,7 +12508,7 @@
         },
         "description": "## Parity sibling discovered by the rebar-debug sweep of `254e-1770-854b-47a2`\n\nWhile fixing the Anthropic LLM transport's zero/expired-`Retry-After` herd vector (254e), the Step-7 parity census found the **same class-B vector** on a parallel, non-LLM surface: the Jira reconciler's 429 backoff. This is filed (not fixed in 254e) because 254e's operator-approved scope is explicitly **Anthropic-only** (\"Bedrock path untouched; Anthropic-only change\") and the reconciler is a separate subsystem (ADR 0036, its own MAX_BACKOFF/attempt policy).\n\n### The finding\n`src/rebar/_engine/rebar_reconciler/_errors.py` `parse_retry_after()` returns `secs if secs >= 0 else None` \u2014 so a `Retry-After: 0` parses to **`0.0`**, not `None`. Callers then honor it as an immediate retry:\n- `dispatch_apply_phases.py` `_call_with_retry`: `delay = min(MAX_BACKOFF_S, retry_after)` -> `min(60, 0.0) = 0.0` -> `time.sleep(0.0)` -> immediate replay.\n- `adapters/jira_datacenter/retry.py` `_rate_limit_delay`: `min(MAX_BACKOFF_S, 0.0 * (1+jitter)) = 0.0` (the `is not None` guard passes for `0.0`).\n- `adapters/jira/acli_subprocess.py` `_rate_limit_backoff`: the `\\d+(\\.\\d+)?` regex matches `0` -> `min(0.0, MAX) = 0.0`.\n\nAcross concurrent reconcilers hitting the SAME Jira instance, a server-sent `Retry-After: 0` synchronizes an immediate replay \u2014 the identical thundering-herd class B that 254e fixes for Anthropic.\n\n### NOT present here (unlike Anthropic)\nThe class-A vector (non-jittered no-`Retry-After` fallback) is **absent**: all three reconciler adapters already jitter their no-header fallback (`2**(attempt+1)+random.random()` / `+uniform(0,1)` / `retry_after*(1+random*0.2)`). Only the zero-guard (class B) is missing.\n\n### Proposed fix (single-source, low blast radius)\nChange `parse_retry_after` to treat a non-positive value as absent: `return secs if secs > 0 else None` (0/negative -> `None` -> the already-jittered fallback). This fixes all three callers at the shared parser. Confirm the DC/acli inline parses agree (acli regex could also be tightened to ignore a `0`). Add a RED test asserting a `Retry-After: 0` yields the jittered fallback (`> 0`), not `sleep(0)`, per the same held-out RED->GREEN discipline used in 254e.\n\n### Acceptance Criteria\n- [ ] `parse_retry_after(\"0\")` (and `\"0.0\"`) returns `None`, so callers use the jittered fallback; a held-out unit test asserts the resulting reconciler backoff delay is `> 0`.\n- [ ] A positive `Retry-After` (e.g. `\"2\"`) is still honored (regression guard), capped at `MAX_BACKOFF_S`.\n- [ ] The no-`Retry-After` jittered fallback in all three adapters is unchanged.\n- [ ] `make lint && make typecheck && make test` green; lands via Gerrit.\n\n## Testing\n- `.venv/bin/python -m pytest tests/unit -k \"retry_after or reconciler_retry\" -q` (new/updated held-out tests over `parse_retry_after` and `_call_with_retry`).\n- Full gate: `make lint && make typecheck && make test`.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Reconciler backoff: parse_retry_after treats Retry-After: 0 as an immediate retry (zero-guard parity with the Anthropic transport)"
       },
       "created_at": "2026-08-30T23:29:22Z",
@@ -15156,6 +15240,13 @@
       "peer_parent": "REB-257",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:33Z"
+    },
+    "426d-3747-d7be-47c6": {
+      "created_at": "2026-08-31T06:59:18Z",
+      "jira_id": "4590756",
+      "jira_key": "REB-4011",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:20Z"
     },
     "427e-8585-8711-449b": {
       "baseline": {
@@ -18109,6 +18200,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:58Z"
     },
+    "4f66-c799-97d3-4fc1": {
+      "created_at": "2026-08-31T06:59:21Z",
+      "jira_id": "4590757",
+      "jira_key": "REB-4012",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:23Z"
+    },
     "4f74-eeae-4e91-41ca": {
       "baseline": {
         "assignee": {
@@ -18242,6 +18340,13 @@
       "peer_parent": "REB-2658",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:10Z"
+    },
+    "5025-c661-db2e-42f9": {
+      "created_at": "2026-08-31T06:59:24Z",
+      "jira_id": "4590758",
+      "jira_key": "REB-4013",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:27Z"
     },
     "502b-5372-81dd-4740": {
       "baseline": {
@@ -18590,6 +18695,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:22Z"
+    },
+    "5165-5f85-f922-4715": {
+      "created_at": "2026-08-31T06:59:27Z",
+      "jira_id": "4590759",
+      "jira_key": "REB-4014",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:30Z"
     },
     "518b-0558-fd18-4713": {
       "created_at": "2026-08-15T14:59:23Z",
@@ -19038,6 +19150,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-29T19:29:42Z"
     },
+    "5418-f4f8-0d3b-45be": {
+      "created_at": "2026-08-31T06:59:31Z",
+      "jira_id": "4590760",
+      "jira_key": "REB-4015",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:33Z"
+    },
     "542e-fb17-6f5d-4ced": {
       "created_at": "2026-08-15T14:59:34Z",
       "jira_key": "REB-1258",
@@ -19114,6 +19233,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T16:43:21Z"
+    },
+    "546f-cc0f-66e7-4a5a": {
+      "created_at": "2026-08-31T06:59:34Z",
+      "jira_id": "4590761",
+      "jira_key": "REB-4016",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:36Z"
     },
     "5494-716e-6e0f-48a7": {
       "baseline": {
@@ -19425,6 +19551,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:41Z"
+    },
+    "5580-4551-af8a-4abd": {
+      "created_at": "2026-08-31T06:59:37Z",
+      "jira_id": "4590762",
+      "jira_key": "REB-4017",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:39Z"
     },
     "558e-d9bd-e285-40a1": {
       "baseline": {
@@ -20248,6 +20381,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:00Z"
     },
+    "591f-2acd-dc28-448e": {
+      "created_at": "2026-08-31T06:59:40Z",
+      "jira_id": "4590763",
+      "jira_key": "REB-4018",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:43Z"
+    },
     "5931-78a3-95d2-44cd": {
       "baseline": {
         "assignee": {
@@ -20689,6 +20829,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:12Z"
+    },
+    "5ae0-411f-6d72-40f1": {
+      "created_at": "2026-08-31T06:59:43Z",
+      "jira_id": "4590764",
+      "jira_key": "REB-4019",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:46Z"
     },
     "5b01-add0-e970-44bd": {
       "baseline": {
@@ -21951,6 +22098,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-18T19:38:46Z"
     },
+    "60c7-c40c-7b49-4cf3": {
+      "created_at": "2026-08-31T06:59:46Z",
+      "jira_id": "4590765",
+      "jira_key": "REB-4020",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:49Z"
+    },
     "60ce-29c1-58be-4648": {
       "baseline": {
         "assignee": null,
@@ -22491,6 +22645,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:01Z"
+    },
+    "6338-8875-3daf-4404": {
+      "created_at": "2026-08-31T06:59:49Z",
+      "jira_id": "4590766",
+      "jira_key": "REB-4021",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:52Z"
     },
     "635f-783f-ae8b-430e": {
       "baseline": {
@@ -23195,6 +23356,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:14Z"
     },
+    "6688-de08-5bcb-4e0f": {
+      "created_at": "2026-08-31T06:59:53Z",
+      "jira_id": "4590767",
+      "jira_key": "REB-4022",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:55Z"
+    },
     "66ac-fd03-6d4d-4249": {
       "baseline": {
         "assignee": null,
@@ -23539,6 +23707,13 @@
       "jira_key": "REB-1803",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:22Z"
+    },
+    "67c8-f10c-81d9-4d4a": {
+      "created_at": "2026-08-31T06:59:56Z",
+      "jira_id": "4590768",
+      "jira_key": "REB-4023",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T06:59:59Z"
     },
     "67d4-ecba-cf95-4353": {
       "baseline": {
@@ -24321,6 +24496,13 @@
       "jira_key": "REB-175",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:51Z"
+    },
+    "6b3f-8318-8290-457c": {
+      "created_at": "2026-08-31T06:59:59Z",
+      "jira_id": "4590769",
+      "jira_key": "REB-4024",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:03Z"
     },
     "6ba6-ae90-28a6-4394": {
       "created_at": "2026-08-15T15:01:52Z",
@@ -25400,7 +25582,7 @@
         },
         "description": "## Context / Problem\n\n`examples/agent-skills/rebar-debug/SKILL.md` Step 7, Axis 1 \"Class review\" item 1 (introduced by story dff2-9c38-c454-4daa) **unconditionally** mandates that every confirmed sibling class add \"one criterion asserting a structural check over the class (a construct-uniqueness guard, or an equivalent that fails if a new instance appears)\". Mandating a structural guard for *every* class that has >= 1 sibling over-produces guards: it invites CI bloat, standing maintenance burden, and change-detector checks for classes whose re-entry risk a plain regression test already covers. The skill has no guidance for *when* a guard is warranted or *how* to design one that survives refactors and stays portable.\n\nThis follow-on (requested by the operator this session) converts that unconditional mandate into a bright-line evaluation, backed by a new conditionally-loaded companion prompt, `structural-guards.md`, mirroring how `test-design.md` and `llm-behavioral-taxonomy.md` are loaded on demand.\n\n## Scope (documentation only -- no code, no ticket-system change)\n\n- `examples/agent-skills/rebar-debug/structural-guards.md` (NEW) -- the companion prompt.\n- `examples/agent-skills/rebar-debug/SKILL.md` -- Step 7 Axis-1 item 1 flips from the unconditional guard mandate to a decision routed through `structural-guards.md`.\n\n## Acceptance criteria\n\n- [x] Step 7 item 1 contains no unconditional structural-check mandate; it routes the decision through `structural-guards.md`. Verified by reading item 1 and by `tests/unit/test_rebar_debug_step7_class_review.py` returning exit 0.\n- [x] Step 7 item 1 still requires one acceptance-criterion checkbox per confirmed sibling naming its path and symbol. Verified by reading item 1.\n- [x] `examples/agent-skills/rebar-debug/structural-guards.md` is present. Verified by `test -f`.\n- [x] `structural-guards.md` opens with a header naming what it governs and its load points (rebar-debug Step 7 Axis 1; rebar-implement). Verified by reading the header.\n- [x] `structural-guards.md` states the WHEN decision as numbered questions phrased as affirmative tests. Verified by reading the \"does this class earn a guard\" section.\n- [x] `structural-guards.md` contains a portability table mapping bug shape to guard shape across at least four enforcement layers. Verified by reading the table.\n- [x] `structural-guards.md` enumerates the design properties as affirmative statements (match on structure not text; carry intent inline; binary and blocking; survive refactor; ship a true-negative). Verified by reading the properties section.\n- [x] `scripts/check_skill_frontmatter.py` returns exit 0 and `tests/unit/test_skill_shared_sync.py` returns exit 0 (the new companion needs no frontmatter and is not a shared-synced file). Verified by running each.\n\n## Test plan\n\nDocumentation change. Run: `python scripts/check_skill_frontmatter.py`; `python -m pytest tests/unit/test_rebar_debug_step7_class_review.py tests/unit/test_skill_shared_sync.py tests/unit/test_check_skill_frontmatter.py`; `make lint`. No runtime behavior changes.\n\n## Attribution\n\nAdditive skill enhancement, not a defect fix -- it evolves the Step-7 directive that story dff2-9c38-c454-4daa shipped. Relates-to dff2 and its epic e71b (bug-trend program: debug-skill upgrades).",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "rebar-debug Step 7: gate the class structural-guard on an evaluation, add structural-guards.md companion"
       },
       "created_at": "2026-08-31T01:12:51Z",
@@ -28747,6 +28929,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:48Z"
     },
+    "7ffa-c56b-22ef-4697": {
+      "created_at": "2026-08-31T07:00:03Z",
+      "jira_id": "4590770",
+      "jira_key": "REB-4025",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:06Z"
+    },
     "8002-a92f-0999-45dd": {
       "baseline": {
         "assignee": null,
@@ -29216,6 +29405,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:06Z"
     },
+    "82ed-c1b6-5080-4809": {
+      "created_at": "2026-08-31T07:00:07Z",
+      "jira_id": "4590771",
+      "jira_key": "REB-4026",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:10Z"
+    },
     "8303-6c51-3daa-45c5": {
       "baseline": {
         "assignee": null,
@@ -29257,6 +29453,13 @@
       "peer_parent": "REB-648",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:08Z"
+    },
+    "831c-b852-4ef3-4f2d": {
+      "created_at": "2026-08-31T07:00:10Z",
+      "jira_id": "4590772",
+      "jira_key": "REB-4027",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:13Z"
     },
     "831f-326d-be85-437a": {
       "baseline": {
@@ -32858,6 +33061,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:42Z"
     },
+    "9152-357c-15ec-4b9d": {
+      "created_at": "2026-08-31T07:00:14Z",
+      "jira_id": "4590773",
+      "jira_key": "REB-4028",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:17Z"
+    },
     "918c-589a-fc4a-4c52": {
       "baseline": {
         "assignee": {
@@ -33849,6 +34059,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:10Z"
     },
+    "95da-0b4f-06a8-4b9c": {
+      "created_at": "2026-08-31T07:00:17Z",
+      "jira_id": "4590774",
+      "jira_key": "REB-4029",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:20Z"
+    },
     "95dc-cbe7-ed1d-48dc": {
       "baseline": {
         "assignee": null,
@@ -34104,6 +34321,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:15Z"
     },
+    "9738-b485-bb21-44ac": {
+      "created_at": "2026-08-31T07:00:20Z",
+      "jira_id": "4590775",
+      "jira_key": "REB-4030",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:23Z"
+    },
     "9788-69c5-1972-4537": {
       "created_at": "2026-08-15T15:06:16Z",
       "jira_key": "REB-437",
@@ -34265,6 +34489,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:19Z"
+    },
+    "97fc-e843-ac6f-47bc": {
+      "created_at": "2026-08-31T07:00:23Z",
+      "jira_id": "4590776",
+      "jira_key": "REB-4031",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:26Z"
     },
     "980d-83ac-a6bb-4edb": {
       "baseline": {
@@ -34651,6 +34882,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:29Z"
+    },
+    "993a-33c3-87c0-4c16": {
+      "created_at": "2026-08-31T07:00:27Z",
+      "jira_id": "4590777",
+      "jira_key": "REB-4032",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:30Z"
     },
     "998e-b3c4-a6d4-4d14": {
       "baseline": {
@@ -37452,6 +37690,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:58Z"
+    },
+    "a605-6a15-7647-4987": {
+      "created_at": "2026-08-31T07:00:31Z",
+      "jira_id": "4590778",
+      "jira_key": "REB-4033",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:33Z"
     },
     "a606-7145-427a-4591": {
       "created_at": "2026-08-15T15:07:59Z",
@@ -41890,6 +42135,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:56Z"
     },
+    "b8b5-225c-8b03-4e55": {
+      "created_at": "2026-08-31T07:00:34Z",
+      "jira_id": "4590779",
+      "jira_key": "REB-4034",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:37Z"
+    },
     "b8bf-a5aa-2f4d-44d4": {
       "baseline": {
         "assignee": {
@@ -45108,6 +45360,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:11Z"
     },
+    "c872-1ca4-584b-4314": {
+      "created_at": "2026-08-31T07:00:37Z",
+      "jira_id": "4590780",
+      "jira_key": "REB-4035",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:41Z"
+    },
     "c87e-3a18-490e-4431": {
       "baseline": {
         "assignee": null,
@@ -46160,6 +46419,13 @@
       "jira_key": "REB-314",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:39Z"
+    },
+    "cd76-fe67-e2f1-48b7": {
+      "created_at": "2026-08-31T07:00:41Z",
+      "jira_id": "4590781",
+      "jira_key": "REB-4036",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:44Z"
     },
     "cd78-d877-3d25-4ec3": {
       "baseline": {
@@ -47617,7 +47883,7 @@
         },
         "description": "## Surface\nGitHub Actions, repo navapbc/rebar, workflow **Terraform Drift** (scheduled), job `plan`.\n\n## Signature\n`terraform init` succeeds configuring the s3 backend, then fails:\n```\nError: Unsupported Terraform Core version\n  required_version = \">= 1.11\"\nThis configuration does not support Terraform version 1.10.5.\n```\nThe runner/setup provisions Terraform **1.10.5**, but the config requires **>= 1.11**. The workflow cannot reach the drift `plan` at all \u2014 drift detection is blind while broken.\n\n## First/last seen in-window\nRun 33297247070 @ 2026-08-30T06:35Z (scheduled). Fails every scheduled run (deterministic version mismatch, not transient).\n\n## Dedup\nNo existing ticket found (searched \"terraform drift / unsupported core version / setup-terraform\"). Distinct from the last sweep's noted \"9350 drift\" item (that is a drift-content blocker, not a Core-version init failure). New signature.\n\n## Severity: P3\nMonitoring-only workflow; no user/merge/production impact. But it is a hard, deterministic failure \u2014 infra drift goes undetected until the Terraform version pin (setup-terraform) is bumped to satisfy `>= 1.11` (or the constraint relaxed).\n\n## Provenance\nPeriodic ops-error sweep (window 2026-08-29T10:00 \u2192 2026-08-30T17:36 PDT). Triage only \u2014 not fixed.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "[terraform-drift] Terraform Drift workflow red: runner Terraform 1.10.5 does not satisfy required_version \">= 1.11\" (init fails before plan)"
       },
       "created_at": "2026-08-31T01:12:59Z",
@@ -47796,6 +48062,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:14Z"
+    },
+    "d2c8-08d7-4c6c-4385": {
+      "created_at": "2026-08-31T07:00:45Z",
+      "jira_id": "4590782",
+      "jira_key": "REB-4037",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:47Z"
     },
     "d2ce-36f5-fd08-4e40": {
       "baseline": {
@@ -49558,6 +49831,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-24T11:39:03Z"
     },
+    "da7c-658d-8b7d-4221": {
+      "created_at": "2026-08-31T07:00:48Z",
+      "jira_id": "4590783",
+      "jira_key": "REB-4038",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:51Z"
+    },
     "da84-924e-0f49-470a": {
       "baseline": {
         "assignee": {
@@ -49909,6 +50189,13 @@
       "peer_parent": "REB-549",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:03Z"
+    },
+    "dbed-fee8-586a-4de7": {
+      "created_at": "2026-08-31T07:00:51Z",
+      "jira_id": "4590784",
+      "jira_key": "REB-4039",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:54Z"
     },
     "dbf0-1fe5-8cc3-4d77": {
       "baseline": {
@@ -50718,6 +51005,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:25Z"
     },
+    "df55-1305-956e-431b": {
+      "created_at": "2026-08-31T07:00:54Z",
+      "jira_id": "4590785",
+      "jira_key": "REB-4040",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:00:57Z"
+    },
     "df7b-fa4c-2af5-495a": {
       "baseline": {
         "assignee": null,
@@ -51383,6 +51677,13 @@
       "peer_parent": "REB-271",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:42Z"
+    },
+    "e251-b366-a41e-4fa9": {
+      "created_at": "2026-08-31T07:00:58Z",
+      "jira_id": "4590786",
+      "jira_key": "REB-4041",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:01:00Z"
     },
     "e27c-5a20-cd13-43b2": {
       "baseline": {
@@ -54736,6 +55037,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:10Z"
     },
+    "f059-cb55-6b6e-47a7": {
+      "created_at": "2026-08-31T07:01:01Z",
+      "jira_id": "4590787",
+      "jira_key": "REB-4042",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:01:03Z"
+    },
     "f088-ef68-9518-4833": {
       "baseline": {
         "assignee": {
@@ -55006,6 +55314,13 @@
       "peer_parent": "REB-23",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:16Z"
+    },
+    "f15e-1b93-a0e9-431e": {
+      "created_at": "2026-08-31T07:01:04Z",
+      "jira_id": "4590788",
+      "jira_key": "REB-4043",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:01:06Z"
     },
     "f161-c70a-1a69-4ed1": {
       "baseline": {
@@ -55822,6 +56137,13 @@
       "jira_key": "REB-389",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:33Z"
+    },
+    "f511-c542-58e4-48ca": {
+      "created_at": "2026-08-31T07:01:07Z",
+      "jira_id": "4590789",
+      "jira_key": "REB-4044",
+      "state": "confirmed",
+      "updated_at": "2026-08-31T07:01:10Z"
     },
     "f542-17bf-1c43-4ce1": {
       "created_at": "2026-08-15T15:15:34Z",
@@ -60308,7 +60630,11 @@
     "1788152191711334001": "__rebar_unknown_comment_id__",
     "1788152251402235649": "__rebar_unknown_comment_id__",
     "1788153122114636001": "__rebar_unknown_comment_id__",
-    "1788153167603308001": "__rebar_unknown_comment_id__"
+    "1788153167603308001": "__rebar_unknown_comment_id__",
+    "1788155627148184001": "__rebar_unknown_comment_id__",
+    "1788157396735280001": "__rebar_unknown_comment_id__",
+    "1788157450549870217": "__rebar_unknown_comment_id__",
+    "1788159060566511001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -62678,13 +63004,59 @@
     "REB-3984": "d80d-7be7-1c0a-4231",
     "REB-3985": "e4f3-1661-2319-4a76",
     "REB-399": "fd2b-b26e-9fef-4bae",
+    "REB-3999": "0232-1407-4600-415c",
     "REB-4": "0224-f86e-2098-4b4e",
     "REB-40": "1c66-6644-4dfb-4afa",
     "REB-400": "fd72-1e8c-8e4c-4da6",
+    "REB-4000": "02aa-d30e-828a-4f21",
+    "REB-4001": "03ef-28e6-58f3-425b",
+    "REB-4002": "0924-f271-d664-4378",
+    "REB-4003": "0a56-e661-1861-44c4",
+    "REB-4004": "0b00-0aad-e5bb-421f",
+    "REB-4005": "0cb5-0abd-c00f-4463",
+    "REB-4006": "19d5-0c65-61e3-4b25",
+    "REB-4007": "272e-9531-f392-468d",
+    "REB-4008": "2b0a-4f32-8420-46c0",
+    "REB-4009": "2d32-f685-6c5f-48d3",
     "REB-401": "fe3e-346e-e5eb-42db",
+    "REB-4010": "338c-cb62-8cfc-4226",
+    "REB-4011": "426d-3747-d7be-47c6",
+    "REB-4012": "4f66-c799-97d3-4fc1",
+    "REB-4013": "5025-c661-db2e-42f9",
+    "REB-4014": "5165-5f85-f922-4715",
+    "REB-4015": "5418-f4f8-0d3b-45be",
+    "REB-4016": "546f-cc0f-66e7-4a5a",
+    "REB-4017": "5580-4551-af8a-4abd",
+    "REB-4018": "591f-2acd-dc28-448e",
+    "REB-4019": "5ae0-411f-6d72-40f1",
     "REB-402": "fe68-0eaf-8e96-4d79",
+    "REB-4020": "60c7-c40c-7b49-4cf3",
+    "REB-4021": "6338-8875-3daf-4404",
+    "REB-4022": "6688-de08-5bcb-4e0f",
+    "REB-4023": "67c8-f10c-81d9-4d4a",
+    "REB-4024": "6b3f-8318-8290-457c",
+    "REB-4025": "7ffa-c56b-22ef-4697",
+    "REB-4026": "82ed-c1b6-5080-4809",
+    "REB-4027": "831c-b852-4ef3-4f2d",
+    "REB-4028": "9152-357c-15ec-4b9d",
+    "REB-4029": "95da-0b4f-06a8-4b9c",
     "REB-403": "fe78-24d9-6076-4088",
+    "REB-4030": "9738-b485-bb21-44ac",
+    "REB-4031": "97fc-e843-ac6f-47bc",
+    "REB-4032": "993a-33c3-87c0-4c16",
+    "REB-4033": "a605-6a15-7647-4987",
+    "REB-4034": "b8b5-225c-8b03-4e55",
+    "REB-4035": "c872-1ca4-584b-4314",
+    "REB-4036": "cd76-fe67-e2f1-48b7",
+    "REB-4037": "d2c8-08d7-4c6c-4385",
+    "REB-4038": "da7c-658d-8b7d-4221",
+    "REB-4039": "dbed-fee8-586a-4de7",
     "REB-404": "ff72-5af3-cd06-43ca",
+    "REB-4040": "df55-1305-956e-431b",
+    "REB-4041": "e251-b366-a41e-4fa9",
+    "REB-4042": "f059-cb55-6b6e-47a7",
+    "REB-4043": "f15e-1b93-a0e9-431e",
+    "REB-4044": "f511-c542-58e4-48ca",
     "REB-405": "ffc4-6f8a-4a3a-4625",
     "REB-406": "9b94-af9e-4acf-4dff",
     "REB-407": "5506-0850-6e71-4dd2",
