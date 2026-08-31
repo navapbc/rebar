@@ -4,18 +4,27 @@ Holds the two per-ticket mutation builders (``_compute_outbound_create_mutation`
 and ``_compute_outbound_update_mutation``) that ``compute_outbound_mutations``
 orchestrates. Split out of ``outbound_differ.py`` purely for module size; the
 behaviour is unchanged.
+
+Ticket 6452: both builders now read their pass-scoped inputs from the EXISTING
+``OutboundDiffConfig`` (extended, not replaced — ADR 0107 explicitly rejects a
+*new* generic context/options object for this seam: "it would just rename the
+same N names as attributes of one bag") instead of a loose 24/11-value parameter
+bundle each. The four Backend-port collaborators (``binding_store``, the
+optional ``client`` read off ``config``, ``outbound_mapper``, ``inbound_mapper``,
+the assignee resolver) stay separate, explicit, narrow parameters per that same
+ADR's disposition — see ``OutboundDiffConfig``'s docstring in outbound_differ.py.
 """
 
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Any
 
 from rebar_reconciler.outbound_comments import _diff_comments, _map_comments_for_create
 from rebar_reconciler.outbound_differ import (
     _BRIDGE_TARGET_PROJECT_KEY,
     _DELETED,
     _TRANSPORT_ERROR,
+    OutboundDiffConfig,
     OutboundMutation,
     _best_effort,
     _effective_create_defaults_for,
@@ -35,28 +44,31 @@ from rebar_reconciler.outbound_labels import (
 )
 from rebar_reconciler.outbound_links import _diff_links
 
-if TYPE_CHECKING:
-    from ._backend import TicketTransport
-
 
 def _compute_outbound_create_mutation(
     mutations,
     ticket,
     status,
     local_id,
+    config: OutboundDiffConfig,
     binding_store,
-    local_ticket_types,
     outbound_mapper,
-    *,
-    dropped_field_sink: list[tuple[str, str]] | None = None,
-    mapping: Any = None,
-    repo_root: Any = None,
-    effective_cache: Any = None,
 ) -> None:
     """Phase: append the outbound CREATE mutation for an unbound local ticket.
 
-    ``outbound_mapper`` is the injected Backend-port ``OutboundMapper`` (ticket 4af8);
-    its ``map_local_to_remote`` replaces the former direct vendor-mapper import.
+    ``config`` carries this pass's fixed, pass-scoped inputs (ticket 6452:
+    converges what used to be 4 loose values — ``local_ticket_types``,
+    ``mapping``, ``repo_root``, ``effective_cache`` — plus the
+    ``dropped_field_sink`` observability sink into reads off this one existing
+    per-pass config object; see ``OutboundDiffConfig``). ``binding_store`` and
+    ``outbound_mapper`` stay explicit Backend-port collaborator parameters per
+    ADR 0107's disposition. The CREATE path owns no per-ticket update-only state
+    (no jira snapshot, no client, etc), so it reads only the subset of
+    ``config`` it needs.
+
+    ``outbound_mapper`` is the injected Backend-port ``OutboundMapper`` (ticket
+    4af8); its ``map_local_to_remote`` replaces the former direct vendor-mapper
+    import.
 
     DROPPED-PARENT REPORTING (ticket 8390): bug 8b25's hierarchy guard omits a non-epic
     parent from the mapped fields, and on this path that omission was totally silent —
@@ -76,6 +88,12 @@ def _compute_outbound_create_mutation(
     A NEVER-bound ticket has no tombstone and still creates; that distinction is the
     whole point. Fail-open via ``_best_effort``, and reversible by ``unretire``.
     """
+    local_ticket_types = config.local_ticket_types
+    mapping = config.projects_mapping
+    repo_root = config.repo_root
+    effective_cache = config.effective_cache
+    dropped_field_sink = config.dropped_field_sink
+
     tombstone = _best_effort(binding_store, "retired_key_for_local", local_id)
     if isinstance(tombstone, str) and tombstone:
         _best_effort(binding_store, "note_create_suppressed", local_id, tombstone)
@@ -169,30 +187,45 @@ def _compute_outbound_update_mutation(
     status,
     local_id,
     jira_key,
-    jira_snapshot,
+    config: OutboundDiffConfig,
     binding_store,
-    client: TicketTransport,
-    pass_id,
-    _selected_for_get_this_pass,
-    prev_snapshot,
-    local_label_intent,
-    local_ticket_types,
-    _assignee_resolver,
-    absent_alive_fields,
     outbound_mapper,
     inbound_mapper,
-    links,
-    *,
-    local_parents: Any = None,
-    conflict_sink: list[tuple[str, str]] | None = None,
-    dropped_field_sink: list[tuple[str, str]] | None = None,
-    mapping: Any = None,
-    repo_root: Any = None,
-    effective_cache: Any = None,
+    assignee_resolver,
 ) -> None:
     """Phase: for a bound ticket, resolve jira_fields (including the bounded
     bound-but-absent direct GET) and append an outbound UPDATE mutation when anything
-    diverged. A bare ``return`` skips the ticket (emit nothing)."""
+    diverged. A bare ``return`` skips the ticket (emit nothing).
+
+    ``config`` carries this pass's fixed, pass-scoped inputs (ticket 6452:
+    converges what used to be 13 loose values into reads off this one existing
+    per-pass config object — see ``OutboundDiffConfig`` in outbound_differ.py,
+    extended for exactly this purpose per ADR 0107's disposition). The four
+    Backend-port collaborators (``binding_store``, ``outbound_mapper``,
+    ``inbound_mapper``, ``assignee_resolver``) stay separate, explicit, narrow
+    parameters — the ADR calls these "already single, named, narrow
+    collaborators... not loose values," so folding them into ``config`` too
+    would not reduce coupling, only relabel it. Every value read from ``config``
+    below is identical across every ticket this pass visits; only
+    ``ticket``/``status``/``local_id``/``jira_key`` vary per call.
+    """
+    jira_snapshot = config.jira_snapshot
+    client = config.client
+    pass_id = config.pass_id
+    _selected_for_get_this_pass = config.selected_for_get
+    prev_snapshot = config.prev_snapshot
+    local_label_intent = config.local_label_intent
+    local_ticket_types = config.local_ticket_types
+    _assignee_resolver = assignee_resolver
+    links = config.links
+    local_parents = config.local_parents
+    mapping = config.projects_mapping
+    repo_root = config.repo_root
+    effective_cache = config.effective_cache
+    absent_alive_fields = config.absent_alive_fields
+    conflict_sink = config.conflict_sink
+    dropped_field_sink = config.dropped_field_sink
+
     # Bound -> compare fields, emit update if different.
     #
     # Bug 1e08-1a35-0267-4ca6: discriminate on MEMBERSHIP, not value.

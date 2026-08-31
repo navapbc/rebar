@@ -232,11 +232,28 @@ class OutboundMutation:
 
 @dataclass
 class OutboundDiffConfig:
-    """Optional inputs to :func:`compute_outbound_mutations`.
+    """Optional/pass-derived inputs to :func:`compute_outbound_mutations`, and the
+    single per-pass home the create/update mutation builders read from (ticket
+    6452, per ADR 0107 §"Disposition of the 23/14/11-parameter producer seams").
 
     Collapses what used to be five trailing optional parameters into one object
     (the 9-positional-param smell). Every field is optional; the orchestrator
     substitutes the documented defaults for any left unset.
+
+    ADR 0107 explicitly REJECTS wrapping the builders' loose parameters in a
+    *new* generic context/options object — "it would just rename the same
+    N names as attributes of one bag," the exact anti-pattern this codebase
+    already rejected once (this very type's own history). Its decided
+    disposition instead groups the pass-scoped values below into this EXISTING
+    type (extended here with ``links``/``effective_cache``/``selected_for_get``/
+    ``absent_alive_fields``/``jira_snapshot``/``local_parents``/
+    ``local_ticket_types`` — computed by ``compute_outbound_mutations`` itself,
+    not caller-supplied, but pass-invariant exactly like every other field here)
+    while the four Backend-port collaborators (``binding_store``, ``client``,
+    ``outbound_mapper``, ``inbound_mapper``, the assignee resolver) stay
+    separate, explicit, narrowly-typed parameters at the builder call — the ADR
+    calls these "already single, named, narrow collaborators... not loose
+    values," so folding them in here would not reduce coupling, only relabel it.
 
     Fields:
         excluded_statuses: Local statuses to skip (defaults to
@@ -250,6 +267,21 @@ class OutboundDiffConfig:
         prev_snapshot: The previous pass's Jira snapshot, consulted by the inbound
             directionality guard (suppress an outbound field-update when it is a
             Jira-side edit local has not touched since the last sync).
+        links: The injected ``SupportsLinks`` capability (ticket eefd), read by the
+            update builder's link diff.
+        effective_cache: The pass-scoped memo for the per-project effective-map
+            resolvers (``{(axis, project_key): value}``, story d378).
+        selected_for_get: The set of jira_keys selected for a bounded
+            bound-but-absent direct GET this pass (bug 1e08's budget).
+        absent_alive_fields: ``{jira_key: raw fields}`` for each bound-but-absent
+            key this pass's direct GET resolved ALIVE — populated by the update
+            builder, consumed after the pass by the inbound-direction GET-sharing
+            seam (bug 0702).
+        jira_snapshot: This pass's ``{jira_key: fields}`` search snapshot.
+        local_parents: ``{local_id: parent_id}`` companion map (S7), used by the
+            comment differ to walk to the nearest ancestor bound in Jira.
+        local_ticket_types: ``{local_id: ticket_type}`` hierarchy pre-check map
+            (ticket 8b25), used to suppress a non-epic parent diff.
     """
 
     excluded_statuses: set[str] | None = None
@@ -276,6 +308,16 @@ class OutboundDiffConfig:
     # None → ``effective_status_map`` falls back to CWD discovery (the built-in map when
     # no config is found), preserving legacy behaviour.
     repo_root: Any = None
+    # --- Ticket 6452: additional pass-scoped fields, populated internally by
+    # compute_outbound_mutations before its per-ticket loop (never caller-supplied
+    # like the fields above; kept on this same type per ADR 0107's disposition). ---
+    links: Any = None
+    effective_cache: dict[tuple[str, str], Any] | None = None
+    selected_for_get: Any = None
+    absent_alive_fields: dict[str, dict[str, Any]] | None = None
+    jira_snapshot: dict[str, Any] | None = None
+    local_parents: dict[str, Any] | None = None
+    local_ticket_types: dict[str, str] | None = None
 
 
 # The reserved create-payload key carrying the resolved target project from the
@@ -390,12 +432,7 @@ def compute_outbound_mutations(
             links = _backend
     # Bind the config's fields to locals so the diff body below reads unchanged.
     excluded_statuses = config.excluded_statuses
-    local_label_intent = config.local_label_intent
     client = config.client
-    pass_id = config.pass_id
-    prev_snapshot = config.prev_snapshot
-    conflict_sink = config.conflict_sink
-    dropped_field_sink = config.dropped_field_sink
     # The bound-but-absent ALIVE-GET sharing seam: populated below, returned to
     # the caller (replaces the former mutable out-param).
     absent_alive_fields: dict[str, dict[str, Any]] = {}
@@ -484,6 +521,19 @@ def compute_outbound_mutations(
         _assignee_cache[assignee] = result
         return result
 
+    # Ticket 6452: populate this pass's remaining pass-scoped values onto the
+    # EXISTING per-pass config object (ADR 0107's disposition) rather than a new
+    # bag — every field set below is pass-invariant and now readable via
+    # ``config.<name>`` by both builders, instead of being re-threaded as ~16
+    # loose positional/keyword values at every one of the loop's per-ticket calls.
+    config.links = links
+    config.effective_cache = _effective_cache
+    config.selected_for_get = _selected_for_get_this_pass
+    config.absent_alive_fields = absent_alive_fields
+    config.jira_snapshot = jira_snapshot
+    config.local_parents = local_parents
+    config.local_ticket_types = local_ticket_types
+
     for ticket in local_tickets:
         status = ticket.get("status", "")
         if status in excluded_statuses:
@@ -521,13 +571,9 @@ def compute_outbound_mutations(
                 ticket,
                 status,
                 local_id,
+                config,
                 binding_store,
-                local_ticket_types,
                 outbound_mapper,
-                dropped_field_sink=dropped_field_sink,
-                mapping=config.projects_mapping,
-                repo_root=config.repo_root,
-                effective_cache=_effective_cache,
             )
         else:
             _compute_outbound_update_mutation(
@@ -536,25 +582,11 @@ def compute_outbound_mutations(
                 status,
                 local_id,
                 jira_key,
-                jira_snapshot,
+                config,
                 binding_store,
-                client,
-                pass_id,
-                _selected_for_get_this_pass,
-                prev_snapshot,
-                local_label_intent,
-                local_ticket_types,
-                _assignee_resolver,
-                absent_alive_fields,
                 outbound_mapper,
                 inbound_mapper,
-                links,
-                local_parents=local_parents,
-                conflict_sink=conflict_sink,
-                dropped_field_sink=dropped_field_sink,
-                mapping=config.projects_mapping,
-                repo_root=config.repo_root,
-                effective_cache=_effective_cache,
+                _assignee_resolver,
             )
 
     return mutations, absent_alive_fields
