@@ -33,11 +33,13 @@ require_plan_review_for_close = true
 # plan-review runs an advisory two-stage retrieve-then-rerank pass (BM25F candidate
 # generation with graph exclusion → bounded LLM pairwise judge over enrichment digests)
 # and surfaces `overlap[]` suggestions on the verdict. Advisory only — it NEVER blocks a
-# claim or close. Ships gated OFF by default; turned on here (rebar-ticket ade2-8c73-e010-491d).
-# Also activates the opportunistic enrichment drain on ticket write paths; scope that to
-# plan-review only with `[llm] overlap_drain = "off"` (that is the parsed table; a
-# `[tool.rebar.*]` table is NOT read). Rollback: set this to false.
-suggest_duplicate_tickets = true
+# claim or close. Ships gated OFF by default and is OFF here too: with the enrichment
+# drain off ([llm] overlap_drain = "off" below), the digests the rerank judges against
+# are never produced, and the certification-time ENQUEUE_ENRICH producer gates on this
+# same pair of settings — leaving this on only wrote durable queue events nothing
+# consumed (rebar-ticket 4eae-c207-7d7b-41f3; originally enabled by ade2-8c73-e010-491d).
+# Rollback: set this to true (and pick an [llm] overlap_drain mode).
+suggest_duplicate_tickets = false
 
 # Commit-ticket gate (docs/commit-ticket-trailer.md): the CI `require-ticket` job (the
 # Gerrit Verified leg) requires every commit to `main` to reference a rebar ticket that
@@ -207,8 +209,10 @@ enforce_since = "f9f38d0c6c4255ae3a6ecd7858fe98813c46ee4f"
 # writer: a fetch->merge->push recovery cycle costs 2.4-4.2s while competing pushes land
 # every 2-4s, so a writer that falls behind never regains the lead. Stores diverged
 # without bound and cross-environment reads disagreed (rebar-ticket 62ab-c11e-30c2-40be).
-# `suggest_duplicate_tickets` above stays true, so plan-review keeps its advisory overlap
-# suggestions; only the write-path drain stops (src/rebar/llm/enrich_drain.py:525).
+# `suggest_duplicate_tickets` above is now false too, so the advisory overlap feature is
+# fully off for this project: neither the write-path drain (src/rebar/llm/enrich_drain.py)
+# nor the certification-time ENQUEUE_ENRICH producer (src/rebar/llm/plan_review/attest.py)
+# runs — both gate on the same two settings (rebar-ticket 4eae-c207-7d7b-41f3).
 overlap_drain = "off"
 model = "bedrock:us.anthropic.claude-opus-4-8"
 # The region the pinned `us.*` inference profiles are served from (measured in account

@@ -116,17 +116,44 @@ def test_recert_after_done_requeues(repo: str) -> None:
 
 
 def test_cert_enqueues(repo: str, monkeypatch) -> None:
-    # sign_plan_review (the certification path) enqueues the ticket for enrichment.
+    # sign_plan_review (the certification path) enqueues the ticket for enrichment
+    # when the overlap feature is on and the drain is not "off" (the producer mirrors
+    # the drain's own gate — rebar-ticket 4eae-c207-7d7b-41f3).
     from rebar.llm.plan_review import attest
 
     # Simulate an active attested session: the sign seam's no-null-pin invariant
     # (bug 5128-0856) refuses to sign with no snapshot SHA at all.
     monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: "c" * 40)
+    monkeypatch.delenv("REBAR_LLM_OVERLAP_DRAIN", raising=False)
     tid = rebar.create_ticket("task", "Cert enqueues", repo_root=repo)
+    # Enable the overlap feature; leave overlap_drain at its default ("async" — enabled).
+    Path(repo, "rebar.toml").write_text("[verify]\nsuggest_duplicate_tickets = true\n")
     verdict = {"verdict": "PASS", "ticket_id": tid}
     attest.sign_plan_review(verdict, material="deadbeef", repo_root=repo)
     st = Q.reduce_ticket(tid, _tracker(repo))
     assert st["enqueued"] is True
+
+
+def test_cert_with_drain_off_appends_no_queue_event(repo: str, monkeypatch) -> None:
+    """With `[llm] overlap_drain = "off"` a plan-review certification appends NO
+    ENQUEUE_ENRICH event: the producer is gated on the same effective config the drain
+    reads, so nothing is ever written into a queue nothing consumes (regression:
+    rebar-ticket 4eae-c207-7d7b-41f3)."""
+    from rebar.llm.plan_review import attest
+
+    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: "c" * 40)
+    monkeypatch.delenv("REBAR_LLM_OVERLAP_DRAIN", raising=False)
+    tid = rebar.create_ticket("task", "Cert with drain off", repo_root=repo)
+    Path(repo, "rebar.toml").write_text(
+        '[verify]\nsuggest_duplicate_tickets = true\n\n[llm]\noverlap_drain = "off"\n'
+    )
+    attest.sign_plan_review(
+        {"verdict": "PASS", "ticket_id": tid}, material="deadbeef", repo_root=repo
+    )
+    tracker = _tracker(repo)
+    assert Q.reduce_ticket(tid, tracker)["enqueued"] is False
+    # No queue event file at all — not merely a reduced "not enqueued".
+    assert list(Path(tracker).rglob(f"*-{Q.ENQUEUE}.json")) == []
 
 
 # ── AC-named proving tests (epic only-crave-art / e1f4 acceptance criteria) ──────

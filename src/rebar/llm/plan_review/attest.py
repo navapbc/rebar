@@ -214,14 +214,19 @@ def sign_plan_review(
             verdict["ticket_id"], manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root
         )
     try:
+        from rebar import config as _root_config
         from rebar.llm.config import resolve_gate_config
         from rebar.llm.overlap import queue as _enqueue_queue
 
-        _enqueue_queue.enqueue(
-            verdict["ticket_id"],
-            soak_min=resolve_gate_config(repo_root).overlap_soak_min,
-            repo_root=repo_root,
-        )
+        # Gate the PRODUCER on the same config pair the drain consumer reads
+        # (enrich_drain.maybe_drain), so certification never appends ENQUEUE_ENRICH
+        # into a queue nothing consumes (bug 4eae-c207-7d7b-41f3).
+        cfg = resolve_gate_config(repo_root)
+        feature_on = _root_config.compose_config(repo_root).verify.suggest_duplicate_tickets
+        if feature_on and cfg.overlap_drain != "off":
+            _enqueue_queue.enqueue(
+                verdict["ticket_id"], soak_min=cfg.overlap_soak_min, repo_root=repo_root
+            )
     except Exception:
         logging.getLogger(__name__).warning(
             "enrichment enqueue on certification failed; continuing", exc_info=True
