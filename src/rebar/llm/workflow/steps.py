@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..review_kernel.decide import DEFAULT_BLOCK_THRESHOLD
 from .executor import StepContext, StepResult, register_step
 from .step_contracts import _ticket_id
 
@@ -196,13 +197,24 @@ def render_context(ctx: StepContext) -> dict[str, Any]:
 # fails the gate when any finding's severity is in ``fail_on_severity`` (or the
 # finding count exceeds ``max_findings``).
 GATE_POLICIES: dict[str, dict[str, Any]] = {
-    "default": {"version": "1", "fail_on_severity": ["critical", "high"], "max_findings": None},
+    "default": {
+        "version": "1",
+        "fail_on_severity": ["critical", "high"],
+        "max_findings": None,
+        "priority_threshold": DEFAULT_BLOCK_THRESHOLD,
+    },
     "strict": {
         "version": "1",
         "fail_on_severity": ["critical", "high", "medium"],
         "max_findings": 0,
+        "priority_threshold": 0.5,
     },
-    "advisory": {"version": "1", "fail_on_severity": [], "max_findings": None},
+    "advisory": {
+        "version": "1",
+        "fail_on_severity": [],
+        "max_findings": None,
+        "priority_threshold": None,
+    },
 }
 
 
@@ -226,7 +238,16 @@ def gate(ctx: StepContext) -> dict[str, Any]:
     policy_name = ctx.inputs.get("policy") or "default"
     policy = GATE_POLICIES.get(policy_name, GATE_POLICIES["default"])
 
-    failing = [f for f in findings if f.get("severity") in policy["fail_on_severity"]]
+    def _fails(finding: dict[str, Any]) -> bool:
+        if finding.get("severity") in policy["fail_on_severity"]:
+            return True
+        threshold = policy.get("priority_threshold")
+        priority = finding.get("priority")
+        return (
+            threshold is not None and isinstance(priority, (int, float)) and priority >= threshold
+        )
+
+    failing = [f for f in findings if _fails(f)]
     over_count = policy["max_findings"] is not None and len(findings) > policy["max_findings"]
     verdict = "fail" if (failing or over_count) else "pass"
     return {
