@@ -71,6 +71,28 @@ def test_severity_label_buckets() -> None:
     assert review_kernel.severity_label(0.1) == "none"
 
 
+def test_pass3_decide_never_stamps_a_severity_key() -> None:
+    """The retired impact-only severity label is not part of pass3_decide's output at any
+    return site -- including the no-verification/indeterminate early return, which used to
+    hardcode `severity: "none"` before any impact/validity was computed, and the veto/dropped
+    return sites (cited-reference veto, low-validity drop), which used to include the
+    severity_label-derived value alongside the veto's `reason`."""
+    assert "severity" not in review_kernel.pass3_decide(None)
+    assert "severity" not in review_kernel.pass3_decide(_verif(), blocking_enabled=True)
+    assert "severity" not in review_kernel.pass3_decide(_verif(), blocking_enabled=False)
+    # low-validity drop
+    n_no = len(review_kernel.GRADED_BINARY) // 2 + 1
+    low = _verif(binary={q: "no" for q in list(review_kernel.GRADED_BINARY)[:n_no]})
+    d_low = review_kernel.pass3_decide(low)
+    assert d_low["decision"] == "dropped"
+    assert "severity" not in d_low
+    # cited-reference veto
+    vetoed = _verif(binary={"cited_reference_accurate": "no"})
+    d_vetoed = review_kernel.pass3_decide(vetoed)
+    assert d_vetoed["decision"] == "dropped"
+    assert "severity" not in d_vetoed
+
+
 def test_decision_labels_by_construction() -> None:
     # no verification ⇒ indeterminate
     assert review_kernel.pass3_decide(None)["decision"] == "indeterminate"

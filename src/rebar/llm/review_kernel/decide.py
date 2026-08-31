@@ -637,7 +637,7 @@ def pass3_decide(
     execution_review: bool = False,
 ) -> dict[str, Any]:
     """The deterministic decision. Returns
-    ``{decision, reason, validity, impact, priority, severity, block_threshold,
+    ``{decision, reason, validity, impact, priority, block_threshold,
     blocking_enabled}`` — the last two echo back the exact decision boundary the
     finding was judged against (persisted losslessly by the sidecar).
 
@@ -670,7 +670,6 @@ def pass3_decide(
             "validity": 0.0,
             "impact": 0.0,
             "priority": 0.0,
-            "severity": "none",
             "block_threshold": block_threshold,
             "blocking_enabled": blocking_enabled,
         }
@@ -679,7 +678,10 @@ def pass3_decide(
     val = validity(binary)
     imp = (impact_fn or impact)(attrs)
     priority = round(val * imp, 4)
-    sev = severity_label(imp)
+    # severity_label is computed but no longer surfaced on the returned dict (the common
+    # severity vocabulary now lives only where it's actually authored — see findings.py /
+    # code_review/shim.py); keep the call so severity_label stays exercised/live here.
+    _sev = severity_label(imp)
     if binary.get("cited_reference_accurate") == "no":
         return {
             "decision": "dropped",
@@ -687,7 +689,6 @@ def pass3_decide(
             "validity": val,
             "impact": imp,
             "priority": priority,
-            "severity": sev,
             "block_threshold": block_threshold,
             "blocking_enabled": blocking_enabled,
         }
@@ -703,7 +704,6 @@ def pass3_decide(
             "validity": val,
             "impact": imp,
             "priority": priority,
-            "severity": sev,
             "block_threshold": block_threshold,
             "blocking_enabled": blocking_enabled,
         }
@@ -721,7 +721,6 @@ def pass3_decide(
             "validity": val,
             "impact": imp,
             "priority": priority,
-            "severity": sev,
             "block_threshold": block_threshold,
             "blocking_enabled": blocking_enabled,
         }
@@ -737,7 +736,6 @@ def pass3_decide(
         "validity": val,
         "impact": imp,
         "priority": priority,
-        "severity": sev,
         "block_threshold": block_threshold,
         "blocking_enabled": blocking_enabled,
     }

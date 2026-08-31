@@ -6,14 +6,13 @@ This lists environment variables read under `src/rebar` via the following recogn
 
 - key-bearing stdlib reads (the literal key is registered): `os.environ["X"]`, `os.environ.__getitem__("X", …)`, `os.environ.get("X", …)`, `os.environ.pop("X", …)`, `os.environ.setdefault("X", …)`, `os.getenv("X", …)`
 - bulk/whole-mapping accesses (allowed, register nothing — they name no single variable): `os.environ.__contains__`, `os.environ.__delitem__`, `os.environ.__iter__`, `os.environ.__len__`, `os.environ.__setitem__`, `os.environ.clear`, `os.environ.copy`, `os.environ.items`, `os.environ.keys`, `os.environ.popitem`, `os.environ.update`, `os.environ.values`
-- project env-read helpers: `_env_truthy`, `_gate_str_pref`, `_int_env`, `_llm_float`, `_llm_int`, `_llm_str`, `_llm_str_source`, `_severities_env`, `_str_env`, `read_secret_env`
+- project env-read helpers: `_env_truthy`, `_gate_str_pref`, `_int_env`, `_llm_float`, `_llm_int`, `_llm_str`, `_llm_str_source`, `_str_env`, `read_secret_env`
 - NOT recognized: reads under `tests/` (outside the scan root), non-literal keys (reported as dynamic below instead of dropped), `os.environ` passed by reference into another callable (`dict(os.environ)`, `f(os.environ)`), `getattr(os.environ, …)` indirection, and keys built from a runtime source other than a parameter (a regex match group, say) — no call site carries those names, so they stay dynamic.
 
 | Variable | Read in | Alias/deprecation |
 |----------|---------|-------------------|
 | `ANTHROPIC_API_KEY` | `src/rebar/llm/config.py` |  |
 | `ANTHROPIC_BASE_URL` | `src/rebar/llm/anthropic_model.py` |  |
-| `BLOCKING_SEVERITIES` | `src/rebar/review_bot/config.py` |  |
 | `BOT_USER` | `src/rebar/review_bot/config.py` |  |
 | `COMPACT_THRESHOLD` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_COMPACT_THRESHOLD` |
 | `DEDUP_DB_PATH` | `src/rebar/review_bot/config.py` |  |
@@ -182,7 +181,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_170 variables._
+_169 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -205,4 +204,3 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/llm/config_readers.py:118` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:72` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:257` — `os.environ.get(<non-literal>)`
-- `src/rebar/review_bot/config.py:267` — `os.environ.get(<non-literal>)`

@@ -562,7 +562,7 @@ placeholders — none of the committed artifacts carry a real secret:
 | `<your-org>/<your-repo>` | `replication.config` remote `url`; `register-deploy-key.sh REPO=…`; `infra/terraform-github/` variables; the GitHub PAT scope |
 | `/rebar/prod/*` SSM paths | the `SSM_PREFIX` / per-script `SSM_*` env overrides if you want a different namespace |
 | The seven secret **values** | populate the SSM SecureString params out-of-band — never in a committed file |
-| Blocking-severity threshold, vote values | review-bot `config.py` env (`BLOCKING_SEVERITIES`, `LLM_REVIEW_MAX_VALUE`, `LLM_REVIEW_BLOCK_VALUE`) |
+| Vote values | review-bot `config.py` env (`LLM_REVIEW_MAX_VALUE`, `LLM_REVIEW_BLOCK_VALUE`) — the four-pass gate's own `priority`/`decision` now decides PASS vs BLOCK; there is no separate severity-threshold env var |
 
 Read the relevant ADRs for the rationale behind each decision before you adapt them:
 [0007 review-bot receiver](adr/0007-review-bot-receiver.md),

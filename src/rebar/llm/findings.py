@@ -70,8 +70,9 @@ def normalize_finding(raw: dict, *, reviewer_id: str | None = None) -> dict:
     """Coerce one raw finding into the canonical ``finding`` shape (best-effort,
     schema-validated downstream). Unknown severities clamp to ``info``."""
     f = dict(raw)
-    sev = str(f.get("severity", "")).strip().lower()
-    f["severity"] = sev if sev in SEVERITIES else "info"
+    if "severity" in f:
+        sev = str(f.get("severity", "")).strip().lower()
+        f["severity"] = sev if sev in SEVERITIES else "info"
     f["dimension"] = str(f.get("dimension") or f.get("category") or "general").strip()
     f.pop("category", None)
     f["detail"] = str(f.get("detail") or f.get("description") or f.get("body") or "").strip()

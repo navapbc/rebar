@@ -23,7 +23,7 @@ import logging
 import os
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 #: Default per-review wall-clock timeout (seconds). Shared by the live worker
@@ -263,24 +263,6 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-def _severities_env(name: str, default: frozenset[str]) -> frozenset[str]:
-    raw = os.environ.get(name)
-    if raw is None or raw.strip() == "":
-        return default
-    parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
-    return frozenset(parts) if parts else default
-
-
-#: The review_code severity vocabulary (mirrors ``rebar.llm.findings.SEVERITIES``).
-#: Kept local so ``config`` stays free of the ``agents`` extra. ``BLOCKING_SEVERITIES`` is a
-#: subset of this set; the four-pass gate now decides PASS vs BLOCK, so the adapter's old
-#: severity comparison against it is vestigial for this path (see ``adapter.py``).
-SEVERITIES: frozenset[str] = frozenset({"critical", "high", "medium", "low", "info"})
-
-#: Default blocking set: a finding at critical OR high blocks the change.
-DEFAULT_BLOCKING_SEVERITIES: frozenset[str] = frozenset({"critical", "high"})
-
-
 @dataclass(frozen=True)
 class ReceiverConfig:
     """Immutable, env-sourced receiver configuration (one snapshot per process)."""
@@ -289,9 +271,6 @@ class ReceiverConfig:
     llm_review_max_value: int = 1
     #: The ``LLM-Review`` value cast for a BLOCK / error (leaves change unsubmittable).
     llm_review_block_value: int = -1
-    #: Blocking-severity set, still env-parsed but vestigial for the review path: the four-pass
-    #: gate now decides PASS→BLOCK, not a severity threshold here (see ``adapter.py``).
-    blocking_severities: frozenset[str] = field(default_factory=lambda: DEFAULT_BLOCKING_SEVERITIES)
     #: SQLite dedup store on the box's data volume (single-box appropriate).
     dedup_db_path: str = "/var/gerrit/site/reviewbot/voted.db"
     #: Gerrit REST base; the receiver reaches Gerrit over the compose network as the
@@ -349,7 +328,6 @@ class ReceiverConfig:
         return cls(
             llm_review_max_value=_int_env("LLM_REVIEW_MAX_VALUE", 1),
             llm_review_block_value=_int_env("LLM_REVIEW_BLOCK_VALUE", -1),
-            blocking_severities=_severities_env("BLOCKING_SEVERITIES", DEFAULT_BLOCKING_SEVERITIES),
             dedup_db_path=os.environ.get(
                 "DEDUP_DB_PATH", "/var/gerrit/site/reviewbot/voted.db"
             ).strip(),

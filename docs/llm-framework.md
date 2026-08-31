@@ -500,7 +500,8 @@ rebar scan-spec --spec-file spec.md --batch-size 5   # scan open epics against a
 import rebar.llm
 result = rebar.llm.review_code(base="main", head="HEAD")
 for f in result["findings"]:
-    print(f["severity"], f["dimension"], f["detail"])
+    label = "BLOCKING" if f.get("decision") == "block" else f.get("severity", "advisory")
+    print(label, f["dimension"], f["detail"])
 ```
 
 MCP: the `review_code` tool is exposed but **disabled unless
