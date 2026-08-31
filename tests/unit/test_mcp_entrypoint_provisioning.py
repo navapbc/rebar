@@ -17,7 +17,6 @@ absence-only assertion passes just as happily when the script died on line one.
 
 from __future__ import annotations
 
-import fcntl
 import os
 import shutil
 import subprocess
@@ -30,6 +29,9 @@ import pytest
 from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
+
+# fcntl is POSIX-only; skip (not error at collection) where it is absent (e.g. Windows).
+fcntl = pytest.importorskip("fcntl")
 
 _REPO = Path(__file__).resolve().parents[2]
 _ENTRYPOINT = _REPO / "infra" / "scripts" / "mcp-entrypoint.sh"

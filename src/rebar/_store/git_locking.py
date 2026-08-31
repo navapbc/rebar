@@ -42,7 +42,6 @@ keys are a known defect class here; tests tune the module-level constants.
 
 from __future__ import annotations
 
-import fcntl
 import logging
 import os
 import random
@@ -53,6 +52,11 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 from rebar._store import git_outcome
+
+try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
+    import fcntl
+except ImportError:  # pragma: no cover - platform-dependent
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
