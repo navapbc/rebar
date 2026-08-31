@@ -125,6 +125,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_MCP_AUTH_RESOURCE_SERVER_URL` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_AUTH_STATIC_TOKENS_FILE` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_AUTH_STRATEGIES` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_DEDUP` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_mcp_inflight.py` |  |
 | `REBAR_MCP_HTTP_ALLOWED_HOSTS` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_HTTP_ALLOWED_ORIGINS` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_HTTP_HOST` | `src/rebar/_config_schema.py (mcp config)` |  |
@@ -181,7 +182,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_169 variables._
+_170 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

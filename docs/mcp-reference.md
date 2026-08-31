@@ -96,6 +96,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 |----------|---------|
 | `REBAR_MCP_READONLY` | Set to 1 to expose only the read tools (no write/mutation tools). |
 | `REBAR_MCP_ALLOW_LLM` | Set to 1 to enable the billable LLM tools (review_code / scan_spec / verify_completion / review_plan); off by default. |
+| `REBAR_MCP_DEDUP` | In-flight de-duplication of the long-running gate tools (review_plan / verify_completion): a concurrent duplicate call for the same ticket+basis attaches to the running gate instead of launching a second billable LLM pass. On by default; set to 0 to disable (kill-switch). |
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only. |
 | `REBAR_MCP_TRANSPORT` | Transport for the MCP server: 'stdio' (default) or 'http' (the optional Streamable-HTTP transport). |
 | `REBAR_MCP_HTTP_HOST` | Bind host for the Streamable-HTTP transport (default 127.0.0.1). |

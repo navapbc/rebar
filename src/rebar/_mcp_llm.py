@@ -15,6 +15,7 @@ plain ``dict`` (a model-produced result), so no output models are imported here.
 
 from __future__ import annotations
 
+from rebar._mcp_inflight import run_gate_singleflight
 from rebar._mcp_models import tool_annotation_presets
 
 
@@ -79,6 +80,46 @@ def _record_verify_completion(result, ticket_id: str, *, readonly: bool):
 
     result["record"] = record_completion_verdict(result, ticket_id)
     return result
+
+
+def _review_plan_body(ticket_id: str, ref, source, force: bool, *, readonly: bool) -> dict:
+    """The complete synchronous ``review_plan`` computation — the unit the singleflight
+    de-duplicates. Behaviour is identical to the former in-line tool body: run the
+    gate, convert an ``LLMError`` to a structured result, then attach the
+    passed-but-unsigned classification. Extracted to module level so the sync tool body
+    can hand this whole closure to :func:`run_gate_singleflight` and every attached
+    caller shares ONE run's verdict (and ONE signature/sidecar)."""
+    import rebar.llm
+    from rebar.llm.plan_review.resign import classify_plan_review_attestation
+
+    try:
+        result = rebar.llm.review_plan(
+            ticket_id,
+            ref=ref,
+            source=source,
+            sign=not readonly,
+            emit_sidecar=not readonly,
+            force=force,
+        )
+    except rebar.llm.LLMError as exc:
+        return _structured_llm_failure(exc)
+    # The CLI maps this same classification to exit 11; MCP has no exit code, so the
+    # structured verdict rides on the payload instead (ticket ammonic-amoral-nabarlek).
+    return _with_attestation(result, classify_plan_review_attestation)
+
+
+def _verify_completion_body(ticket_id: str, graph, ref, source, *, readonly: bool) -> dict:
+    """The complete synchronous ``verify_completion`` computation — the unit the
+    singleflight de-duplicates. Identical to the former in-line body: run the gate,
+    convert an ``LLMError`` to a structured result, then record the run (or NOTHING in
+    read-only mode). One deduped run => one recording, which is exactly the intent."""
+    import rebar.llm
+
+    try:
+        result = rebar.llm.verify_completion(ticket_id, graph=graph, ref=ref, source=source)
+    except rebar.llm.LLMError as exc:
+        return _structured_llm_failure(exc)
+    return _record_verify_completion(result, ticket_id, readonly=readonly)
 
 
 def register_llm_tools(mcp, ctx) -> None:
@@ -183,6 +224,12 @@ def register_llm_tools(mcp, ctx) -> None:
         result's ``record`` field (``{signed, cause, sidecar_written, error}``) and never
         changes the verdict. A ``local`` verdict is never signed.
 
+        IN-FLIGHT DE-DUPLICATION (bug d80d): a second concurrent call for the same
+        ticket + basis + variant while a verify is already running ATTACHES to that run and
+        shares its verdict — it does NOT start a second billable LLM pass — so a
+        client-side ``-32001`` timeout followed by a retry no longer double-charges. Disable
+        with ``REBAR_MCP_DEDUP=0``.
+
         DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes a live, billable LLM call and reaches
         the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
         dict and advertises NO outputSchema by design — the result is model-produced, so it is
@@ -192,16 +239,20 @@ def register_llm_tools(mcp, ctx) -> None:
                 "verify_completion is disabled: it makes a live, billable LLM call. "
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
             )
-        import rebar.llm
-
-        try:
-            result = rebar.llm.verify_completion(ticket_id, graph=graph, ref=ref, source=source)
-        except rebar.llm.LLMError as exc:
-            return _structured_llm_failure(exc)
-        # Symmetric with review_plan: record the run on the ticket unless read-only. A
-        # read-only server writes NOTHING (no sidecar, no signature); the branch lives in the
-        # module-level helper so this closure stays under the complexity ceiling.
-        return _record_verify_completion(result, ticket_id, readonly=_readonly())
+        # The tool body stays SYNC (the certified-tool in-flight gauge + SIGTERM drain
+        # require it — _mcp_health.instrument_certified_tools fails loud on an async
+        # certified tool); the singleflight de-dups concurrent worker threads underneath.
+        ro = _readonly()
+        return run_gate_singleflight(
+            "verify_completion",
+            ticket_id,
+            ref=ref,
+            source=source,
+            variant=f"graph={graph};source={source or 'attested'}",
+            readonly=ro,
+            force=False,
+            work=lambda: _verify_completion_body(ticket_id, graph, ref, source, readonly=ro),
+        )
 
     @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def review_plan(
@@ -245,6 +296,12 @@ def register_llm_tools(mcp, ctx) -> None:
         so there is nothing to re-sign). ``cause`` is ``signed``/``skipped`` when nothing is
         wrong.
 
+        IN-FLIGHT DE-DUPLICATION (bug d80d): a second concurrent call for the same
+        ticket + basis while a review is already running ATTACHES to that run and shares its
+        verdict — it does NOT start a second billable LLM review — so a client-side ``-32001``
+        timeout followed by a retry no longer double-charges. ``force=True`` bypasses de-dup
+        (a forced fresh review must not attach); disable entirely with ``REBAR_MCP_DEDUP=0``.
+
         DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes live, billable LLM calls and reaches
         the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
         dict and advertises NO outputSchema by design (model-produced result; NO_SCHEMA_EXEMPT)."""
@@ -253,19 +310,20 @@ def register_llm_tools(mcp, ctx) -> None:
                 "review_plan is disabled: it makes live, billable LLM calls. "
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
             )
-        import rebar.llm
-        from rebar.llm.plan_review.resign import classify_plan_review_attestation
-
+        # The tool body stays SYNC (see verify_completion): the singleflight de-dups
+        # concurrent worker threads while the certified-tool gauge keeps counting billable
+        # work. force=True bypasses de-dup, mirroring the gate's own force short-circuit bypass.
         ro = _readonly()
-        try:
-            result = rebar.llm.review_plan(
-                ticket_id, ref=ref, source=source, sign=not ro, emit_sidecar=not ro, force=force
-            )
-        except rebar.llm.LLMError as exc:
-            return _structured_llm_failure(exc)
-        # The CLI maps this same classification to exit 11; MCP has no exit code, so the
-        # structured verdict rides on the payload instead (ticket ammonic-amoral-nabarlek).
-        return _with_attestation(result, classify_plan_review_attestation)
+        return run_gate_singleflight(
+            "plan_review",
+            ticket_id,
+            ref=ref,
+            source=source,
+            variant=f"source={source or 'attested'}",
+            readonly=ro,
+            force=force,
+            work=lambda: _review_plan_body(ticket_id, ref, source, force, readonly=ro),
+        )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def sign_review(ticket_id: str) -> dict:
