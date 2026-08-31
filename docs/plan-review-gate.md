@@ -680,6 +680,37 @@ paths all inherit it (ADR 0005; bug `melancholy-firstborn-shihtzu`). Pre-existin
 (pre-S4b) attestations remain readable. To review-and-sign offline, use the attested source
 with a local ref instead: `--ref HEAD` resolves from the local object DB with no network.
 
+### Running the gate over MCP without a client timeout — `*_start` + poll
+
+Over the MCP server a gate can run longer than the client's request deadline (~60s). When
+it does, the client gets a `-32001` timeout **while the server keeps running the gate** — an
+ambiguous non-signal: the caller cannot tell whether the review is still in flight, already
+signed, or dead, and a blind re-run launches a **second, double-billed** LLM pass (bug
+`jeanlike-hick-azurevase` / `d80d-7be7-1c0a-4231`). Two additive protections close this:
+
+- **Prefer the async starters.** `review_plan_start(ticket_id, …)` and
+  `verify_completion_start(ticket_id, …)` return a `{job_id, ticket_id, gate_type,
+  status:"running"}` handle in milliseconds and run the gate on a background daemon thread
+  (mirroring `run_workflow`), so it OUTLIVES the request deadline. Then POLL for the verdict:
+  `plan_review_status` / `verify_completion_status` read the durable **signed attestation**
+  (the authoritative result), and `gate_status(job_id)` reads the run handle
+  (`running` → `passed` / `failed`, or `stale-running` if the daemon died mid-run). The
+  `.rebar/gate_runs/<job_id>` index is a **local** handle only — like `run_workflow`, the
+  daemon does not survive the process exiting and there is no reaper; the verdict a fresh
+  process trusts is always the attestation, not the index.
+- **The sync tools are de-dup-protected fallbacks.** `review_plan` / `verify_completion`
+  still work, and a concurrent same-key call now **attaches to the in-flight run** and shares
+  its verdict instead of starting a second billable pass — so an accidental re-fire after a
+  `-32001` no longer double-charges. The key is `sha256` over the gate type, the canonical
+  ticket id, the resolved base SHA, the variant, and the readonly flag; `force=True` bypasses
+  de-dup, and the kill-switch `REBAR_MCP_DEDUP=0` disables it entirely. A **different**
+  `basis_ref` is a different key (a legitimately distinct run), and a re-call **after** the
+  first completes re-invokes (the slot is purged on completion).
+
+Never wrap either gate in a shell `timeout` (see AGENTS.md's bounding section): they are
+bounded workloads that terminate with a verdict — background them if you must keep working,
+but let them finish.
+
 ### Resuming exactly the latest review — `review-plan --retry`
 
 A plan review can land on **INDETERMINATE** without failing on the merits: an LLM call for a
