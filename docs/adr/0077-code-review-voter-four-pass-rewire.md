@@ -52,7 +52,8 @@ sub-reason is derived deterministically from `verdict.coverage`. A security-scan
   to the d251 receiver/voter/label contract.
 - Operators can distinguish an infrastructure `-1` (re-run when healthy) from a real-finding `-1`
   by the message tag.
-- `ReceiverConfig.blocking_severities` is retained for back-compat but unused by this adapter path;
-  a follow-on may remove it once no other consumer reads it.
+- `ReceiverConfig.blocking_severities` was retained for back-compat, unused by this adapter path;
+  it has since been removed entirely (ADR 0108, epic `pink-complex-xenurine`), the follow-on this
+  entry anticipated.
 - The receiver now depends (at review time) on the `[agents]` extra + the four-pass gate's runtime
   scanners (gitleaks/opengrep, per ADR 0012) — imported lazily, fail-closed on absence.

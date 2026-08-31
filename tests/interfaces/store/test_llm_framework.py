@@ -91,9 +91,20 @@ def test_normalize_coerces_shape() -> None:
     from rebar.llm.findings import normalize_finding
 
     f = normalize_finding({"severity": "BOGUS", "category": "x", "description": "d"})
-    assert f["severity"] == "info"  # unknown clamps to info
+    assert f["severity"] == "info"  # unknown-but-PRESENT clamps to info
     assert f["dimension"] == "x" and f["detail"] == "d"
     assert f["citations"] == []
+
+
+def test_normalize_leaves_severity_absent_when_the_input_never_had_it() -> None:
+    """A review-kernel finding with no severity key at all (the normal case once
+    pass3_decide stops stamping one) must NOT be backfilled to "info" -- only a
+    PRESENT-but-invalid value clamps (see test_normalize_coerces_shape)."""
+    from rebar.llm.findings import normalize_finding
+
+    f = normalize_finding({"category": "x", "description": "d"})
+    assert "severity" not in f
+    assert f["dimension"] == "x" and f["detail"] == "d"
 
 
 def test_normalize_strips_model_emitted_nulls() -> None:

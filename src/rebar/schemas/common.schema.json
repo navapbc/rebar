@@ -141,8 +141,8 @@
     "finding": {
       "type": "object",
       "additionalProperties": true,
-      "description": "One reviewer finding — the universal output element of every LLM review operation (rebar.llm).",
-      "required": ["severity", "dimension", "detail"],
+      "description": "One reviewer finding — the universal output element of every LLM review operation (rebar.llm). `severity` is optional: review-kernel-sourced findings (code-review/plan-review) no longer stamp it, carrying `priority`/`decision` instead; other producers (e.g. completion-verification) continue to always supply it.",
+      "required": ["dimension", "detail"],
       "properties": {
         "severity": { "$ref": "common.schema.json#/$defs/severity" },
         "dimension": { "type": "string", "description": "Category/dimension the finding belongs to (e.g. 'security', 'acceptance-criteria', 'test-coverage'). Reviewer-defined." },

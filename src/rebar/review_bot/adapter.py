@@ -10,8 +10,8 @@ code-review decision:
 verdict) — a drop-in swap of the earlier single-pass ``review_code`` implementation, with NO
 caller change (the voter still reads ``decision`` + ``message``). The four-pass gate's own
 deterministic Pass-3 blocker decides PASS vs BLOCK (via ``criteria_routing.json`` thresholds), so
-the adapter no longer applies a severity heuristic — ``ReceiverConfig.blocking_severities`` is now
-vestigial for this path.
+the adapter no longer applies a severity heuristic — the once-vestigial
+``ReceiverConfig.blocking_severities`` has since been removed entirely.
 
 FORCE-ENABLE. The code-review DISPATCH is OFF by default for callers that leave ``enabled=None``
 (``verify.enable_code_review``), but voter activation is itself the authoritative gate (a project

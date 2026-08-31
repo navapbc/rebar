@@ -114,3 +114,48 @@ previous — a later change's plan review is only valid once its prerequisite is
 - DET-tier findings (secrets detector, bugfix-size gate) gain a `priority`/`decision`
   vocabulary consistent with LLM-scored findings, closing the gap that let them bypass
   priority-based ranking and gating.
+
+## Amendment (2026-08-31, during implementation)
+
+Decomposition-time research corrected the scope above on three points, all discovered by the
+plan-review gate rather than assumed at authoring time:
+
+1. **Step 2's target was dead code.** `aggregate.py::aggregate_findings`/`_severity_rank` has no
+   caller anywhere in `src/rebar/` — orphaned since ADR 0075 retired the single-pass code-review
+   route. The live cross-finding dedup (`_cluster_findings` in `code_review/workflow_ops.py`,
+   `dedup_key`/`suppress_and_dedup` in `review_kernel/decide.py`) picks a representative
+   first-in-order, never by severity or priority, so there was no live misranking bug to fix
+   there. `beaming-snively-urial`'s actual landed scope is narrower: thread `priority`/`decision`
+   through `code_review/shim.py::_to_common_finding` for the `review_result`/`review_code()`
+   consumer only. `aggregate.py` is untouched by this epic.
+2. **Step 4's target (`steps.gate`/`fail_on_severity`) is not wired into any real production
+   gate.** All three real gate workflows (plan-review, code-review, completion-verification) use
+   their own bespoke `_decide`/`_reconcile` ops instead; `steps.gate` is exercised only by a
+   retained sample workflow and a test fixture, both severity-only. The landed change is
+   therefore additive (a new `priority_threshold` alongside the existing `fail_on_severity`,
+   never a replacement) rather than a migration of live behavior.
+3. **Step 5 ("drop the `severity` field entirely") was too broad.** `findings.py`'s shared
+   `SEVERITIES` vocabulary and `normalize_finding` clamp are NOT removed — they serve an
+   entirely separate completion-verification module cluster (`completion_reconcile.py`,
+   `completion_child_gate.py`, `epic_bug_screen.py`, `workflow/gate_ops.py`,
+   `workflow/completion_verdict_assembly.py`) that hardcodes `severity` as its only signal, with
+   no `priority`/`decision`/`impact`/`validity` concept anywhere in that call path — and
+   `spec_scan.py`'s independent LLM reviewer, likewise severity-only. Deleting the shared
+   vocabulary would have broken both with no fallback. The landed change instead: (a) stops
+   `pass3_decide` from stamping `severity` at any of its return sites; (b) stops
+   `code_review/shim.py::_to_common_finding` from defaulting an absent severity to a literal
+   (deletes the now-unneeded `_KERNEL_TO_COMMON_SEVERITY`/`_SEVERITY_DEFAULT`, passing through
+   an explicit value unchanged and omitting the key when absent); (c) changes
+   `findings.py::normalize_finding` to only clamp to `"info"` when a `severity` key IS PRESENT
+   but holds an unrecognized value — never backfilling `"info"` when the key is genuinely
+   absent (confirmed safe: no production caller or existing test relied on that backfill); (d)
+   relaxes (not removes) `severity` from `common.schema.json`'s shared `finding.required` list.
+   Because `completion_verdict` findings never pass through the review-kernel and always supply
+   `severity` in practice, this relaxation has no observable effect on `completion_verdict`
+   consumers, despite `completion_verdict.schema.json` and `review_result.schema.json` sharing
+   the same `$defs/finding` definition.
+
+The core decision — findings surface `priority` + `blocking`/`advisory` as the canonical
+signal, retiring the impact-only severity label as a decision-adjacent signal — is unchanged.
+Only the blast radius of removing the *field* itself narrowed once the actual (not assumed)
+call graph was traced.

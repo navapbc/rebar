@@ -196,7 +196,7 @@ def test_recorded_finding_still_scores_zero_when_ungraded() -> None:
     # describing a mechanism that would not work lands advisory.
     d = _decide("none")
     assert d["impact"] == 0.0
-    assert d["severity"] == "none"
+    assert "severity" not in d  # the impact-only label is retired from pass3_decide's output
     assert d["decision"] == "advisory"
     assert d["validity"] == pytest.approx(0.8889, abs=1e-4)
 
@@ -208,7 +208,7 @@ def test_recorded_finding_blocks_when_graded_omits_required_site() -> None:
     assert d["impact"] == _HARD_FLOOR
     assert d["priority"] == pytest.approx(0.7556, abs=1e-4)
     assert d["decision"] == "block"
-    assert d["severity"] == "critical"
+    assert "severity" not in d  # the impact-only label is retired from pass3_decide's output
 
 
 def test_recorded_finding_stays_advisory_when_merely_cosmetic() -> None:

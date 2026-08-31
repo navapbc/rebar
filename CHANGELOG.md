@@ -36,6 +36,16 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+### Changed
+
+- **`severity` is now optional on `review_result` findings.** Code-review and plan-review
+  findings no longer carry an impact-only `severity` label that could disagree with the
+  review-kernel's own `priority`/blocking decision; they now surface `priority` and
+  `decision` instead, and the Gerrit `LLM-Review` comment plus the CLI text output show
+  blocking/advisory rather than a severity word. `completion_verdict` findings (from an
+  unrelated completion-verification pipeline) are unaffected and always continue to carry
+  `severity`. See `docs/release-notes.md` for the schema detail.
+
 ## [0.13.0] - 2026-08-28
 
 ### Changed

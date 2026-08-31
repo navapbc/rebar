@@ -644,7 +644,6 @@ def test_config_from_env_defaults_and_token_alias(monkeypatch):
     for k in (
         "LLM_REVIEW_MAX_VALUE",
         "LLM_REVIEW_BLOCK_VALUE",
-        "BLOCKING_SEVERITIES",
         "DEDUP_DB_PATH",
         "GERRIT_BASE_URL",
         "BOT_USER",
@@ -657,18 +656,10 @@ def test_config_from_env_defaults_and_token_alias(monkeypatch):
     cfg = ReceiverConfig.from_env()
     assert cfg.llm_review_max_value == 1
     assert cfg.llm_review_block_value == -1
-    assert cfg.blocking_severities == frozenset({"critical", "high"})
     assert cfg.gerrit_base_url == "http://gerrit:8080"
     assert cfg.reconcile_interval_seconds == 300
     # WEBHOOK_TOKEN defaults to the bot token (ADR-0014)
     assert cfg.webhook_token == "secret-tok"
-
-
-def test_config_blocking_severities_override(monkeypatch):
-    monkeypatch.setenv("GERRIT_BOT_TOKEN", "t")
-    monkeypatch.setenv("BLOCKING_SEVERITIES", "critical, high, medium")
-    cfg = ReceiverConfig.from_env()
-    assert cfg.blocking_severities == frozenset({"critical", "high", "medium"})
 
 
 # ── reconcile (backfill) ──────────────────────────────────────────────────────

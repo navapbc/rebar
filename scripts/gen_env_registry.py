@@ -164,7 +164,6 @@ KNOWN_ENV_HELPERS: dict[str, int] = {
     # green, so a clean `--check` proves agreement with the generator, never completeness.
     "_llm_float": 2,  # llm/config.py: (table, cli, env_name, ...)
     "_int_env": 0,  # review_bot/config.py
-    "_severities_env": 0,  # review_bot/config.py
     "_str_env": 0,  # opcert_service/config.py: os.environ.get(name)
     # Found by the fail-closed helper rule below rather than by hand. ``_gate_str_pref`` is the
     # MEASURED loss that motivated it: its two call-site literals REBAR_GATE_REF and
