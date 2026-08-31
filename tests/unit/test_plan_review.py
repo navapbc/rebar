@@ -293,7 +293,7 @@ def test_pass3_validity_graded_fraction() -> None:
 def test_pass3_impact_and_priority() -> None:
     d = passes.pass3_decide(_verif(), blocking_enabled=True)
     assert d["validity"] == 1.0 and d["impact"] == 1.0 and d["priority"] == 1.0
-    assert d["severity"] == "critical"
+    assert "severity" not in d  # the impact-only label is retired from pass3_decide's output
 
 
 def test_pass3_advisory_by_default_even_at_max_priority() -> None:

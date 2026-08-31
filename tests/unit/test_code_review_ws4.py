@@ -211,26 +211,41 @@ def test_shim_translates_kernel_findings_to_common_findings():
     assert r["verdict"]["verdict"] == "BLOCK"  # raw verdict attached
 
 
-@pytest.mark.parametrize(
-    ("kernel_sev", "common_sev"),
-    [("critical", "critical"), ("major", "high"), ("minor", "medium"), ("none", "info")],
-)
-def test_shim_maps_kernel_severity_to_common_vocabulary(kernel_sev, common_sev):
-    """The kernel Pass-3 severity vocab ({critical,major,minor,none}) must MAP to the
-    common.finding enum ({critical,high,medium,low,info}) — not pass through (which would clamp
-    major/minor/none to 'info', flattening every non-critical finding)."""
+def test_shim_passes_through_a_present_severity_value_unchanged():
+    """pass3_decide no longer stamps severity, so the only findings that still carry one are
+    DET-tier (secrets detector, bugfix-size gate) hardcodes -- already valid common-vocabulary
+    strings ("critical"/"high"). With the retired kernel->common map gone, the shim must pass
+    such a value through unchanged rather than mapping or clamping it."""
     from rebar.llm.code_review.shim import _verdict_to_review_result
 
     verdict = {
         "verdict": "PASS",
         "blocking": [],
-        "advisory": [{"finding": "x", "criteria": ["correctness"], "severity": kernel_sev}],
+        "advisory": [{"finding": "x", "criteria": ["correctness"], "severity": "high"}],
         "runner": "fake",
         "model": None,
     }
     r = _verdict_to_review_result(verdict, base="HEAD~1", head="HEAD", changed_files=["a.py"])
     schemas.validator(schemas.REVIEW_RESULT).validate(r)
-    assert r["findings"][0]["severity"] == common_sev
+    assert r["findings"][0]["severity"] == "high"
+
+
+def test_shim_omits_severity_when_absent_from_the_source_finding():
+    """A review-kernel finding with no severity key at all (the normal case once
+    pass3_decide stops stamping one) must translate to a common finding with NO severity
+    key -- not a default like "medium" or "info"."""
+    from rebar.llm.code_review.shim import _verdict_to_review_result
+
+    verdict = {
+        "verdict": "PASS",
+        "blocking": [],
+        "advisory": [{"finding": "x", "criteria": ["correctness"]}],
+        "runner": "fake",
+        "model": None,
+    }
+    r = _verdict_to_review_result(verdict, base="HEAD~1", head="HEAD", changed_files=["a.py"])
+    schemas.validator(schemas.REVIEW_RESULT).validate(r)  # severity is no longer required
+    assert "severity" not in r["findings"][0]
 
 
 # ── sidecar: emits on an explicit target ticket only ────────────────────────────────────────

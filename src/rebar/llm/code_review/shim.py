@@ -22,21 +22,6 @@ from typing import Any
 
 from rebar.llm.config import LLMConfig
 
-_SEVERITY_DEFAULT = "medium"
-
-# The kernel Pass-3 severity vocabulary ({critical, major, minor, none} from
-# review_kernel.severity_label) → the common.finding enum ({critical, high, medium, low, info}).
-# WITHOUT this map the raw kernel label flows into findings.normalize_finding, which clamps any
-# UNKNOWN severity to "info" — silently flattening every non-critical gate finding to the lowest
-# severity and corrupting the severity×agreement ranking. This is the first place a kernel
-# verdict is translated to common.finding, so the mismatch surfaces only here.
-_KERNEL_TO_COMMON_SEVERITY = {
-    "critical": "critical",
-    "major": "high",
-    "minor": "medium",
-    "none": "info",
-}
-
 
 def _parse_location(loc: Any) -> tuple[str | None, int | None]:
     if not isinstance(loc, str) or not loc.strip():
@@ -61,12 +46,12 @@ def _to_common_finding(f: dict[str, Any]) -> dict[str, Any]:
         detail += f"\n(also: {extra})"
     for ev in f.get("evidence") or []:
         detail += f"\nevidence: {ev}"
-    raw_sev = str(f.get("severity") or "").lower()
     out: dict[str, Any] = {
-        "severity": _KERNEL_TO_COMMON_SEVERITY.get(raw_sev, _SEVERITY_DEFAULT),
         "dimension": (criteria[0] if criteria else "code-review"),
         "detail": detail.strip(),
     }
+    if f.get("severity"):
+        out["severity"] = f["severity"]
     path, line = _parse_location(f.get("location"))
     if path:
         cit: dict[str, Any] = {"kind": "file", "path": path}

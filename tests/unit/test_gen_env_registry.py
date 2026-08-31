@@ -38,8 +38,6 @@ def test_positive_capture_direct_helper_and_llm():
     assert "REBAR_RECONCILER_VERBOSE" in reads
     # a _llm_int(table, cli, "REBAR_LLM_TIMEOUT", ...) read
     assert "REBAR_LLM_TIMEOUT" in reads
-    # a _severities_env review-bot read
-    assert "BLOCKING_SEVERITIES" in reads
 
 
 def test_aliases_present_and_removed_vars_absent():

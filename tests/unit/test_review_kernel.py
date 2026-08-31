@@ -71,6 +71,15 @@ def test_severity_label_buckets() -> None:
     assert review_kernel.severity_label(0.1) == "none"
 
 
+def test_pass3_decide_never_stamps_a_severity_key() -> None:
+    """The retired impact-only severity label is not part of pass3_decide's output at any
+    return site -- including the no-verification/indeterminate early return, which used to
+    hardcode `severity: "none"` before any impact/validity was computed."""
+    assert "severity" not in review_kernel.pass3_decide(None)
+    assert "severity" not in review_kernel.pass3_decide(_verif(), blocking_enabled=True)
+    assert "severity" not in review_kernel.pass3_decide(_verif(), blocking_enabled=False)
+
+
 def test_decision_labels_by_construction() -> None:
     # no verification ⇒ indeterminate
     assert review_kernel.pass3_decide(None)["decision"] == "indeterminate"

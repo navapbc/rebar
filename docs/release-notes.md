@@ -8,6 +8,24 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## `severity` is now OPTIONAL on `review_result` findings (epic `pink-complex-xenurine`)
+
+The review-kernel (`pass3_decide`, shared by code-review and plan-review) no longer stamps a
+`severity` label onto the findings it emits — it was derived from `impact` alone and could
+disagree with the kernel's own `priority = validity × impact` decision, misleadingly
+outranking a genuinely higher-priority finding. Review-kernel-sourced findings now carry
+`priority` and `decision` (`block`/`advisory`) instead; the Gerrit `LLM-Review` comment and the
+CLI text renderers show blocking/advisory, not a severity word.
+
+**Schema effect (`common.schema.json`'s shared `finding` def, used by `review_result` and
+`completion_verdict`).** `severity` is removed from the `required` list — a relaxation, not a
+field removal (the `severity` property and its enum stay defined). This is scoped narrowly:
+`completion_verdict` findings always come from an unrelated completion-verification pipeline
+that never computed impact/priority in the first place, and that pipeline continues to always
+supply `severity` in practice, so its behavior is unaffected. Only `review_result` findings
+sourced from the review-kernel may now lack `severity` — a consumer that unconditionally reads
+`finding["severity"]` without checking for its presence should switch to `finding.get("severity")`.
+
 ## BREAKING (pre-1.0) — `rebar export` NDJSON timestamps are STRINGS (`schema_version` 1 → 2)
 
 Bug `guilty-pusslike-wyvern` (`a8db-dc3c-983a-40b0`), 2026-08-28. The js-safe decimal-string wire
