@@ -515,10 +515,7 @@ def _render_plan_review_text(result: dict) -> None:
             f"  [BLOCK {','.join(f.get('criteria', []))}] {f.get('finding', '')}{suffix}\n"
         )
     for f in result.get("advisory", []):
-        sys.stdout.write(
-            f"  [advisory {','.join(f.get('criteria', []))} "
-            f"sev={f.get('severity')}] {f.get('finding', '')}\n"
-        )
+        sys.stdout.write(f"  [advisory {','.join(f.get('criteria', []))}] {f.get('finding', '')}\n")
     if overflow:
         # The surfaced advisory list is capped; tell the reader the tail exists (it is
         # NOT "only N issues") and where the full set lives, so a capped list never
@@ -562,7 +559,11 @@ def _render_review_text(result: dict) -> None:
     if result.get("summary"):
         sys.stdout.write(f"\n{result['summary']}\n")
     for f in findings:
-        sys.stdout.write(f"\n[{f.get('severity', '?').upper()}] ({f.get('dimension')}) ")
+        if "decision" in f:
+            tag = "BLOCKING" if f.get("decision") == "block" else "ADVISORY"
+        else:
+            tag = f.get("severity", "?").upper()
+        sys.stdout.write(f"\n[{tag}] ({f.get('dimension')}) ")
         # Surface multi-reviewer consensus that aggregation computed (agreement>1).
         if f.get("agreement", 1) > 1:
             who = ", ".join(f.get("reviewers", [])) or "?"

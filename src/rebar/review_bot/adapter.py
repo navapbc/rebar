@@ -82,15 +82,6 @@ _TAG_SUFFIXES: dict[str, str] = {
 #: carries no ``gap_reason`` and keeps its immediate fail-closed vote.
 RETRYABLE_GAP_REASONS = frozenset({"review-error", "llm-unavailable", "scanner", "gate-disabled"})
 
-#: Map the four-pass kernel severity ({critical,major,minor,none}) to the finding vocabulary the
-#: receiver logs ({critical,high,medium,info}) — mirrors the WS4 shim.
-_KERNEL_TO_COMMON_SEVERITY = {
-    "critical": "critical",
-    "major": "high",
-    "minor": "medium",
-    "none": "info",
-}
-
 
 def _message_tag(
     reason: str, *, label: str = "LLM-Review", merge_commits: int | None = None
@@ -124,7 +115,10 @@ def _coverage_gap_reason(coverage: dict[str, Any]) -> str | None:
 
 def _translate_findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize the verdict's blocking + advisory findings to the receiver's logged shape
-    (``{severity, dimension, detail, location}``).
+    (``{blocking, dimension, detail, location}``).
+
+    ``blocking`` is True for a finding from ``verdict["blocking"]`` and False for one from
+    ``verdict["advisory"]``, so the receiver can distinguish the two without a severity word.
 
     ``standing`` is carried through for a finding re-raised from an earlier patchset, so the
     Gerrit text can say which patchset it has been standing since.
@@ -132,23 +126,28 @@ def _translate_findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
     ``location`` is carried through (bug lacquer-grotesque-urson) so the voter can anchor a
     finding to a real file/line as an inline Gerrit comment; it was previously dropped here,
     which is why no anchor ever reached the Gerrit layer. The key is additive — consumers
-    reading ``{severity, dimension, detail}`` are unaffected."""
+    reading ``{blocking, dimension, detail}`` are unaffected."""
     out: list[dict[str, Any]] = []
-    for f in (verdict.get("blocking") or []) + (verdict.get("advisory") or []):
-        criteria = f.get("criteria") or []
-        item = {
-            "severity": _KERNEL_TO_COMMON_SEVERITY.get(str(f.get("severity", "")).lower(), "info"),
-            "dimension": criteria[0] if criteria else "general",
-            "detail": str(f.get("finding", "")).strip(),
-            "location": f.get("location") or "",
-        }
-        # `standing` rides along when the finding was carried from an earlier patchset (story
-        # nitro-zombie-mealworm) so finding_publish can mark it "since patchset k". Additive and
-        # only ever present on a carried finding — the four keys above are unchanged.
-        standing = f.get("standing")
-        if isinstance(standing, dict):
-            item["standing"] = dict(standing)
-        out.append(item)
+    for is_blocking, findings in (
+        (True, verdict.get("blocking") or []),
+        (False, verdict.get("advisory") or []),
+    ):
+        for f in findings:
+            criteria = f.get("criteria") or []
+            item = {
+                "blocking": is_blocking,
+                "dimension": criteria[0] if criteria else "general",
+                "detail": str(f.get("finding", "")).strip(),
+                "location": f.get("location") or "",
+            }
+            # `standing` rides along when the finding was carried from an earlier patchset
+            # (story nitro-zombie-mealworm) so finding_publish can mark it "since patchset k".
+            # Additive and only ever present on a carried finding — the four keys above are
+            # unchanged.
+            standing = f.get("standing")
+            if isinstance(standing, dict):
+                item["standing"] = dict(standing)
+            out.append(item)
     return out
 
 
