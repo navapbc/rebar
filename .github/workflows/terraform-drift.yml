@@ -42,9 +42,12 @@ jobs:
           aws-region: us-east-1
 
       - name: Setup Terraform
+        # Must satisfy infra/terraform/versions.tf `required_version = ">= 1.11"` (raised for
+        # write-only SSM secret args, ADR 0105). A pin below the floor makes `terraform init`
+        # hard-fail "Unsupported Terraform Core version" before the drift plan runs (bug d227).
         uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: 1.10.5
+          terraform_version: 1.11.4
           terraform_wrapper: false
 
       - name: terraform fmt -check
