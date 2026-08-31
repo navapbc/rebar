@@ -418,12 +418,15 @@ def test_adapter_carries_standing_through_to_the_receiver_shape() -> None:
 
     standing = {"origin_revision": "ps2", "origin_decision": "advisory", "state": "still-present"}
     verdict = {
-        "blocking": [],
+        "blocking": [{"finding": "f0", "criteria": ["security"], "location": "c.py:1"}],
         "advisory": [
             {"finding": "f1", "criteria": ["tests"], "location": "a.py:40", "standing": standing},
             {"finding": "f2", "criteria": ["tests"], "location": "b.py:1"},
         ],
     }
     out = adapter._translate_findings(verdict)
-    assert out[0]["standing"] == standing
-    assert "standing" not in out[1], "an uncarried finding gains no key"
+    assert out[0]["blocking"] is True  # sourced from verdict["blocking"]
+    assert out[1]["blocking"] is False  # sourced from verdict["advisory"]
+    assert out[2]["blocking"] is False  # sourced from verdict["advisory"]
+    assert out[1]["standing"] == standing
+    assert "standing" not in out[2], "an uncarried finding gains no key"
