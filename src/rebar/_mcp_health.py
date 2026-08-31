@@ -40,8 +40,6 @@ from typing import Any
 
 from rebar._mcp_opcert_health import (
     _OPCERT_STATUS_ATTR,
-    opcert_signing_status,
-    run_startup_opcert_check,
 )
 
 CERTIFIED_TOOLS = frozenset({"review_plan", "verify_completion", "review_code", "scan_spec"})
@@ -51,6 +49,17 @@ Only these move the in-flight gauge; ``sign_review`` is excluded (it runs no LLM
 DEFAULT_SHUTDOWN_GRACE_SECONDS = 1200
 """Upper bound (seconds) a retiring process waits for the gauge to drain before it
 exits. compose ``stop_grace_period`` must be >= this so Docker never SIGKILLs mid-op."""
+
+DEFAULT_UVICORN_GRACEFUL_SECONDS = 10
+"""Short backstop (seconds) for uvicorn's OWN ``timeout_graceful_shutdown``, deliberately
+DECOUPLED from :data:`DEFAULT_SHUTDOWN_GRACE_SECONDS` (bug 2f46). uvicorn's graceful
+shutdown waits this long for still-open connections after :attr:`should_exit` is set.
+Binding it to the 1200s certified-op grace made a retiring Streamable-HTTP container wait
+the FULL 1200s for idle held-open client streams even at 0 in-flight ops — pinning a
+blue-green port ~20 min and exhausting the two-port pool (``mcp_retire_cap`` /
+``deploy_errors``). The certified-op drain is enforced by the in-flight gauge poll (which
+runs BEFORE ``should_exit`` is set), never by this timeout, so keeping it short only sweeps
+IDLE held-open streams fast and never truncates a real in-flight op."""
 
 _GAUGE_ATTR = "_rebar_in_flight_gauge"
 
@@ -100,6 +109,15 @@ def _declared_public_host(resource_server_url: Any) -> str:
     return host if port in (None, default_port) else f"{host}:{port}"
 
 
+class MCPRetiringError(RuntimeError):
+    """Raised when a NEW certified tool call arrives on a container that has already begun
+    draining for retirement (SIGTERM received). The client should retry against the live
+    (green) container. Refusing new intake — rather than counting it — is what lets the
+    in-flight gauge actually reach 0 during the drain window: without it a landing burst
+    could keep the gauge >0 and re-pin the retiring blue-green port for the full grace,
+    re-creating the very port-exhaustion bug 2f46 fixes."""
+
+
 class InFlightGauge:
     """Thread-safe counter of in-flight certified tool calls.
 
@@ -114,16 +132,34 @@ class InFlightGauge:
     calls mutate it. :meth:`track` only counts a call whose tool name is in
     :data:`CERTIFIED_TOOLS`; any other name is a no-op context so instrumentation can
     be applied uniformly.
+
+    Once :meth:`begin_draining` is called (on SIGTERM, bug 2f46) the gauge is CLOSED to NEW
+    certified intake: :meth:`track` raises :class:`MCPRetiringError` for a certified tool
+    instead of counting it, so a burst arriving mid-drain cannot push the gauge back above 0
+    and re-pin the retiring port. Calls already in flight are unaffected and drain normally.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._value = 0
+        self._draining = False
 
     @property
     def value(self) -> int:
         with self._lock:
             return self._value
+
+    @property
+    def draining(self) -> bool:
+        with self._lock:
+            return self._draining
+
+    def begin_draining(self) -> None:
+        """Close the gauge to NEW certified intake (idempotent). Ops already counted keep
+        running; a subsequent :meth:`track` of a certified tool raises
+        :class:`MCPRetiringError`. Called first thing on SIGTERM so the drain can complete."""
+        with self._lock:
+            self._draining = True
 
     def _increment(self) -> None:
         with self._lock:
@@ -138,7 +174,13 @@ class InFlightGauge:
         if tool_name not in CERTIFIED_TOOLS:
             yield
             return
-        self._increment()
+        with self._lock:
+            if self._draining:
+                raise MCPRetiringError(
+                    f"certified tool {tool_name!r} refused: this MCP container is retiring "
+                    "(draining for shutdown) — retry against the live container"
+                )
+            self._value += 1
         try:
             yield
         finally:
@@ -653,148 +695,15 @@ def wire_health(mcp: Any, gauge: InFlightGauge | None = None) -> InFlightGauge:
     return gauge
 
 
-def drain_then_exit(
-    gauge: InFlightGauge,
-    *,
-    grace_seconds: float,
-    exit_fn: Callable[[], None],
-    poll_interval: float = 0.5,
-    sleep: Callable[[float], None] = time.sleep,
-    monotonic: Callable[[], float] = time.monotonic,
-) -> None:
-    """Wait (bounded by ``grace_seconds``) for the gauge to reach 0, then call
-    ``exit_fn``. The clock/sleep are injectable so the bound is unit-testable without
-    real time. Returns immediately when the gauge is already idle."""
+# The serving/shutdown runtime (run_mcp -> run_http_with_grace -> make_sigterm_handler ->
+# drain_then_exit) lives in _mcp_serving to keep this module under the 800-LOC cap. Re-export
+# it so `from rebar._mcp_health import run_mcp` (and the tests' monkeypatch paths) keep working.
+# Imported at the END so _mcp_serving can import the gauge/handshake primitives defined above.
+from rebar._mcp_serving import (  # noqa: E402
+    drain_then_exit,
+    make_sigterm_handler,
+    run_http_with_grace,
+    run_mcp,
+)
 
-    deadline = monotonic() + grace_seconds
-    while gauge.value > 0 and monotonic() < deadline:
-        sleep(poll_interval)
-    exit_fn()
-
-
-def make_sigterm_handler(
-    server: Any,
-    gauge: InFlightGauge,
-    *,
-    grace_seconds: float,
-    poll_interval: float,
-) -> Callable[[int, Any], None]:
-    """Build the SIGTERM handler used by :func:`run_http_with_grace`.
-
-    On SIGTERM it first tells uvicorn to stop accepting NEW connections
-    (``should_exit`` — uvicorn begins its own graceful shutdown, bounded by
-    ``timeout_graceful_shutdown``), THEN waits (bounded by ``grace_seconds``) for the
-    in-flight certified op to finish before returning so the serving thread can exit.
-    Stopping intake first is what keeps a newly-arriving op from extending the drain
-    window indefinitely. Extracted as a seam so the handler BODY is directly testable
-    without delivering a real signal."""
-
-    def _on_sigterm(_signum: int, _frame: Any) -> None:
-        server.should_exit = True
-        drain_then_exit(
-            gauge,
-            grace_seconds=grace_seconds,
-            poll_interval=poll_interval,
-            exit_fn=lambda: setattr(server, "should_exit", True),
-        )
-
-    return _on_sigterm
-
-
-def run_http_with_grace(
-    mcp: Any,
-    gauge: InFlightGauge,
-    *,
-    grace_seconds: float = DEFAULT_SHUTDOWN_GRACE_SECONDS,
-    poll_interval: float = 0.5,
-    opcert_binding: Any = None,
-) -> None:
-    """Serve the Streamable-HTTP app with an owned, bounded SIGTERM grace.
-
-    uvicorn only installs its own signal handlers on the main thread, so we run the
-    server on a background thread (it therefore installs none) and own the SIGTERM
-    handler on the main thread (see :func:`make_sigterm_handler`).
-    ``timeout_graceful_shutdown`` bounds uvicorn's own drain as a backstop. The main
-    thread joins with a timeout so it stays responsive to the signal (a bare
-    ``join()`` would defer handler delivery).
-
-    ``opcert_binding`` (the box's startup op-cert signer, or ``None``) is bound
-    context-locally INSIDE the serving thread's target, not in the caller's thread:
-    a :class:`contextvars.ContextVar` set on the main thread is NOT inherited by the
-    background thread, so the binding must be entered where the request-handling event
-    loop actually runs. ``None`` is a transparent no-op (the unprovisioned path)."""
-
-    import signal
-
-    import uvicorn
-
-    from rebar._opcert_binding import bound_signer
-
-    app = mcp.streamable_http_app()
-    # Prove the MCP REQUEST PATH works before uvicorn accepts its first connection: the
-    # handshake runs inside this app's ASGI lifespan, so a later /health 200 means this
-    # container has already served an `initialize` (bug vaccinated-flavorous-solenodon).
-    app = install_startup_handshake(mcp, app)
-    config = uvicorn.Config(
-        app,
-        host=mcp.settings.host,
-        port=mcp.settings.port,
-        log_level=mcp.settings.log_level.lower(),
-        timeout_graceful_shutdown=int(grace_seconds),
-    )
-    server = uvicorn.Server(config)
-
-    def _serve() -> None:
-        # push_mode=None: sign under the box environment but leave the outbound push policy
-        # to env/config, so the box still auto-pushes its ticket writes to the shared store.
-        with bound_signer(opcert_binding, push_mode=None):
-            server.run()
-
-    thread = threading.Thread(target=_serve, name="rebar-mcp-http")
-    thread.start()
-
-    signal.signal(
-        signal.SIGTERM,
-        make_sigterm_handler(
-            server, gauge, grace_seconds=grace_seconds, poll_interval=poll_interval
-        ),
-    )
-
-    while thread.is_alive():
-        thread.join(timeout=0.2)
-
-
-def run_mcp(server: Any, mcp_cfg: Any, *, opcert_binding: Any = None) -> None:
-    """Run ``server`` for the configured transport. HTTP uses the bounded-grace runner
-    above; stdio delegates to FastMCP's own run loop (no HTTP surface to drain).
-
-    ``opcert_binding`` (or ``None``) is the box's startup op-cert signer; it is threaded to
-    the serving thread so the certified-op tools mint certs under the box environment. HTTP
-    binds it inside the uvicorn thread target (:func:`run_http_with_grace`); stdio binds it
-    around ``server.run`` here (same thread). ``None`` is a transparent no-op."""
-
-    # Bug 879b serve-degraded surface: stash the pinned-key match status for /health and log a
-    # boot warning if the bound signer is not the pinned trusted-environment key. Never aborts.
-    setattr(server, _OPCERT_STATUS_ATTR, opcert_signing_status(opcert_binding))
-    run_startup_opcert_check(opcert_binding)
-
-    if mcp_cfg.transport == "http":
-        gauge = getattr(server, _GAUGE_ATTR, None)
-        if gauge is None:
-            # build_server always wire_health()s the gauge; a missing one means this
-            # server was assembled another way. Log it (an empty gauge would silently
-            # read 0 and skip the drain) and fall back to a fresh gauge so the run
-            # still starts rather than crashing.
-            import logging
-
-            logging.getLogger("rebar").warning(
-                "MCP HTTP server has no wired in-flight gauge; SIGTERM drain will not "
-                "observe in-flight ops. Was build_server() used?"
-            )
-            gauge = InFlightGauge()
-        run_http_with_grace(server, gauge, opcert_binding=opcert_binding)
-    else:
-        from rebar._opcert_binding import bound_signer
-
-        with bound_signer(opcert_binding, push_mode=None):
-            server.run(transport="stdio")
+__all__ = ["drain_then_exit", "make_sigterm_handler", "run_http_with_grace", "run_mcp"]

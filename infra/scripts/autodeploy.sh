@@ -303,6 +303,32 @@ print(value if value >= 0 else -1)
   echo "$count"
 }
 
+# bot_unreachable_disposition (bug 2f46): when bot_in_flight_reviews() returns -1 (the /health
+# in_flight field could not be read), tell a bot that is merely MID-REDEPLOY — being recreated
+# or still starting, so unreachable only TRANSIENTLY — from one that is genuinely WEDGED (its
+# container up but not answering, reporting unhealthy, or absent). Echoes `redeploying` or
+# `wedged`. BEST-EFFORT and FAIL-SAFE: any docker error, or a state we do not recognise, echoes
+# `wedged` — which is exactly the pre-2f46 fail-open behaviour — so a broken observability path
+# can never turn into a deferral live-lock. The caller only DEFERS on `redeploying`, and that
+# defer is bounded by DEPLOY_DEFER_MAX just like the busy path.
+bot_unreachable_disposition() {
+  local cid status health
+  cid="$( cd "$COMPOSE_DIR" && docker compose ps -q "$BOT_SERVICE" 2>/dev/null )" || { echo wedged; return 0; }
+  [ -n "$cid" ] || { echo wedged; return 0; }   # no container at all -> deploy to (re)create it
+  status="$( docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null )" || { echo wedged; return 0; }
+  case "$status" in
+    restarting | created | removing | paused) echo redeploying; return 0 ;;
+  esac
+  # `running` but /health unreadable is ambiguous; the docker HEALTHcheck disambiguates it —
+  # `starting` means the container is still inside its start-period (mid-(re)start), whereas
+  # `unhealthy`/`healthy`/none all mean it is up and simply not answering us == wedged.
+  health="$( docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null )" || { echo wedged; return 0; }
+  case "$health" in
+    starting) echo redeploying; return 0 ;;
+  esac
+  echo wedged
+}
+
 # Copy a BOUNDED tail of the failing review-bot container's own output into the deploy journal.
 # The rollback below replaces that container immediately, so without this its stderr is
 # recoverable only by host access to a container that no longer exists — which is why the
@@ -905,11 +931,32 @@ deploy_review_bot() {
       "target=$TARGET in_flight=$inflight deferred_for=${waited}s bound=${DEPLOY_DEFER_MAX}s; recreating anyway, so an in-flight review IS being killed"
     log "deferral bound ${DEPLOY_DEFER_MAX}s exhausted with $inflight review(s) still in flight; proceeding (a review is interrupted; the backfill reconciler retries it)"
   elif [ "$inflight" -lt 0 ]; then
-    # Fail OPEN on an unreadable signal: a bot that cannot answer /health is likely broken or
-    # down, and deploying is how a broken bot gets FIXED — blocking deploys on an unparseable
-    # field would invent a NEW way to freeze the gate, strictly worse than the bug. But do not
-    # let that be silent: a signal that quietly stops working (renamed field, wedged bot) puts
-    # us back in the original blind state, so it emits the same countable interrupt marker.
+    # The /health in_flight signal is unreadable. Before failing open, tell a bot that is
+    # merely MID-REDEPLOY (unreachable because it is itself being recreated / still starting)
+    # from one that is genuinely WEDGED. Recreating a mid-redeploy bot would kill the very
+    # startup we should wait for and re-enter the same blind window that produced this bug.
+    disposition="$(bot_unreachable_disposition)"
+    if [ "$disposition" = redeploying ]; then
+      # DEFER (retry next tick), bounded EXACTLY like the busy path (same episode + bound) so a
+      # bot stuck starting can never freeze the gate. Distinct countable reason so a mid-redeploy
+      # deferral is never mistaken for a busy-defer or a fail-open interrupt.
+      [ "$defer_since" -eq 0 ] && { defer_since="$(now)"; echo "$defer_since" >"$DEFER_FILE"; }
+      waited=$(( $(now) - defer_since ))
+      if [ "$waited" -lt "$DEPLOY_DEFER_MAX" ]; then
+        marker AUTODEPLOY_DEFERRED bot-redeploying \
+          "target=$TARGET; /health unreadable while the bot is mid-redeploy — deferring rather than recreating it blind (${waited}s of the ${DEPLOY_DEFER_MAX}s bound used)"
+        log "review-bot /health unreadable but the bot is mid-redeploy; DEFERRING the deploy of $TARGET (${waited}s of the ${DEPLOY_DEFER_MAX}s bound used); deployed-sha unchanged; retrying on the next timer tick"
+        bot_deferred=1
+        return 0
+      fi
+      log "mid-redeploy deferral bound ${DEPLOY_DEFER_MAX}s exhausted with /health still unreadable; proceeding via the fail-open recreate below"
+    fi
+    # Fail OPEN on a WEDGED bot (or an exhausted mid-redeploy bound): a bot that cannot answer
+    # /health is likely broken or down, and deploying is how a broken bot gets FIXED — blocking
+    # deploys on an unparseable field would invent a NEW way to freeze the gate, strictly worse
+    # than the bug. But do not let that be silent: a signal that quietly stops working (renamed
+    # field, wedged bot) puts us back in the original blind state, so it emits the same countable
+    # interrupt marker.
     marker AUTODEPLOY_REVIEW_INTERRUPT signal-unavailable \
       "target=$TARGET; /health in_flight unreadable at $HEALTH_URL — deploying WITHOUT a drain check, so a review may be killed unobserved"
     log "in-flight review signal unavailable at $HEALTH_URL; proceeding without the drain check (fail-open: a broken bot is fixed BY deploying)"
