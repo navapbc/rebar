@@ -53,6 +53,23 @@ def test_gate_handles_empty_and_malformed() -> None:
     assert steps.gate(_ctx({"findings": "notalist"}))["verdict"] == "pass"
 
 
+def test_gate_default_fails_on_high_priority_finding_with_no_severity() -> None:
+    out = steps.gate(_ctx({"findings": [{"priority": 0.99}], "policy": "default"}))
+    assert out["verdict"] == "fail"
+
+
+def test_gate_default_passes_low_priority_finding_with_no_severity() -> None:
+    out = steps.gate(_ctx({"findings": [{"priority": 0.5}], "policy": "default"}))
+    assert out["verdict"] == "pass"
+
+
+def test_gate_strict_still_fails_via_max_findings_regardless_of_priority() -> None:
+    """strict's max_findings=0 pre-decides the verdict; the additive priority_threshold
+    field must not interfere with that pre-existing behavior."""
+    out = steps.gate(_ctx({"findings": [{"priority": 0.01}], "policy": "strict"}))
+    assert out["verdict"] == "fail"
+
+
 def test_render_context_builds_sections() -> None:
     out = steps.render_context(_ctx({"diff": "patch text", "meta": {"n": 1}, "empty": ""}))
     ctx_text = out["context"]
