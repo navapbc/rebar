@@ -1,0 +1,194 @@
+# Project eval corpus for the plan-review criterion `project.failure-disposition-contract`
+# (ticket c789-e1bb-4c7b-496c / slavish-unwieldy-mastiff; incident 1c0d prevention).
+# Resolves as the user override for logical criterion `project.failure-disposition-contract`
+# (prompt id plan-review-project-failure-disposition-contract).
+#
+# Bounded hand-authored SANITY fixture set (NOT an E2/E3 batch corpus eval): three must-fire
+# cases (a plan that adds/alters a failure/retry/fallback path but omits its disposition
+# contract) and four must-not-fire cases (gate not applicable, a full contract stated, a
+# non-failure "fallback" sense, and a T5b-adjacent new-call plan that DOES state per-arm
+# disposition). Offline shape + calibration checks live in
+# tests/unit/test_project_failure_disposition_contract.py; the LIVE semantic run is the
+# ticket's [operator-attested] criterion (`rebar criteria eval
+# project.failure-disposition-contract --runs 3`), evidenced by the committed baseline
+# docs/experiments/plan-review-gate/runs/failure_disposition_sanity.json.
+prompt: plan-review-project-failure-disposition-contract
+model: anthropic:claude-sonnet-4-6
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 1.0
+scorers:
+  # Deterministic GATE: the criterion emits a schema-valid finding set — >=1 finding on a
+  # fire case, none on a pass case — scored independently of any judge.
+  - type: deterministic
+    name: emits_valid_findings
+    description: >
+      Output validates plan_review_findings; a fire case surfaces at least one
+      project.failure-disposition-contract finding, a pass case surfaces none.
+
+dataset:
+  # ── must-fire: a failure path is added/altered but its disposition contract is missing ──
+  - id: FDC-TP1
+    corpus: rebar
+    criterion: project.failure-disposition-contract
+    expect: finding
+    note: >-
+      The 8fbd/1c0d config-origin shape: a thin `rebar.toml` flip enables a secondary
+      provider fallback chain, but the plan never states what disposition the caller
+      surfaces when the fallback arm itself fails. GATE opens on the added fallback
+      semantics (from file_impact + text); FIRES because no per-arm disposition and no
+      fallback-failure winner is stated — a retryable primary throttle can be masked by
+      the fallback's own non-retryable auth failure.
+    input: >
+      ## What
+
+      Enable the secondary Anthropic provider fallback by flipping `llm.fallback.enabled`
+      in `rebar.toml`. When the primary Bedrock call fails, the runtime retries once and
+      then falls back to the Anthropic endpoint so reviews keep running during a Bedrock
+      incident.
+
+      ## Acceptance Criteria
+
+      - [ ] `llm.fallback.enabled = true` in `rebar.toml` and the fallback arm is exercised
+        when Bedrock is unavailable.
+  - id: FDC-TP2
+    corpus: rebar
+    criterion: project.failure-disposition-contract
+    expect: finding
+    note: >-
+      Clause-1 single-arm gap: the plan ALTERS an exception-mapping site (maps a new
+      exception onto a surfaced classification) but never states the disposition that arm
+      surfaces with an explicit disposition word. GATE opens on the changed exception
+      semantics; FIRES because the affected arm has no stated retryable-vs-fatal
+      disposition.
+    input: >
+      ## What
+
+      In `classify_llm_failure`, add a branch that maps a provider `TypeError` (raised when
+      a degraded fallback returns a malformed body) onto `NEEDS_INVESTIGATION` instead of
+      letting it propagate raw. This changes what the review path surfaces for that failure.
+
+      ## Acceptance Criteria
+
+      - [ ] A malformed fallback body maps to `NEEDS_INVESTIGATION`, covered by a unit test.
+  - id: FDC-TP3
+    corpus: rebar
+    criterion: project.failure-disposition-contract
+    expect: finding
+    note: >-
+      Clause-2 composition gap: the plan adds a SECONDARY fallback arm and even names a
+      retry on the primary, but never states which disposition WINS when the fallback
+      itself fails — so a retryable primary throttle would be masked by the fallback's
+      non-retryable failure (the exact 1c0d root cause at plan time).
+    input: >
+      ## What
+
+      Add a `should_fall_back` helper so a primary Bedrock `429` (throttle) triggers a
+      failover to the Anthropic endpoint. The primary is retried with backoff before the
+      failover kicks in, keeping reviews flowing when Bedrock throttles.
+
+      ## Acceptance Criteria
+
+      - [ ] A Bedrock `429` triggers backoff-then-failover through `should_fall_back`.
+  # ── must-not-fire: gate closed, or the disposition contract is fully stated ──────────────
+  - id: FDC-TN1
+    corpus: rebar
+    criterion: project.failure-disposition-contract
+    expect: pass
+    note: >-
+      The FDC-TP1 config flip WITH a complete disposition contract stated: per-arm
+      disposition (primary throttle stays retryable; fallback auth failure is fatal) AND
+      the fallback-failure winner (the chain preserves the primary's retryable disposition
+      via exit-11 / WAIT_AND_RETRY). Gate opens but the contract is stated → PASS.
+    input: >
+      ## What
+
+      Enable the secondary Anthropic provider fallback by flipping `llm.fallback.enabled`
+      in `rebar.toml`.
+
+      Failure-disposition contract: a primary Bedrock `429` stays RETRYABLE and surfaces
+      exit-11 / `WAIT_AND_RETRY`. The fallback's own auth failure is FATAL (non-retryable).
+      When the fallback fails, the chain PRESERVES the most-recoverable leg — the primary's
+      retryable `WAIT_AND_RETRY` disposition wins and is surfaced; the fallback's
+      non-retryable failure never masks it.
+
+      ## Acceptance Criteria
+
+      - [ ] The fallback arm is exercised when Bedrock is unavailable, and a fallback-failure
+        surfaces the primary's retryable disposition (not the fallback's fatal one).
+  - id: FDC-TN2
+    corpus: rebar
+    criterion: project.failure-disposition-contract
+    expect: pass
+    note: >-
+      A non-failure sense of "fallback": a bin-packing default that selects the single
+      remaining child when no better fit exists. No failure/timeout/exception/retry
+      semantics are added or altered — the GATE does not open → not-applicable → PASS.
+    input: >
+      ## What
+
+      In the ticket-layout packer, add a fallback rule: when only one child bin remains,
+      place the next ticket there instead of opening a new bin. This is a placement default
+      for balanced layout; it does not touch error handling, retries, or timeouts.
+
+      ## Acceptance Criteria
+
+      - [ ] A single remaining bin receives the next ticket, covered by a layout test.
+  - id: FDC-TN3
+    corpus: rebar
+    criterion: project.failure-disposition-contract
+    expect: pass
+    note: >-
+      Doc/test-only mention: the plan documents the EXISTING fallback behavior and adds a
+      test, but adds/alters no failure semantics itself. The GATE does not open → PASS.
+    input: >
+      ## What
+
+      Document the already-shipped Bedrock→Anthropic fallback in `docs/llm-framework.md`
+      and add a regression test asserting the current disposition mapping is unchanged. No
+      runtime behavior changes; this is documentation plus a characterization test.
+
+      ## Acceptance Criteria
+
+      - [ ] `docs/llm-framework.md` describes the existing fallback and the test pins the
+        current mapping.
+  - id: FDC-TN4
+    corpus: rebar
+    criterion: project.failure-disposition-contract
+    expect: pass
+    note: >-
+      T5b-orthogonality guard: the plan adds a NEW external call with retry + backoff +
+      timeout (a new failure point T5b would note) AND states its per-arm disposition
+      contract. Because the disposition is stated, THIS criterion must PASS even though a
+      new failure path exists — the two concerns are distinct.
+    input: >
+      ## What
+
+      Add a new `POST /a/changes` call to the Gerrit client with a 10s timeout and three
+      retries with exponential backoff.
+
+      Failure-disposition contract: a timeout or `5xx` is RETRYABLE (transient) and, after
+      retries are exhausted, surfaces `WAIT_AND_RETRY`; a `409` conflict is FATAL
+      (permanent) and surfaces `NEEDS_INVESTIGATION`. There is no fallback arm, so no
+      fallback-failure winner applies.
+
+      ## Acceptance Criteria
+
+      - [ ] Timeouts/`5xx` retry then surface `WAIT_AND_RETRY`; a `409` surfaces
+        `NEEDS_INVESTIGATION`, covered by tests.
+
+gold_set:
+  - input: "A `rebar.toml` flip enables a provider fallback chain but the plan states no per-arm disposition and no fallback-failure winner; a retryable primary can be masked."
+    label: finding
+  - input: "`classify_llm_failure` maps a new provider TypeError onto NEEDS_INVESTIGATION but never states that arm's retryable-vs-fatal disposition."
+    label: finding
+  - input: "`should_fall_back` adds a Bedrock-429 failover with primary retry but never states which disposition wins when the fallback itself fails."
+    label: finding
+  - input: "The rebar.toml fallback flip states a full contract: primary 429 stays retryable (exit-11/WAIT_AND_RETRY); fallback auth failure is fatal; the chain preserves the primary's retryable leg."
+    label: pass
+  - input: "A bin-packing 'fallback' places the next ticket in the single remaining bin; no failure/retry/timeout semantics are added — gate not applicable."
+    label: pass
+  - input: "The plan documents the existing Bedrock->Anthropic fallback and adds a characterization test; it alters no failure semantics."
+    label: pass
+  - input: "A new Gerrit POST call adds retry+backoff+timeout AND states per-arm disposition: timeouts/5xx retryable then WAIT_AND_RETRY, 409 fatal then NEEDS_INVESTIGATION."
+    label: pass
