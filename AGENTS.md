@@ -199,6 +199,19 @@ restated here:
   planning, **not** limits: a gate may legitimately run longer on a large store or a
   contended box. Never convert them into a `timeout` — see the bounding section, which
   carves gate runs out of the at-spawn wall-clock rule for exactly this reason.
+- **Long gate ops over MCP — PREFER the async `*_start`+poll surface.** A gate can outlast
+  the MCP client's ~60s request deadline, which then returns a `-32001` timeout while the
+  server keeps running — an ambiguous non-signal that provokes a duplicate, double-billed
+  re-run. So for `review_plan`/`verify_completion` over MCP, call the async starters
+  **`review_plan_start`/`verify_completion_start`** (they return a `{job_id,…,status:'running'}`
+  handle in ms on a background daemon, mirroring `run_workflow`), then POLL —
+  `plan_review_status`/`verify_completion_status` for the durable signed verdict, or
+  `gate_status(job_id)` for the run handle (`running` → `passed`/`failed`/`stale-running`). The
+  synchronous `review_plan`/`verify_completion` tools remain the fallback and are now
+  **de-dup-protected**: a concurrent same-key retry attaches to the in-flight run (kill-switch
+  `REBAR_MCP_DEDUP=0`) instead of launching a second billable pass, so an accidental re-fire
+  after a timeout no longer double-charges. Never wrap a gate call in a `timeout` (see the
+  bounding section) → `docs/plan-review-gate.md`, `docs/mcp-reference.md`.
 - **Plan-review criteria reference** — the generated per-criterion registry (one section per
   criterion, the reviewer's detection detail), the per-ticket structural quality gates, and
   the `.rebar/criteria_routing.json` overlay → `docs/plan-review-criteria-guide.md` (and

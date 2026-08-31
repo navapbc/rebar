@@ -100,6 +100,16 @@ EXEMPT_GENERIC: dict[str, str] = {
     "durable shape consumers read is the ticket's `commits` list, not this ack",
     "render_workflow": "workflow engine (WS-I): returns a Mermaid flowchart as a "
     "string (a read-only render); no canonical structured shape.",
+    "gate_status": "async gate-run status poll (bug d80d P2): an MCP-only READ that "
+    "returns the GateRunOut handle for a review_plan_start/verify_completion_start job "
+    "(status running -> passed/failed/stale-running, plus the durable attestation "
+    "currency). It advertises its auto-derived model schema, but — like the run_workflow "
+    "handle it mirrors — there is NO canonical CLI `--output json` shape to pin, so it "
+    "stays EXEMPT_GENERIC rather than canonical.",
+    "verify_completion_status": "completion-verifier attestation poll (bug d80d P2): the "
+    "MCP-only sibling of plan_review_status, returning the VerifyCompletionStatusOut view "
+    "of the durable `completion-verifier` attestation. Same rationale as gate_status — an "
+    "MCP-only structured read with no canonical CLI `--output json` shape to pin.",
 }
 
 # Tools that deliberately advertise NO outputSchema by design.
@@ -139,6 +149,13 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "status:'running'} immediately and runs in the background; a plain dict (no "
     "outputSchema) because it is a fire-and-forget START ack, not the run result "
     "(the typed surface is get_workflow_status/result, validated below).",
+    "review_plan_start": "async plan-review START (bug d80d P2): mirrors run_workflow — "
+    "returns {job_id, ticket_id, gate_type, status:'running'} immediately and runs the "
+    "gate on a background daemon thread; a plain dict (no outputSchema) because it is a "
+    "fire-and-forget START ack, not the verdict (poll plan_review_status/gate_status).",
+    "verify_completion_start": "async completion-verifier START (bug d80d P2): same "
+    "fire-and-forget START-ack shape and rationale as review_plan_start — a plain dict "
+    "(no outputSchema); poll verify_completion_status/gate_status for the verdict.",
     "bridge_projects_list": "pure store READ of the bridge-projects sync mapping "
     "({key: {repos: [...]}}); returns a plain free-form dict (no pydantic model), so it "
     "advertises NO outputSchema by design — the durable shape is the store's sync list.",
