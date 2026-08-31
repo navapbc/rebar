@@ -295,12 +295,24 @@ def _in_guarded_tier(item: pytest.Item) -> bool:
     return any(test_path.is_relative_to(tier) for tier in _NETWORK_GUARDED_TIERS)
 
 
-def _guard_socket_connect(*args: object, **kwargs: object) -> None:
-    raise RuntimeError(
-        "Network access is forbidden in unit/scripts tests. "
-        "Mock the network call (e.g. unittest.mock.patch('urllib.request.urlopen')) "
-        "or add @pytest.mark.allow_network if this test genuinely needs network access."
-    )
+_REAL_SOCKET_CONNECT = socket.socket.connect
+
+
+def _guard_socket_connect(self: socket.socket, *args: object, **kwargs: object) -> object:
+    """Block real network (AF_INET/AF_INET6); allow local IPC (e.g. AF_UNIX).
+
+    ``multiprocessing``'s ``forkserver`` start method — the Linux default from Python
+    3.14 — reaches its server process over an ``AF_UNIX`` socket, which is local IPC and
+    never touches the network. Blocking every address family broke that (and any other
+    ``AF_UNIX`` use), so the guard is scoped to the internet families only.
+    """
+    if self.family in (socket.AF_INET, socket.AF_INET6):
+        raise RuntimeError(
+            "Network access is forbidden in unit/scripts tests. "
+            "Mock the network call (e.g. unittest.mock.patch('urllib.request.urlopen')) "
+            "or add @pytest.mark.allow_network if this test genuinely needs network access."
+        )
+    return _REAL_SOCKET_CONNECT(self, *args, **kwargs)
 
 
 @pytest.fixture(autouse=True)

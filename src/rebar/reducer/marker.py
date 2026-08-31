@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-import fcntl
 import logging
 import os
+
+try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
+    import fcntl
+except ImportError:  # pragma: no cover - platform-dependent
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 

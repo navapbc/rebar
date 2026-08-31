@@ -298,6 +298,14 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# Agent Skills SKILL.md frontmatter (ticket db04): Copilot CLI silently drops a skill
 	@# whose frontmatter fails to parse or whose description exceeds 1024 chars, so gate it.
 	python scripts/check_skill_frontmatter.py
+	@# POSIX-only-import collection guard (bug infamous-protected-baboon, 0b31-aeb5-e734-41c9):
+	@# fcntl has no Windows build, so an UNCONDITIONAL module-scope `import fcntl` makes the
+	@# module — and every importer, incl. `import rebar` via _commands.doctor_locks — fail to
+	@# COLLECT off POSIX (the Windows sweep tier went fully red). Flags a module-scope fcntl
+	@# import not made conditional by a `try` or `if` platform guard; lazy in-function imports
+	@# are ignored. Sanction is `# fcntl-guard-ok: <reason>` (reason MANDATORY). Stdlib-only,
+	@# no CI provider required (project.portability).
+	python scripts/check_fcntl_import_guard.py
 	@# ShellCheck over standalone *.sh (ticket fe4e-54a5-3c3a-4901). Workflow `run:` blocks
 	@# are ALREADY linted — actionlint (below) embeds ShellCheck for .github/workflows/** —
 	@# but no gate covered standalone scripts, of which this repo has 35.

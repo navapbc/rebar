@@ -66,7 +66,6 @@ store simply reports the lock free.
 from __future__ import annotations
 
 import errno
-import fcntl
 import os
 import time
 from typing import Any
@@ -74,6 +73,11 @@ from typing import Any
 from rebar._store import lock as _lock
 from rebar._store import lock_owner as _owner
 from rebar._store.paths import StorePaths
+
+try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
+    import fcntl
+except ImportError:  # pragma: no cover - platform-dependent
+    fcntl = None  # type: ignore[assignment]
 
 # Report/finding vocabulary. Kept as constants so the schema, the renderer and the tests
 # name the same strings.

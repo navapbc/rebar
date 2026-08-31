@@ -23,7 +23,6 @@ parallel run of real fetches sharing one common dir converges with zero CAS surf
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import os
 import subprocess
 import threading
@@ -34,6 +33,9 @@ import pytest
 from rebar._snapshot import git_fetch
 from rebar._store import git_locking, git_outcome, sync
 from rebar._store.git_locking import _resolve_common_git_dir, fetch_coordination_lock
+
+# fcntl is POSIX-only; skip (not error at collection) where it is absent (e.g. Windows).
+fcntl = pytest.importorskip("fcntl")
 
 # The exact production stderr recorded on the ticket.
 _CAS_STDERR = (
