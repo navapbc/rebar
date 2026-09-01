@@ -1,0 +1,16 @@
+Usage: rebar reclaim-collapse --shadow-tracker SHADOW_TRACKER --boundary
+                              BOUNDARY [--branch BRANCH] [--apply]
+                              [--format {text,json}]
+
+Build an offline below-horizon tickets history collapse in a shadow clone.
+
+options:
+  --shadow-tracker SHADOW_TRACKER
+                        path to an explicitly marked disposable tickets-branch
+                        shadow clone
+  --boundary BOUNDARY   oldest retained boundary commit to collapse into the
+                        checkpoint
+  --branch BRANCH       shadow branch/ref tip to rewrite (default: HEAD)
+  --apply               update the shadow clone's current branch; omitted means
+                        dry-run only
+  --format {text,json}  output format
