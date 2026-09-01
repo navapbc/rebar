@@ -243,6 +243,14 @@ def tickets_remote(root: str | os.PathLike[str] | None = None) -> str:
     return load_config(root).sync.remote
 
 
+def reclaim_horizon_days(root: str | os.PathLike[str] | None = None) -> int:
+    """ADR 0106's remote-anchored history-reclamation horizon in days."""
+    snapshot = _bound_snapshot_for_root(root)
+    if snapshot is not None:
+        return int(snapshot.values["reclaim"]["horizon_days"])
+    return load_config(root).reclaim.horizon_days
+
+
 # ── config-file discovery + layered load ──────────────────────────────────────
 #
 # Config resolution is on the COMMAND HOT PATH (every CLI invocation + many library

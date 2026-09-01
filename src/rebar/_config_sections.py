@@ -72,6 +72,9 @@ _SECTIONS: dict[str, dict] = {
         "trigger": lambda v, k: _as_choice(v, k, {"async", "always", "off"}),
         "trigger_interval_s": lambda v, k: _as_int(v, k, minimum=0),
     },
+    "reclaim": {
+        "horizon_days": lambda v, k: _as_int(v, k, minimum=1),
+    },
     "sync": {
         "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),
         "pull": lambda v, k: _as_choice(v, k, {"on", "off"}),

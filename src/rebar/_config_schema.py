@@ -266,6 +266,15 @@ class CompactConfig:
 
 
 @dataclass
+class ReclaimConfig:
+    # read-via: config.py reclaim_horizon_days()
+    horizon_days: int = _documented(
+        30,
+        "Sets the remote-anchored reclamation horizon in days.",
+    )
+
+
+@dataclass
 class SyncConfig:
     # read-via: config.py resolve_push_mode()
     push: str = _documented(
@@ -693,6 +702,8 @@ class Config:
     ticket: TicketConfig = field(default_factory=TicketConfig)
     ticket_clarity: TicketClarityConfig = field(default_factory=TicketClarityConfig)
     compact: CompactConfig = field(default_factory=CompactConfig)
+    # read-via: config.py reclaim_horizon_days()
+    reclaim: ReclaimConfig = field(default_factory=ReclaimConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
     ui: UiConfig = field(default_factory=UiConfig)
@@ -722,6 +733,7 @@ _SECTION_CLASSES: dict[str, type] = {
     "ticket": TicketConfig,
     "ticket_clarity": TicketClarityConfig,
     "compact": CompactConfig,
+    "reclaim": ReclaimConfig,
     "sync": SyncConfig,
     "mcp": McpConfig,
     "ui": UiConfig,

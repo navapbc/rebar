@@ -20,6 +20,7 @@ def test_defaults_when_empty() -> None:
     assert c.verify.require_plan_review_for_claim is False
     assert c.ticket.display_mode == "auto"
     assert c.compact.threshold == 10
+    assert c.reclaim.horizon_days == 30
     assert c.sync.push == "always" and c.sync.pull == "on"
     assert c.mcp.readonly is False and c.mcp.allow_llm is False and c.mcp.allow_jira_sync is False
     assert c.reconciler.deletion_probe_limit == 20
@@ -32,6 +33,7 @@ def test_parses_known_keys_typed() -> None:
         {
             "verify": {"require_plan_review_for_claim": True},
             "compact": {"threshold": 25},
+            "reclaim": {"horizon_days": 45},
             "sync": {"push": "async", "pull": "off"},
             "mcp": {"allow_jira_sync": True},
             "reconciler": {"lock_lease_secs": 90, "id_guard_bypass_unsafe": True},
@@ -41,6 +43,7 @@ def test_parses_known_keys_typed() -> None:
     )
     assert c.verify.require_plan_review_for_claim is True
     assert c.compact.threshold == 25
+    assert c.reclaim.horizon_days == 45
     assert c.sync.push == "async" and c.sync.pull == "off"
     assert c.mcp.allow_jira_sync is True
     assert c.reconciler.lock_lease_secs == 90 and c.reconciler.id_guard_bypass_unsafe is True
@@ -73,6 +76,8 @@ def test_string_coercion_from_env_or_flat_file() -> None:
         ({"compact": {"threshold": "lots"}}, "integer"),
         ({"compact": {"threshold": 0}}, ">= 1"),  # below minimum
         ({"compact": {"threshold": True}}, "boolean"),  # bool rejected as int
+        ({"reclaim": {"horizon_days": 0}}, ">= 1"),
+        ({"reclaim": {"horizon_days": True}}, "boolean"),
         ({"jira": {"url": {"nested": 1}}}, "string"),
         ({"verify": "notatable"}, "table/section"),
     ],
