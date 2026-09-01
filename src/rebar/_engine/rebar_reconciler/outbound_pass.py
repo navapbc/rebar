@@ -53,6 +53,31 @@ except ImportError:  # standalone load without package context
         _loader_spec.loader.exec_module(_loader_mod)
     lazy_load = sys.modules[_loader_key].lazy_load
 
+# ADR 0107 "Cut" step: producers construct native typed payload dataclasses
+# directly instead of raw dicts. mutation_payloads.py carries no cross-reload
+# class-identity requirement (it never references MutationDirection/
+# MutationAction), so an ordinary package import is safe here.
+try:
+    from rebar_reconciler.mutation_payloads import (
+        OutboundCreatePayload,
+        OutboundDeletePayload,
+        OutboundUpdatePayload,
+    )
+except ImportError:  # standalone load without package context
+    _mp_key = "rebar_reconciler.mutation_payloads"
+    if _mp_key not in sys.modules:
+        _mp_spec = importlib.util.spec_from_file_location(
+            _mp_key, Path(__file__).parent / "mutation_payloads.py"
+        )
+        assert _mp_spec is not None and _mp_spec.loader is not None
+        _mp_mod = importlib.util.module_from_spec(_mp_spec)
+        sys.modules[_mp_key] = _mp_mod
+        _mp_spec.loader.exec_module(_mp_mod)
+    _mp_mod = sys.modules[_mp_key]
+    OutboundCreatePayload = _mp_mod.OutboundCreatePayload
+    OutboundUpdatePayload = _mp_mod.OutboundUpdatePayload
+    OutboundDeletePayload = _mp_mod.OutboundDeletePayload
+
 
 def _load(name: str, relpath: str):
     """Load a sibling module by relative file path, registering it in sys.modules.
@@ -225,19 +250,22 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
         file=sys.stderr,
     )
 
-    # Convert OutboundMutation → typed Mutation for unified dispatch.
+    # Convert OutboundMutation → typed Mutation for unified dispatch. ADR 0107 "Cut"
+    # step: the payload itself is now one of the ten typed dataclasses
+    # (mutation_payloads.py), constructed directly by this producer — not a raw dict
+    # later disambiguated at dispatch time by ``batch_dispatch._mutation_to_batch_dict``.
     for om in outbound_raw:
         if om.action == "create":
             typed = mut_mod.Mutation(
                 direction=mut_mod.MutationDirection.outbound,
                 action=mut_mod.MutationAction.create,
                 target=om.local_id,
-                payload={
-                    **om.fields,
-                    "comments": om.comments,
-                    "labels": om.labels,
-                    "local_id": om.local_id,
-                },
+                payload=OutboundCreatePayload(
+                    fields=om.fields,
+                    comments=tuple(om.comments),
+                    labels=tuple(om.labels),
+                    local_id=om.local_id,
+                ),
                 provenance={"source": "outbound_differ", "local_id": om.local_id},
             )
         elif om.action == "update":
@@ -245,15 +273,15 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
                 direction=mut_mod.MutationDirection.outbound,
                 action=mut_mod.MutationAction.update,
                 target=om.jira_key or om.local_id,
-                payload={
-                    "changed_fields": om.fields,
-                    "comments": om.comments,
-                    "labels": om.labels,
+                payload=OutboundUpdatePayload(
+                    changed_fields=om.fields,
+                    comments=tuple(om.comments),
+                    labels=tuple(om.labels),
                     # Cycle 3: link adds ride the existing update payload
                     # (no new MutationAction) — _apply_outbound_update reads
                     # payload["links"] and calls client.set_relationship.
-                    "links": getattr(om, "links", []),
-                },
+                    links=tuple(getattr(om, "links", [])),
+                ),
                 provenance={
                     "source": "outbound_differ",
                     "local_id": om.local_id,
@@ -265,7 +293,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
                 direction=mut_mod.MutationDirection.outbound,
                 action=mut_mod.MutationAction.delete,
                 target=om.jira_key or om.local_id,
-                payload={},
+                payload=OutboundDeletePayload(),
                 provenance={
                     "source": "outbound_differ",
                     "local_id": om.local_id,
