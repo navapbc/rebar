@@ -192,8 +192,7 @@ def test_stale_material_reports_before_and_after_sizes(monkeypatch) -> None:
 
 
 def test_the_fixed_enumeration_is_gone_from_the_source_tree() -> None:
-    """The misleading list must not survive anywhere but the module that documents its
-    removal (it names "AC", which is not a basis component at all)."""
+    """The misleading list must not survive anywhere in runtime source."""
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[3] / "src" / "rebar"
@@ -202,7 +201,7 @@ def test_the_fixed_enumeration_is_gone_from_the_source_tree() -> None:
         for module in parsed_python_files(root)
         if "description/AC/file_impact/children" in module.source
     )
-    assert offenders == ["material_diff.py"]
+    assert offenders == []
 
 
 # ── ticking a checkbox is attestation-SAFE (pins bug 330c) ──────────────────────

@@ -3,8 +3,9 @@
 The plan-review / completion attestations bind a SINGLE composite hash of the ticket's
 material plan content (:func:`pass1.material_fingerprint`). A composite is one-way, so when
 it stops matching, the gate knew only *that* something changed — every message therefore
-recited a fixed list, ``description/AC/file_impact/children``, which named an input that does
-not exist ("AC" is not a basis key; acceptance criteria live inside ``description``) and left
+recited a fixed list of description, AC, file_impact, and children, which named an input
+that does not exist ("AC" is not a basis key; acceptance criteria live inside
+``description``) and left
 the reader to guess. Three agents reached three different conclusions about whether ticking a
 checkbox invalidates an attestation because of it (bug 94a3).
 
