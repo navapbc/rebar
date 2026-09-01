@@ -40,10 +40,17 @@ def test_all_uses_are_full_sha_pinned() -> None:
     uses = re.findall(r"uses:\s*(\S+)", _text())
     assert uses, "expected `uses:` steps in release.yml"
     for u in uses:
+        if u.startswith("./"):
+            continue
         ref = u.split("@", 1)[1] if "@" in u else ""
         assert re.fullmatch(r"[0-9a-f]{40}", ref), (
             f"`uses: {u}` is not pinned to a full 40-char commit SHA"
         )
+
+
+def test_repo_local_actions_are_not_sha_pinned() -> None:
+    """A relative action path is pinned by the reviewing commit itself."""
+    assert "uses: ./.github/actions/setup-uv" in _text()
 
 
 def test_checkouts_disable_persist_credentials() -> None:
