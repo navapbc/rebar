@@ -24,7 +24,6 @@ tests must monkeypatch it there, not here — see those modules' docstrings and
 from __future__ import annotations
 
 import hashlib
-import os
 import time
 
 from rebar import config
@@ -65,6 +64,7 @@ from rebar._signing_manifest import (
     verified_at_sha_step,
     verified_at_sha_subject,
 )
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 # The re-export contract: ``rebar.signing`` is the single import point for the whole family, so
 # every name the sibling modules define is listed here — the PRIVATE ones deliberately, because
@@ -274,7 +274,7 @@ def _resolve_and_reduce(ticket_id: str, repo_root):
     resolved_id = resolve_ticket_id(ticket_id, tracker)
     if resolved_id is None:
         raise SigningError(f"Error: ticket '{ticket_id}' not found")
-    state = reduce_ticket(os.path.join(tracker, resolved_id)) or {}
+    state = reduce_ticket(layout_ticket_dir(tracker, resolved_id)) or {}
     return resolved_id, state, signing_key(tracker, create_if_missing=False)
 
 

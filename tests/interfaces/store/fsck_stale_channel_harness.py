@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 _CREATE_UUID = "11111111-aaaa-4bbb-8ccc-000000000001"
 _SNAP_UUID = "22222222-aaaa-4bbb-8ccc-000000000002"
 
@@ -16,7 +18,7 @@ def write_snapshot_ticket(
     stale_channel: bool,
     orphan_type: str | None = None,
 ) -> tuple[Path, Path]:
-    ticket_dir = tracker / ticket_id
+    ticket_dir = Path(layout_ticket_dir(tracker, ticket_id))
     ticket_dir.mkdir(parents=True)
     create_name = f"1000000000000000000-{_CREATE_UUID}-CREATE.json.retired"
     (ticket_dir / create_name).write_text(

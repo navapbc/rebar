@@ -16,6 +16,9 @@ import logging
 import os
 from typing import Any
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+from rebar._store.ticket_layout import ticket_dir_relpath
+
 # The retention cap is a SINGLE definition owned by plan_review.sidecar (story fde0); code-review
 # imports it rather than defining a second literal, so both prune paths are governed by one
 # constant. plan_review.sidecar is stdlib-only at import (no cycle back to this module).
@@ -199,7 +202,7 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)
@@ -208,7 +211,8 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         old = files[: max(0, len(files) - keep)]
         if not old:
             return 0
-        rels = [f"{rid}/{f}" for f in old]
+        base_relpath = ticket_dir_relpath(tracker, rid)
+        rels = [f"{base_relpath}/{f}" for f in old]
         # Delete through the canonical locked write path (bug malevolent-emigratory-umbrette):
         # a raw git rm + whole-index commit here races normal store writes.
         delete_events(tracker, rels, f"prune: REVIEW_RESULT sidecar for {rid} (retain {keep})")
@@ -283,7 +287,7 @@ def _latest_payload_with_ts(ticket_id: str, *, repo_root=None) -> tuple[dict[str
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)
@@ -324,7 +328,7 @@ def all_review_results(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)

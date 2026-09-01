@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 from ._loader import reduce_ticket
 from ._relations import _BLOCKING_RELATIONS  # re-exported for _blockers
 
@@ -25,7 +27,7 @@ def _get_ticket_status(ticket_id: str, tracker_dir: str) -> str:
     - reduce_ticket() returns None → treat as "closed" (ghost ticket safety)
     - reduce_ticket() returns error-state → treat as "closed"
     """
-    ticket_dir = os.path.join(tracker_dir, ticket_id)
+    ticket_dir = layout_ticket_dir(tracker_dir, ticket_id)
 
     # Missing directory → archived/tombstoned → closed
     if not os.path.isdir(ticket_dir):

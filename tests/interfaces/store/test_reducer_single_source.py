@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir
 
 # Keys the reducer keeps internally but must NOT appear in any interface output.
 INTERNAL_KEYS = {"parent_status_uuid", "last_status_env_id"}
@@ -98,8 +99,7 @@ def test_native_reduce_matches_interface_modulo_internal_keys(rebar_repo: Path) 
     r = str(rebar_repo)
     show = rebar.show_ticket(tid, repo_root=r)
 
-    tracker = rebar_repo / ".tickets-tracker" / tid
-    native = rebar.reduce_ticket(str(tracker))
+    native = rebar.reduce_ticket(ticket_dir(rebar_repo / ".tickets-tracker", tid))
 
     # Native carries internal bookkeeping that the interface hides.
     assert "parent_status_uuid" in native

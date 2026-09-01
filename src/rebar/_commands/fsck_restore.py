@@ -16,6 +16,7 @@ import os
 import subprocess
 
 from rebar._store.gitutil import run_git
+from rebar._store.ticket_layout import ticket_relpath
 from rebar.reducer._cache import RETIRED_SUFFIX
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ def _deleted_history(tracker: str, ticket_id: str) -> dict[str, str]:
     and deleted more than once across successive compactions and only the last removal has
     the current pre-image. ``git log`` streams newest-first, so FIRST-SEEN wins here.
     """
+    prefixes = (f"{ticket_id}/", f"{ticket_relpath(ticket_id)}/")
     try:
         res = run_git(
             tracker,
@@ -40,7 +42,7 @@ def _deleted_history(tracker: str, ticket_id: str) -> dict[str, str]:
             "--name-only",
             "--format=@%H",
             "--",
-            f"{ticket_id}/",
+            *prefixes,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -52,7 +54,7 @@ def _deleted_history(tracker: str, ticket_id: str) -> dict[str, str]:
     for line in (res.stdout or "").splitlines():
         if line.startswith("@"):
             commit = line[1:]
-        elif line.startswith(f"{ticket_id}/") and commit:
+        elif line.startswith(prefixes) and commit:
             out.setdefault(line, commit)  # newest-first stream => first seen is newest
     return out
 
@@ -65,6 +67,7 @@ def _deleted_path_for_uuid(tracker: str, ticket_id: str, uuid: str) -> tuple[str
     ``-- <tid>/`` found 0, ``-- <tid>/*<uuid>*`` found 1; neither ``--all`` nor
     ``--full-history`` helped, so it is a pathspec-scope effect.
     """
+    prefixes = (f"{ticket_id}/", f"{ticket_relpath(ticket_id)}/")
     try:
         res = run_git(
             tracker,
@@ -74,6 +77,7 @@ def _deleted_path_for_uuid(tracker: str, ticket_id: str, uuid: str) -> tuple[str
             "--format=@%H",
             "--",
             f"{ticket_id}/*{uuid}*",
+            f"{ticket_relpath(ticket_id)}/*{uuid}*",
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -84,7 +88,7 @@ def _deleted_path_for_uuid(tracker: str, ticket_id: str, uuid: str) -> tuple[str
     for line in (res.stdout or "").splitlines():
         if line.startswith("@"):
             commit = line[1:]
-        elif line.startswith(f"{ticket_id}/") and uuid in line and commit:
+        elif line.startswith(prefixes) and uuid in line and commit:
             return line, commit  # newest-first stream => first hit is the newest deletion
     return None
 

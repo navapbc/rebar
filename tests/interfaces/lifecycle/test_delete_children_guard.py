@@ -13,11 +13,12 @@ import pytest
 
 import rebar
 from rebar import _cli
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _exists_live(ticket_id: str, repo: Path) -> bool:
     """True if the ticket is still present and not tombstoned."""
-    d = repo / ".tickets-tracker" / ticket_id
+    d = Path(layout_ticket_dir(repo / ".tickets-tracker", ticket_id))
     return d.is_dir() and not (d / ".tombstone.json").is_file()
 
 

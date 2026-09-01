@@ -22,6 +22,7 @@ import pytest
 
 import rebar
 from rebar._commands import compact as _compact
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 
 _TS = 1742605200000000000  # a valid 19-digit HLC ns prefix
@@ -36,7 +37,7 @@ def _fold_everything(monkeypatch):
 
 
 def _tdir(repo: Path, tid: str) -> Path:
-    return repo / ".tickets-tracker" / tid
+    return Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
 
 
 def _do_compact(repo: Path, tid: str, *, extra: list[str] | None = None) -> None:

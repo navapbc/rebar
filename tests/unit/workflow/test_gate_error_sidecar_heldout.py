@@ -65,9 +65,10 @@ def store(tmp_path, monkeypatch):
 def _scan(ticket_id: str, repo_root: str, suffix: str) -> list[dict]:
     from rebar import config as _config
     from rebar._engine_support.resolver import resolve_ticket_dir_name
+    from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
     tracker = str(_config.tracker_dir(repo_root))
-    ticket_dir = os.path.join(tracker, resolve_ticket_dir_name(ticket_id, tracker))
+    ticket_dir = layout_ticket_dir(tracker, resolve_ticket_dir_name(ticket_id, tracker))
     out = []
     for f in sorted(os.listdir(ticket_dir)):
         if f.endswith(f"-{suffix}.json") and not f.startswith("."):

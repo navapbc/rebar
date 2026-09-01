@@ -58,6 +58,27 @@ def test_a_ticket_directory_is_never_reported_as_foreign(rebar_repo: Path) -> No
     assert report is None, f"a ticket directory was misreported as pollution: {report}"
 
 
+def test_empty_shard_container_is_never_reported_as_foreign(rebar_repo: Path) -> None:
+    """Rollback/failed-create cleanup may leave an empty two-hex shard container."""
+    tracker = _tracker(rebar_repo)
+    (tracker / "ab").mkdir()
+
+    report = _fsck._foreign_store_paths(str(tracker))
+    assert report is None, f"an empty shard container was misreported as pollution: {report}"
+
+
+def test_two_hex_pollution_with_non_ticket_child_is_reported(rebar_repo: Path) -> None:
+    """A two-hex name is not enough; shard contents must still be ticket data."""
+    tracker = _tracker(rebar_repo)
+    (tracker / "ab" / "src").mkdir(parents=True)
+    (tracker / "ab" / "src" / "leak.py").write_text("# source\n", encoding="utf-8")
+
+    report = _fsck._foreign_store_paths(str(tracker))
+    assert report is not None, "a polluted shard container was not reported"
+    assert "FOREIGN_STORE_PATH" in report
+    assert "ab" in report
+
+
 def test_fsck_counts_the_foreign_path_as_an_issue(
     rebar_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

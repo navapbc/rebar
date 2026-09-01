@@ -21,6 +21,7 @@ import pytest
 from _subprocess_env import subprocess_env
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 MANIFEST = ["ran unit tests: PASS", "lint clean", "manual smoke OK"]
 
@@ -97,7 +98,7 @@ def _tamper_opcert_envelope(repo: Path, tid: str) -> None:
 
     from rebar.attest import dsse
 
-    tdir = repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     latest = sorted(glob.glob(str(tdir / "*-SIGNATURE.json")))[-1]
     ev = json.loads(Path(latest).read_text())
     env = dsse.decode(ev["data"]["envelope"])
@@ -158,7 +159,9 @@ def test_signature_survives_compaction(rebar_repo: Path) -> None:
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
     cp = _cli("compact", tid, "--threshold=0", cwd=rebar_repo, REBAR_SYNC_PULL="off")
     assert cp.returncode == 0, cp.stderr
-    snaps = list((rebar_repo / ".tickets-tracker" / tid).glob("*-SNAPSHOT.json"))
+    snaps = list(
+        Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", tid)).glob("*-SNAPSHOT.json")
+    )
     assert snaps, "expected a SNAPSHOT after compaction"
     out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
     assert out["verdict"] == "certified"
@@ -192,7 +195,7 @@ def test_concurrent_signatures_converge_by_basename(rebar_repo: Path) -> None:
 
     tid = _seed(rebar_repo)
     tracker = str(rebar_repo / ".tickets-tracker")
-    tdir = rebar_repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", tid))
     key = signing.signing_key(tracker)
     ts = 1_781_000_000_000_000_000
 
@@ -284,7 +287,7 @@ def test_verify_survives_non_dict_signature_state(rebar_repo: Path) -> None:
     state["attestations"] = {}
     ts = _time.time_ns()
     uid = str(_uuid.uuid4())
-    tdir = rebar_repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", tid))
     snap = {
         "timestamp": ts,
         "uuid": uid,

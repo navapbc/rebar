@@ -27,6 +27,7 @@ from typing import Any
 from rebar._engine_support import validate_checks as _checks
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.ticket_layout import iter_ticket_dirs
 
 # Colors (echo -e escapes in the bash original).
 _RED = "\033[0;31m"
@@ -90,16 +91,9 @@ def signature_findings(tracker: str) -> list:
         return out
     if not key:  # _NO_KEY: nothing to certify against here.
         return out
-    try:
-        entries = sorted(os.listdir(tracker))
-    except OSError:
-        return out
-    for name in entries:
-        if name.startswith("."):
-            continue
-        tdir = os.path.join(tracker, name)
-        if not os.path.isdir(tdir):
-            continue
+    for entry in iter_ticket_dirs(tracker):
+        name = entry.ticket_id
+        tdir = entry.path
         # Cheap pre-filter: only reduce tickets that actually carry a signature
         # event, so an unsigned store costs nothing here.
         try:

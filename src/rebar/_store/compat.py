@@ -60,7 +60,7 @@ KNOWN_FORMAT_VERSIONS: frozenset[int] = frozenset({0, 1})
 # expand/contract rollout (docs/migrations.md): binaries learn to recognise it — and
 # so pass, rather than fail closed, on a store that declares it — before anything
 # stamps the requirement.
-KNOWN_CAPABILITIES: frozenset[str] = frozenset({"multi-project-bridge"})
+KNOWN_CAPABILITIES: frozenset[str] = frozenset({"multi-project-bridge", "sharded-ticket-layout"})
 
 # The committed record's filename, under the tracker root (tickets-branch worktree).
 COMPAT_FILENAME = ".store-compat.json"

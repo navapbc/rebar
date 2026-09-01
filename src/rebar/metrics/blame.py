@@ -26,6 +26,7 @@ from rebar._alias import compute_alias
 from rebar._commands.verify_commit import extract_ticket_refs
 from rebar._engine_support import field_reads
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 
 # Watchdog on the read-only culprit-analysis git walks (bug 9305): log walks over a
@@ -97,7 +98,7 @@ def _effective_alias(target: str, tracker: str) -> str:
     """The alias the resolver's alias scan would match for ``target`` — stored if present,
     else the computed fallback (mirroring ``rebar._ids._scan_alias``). Best-effort: ``""``."""
     state: dict = {}
-    path = os.path.join(tracker, target)
+    path = layout_ticket_dir(tracker, target)
     if os.path.isdir(path):
         try:
             state = reduce_ticket(path) or {}

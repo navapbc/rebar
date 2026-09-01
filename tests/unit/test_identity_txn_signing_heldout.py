@@ -21,6 +21,7 @@ from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 pytestmark = pytest.mark.skipif(
     subprocess.run(["ssh-keygen", "-Y", "sign", "-h"], capture_output=True, check=False).returncode
@@ -67,7 +68,7 @@ def signed_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _events(repo: Path, ticket_id: str, event_type: str) -> list[dict]:
-    d = Path(tracker_dir(str(repo))) / ticket_id
+    d = Path(layout_ticket_dir(tracker_dir(str(repo)), ticket_id))
     return [
         json.loads(p.read_text(encoding="utf-8")) for p in sorted(d.glob(f"*-{event_type}.json"))
     ]

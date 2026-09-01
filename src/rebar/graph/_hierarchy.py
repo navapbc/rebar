@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 from ..reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 from ._loader import reduce_all_tickets, reduce_ticket
 from ._relations import _BLOCKING_RELATIONS
@@ -34,7 +36,7 @@ def _get_ancestors(ticket_id: str, tracker_dir: str) -> list[str]:
     seen: set[str] = {ticket_id}
     current = ticket_id
     while True:
-        ticket_dir = os.path.join(tracker_dir, current)
+        ticket_dir = layout_ticket_dir(tracker_dir, current)
         if not os.path.isdir(ticket_dir):
             break
         try:
@@ -134,8 +136,8 @@ def resolve_hierarchy_link(
     On error (missing/unreadable ticket):
         {"error": str, "ticket_id": str}  with the caller expected to exit non-zero.
     """
-    source_dir = os.path.join(tracker_dir, source_id)
-    target_dir = os.path.join(tracker_dir, target_id)
+    source_dir = layout_ticket_dir(tracker_dir, source_id)
+    target_dir = layout_ticket_dir(tracker_dir, target_id)
 
     if not os.path.isdir(source_dir):
         return {"error": f"ticket '{source_id}' does not exist", "ticket_id": source_id}

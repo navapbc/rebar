@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 from rebar._store import fsutil
+from rebar._store.ticket_layout import iter_ticket_dirs
 
 _GRAPH_CACHE_FILE = ".graph-cache.json"
 
@@ -22,16 +23,9 @@ def _compute_cache_key(tracker_dir: str) -> str:
     cannot see it and would serve a stale graph through deps/ready/next-batch.
     (Mirrors the fix in ticket_reducer/_cache.compute_dir_hash.)
     """
-    try:
-        entries = sorted(os.listdir(tracker_dir))
-    except OSError:
-        return ""
-
     all_hashes: list[str] = []
-    for entry in entries:
-        entry_path = os.path.join(tracker_dir, entry)
-        if not os.path.isdir(entry_path):
-            continue
+    for entry in iter_ticket_dirs(tracker_dir):
+        entry_path = entry.path
         try:
             dir_entries = sorted(os.listdir(entry_path))
         except OSError:
@@ -49,7 +43,7 @@ def _compute_cache_key(tracker_dir: str) -> str:
                 size, mtime_ns = -1, -1
             hash_parts.append(f"{name}:{size}:{mtime_ns}")
         dir_hash = hashlib.sha256("|".join(hash_parts).encode()).hexdigest()
-        all_hashes.append(f"{entry}:{dir_hash}")
+        all_hashes.append(f"{entry.ticket_id}:{dir_hash}")
 
     return hashlib.sha256("|".join(all_hashes).encode()).hexdigest()
 

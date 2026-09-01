@@ -29,6 +29,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 _REBAR = shutil.which("rebar")
 pytestmark = pytest.mark.integration
 
@@ -114,7 +116,7 @@ def _create(repo: Path, ttype: str, title: str, env_extra: dict) -> str:
 
 
 def _count_events(repo: Path, ticket_id: str, suffix: str) -> int:
-    tdir = repo / ".tickets-tracker" / ticket_id
+    tdir = Path(layout_ticket_dir(repo / ".tickets-tracker", ticket_id))
     return len(
         [p for p in tdir.iterdir() if p.name.endswith(suffix) and not p.name.startswith(".")]
     )

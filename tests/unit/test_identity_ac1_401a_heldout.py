@@ -14,6 +14,7 @@ import pytest
 
 import rebar
 from rebar._commands._seam import tracker_dir
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 _PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexamplepublickeymaterial comment"
 
@@ -66,7 +67,7 @@ def test_create_rejects_all_private_key_headers(store: Path, private_key: str) -
 def test_add_identity_key_rejects_private_key(store: Path) -> None:
     """The KEY_ADD path is guarded too: adding a private key raises and appends no event."""
     ident = rebar.create_identity("Ada", "ada@example.com", repo_root=str(store))
-    tdir = Path(tracker_dir(str(store))) / ident
+    tdir = Path(layout_ticket_dir(tracker_dir(str(store)), ident))
     before = len(list(tdir.glob("*.json")))
     with pytest.raises(Exception):  # noqa: B017 — private-key material must be refused
         rebar.add_identity_key(ident, _fake_priv("RSA"), repo_root=str(store))

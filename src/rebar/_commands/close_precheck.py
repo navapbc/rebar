@@ -9,7 +9,6 @@ re-imports its public seam names so established monkeypatch and library paths re
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -18,6 +17,7 @@ from rebar import config
 from rebar._commands import close_disposition, txn
 from rebar._commands._seam import CommandError
 from rebar._store import freshness
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def _is_live_ticket(ticket_id: str, tracker: str) -> bool:
     if resolved is None:
         return False
     try:
-        state = reduce_ticket(os.path.join(tracker, resolved))
+        state = reduce_ticket(layout_ticket_dir(tracker, resolved))
     except Exception:  # noqa: BLE001 -- malformed/unreadable targets never earn a gate bypass
         return False
     return bool(
@@ -257,7 +257,7 @@ def _attached_commit_shas(
             records = (
                 ticket_view.field_value(ticket, "commits")
                 if ticket_view is not None
-                else (reduce_ticket(os.path.join(tracker, ticket)) or {}).get("commits")
+                else (reduce_ticket(layout_ticket_dir(tracker, ticket)) or {}).get("commits")
             )
         except Exception:  # The legacy live path treats an unreadable sibling as unattached.
             if ticket_view is not None:

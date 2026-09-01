@@ -25,6 +25,7 @@ import rebar
 from rebar._commands import compact as _compact
 from rebar._commands import compact_plan
 from rebar._commands import compact_rebuild as _rebuild
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 pytestmark = pytest.mark.unit
 
@@ -55,7 +56,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _tdir(repo: Path, tid: str) -> Path:
-    return repo / ".tickets-tracker" / tid
+    return Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
 
 
 def _seed(repo: Path, title: str, comments: int = 3) -> str:

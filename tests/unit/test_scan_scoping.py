@@ -35,6 +35,7 @@ from rebar._commands import compact as _compact
 from rebar._commands import fsck as _fsck
 from rebar._commands import fsck_repair as _fsck_repair
 from rebar._store import hlc
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 pytestmark = pytest.mark.unit
 
@@ -64,7 +65,7 @@ def _tracker(repo: Path) -> Path:
 
 
 def _tdir(repo: Path, tid: str) -> Path:
-    return _tracker(repo) / tid
+    return Path(layout_ticket_dir(_tracker(repo), tid))
 
 
 def _seed(repo: Path, title: str, comments: int = 2) -> str:

@@ -50,6 +50,7 @@ import sys
 from typing import NamedTuple
 
 from rebar._alias import compute_alias
+from rebar._store.ticket_layout import existing_ticket_dir, iter_ticket_dirs, iter_ticket_ids
 
 _FULL_ID_RE = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$")
 _SHORT_ID_RE = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}$")
@@ -95,7 +96,9 @@ def _existing_ticket_dir_name(tracker_dir: str, name: str) -> str | None:
     if not _is_safe_segment(name):
         return None
     tracker_norm = os.path.normpath(tracker_dir)
-    candidate = os.path.normpath(os.path.join(tracker_norm, name))
+    candidate = os.path.normpath(
+        existing_ticket_dir(tracker_norm, name) or os.path.join(tracker_norm, name)
+    )
     # Containment barrier: only a normalized candidate that is a CHILD of the
     # tracker directory is accepted. A traversing/absolute ``name`` normalizes
     # outside and fails ``startswith``, yielding None. The plain normpath +
@@ -163,7 +166,7 @@ def _resolve_via_binding_store(target: str, tracker_dir: str) -> str | None:
     local_id = reverse.get(target) or reverse.get(target.upper())
     if not isinstance(local_id, str) or not local_id:
         return None
-    if os.path.isdir(os.path.join(tracker_dir, local_id)):
+    if existing_ticket_dir(tracker_dir, local_id) is not None:
         return local_id
     return None
 
@@ -180,7 +183,7 @@ def _effective_alias_for_dir(tracker_dir: str, name: str) -> str:
     """
     if name.startswith("."):
         return ""
-    ticket_dir = os.path.join(tracker_dir, name)
+    ticket_dir = existing_ticket_dir(tracker_dir, name) or os.path.join(tracker_dir, name)
     if not os.path.isdir(ticket_dir):
         return ""
     # First CREATE (lexically earliest) + latest non-PRECONDITIONS SNAPSHOT
@@ -241,16 +244,14 @@ def _scan_tracker_root(tracker_dir: str) -> ResolverScanIndex | None:
     failure never masquerades as "no match". Dotfiles (e.g. ``.bridge_state``) and
     non-directory entries are excluded, mirroring the per-candidate scan filters.
     """
-    try:
-        entries = os.listdir(tracker_dir)
-    except OSError as exc:
-        print(f"Error: cannot list {tracker_dir!r}: {exc}", file=sys.stderr)
+    if not os.path.isdir(tracker_dir):
+        print(f"Error: cannot list {tracker_dir!r}: not a directory", file=sys.stderr)
         return None
+    entries = iter_ticket_dirs(tracker_dir)
     alias_to_dirs: dict[str, list[str]] = {}
     dir_names: list[str] = []
-    for name in entries:
-        if name.startswith(".") or not os.path.isdir(os.path.join(tracker_dir, name)):
-            continue
+    for entry in entries:
+        name = entry.ticket_id
         dir_names.append(name)
         effective_alias = _effective_alias_for_dir(tracker_dir, name)
         if effective_alias:
@@ -317,14 +318,14 @@ def _scan_alias(target: str, tracker_dir: str) -> list[str] | None:
     Per-ticket I/O errors skip that ticket. Each ticket's effective alias is
     computed by :func:`_effective_alias_for_dir`.
     """
-    try:
-        entries = sorted(os.listdir(tracker_dir))
-    except OSError as exc:
-        print(f"Error: cannot list {tracker_dir!r}: {exc}", file=sys.stderr)
+    if not os.path.isdir(tracker_dir):
+        print(f"Error: cannot list {tracker_dir!r}: not a directory", file=sys.stderr)
         return None
+    entries = iter_ticket_dirs(tracker_dir)
 
     alias_matches: list[str] = []
-    for name in entries:
+    for entry in entries:
+        name = entry.ticket_id
         effective_alias = _effective_alias_for_dir(tracker_dir, name)
         if effective_alias and effective_alias == target:
             alias_matches.append(name)
@@ -349,13 +350,7 @@ def _resolve_short_id(
         matches = _dir_prefix_matches(dir_names, ticket_id)
     else:
         try:
-            matches = [
-                n
-                for n in os.listdir(tracker_dir)
-                if not n.startswith(".")
-                and n[:9] == ticket_id
-                and os.path.isdir(os.path.join(tracker_dir, n))
-            ]
+            matches = [n for n in iter_ticket_ids(tracker_dir) if n[:9] == ticket_id]
         except OSError:
             return None
     if len(matches) == 1:
@@ -383,13 +378,7 @@ def _resolve_prefix(
         matches = _dir_prefix_matches(dir_names, ticket_id)
     else:
         try:
-            matches = [
-                n
-                for n in os.listdir(tracker_dir)
-                if not n.startswith(".")
-                and n.startswith(ticket_id)
-                and os.path.isdir(os.path.join(tracker_dir, n))
-            ]
+            matches = [n for n in iter_ticket_ids(tracker_dir) if n.startswith(ticket_id)]
         except OSError:
             return None
     if len(matches) == 1:
