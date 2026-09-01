@@ -13,8 +13,8 @@ line the SINGLE SOURCE it claims to be, by failing the build on the four ways it
 1. **Removed** — the section or the key is gone, so the fallback fetch returns for every job.
 2. **Loosened to a range** — the subtle one, and the reason a mere presence check is not enough.
    The action strips a leading ``==`` and classifies the remainder with ``tc.isExplicitVersion``
-   (``src/version/specifier.ts``). ``==0.12.7`` is *exact* and resolves with no network; a range
-   like ``>=0.12.7`` takes the range branch and STILL fetches the manifest. A range therefore
+   (``src/version/specifier.ts``). ``==X.Y.Z`` is *exact* and resolves with no network; a range
+   like ``>=X.Y.Z`` takes the range branch and STILL fetches the manifest. A range therefore
    looks pinned to a reader while restoring the exact failure mode the pin removed.
 3. **Overridden per call site** — ``ExplicitInputVersionResolver`` runs BEFORE the workspace
    scan (``src/version/version-request-resolver.ts``), so a ``version:`` or ``version-file:``
