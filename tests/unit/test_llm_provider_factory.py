@@ -41,6 +41,21 @@ from rebar.llm.runner import PydanticAIRunner, RunRequest
 pytestmark = pytest.mark.unit
 
 
+def _anthropic_expects_httpx2_client() -> bool:
+    import inspect
+
+    import anthropic
+
+    http_client = inspect.signature(anthropic.AsyncAnthropic.__init__).parameters["http_client"]
+    return "httpx2.AsyncClient" in str(http_client.annotation)
+
+
+def _transport_http_module():
+    if _anthropic_expects_httpx2_client():
+        return pytest.importorskip("httpx2")
+    return httpx
+
+
 def _ok_body(text: str = "OK") -> dict:
     return {
         "id": "msg_x",
@@ -78,8 +93,9 @@ def seam(monkeypatch):
     - ``runner.Agent`` -> a pass-through that captures the model ``run()`` handed its consumer.
       The real Agent still runs; this only observes what crossed the seam.
     """
-    clients: list[httpx.AsyncClient] = []
-    real_client_cls = httpx.AsyncClient
+    transport_http = _transport_http_module()
+    clients: list = []
+    real_client_cls = transport_http.AsyncClient
     status = {"code": 200}
 
     class _RecordingAsyncClient(real_client_cls):  # type: ignore[valid-type,misc]
@@ -87,13 +103,17 @@ def seam(monkeypatch):
             super().__init__(*a, **kw)
             clients.append(self)
 
-    def _handler(request: httpx.Request) -> httpx.Response:
+    def _handler(request):
         if status["code"] == 200:
-            return httpx.Response(200, json=_ok_body())
-        return httpx.Response(status["code"], json=_err_body())
+            return transport_http.Response(200, json=_ok_body())
+        return transport_http.Response(status["code"], json=_err_body())
 
-    monkeypatch.setattr(httpx, "AsyncClient", _RecordingAsyncClient)
-    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda *a, **kw: httpx.MockTransport(_handler))
+    monkeypatch.setattr(transport_http, "AsyncClient", _RecordingAsyncClient)
+    monkeypatch.setattr(
+        transport_http,
+        "AsyncHTTPTransport",
+        lambda *a, **kw: transport_http.MockTransport(_handler),
+    )
 
     import rebar.llm.runner as runner_mod
 
@@ -122,7 +142,10 @@ def _retrying_clients(clients) -> list:
     installs. Filters out any unrelated client another library may construct, so the negative
     control asserts on OUR construction rather than on a global count."""
     return [
-        c for c in clients if isinstance(getattr(c, "_transport", None), AsyncTenacityTransport)
+        c
+        for c in clients
+        if isinstance(getattr(c, "_transport", None), AsyncTenacityTransport)
+        or getattr(c, "_transport", None).__class__.__name__ == "_Httpx2AsyncTenacityTransport"
     ]
 
 

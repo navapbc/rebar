@@ -23,7 +23,6 @@ from __future__ import annotations
 import contextlib
 import json
 
-import httpx
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -110,6 +109,14 @@ def _err_body(message: str = "nope") -> dict:
     return {"type": "error", "error": {"type": "invalid_request_error", "message": message}}
 
 
+def _transport_http_module():
+    from anthropic import AsyncAnthropic
+
+    from rebar.llm.anthropic_model import _anthropic_http_client_module
+
+    return _anthropic_http_client_module(AsyncAnthropic)
+
+
 def install_failover(
     monkeypatch, *, status: dict[str, int], err_message: str = "nope"
 ) -> list[str]:
@@ -125,16 +132,21 @@ def install_failover(
             monkeypatch.delenv(f"REBAR_LLM_{name}_{field}", raising=False)
 
     seen: list[str] = []
+    transport_http = _transport_http_module()
 
-    def _handler(request: httpx.Request) -> httpx.Response:
+    def _handler(request) -> object:
         name = json.loads(request.content).get("model", "")
         seen.append(name)
         code = status.get(name, 200)
         if code == 200:
-            return httpx.Response(200, json=_ok_body(name))
-        return httpx.Response(code, json=_err_body(err_message))
+            return transport_http.Response(200, json=_ok_body(name))
+        return transport_http.Response(code, json=_err_body(err_message))
 
-    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda *a, **kw: httpx.MockTransport(_handler))
+    monkeypatch.setattr(
+        transport_http,
+        "AsyncHTTPTransport",
+        lambda *a, **kw: transport_http.MockTransport(_handler),
+    )
     monkeypatch.setattr(pydantic_ai.models, "ALLOW_MODEL_REQUESTS", True)
 
     from rebar.llm import config as llm_config

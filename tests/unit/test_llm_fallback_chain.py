@@ -43,6 +43,21 @@ _NO_TEMPERATURE = "claude-opus-4-8"
 _FALLBACK_ENDPOINT = "https://fallback.test"
 
 
+def _anthropic_expects_httpx2_client() -> bool:
+    import inspect
+
+    import anthropic
+
+    http_client = inspect.signature(anthropic.AsyncAnthropic.__init__).parameters.get("http_client")
+    return http_client is not None and "httpx2.AsyncClient" in str(http_client.annotation)
+
+
+def _transport_http_module():
+    if _anthropic_expects_httpx2_client():
+        return pytest.importorskip("httpx2")
+    return httpx
+
+
 def _origin(url: object) -> tuple[str, str]:
     """The ``(scheme, host)`` pair of ``url``, for comparing endpoints by ORIGIN.
 
@@ -105,8 +120,9 @@ def seam(monkeypatch):
     - `captured`: what `run()` handed its `Agent`, plus an event log ordering model entry,
       agent construction and model exit.
     """
-    clients: list[httpx.AsyncClient] = []
-    real_client_cls = httpx.AsyncClient
+    transport_http = _transport_http_module()
+    clients: list = []
+    real_client_cls = transport_http.AsyncClient
     status: dict[str, int] = {}
     seen: list[str] = []
     events: list[str] = []
@@ -121,16 +137,20 @@ def seam(monkeypatch):
             self.aclose_calls += 1
             return await super().aclose(*a, **kw)
 
-    def _handler(request: httpx.Request) -> httpx.Response:
+    def _handler(request):
         name = json.loads(request.content).get("model", "")
         seen.append(name)
         code = status.get(name, 200)
         if code == 200:
-            return httpx.Response(200, json=_ok_body(name))
-        return httpx.Response(code, json=_err_body())
+            return transport_http.Response(200, json=_ok_body(name))
+        return transport_http.Response(code, json=_err_body())
 
-    monkeypatch.setattr(httpx, "AsyncClient", _CountingAsyncClient)
-    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda *a, **kw: httpx.MockTransport(_handler))
+    monkeypatch.setattr(transport_http, "AsyncClient", _CountingAsyncClient)
+    monkeypatch.setattr(
+        transport_http,
+        "AsyncHTTPTransport",
+        lambda *a, **kw: transport_http.MockTransport(_handler),
+    )
 
     import rebar.llm.runner as runner_mod
 
@@ -178,7 +198,10 @@ def _retrying_clients(clients) -> list:
     """The clients the provider seam built — identified by the retrying transport the builder
     installs, so an unrelated client another library opens cannot inflate the count."""
     return [
-        c for c in clients if isinstance(getattr(c, "_transport", None), AsyncTenacityTransport)
+        c
+        for c in clients
+        if isinstance(getattr(c, "_transport", None), AsyncTenacityTransport)
+        or getattr(c, "_transport", None).__class__.__name__ == "_Httpx2AsyncTenacityTransport"
     ]
 
 

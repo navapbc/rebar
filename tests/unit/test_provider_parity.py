@@ -623,7 +623,9 @@ def _normalize(payload: dict, *, provider: str) -> dict:
 def _capture(model: str, monkeypatch, *, temperature=None) -> dict:
     """Capture the outbound request for ONE logical agentic call, aborting at the boundary."""
     import contextlib
+    import inspect
 
+    import anthropic
     import boto3
     import httpx
     import pydantic_ai.models
@@ -643,7 +645,17 @@ def _capture(model: str, monkeypatch, *, temperature=None) -> dict:
     class _Abort(Exception):
         pass
 
-    def _handler(request: httpx.Request) -> httpx.Response:
+    def _anthropic_transport_http_module():
+        http_client = inspect.signature(anthropic.AsyncAnthropic.__init__).parameters.get(
+            "http_client"
+        )
+        if http_client is not None and "httpx2.AsyncClient" in str(http_client.annotation):
+            return pytest.importorskip("httpx2")
+        return httpx
+
+    anthropic_http = _anthropic_transport_http_module()
+
+    def _handler(request) -> object:
         captured["payload"] = json.loads(request.content.decode())
         captured["endpoint"] = str(request.url)
         raise _Abort()
@@ -666,7 +678,9 @@ def _capture(model: str, monkeypatch, *, temperature=None) -> dict:
         monkeypatch.setattr(boto3.Session, "client", _patched_client)
     else:
         monkeypatch.setattr(
-            httpx, "AsyncHTTPTransport", lambda *a, **kw: httpx.MockTransport(_handler)
+            anthropic_http,
+            "AsyncHTTPTransport",
+            lambda *a, **kw: anthropic_http.MockTransport(_handler),
         )
 
     cfg = LLMConfig(

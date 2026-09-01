@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import os
 
-import httpx
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -69,6 +68,14 @@ def _project(tmp_path, *, primary: str, fallback: str = _ANTHROPIC_FALLBACK):
     (root / ".git").mkdir()
     (root / "rebar.toml").write_text(_PROJECT_TOML.format(primary=primary, fallback=fallback))
     return root
+
+
+def _transport_http_module():
+    from anthropic import AsyncAnthropic
+
+    from rebar.llm.anthropic_model import _anthropic_http_client_module
+
+    return _anthropic_http_client_module(AsyncAnthropic)
 
 
 @pytest.fixture
@@ -149,16 +156,17 @@ def socket(monkeypatch):
     wire rather than inferred from configuration."""
     status: dict[str, int] = {}
     seen: list[str] = []
+    transport_http = _transport_http_module()
 
-    def _handler(request: httpx.Request) -> httpx.Response:
+    def _handler(request) -> object:
         name = json.loads(request.content).get("model", "")
         seen.append(name)
         code = status.get(name, 200)
         if code != 200:
-            return httpx.Response(
+            return transport_http.Response(
                 code, json={"type": "error", "error": {"type": "overloaded_error", "message": "x"}}
             )
-        return httpx.Response(
+        return transport_http.Response(
             200,
             json={
                 "id": "msg_x",
@@ -172,7 +180,11 @@ def socket(monkeypatch):
             },
         )
 
-    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda *a, **kw: httpx.MockTransport(_handler))
+    monkeypatch.setattr(
+        transport_http,
+        "AsyncHTTPTransport",
+        lambda *a, **kw: transport_http.MockTransport(_handler),
+    )
     monkeypatch.setattr(pydantic_ai.models, "ALLOW_MODEL_REQUESTS", True)
     return {"status": status, "seen": seen}
 
