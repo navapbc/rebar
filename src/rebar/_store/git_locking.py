@@ -210,7 +210,7 @@ def _store_git_op_lock(tracker: str) -> Iterator[None]:
     correctness, so a wedged peer degrades to pre-9305 behavior rather than a new failure
     mode. Best-effort on any OS fault (an unwritable git dir must not fail the git op)."""
     lock_path = _store_git_lock_path(tracker)
-    if lock_path is None:
+    if lock_path is None or fcntl is None:
         yield
         return
     try:
@@ -312,6 +312,8 @@ def _acquire_fetch_coord_flock(fd: int) -> bool:
     the caller proceeds UNLOCKED (the bounded CAS retry is the net). A blocking wait with no
     ceiling could pin the long-lived MCP server behind a wedged peer fetch, so it is
     deliberately avoided here."""
+    if fcntl is None:
+        return False
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return True
@@ -343,7 +345,7 @@ def fetch_coordination_lock(repo_root: str) -> Iterator[None]:
     net, and that retry is also what covers a NON-rebar git peer, which never takes this lock
     at all."""
     common = _resolve_common_git_dir(repo_root)
-    if common is None:
+    if common is None or fcntl is None:
         yield
         return
     lock_path = os.path.join(common, _FETCH_COORD_LOCK_NAME)
