@@ -111,7 +111,7 @@
       "created_at": "2026-09-01T03:41:20Z",
       "jira_id": "4591202",
       "jira_key": "REB-4329",
-      "peer_parent": "",
+      "peer_parent": "REB-4359",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:41:22Z"
     },
@@ -1512,7 +1512,7 @@
       "created_at": "2026-09-01T03:41:23Z",
       "jira_id": "4591203",
       "jira_key": "REB-4330",
-      "peer_parent": "",
+      "peer_parent": "REB-4379",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:41:25Z"
     },
@@ -1632,7 +1632,7 @@
       "created_at": "2026-09-01T03:41:25Z",
       "jira_id": "4591204",
       "jira_key": "REB-4331",
-      "peer_parent": "",
+      "peer_parent": "REB-4412",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:41:28Z"
     },
@@ -2002,7 +2002,7 @@
       "created_at": "2026-09-01T03:41:28Z",
       "jira_id": "4591205",
       "jira_key": "REB-4332",
-      "peer_parent": "",
+      "peer_parent": "REB-4359",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:41:31Z"
     },
@@ -2505,7 +2505,7 @@
       "created_at": "2026-09-01T03:41:31Z",
       "jira_id": "4591206",
       "jira_key": "REB-4333",
-      "peer_parent": "",
+      "peer_parent": "REB-4379",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:41:33Z"
     },
@@ -4038,7 +4038,7 @@
         "assignee": null,
         "description": "## Context\nThe RCA for broadish-permanent-condor found seven additional `@pytest.fixture` functions that return a full `dict(os.environ)` directly or nested inside the fixture argument pytest renders. Default long tracebacks can print early ambient credentials through `saferepr`. Confirmed fixtures: `tests/scripts/test_autodeploy_materialize_probe.py`, `test_autodeploy_fetch_secrets.py`, `test_autodeploy_disk_pressure.py`, `test_autodeploy_health_gate.py`, `test_autodeploy_signals_gerrit_config.py`, `test_observability_exit.py`, and `tests/interfaces/facades/test_cli.py`.\n\nThe scope boundary is the decorated pytest-fixture return path. An AST sweep found no eighth fixture. In particular, `test_autodeploy_materialize_certbot.py::_make_box` is a plain helper whose result is assigned to a test local, so an unrelated later assertion does not render it as a fixture argument; a runtime long/short traceback probe confirmed the sentinel stays absent. A distinct exception-time carrier exists for 103 test-local subprocess mappings when the subprocess call itself raises; follow-up `antiutopic-toadyish-goldfinch` owns that larger audit. Runtime/maintenance environment propagation is excluded because preserving caller credentials/config is a separate product contract.\n\n## Plan\n- Build a parametrized real-pytest RED oracle using insertion-ordered synthetic sentinels and deterministic unrelated failures for each of the seven decorated fixture surfaces.\n- Replace each broad ambient copy with an explicit mutable allowlist: fake-bin-first `PATH` plus that harness's declared variables and per-test overrides. This is preferred over a representation wrapper because the subprocess contract itself should be explicit, the 24-test minimal-parent-environment run proves arbitrary keys are unnecessary, and it avoids adding a shared abstraction solely for test fixtures.\n- Prove sentinel absence under default long traceback and preserve the short-traceback negative control.\n- Run every existing fixture consumer under the minimal parent environment and the normal focused suites.\n- Reintroduce the exact broad-copy mutation and require the oracle to return to RED.\n\n## Acceptance Criteria\n- [x] Each of the seven decorated fixtures has a deterministic RED failure-rendering probe.\n- [x] No decorated fixture in the AST construct sweep returns arbitrary ambient values.\n- [x] Default long traceback output contains no synthetic ambient sentinel on any of the seven surfaces.\n- [x] The fake-bin-first `PATH` remains available to every existing fixture consumer.\n- [x] Explicit harness environment variables remain mutable by their existing tests.\n- [x] [operator-attested] The 24-test minimal-parent-environment suite passes.\n  provenance: environment=minimal-parent-worktree-aa41c2e45a; principal=RebarBotNava; privilege_posture=narrower; instrument=simulation \u2014 42-pass real pytest fixture/subprocess run under env -i PATH=/usr/bin:/bin\n- [x] [operator-attested] Focused suites pass.\n  provenance: environment=minimal-parent-worktree-aa41c2e45a; principal=RebarBotNava; privilege_posture=narrower; instrument=simulation \u2014 affected real fixture consumers plus held-out rendering oracle\n- [x] [operator-attested] Lint passes.\n  provenance: environment=gerrit-ci-run-32111971923; principal=rebar-ci-bot; privilege_posture=production-equivalent; instrument=static-analysis \u2014 canonical gating Ruff, formatting, and repository policy checks\n- [x] [operator-attested] Typecheck passes.\n  provenance: environment=gerrit-ci-run-32111971923; principal=rebar-ci-bot; privilege_posture=production-equivalent; instrument=static-analysis \u2014 canonical gating mypy run\n- [x] The exact broad-copy mutation returns the security oracle to RED.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Prevent sibling pytest fixtures from rendering ambient credentials"
       },
       "created_at": "2026-09-01T03:41:36Z",
@@ -4738,7 +4738,7 @@
       "created_at": "2026-09-01T03:41:39Z",
       "jira_id": "4591209",
       "jira_key": "REB-4336",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:41:41Z"
     },
@@ -9599,7 +9599,7 @@
       "created_at": "2026-09-01T03:41:44Z",
       "jira_id": "4591211",
       "jira_key": "REB-4338",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:41:47Z"
     },
@@ -10750,7 +10750,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\n\nSplit from `floating-chromium-leafwing` (1f35-74fc-47a0-4d71), Decision 6 (operator-approved 2026-08-30). That bug is being resolved now by bounding `anthropic` in `pyproject.toml` (portable, eb64-free) so the mirror-sweep legs stop floating to `anthropic==1.2.0`, whose client vendors `httpx2` and rejects a stdlib `httpx.AsyncClient`. **This ticket carries the long-term fix:** adapt rebar's Anthropic provider seam so it works against the httpx2 `http_client` contract, so the cap 1f35 adds can be lifted.\n\n## Why this is deferred (blocked_by eb64)\n\nThe change touches `src/rebar/llm/anthropic_model.py:_build_retrying_anthropic_provider`, which is inside epic `financial-stoneware-brant` (eb64-844b-ab7a-4915) declared scope, and collides directly with the in-flight anthropic-backoff work (254e) \u2014 which enhances that same retrying provider by passing a custom `httpx.AsyncClient`, exactly the seam this change must rework. Doing both concurrently would conflict. Sequence this AFTER eb64 lands and AFTER 254e, and **preserve 254e's jitter + Retry-After backoff semantics** (re-express them on the httpx2 transport rather than dropping them).\n\n## Plan\n\n- Detect the installed anthropic SDK's expected `http_client` type and construct the provider accordingly: a stdlib `httpx.AsyncClient` for pre-httpx2 SDKs, the vendored `httpx2` client for httpx2 SDKs \u2014 OR stop passing a custom client and re-implement retry/backoff via the SDK's supported transport/retry hook.\n- Once the seam supports httpx2, lift or widen the `anthropic` upper bound that 1f35 added to `pyproject.toml`.\n\n## Acceptance criteria\n\n- [ ] The Anthropic provider constructs without `TypeError` against an anthropic SDK that vendors httpx2 (the `1.2.0` line and later) AND against the currently-pinned pre-httpx2 SDK.\n- [ ] 254e's retry/backoff behavior (jitter + Retry-After) is preserved and covered by tests.\n- [ ] The `anthropic` upper bound introduced for 1f35 is lifted or widened once the seam is compatible, and the mirror-sweep legs stay green.\n- [ ] Portable across CI providers / no CI.",
+        "description": "## Context\n\nSplit from `floating-chromium-leafwing` (1f35-74fc-47a0-4d71), Decision 6 (operator-approved 2026-08-30). 1f35 was the stopgap: bound `anthropic` below the first httpx2-vendoring release (`<1`) so mirror-sweep legs stopped floating to SDKs whose `http_client` contract rejects a stdlib `httpx.AsyncClient`. The dependency boundary is `1.0.0`: `anthropic` 1.x (including the reproduced `1.2.0`) declares and validates `httpx2`, while `0.121.0` remains the pre-httpx2 line. This ticket is the approved long-term fix: adapt rebar's Anthropic provider seam for both contracts and widen the temporary cap.\n\n## Why this followed eb64 / 254e\n\nThe changed seam is `src/rebar/llm/anthropic_model.py:_build_retrying_anthropic_provider`, inside epic `financial-stoneware-brant` (eb64-844b-ab7a-4915) and overlapping 254e. 254e's invariant is transport-owned retry: rebar supplies the HTTP client, sets `AsyncAnthropic(max_retries=0)`, retries transient 429/529/5xx plus timeout/network errors below the agent loop, honors positive `Retry-After`, and falls back to jitter. This fix preserves that invariant; it does not switch to SDK-managed retries.\n\n## Plan\n\n- Choose the type-detected custom-client branch because it is the branch compatible with 254e's `max_retries=0` transport-owned retry invariant.\n- Detect the SDK contract by reading `inspect.signature(AsyncAnthropic.__init__).parameters[\"http_client\"].annotation`; if its text contains `httpx2.AsyncClient`, select `httpx2`, otherwise default to stdlib `httpx` when the annotation is absent or ambiguous.\n- Build one shared `RetryConfig` and one shared `_validate_response` against the selected module. The retry predicate uses the selected module's `HTTPStatusError`, `TimeoutException`, and `NetworkError`; `_build_retry_wait` reads `exc.response.headers` generically, so the same Retry-After/jitter rules apply to both exception families.\n- For stdlib `httpx`, keep pydantic-ai's existing `AsyncTenacityTransport`. For `httpx2`, first check for a first-party `pydantic_ai.retries.HTTPX2TenacityTransport`; the current pinned pydantic-ai lacks it, so this patch uses a local `httpx2.AsyncBaseTransport` wrapper with the same retry/validate/close/context-manager behavior.\n- Handle Anthropic 1.x beta `messages.create` signature removal by wrapping the rebar-owned `anthropic_client.beta.messages.create` instance after provider construction. The wrapper moves unsupported real sampling kwargs (`temperature`, `top_p`, `top_k`) into `extra_body` and only drops `anthropic.Omit` placeholders. Upstream capability resolution still decides whether a model gets a real sampling value; the wrapper only changes the Python-call location required by the SDK signature. Provider-parity normalization continues to read the final wire JSON, where `extra_body` is merged into the top-level request body.\n- Widen `anthropic` to `>=0.121.0,<2`, keeping both pre-httpx2 and 1.x/httpx2 lines installable while excluding the next major line.\n\n## Acceptance criteria\n\n- [ ] `anthropic==1.2.0`: provider/model construction uses `httpx2.AsyncClient`, does not raise the old `TypeError`, and can issue a MockTransport request through `AnthropicProvider`/`AnthropicModel`.\n- [ ] `anthropic==0.121.0`: provider/model construction remains compatible with stdlib `httpx.AsyncClient`.\n- [ ] 254e retry semantics are preserved for the selected HTTP module: retry predicate, Retry-After parsing, zero/expired-header fallback, jitter wait, and `max_retries=0` guard.\n- [ ] `tests/unit/test_transport_retry.py` covers httpx2 construction, retry, and sampling-kwarg relocation.\n- [ ] `tests/unit/test_transport_retry_jitter.py` remains green for `_build_retry_wait`'s shared Retry-After/jitter contract.\n- [ ] `tests/unit/test_provider_parity.py` captures direct-Anthropic requests through the SDK-selected transport module and confirms sampling values remain visible in the normalized wire payload.\n- [ ] Existing direct-Anthropic MockTransport harnesses are updated to patch the SDK-selected transport module in `tests/unit/test_llm_fallback_chain.py`, `tests/unit/test_agentic_message_cache.py`, `tests/unit/test_llm_provider_factory.py`, `tests/unit/test_llm_timeouts.py`, `tests/unit/test_cache_prefix_breakpoint.py`, `tests/unit/test_candidate_tracing.py`, `tests/unit/test_candidate_tracing_oracle.py`, and `tests/unit/test_llm_config_gate_root.py`.\n- [ ] `tests/unit/test_packaging_dependencies.py` proves `0.121.0` and `1.2.0` are allowed while `2.0.0` is rejected.\n- [ ] Portable across CI providers / no CI: the adaptation is local Python plus dependency bounds; no provider-specific CI trigger is required.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Adapt anthropic provider seam to the httpx2 http_client contract (lift the 1f35 cap)"
@@ -13100,7 +13100,7 @@
       "created_at": "2026-09-01T03:41:55Z",
       "jira_id": "4591215",
       "jira_key": "REB-4342",
-      "peer_parent": "",
+      "peer_parent": "REB-4359",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:41:58Z"
     },
@@ -14034,10 +14034,24 @@
     },
     "3691-d673-2e4b-413a": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nAttestation staleness errors currently say the plan changed in the fixed list \"description/AC/file_impact/children\". That is misleading: AC is not an independent material key, checkbox state is normalized out, and the message does not identify the component that actually changed. Operator approval: fix this broadly anywhere rebar reports an attestation refusal, including additive signed-manifest metadata, while preserving all gate outcomes.\n\n## Confirmed RCA\n\n`material_fingerprint()` hashes a single composite basis. Current `origin/main` keeps the basis single-sourced in `material_diff.material_basis`: `ticket_id`, normalized `description`, `file_impact`, `children`, and conditional `file_impact_scope`; `pass1.material_fingerprint()` hashes that basis. Checkbox state is removed by `normalize_checkbox_state()`, so ticking `- [ ]` to `- [x]` is attestation-safe. Because the composite hash is one-way and older manifests lack per-component values, stale-material readers could not name what changed and sometimes named the fictional `AC` component.\n\n## Plan\n\nAdd signed per-component material fingerprints as deterministic additive `material-part: <name> <hash16> <size>` manifest lines. Parse them leniently and use them only for diagnostics. On stale-material, compare signed parts with live parts and render the changed component(s) plus compact sizes; legacy manifests fall back to child-pin add/remove diffs when possible, otherwise say the component cannot be named and advise re-review. Update every attestation-refusal surface that drops or rewrites the underlying reason so it forwards or reconstructs the same specific reason.\n\nInvariant: no gate outcome changes. Edits may only add manifest diagnostic lines or change `reason` text for already-failing branches. Do not change branch conditions, verdict names, thresholds, or valid/invalid decisions.\n\n## Scope\n\n- `src/rebar/llm/plan_review/material_diff.py`: per-component material hashing and explanation.\n- `src/rebar/llm/plan_review/manifest.py`: emit/parse additive `material-part:` lines.\n- `src/rebar/llm/plan_review/attest.py`: named stale-material reasons and timestamped stale-reopened reasons.\n- `src/rebar/llm/plan_review/attest_gate.py`: actionable unsigned message and complete verdict docs.\n- `src/rebar/llm/plan_review/generation.py`: named own/dependency material drift.\n- `src/rebar/llm/plan_review/resign.py`: named plan drift in sign-review recovery.\n- `src/rebar/llm/completion_child_gate.py`: forward child closure signature reason.\n- `src/rebar/_cli/_llm_commands.py`: sign-aborted rendering that names reason/remedy.\n- `docs/plan-review-gate.md`: document checkbox-safe and named staleness reasons.\n- `tests/unit/plan_review/test_94a3_material_diff.py`: regression coverage.\n\n## Testing\n\nRun the new material-diff unit tests first RED and then GREEN, then run the related existing suites: `tests/unit/test_compute_validity.py`, `tests/unit/test_legacy_material_grandfather_96d1.py`, `tests/unit/test_attestation_invalidation.py`, `tests/unit/test_plan_material_pins.py`, plus `pytest tests/unit tests/integration` for the requested full gate.\n\n## Acceptance Criteria\n\n- [ ] `material_components(ctx)` exposes exactly the material basis keys, and changing one component changes only that component hash.\n- [ ] `build_manifest` emits sorted `material-part` lines; `manifest_material_parts()` round-trips them; manifests without lines parse to `{}`.\n- [ ] `compute_validity` stale-material reasons name changed components for description-only, file-impact-only, and children-only edits, never `description/AC/file_impact/children`.\n- [ ] Tick-only checkbox edits remain `verdict == \"certified\"`.\n- [ ] Legacy raw-description attestations over unchanged tickets remain certified.\n- [ ] Un-grandfatherable legacy attestations say the changed component cannot be named.\n- [ ] `stale-reopened` names signed and reopened timestamps.\n- [ ] `unsigned` names both `review-plan` and `sign-review` remedies.\n- [ ] `plan_review_sign_aborted` with `store-read-failure` renders that reason and does not advise `sign-review`.\n- [ ] Generation-time dependency material drift names changed dependency ticket ids.\n- [ ] Touched branches preserve the prior `(valid, verdict)` outcome.\n- [ ] Relevant unit and integration tests pass.\n- [ ] Documentation states plainly that ticking an AC checkbox is attestation-safe.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Whether ticking an AC checkbox invalidates a plan-review attestation is inconsistent across tickets"
       },
       "created_at": "2026-08-31T23:31:42Z",
@@ -14177,7 +14191,7 @@
       "created_at": "2026-09-01T03:41:58Z",
       "jira_id": "4591216",
       "jira_key": "REB-4343",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:01Z"
     },
@@ -14673,7 +14687,7 @@
       "created_at": "2026-09-01T03:42:01Z",
       "jira_id": "4591217",
       "jira_key": "REB-4344",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:03Z"
     },
@@ -14688,7 +14702,7 @@
       "created_at": "2026-09-01T03:42:04Z",
       "jira_id": "4591218",
       "jira_key": "REB-4345",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:06Z"
     },
@@ -15048,7 +15062,7 @@
       "created_at": "2026-09-01T03:42:07Z",
       "jira_id": "4591219",
       "jira_key": "REB-4346",
-      "peer_parent": "",
+      "peer_parent": "REB-4379",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:09Z"
     },
@@ -17869,7 +17883,7 @@
       "created_at": "2026-09-01T03:42:10Z",
       "jira_id": "4591220",
       "jira_key": "REB-4347",
-      "peer_parent": "",
+      "peer_parent": "REB-4379",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:12Z"
     },
@@ -18724,7 +18738,7 @@
         "assignee": null,
         "description": "## Context\nThe box fixture in tests/scripts/test_autodeploy_review_drain.py constructs env = dict(os.environ) and returns that mapping inside the fixture value. When a test fails, pytest renders the fixture argument and can print ambient credential values into local or CI logs. This was directly observed during a deliberate defect-seeded RED run; no credential value is recorded on this ticket. The performance ticket must not absorb an unrelated security fix.\n\n## Plan\n- Reproduce with a synthetic sentinel secret in the ambient environment and a deliberate assertion failure.\n- Change the fixture boundary to pass only required environment variables or use a representation-safe wrapper while preserving the real bash subprocess environment needed by the tests.\n- Audit sibling subprocess fixtures for the same dict(os.environ)-inside-rendered-fixture shape.\n- Prove the synthetic sentinel never appears in pytest failure output while the autodeploy suite remains behaviorally green.\n\n## Scope and alternative rationale\nThe construct sweep separates two runtime carriers rather than deferring equivalent leaks. This parent and child dumbstruck-wonderful-xiphosuran own the eight decorated fixtures whose returned values pytest renders as function arguments; explicit allowlists are correct there because minimal-parent runs prove their consumers need only declared harness values. The remaining broad mappings are test-local or helper values exposed only when subprocess startup itself raises. Some intentionally forward the invoking pytest environment or environment-only live-service credentials, so applying the fixture allowlist would break their contract. Follow-up antiutopic-toadyish-goldfinch owns all 103 of those sites as one atomic shared representation-safe mapping migration, with a repository guard and exact child-value preservation test. A repo-wide allowlist was rejected because it would drop required values; independent per-file wrappers were rejected because they would duplicate the same diagnostic boundary without enforcement.\n\n## Acceptance Criteria\n- [x] [operator-attested] A deterministic regression test fails before the fix because a synthetic ambient secret appears in captured pytest failure rendering.\n  provenance: environment=sanitized-red-probe-034e17209c; principal=RebarBotNava; privilege_posture=narrower; instrument=simulation \u2014 real nested pytest default-long traceback with first-position synthetic sentinel\n- [x] The synthetic secret is absent from failure output after the fix.\n- [x] Required PATH and autodeploy environment behavior remains covered through the real bash subprocess.\n- [x] Sibling occurrences are inventoried and either fixed or linked as follow-ups.\n- [x] [operator-attested] Repository gates and Gerrit votes pass before closure.\n  provenance: environment=gerrit-ci-run-32101886011; principal=rebar-ci-bot; privilege_posture=production-equivalent; instrument=static-analysis \u2014 canonical Gerrit Verified and LLM-Review gates for merged change 1847",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Prevent autodeploy test failures from printing ambient credentials"
       },
       "created_at": "2026-09-01T03:42:15Z",
@@ -19514,7 +19528,7 @@
       "created_at": "2026-09-01T03:42:18Z",
       "jira_id": "4591223",
       "jira_key": "REB-4350",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:21Z"
     },
@@ -20276,7 +20290,7 @@
       "created_at": "2026-09-01T03:42:21Z",
       "jira_id": "4591224",
       "jira_key": "REB-4351",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:23Z"
     },
@@ -21276,7 +21290,7 @@
       "created_at": "2026-09-01T03:42:26Z",
       "jira_id": "4591226",
       "jira_key": "REB-4353",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:29Z"
     },
@@ -25427,7 +25441,7 @@
       "created_at": "2026-09-01T03:42:34Z",
       "jira_id": "4591229",
       "jira_key": "REB-4356",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:37Z"
     },
@@ -26728,7 +26742,7 @@
       "created_at": "2026-09-01T03:42:40Z",
       "jira_id": "4591231",
       "jira_key": "REB-4358",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:42Z"
     },
@@ -27184,7 +27198,7 @@
       "created_at": "2026-09-01T03:42:45Z",
       "jira_id": "4591233",
       "jira_key": "REB-4360",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:47Z"
     },
@@ -28202,7 +28216,7 @@
       "created_at": "2026-09-01T03:42:48Z",
       "jira_id": "4591234",
       "jira_key": "REB-4361",
-      "peer_parent": "",
+      "peer_parent": "REB-4412",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:50Z"
     },
@@ -28274,7 +28288,7 @@
       "created_at": "2026-09-01T03:42:50Z",
       "jira_id": "4591235",
       "jira_key": "REB-4362",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:53Z"
     },
@@ -29919,7 +29933,7 @@
         "assignee": null,
         "description": "## Context / Problem\n\nThree agents on 2026-08-05 reported contradictory answers to \"does ticking an AC checkbox invalidate a plan-review attestation?\". The contradiction is a DIAGNOSTIC defect, not a behavioral one, and the empirical answer is now settled (see Findings). Every attestation staleness message today names a fixed, partly-fictional list of inputs, so a reader cannot tell which input actually changed and hunts for an edit that could never have been the cause. The operator has approved fixing this broadly: wherever rebar reports an attestation error, it must say WHAT CHANGED. That approval covers this ticket's whole scope, including the additive manifest change described below.\n\n## Findings that fix the scope (verified in this checkout)\n\n- The material basis is a SINGLE composite sha256, built in\n  `src/rebar/llm/plan_review/pass1.py` `material_fingerprint()` over exactly four keys \u2014\n  `ticket_id`, `description`, `file_impact`, `children` \u2014 plus `file_impact_scope` when the\n  scope is `none`. Verified by reading `pass1.py:750-777`.\n- AC checkbox STATE is normalized out of that basis by\n  `pass1.py::_normalize_checkbox_state` (`pass1.py:741-747`, bug 330c). Ticking `- [ ]` to\n  `- [x]` therefore does NOT invalidate an attestation. Confirmed by running\n  `material_fingerprint` over a tick-only description pair: the hashes are equal.\n- \"AC\" is NOT a basis component. Acceptance criteria live inside `description`. Every current\n  message says \"description/AC/file_impact/children\", naming an input that does not exist.\n- A pre-330c attestation hashed the RAW description, so after a tick neither the normalized\n  recompute nor the `attest.py::_legacy_material_ok` grandfather (`attest.py:614-631`) can\n  match, and it reads `stale-material` with no component actually edited. This is the residual\n  cause the current message hides, and it reconciles observation 3 in the original report.\n- `children` is derived from OTHER tickets' `parent_id` at read time\n  (`relation_snapshot.py::live_material_children`), not from this ticket's own event log.\n- The signed manifest ALREADY carries per-child/prerequisite pins \u2014\n  `plan-material-pin: <role> <id> <fingerprint>` parsed by `manifest.py::manifest_pins`\n  (`manifest.py:428-457`) \u2014 so the signed child-id set is recoverable from any pinned\n  attestation without any schema change.\n\n## Approach\n\nAdd per-component fingerprints to the signed manifest and diff them component-wise on read.\n\nConcretely:\n\n1. New module `src/rebar/llm/plan_review/material_diff.py` holding two functions.\n   `material_components(ctx)` returns `{name: hash16}` for each basis key, hashing exactly the\n   same per-key values `material_fingerprint` already feeds into the composite (so the two can\n   never disagree). `explain_material_change(attestation, ticket_id, repo_root)` returns a\n   compact human string naming the components that differ.\n2. `manifest.py::build_manifest` emits one additive, deterministic line per component:\n   `material-part: <name> <hash16>`, sorted by name. `manifest.py` gains\n   `manifest_material_parts()` to parse them back. The lines are additive, so an existing\n   verifier ignores them and a pre-change manifest simply parses to `{}`. The prefix cannot\n   collide with `manifest_material()`, which matches `startswith(\"material:\")`.\n3. `attest.py::compute_validity` calls `explain_material_change` for BOTH `stale-material`\n   returns (plan-review at `attest.py:588-601` and completion-verifier at `attest.py:527-538`)\n   and puts the named components in `reason`. It also names the reopen timestamp on\n   `stale-reopened` and keeps the already-specific `stale-code` / `stale-head` wording (both\n   already name the drifted paths / the two SHAs).\n4. `attest_gate.py::claim_gate_check`'s `unsigned` message (`attest_gate.py:121-126`) states\n   both remedies, because rebar cannot distinguish \"never reviewed\" from \"review PASSed but\n   signing aborted\": run `rebar review-plan <id>`, or `rebar sign-review <id>` if a review\n   already passed. `claim_gate_check` already forwards `compute_validity`'s `reason` verbatim,\n   and `_commands/transition_close.py::_raise_plan_review_close_gate_error` and\n   `_commands/claim.py` render that same string, so fixing the source fixes the claim gate, the\n   close gate and `review-plan --status` together.\n5. The sites that re-word or drop the reason instead of forwarding it are pointed at the same\n   helper or made to carry the data they already hold:\n   - `generation.py:265-269` and `resign.py:198-208` \u2014 replace the fixed list with the named\n     components.\n   - `generation.py:270-273` \u2014 \"a dependency's plan material changed since the review\" names no\n     dependency, although the changed pin set is in hand; `resign.py:262-270` already names the\n     ids, so this one is brought to parity.\n   - `completion.py:178` \u2014 a child's closure-validity detail is currently\n     `f\"signature: {sig.get('verdict')}\"`, dropping the reason that explains it; it forwards the\n     reason too.\n   - `_cli/_llm_commands.py:118-141` \u2014 a `plan_review_sign_aborted` signing failure currently\n     renders the generic \"run `rebar sign-review`\" advice, which is wrong for the\n     `store-read-failure` reason (a re-sign hits the same unreadable read). It gets its own\n     branch naming the reason and the correct remedy.\n   - `attest_gate.py:166-167` \u2014 the docstring's verdict vocabulary omits `not-closed`,\n     `malformed-phase`, `incompatible-phase` and the `stale-pin-*` values; corrected so the\n     documented list matches what `compute_validity` can actually return.\n\n   These were found by an exhaustive sweep of every attestation refusal surface. Surfaces\n   deliberately left unchanged because they already forward the reason verbatim:\n   `_commands/gates.py::_claim_gate_reason`, `_commands/transition_close.py`, and\n   `llm/code_review/bugfix_size_gate.py`. `attest/opcert.py` and `signing.py` are also left\n   alone: their verdicts are cryptographic (`mismatch` / `foreign_key`), not staleness, and\n   already name the two keys or ids that differ.\n\nWhy this approach: the composite hash is one-way, so naming a changed component requires the old per-component values, and the only trustworthy source for them is the SIGNED manifest \u2014 anything reconstructed at read time could disagree with what the reviewer actually saw. The alternative of replaying the event store to `signed_at` is rejected: `children` comes from other tickets' state, so it would need a whole-store replay, and compaction squashes exactly the old events where legacy attestations live. Adding the parts to the manifest is additive, authenticated by the existing HMAC, and deterministic (no timestamps), so re-signing stays reproducible.\n\nAttestations signed before this change carry no `material-part:` lines. For them `explain_material_change` degrades in two useful steps rather than falling back to the old fixed list: it uses the signed `plan-material-pin:` child ids to report a `children` add/remove diff when one exists, and when no component difference can be named it says so plainly and points at the pre-330c normalization basis as the likely cause, with the remedy.\n\nNo gate outcome changes: every edit is inside the `reason` string of an already-failing branch, or is a new additive manifest line. No branch condition, threshold or verdict value is touched.\n\n## Scope\n\n- `src/rebar/llm/plan_review/material_diff.py` (new) \u2014 component hashing + the diff/explain\n  helper.\n- `src/rebar/llm/plan_review/manifest.py` \u2014 emit and parse `material-part:` lines.\n- `src/rebar/llm/plan_review/attest.py` \u2014 component-named `stale-material` reasons (both\n  kinds); timestamp-named `stale-reopened`.\n- `src/rebar/llm/plan_review/attest_gate.py` \u2014 actionable `unsigned` message.\n- `src/rebar/llm/plan_review/generation.py` \u2014 replace the fixed-list wording.\n- `src/rebar/llm/plan_review/resign.py` \u2014 replace the fixed-list wording.\n- `src/rebar/llm/completion.py` \u2014 forward the child-closure validity reason, not just the\n  verdict.\n- `src/rebar/_cli/_llm_commands.py` \u2014 a dedicated render branch for a `plan_review_sign_aborted`\n  signing failure that names the reason and the correct remedy.\n- `docs/plan-review-gate.md` \u2014 state plainly that ticking a checkbox is attestation-safe, and\n  document the component-named staleness reasons.\n- `tests/unit/plan_review/test_94a3_material_diff.py` (new) \u2014 the tests below.\n\n`pass1.py` is at 776 of the 800-line cap, so the new hashing helper goes in `material_diff.py` and `pass1.py` is not touched.\n\n## Testing\n\n- Happy path: an attestation whose `file_impact` changed reports a reason containing\n  `file_impact` and NOT `description` or `children`; likewise a description-only edit and a\n  children-only edit, one test each.\n- Checkbox pin (330c): an attestation over a description whose boxes are then ticked reports\n  `certified`, not `stale-material` \u2014 pinning the normalization that is currently only implicit.\n- Legacy/grandfather regression: a pre-330c attestation (raw-description basis) over an\n  unchanged ticket still reports `certified`, and one that cannot be grandfathered reports the\n  \"no component differs\" wording rather than a spurious component name.\n- Edge: an attestation with no `material-part:` lines and no pins still produces an actionable\n  reason and never raises.\n- Gate-outcome invariance: for each of the stale verdicts, assert `valid is False` and the\n  `verdict` value is unchanged from the current code \u2014 the same inputs are still refused.\n- The full existing suites `tests/unit/test_compute_validity.py`,\n  `tests/unit/test_legacy_material_grandfather_96d1.py`,\n  `tests/unit/test_attestation_invalidation.py` and `tests/unit/test_plan_material_pins.py`\n  pass unchanged.\n\n## Acceptance Criteria\n\n- [ ] `material_diff.material_components(ctx)` returns a per-component hash map whose keys are\n      exactly the `material_fingerprint` basis keys; verified by a test that asserts the key set\n      matches and that changing one component changes only that component's hash.\n- [ ] `build_manifest` emits sorted `material-part: <name> <hash16>` lines and\n      `manifest_material_parts()` round-trips them; verified by a test asserting the round-trip\n      and that a manifest without the lines parses to `{}`.\n- [ ] A `stale-material` reason from `compute_validity` NAMES the differing component(s) with a\n      compact magnitude (for example `file_impact: 13 -> 16 paths`) and does not contain the\n      string `description/AC/file_impact/children`; verified by one test per component, plus a\n      repo-wide grep asserting that literal no longer appears in `src/`.\n- [ ] Ticking checkboxes only leaves the verdict `certified`; verified by a test that signs over\n      an unticked description, ticks every box, and asserts `compute_validity` returns\n      `verdict == \"certified\"`.\n- [ ] A pre-330c (raw-description) attestation over an unchanged ticket still returns\n      `certified`, and an un-grandfatherable one returns a reason that says no component differs\n      rather than naming a component; verified by two tests.\n- [ ] `stale-reopened` names the reopen timestamp and `unsigned` names both `review-plan` and\n      `sign-review` remedies; verified by asserting those substrings in the reasons.\n- [ ] A `plan_review_sign_aborted` signing failure renders its reason (for example\n      `store-read-failure`) and does NOT advise `sign-review`; verified by a test that feeds a\n      verdict carrying that event to the renderer and asserts both facts.\n- [ ] A dependency-material change from `generation.py` names the changed dependency ticket\n      ids, matching `resign.py`'s existing wording; verified by asserting the ids appear in the\n      raised message.\n- [ ] No gate outcome changes: for every branch touched, a test asserts the same\n      `(valid, verdict)` pair as before, and `pytest tests/unit tests/integration` passes.\n- [ ] `docs/plan-review-gate.md` states plainly that ticking an AC checkbox is\n      attestation-safe; verified by a grep for that statement in the file.\n\n## Provenance\n\nThree independent agent reports on 2026-08-05, recorded in the original description above. Related: bug 858c-786a-13be-4332 (the close gate cannot express an N/A criterion).",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Whether ticking an AC checkbox invalidates a plan-review attestation is inconsistent across tickets"
       },
       "created_at": "2026-09-01T03:42:59Z",
@@ -31423,7 +31437,7 @@
       "created_at": "2026-09-01T03:43:04Z",
       "jira_id": "4591240",
       "jira_key": "REB-4367",
-      "peer_parent": "",
+      "peer_parent": "REB-4359",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:06Z"
     },
@@ -31811,7 +31825,7 @@
       "created_at": "2026-09-01T03:43:10Z",
       "jira_id": "4591242",
       "jira_key": "REB-4369",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:12Z"
     },
@@ -34275,7 +34289,7 @@
       "created_at": "2026-09-01T03:43:12Z",
       "jira_id": "4591243",
       "jira_key": "REB-4370",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:15Z"
     },
@@ -36488,7 +36502,7 @@
       "created_at": "2026-09-01T03:43:18Z",
       "jira_id": "4591245",
       "jira_key": "REB-4372",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:20Z"
     },
@@ -37005,7 +37019,7 @@
       "created_at": "2026-09-01T03:43:21Z",
       "jira_id": "4591246",
       "jira_key": "REB-4373",
-      "peer_parent": "",
+      "peer_parent": "REB-4412",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:23Z"
     },
@@ -37891,7 +37905,7 @@
       "created_at": "2026-09-01T03:43:23Z",
       "jira_id": "4591247",
       "jira_key": "REB-4374",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:25Z"
     },
@@ -39725,7 +39739,7 @@
       "created_at": "2026-09-01T03:43:29Z",
       "jira_id": "4591249",
       "jira_key": "REB-4376",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:31Z"
     },
@@ -40616,7 +40630,7 @@
       "created_at": "2026-09-01T03:43:32Z",
       "jira_id": "4591250",
       "jira_key": "REB-4377",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:34Z"
     },
@@ -41008,7 +41022,7 @@
       "created_at": "2026-09-01T03:43:34Z",
       "jira_id": "4591251",
       "jira_key": "REB-4378",
-      "peer_parent": "",
+      "peer_parent": "REB-4379",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:37Z"
     },
@@ -44116,7 +44130,7 @@
       "created_at": "2026-09-01T03:43:43Z",
       "jira_id": "4591254",
       "jira_key": "REB-4381",
-      "peer_parent": "",
+      "peer_parent": "REB-4379",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:46Z"
     },
@@ -47621,7 +47635,7 @@
       "created_at": "2026-09-01T03:43:52Z",
       "jira_id": "4591257",
       "jira_key": "REB-4384",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:43:54Z"
     },
@@ -50773,7 +50787,7 @@
       "created_at": "2026-09-01T03:43:58Z",
       "jira_id": "4591259",
       "jira_key": "REB-4386",
-      "peer_parent": "",
+      "peer_parent": "REB-4359",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:00Z"
     },
@@ -51256,7 +51270,7 @@
       "created_at": "2026-09-01T03:44:00Z",
       "jira_id": "4591260",
       "jira_key": "REB-4387",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:03Z"
     },
@@ -51271,7 +51285,7 @@
       "created_at": "2026-09-01T03:44:03Z",
       "jira_id": "4591261",
       "jira_key": "REB-4388",
-      "peer_parent": "",
+      "peer_parent": "REB-4412",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:05Z"
     },
@@ -51815,7 +51829,7 @@
       "created_at": "2026-09-01T03:44:06Z",
       "jira_id": "4591262",
       "jira_key": "REB-4389",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:08Z"
     },
@@ -52964,7 +52978,7 @@
       "created_at": "2026-09-01T03:44:11Z",
       "jira_id": "4591264",
       "jira_key": "REB-4391",
-      "peer_parent": "",
+      "peer_parent": "REB-4412",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:13Z"
     },
@@ -53318,7 +53332,7 @@
       "created_at": "2026-09-01T03:44:14Z",
       "jira_id": "4591265",
       "jira_key": "REB-4392",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:16Z"
     },
@@ -55061,7 +55075,7 @@
       "created_at": "2026-09-01T03:44:22Z",
       "jira_id": "4591268",
       "jira_key": "REB-4395",
-      "peer_parent": "",
+      "peer_parent": "REB-4359",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:24Z"
     },
@@ -55575,7 +55589,7 @@
       "created_at": "2026-09-01T03:44:25Z",
       "jira_id": "4591269",
       "jira_key": "REB-4396",
-      "peer_parent": "",
+      "peer_parent": "REB-4412",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:27Z"
     },
@@ -55988,7 +56002,7 @@
       "created_at": "2026-09-01T03:44:28Z",
       "jira_id": "4591270",
       "jira_key": "REB-4397",
-      "peer_parent": "",
+      "peer_parent": "REB-4337",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:30Z"
     },
@@ -57312,7 +57326,7 @@
       "created_at": "2026-09-01T03:44:34Z",
       "jira_id": "4591272",
       "jira_key": "REB-4399",
-      "peer_parent": "",
+      "peer_parent": "REB-4412",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:36Z"
     },
@@ -57604,10 +57618,24 @@
     },
     "e4a5-1e8e-e441-43a3": {
       "baseline": {
-        "assignee": null,
-        "description": "## Problem\n\nEvery COMPLETION_VERDICT sidecar is emitted with `material=None` \u2014 `completion_sidecar.emit(result, material=None, repo_root=repo_root)` at `src/rebar/_commands/close_precheck.py:405`, with the comment at `:754` noting no fingerprint is computed on this path. Measured on the live store: 0 of the most recent 300 COMPLETION_VERDICT sidecars (216 PASS / 59 FAIL / 23 no-verdict / 2 ERROR) carry any material/material_fingerprint field.\n\n## Consequence (why this is worth fixing)\n\nA FAIL followed by a PASS on the same `verified_at_sha` cannot be attributed: verifier inputs include ticket comments and prefetched evidence, which change without a code commit, so \"no commit in between\" does not mean \"same inputs.\" This makes the completion gate's precision unmeasurable from its own records (an analysis this week mis-derived an \"80\u201384% FP\" figure from exactly this gap), and it means completion attestations cannot support the stale-material currency discipline that plan-review attestations already have.\n\nNote: the `material=None` is deliberate per the code's own comment \u2014 this ticket treats the capability gap as the defect (operator-directed filing, 2026-08-31). Formula/prompt version stamping in the same record would make longitudinal gate analysis version-aware (pass-3 blocking formulas have changed over time, so unversioned sidecars conflate formula eras).\n\n## Acceptance criteria\n\n- [ ] COMPLETION_VERDICT sidecars (PASS, FAIL, ERROR alike) record a material fingerprint over the verifier's actual inputs (ticket material as pinned for the run: description/ACs/comments snapshot + evidence set identifiers), reusing the existing plan-review fingerprint machinery where applicable rather than inventing a new scheme.\n- [ ] Sidecars record the verifier formula/prompt version identifier alongside the fingerprint.\n- [ ] Existing sidecars are untouched (no backfill); consumers treat absent material as \"unknown era\".\n- [ ] A regression test asserts a FAIL sidecar carries a non-null fingerprint and version.\n\n## File impact\n\nTo be confirmed at investigation (bugs do not pre-declare impact): expected `src/rebar/_commands/close_precheck.py`, `src/rebar/llm/completion_sidecar.py` (or equivalent emitter), one test module.\n\n## Fix plan (2026-08-31)\n\n### Root cause\n\nThe completion verifier already computes/pins material identity (`material_fingerprint` plus the pinned `completion_read_basis` receipt) before close publication, but both close-time and standalone sidecar emitters pass `material=None`, and `completion_sidecar.build_payload` only serializes that explicit argument. The sidecar therefore drops the verifier-input identity it already has. The same COMPLETION_VERDICT event family also carries `gate_error_v1` ERROR records without a completion-verifier prompt/formula version.\n\n### Scope / file impact\n\n- `src/rebar/llm/completion_sidecar.py`: make COMPLETION_VERDICT PASS/FAIL payload construction derive a non-null material fingerprint from the verifier result when the caller does not supply one, incorporating the existing plan-review material fingerprint and the pinned completion read-basis receipt digest when available; stamp the completion-verifier prompt version/content hash.\n- `src/rebar/_commands/close_precheck.py`: stop documenting the close-path sidecar as deliberately material-less and let the shared emitter enrich PASS/FAIL records without changing close outcomes.\n- `src/rebar/_commands/transition_close.py`: keep standalone `verify-completion` recording behavior/outcomes unchanged while allowing the shared emitter to enrich PASS/FAIL records.\n- `src/rebar/llm/gate_error_sidecar.py`: for completion-gate ERROR sidecars, best-effort stamp the same material/version observability fields; preserve best-effort/no-outcome-change semantics.\n- `tests/unit/test_completion_sidecar_material_balding.py`: RED\u2192GREEN regression coverage that a FAIL sidecar carries non-null fingerprint and version, plus payload coverage for PASS/FAIL/ERROR era handling.\n\n### Acceptance criteria mapping\n\n- AC1: New PASS/FAIL sidecars will write `material_fingerprint` from existing verifier material (`result['material_fingerprint']`) and, when present, the pinned `completion_read_basis` receipt digest that represents the ticket/comments snapshot actually consulted. ERROR sidecars in the completion gate will best-effort compute current material identity so ERROR intervals are not unversioned/unknown when the verifier fails before a normal verdict.\n- AC2: New sidecars will carry `verifier_prompt_version` (completion-verifier prompt id + git-canonical content sha256) beside the fingerprint.\n- AC3: No migration/backfill/prune path is touched. Readers remain tolerant of absent material/version fields, so old sidecars stay \"unknown era\".\n- AC4: A regression test will assert a FAIL sidecar emitted through the public `completion_sidecar.emit` path carries non-null fingerprint and prompt version; it will be observed RED before production code changes and GREEN after.\n\n### Safety invariants\n\nThis is record enrichment only. It must not alter the completion PASS/FAIL/ERROR verdict, close blocking, signing eligibility, or whether sidecar persistence failures are swallowed. If any candidate change affects those gate outcomes, stop and seek an operator decision.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Problem\n\nEvery COMPLETION_VERDICT sidecar is emitted with `material=None` \u2014 `completion_sidecar.emit(result, material=None, repo_root=repo_root)` at `src/rebar/_commands/close_precheck.py:405`, with the comment at `:754` noting no fingerprint is computed on this path. Measured on the live store: 0 of the most recent 300 COMPLETION_VERDICT sidecars (216 PASS / 59 FAIL / 23 no-verdict / 2 ERROR) carry any material/material_fingerprint field.\n\n## Consequence (why this is worth fixing)\n\nA FAIL followed by a PASS on the same `verified_at_sha` cannot be attributed: verifier inputs include ticket comments and prefetched evidence, which change without a code commit, so \"no commit in between\" does not mean \"same inputs.\" This makes the completion gate's precision unmeasurable from its own records (an analysis this week mis-derived an \"80\u201384% FP\" figure from exactly this gap), and it means completion attestations cannot support the stale-material currency discipline that plan-review attestations already have.\n\nNote: the `material=None` is deliberate per the code's own comment \u2014 this ticket treats the capability gap as the defect (operator-directed filing, 2026-08-31). Formula/prompt version stamping in the same record would make longitudinal gate analysis version-aware (pass-3 blocking formulas have changed over time, so unversioned sidecars conflate formula eras).\n\n## Acceptance criteria\n\n- [ ] COMPLETION_VERDICT sidecars (PASS, FAIL, ERROR alike) record a material fingerprint over the verifier's actual inputs (ticket material as pinned for the run: description/ACs/comments snapshot + evidence set identifiers), reusing the existing plan-review fingerprint machinery where applicable rather than inventing a new scheme.\n- [ ] Sidecars record the verifier formula/prompt version identifier alongside the fingerprint.\n- [ ] Existing sidecars are untouched (no backfill); consumers treat absent material as \"unknown era\".\n- [ ] A regression test asserts a FAIL sidecar carries a non-null fingerprint and version.\n\n## File impact\n\nTo be confirmed at investigation (bugs do not pre-declare impact): expected `src/rebar/_commands/close_precheck.py`, `src/rebar/llm/completion_sidecar.py` (or equivalent emitter), one test module.\n\n## Fix plan (2026-08-31, concise reviewed scope)\n\nRoot cause: completion verifier results already carry or can carry input identity, but `completion_sidecar.build_payload` only serializes the explicit `material` argument. Close-time and standalone emitters pass `material=None`, atomic PASS calls `build_payload` directly, and completion `gate_error_v1` records lack the same version/fingerprint observability. The change is additive record enrichment only: verdicts, close blocking, signing eligibility, and best-effort error swallowing must not change.\n\nFingerprint contract: new sidecars keep `material_fingerprint`, as sha256-16 over JSON schema `completion_verifier_material_v1`.\n\nNormal pinned PASS/FAIL writes `material_basis=\"pinned_completion_inputs\"` and hashes: existing plan-review material fingerprint (`current_material_fingerprint` / `pass1.material_fingerprint`), pinned `completion_read_basis` identifiers (`code_oid`, `tickets_oid`, `receipt_digest`, `run_id`), and `completion_prefetch_manifest` identifiers (`path`, `mode`) threaded from the precheck's `PRE-LOAD MANIFEST`. Mechanism: `completion_precheck` keeps `assemble_prefetch(...)->manifest`, returns it as `completion_prefetch_manifest`, the workflow YAML passes that output into `completion_reconcile`, and the reconcile op copies a non-empty list onto the verdict dict that close/standalone emitters already pass to `completion_sidecar.emit`; atomic PASS passes `repo_root` into `build_payload`. `REBAR_VERIFY_PREFETCH=0` produces an empty manifest but remains pinned when `completion_read_basis.receipt_digest` is present. Example basis keys: `{schema, material_basis, plan_material_fingerprint, completion_read_basis:{code_oid,tickets_oid,receipt_digest,run_id}, completion_prefetch_manifest:[{path,mode}]}`. `receipt_digest` is load-bearing because it covers the exact ticket/comments snapshot.\n\nFallbacks are explicit: `material_basis=\"unpinned_completion_inputs\"` for legacy/local/deterministic precheck FAIL with current plan material but no read basis; `material_basis=\"error_unpinned\"` for completion ERROR before a verdict result exists. If no ticket material can be read, material remains absent/unknown and the gate outcome is unchanged.\n\nVersion contract: every new completion sidecar carries `verifier_version={prompt_id:\"completion-verifier\", prompt_content_sha256:\"<git-canonical prompt hash>\", formula_version:\"<signing.gate_code_version()>\"}`. The sidecar emitter resolves `get_prompt(\"completion-verifier\")`, hashes `canonical_prompt_text(...)` with `prompt_content_hash`, and reads `signing.gate_code_version()` independently, so the produce_completion_verdict preflight-ERROR path can stamp the same version even though no prompt step ran. If either lookup fails, that component is recorded as `unknown` without changing the gate outcome; old records without the field remain unknown era.\n\nShared ERROR scope: `gate_error_sidecar` serves plan_review, code_review, and completion. Enrichment is conditional on `gate == \"completion\"` only. Completion ERROR call sites covered: `produce_completion_verdict` preflight and `completion_failures.raise_completion_workflow_failure`. Plan-review/code-review ERROR shapes stay unchanged.\n\nFile impact: `src/rebar/llm/completion_sidecar.py`; `src/rebar/_commands/completion_bundle.py`; `src/rebar/llm/workflow/gate_ops.py`; `src/rebar/llm/workflow/gates/completion-verification.yaml`; `src/rebar/schemas/completion_precheck_output.schema.json`; `src/rebar/schemas/completion_reconcile_input.schema.json`; `src/rebar/llm/gate_error_sidecar.py`; `tests/unit/test_completion_sidecar_material_balding.py`.\n\nVerification: (1) RED first: add a FAIL-sidecar regression test and run only it; it fails today because `material_fingerprint` is null and `verifier_version` absent. (2) GREEN: tests assert pinned FAIL has non-null version, `material_basis=\"pinned_completion_inputs\"`, includes prefetch manifest, and its fingerprint changes when `receipt_digest` changes; also cover PASS direct-builder enrichment, unpinned FAIL fallback, completion-only ERROR enrichment, and plan/code-review ERROR non-enrichment. (3) AC3 reader proof: `latest_fail_verdict` / `latest_pass_record` still return legacy records lacking material/version. (4) Mutation-teeth in sandbox: reintroduce the builder omission; held-out FAIL test returns RED, then restore. (5) Focused sidecar/workflow/atomic-close tests plus lint/typecheck.\n\nAC mapping: AC1 pinned PASS/FAIL fingerprint includes existing plan material, receipt digest, and prefetch identifiers; fallback values mark unpinned/error cases. AC2 is `verifier_version`. AC3 has no backfill/prune/reader rejection change. AC4 is the RED\u2192GREEN FAIL test, including receipt-digest dependency.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Completion-verifier sidecars carry no material fingerprint, so FAIL->PASS transitions cannot be attributed"
       },
       "created_at": "2026-09-01T03:44:37Z",
@@ -58591,7 +58619,7 @@
       "created_at": "2026-09-01T03:44:43Z",
       "jira_id": "4591275",
       "jira_key": "REB-4402",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:45Z"
     },
@@ -59385,7 +59413,7 @@
         },
         "description": "## Context\n\nImplement the accepted scope from architecture recommendations 2, 4, and 6, following the evidence on `expecting-renowned-buzzard`.\n\nCurrent `origin/main` still has three related sources of protocol complexity:\n\n- Reconciler `Mutation` has typed direction/action but a generic `Mapping[str, Any]` payload. Outbound typed mutations are converted through `_mutation_to_batch_dict()` into the legacy batch shape; two CREATE shapes and a polymorphic `applier.apply()` remain.\n- `PydanticAIRunner.run()` has regrown after ADR 0056. Existing ownership seams already include `ProviderSession`, `model_classes`, `structured_run`, `agent_call`, `runner_support`, capability modules, and ordered success/failure telemetry. The next change must improve those boundaries, not duplicate them.\n- ADR 0098's `OperationSnapshot` is authoritative for reconciler runtime bindings, but CLI/shared command paths still call `emit_shadow_snapshot()`, and many LLM operations independently resolve `LLMConfig.from_env()`.\n\nThis epic completes these migrations. It extends ADR 0103 rather than reopening its retry/coordinator decision, works within ADRs 0056 and 0058 unless the runner research child proves an amendment is needed, and completes ADR 0098's expand/contract migration.\n\n## Outcomes\n\n### A. One typed reconciler representation and one production route\n\nDefine payload types as a discriminated union by `(direction, action)`, carry them through planner/coordinator/adapter boundaries, prove behavior against a broad corpus in side-effect-free shadow mode, then cut production over and delete dictionary translation and legacy dispatch in this epic. Deletion is part of the cutover, not a follow-up.\n\n### A1. Reconciler runway and producer inputs\n\nRestore <=700-line headroom in the uncovered spine modules, then eliminate the loose 24-value producer seam using Brant/RP-03 types and owners\u2014never a second generic context.\n\n### B. Runner lifecycle ownership grounded in current architecture\n\nFirst produce a current effect/resource timeline and fault matrix. Then reshape only call-graph seams that the evidence supports, preserving `ProviderSession` as provider-resource owner, fallback `ExitStack` ordering, failure accounting, pre-finalization success logging, final spend/result-shape updates, provider provenance, and existing injection contracts.\n\nNo new function-NLOC ratchet or per-file headroom gate is in scope. ADR 0058's single 800-LOC ceiling remains the hard gate and debt signal. The reconciler's one-time prerequisite extractions restore room under that existing gate; they do not create another enforcement mechanism. Any future function-size metric requires separate evidence and approval.\n\n### C. Authoritative operation configuration\n\nMake the existing `OperationSnapshot` and focused runtime bindings behavior-bearing at the CLI, MCP, Python, shared command/store, and LLM operation boundaries. An operation composes once; downstream code consumes projections/context and cannot reread environment, files, or CWD. Remove diagnostic shadow composition and migrated ambient-resolution paths after parity.\n\n## Verification strategy (executed; see AC evidence below for outcomes)\n\nPortable/default-CI shadow replay; ephemeral Jira DC exact-patchset differential/convergence; runner fault-injection across lifecycle boundaries; consumer-level metamorphic config tests. The Jira DC lane is additive evidence, not the only gate.\n\n## Constraints\n\n- No production dual-write/double-send comparison.\n- Reuse the existing ephemeral Jira DC harness and isolation assertions; do not build a second DC test environment.\n- Preserve Jira Cloud behavior with verified fakes/transport contracts even though large-scale live mutation testing uses disposable DC.\n- Reuse `OperationSnapshot`, central schema/provenance, `LLMRuntime`, `ProviderSession`, and current runner leaf modules; no second config schema, generic hook bus, plugin framework, or decorative frozen lifecycle carriers.\n- Reuse reconciler `Observation`, `TicketPlan`, and current pass/runtime owners; no generic option-bag replacement.\n- String imports, monkeypatch targets, and compatibility re-exports require a census before movement/deletion.\n- New structural decisions complete the ADR lifecycle before dependent implementation; accepted ADRs are constraints, not prose to reimplement.\n- Keep every intermediate Gerrit change independently testable and green.\n\n## Acceptance Criteria\n\n- [x] Every supported reconciler `(direction, action)` has one typed payload contract; planners/coordinator/adapters/tests consume it without generic dicts. Evidence: f448 (spec) -> e9d5 (typed payloads+corpus) -> 6452 (converged inputs) -> 3f27 (cutover). `outbound_pass.py` builds every Mutation with a typed `Outbound{Create,Update,Delete}Payload`.\n- [x] Portable shadow corpus covers create/update/delete/probe/conflict, inbound-only, links/comments/labels/status/parent/binding, retries, malformed input, suppression, multi-project routing; traces match. Evidence: `test_payload_shadow_corpus.py`+`test_payload_shadow_effect_spies.py` (36 tests, green post-cutover).\n- [x] Exact-patchset ephemeral Jira DC CI run proves isolated differential parity and typed-only post-deletion convergence, no live-remote route. Evidence: `jira-dc-exact-patchset.yml` (3f27), live-run 33455991406: 74 passed, 1 skipped (LLM-gated), 1 xfailed (pre-existing, 2b16), 0 failed. Verified SHA matched pushed revision.\n- [x] Duplicate CREATE-shape ambiguity deleted; one production route remains (3f27). `_mutation_to_batch_dict`/the `MutationShape` ternary are RETAINED-justified: both serve `apply()`'s separate, still-documented `list[dict]` legacy-batch calling convention (deleting broke ~50 unrelated tests) -- not dead legacy. Full census on 3f27 / `docs/architecture.md`.\n- [x] Runner research records ownership/effect timeline + ADR disposition before refactoring; reuses established seams, no new size gate. Evidence: c465 (research: ADR 0056 already authorizes the seam, no restructuring warranted) -> 6586 (no code moved, owner map confirmed, suites green unchanged).\n- [x] CLI/MCP/Python/shared command-store/LLM operations compose one authoritative snapshot/context; consumers don't reread ambient config. Evidence: 3a08 (CLI/command/store) + ec44 (LLM ops; `LLMRuntime`/`ProviderSession` remain resource owners).\n- [x] Diagnostic shadow composition + migrated legacy resolution paths deleted; ownership checks/metamorphic tests prevent reintroduction. Evidence: 3a08 deleted 23 `_shadow(...)`/CLI call sites; ec44 deleted `emit_shadow_snapshot`+switch+migrated `from_env` branches. `check_config_ownership.py` carries zero new exceptions.\n- [x] Focused suites, default suite, lint, typecheck, complexity/module-size gates, portable oracles, Jira DC lane pass; docs/ADR status match landed architecture. Evidence: `make test` 18,568 passed (8 pre-existing/host-only, reconfirmed unrelated), lint/typecheck clean, DC lane green (run 33455991406). ADR 0107 + ADR 0098 both landed.\n- [x] `reconcile.py`/`reconcile_helpers.py` each <=700 LOC via cohesive deletion/extraction; lifecycle facade + ADR 0099 boundary guarded. Current: 333/394 LOC (0f21/7153 headroom + e9d5/3f27 cutover deletions).\n- [x] No producer retains/repackages the 24-value outbound-update bundle; cohesive Brant/RP-03 inputs. Evidence: 6452 reduced `_compute_outbound_update_mutation` 24->10, `_compute_outbound_create_mutation` 11->7 params per ADR 0107 (rejected generic-context wrapper).\n- [x] Final epic evidence reports deleted representations/routes/ambient authorities; no cleanup deferred solely to keep both paths live. Deleted: dict-payload route, CREATE-shape ambiguity, 23 shadow call sites, `emit_shadow_snapshot`+switch, migrated `from_env` branches, 24-value bundle. Retained-justified items serve an unrelated, still-documented calling convention. Full sweep in the epic comment thread.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Converge reconciler, runner, and operation boundaries"
       },
       "created_at": "2026-08-29T18:35:03Z",
@@ -60270,7 +60298,7 @@
       "created_at": "2026-09-01T03:44:48Z",
       "jira_id": "4591277",
       "jira_key": "REB-4404",
-      "peer_parent": "",
+      "peer_parent": "REB-4359",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:51Z"
     },
@@ -61164,7 +61192,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\nPass 1 (`src/rebar/llm/plan_review/pass1.py`, `passes.pass1_chunk`, prompts `reviewers/plan_review_finder.md` + one `plan_review_<ID>.md` per criterion, routing in `criteria_routing.json`, frontier class = Opus on Bedrock) is the expensive pass. A criterion edit cannot be judged from stored data alone, so Tier 2 re-runs finders on a small fixed sample. Per-criterion edits are far cheaper in single-criterion mode; prior work (`docs/experiments/plan-review-model-tradeoff.md`) showed Opus is flat to 12 criteria/turn while Sonnet degrades.\n\n**Execution tier is per-criterion \u2014 exact contract.** `registry.exec_tier(crit)` (registry.py:604-610) returns ONLY one of `\"AGENT\"` / `\"2-STEP\"` / `\"1-TURN\"` \u2014 there is NO `\"CONTAINER\"` return value. It returns `\"AGENT\"` for any id in `AGENT_TIER` (registry.py:97-116 \u2014 the FULL frozenset: `G1G2, E4, A1, G6, G3, G4, G7, T1, T3, T5c, T8, T10, T11, asserted-capability, evidence-kind, decomp-shape`) or when `crit[\"exec\"] == \"AGENT\"`. `G3`/`G4` therefore resolve to `\"AGENT\"` from `exec_tier`, NOT a container value \u2014 the container fan-out (`pass1_container`) is a SEPARATE downstream step: `production_batch_runner._resolve_criteria` (production_batch_runner.py:198-248) splits criteria into `(single, agent, skipped)` purely by `exec_tier(desc) == \"AGENT\"`, and its own docstring states G3/G4 are \"pulled out of `agent` by `run_pass1` itself\" \u2014 i.e. `run_pass1` inspects the resolved `agent` list afterward and routes G3/G4 to `pass1_container` from there. Tier-2 derives its own single/agent/container split the same way: resolve via `exec_tier`, then separately check membership in the (small, hardcoded in `run_pass1`) G3/G4 container set.\n\n**Single-criterion filtering \u2014 exact mechanism.** `BatchRunRequest.criteria` (workflow/runners.py:66, `tuple[Mapping[str, Any], ...]`, each entry `{prompt, with?}`) is what `_resolve_criteria` actually filters on. `req.with_inputs[\"probe_criteria\"]` (a SEPARATE field) is consumed ONLY by `_project_criteria` for `project.*`-prefixed fan-in criteria (production_batch_runner.py:114-118) \u2014 it does NOT filter `req.criteria`/`_resolve_criteria`'s built-in dispatch. To run exactly one named criterion against `ProductionBatchRunner` directly, Tier-2 constructs `req.criteria = ({\"prompt\": f\"plan-review-{id}\"},)` (a single-entry tuple) itself \u2014 `_resolve_criteria` then correctly routes that one descriptor through `exec_tier` into `single` or `agent`. (The workflow-level PROBE MODE that reads `ctx.inputs[\"probe_criteria\"]` to filter built-ins, `workflow_ops.py:254-263`, is a different, higher-layer mechanism for workflow-driven runs and is not used here since Tier-2 invokes the runner directly.)\n\nCost varies by resolved tier: `1-TURN`/`2-STEP` criteria cost \u2248 $0.17-0.25/sample (the AC's ceiling, applies ONLY to ids resolving to `1-TURN`/`2-STEP`); `AGENT`-tier criteria (including the G3/G4 container subset) cost their real production rate and are reported separately in the ledger, with no fixed per-sample ceiling assumed.\n\n**Tier-1 chaining, corrected.** `tier1.replay_review` requires a STORED `verification` on each finding to build `stored_answers` \u2014 a freshly-generated Tier-2 candidate finding has none, so Tier-1's `per_question_agreement`/`distribution_shift` cannot run on it directly. Tier 2's \"downstream\" instead reuses Tier-1/Tier-0's COMPUTATION functions: candidate findings are verified fresh via the SAME `verify_findings` seam Tier-1 uses, then `review_kernel.decide.pass3_decide`/`pass3_over_findings` computes a CANDIDATE VERDICT from them, compared against the STORED verdict already recorded in the original review's sidecar \u2014 a verdict-level flip matrix (Tier-0's shape), not a per-question agreement table.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/tier2.py`:\n\n- **Fixed sample**: ~20 review ids drawn once by the Tier-1 stratified sampler (additional strata: \u22655 containers, \u22658 with \u226510 findings, \u22653 from the LMN store), committed as `docs/experiments/plan-review-gate/replay/tier2-sample.json`. Plan text from reconstructed material; code-grounded AGENT criteria run against the pinned `verified_at_sha` snapshot via `source=attested`.\n- **Full mode**: run the candidate registry/prompts through `ProductionBatchRunner`, frontier class pinned to Bedrock Opus; compare candidate Pass-1 finding sets to stored findings by `norm_id` (Jaccard, gained/lost per criterion); verify candidate findings via `verify_findings`, compute their verdict via `pass3_decide`/`pass3_over_findings`, compare to the stored verdict (flip matrix).\n- **Single-criterion mode**: `--criteria T5c` constructs `req.criteria = ({\"prompt\": \"plan-review-T5c\"},)` on a `BatchRunRequest` and runs it directly through `ProductionBatchRunner`/`_resolve_criteria` (real single/agent dispatch by `exec_tier`, with G3/G4's container split applied same as `run_pass1`) over the sample; compares only that criterion's findings.\n- Baseline for a criterion whose stored findings predate the current `regver`: a one-time baseline run recorded in the ledger; otherwise stored findings are the baseline.\n- Budget pre-flight from stored per-criterion usage (`coverage.usage.per_criterion`) \u00d7 current price.\n\n`src/rebar/llm/evals/plan_replay/__main__.py`: add a `tier2` subparser (`--candidate <registry-dir>`, `--criteria <id>`, plus shared `--store`/`--cache-dir`/`--out-dir`) and a `_run_tier2` dispatch branch, mirroring `tier0`/`tier1`.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/tier2.py` (new)\n- `src/rebar/llm/evals/plan_replay/__main__.py` (edited \u2014 `tier2` subparser + dispatch)\n- `docs/experiments/plan-review-gate/replay/tier2-sample.json`, `tier2-*.md` (new/generated)\n- `tests/unit/evals/test_plan_replay_tier2.py` (new)\n\n## Testing\n\nUnit: with a `FakeRunner` returning canned `P1Output`, gained/lost findings per criterion match expectations; single-criterion mode for a `1-TURN` id (`req.criteria` single-entry) issues exactly one chunk per sampled review; single-criterion mode for an `AGENT`-tier id (e.g. `T5c`) dispatches agentically via `ProductionBatchRunner`'s `agent` bucket, NOT forced single-turn; G3/G4 route to the container path the same way `run_pass1` does; a run is refused when the frontier model is not the Bedrock Opus id; the sample file is validated against the corpus manifest; a candidate finding set is verified via `verify_findings` and its verdict computed via `pass3_decide`, compared correctly against a fixture's stored verdict. Live (commissioning, \u2264$60): one full-mode baseline over the fixed sample. `__main__.py`'s `tier2` subcommand dispatches correctly.\n\n## Acceptance Criteria\n\n- [ ] A committed fixed sample of review ids exists with the strata above; checked by the sample file and manifest cross-check.\n- [ ] `tier2 --candidate <registry-dir>` produces finding-set Jaccard and gained/lost-per-criterion tables plus a candidate-vs-stored verdict flip matrix; checked by one generated report.\n- [ ] `tier2 --criteria <1-TURN-or-2-STEP-id>` costs \u2264 N \u00d7 $0.25 in the ledger; checked by the ledger. An AGENT-tier `--criteria` run (including G3/G4) is priced at its real production rate and reported separately, with no fixed per-sample ceiling assumed.\n- [ ] Commissioning spend for this ticket \u2264 $60 and every call uses the Bedrock frontier model id; checked by the ledger.\n- [ ] Unit tests pass in `make test`.",
+        "description": "## Context / Problem\n\nPass 1 (`src/rebar/llm/plan_review/pass1.py`, `passes.pass1_chunk`, prompts `reviewers/plan_review_finder.md` + one `plan_review_<ID>.md` per criterion, routing in `criteria_routing.json`, frontier class = Opus on Bedrock) is the expensive pass. A criterion edit cannot be judged from stored data alone, so Tier 2 re-runs finders on a small fixed sample. Per-criterion edits are far cheaper in single-criterion mode; prior work (`docs/experiments/plan-review-model-tradeoff.md`) showed Opus is flat to 12 criteria/turn while Sonnet degrades.\n\n**Execution tier is per-criterion \u2014 exact contract.** `registry.exec_tier(crit)` (registry.py:604-610) returns ONLY one of `\"AGENT\"` / `\"2-STEP\"` / `\"1-TURN\"` \u2014 there is NO `\"CONTAINER\"` return value. It returns `\"AGENT\"` for any id in `AGENT_TIER` (registry.py:97-116 \u2014 the FULL frozenset: `G1G2, E4, A1, G6, G3, G4, G7, T1, T3, T5c, T8, T10, T11, asserted-capability, evidence-kind, decomp-shape`) or when `crit[\"exec\"] == \"AGENT\"`. `G3`/`G4` therefore resolve to `\"AGENT\"` from `exec_tier`, NOT a container value \u2014 the container fan-out (`pass1_container`) is a SEPARATE downstream step: `production_batch_runner._resolve_criteria` (production_batch_runner.py:198-248) splits criteria into `(single, agent, skipped)` purely by `exec_tier(desc) == \"AGENT\"`, and its own docstring states G3/G4 are \"pulled out of `agent` by `run_pass1` itself\" \u2014 i.e. `run_pass1` inspects the resolved `agent` list afterward and routes G3/G4 to `pass1_container` from there. Tier-2 derives its own single/agent/container split the same way: resolve via `exec_tier`, then separately check membership in the (small, hardcoded in `run_pass1`) G3/G4 container set.\n\n**Single-criterion filtering \u2014 exact mechanism.** `BatchRunRequest.criteria` (workflow/runners.py:66, `tuple[Mapping[str, Any], ...]`, each entry `{prompt, with?}`) is what `_resolve_criteria` actually filters on. `req.with_inputs[\"probe_criteria\"]` (a SEPARATE field) is consumed ONLY by `_project_criteria` for `project.*`-prefixed fan-in criteria (production_batch_runner.py:114-118) \u2014 it does NOT filter `req.criteria`/`_resolve_criteria`'s built-in dispatch. To run exactly one named criterion against `ProductionBatchRunner` directly, Tier-2 constructs `req.criteria = ({\"prompt\": f\"plan-review-{id}\"},)` (a single-entry tuple) itself \u2014 `_resolve_criteria` then correctly routes that one descriptor through `exec_tier` into `single` or `agent`. (The workflow-level PROBE MODE that reads `ctx.inputs[\"probe_criteria\"]` to filter built-ins, `workflow_ops.py:254-263`, is a different, higher-layer mechanism for workflow-driven runs and is not used here since Tier-2 invokes the runner directly.)\n\nCost varies by resolved tier: `1-TURN`/`2-STEP` criteria cost \u2248 $0.17-0.25/sample (the AC's ceiling, applies ONLY to ids resolving to `1-TURN`/`2-STEP`); `AGENT`-tier criteria (including the G3/G4 container subset) cost their real production rate and are reported separately in the ledger, with no fixed per-sample ceiling assumed.\n\n**Tier-1 chaining, corrected.** `tier1.replay_review` requires a STORED `verification` on each finding to build `stored_answers` \u2014 a freshly-generated Tier-2 candidate finding has none, so Tier-1's `per_question_agreement`/`distribution_shift` cannot run on it directly. Tier 2's \"downstream\" instead reuses Tier-1/Tier-0's COMPUTATION functions: candidate findings are verified fresh via the SAME `verify_findings` seam Tier-1 uses, then `review_kernel.decide.pass3_decide`/`pass3_over_findings` computes a CANDIDATE VERDICT from them, compared against the STORED verdict already recorded in the original review's sidecar \u2014 a verdict-level flip matrix (Tier-0's shape), not a per-question agreement table.\n\n## Approach\n\nBuild `src/rebar/llm/evals/plan_replay/tier2.py`:\n\n- **Fixed sample**: ~20 review ids drawn once by the Tier-1 stratified sampler (additional strata: \u22655 containers, \u22658 with \u226510 findings, \u22653 from the LMN store), committed as `docs/experiments/plan-review-gate/replay/tier2-sample.json`. Plan text from reconstructed material; code-grounded AGENT criteria run against the pinned `verified_at_sha` snapshot via `source=attested`.\n- **Full mode**: run the candidate registry/prompts through `ProductionBatchRunner`, frontier class pinned to Bedrock Opus; compare candidate Pass-1 finding sets to stored findings by `norm_id` (Jaccard, gained/lost per criterion); verify candidate findings via `verify_findings`, compute their verdict via `pass3_decide`/`pass3_over_findings`, compare to the stored verdict (flip matrix).\n- **Single-criterion mode**: `--criteria T5c` constructs `req.criteria = ({\"prompt\": \"plan-review-T5c\"},)` on a `BatchRunRequest` and runs it directly through `ProductionBatchRunner`/`_resolve_criteria` (real single/agent dispatch by `exec_tier`, with G3/G4's container split applied same as `run_pass1`) over the sample; compares only that criterion's findings.\n- Baseline for a criterion whose stored findings predate the current `regver`: a one-time baseline run recorded in the ledger; otherwise stored findings are the baseline.\n- Budget pre-flight from stored per-criterion usage (`coverage.usage.per_criterion`) \u00d7 current price.\n\n`src/rebar/llm/evals/plan_replay/__main__.py`: add a `tier2` subparser (`--candidate <registry-dir>`, `--criteria <id>`, plus shared `--store`/`--cache-dir`/`--out-dir`) and a `_run_tier2` dispatch branch, mirroring `tier0`/`tier1`.\n\n## Scope\n\n- `src/rebar/llm/evals/plan_replay/tier2.py` (new)\n- `src/rebar/llm/evals/plan_replay/__main__.py` (edited \u2014 `tier2` subparser + dispatch)\n- `docs/experiments/plan-review-gate/replay/tier2-sample.json`, `tier2-*.md` (new/generated)\n- `tests/unit/evals/test_plan_replay_tier2.py` (new)\n\n## Testing\n\nUnit: with a `FakeRunner` returning canned `P1Output`, gained/lost findings per criterion match expectations; single-criterion mode for a `1-TURN` id (`req.criteria` single-entry) issues exactly one chunk per sampled review; single-criterion mode for an `AGENT`-tier id (e.g. `T5c`) dispatches agentically via `ProductionBatchRunner`'s `agent` bucket, NOT forced single-turn; G3/G4 route to the container path the same way `run_pass1` does; a run is refused when the frontier model is not the Bedrock Opus id; the sample file is validated against the corpus manifest; a candidate finding set is verified via `verify_findings` and its verdict computed via `pass3_decide`, compared correctly against a fixture's stored verdict. Live (commissioning, \u2264$60): one full-mode baseline over the fixed sample. `__main__.py`'s `tier2` subcommand dispatches correctly.\n\n## Acceptance Criteria\n\n- [x] A committed fixed sample of review ids exists with the strata above; checked by the sample file and manifest cross-check.\n- [x] `tier2 --candidate <registry-dir>` produces finding-set Jaccard and gained/lost-per-criterion tables plus a candidate-vs-stored verdict flip matrix; checked by one generated report.\n- [x] `tier2 --criteria <1-TURN-or-2-STEP-id>` costs \u2264 N \u00d7 $0.25 in the ledger; checked by the ledger. An AGENT-tier `--criteria` run (including G3/G4) is priced at its real production rate and reported separately, with no fixed per-sample ceiling assumed.\n- [x] Commissioning spend for this ticket \u2264 $60 and every call uses the Bedrock frontier model id; checked by the ledger.\n- [ ] Unit tests pass in `make test`.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Tier-2 harness: replay Pass-1 criteria on a fixed stratified sample (Opus via Bedrock, budgeted; single-criterion mode)"
@@ -61423,7 +61451,7 @@
       "created_at": "2026-09-01T03:44:57Z",
       "jira_id": "4591280",
       "jira_key": "REB-4407",
-      "peer_parent": "",
+      "peer_parent": "REB-4393",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:59Z"
     },
@@ -61510,7 +61538,7 @@
         "assignee": null,
         "description": "## Summary\nThe MCP blue-green autodeploy emits `AUTODEPLOY_ERROR {reason: deploy_failed}` (\u2192 `rebar/host:deploy_errors`, which pages the `rebar-autodeploy-errors` alarm) on TWO conditions that are *documented as routine, non-error backoffs that must be kept OUT of deploy_errors*: `port-exhausted` (retire-cap) and low-memory abort. This false-pages the general \"deploys are failing\" alarm during a normal landing burst, when the deploy is in fact correctly, safely deferring.\n\n## Evidence (live, 2026-08-30 ~03:33\u201304:05 UTC on i-00880b2c7f13527c5)\nDuring a burst of merges, both blue/green MCP ports (8092/8093) were held by un-reaped containers still in their 21-min graceful drain (`docker stop --time 1260`). Each deploy tick logged BOTH markers for the same event:\n```\nAUTODEPLOY_MCP_RETIRE_CAP {reason: port-exhausted, ...}\nAUTODEPLOY_ERROR {reason: deploy_failed, detail: component=mcp target=... fail#1..4 backoff=60s..480s}\n```\n`rebar-autodeploy-errors` (deploy_errors, Sum>0 / 4 periods) and `rebar-autodeploy-mcp-retire-cap` BOTH went ALARM. It self-resolved (~04:15). No outage \u2014 MCP served the old build throughout; only the cutover was delayed.\n\n## Root cause\n`infra/scripts/autodeploy.sh`: `record_mcp_backoff_failure` (~L668) calls `err deploy_failed \"component=mcp ...\"` \u2192 emits `AUTODEPLOY_ERROR` \u2192 inflates `deploy_errors`. It is invoked on the two routine backoff paths \u2014 low-mem abort (~L915, after `AUTODEPLOY_MCP_MEM_ABORT`) and port-exhausted (~L924, after `AUTODEPLOY_MCP_RETIRE_CAP`). This contradicts the documented contract in `infra/scripts/observability.sh` (~L284-291, L355): the retire-cap and mem-abort markers are \"each kept out of AUTODEPLOY_ERROR so a routine retire-cap / memory abort never inflates deploy_errors.\" The sustained case is already covered by the dedicated `mcp_retire_cap` / `mcp_mem_abort` alarms. Introduced by the blue-green commit `2a0a4b19f2ab` (ticket 6964), which shipped both the contract and the violating code \u2014 an internally-inconsistent plan (`plan_defect`).\n\n## Standing intent \u2014 this is a fix, not a behavior decision\nThe intended behavior is documented in observability.sh. The code simply doesn't match it. No ADR / design decision required.\n\n## Fix\nFactor the backoff-timer bookkeeping (write `$MCP_BACKOFF_FILE` + prune) out of the `err deploy_failed` emission via a shared `schedule_mcp_backoff` helper. Add a `record_mcp_routine_backoff` variant (schedule + log, no `err deploy_failed`) and switch the two routine paths to it. Genuine-failure paths (build/tag/run/unhealthy/handshake/flip) keep `record_mcp_backoff_failure` and still page. The throttle still applies on all paths.\n\n## Acceptance Criteria\n- [ ] A routine `port-exhausted` (retire-cap) backoff does NOT emit `AUTODEPLOY_ERROR/deploy_failed` and does NOT increment `deploy_errors`; the `AUTODEPLOY_MCP_RETIRE_CAP` marker + `mcp_retire_cap` metric remain the signal.\n- [ ] A routine low-memory abort likewise does NOT inflate `deploy_errors`; `AUTODEPLOY_MCP_MEM_ABORT` + `mcp_mem_abort` remain the signal.\n- [ ] GENUINE MCP deploy failures (build-failed, tag-failed, run-failed, unhealthy, handshake, flip) STILL emit `deploy_failed` and page `deploy_errors` (no regression to real-failure alarming).\n- [ ] The mcp backoff throttle (timer/prune) still applies on the routine paths so ticks don't hammer during a drain \u2014 only the erroneous deploy_errors emission is removed (the `mcp-deploy-backoff` file is still written).\n- [ ] A regression test asserts the observable outcome: the retire-cap/mem-abort paths emit their own marker but NOT `AUTODEPLOY_ERROR`, while a real failure emits `AUTODEPLOY_ERROR`.\n\n## Testing\n- `python -m pytest tests/scripts/test_autodeploy_mcp_bluegreen.py` \u2014 includes new `test_port_exhausted_routine_backoff_does_not_inflate_deploy_errors` and `test_low_memory_routine_backoff_does_not_inflate_deploy_errors` (assert routine marker present, no `AUTODEPLOY_ERROR/deploy_failed`, throttle file still written), plus existing `test_mcp_failure_keeps_the_deploy_failed_metric_and_names_the_component` and `test_unhealthy_new_container_leaves_old_upstream_current` (genuine failures still emit `deploy_failed`).\n- Verified: `make lint` (shellcheck), `make typecheck`, `make test` all green. Mutation check: reintroducing `record_mcp_backoff_failure` on the routine sites returns both new tests to RED.\n\n## Notes\nChecked for duplication against the blue-green target ticket (6964) and the graceful-drain-contract bug (b580) \u2014 not duplicates. The plan-review overlap detector flags shared artifact `record_mcp_backoff_failure` with e1d9 (handshake gate, already landed in origin/main) and the held-back sibling `prespinal-gem-kinkajou` (dbf0); this change edits disjoint lines (function def + the two routine call sites) and lands first in the autodeploy.sh cluster.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Autodeploy MCP routine backoff (retire-cap port-exhausted / mem-abort) inflates deploy_errors, false-paging the general deploy alarm"
       },
       "created_at": "2026-09-01T03:44:59Z",
@@ -62510,7 +62538,7 @@
       "created_at": "2026-09-01T03:45:02Z",
       "jira_id": "4591282",
       "jira_key": "REB-4409",
-      "peer_parent": "",
+      "peer_parent": "REB-4412",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:45:05Z"
     },
@@ -63204,7 +63232,7 @@
       "created_at": "2026-09-01T03:45:05Z",
       "jira_id": "4591283",
       "jira_key": "REB-4410",
-      "peer_parent": "",
+      "peer_parent": "REB-4359",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:45:08Z"
     },
@@ -63521,7 +63549,7 @@
       "created_at": "2026-09-01T03:45:14Z",
       "jira_id": "4591286",
       "jira_key": "REB-4413",
-      "peer_parent": "",
+      "peer_parent": "REB-4379",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:45:16Z"
     },
@@ -64286,7 +64314,7 @@
       "created_at": "2026-09-01T03:45:17Z",
       "jira_id": "4591287",
       "jira_key": "REB-4414",
-      "peer_parent": "",
+      "peer_parent": "REB-4403",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:45:19Z"
     },
@@ -66761,7 +66789,23 @@
     "1788233849522888001": "__rebar_unknown_comment_id__",
     "1788236752953297001": "__rebar_unknown_comment_id__",
     "1788236790390602001": "__rebar_unknown_comment_id__",
-    "1788236812966424001": "__rebar_unknown_comment_id__"
+    "1788236812966424001": "__rebar_unknown_comment_id__",
+    "1788238274731554001": "__rebar_unknown_comment_id__",
+    "1788238300474889001": "__rebar_unknown_comment_id__",
+    "1788239126295670001": "__rebar_unknown_comment_id__",
+    "1788239359917241001": "__rebar_unknown_comment_id__",
+    "1788239427970819001": "__rebar_unknown_comment_id__",
+    "1788239470792728001": "__rebar_unknown_comment_id__",
+    "1788240644275326001": "__rebar_unknown_comment_id__",
+    "1788241374437320001": "__rebar_unknown_comment_id__",
+    "1788241946245790001": "__rebar_unknown_comment_id__",
+    "1788243167870652001": "__rebar_unknown_comment_id__",
+    "1788243731490480688": "__rebar_unknown_comment_id__",
+    "1788244166995616001": "__rebar_unknown_comment_id__",
+    "1788244179904505001": "__rebar_unknown_comment_id__",
+    "1788244191217473001": "__rebar_unknown_comment_id__",
+    "1788244880403191001": "__rebar_unknown_comment_id__",
+    "1788245261165251001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
