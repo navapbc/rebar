@@ -10,8 +10,9 @@
     "canonical_id": { "type": "string", "description": "The resolved canonical ticket id." },
     "verdict": { "type": ["object", "null"], "description": "The deterministic FAIL completion_verdict on precheck failure, else null." },
     "context": { "type": "string", "description": "The graph-aware, fenced ticket context for the verify step (empty when the precheck short-circuits)." },
-    "certifiable": { "type": "boolean", "description": "False iff a direct child is closed-but-uncertified (force-closed): the parent may close but not certify (certification propagates). True otherwise. Read by the close gate to close without signing." }
+    "certifiable": { "type": "boolean", "description": "False iff a direct child is closed-but-uncertified (force-closed): the parent may close but not certify (certification propagates). True otherwise. Read by the close gate to close without signing." },
+    "completion_prefetch_manifest": { "type": "array", "description": "Identifiers for the prefetched evidence included in the verifier context, as {path, mode} objects. Empty when prefetch is disabled or no verifier runs.", "items": { "type": "object", "additionalProperties": true } }
   },
-  "required": ["run_verify", "precheck_failed", "canonical_id", "verdict", "context", "certifiable"],
+  "required": ["run_verify", "precheck_failed", "canonical_id", "verdict", "context", "certifiable", "completion_prefetch_manifest"],
   "additionalProperties": false
 }

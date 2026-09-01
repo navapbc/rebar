@@ -1,4 +1,4 @@
-"""The ``COMPLETION_VERDICT`` observability sidecar for completion FAILs (ticket 24ec).
+"""The ``COMPLETION_VERDICT`` observability sidecar for completion verdicts.
 
 Today only a PASS completion verdict leaves a durable artifact (the signed
 ``completion-verifier`` attestation). A FAIL blocks the close and then VANISHES — the
@@ -18,9 +18,11 @@ preserved-and-ignored-by-older-clones rollout (upgrade reconcile hosts first).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+from collections.abc import Mapping
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -48,6 +50,124 @@ RETAIN_PER_TICKET = 10
 # brief contention window clear so the record LANDS instead of being silently dropped. This is
 # the total number of append attempts (one retry).
 _SIDECAR_WRITE_ATTEMPTS = 2
+_PROMPT_ID = "completion-verifier"
+_MATERIAL_SCHEMA = "completion_verifier_material_v1"
+PINNED_MATERIAL_BASIS = "pinned_completion_inputs"
+UNPINNED_MATERIAL_BASIS = "unpinned_completion_inputs"
+ERROR_MATERIAL_BASIS = "error_unpinned"
+
+
+def _short_hash(obj: Mapping[str, Any]) -> str:
+    blob = json.dumps(obj, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _nonempty_str(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def verifier_version(repo_root=None) -> dict[str, str]:
+    """Return the completion verifier's prompt/formula version stamp.
+
+    Best-effort observability: callers must never change a gate outcome merely because version
+    stamping could not resolve a prompt override, so the shape remains present with ``unknown``.
+    """
+    prompt_hash = "unknown"
+    try:
+        from rebar.llm.prompting import prompts
+        from rebar.llm.prompting.prompt_model import prompt_content_hash
+
+        prompt = prompts.get_prompt(_PROMPT_ID, repo_root=repo_root)
+        prompt_text = prompts.canonical_prompt_text(prompt, repo_root=repo_root)
+        prompt_hash = prompt_content_hash(prompt_text)
+    except Exception:
+        logger.warning("completion verifier prompt version unavailable", exc_info=True)
+    try:
+        from rebar import signing
+
+        formula = signing.gate_code_version()
+    except Exception:
+        logger.warning("completion verifier formula version unavailable", exc_info=True)
+        formula = "unknown"
+    return {
+        "prompt_id": _PROMPT_ID,
+        "prompt_content_sha256": prompt_hash,
+        "formula_version": formula,
+    }
+
+
+def _compact_completion_basis(raw: object) -> dict[str, str] | None:
+    if not isinstance(raw, Mapping):
+        return None
+    out = {
+        key: raw.get(key)
+        for key in ("code_oid", "tickets_oid", "receipt_digest", "run_id")
+        if _nonempty_str(raw.get(key))
+    }
+    return {str(k): str(v) for k, v in out.items()} if "receipt_digest" in out else None
+
+
+def _prefetch_manifest(raw: object) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    manifest: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        path = _nonempty_str(item.get("path"))
+        mode = _nonempty_str(item.get("mode"))
+        if path and mode:
+            manifest.append({"path": path, "mode": mode})
+    return manifest
+
+
+def _current_plan_material(ticket_id: str | None, repo_root) -> str | None:
+    if not ticket_id:
+        return None
+    try:
+        from rebar.llm.plan_review.attest import current_material_fingerprint
+
+        return current_material_fingerprint(ticket_id, repo_root=repo_root)
+    except Exception:
+        logger.warning("completion sidecar material fallback unavailable", exc_info=True)
+        return None
+
+
+def _material_record(
+    verdict: Mapping[str, Any],
+    *,
+    material: str | None,
+    repo_root=None,
+    fallback_basis: str = UNPINNED_MATERIAL_BASIS,
+) -> tuple[str | None, str | None]:
+    plan_material = _nonempty_str(material) or _nonempty_str(verdict.get("material_fingerprint"))
+    if plan_material is None:
+        plan_material = _current_plan_material(_nonempty_str(verdict.get("ticket_id")), repo_root)
+    if plan_material is None:
+        return None, None
+    basis = _compact_completion_basis(verdict.get("completion_read_basis"))
+    material_basis = PINNED_MATERIAL_BASIS if basis else fallback_basis
+    record: dict[str, Any] = {
+        "schema": _MATERIAL_SCHEMA,
+        "material_basis": material_basis,
+        "plan_material_fingerprint": plan_material,
+    }
+    if basis:
+        record["completion_read_basis"] = basis
+    manifest = _prefetch_manifest(verdict.get("completion_prefetch_manifest"))
+    if manifest:
+        record["completion_prefetch_manifest"] = manifest
+    return _short_hash(record), material_basis
+
+
+def error_material(ticket_id: str, *, repo_root=None) -> tuple[str | None, str | None]:
+    """Best-effort material identity for completion ERROR sidecars."""
+    return _material_record(
+        {"ticket_id": ticket_id},
+        material=None,
+        repo_root=repo_root,
+        fallback_basis=ERROR_MATERIAL_BASIS,
+    )
 
 
 def _is_lock_timeout_error(exc: Exception) -> bool:
@@ -107,7 +227,12 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
 
     try:
         tracker = _config.tracker_dir(repo_root)
-        payload = build_payload(verdict, material=material)
+        payload = build_payload(
+            verdict,
+            material=material,
+            repo_root=repo_root,
+            verifier_version=verifier_version(repo_root),
+        )
         _append_sidecar_retrying(payload["ticket_id"], payload, tracker, repo_root)
     except SecretScreenRefused:
         warn_secret_screen_refused(str(verdict.get("ticket_id", "?")), EVENT_TYPE)
@@ -305,7 +430,13 @@ def latest_screen_tally(ticket_id: str, *, repo_root=None) -> dict[str, Any] | N
         return None
 
 
-def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> dict[str, Any]:
+def build_payload(
+    verdict: dict[str, Any],
+    *,
+    material: str | None = None,
+    repo_root=None,
+    verifier_version: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """The slim, queryable sidecar payload for a completion verdict.
 
     The verdict is normalized through the shared :func:`rebar.llm.completion.reconcile_verdict`
@@ -315,12 +446,20 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
     querying offline; runtime-only carriers are dropped to keep the record lean.
 
     Branches on the (reconciled) verdict: a **PASS** emits the ``SCHEMA_PASS`` record carrying the
-    lossless positive ``criteria[]`` (findings empty on PASS); a **FAIL** keeps the EXACT prior
-    ``SCHEMA`` payload (findings/remediation/certifiable) unchanged."""
+    lossless positive ``criteria[]`` (findings empty on PASS); a **FAIL** emits the ``SCHEMA``
+    payload (findings/remediation/certifiable) plus additive observability fields."""
     from rebar.llm.completion import reconcile_verdict
 
     v = dict(verdict)  # shallow copy — reconcile_verdict mutates its argument in place
     reconcile_verdict(v)
+    material_fingerprint, material_basis = _material_record(
+        v, material=material, repo_root=repo_root
+    )
+    version = (
+        verifier_version
+        if verifier_version is not None
+        else globals()["verifier_version"](repo_root)
+    )
     # Run CONSUMPTION metrics (df94): the gate-run's consumed requests/tool_calls + duration,
     # attached by gate_dispatch._attach_completion_metrics for verdicts produced by an actual
     # LLM run. Carried on BOTH the PASS and FAIL branches so a FAILING gate run's consumption
@@ -343,7 +482,9 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             # than ambiguous input drift. `verified_at_sha` is None in local (unattested) mode.
             "verified_at_sha": v.get("verified_at_sha"),
             "trace_id": v.get("trace_id"),
-            "material_fingerprint": material,
+            "material_fingerprint": material_fingerprint,
+            "material_basis": material_basis,
+            "verifier_version": version,
             # Whether the close may be CERTIFIED (signed). False iff certification was
             # withheld (an uncertified descendant) — previously dropped on PASS, which made
             # an unsigned certifiable=False close unexplainable from stored data (bug 96d1).
@@ -357,6 +498,9 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             payload["auto_resume_trail"] = list(v["auto_resume_trail"])
         if isinstance(v.get("completion_read_basis"), dict):
             payload["completion_read_basis"] = dict(v["completion_read_basis"])
+        prefetch_manifest = _prefetch_manifest(v.get("completion_prefetch_manifest"))
+        if prefetch_manifest:
+            payload["completion_prefetch_manifest"] = prefetch_manifest
         if v.get("ticket_read_mode"):
             payload["ticket_read_mode"] = v["ticket_read_mode"]
         return payload
@@ -377,7 +521,9 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         # See the PASS branch: verify-sha + trace id for input-identity diagnosis (bug e458).
         "verified_at_sha": v.get("verified_at_sha"),
         "trace_id": v.get("trace_id"),
-        "material_fingerprint": material,
+        "material_fingerprint": material_fingerprint,
+        "material_basis": material_basis,
+        "verifier_version": version,
     }
     # Carry the verifier-FAULT marker (bug 2a6f) onto the durable record when set, so a run
     # that produced no usable verdict stays queryable AS a fault instead of looking, forever
@@ -397,6 +543,9 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         payload["metrics"] = dict(metrics)
     if isinstance(v.get("completion_read_basis"), dict):
         payload["completion_read_basis"] = dict(v["completion_read_basis"])
+    prefetch_manifest = _prefetch_manifest(v.get("completion_prefetch_manifest"))
+    if prefetch_manifest:
+        payload["completion_prefetch_manifest"] = prefetch_manifest
     if v.get("ticket_read_mode"):
         payload["ticket_read_mode"] = v["ticket_read_mode"]
     return payload

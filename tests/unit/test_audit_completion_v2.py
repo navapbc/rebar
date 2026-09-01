@@ -123,7 +123,9 @@ def test_build_payload_pass_carries_criteria() -> None:
         "AC1: the widget renders",
         "AC2: deployed to prod",
     ]
-    assert p["material_fingerprint"] == "fp"
+    assert p["material_fingerprint"] != "fp"
+    assert p["material_basis"] == "unpinned_completion_inputs"
+    assert p["verifier_version"]["prompt_id"] == "completion-verifier"
     assert p["runner"] == "fake" and p["model"] == "m"
 
 

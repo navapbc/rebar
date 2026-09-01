@@ -82,6 +82,7 @@ steps:
         # verdict without a model call. Both are ALWAYS present on the verify output.
         finalizer: ${{ steps.verify.outputs.finalizer }}
         verify_certifiable: ${{ steps.verify.outputs.certifiable }}
+        completion_prefetch_manifest: ${{ steps.precheck.outputs.completion_prefetch_manifest }}
         # Certification decision from the precheck: false iff a closed-but-uncertified descendant
         # withholds the parent's signature (the parent may close but not certify). Carried onto
         # the verdict; the close gate closes WITHOUT signing when false.
