@@ -1,8 +1,4 @@
-"""rebar root/config resolution (Python side).
-
-Mirrors ``_engine/rebar-config.sh`` so the library and CLI agree with the bash
-engine on repo-root and config-file location.
-"""
+"""rebar root/config resolution (Python side), mirroring ``_engine/rebar-config.sh``."""
 
 from __future__ import annotations
 
@@ -160,6 +156,13 @@ def _bound_snapshot_for_root(root: str | os.PathLike[str] | None) -> OperationSn
     return None
 
 
+def _config_value(root: str | os.PathLike[str] | None, section: str, key: str) -> object:
+    snapshot = _bound_snapshot_for_root(root)
+    if snapshot is not None:
+        return snapshot.values[section][key]
+    return getattr(getattr(load_config(root), section), key)
+
+
 def tracker_dir(root: str | os.PathLike[str] | None = None) -> Path:
     """Path to the ticket event store, resolved through the full config precedence:
     the explicit env override (``REBAR_TRACKER_DIR``) wins verbatim; otherwise the
@@ -216,10 +219,7 @@ def tickets_branch(root: str | os.PathLike[str] | None = None) -> str:
 
     Reads from the bound operation snapshot when one is active for this root (see
     :func:`tracker_dir`'s snapshot note); otherwise resolves live via ``load_config``."""
-    snapshot = _bound_snapshot_for_root(root)
-    if snapshot is not None:
-        return snapshot.values["tracker"]["branch"]
-    return load_config(root).tracker.branch
+    return str(_config_value(root, "tracker", "branch"))
 
 
 def tickets_remote(root: str | os.PathLike[str] | None = None) -> str:
@@ -237,10 +237,11 @@ def tickets_remote(root: str | os.PathLike[str] | None = None) -> str:
     the store no longer hard-assumes ``origin`` is the ticket remote. Like
     :func:`tickets_branch`, a malformed config is NOT swallowed here: silently defaulting
     could mis-route a push to the wrong remote, so the ``ConfigError`` propagates."""
-    snapshot = _bound_snapshot_for_root(root)
-    if snapshot is not None:
-        return snapshot.values["sync"]["remote"]
-    return load_config(root).sync.remote
+    return str(_config_value(root, "sync", "remote"))
+
+
+def reclaim_horizon_days(root: str | os.PathLike[str] | None = None) -> int:
+    return int(str(_config_value(root, "reclaim", "horizon_days")))
 
 
 # ── config-file discovery + layered load ──────────────────────────────────────

@@ -200,6 +200,14 @@ compact.trigger_interval_s = 21600  # env REBAR_COMPACT_TRIGGER_INTERVAL_S
                         # this the floor has a hole: a store whose closed tickets happen never
                         # to be foldable would never fold the ones that are. Default 6 h,
                         # matching the scheduled sweep's cadence. 0 disables the staleness arm.
+reclaim.horizon_days = 30  # env REBAR_RECLAIM_HORIZON_DAYS
+                        # ADR 0106's remote-anchored reclamation horizon. A collapse
+                        # checkpoint, and any `.retired` tombstone keyed to its folding
+                        # commit, is eligible only when that commit is reachable from the
+                        # configured sync remote's tickets ref and is at least this many days
+                        # old. This key governs the read-only eligibility predicate and later
+                        # sweep/publish operations; it is intentionally portable and not tied
+                        # to any CI provider.
 
 # sync (git-backed store)
 sync.push   = "always"  # always | async | off   (env REBAR_SYNC_PUSH)

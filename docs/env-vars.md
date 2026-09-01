@@ -189,11 +189,11 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_config_resolvers.py:325` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:366` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:379` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:383` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:390` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:720` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:367` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:380` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:384` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:391` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:721` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:78` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:517` — `_llm_str(<non-literal>)`

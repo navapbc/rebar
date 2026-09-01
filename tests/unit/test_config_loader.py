@@ -84,10 +84,12 @@ def test_defaults_when_no_config(tmp_path: Path) -> None:
 def test_project_rebar_toml(tmp_path: Path) -> None:
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text(
-        "[sync]\npush = 'async'\n[compact]\nthreshold = 25\n", encoding="utf-8"
+        "[sync]\npush = 'async'\n[compact]\nthreshold = 25\n[reclaim]\nhorizon_days = 45\n",
+        encoding="utf-8",
     )
     c = cfg.load_config(root=p)
     assert c.sync.push == "async" and c.compact.threshold == 25
+    assert c.reclaim.horizon_days == 45
 
 
 def test_project_pyproject_tool_rebar(tmp_path: Path) -> None:
@@ -97,6 +99,12 @@ def test_project_pyproject_tool_rebar(tmp_path: Path) -> None:
     )
     c = cfg.load_config(root=p)
     assert c.mcp.allow_jira_sync is True
+
+
+def test_reclaim_horizon_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    p = _proj(tmp_path)
+    monkeypatch.setenv("REBAR_RECLAIM_HORIZON_DAYS", "12")
+    assert cfg.load_config(root=p).reclaim.horizon_days == 12
 
 
 def test_rebar_config_env_points_at_explicit_file(
