@@ -20,6 +20,8 @@ import pytest
 
 _TRUNCATION_SUFFIX = " … [truncated by reconciler]"
 _JIRA_COMMENT_MAX_CHARS = 32767
+_WINDOWS_ENV_VAR_VALUE_LIMIT = 32767
+_WINDOWS_ENV_VAR_VALUE_TOO_LONG = "the environment variable is longer than 32767 characters"
 
 
 @pytest.fixture
@@ -156,6 +158,19 @@ def cloud_fit():
     return AdfCodec(rich=False).fit_outbound
 
 
+def _assert_windows_env_value_fits(value: str) -> None:
+    if len(value) > _WINDOWS_ENV_VAR_VALUE_LIMIT:
+        raise ValueError(_WINDOWS_ENV_VAR_VALUE_TOO_LONG)
+
+
+def test_pytest_current_test_values_fit_windows_environment(request: pytest.FixtureRequest) -> None:
+    module_items = [item for item in request.session.items if item.path == request.node.path]
+    assert module_items, "precondition: this module's collected nodeids are visible"
+
+    for item in module_items:
+        _assert_windows_env_value_fits(f"{item.nodeid} (setup)")
+
+
 @pytest.mark.parametrize(
     ("label", "text"),
     [
@@ -173,8 +188,12 @@ def cloud_fit():
         ("trailing_spaces", "text with trailing spaces   "),
         # THE case that matters: over the limit, so the fitter actually truncates
         # and any divergence in this branch would be observable.
-        ("far_over_limit", "x" * 60_000),
-        ("over_limit_multiline", "line of prose\n" * 5_000),
+        pytest.param("far_over_limit", "x" * 60_000, id="far_over_limit"),
+        pytest.param(
+            "over_limit_multiline",
+            "line of prose\n" * 5_000,
+            id="over_limit_multiline",
+        ),
     ],
 )
 def test_undecorated_text_is_byte_identical_to_the_bare_fitter(
