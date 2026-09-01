@@ -12,6 +12,7 @@ import types
 from pathlib import Path
 
 import pytest
+from _git_counts import commit_count
 
 import rebar
 from rebar._store import event_append
@@ -73,6 +74,31 @@ def _tracker(repo: str) -> str:
     return str(tracker_dir(repo))
 
 
+def _changed_paths(tracker: str, ref: str) -> list[str]:
+    out = subprocess.run(
+        ["git", "-C", tracker, "show", "--format=", "--name-only", ref],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return [line for line in out.splitlines() if line]
+
+
+def _enable_fixture_signing(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    key = Path(repo).parent / "id_ed25519"
+    subprocess.run(
+        ["ssh-keygen", "-t", "ed25519", "-f", str(key), "-N", "", "-q"],
+        check=True,
+        capture_output=True,
+    )
+    key_type, key_body, *_ = Path(f"{key}.pub").read_text(encoding="utf-8").strip().split()
+    ident = rebar.create_identity(
+        "Test User", "t@t", keys=[f"{key_type} {key_body}"], repo_root=repo
+    )
+    rebar.use_identity(ident, repo_root=repo)
+    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", str(key))
+
+
 def test_done_enrich_registered() -> None:
     for et in ("ENQUEUE_ENRICH", "CLAIM_ENRICH", "DONE_ENRICH"):
         assert et in event_append.EVENT_TYPES
@@ -87,6 +113,62 @@ def test_drain_once(repo: str) -> None:
     assert ds.latest_ticket_digest(tid, repo_root=repo) is not None
     assert Q.reduce_ticket(tid, _tracker(repo))["pending"] is False
     assert Q.pending_enrichment(Q._now_ns(), _tracker(repo)) == []
+
+
+def test_successful_drain_batches_finalize_events_after_visible_claim(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W1: CLAIM stays cross-clone-visible, while post-enrich DIGEST+DONE share one commit."""
+    _enable_fixture_signing(repo, monkeypatch)
+    tid = rebar.create_ticket("task", "Batch finalize", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
+    tracker = _tracker(repo)
+    base = commit_count(tracker)
+
+    result = D.drain(tracker, once=True, repo_root=repo, runner=_DigestRunner())
+
+    assert result["processed"] == 1
+    assert commit_count(tracker) == base + 2
+
+    claim_paths = _changed_paths(tracker, "HEAD~1")
+    finalize_paths = _changed_paths(tracker, "HEAD")
+    assert any(
+        path.startswith(f"{tid}/") and path.endswith("-CLAIM_ENRICH.json") for path in claim_paths
+    )
+    assert not any(
+        path.startswith(f"{tid}/") and path.endswith("-TICKET_DIGEST.json") for path in claim_paths
+    )
+    assert not any(
+        path.startswith(f"{tid}/") and path.endswith("-DONE_ENRICH.json") for path in claim_paths
+    )
+    assert any(
+        path.startswith(f"{tid}/") and path.endswith("-TICKET_DIGEST.json")
+        for path in finalize_paths
+    )
+    assert any(
+        path.startswith(f"{tid}/") and path.endswith("-DONE_ENRICH.json") for path in finalize_paths
+    )
+
+    assert ds.freshness(tid, repo_root=repo) == "present-fresh"
+    reduced = Q.reduce_ticket(tid, tracker)
+    assert reduced["done"] is True
+    assert reduced["pending"] is False
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "rebar.cli",
+            "verify-authorship",
+            "--require-authenticated",
+            "--root",
+            repo,
+            "--all",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
 
 
 def test_batch_cap(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:

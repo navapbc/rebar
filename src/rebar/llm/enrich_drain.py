@@ -457,6 +457,34 @@ def _enrich_claims(
     return results
 
 
+def _write_success_finalize(tid: str, digest: dict, *, state: dict | None, cfg, repo_root) -> None:
+    """Write the successful post-enrich finalize lane, batching only the commit wrapper."""
+    from rebar._commands import _seam
+    from rebar._store import event_append
+    from rebar.llm.overlap import digest_sidecar as ds
+    from rebar.llm.overlap import queue as _queue
+
+    tracker = _seam.tracker_dir(repo_root)
+    buffered: list[tuple[str, dict]] = []
+    with _seam.batch_sink(buffered):
+        ds.emit(digest, tid, state=state, model=cfg.model, repo_root=repo_root)
+        _queue.mark_done(tid, repo_root=repo_root)
+
+    if not buffered:
+        return
+
+    try:
+        event_append.batch_write_and_push(tracker, buffered)
+    except Exception:
+        logger.warning(
+            "enrich drain: batched finalize for %s failed; falling back to sequential writes",
+            tid,
+            exc_info=True,
+        )
+        ds.emit(digest, tid, state=state, model=cfg.model, repo_root=repo_root)
+        _queue.mark_done(tid, repo_root=repo_root)
+
+
 def _finalize_claims(
     results: list[tuple[str, str | None, dict | None, BaseException | None]], *, cfg, repo_root
 ) -> tuple[int, int]:
@@ -498,8 +526,7 @@ def _finalize_claims(
                 # must stay immediate so the fresh content is not left unenriched.
                 _queue.enqueue(tid, soak_min=0, repo_root=repo_root)
                 continue
-        ds.emit(result["digest"], tid, state=state, model=cfg.model, repo_root=repo_root)
-        _queue.mark_done(tid, repo_root=repo_root)
+        _write_success_finalize(tid, result["digest"], state=state, cfg=cfg, repo_root=repo_root)
         processed += 1
     return processed, stale_skipped
 
