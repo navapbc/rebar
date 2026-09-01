@@ -13,7 +13,7 @@ Bug 2f46: on SIGTERM a retiring container now (1) CLOSES new certified intake vi
 :meth:`rebar._mcp_health.InFlightGauge.begin_draining`, (2) waits (bounded by the
 certified-op ``grace_seconds``) for the in-flight op to finish, and only THEN tells
 uvicorn to stop. uvicorn's own ``timeout_graceful_shutdown`` is bound to the SHORT
-:data:`rebar._mcp_health.DEFAULT_UVICORN_GRACEFUL_SECONDS`, decoupled from the op grace,
+:data:`rebar._mcp_health.DEFAULT_UVICORN_BACKSTOP_SECONDS`, decoupled from the op grace,
 so a 0-in-flight container fast-drains instead of pinning a blue-green port for ~20 min.
 """
 
@@ -27,7 +27,7 @@ from typing import Any
 from rebar._mcp_health import (
     _GAUGE_ATTR,
     DEFAULT_SHUTDOWN_GRACE_SECONDS,
-    DEFAULT_UVICORN_GRACEFUL_SECONDS,
+    DEFAULT_UVICORN_BACKSTOP_SECONDS,
     InFlightGauge,
     install_startup_handshake,
 )
@@ -99,7 +99,8 @@ def run_http_with_grace(
     gauge: InFlightGauge,
     *,
     grace_seconds: float = DEFAULT_SHUTDOWN_GRACE_SECONDS,
-    uvicorn_graceful_seconds: float = DEFAULT_UVICORN_GRACEFUL_SECONDS,
+    uvicorn_backstop_seconds: float = DEFAULT_UVICORN_BACKSTOP_SECONDS,
+    uvicorn_graceful_seconds: float | None = None,
     poll_interval: float = 0.5,
     opcert_binding: Any = None,
 ) -> None:
@@ -109,7 +110,7 @@ def run_http_with_grace(
     server on a background thread (it therefore installs none) and own the SIGTERM
     handler on the main thread (see :func:`make_sigterm_handler`).
     ``timeout_graceful_shutdown`` is uvicorn's OWN backstop and is bounded by the SHORT
-    ``uvicorn_graceful_seconds`` (default :data:`DEFAULT_UVICORN_GRACEFUL_SECONDS`),
+    ``uvicorn_backstop_seconds`` (default :data:`DEFAULT_UVICORN_BACKSTOP_SECONDS`),
     DELIBERATELY DECOUPLED from ``grace_seconds`` (the certified-op drain budget) — bug
     2f46: binding the two made a retiring container wait the full op grace for idle
     held-open client streams and pin a blue-green port ~20 min. The certified-op drain is
@@ -117,6 +118,9 @@ def run_http_with_grace(
     so this short backstop only sweeps idle streams and never truncates a real op. The main
     thread joins with a timeout so it stays responsive to the signal (a bare ``join()``
     would defer handler delivery).
+    ``uvicorn_graceful_seconds`` remains accepted as a backward-compatible spelling; new
+    callers should use ``uvicorn_backstop_seconds`` to avoid confusing this transport
+    backstop with the certified-op drain grace.
 
     ``opcert_binding`` (the box's startup op-cert signer, or ``None``) is bound
     context-locally INSIDE the serving thread's target, not in the caller's thread:
@@ -130,6 +134,9 @@ def run_http_with_grace(
 
     from rebar._opcert_binding import bound_signer
 
+    if uvicorn_graceful_seconds is not None:
+        uvicorn_backstop_seconds = uvicorn_graceful_seconds
+
     app = mcp.streamable_http_app()
     # Prove the MCP REQUEST PATH works before uvicorn accepts its first connection: the
     # handshake runs inside this app's ASGI lifespan, so a later /health 200 means this
@@ -140,7 +147,7 @@ def run_http_with_grace(
         host=mcp.settings.host,
         port=mcp.settings.port,
         log_level=mcp.settings.log_level.lower(),
-        timeout_graceful_shutdown=int(uvicorn_graceful_seconds),
+        timeout_graceful_shutdown=int(uvicorn_backstop_seconds),
     )
     server = uvicorn.Server(config)
 

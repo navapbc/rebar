@@ -531,8 +531,10 @@ def test_run_http_with_grace_decouples_uvicorn_grace_from_op_grace_2f46(monkeypa
         assert tgs != 1200, (
             "uvicorn timeout_graceful_shutdown must be DECOUPLED from the 1200s op grace (2f46)"
         )
-        assert tgs == int(health.DEFAULT_UVICORN_GRACEFUL_SECONDS)
-        assert health.DEFAULT_UVICORN_GRACEFUL_SECONDS < health.DEFAULT_SHUTDOWN_GRACE_SECONDS
+        assert tgs == int(health.DEFAULT_UVICORN_BACKSTOP_SECONDS)
+        assert health.DEFAULT_UVICORN_BACKSTOP_SECONDS == 30
+        assert health.DEFAULT_UVICORN_GRACEFUL_SECONDS == health.DEFAULT_UVICORN_BACKSTOP_SECONDS
+        assert health.DEFAULT_UVICORN_BACKSTOP_SECONDS < health.DEFAULT_SHUTDOWN_GRACE_SECONDS
     finally:
         signal.signal(signal.SIGTERM, prev)
 
@@ -603,6 +605,71 @@ def test_make_sigterm_handler_stops_new_intake_immediately_2f46():
         "a certified op landing during the drain window must be refused so a burst cannot "
         "re-pin the retiring container's port for the full grace (2f46)"
     )
+
+
+def test_mcp_retirement_idle_gauge_sets_should_exit_immediately_under_full_grace_40a7():
+    """An idle retirement is driven by the gauge, not the 1200s certified-op grace."""
+    from rebar._mcp_health import InFlightGauge, drain_then_exit
+
+    gauge = InFlightGauge()
+    exited = {"v": False}
+    sleeps: list[float] = []
+
+    drain_then_exit(
+        gauge,
+        grace_seconds=1200,
+        exit_fn=lambda: exited.__setitem__("v", True),
+        poll_interval=0.5,
+        sleep=lambda dt: sleeps.append(dt),
+        monotonic=lambda: 100.0,
+    )
+
+    assert gauge.value == 0
+    assert exited["v"] is True
+    assert sleeps == [], "idle gauge must not poll/sleep through the 1200s certified-op grace"
+
+
+def test_mcp_retirement_busy_gauge_is_not_cut_short_by_uvicorn_backstop_40a7():
+    """The short uvicorn backstop is not the certified-op drain deadline.
+
+    The handler does not set ``should_exit`` (which starts uvicorn graceful shutdown) until the
+    gauge drains or the injected certified-op deadline elapses, so a busy certified op cannot be
+    truncated merely because the uvicorn backstop is shorter.
+    """
+    from rebar._mcp_health import InFlightGauge, drain_then_exit
+
+    gauge = InFlightGauge()
+    gauge._increment()
+    now = {"t": 0.0}
+    states: list[tuple[str, float, bool]] = []
+
+    class _FakeServer:
+        should_exit = False
+
+    server = _FakeServer()
+    uvicorn_backstop_seconds = 0.25
+
+    def _sleep(dt: float) -> None:
+        now["t"] += dt
+        states.append(("before-drain", now["t"], server.should_exit))
+        if now["t"] >= 1.0:
+            gauge._decrement()
+
+    drain_then_exit(
+        gauge,
+        grace_seconds=5.0,
+        poll_interval=0.5,
+        sleep=_sleep,
+        monotonic=lambda: now["t"],
+        exit_fn=lambda: setattr(server, "should_exit", True),
+    )
+
+    assert uvicorn_backstop_seconds < now["t"]
+    assert states
+    assert all(should_exit is False for _, _, should_exit in states)
+    assert now["t"] < 5.0
+    assert gauge.value == 0
+    assert server.should_exit is True
 
 
 def test_wired_server_moves_gauge_for_a_really_registered_certified_tool():
@@ -738,7 +805,7 @@ def test_run_http_with_grace_installs_sigterm_and_bounds_uvicorn(monkeypatch):
         health.run_http_with_grace(server, gauge, grace_seconds=1200)
         assert captured.get("ran") is True
         assert captured["config_kwargs"]["timeout_graceful_shutdown"] == int(
-            health.DEFAULT_UVICORN_GRACEFUL_SECONDS
+            health.DEFAULT_UVICORN_BACKSTOP_SECONDS
         )
         assert captured["config_kwargs"]["timeout_graceful_shutdown"] != 1200
         assert signal.getsignal(signal.SIGTERM) not in (prev, signal.SIG_DFL)
@@ -761,9 +828,15 @@ def test_run_mcp_stdio_delegates_to_fastmcp_run(monkeypatch):
 
 def test_shutdown_grace_constant_is_positive_and_bounded():
     """The module grace constant is the documented 1200s budget."""
-    from rebar._mcp_health import DEFAULT_SHUTDOWN_GRACE_SECONDS
+    from rebar._mcp_health import (
+        DEFAULT_SHUTDOWN_GRACE_SECONDS,
+        DEFAULT_UVICORN_BACKSTOP_SECONDS,
+        DEFAULT_UVICORN_GRACEFUL_SECONDS,
+    )
 
     assert DEFAULT_SHUTDOWN_GRACE_SECONDS == 1200
+    assert DEFAULT_UVICORN_BACKSTOP_SECONDS == 30
+    assert DEFAULT_UVICORN_GRACEFUL_SECONDS == DEFAULT_UVICORN_BACKSTOP_SECONDS
 
 
 def test_sigterm_grace_subprocess_waits_for_inflight_then_exits_zero():
