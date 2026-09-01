@@ -427,8 +427,10 @@ def apply(
         file=sys.stderr,
     )
 
-    # Outbound (or untyped dict): normalize typed Mutations to dicts so
-    # _apply_batch can iterate, then route through the legacy batch path.
+    # Outbound (or untyped dict — the legacy batch call shape passes
+    # already-dict-shaped mutations directly; see apply()'s own docstring):
+    # normalize typed Mutations to dicts so _apply_batch can iterate, then
+    # route through the legacy batch path.
     outbound_list = [
         _mutation_to_batch_dict(m) if isinstance(m, MutationShape) else m
         for m in outbound_or_untyped

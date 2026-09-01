@@ -123,68 +123,109 @@ def _mutation_to_batch_dict(mutation) -> dict:
     Note: this dict is later passed through `json.dumps` when the manifest
     is written. Every value here MUST be JSON-serializable. Do NOT store
     the original Mutation object as a back-reference — non-serializable.
+
+    ADR 0107 "Cut"/"Delete" step: production (``outbound_pass.py``) now
+    constructs one of the typed payload dataclasses
+    (``mutation_payloads.OutboundCreatePayload`` / ``OutboundUpdatePayload`` /
+    ``OutboundDeletePayload``) directly, so the CREATE payload shape is no
+    longer runtime-ambiguous on that path — read the field maps straight off
+    the dataclass's own named attributes, no ``"fields" in payload``
+    sniffing required. A raw dict payload (legacy test fixtures only —
+    census-verified: no production producer constructs one any more) falls
+    through to the historical two-shape heuristic below, unchanged.
     """
-    payload = dict(mutation.payload) if mutation.payload else {}
+    from rebar_reconciler.mutation_payloads import (
+        OutboundCreatePayload,
+        OutboundUpdatePayload,
+    )
+
     action_value = getattr(mutation.action, "value", str(mutation.action))
     direction_value = getattr(mutation.direction, "value", str(mutation.direction))
-    # Bug 87e4: outbound mutations from reconcile.py have two different
-    # payload shapes depending on action:
-    #
-    #   - CREATE: payload has create fields at the TOP LEVEL (summary,
-    #     description, priority, issuetype, assignee, ...) alongside
-    #     bookkeeping keys (local_id, comments, labels). create_one needs
-    #     the full set of fields.
-    #
-    #   - UPDATE: payload has changed fields under "changed_fields", with
-    #     "comments" and "labels" as separate top-level keys. update_one
-    #     needs ONLY the scalar field changes — passing the whole payload
-    #     would unpack bogus `changed_fields=`, `comments=`, `labels=`
-    #     kwargs to client.update_issue (the original bug symptom).
-    #
-    # Distinguish by action and read the appropriate shape.
-    _BOOKKEEPING_KEYS = {
-        "changed_fields",
-        "comments",
-        "labels",
-        "local_id",
-        "follow_on",
-    }
-    if action_value == "update":
-        fields = payload.get("changed_fields")
-        if fields is None:
-            fields = payload.get("fields", {})
-    elif action_value == "create":
-        # Two CREATE payload shapes coexist:
-        #   - Legacy (test fixtures + older callers): payload has a nested
-        #     "fields" key.  Honor it explicitly (including the
-        #     intentionally-empty {} case — the original "fields=={}
-        #     must NOT fall through to full payload" contract).
-        #   - New (reconcile.py:524-535): payload spreads create fields
-        #     at the TOP LEVEL via `**om.fields`, alongside bookkeeping
-        #     keys.  Strip bookkeeping; everything else is a field.
-        if "fields" in payload:
-            fields = payload.get("fields", {})
-        else:
-            fields = {k: v for k, v in payload.items() if k not in _BOOKKEEPING_KEYS}
+
+    if isinstance(mutation.payload, OutboundCreatePayload):
+        fields = dict(mutation.payload.fields)
+        local_id = mutation.payload.local_id or ""
+        comments = list(mutation.payload.comments)
+        labels = list(mutation.payload.labels)
+        links = list(mutation.payload.links)
+        follow_on = None
+    elif isinstance(mutation.payload, OutboundUpdatePayload):
+        fields = dict(mutation.payload.changed_fields)
+        local_id = mutation.payload.local_id or ""
+        comments = list(mutation.payload.comments)
+        labels = list(mutation.payload.labels)
+        links = list(mutation.payload.links)
+        follow_on = None
     else:
-        # Other actions (delete, probe, etc.) don't carry field maps.
-        fields = payload.get("fields", {})
+        payload = dict(mutation.payload) if mutation.payload else {}
+        # Bug 87e4: outbound mutations from reconcile.py have two different
+        # payload shapes depending on action:
+        #
+        #   - CREATE: payload has create fields at the TOP LEVEL (summary,
+        #     description, priority, issuetype, assignee, ...) alongside
+        #     bookkeeping keys (local_id, comments, labels). create_one needs
+        #     the full set of fields.
+        #
+        #   - UPDATE: payload has changed fields under "changed_fields", with
+        #     "comments" and "labels" as separate top-level keys. update_one
+        #     needs ONLY the scalar field changes — passing the whole payload
+        #     would unpack bogus `changed_fields=`, `comments=`, `labels=`
+        #     kwargs to client.update_issue (the original bug symptom).
+        #
+        # Distinguish by action and read the appropriate shape. This branch is
+        # now reached only by a raw dict-shaped payload (legacy test fixtures;
+        # no production producer builds one — see the route-census guard
+        # test in tests/unit/rebar_reconciler/mutate/).
+        _BOOKKEEPING_KEYS = {
+            "changed_fields",
+            "comments",
+            "labels",
+            "local_id",
+            "follow_on",
+        }
+        if action_value == "update":
+            raw_changed_fields = payload.get("changed_fields")
+            fields = (
+                dict(raw_changed_fields)
+                if raw_changed_fields is not None
+                else payload.get("fields", {})
+            )
+        elif action_value == "create":
+            # Two CREATE payload shapes coexist:
+            #   - Legacy (test fixtures + older callers): payload has a nested
+            #     "fields" key.  Honor it explicitly (including the
+            #     intentionally-empty {} case — the original "fields=={}
+            #     must NOT fall through to full payload" contract).
+            #   - Top-level spread: bookkeeping keys stripped, everything
+            #     else is a field.
+            if "fields" in payload:
+                fields = payload.get("fields", {})
+            else:
+                fields = {k: v for k, v in payload.items() if k not in _BOOKKEEPING_KEYS}
+        else:
+            # Other actions (delete, probe, etc.) don't carry field maps.
+            fields = payload.get("fields", {})
+        local_id = payload.get("local_id", "")
+        comments = payload.get("comments", [])
+        labels = payload.get("labels", [])
+        links = payload.get("links", [])
+        follow_on = payload.get("follow_on")
     return {
         "action": action_value,
         "direction": direction_value,
         "key": mutation.target,
         "fields": fields,
-        "local_id": payload.get("local_id", ""),
-        "follow_on": payload.get("follow_on"),
+        "local_id": local_id,
+        "follow_on": follow_on,
         # Surface comments and labels so update_one can dispatch them via
         # add_comment / add_label / remove_label respectively (bug 87e4).
-        "comments": payload.get("comments", []),
-        "labels": payload.get("labels", []),
+        "comments": comments,
+        "labels": labels,
         # Surface links so update_one can dispatch them via set_relationship
         # (bug 3f04). Previously omitted here, so the production batch path
         # silently dropped every outbound blocks/relates link — the link was
         # reported "applied" (the mutation succeeded) but never created in Jira.
-        "links": payload.get("links", []),
+        "links": links,
     }
 
 

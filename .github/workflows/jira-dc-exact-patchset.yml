@@ -1,0 +1,152 @@
+name: Jira DC Exact-Patchset Parity
+
+# Exact-Gerrit-patchset Jira DC differential/convergence lane (AC1/AC2 of ticket
+# `3f27-cb3c-8023-4f57` / `single-vast-roan`, epic `eb64` "Prove Jira DC parity, cut
+# over the reconciler, and delete legacy dispatch").
+#
+# The existing `jira-dc-harness` job (external-integration.yml) and the capability-map
+# job (jira-dc-capability-map.yml) both run against whatever ref GitHub Actions'
+# `actions/checkout` resolves for the *current event* — a `workflow_dispatch` run of
+# either always exercises the tip of whatever branch/ref triggered it, never an
+# explicit, verified Gerrit patchset SHA. Neither takes a patchset SHA as an input,
+# verifies the checkout landed on it, or fails a wrong-ref/all-skipped run. This
+# workflow closes that gap: it is dispatched the SAME way `gerrit-verify.yaml` is (by
+# gerrit-to-platform on `patchset-created`/`recheck`, or manually with the same nine
+# GERRIT_* inputs), checks out the EXACT patchset via the same
+# `checkout-gerrit-change-action` used there, asserts the checked-out HEAD SHA matches
+# `GERRIT_PATCHSET_REVISION` byte-for-byte (fail on any mismatch — a stale mirror, a
+# race with a newer patchset, or a wrong ref resolves to a hard CI failure, never a
+# silent no-op), and RECORDS that verified SHA in the job summary before running the
+# live Jira DC harness.
+#
+# This is ADDITIVE evidence (ticket AC5: "Portable/default CI remains authoritative
+# when Docker/DC is unavailable; the live lane is additive evidence") — it does not
+# gate `Verified` and is not invoked by gerrit-verify.yaml's `build-and-test` job. A
+# human (or a future automation) dispatches it deliberately for a patchset under
+# review, same as jira-dc-capability-map.yml today.
+#
+# Native amd64 is a hard requirement for the harness itself (see
+# tests/external/live_jira_dc/README.md's measured arm64 findings) — ubuntu-latest is
+# native x86_64, mirroring every other Docker-backed Jira DC job in this repo.
+on:
+  workflow_dispatch:
+    inputs:
+      GERRIT_BRANCH:            { description: "Gerrit target branch", required: true, type: string }
+      GERRIT_CHANGE_ID:         { description: "Gerrit Change-Id", required: true, type: string }
+      GERRIT_CHANGE_NUMBER:     { description: "Gerrit change number", required: true, type: string }
+      GERRIT_CHANGE_URL:        { description: "Gerrit change URL", required: true, type: string }
+      GERRIT_EVENT_TYPE:        { description: "Gerrit event type", required: true, type: string }
+      GERRIT_PATCHSET_NUMBER:   { description: "Gerrit patchset number", required: true, type: string }
+      GERRIT_PATCHSET_REVISION: { description: "Gerrit patchset revision (commit SHA) — verified against the actual checkout", required: true, type: string }
+      GERRIT_PROJECT:           { description: "Gerrit project", required: true, type: string }
+      GERRIT_REFSPEC:           { description: "Gerrit refspec (refs/changes/NN/NNNN/P)", required: true, type: string }
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer patchset for the same change supersedes an in-flight run of THIS lane too.
+  group: jira-dc-exact-patchset-${{ inputs.GERRIT_CHANGE_ID }}
+  cancel-in-progress: true
+
+jobs:
+  jira-dc-exact-patchset:
+    name: jira DC exact-patchset parity (real Jira Data Center, ephemeral)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+
+      # AC1: "CI checks out and records the exact Gerrit patchset SHA used for the
+      # ephemeral DC run; an all-skipped or wrong-ref run fails." The checkout action
+      # resolves GERRIT_REFSPEC, which names a patchset but is not itself proof of
+      # WHICH commit landed in the working tree (a stale mirror or a race with a
+      # newer patchset could resolve to the wrong SHA silently). Compare the actual
+      # checked-out HEAD against the input's own claimed revision and fail hard on any
+      # mismatch, then record the verified SHA in the job summary as durable evidence.
+      - name: Verify the checkout landed on the exact patchset SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          expected_sha="${{ inputs.GERRIT_PATCHSET_REVISION }}"
+          if [ "$actual_sha" != "$expected_sha" ]; then
+            echo "::error::checked-out HEAD ($actual_sha) does not match the requested Gerrit patchset revision ($expected_sha) — refusing to run the DC lane against the wrong ref."
+            exit 1
+          fi
+          {
+            echo "### Jira DC exact-patchset parity"
+            echo ""
+            echo "- Gerrit change: [${{ inputs.GERRIT_CHANGE_URL }}](${{ inputs.GERRIT_CHANGE_URL }}) (change ${{ inputs.GERRIT_CHANGE_NUMBER }}, patchset ${{ inputs.GERRIT_PATCHSET_NUMBER }})"
+            echo "- Verified patchset SHA: \`$actual_sha\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "verified_sha=$actual_sha" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
+        with:
+          enable-cache: true
+
+      # `[jira-datacenter]` supplies pycontribs/jira (the DC transport dependency) —
+      # without it the transport tests skip while the smoke tests still execute, which
+      # is exactly the "silently-all-skipped run reads as green" failure this lane
+      # exists to prevent. Mirrors external-integration.yml's jira-dc-harness job.
+      - name: Install rebar (test-only; this harness needs no LLM API key)
+        run: |
+          uv sync --locked --extra dev --extra jira-datacenter
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Build and start the Jira DC harness
+        working-directory: tests/external/live_jira_dc
+        run: docker compose up -d --build
+
+      - name: Wait for Jira DC to become ready
+        run: |
+          ok=
+          for i in $(seq 1 240); do
+            if curl -fsS http://localhost:2990/jira/rest/api/2/serverInfo >/dev/null 2>&1; then
+              echo "Jira DC ready after ${i} tries"; ok=1; break
+            fi
+            sleep 5
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Jira DC harness never became ready (see tests/external/live_jira_dc/README.md)"
+            (cd tests/external/live_jira_dc && docker compose logs --tail=200)
+            exit 1
+          fi
+
+      # Isolation guarantees (AC2): both the outer git repo and the ticket-store repo
+      # have no remotes, REBAR_SYNC_PUSH=off, and every Jira target is the disposable
+      # harness project — all enforced by the existing fixtures in
+      # tests/external/live_jira_dc/_dc_fixtures.py / _dc_support.py / conftest.py,
+      # reused unmodified here (never weakened or bypassed).
+      #
+      # -m external selects the whole live_jira_dc external-tier suite, which includes
+      # the isolated legacy-vs-typed differential (test_dc_mutations.py's 14-by-2
+      # mutation table), the store-copy isolation assertions
+      # (test_store_copy_isolation.py), and the multi-project rehearsal
+      # (test_multi_project_rehearsal.py) — the comparison this AC requires. The
+      # all-skip canary in tests/external/conftest.py fails the session if every test
+      # in this tier skipped (an all-skipped run cannot go green).
+      - name: Run the exact-patchset Jira DC differential + convergence suite
+        env:
+          REBAR_RUN_EXTERNAL: "1"
+          REBAR_SYNC_PUSH: "off"
+        run: >-
+          pytest -m external tests/external/live_jira_dc -q -rA --durations=25
+          --timeout=900 --timeout-method=thread
+          -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
+
+      - name: Jira DC container logs on failure
+        if: failure()
+        run: cd tests/external/live_jira_dc && docker compose logs --tail=200
+
+      - name: Tear down the Jira DC harness
+        if: always()
+        run: cd tests/external/live_jira_dc && docker compose down -v

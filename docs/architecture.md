@@ -134,7 +134,54 @@ ADR 0100 remains the historical rationale for this boundary, including the canon
 
 **Future adapter obligations.** A new provider adapter joining this boundary must: expose each supported mutation as a single typed operation returning a provider-neutral signal (no whole-operation retry loop of its own, no `_best_effort` write-swallowing); support the observe step so an ambiguous commit can be resolved by re-observation rather than blind replay (`ReplaySafety.forbidden` for `commit_unknown`); never delete remote work to undo a partial pass (rollback is code/routing reversion plus re-observation); and leave the retry budget, fuse, and pass tally to the coordinator. These obligations are enforced behaviourally by the route census (`tests/unit/rebar_reconciler/mutate/test_coordinator_route_census.py`) and the portable, credential-free Cloud/DC coordinator suite (`tests/unit/rebar_reconciler/mutate/test_reconciler_coordinator.py`).
 
-### Two writers, one store
+### Typed outbound mutation payloads (ADR 0107)
+
+[ADR 0107](adr/0107-reconciler-typed-mutation-payload-contract.md) records the
+`Mutation.payload` contract: ten typed, `Mapping`-compatible dataclasses in
+`rebar_reconciler/mutation_payloads.py` (one per live `(direction, action)`
+combination — `OutboundCreatePayload`, `OutboundUpdatePayload`,
+`OutboundDeletePayload`, `OutboundProbePayload`, `OutboundConflictPayload`,
+`InboundCreatePayload`, `InboundUpdatePayload`, `InboundCleanLabelPayload`,
+`InboundRepairPropertyPayload`, `InboundConflictPayload`), each with an
+`as_legacy_dict()`/`from_legacy()` round-trip and its own `__post_init__`
+validation (e.g. an update payload must change at least one of
+changed_fields/comments/labels/links).
+
+**Producer cutover (epic `eb64` / story `single-vast-roan`).** The outbound
+producer (`outbound_pass._run_differs_outbound`) now constructs
+`OutboundCreatePayload`/`OutboundUpdatePayload`/`OutboundDeletePayload`
+directly from each `OutboundMutation`, rather than assembling a raw dict whose
+CREATE shape (top-level-spread fields vs. a nested `"fields"` key) was
+ambiguous downstream. `batch_dispatch._mutation_to_batch_dict` reads a typed
+payload's own named attributes (`.fields` / `.changed_fields`) directly — no
+more runtime `"fields" in payload` sniffing for the production path. The
+historical dict-shape heuristic in `_mutation_to_batch_dict` is **retained**,
+but only as an explicit, documented fallback for a raw-dict `Mutation.payload`
+— a genuinely supported, test-exercised construction path (see
+`tests/unit/rebar_reconciler/mutate/test_outbound_update_propagation.py` /
+`test_outbound_create_binding.py`), not a production code path (verified by
+`tests/unit/rebar_reconciler/mutate/test_payload_shadow_route_census.py`'s
+source-text census: only `outbound_pass` and `batch_dispatch` import
+`mutation_payloads`; no production module imports the side-effect-free shadow
+comparator, `payload_shadow.py`).
+
+`applier.apply()`'s **two call shapes remain**: a single typed `Mutation`
+dispatches through `_apply_typed`, and a **list** dispatches through the legacy
+batch path (`_apply_batch`) — and that list may itself be either typed
+`Mutation`s (the real production shape, always typed after the producer
+cutover above) or already-dict-shaped legacy batch entries (a distinct,
+directly-tested API convention — see
+`tests/unit/rebar_reconciler/mutate/test_apply_list_of_mutations.py` and the
+~50 tests across `tests/unit/rebar_reconciler/apply/` that hand-build dict
+batches to unit-test `_apply_batch`/`create_one`/`update_one`/`delete_one`
+independent of how the input was produced). `apply()` still branches on
+`isinstance(m, MutationShape)` per list entry to decide whether to convert via
+`_mutation_to_batch_dict` — this is that dual-call-shape API, not residual
+production-path ambiguity: 100% of what the reconciler pass itself emits is
+now a typed `Mutation` with a typed payload, so `_mutation_to_batch_dict` is
+never invoked on an ambiguous shape in production.
+
+
 
 rebar's git-backed event store has **two independent writers** that must not be
 conflated — a recurring confusion for agents scoping bulk-write work:

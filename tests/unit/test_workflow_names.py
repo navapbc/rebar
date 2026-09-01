@@ -48,6 +48,7 @@ _EXPECTED_NAMES: dict[str, str] = {
     "reconcile-bridge-canary.yml": "Reconciler Heartbeat Canary",
     "dependency-advisory-canary.yml": "Dependency Advisory Canary",
     "jira-dc-capability-map.yml": "Jira DC Capability Map",
+    "jira-dc-exact-patchset.yml": "Jira DC Exact-Patchset Parity",
     "jira-dc-richtext-probe.yml": "Jira DC Rich-Text Probe",
     "structured-output-baseline.yml": "Structured-Output Baseline",
     "compact-sweep.yml": "Compaction Sweep",
