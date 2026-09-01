@@ -15512,6 +15512,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:06Z"
     },
+    "3cef-c948-68ba-40fd": {
+      "created_at": "2026-09-01T23:30:20Z",
+      "jira_id": "4591363",
+      "jira_key": "REB-4420",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T23:30:23Z"
+    },
     "3cf7-56db-cbf2-4ba4": {
       "baseline": {
         "assignee": {
@@ -56121,9 +56128,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Summary\nCI for Gerrit change 2480 exposed a py3.11 xdist leak: `tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip` creates `.rebar-test-sidecar-material` under `Path.cwd()` / repo root. During xdist, another test can snapshot repo root while that directory exists and fail in `tests/conftest.py::_no_repo_root_leaks`.\n\n## Root cause\nThe test fixture should use a per-test temporary directory, not the checkout root. Its current repo-root scratch directory is briefly visible to unrelated tests.\n\n## Acceptance Criteria\n- [ ] `test_legacy_payloads_without_material_still_round_trip` writes its synthetic tracker under `tmp_path`, not `Path.cwd()` / repo root.\n- [ ] The targeted sidecar-material test passes.\n- [ ] The 29a6 Gerrit Verified gate no longer fails on `.rebar-test-sidecar-material` repo-root leakage.\n\n## Testing\n- `python -m pytest tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip -q`\n- Gerrit change 2480 Verified rerun.",
+        "description": "## Summary\nCI for Gerrit change 2480 exposed a py3.11 xdist leak: `tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip` created `.rebar-test-sidecar-material` under `Path.cwd()` / repo root. During xdist, another test could snapshot repo root while that directory existed and fail in `tests/conftest.py::_no_repo_root_leaks`.\n\n## Root cause\nThe test fixture used a repo-root scratch directory for its synthetic tracker. That directory was briefly visible to unrelated tests. The fix uses pytest `tmp_path`, which is per-test disposable storage outside the checkout.\n\n## Acceptance Criteria\n- [x] `test_legacy_payloads_without_material_still_round_trip` writes its synthetic tracker under `tmp_path`, not `Path.cwd()` / repo root.\n- [x] The targeted sidecar-material test passes.\n- [ ] The 29a6 Gerrit change 2480 Verified gate no longer fails on `.rebar-test-sidecar-material` repo-root leakage.\n\n## Testing\n- `python -m pytest tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip -q` \u2014 passed.\n- `python -m pytest tests/scripts/test_autodeploy_mcp_bluegreen.py::test_port_exhausted_routine_backoff_does_not_inflate_deploy_errors tests/scripts/test_autodeploy_mcp_bluegreen.py::test_low_memory_routine_backoff_does_not_inflate_deploy_errors tests/scripts/test_autodeploy_mcp_bluegreen.py::test_mcp_failure_keeps_the_deploy_failed_metric_and_names_the_component -q` \u2014 passed.\n- `make lint` \u2014 passed.\n- Gerrit change 2480 Verified rerun pending.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Completion sidecar material test leaks repo-root scratch dir under xdist"
       },
       "created_at": "2026-09-01T21:33:47Z",
@@ -67096,7 +67103,26 @@
     "1788301372893410001": "__rebar_unknown_comment_id__",
     "1788301464259923001": "__rebar_unknown_comment_id__",
     "1788301529345544001": "__rebar_unknown_comment_id__",
-    "1788301709504027001": "__rebar_unknown_comment_id__"
+    "1788301709504027001": "__rebar_unknown_comment_id__",
+    "1788301856353510001": "__rebar_unknown_comment_id__",
+    "1788302001905798001": "__rebar_unknown_comment_id__",
+    "1788302013159672001": "__rebar_unknown_comment_id__",
+    "1788302143776353001": "__rebar_unknown_comment_id__",
+    "1788302239620629001": "__rebar_unknown_comment_id__",
+    "1788302257558814001": "__rebar_unknown_comment_id__",
+    "1788302857944180001": "__rebar_unknown_comment_id__",
+    "1788302916391690001": "__rebar_unknown_comment_id__",
+    "1788302918939456001": "__rebar_unknown_comment_id__",
+    "1788302921447573001": "__rebar_unknown_comment_id__",
+    "1788302923971812001": "__rebar_unknown_comment_id__",
+    "1788303080636262001": "__rebar_unknown_comment_id__",
+    "1788303257409042001": "__rebar_unknown_comment_id__",
+    "1788303389256646001": "__rebar_unknown_comment_id__",
+    "1788303485691849001": "__rebar_unknown_comment_id__",
+    "1788303668244980001": "__rebar_unknown_comment_id__",
+    "1788303967114384001": "__rebar_unknown_comment_id__",
+    "1788304714221752528": "__rebar_unknown_comment_id__",
+    "1788304714222174319": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -69923,6 +69949,7 @@
     "REB-4418": "897e-8ad4-0444-49d9",
     "REB-4419": "ddc2-66ae-a863-4e09",
     "REB-442": "70c7-8745-2be8-4e5c",
+    "REB-4420": "3cef-c948-68ba-40fd",
     "REB-443": "fa49-2687-4daf-4afc",
     "REB-444": "1ba5-39de-2fc2-45f0",
     "REB-445": "30b3-b001-4ee2-43d2",
