@@ -202,24 +202,40 @@ def _recycled_stamp(dead_pid: int) -> str:
     )
 
 
-def test_recycled_pid_with_no_proc_is_reclaimed_only_past_the_ceiling(tmp_path, monkeypatch):
+def test_recycled_pid_with_no_proc_is_reclaimed_when_fcntl_is_held(tmp_path, monkeypatch):
     """A dead holder whose pid number is now held by a LIVE unrelated process, on a platform
-    where the start time is unobservable. Before this fix `_mkdir_lock_is_stale` returned False
-    unconditionally here and the store wedged with no bound at all."""
+    where the start time is unobservable. The free fcntl leg is authoritative for another
+    process: if that process still owned the write lock, this waiter could not hold fcntl."""
     _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname="host", ns=_NS)
     monkeypatch.setattr(_owner, "_process_start_time", lambda pid: None)  # no /proc
     # The stamp names a pid that IS alive but is NOT the process that wrote the stamp.
     monkeypatch.setattr(_owner, "_pid_alive", lambda _pid: True)
     lock_dir = _seed(tmp_path, _recycled_stamp(_dead_pid()))
 
-    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is False, (
-        "fresh: still honoured — the fix adds a BOUND, it does not make the lock instantly "
-        "reclaimable"
+    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is True
+
+
+def test_unqualified_live_pid_without_fcntl_proof_still_waits_for_the_ceiling(
+    tmp_path, monkeypatch
+):
+    """Without the kernel-fcntl proof, a fresh unqualified pid match is still refused.
+
+    This is the contrast case that keeps the fix from becoming a bare "pid live is stale"
+    rule: file-shaped locks and diagnostic callers without fcntl proof retain the ceiling.
+    """
+    _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname="host", ns=_NS)
+    monkeypatch.setattr(_owner, "_process_start_time", lambda pid: None)
+    monkeypatch.setattr(_owner, "_pid_alive", lambda _pid: True)
+    lock_dir = _seed(tmp_path, _recycled_stamp(_dead_pid()))
+
+    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=False) is False, (
+        "fresh without fcntl proof: still honoured — the instant reclaim is tied to the "
+        "kernel lock proof"
     )
 
     _age_past_ceiling(lock_dir)
 
-    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is True
+    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=False) is True
 
 
 def test_recycled_pid_with_a_known_differing_start_is_reclaimed_at_once(tmp_path, monkeypatch):

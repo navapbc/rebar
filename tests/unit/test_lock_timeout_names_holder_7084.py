@@ -45,9 +45,51 @@ def test_describes_a_held_lock_from_the_existing_stamp(tmp_path):
     assert f"pid={os.getpid()}" in holder
     assert f"host={_owner._host_identity()}" in holder
     assert "held=" in holder
-    # Our own pid is, definitionally, live — so the message distinguishes a real holder
-    # from a stale stamp.
-    assert "pid_state=live" in holder
+    assert "pid_state=" in holder
+
+
+def test_describe_reports_live_only_when_start_time_corroborates_the_stamp(tmp_path, monkeypatch):
+    """A pid-number hit is a live-holder diagnostic only when start time matches too."""
+    monkeypatch.setattr(_owner, "_process_start_time", lambda _pid: "111")
+    stamp = (
+        f"{_owner._STAMP_V2_PREFIX} host={_owner._host_identity()} "
+        f"ns={_owner._read_pid_namespace_id() or _owner._STAMP_UNKNOWN} "
+        "pid=4321 start=111"
+    )
+    monkeypatch.setattr(_owner, "_pid_alive", lambda _pid: True)
+    _seed_stamp(tmp_path, stamp)
+
+    assert "pid_state=live" in _lock.describe_lock_holder(str(tmp_path))
+
+
+def test_describe_does_not_report_unqualified_pid_match_as_live(tmp_path, monkeypatch):
+    """On no-/proc platforms a live pid number is unverified, not proof of ownership."""
+    monkeypatch.setattr(_owner, "_process_start_time", lambda _pid: None)
+    monkeypatch.setattr(_owner, "_pid_alive", lambda _pid: True)
+    stamp = (
+        f"{_owner._STAMP_V2_PREFIX} host={_owner._host_identity()} "
+        f"ns={_owner._read_pid_namespace_id() or _owner._STAMP_UNKNOWN} "
+        "pid=4321 start=-"
+    )
+    _seed_stamp(tmp_path, stamp)
+
+    holder = _lock.describe_lock_holder(str(tmp_path))
+    assert "pid_state=live" not in holder
+    assert "pid_state=unverified-live (start unknown)" in holder
+
+
+def test_describe_reports_known_recycled_pid_as_not_owner(tmp_path, monkeypatch):
+    """Known but differing start times prove the pid number has been recycled."""
+    monkeypatch.setattr(_owner, "_process_start_time", lambda _pid: "222")
+    monkeypatch.setattr(_owner, "_pid_alive", lambda _pid: True)
+    stamp = (
+        f"{_owner._STAMP_V2_PREFIX} host={_owner._host_identity()} "
+        f"ns={_owner._read_pid_namespace_id() or _owner._STAMP_UNKNOWN} "
+        "pid=4321 start=111"
+    )
+    _seed_stamp(tmp_path, stamp)
+
+    assert "pid_state=not-owner (recycled pid)" in _lock.describe_lock_holder(str(tmp_path))
 
 
 def test_a_dead_stamped_pid_reports_not_running(tmp_path, monkeypatch):
@@ -142,7 +184,7 @@ def test_contended_timeout_names_the_holder(tmp_path):
     assert message.startswith("flock: could not acquire lock after 1s")
     # ...and the holder is NAMED, so diagnosis needs no commit-timeline inference.
     assert f"pid={proc.pid}" in message
-    assert "pid_state=live" in message
+    assert "pid_state=live" in message or "pid_state=unverified-live" in message
     assert excinfo.value.holder is not None
 
 
