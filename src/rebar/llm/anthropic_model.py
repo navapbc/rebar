@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 from rebar.llm.config import LLMConfig
@@ -80,6 +82,112 @@ def _local_proxy_bypass_base_url() -> str | None:
 _RETRY_STATUSES = frozenset({429, 529, 500, 502, 503, 504})
 
 
+def _retry_after_delay(exc: BaseException, *, max_wait: float) -> float | None:
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    retry_after = headers.get("retry-after") if headers is not None else None
+    if not retry_after:
+        return None
+    try:
+        return min(float(int(retry_after)), max_wait)
+    except ValueError:
+        pass
+    try:
+        retry_time = parsedate_to_datetime(retry_after)
+    except (TypeError, ValueError):
+        return None
+    if retry_time.tzinfo is None:
+        retry_time = retry_time.replace(tzinfo=timezone.utc)
+    wait_seconds = (retry_time - datetime.now(timezone.utc)).total_seconds()
+    if wait_seconds <= 0:
+        return None
+    return min(wait_seconds, max_wait)
+
+
+def _anthropic_http_client_module(async_anthropic_cls):
+    import inspect
+
+    import httpx
+
+    http_client = inspect.signature(async_anthropic_cls.__init__).parameters.get("http_client")
+    if http_client is not None and "httpx2.AsyncClient" in str(http_client.annotation):
+        import httpx2
+
+        return httpx2
+    return httpx
+
+
+def _coerce_timeout_for_http_client(http_module, *, cfg: LLMConfig, http_timeout):
+    if http_timeout is None:
+        return http_module.Timeout(float(cfg.timeout_s))
+    if http_module.__name__ != "httpx2" or isinstance(http_timeout, http_module.Timeout):
+        return http_timeout
+    return http_module.Timeout(
+        connect=getattr(http_timeout, "connect", None),
+        read=getattr(http_timeout, "read", None),
+        write=getattr(http_timeout, "write", None),
+        pool=getattr(http_timeout, "pool", None),
+    )
+
+
+def _build_httpx2_tenacity_transport(httpx2, *, config, wrapped=None, validate_response=None):
+    class _Httpx2AsyncTenacityTransport(httpx2.AsyncBaseTransport):  # type: ignore[name-defined]
+        def __init__(self):
+            self.config = config
+            self.wrapped = wrapped or httpx2.AsyncHTTPTransport()
+            self.validate_response = validate_response
+
+        async def handle_async_request(self, request):
+            from tenacity import retry
+
+            @retry(**self.config)
+            async def _handle(req):
+                response = await self.wrapped.handle_async_request(req)
+                response.request = req
+                if self.validate_response is not None:
+                    try:
+                        self.validate_response(response)
+                    except Exception:
+                        await response.aclose()
+                        raise
+                return response
+
+            return await _handle(request)
+
+        async def __aenter__(self):
+            await self.wrapped.__aenter__()
+            return self
+
+        async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+            await self.wrapped.__aexit__(exc_type, exc_value, traceback)
+
+        async def aclose(self) -> None:
+            await self.wrapped.aclose()
+
+    return _Httpx2AsyncTenacityTransport()
+
+
+def _drop_unsupported_beta_create_kwargs(anthropic_client: Any) -> None:
+    import inspect
+
+    create = getattr(
+        getattr(getattr(anthropic_client, "beta", None), "messages", None), "create", None
+    )
+    if create is None:
+        return
+    params = inspect.signature(create).parameters
+    unsupported = tuple(name for name in ("temperature", "top_p", "top_k") if name not in params)
+    if not unsupported:
+        return
+
+    async def _create(*args, **kwargs):
+        for name in unsupported:
+            kwargs.pop(name, None)
+        return await create(*args, **kwargs)
+
+    anthropic_client.beta.messages.create = _create
+
+
 def _build_retry_wait(*, max_wait: float, rng=None):
     """Build the tenacity wait strategy for the Anthropic transport (ticket
     ``254e-1770-854b-47a2``). Hardens pydantic-ai's ``wait_retry_after`` against two
@@ -91,21 +199,18 @@ def _build_retry_wait(*, max_wait: float, rng=None):
        amount and retry in lockstep. Replace it with Equal Jitter ``rng.uniform(cap / 2, cap)``
        over an exponential cap (Marc Brooker's AWS taxonomy; the gobifrost/bifrost pattern) so
        concurrent clients scatter.
-    2. **Zero/expired ``Retry-After`` guard.** A ``Retry-After: 0`` (or negative) integer is
-       honored verbatim by ``wait_retry_after`` as an IMMEDIATE replay — re-forming the herd.
+    2. **Zero/expired ``Retry-After`` guard.** A ``Retry-After: 0`` (or negative) integer can
+       otherwise collapse to an IMMEDIATE replay — re-forming the herd.
        Treat a non-positive integer ``Retry-After`` as ABSENT and fall through to the jittered
-       fallback. (An already-expired HTTP-date already falls through inside ``wait_retry_after``.)
+       fallback. (An already-expired HTTP-date falls through the same way.)
 
-    A positive in-window ``Retry-After`` is still honored (capped at ``max_wait``) by delegating
-    to ``wait_retry_after``. ``rng`` defaults to the process-global ``random`` module, which
+    A positive in-window ``Retry-After`` is still honored (capped at ``max_wait``). ``rng``
+    defaults to the process-global ``random`` module, which
     Python seeds from OS entropy once per interpreter start — so the N SEPARATE agent processes
     that form the herd draw from independent streams; it is an injection seam for deterministic
     tests only, never threaded from production config.
     """
     import random as _random
-
-    import httpx
-    from pydantic_ai.retries import wait_retry_after
 
     _rng = rng if rng is not None else _random
 
@@ -115,23 +220,13 @@ def _build_retry_wait(*, max_wait: float, rng=None):
             return 0.0
         return _rng.uniform(cap / 2.0, cap)
 
-    delegate = wait_retry_after(fallback_strategy=_jittered_fallback, max_wait=max_wait)
-
     def _wait(state) -> float:
         exc = state.outcome.exception() if state.outcome else None
-        if isinstance(exc, httpx.HTTPStatusError):
-            retry_after = exc.response.headers.get("retry-after")
-            if retry_after:
-                try:
-                    # A zero/negative integer Retry-After would collapse the backoff to an
-                    # immediate synchronized replay; treat it as absent -> jittered fallback.
-                    if int(retry_after) <= 0:
-                        return _jittered_fallback(state)
-                except ValueError:
-                    # Non-integer -> an HTTP-date; wait_retry_after already falls an expired
-                    # date through to the (now jittered) fallback, so just delegate.
-                    pass
-        return delegate(state)
+        if exc is not None:
+            retry_after_delay = _retry_after_delay(exc, max_wait=max_wait)
+            if retry_after_delay is not None and retry_after_delay > 0:
+                return retry_after_delay
+        return _jittered_fallback(state)
 
     return _wait
 
@@ -151,12 +246,13 @@ def _build_retrying_anthropic_provider(
 
     ``base_url=None`` uses the Anthropic SDK default (the normal path); a non-empty value is
     the loopback-proxy-bypass direct URL. ``http_timeout`` is story hoopoe's per-attempt
-    ``httpx.Timeout`` when present, else a bounded default from ``cfg.timeout_s`` (never
-    unbounded). A transient ``{429,529,5xx}``/``httpx.TimeoutException``/``httpx.NetworkError``
-    blip is re-sent BELOW the agent loop, so completed tool calls are never re-executed; a
-    positive ``Retry-After`` is honored (capped at ``llm_retry_max_wait_s``), else a jittered
-    exponential backoff (``_build_retry_wait``; a zero/negative/expired ``Retry-After`` is
-    guarded to that jittered fallback rather than an immediate replay — ticket 254e).
+    ``httpx.Timeout`` when present (coerced to ``httpx2.Timeout`` for the SDKs that require
+    it), else a bounded default from ``cfg.timeout_s`` (never unbounded). A transient
+    ``{429,529,5xx}``/timeout/network blip is re-sent BELOW the agent loop, so completed tool
+    calls are never re-executed; a positive ``Retry-After`` is honored (capped at
+    ``llm_retry_max_wait_s``), else a jittered exponential backoff (``_build_retry_wait``; a
+    zero/negative/expired ``Retry-After`` is guarded to that jittered fallback rather than an
+    immediate replay — ticket 254e).
 
     ``auth`` is the optional RP-04 S4 :class:`~rebar.llm.auth.AnthropicAuth` carrier. When
     SUPPLIED it is fail-closed-validated (exactly one of ``api_key``/``auth_token`` — a
@@ -164,7 +260,6 @@ def _build_retrying_anthropic_provider(
     never degrading to the ambient credential) and its single key is injected into the
     ``AsyncAnthropic(...)`` call; ``None`` means the SDK resolves its ambient credential
     exactly as before RP-04."""
-    import httpx
     from anthropic import AsyncAnthropic
     from pydantic_ai.providers.anthropic import AnthropicProvider
     from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig
@@ -177,7 +272,9 @@ def _build_retrying_anthropic_provider(
 
         auth_kwargs = anthropic_auth_kwargs(auth)
 
-    def _validate_response(response: httpx.Response) -> None:
+    http_module = _anthropic_http_client_module(AsyncAnthropic)
+
+    def _validate_response(response: Any) -> None:
         if response.status_code in _RETRY_STATUSES:
             response.raise_for_status()
 
@@ -190,27 +287,32 @@ def _build_retrying_anthropic_provider(
         )
 
     attempts = max(1, int(cfg.llm_retry_max_attempts))
-    transport = AsyncTenacityTransport(
-        config=RetryConfig(
-            retry=(
-                retry_if_exception_type(httpx.HTTPStatusError)
-                | retry_if_exception_type(httpx.TimeoutException)
-                | retry_if_exception_type(httpx.NetworkError)
-            ),
-            wait=_build_retry_wait(max_wait=float(cfg.llm_retry_max_wait_s)),
-            stop=stop_after_attempt(attempts),
-            reraise=True,
-            before_sleep=_before_sleep,
+    retry_config = RetryConfig(
+        retry=(
+            retry_if_exception_type(http_module.HTTPStatusError)
+            | retry_if_exception_type(http_module.TimeoutException)
+            | retry_if_exception_type(http_module.NetworkError)
         ),
-        # ``_wrapped_transport`` is a test seam (a MockTransport); production uses the real
-        # httpx transport.
-        wrapped=_wrapped_transport
-        if _wrapped_transport is not None
-        else httpx.AsyncHTTPTransport(),
-        validate_response=_validate_response,
+        wait=_build_retry_wait(max_wait=float(cfg.llm_retry_max_wait_s)),
+        stop=stop_after_attempt(attempts),
+        reraise=True,
+        before_sleep=_before_sleep,
     )
-    timeout = http_timeout if http_timeout is not None else httpx.Timeout(float(cfg.timeout_s))
-    http_client = httpx.AsyncClient(transport=transport, timeout=timeout)
+    wrapped = (
+        _wrapped_transport if _wrapped_transport is not None else http_module.AsyncHTTPTransport()
+    )
+    if http_module.__name__ == "httpx2":
+        transport = _build_httpx2_tenacity_transport(
+            http_module, config=retry_config, wrapped=wrapped, validate_response=_validate_response
+        )
+    else:
+        transport = AsyncTenacityTransport(
+            config=retry_config,
+            wrapped=wrapped,
+            validate_response=_validate_response,
+        )
+    timeout = _coerce_timeout_for_http_client(http_module, cfg=cfg, http_timeout=http_timeout)
+    http_client = http_module.AsyncClient(transport=transport, timeout=timeout)
     anthropic_client = AsyncAnthropic(
         base_url=base_url or None, max_retries=0, http_client=http_client, **auth_kwargs
     )
@@ -220,6 +322,7 @@ def _build_retrying_anthropic_provider(
             "transport-retry guard: AsyncAnthropic.max_retries must be 0 "
             "(retry is owned by the httpx transport, not the SDK)"
         )
+    _drop_unsupported_beta_create_kwargs(anthropic_client)
     return AnthropicProvider(anthropic_client=anthropic_client), http_client
 
 

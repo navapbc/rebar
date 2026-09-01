@@ -77,6 +77,21 @@ _MODEL = "claude-sonnet-4-6"
 _BEDROCK_MODEL = "us.anthropic.claude-sonnet-4-6-20250101-v1:0"
 
 
+def _anthropic_expects_httpx2_client() -> bool:
+    import inspect
+
+    import anthropic
+
+    http_client = inspect.signature(anthropic.AsyncAnthropic.__init__).parameters.get("http_client")
+    return http_client is not None and "httpx2.AsyncClient" in str(http_client.annotation)
+
+
+def _transport_http_module():
+    if _anthropic_expects_httpx2_client():
+        return pytest.importorskip("httpx2")
+    return httpx
+
+
 def _caps(style: str) -> ModelCapabilities:
     return ModelCapabilities(
         native_structured_output=False,
@@ -153,9 +168,11 @@ def _capture_anthropic_body(
 
     captured: list[bytes] = []
 
-    def _handler(request: httpx.Request) -> httpx.Response:
+    transport_http = _transport_http_module()
+
+    def _handler(request):
         captured.append(request.content)
-        return httpx.Response(
+        return transport_http.Response(
             200,
             json={
                 "id": "msg_x",
@@ -171,7 +188,7 @@ def _capture_anthropic_body(
 
     cfg = LLMConfig(repo_path=".", model=f"anthropic:{_MODEL}")
     model, client = _build_retrying_anthropic_model(
-        _MODEL, base_url=None, cfg=cfg, _wrapped_transport=httpx.MockTransport(_handler)
+        _MODEL, base_url=None, cfg=cfg, _wrapped_transport=transport_http.MockTransport(_handler)
     )
     try:
         asyncio.run(model.request(messages, settings, ModelRequestParameters(function_tools=tools)))
