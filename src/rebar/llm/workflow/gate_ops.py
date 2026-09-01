@@ -109,6 +109,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
             "verdict": verdict,
             "context": "",
             "certifiable": False,
+            "completion_prefetch_manifest": [],
         }
     blocking, uncertified = child_closure_findings(canonical, ctx.repo_root)
     floor: list[dict] = []
@@ -159,6 +160,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
             "verdict": verdict,
             "context": "",  # short-circuit: no verify runs, so no context is needed
             "certifiable": False,
+            "completion_prefetch_manifest": [],
         }
     # No unclosed child → run the LLM on the parent's OWN criteria. Certification is WITHHELD iff a
     # direct child is closed-but-UNCERTIFIED (force-closed): the parent MAY close (subject to its
@@ -195,9 +197,12 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
 
     if os.environ.get("REBAR_VERIFY_PREFETCH") == "0":  # read-via: subsystem-kill-switch
         context = base
+        prefetch_manifest: list[dict[str, Any]] = []
     else:
         spec = PrefetchSpec(ticket_id=str(tid), graph=graph)
-        section, _manifest = completion_prefetch.assemble_prefetch(spec, repo_root=ctx.repo_root)
+        section, prefetch_manifest = completion_prefetch.assemble_prefetch(
+            spec, repo_root=ctx.repo_root
+        )
         model = resolve_gate_config(ctx.repo_root).model
         fitted = fit_within_ceiling(base, section, model)
         context = base + ("\n\n" + fitted if fitted else "")
@@ -234,6 +239,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
         "verdict": None,
         "context": fenced,
         "certifiable": certifiable,
+        "completion_prefetch_manifest": prefetch_manifest,
     }
 
 
@@ -312,6 +318,9 @@ def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
     finalizer = ctx.inputs.get("finalizer")
     if finalizer is not None and finalizer != "primary":
         result["finalizer"] = finalizer
+    prefetch_manifest = ctx.inputs.get("completion_prefetch_manifest")
+    if isinstance(prefetch_manifest, list) and prefetch_manifest:
+        result["completion_prefetch_manifest"] = list(prefetch_manifest)
     if not result["certifiable"] and "summary" not in result:
         result["summary"] = (
             "Closed without certification: a force-closed (uncertified) descendant leaves the "

@@ -41,6 +41,9 @@ def build_gate_error_payload(
     cause: str,
     evidence_ref: str | None = None,
     diagnostic: dict[str, Any] | None = None,
+    material_fingerprint: str | None = None,
+    material_basis: str | None = None,
+    verifier_version: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """The dedicated ERROR payload: ``verdict == "ERROR"`` + an ``error{cause, evidence_ref}``
     object, tagged ``schema == "gate_error_v1"``. Deliberately a SEPARATE builder from the
@@ -48,12 +51,19 @@ def build_gate_error_payload(
     error: dict[str, Any] = {"cause": cause, "evidence_ref": evidence_ref}
     if diagnostic:
         error["diagnostic"] = dict(diagnostic)
-    return {
+    payload = {
         "schema": GATE_ERROR_SCHEMA,
         "verdict": "ERROR",
         "gate": gate,
         "error": error,
     }
+    if material_fingerprint:
+        payload["material_fingerprint"] = material_fingerprint
+    if material_basis:
+        payload["material_basis"] = material_basis
+    if verifier_version:
+        payload["verifier_version"] = dict(verifier_version)
+    return payload
 
 
 def emit_gate_error(
@@ -75,11 +85,24 @@ def emit_gate_error(
     try:
         event_type = _GATE_EVENT_TYPE[gate]
         tracker = _config.tracker_dir(repo_root)
+        material_fingerprint = None
+        material_basis = None
+        version = None
+        if gate == "completion":
+            from rebar.llm import completion_sidecar
+
+            material_fingerprint, material_basis = completion_sidecar.error_material(
+                ticket_id, repo_root=repo_root
+            )
+            version = completion_sidecar.verifier_version(repo_root)
         payload = build_gate_error_payload(
             gate,
             cause=cause,
             evidence_ref=evidence_ref,
             diagnostic=diagnostic,
+            material_fingerprint=material_fingerprint,
+            material_basis=material_basis,
+            verifier_version=version,
         )
         append_event(ticket_id, event_type, payload, tracker, repo_root=repo_root)
     except Exception:

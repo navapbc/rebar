@@ -212,7 +212,7 @@ def _compose_prepared_bundle(
             "Error: completion PASS cannot be atomically certified without pinned material",
             returncode=1,
         )
-    payload = completion_sidecar.build_payload(result, material=material)
+    payload = completion_sidecar.build_payload(result, material=material, repo_root=repo_root)
     manifest = verdict_manifest(result, ticket_id, repo_root)
     try:
         resolved, signature_payload = signing._prepare_manifest_event(
