@@ -186,56 +186,48 @@ def test_completion_gate_error_emit_enriches_only_completion_records(monkeypatch
     assert "verifier_version" not in plan
 
 
-def test_legacy_payloads_without_material_still_round_trip(monkeypatch):
+def test_legacy_payloads_without_material_still_round_trip(monkeypatch, tmp_path):
     import json
     import os
-    import shutil
     from pathlib import Path
 
     from rebar import config
     from rebar.llm import completion_sidecar
 
-    root = Path.cwd() / ".rebar-test-sidecar-material"
-    tracker = root / "tracker"
-    shutil.rmtree(root, ignore_errors=True)
+    tracker = tmp_path / "tracker"
     ticket_dir = tracker / "ticket-1"
     ticket_dir.mkdir(parents=True)
-    try:
-        event = {
-            "event_type": completion_sidecar.EVENT_TYPE,
-            "data": {
-                "schema": completion_sidecar.SCHEMA,
-                "verdict": "FAIL",
-                "ticket_id": "ticket-1",
-                "findings": [],
-            },
-        }
-        (ticket_dir / "0000000000000000001-COMPLETION_VERDICT.json").write_text(
-            json.dumps(event), encoding="utf-8"
-        )
-        pass_event = {
-            "event_type": completion_sidecar.EVENT_TYPE,
-            "data": {
-                "schema": completion_sidecar.SCHEMA_PASS,
-                "verdict": "PASS",
-                "ticket_id": "ticket-1",
-                "criteria": [],
-                "findings": [],
-            },
-        }
-        (ticket_dir / "0000000000000000002-COMPLETION_VERDICT.json").write_text(
-            json.dumps(pass_event), encoding="utf-8"
-        )
+    event = {
+        "event_type": completion_sidecar.EVENT_TYPE,
+        "data": {
+            "schema": completion_sidecar.SCHEMA,
+            "verdict": "FAIL",
+            "ticket_id": "ticket-1",
+            "findings": [],
+        },
+    }
+    (ticket_dir / "0000000000000000001-COMPLETION_VERDICT.json").write_text(
+        json.dumps(event), encoding="utf-8"
+    )
+    pass_event = {
+        "event_type": completion_sidecar.EVENT_TYPE,
+        "data": {
+            "schema": completion_sidecar.SCHEMA_PASS,
+            "verdict": "PASS",
+            "ticket_id": "ticket-1",
+            "criteria": [],
+            "findings": [],
+        },
+    }
+    (ticket_dir / "0000000000000000002-COMPLETION_VERDICT.json").write_text(
+        json.dumps(pass_event), encoding="utf-8"
+    )
 
-        monkeypatch.setattr(config, "tracker_dir", lambda repo_root=None: tracker)
-        monkeypatch.setattr(
-            "rebar._engine_support.resolver.resolve_ticket_dir_name",
-            lambda ticket_id, tracker: os.fspath(Path(ticket_id)),
-        )
+    monkeypatch.setattr(config, "tracker_dir", lambda repo_root=None: tracker)
+    monkeypatch.setattr(
+        "rebar._engine_support.resolver.resolve_ticket_dir_name",
+        lambda ticket_id, tracker: os.fspath(Path(ticket_id)),
+    )
 
-        assert completion_sidecar.latest_fail_verdict("ticket-1", repo_root=".") == event["data"]
-        assert (
-            completion_sidecar.latest_pass_record("ticket-1", repo_root=".") == pass_event["data"]
-        )
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+    assert completion_sidecar.latest_fail_verdict("ticket-1", repo_root=".") == event["data"]
+    assert completion_sidecar.latest_pass_record("ticket-1", repo_root=".") == pass_event["data"]
