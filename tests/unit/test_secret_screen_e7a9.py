@@ -40,6 +40,7 @@ from _topology_template import clone_topology_template
 import rebar
 from rebar._commands import leaf
 from rebar._commands._seam import CommandError
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 pytestmark = pytest.mark.unit
 
@@ -324,7 +325,8 @@ def test_force_override_lands_the_write_and_records_it_as_forced(
     assert len(comments) == 1, "the forced write must land"
 
     tracker = _tracker(rebar_repo)
-    events = [json.loads(p.read_text()) for p in sorted((tracker / ticket).glob("*-COMMENT.json"))]
+    ticket_dir = Path(layout_ticket_dir(tracker, ticket))
+    events = [json.loads(p.read_text()) for p in sorted(ticket_dir.glob("*-COMMENT.json"))]
     assert len(events) == 1
     override = events[0]["data"].get("secret_override")
     assert override, "a forced write must be recorded as forced"
@@ -344,7 +346,9 @@ def test_a_clean_write_carries_no_override_marker(ticket: str, rebar_repo: Path)
     """Distinguishability runs both ways: a clean write is unmarked."""
     leaf.comment(ticket, "nothing to see here", repo_root=str(rebar_repo))
     tracker = _tracker(rebar_repo)
-    event = json.loads(next((tracker / ticket).glob("*-COMMENT.json")).read_text())
+    event = json.loads(
+        next(Path(layout_ticket_dir(tracker, ticket)).glob("*-COMMENT.json")).read_text()
+    )
     assert "secret_override" not in event["data"]
 
 

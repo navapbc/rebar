@@ -15,6 +15,8 @@ from _helpers import (
     _write_ticket,
 )
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 # ---------------------------------------------------------------------------
 # resolve_hierarchy_link tests (SC1, SC3, SC5, SC10, SC11 + is_redundant)
 # ---------------------------------------------------------------------------
@@ -575,7 +577,7 @@ def test_resolve_hierarchy_link_virtual_root_is_never_an_endpoint(
     assert result["resolved_source"] == "epic-a", result
     assert result["resolved_target"] == "lonely-task", result
     for endpoint in (result["resolved_source"], result["resolved_target"]):
-        assert (tracker_dir / str(endpoint)).is_dir(), (
+        assert Path(layout_ticket_dir(tracker_dir, str(endpoint))).is_dir(), (
             f"resolved endpoint {endpoint!r} is not a real ticket directory"
         )
 

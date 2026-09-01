@@ -30,6 +30,8 @@ import uuid as _uuid
 from pathlib import Path
 from typing import Any
 
+from rebar._store.ticket_layout import ticket_dir
+
 _ENGINE_DIR = Path(__file__).resolve().parents[4] / "src" / "rebar" / "_engine"
 if str(_ENGINE_DIR) not in sys.path:  # pragma: no cover - import bootstrap
     sys.path.insert(0, str(_ENGINE_DIR))
@@ -233,7 +235,7 @@ def _prep_scenario(base: Path) -> tuple[_FakeJiraState, Path, Any]:
     reconcile.reconcile_once("import-pass", repo_root=repo)
 
     # Edit the local ticket's description so the outbound differ computes a scalar UPDATE.
-    tdir = repo / ".tickets-tracker" / "jira-dig-1"
+    tdir = Path(ticket_dir(repo / ".tickets-tracker", "jira-dig-1"))
     ts = 1_800_000_000_000_000_000
     u = str(_uuid.uuid4())
     ev = {

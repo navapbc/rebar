@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.metrics.event_metrics import attempts_per_ticket, revert_recovery, rework_within_days
 from rebar.metrics.registry import REGISTRY, is_authoritative
 
@@ -48,7 +49,7 @@ def _write_event(
 
 
 def _ticket(tracker: Path, tid: str, ttype: str = "task") -> Path:
-    d = tracker / tid
+    d = Path(layout_ticket_dir(tracker, tid))
     d.mkdir(parents=True)
     _write_event(d, _ns("2026-01-01T00:00:00"), "CREATE", {"ticket_type": ttype, "title": tid})
     return d

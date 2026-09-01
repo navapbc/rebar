@@ -24,6 +24,8 @@ from pathlib import Path
 
 from rebar._commands._seam import CommandError, append_event, tracker_dir
 from rebar._commands.composer import create_core
+from rebar._store.ticket_layout import iter_ticket_dirs
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +83,7 @@ def _is_identity(ticket_id: str, tracker: str) -> bool:
     """True iff ``ticket_id`` is an existing, non-deleted ``identity`` ticket."""
     import os
 
-    d = os.path.join(tracker, ticket_id)
+    d = layout_ticket_dir(tracker, ticket_id)
     if not os.path.isdir(d):
         return False
     state = _reduce(d)
@@ -120,20 +122,11 @@ def _git_email(repo_root=None) -> str | None:
 def _match_by_email(email: str, tracker: str) -> str | None:
     """Return the sole identity id whose ``email`` matches (case-insensitive), else
     ``None`` (zero matches OR two-or-more ambiguous matches both resolve to None)."""
-    import os
 
     target = email.strip().lower()
     matches: list[str] = []
-    try:
-        entries = sorted(os.listdir(tracker))
-    except OSError:
-        return None
-    for entry in entries:
-        if entry.startswith("."):
-            continue
-        d = os.path.join(tracker, entry)
-        if not os.path.isdir(d):
-            continue
+    for entry in iter_ticket_dirs(tracker):
+        d = entry.path
         state = _reduce(d)
         if not isinstance(state, dict) or state.get("ticket_type") != "identity":
             continue
@@ -141,7 +134,7 @@ def _match_by_email(email: str, tracker: str) -> str | None:
             continue
         got = state.get("email")
         if isinstance(got, str) and got.strip().lower() == target:
-            matches.append(state.get("ticket_id") or entry)
+            matches.append(state.get("ticket_id") or entry.ticket_id)
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -161,25 +154,16 @@ def _iter_identities(repo_root=None):
     A thin generator over the tracker directory (mirrors :func:`_match_by_email`'s
     scan) shared by the provider-neutral resolvers below. Silent on any listdir /
     reduce failure — the resolvers are opt-in and never raise."""
-    import os
 
     tracker = str(tracker_dir(repo_root))
-    try:
-        entries = sorted(os.listdir(tracker))
-    except OSError:
-        return
-    for entry in entries:
-        if entry.startswith("."):
-            continue
-        d = os.path.join(tracker, entry)
-        if not os.path.isdir(d):
-            continue
+    for entry in iter_ticket_dirs(tracker):
+        d = entry.path
         state = _reduce(d)
         if not isinstance(state, dict) or state.get("ticket_type") != "identity":
             continue
         if state.get("status") == "deleted":
             continue
-        yield (state.get("ticket_id") or entry, state)
+        yield (state.get("ticket_id") or entry.ticket_id, state)
 
 
 def _match_identity(local_assignee, repo_root=None) -> dict | None:
@@ -317,13 +301,12 @@ def is_placeholder(identity_id: str, *, repo_root=None) -> bool:
     """True iff ``identity_id`` is an identity whose compiled-state ``tags`` carries the
     ``placeholder`` marker (a ghost minted for an unmapped inbound user). An unknown id,
     a non-identity ticket, or any reduce failure is ``False`` — never raises."""
-    import os
 
     if not isinstance(identity_id, str) or not identity_id.strip():
         return False
     try:
         tracker = str(tracker_dir(repo_root))
-        d = os.path.join(tracker, identity_id)
+        d = layout_ticket_dir(tracker, identity_id)
         state = _reduce(d)
         if not isinstance(state, dict) or state.get("ticket_type") != "identity":
             return False

@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from rebar._proc import store_repo_root
 from rebar._store import event_append
 from rebar._store.gitutil import _AUTOMAINT_OFF, run_git_write
+from rebar._store.ticket_layout import ticket_dir_relpath
 from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
 logger = logging.getLogger(__name__)
@@ -262,7 +263,7 @@ def _git(tracker: str, *args: str):
 def unstage_ticket_dir(tracker: str, ticket_id: str) -> None:
     """Unstage an aborted fold's own index entries: a death between ``git add`` and ``git
     commit`` leaves a dirty INDEX that aborts the union merge exactly as dirty files do."""
-    _git(tracker, "reset", "-q", "--", f"{ticket_id}/")
+    _git(tracker, "reset", "-q", "--", f"{ticket_dir_relpath(tracker, ticket_id)}/")
 
 
 # raw-git-ok: store-maintenance command, seam-internal (moved from compact_txn)
@@ -275,7 +276,7 @@ def commit_ticket_dir(tracker: str, ticket_id: str, message: str) -> tuple[bool,
     it). ``stderr`` is handed back rather than logged here because the seam's lock-exhaustion
     guidance rides in it (bug ``9305``).
     """
-    add = _git(tracker, "add", "-A", f"{ticket_id}/")
+    add = _git(tracker, "add", "-A", f"{ticket_dir_relpath(tracker, ticket_id)}/")
     if add.returncode != 0:
         return False, add.stderr
     if _git(tracker, "diff", "--cached", "--quiet").returncode == 0:

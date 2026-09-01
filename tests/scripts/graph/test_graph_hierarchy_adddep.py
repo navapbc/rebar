@@ -16,6 +16,8 @@ from _helpers import (
     _write_ticket,
 )
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 # ---------------------------------------------------------------------------
 # add_dependency hierarchy integration tests (story 983e-7fff)
 # ---------------------------------------------------------------------------
@@ -55,7 +57,7 @@ def test_add_dependency_cross_story_redirects_to_story_level(
     graph.add_dependency("task-a1", "epic-other", str(tracker_dir), "depends_on")
 
     # LINK event must be written in epic-root's directory (promoted source)
-    epic_root_dir = tracker_dir / "epic-root"
+    epic_root_dir = Path(layout_ticket_dir(tracker_dir, "epic-root"))
     link_files = _glob.glob(str(epic_root_dir / "*-LINK.json"))
     assert len(link_files) >= 1, (
         f"Expected LINK event in epic-root dir (promoted source), found: {link_files}"
@@ -75,7 +77,7 @@ def test_add_dependency_cross_story_redirects_to_story_level(
     )
 
     # No LINK event should be written in task-a1's directory
-    task_a1_dir = tracker_dir / "task-a1"
+    task_a1_dir = Path(layout_ticket_dir(tracker_dir, "task-a1"))
     task_link_files = _glob.glob(str(task_a1_dir / "*-LINK.json"))
     assert len(task_link_files) == 0, (
         f"Expected NO LINK event in task-a1 dir (original source), found: {task_link_files}"
@@ -180,7 +182,7 @@ def test_add_dependency_same_parent_still_works(graph: ModuleType, tmp_path: Pat
     graph.add_dependency("task-p", "task-q", str(tracker_dir))
 
     # LINK event must be in task-p's directory (no redirect)
-    task_p_dir = tracker_dir / "task-p"
+    task_p_dir = Path(layout_ticket_dir(tracker_dir, "task-p"))
     link_files = _glob.glob(str(task_p_dir / "*-LINK.json"))
     assert len(link_files) >= 1, (
         f"Expected LINK event in task-p dir (same parent, no redirect), found: {link_files}"
@@ -280,12 +282,13 @@ def test_add_dependency_rejects_non_canonical_relation(graph: ModuleType, tmp_pa
         capture_output=True,
     )
 
-    link_count_before = len(glob.glob(str(tracker_dir / "ticket-a" / "*-LINK.json")))
+    ticket_a_dir = Path(layout_ticket_dir(tracker_dir, "ticket-a"))
+    link_count_before = len(glob.glob(str(ticket_a_dir / "*-LINK.json")))
 
     with pytest.raises(ValueError, match="blocked_by"):
         graph.add_dependency("ticket-a", "ticket-b", str(tracker_dir), "blocked_by")
 
-    link_count_after = len(glob.glob(str(tracker_dir / "ticket-a" / "*-LINK.json")))
+    link_count_after = len(glob.glob(str(ticket_a_dir / "*-LINK.json")))
     assert link_count_after == link_count_before, (
         f"Expected no LINK event to be written for non-canonical relation 'blocked_by', "
         f"but found {link_count_after - link_count_before} new LINK event(s). "

@@ -27,6 +27,7 @@ from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
+from rebar._store.ticket_layout import iter_ticket_dirs
 from rebar_reconciler._heartbeat import Heartbeat as _Heartbeat
 
 # The pass-lock lifecycle cluster, extracted to a sibling module (module-size cap).
@@ -518,12 +519,8 @@ def _dry_run_enumeration_exit(request) -> int | None:
     tickets_dir = _resolve_store(resolved_root)
     if not tickets_dir.is_dir():
         return 0
-    for entry in sorted(tickets_dir.iterdir()):
-        if not entry.is_dir():
-            continue
-        if ".scratch" in entry.parts:
-            continue
-        print(entry)
+    for entry in iter_ticket_dirs(str(tickets_dir)):
+        print(entry.path)
     return 0
 
 

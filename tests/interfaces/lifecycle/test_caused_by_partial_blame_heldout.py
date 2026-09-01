@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.metrics import blame
 
 
@@ -49,7 +51,7 @@ def test_partial_blame_failure_writes_no_caused_by_event(rebar_repo, monkeypatch
     ]
     assert caused_by_deps == []
 
-    ticket_dir = rebar_repo / ".tickets-tracker" / bug
+    ticket_dir = Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", bug))
     caused_by_events = []
     for path in ticket_dir.glob("*-LINK.json"):
         event = json.loads(path.read_text(encoding="utf-8"))

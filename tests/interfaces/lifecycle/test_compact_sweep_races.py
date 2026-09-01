@@ -32,6 +32,7 @@ import pytest
 
 import rebar
 from rebar._commands import compact as _compact
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 
 pytestmark = pytest.mark.interface
@@ -54,7 +55,7 @@ def _tracker(repo: Path) -> Path:
 
 
 def _tdir(repo: Path, tid: str) -> Path:
-    return _tracker(repo) / tid
+    return Path(layout_ticket_dir(_tracker(repo), tid))
 
 
 def _seed(repo: Path, title: str, comments: int) -> str:
@@ -113,9 +114,10 @@ def test_two_independent_folds_of_one_ticket_converge(rebar_repo: Path, tmp_path
     for clone in (clone_a, clone_b):
         rc = _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(clone))
         assert rc == 0, f"the fold failed in {clone.name}"
-        assert list((clone / ".tickets-tracker" / tid).glob("*-SNAPSHOT.json")), (
-            f"{clone.name} did not actually fold the ticket"
+        clone_snapshots = list(
+            Path(layout_ticket_dir(clone / ".tickets-tracker", tid)).glob("*-SNAPSHOT.json")
         )
+        assert clone_snapshots, f"{clone.name} did not actually fold the ticket"
 
     # Merge B into A — the delivery path a real sweep's push takes.
     tracker_a = clone_a / ".tickets-tracker"
@@ -130,7 +132,7 @@ def test_two_independent_folds_of_one_ticket_converge(rebar_repo: Path, tmp_path
         f"concurrently with another writer.\nstdout: {merge.stdout}\nstderr: {merge.stderr}"
     )
 
-    merged_dir = tracker_a / tid
+    merged_dir = Path(layout_ticket_dir(tracker_a, tid))
     snapshots = sorted(p.name for p in merged_dir.glob("*-SNAPSHOT.json"))
     assert len(snapshots) == 2, (
         f"expected the race to leave BOTH snapshots after the union merge, got {snapshots}"
@@ -183,7 +185,9 @@ def test_a_fold_in_a_clone_matches_a_fold_in_place(rebar_repo: Path, tmp_path: P
     )
     assert _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(repo)) == 0
 
-    clone_snaps = sorted((clone / ".tickets-tracker" / tid).glob("*-SNAPSHOT.json"))
+    clone_snaps = sorted(
+        Path(layout_ticket_dir(clone / ".tickets-tracker", tid)).glob("*-SNAPSHOT.json")
+    )
     local_snaps = sorted(_tdir(repo, tid).glob("*-SNAPSHOT.json"))
     assert clone_snaps and local_snaps, "both folds must have written a SNAPSHOT"
 

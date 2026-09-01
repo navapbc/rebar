@@ -19,6 +19,7 @@ from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 GIT_EMAIL = "dev@example.com"
 
@@ -44,7 +45,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _all_events(repo: Path, tid: str) -> list[dict]:
-    tdir = Path(tracker_dir(str(repo))) / tid
+    tdir = Path(layout_ticket_dir(tracker_dir(str(repo)), tid))
     out = []
     for name in sorted(os.listdir(tdir)):
         if name.endswith(".json") and not name.startswith("."):
@@ -121,7 +122,7 @@ def test_rebuild_snapshot_composer_stamps_email(store: Path) -> None:
     tid = rebar.create_ticket("task", "T", repo_root=str(store))
     rebar.comment(tid, "c", repo_root=str(store))
     tracker = str(tracker_dir(str(store)))
-    ticket_dir = os.path.join(tracker, tid)
+    ticket_dir = layout_ticket_dir(tracker, tid)
     _compact.rebuild_snapshot_from_full_log(tracker, tid, ticket_dir)
     snaps = _events(store, tid, "SNAPSHOT")
     assert snaps, "expected a rebuilt SNAPSHOT"
@@ -168,7 +169,7 @@ def test_backcompat_pre_change_event_reduces_identically(store: Path) -> None:
 
     tracker = Path(tracker_dir(str(store)))
     tid = "0000-1111-2222-3333"
-    tdir = tracker / tid
+    tdir = Path(layout_ticket_dir(tracker, tid))
     tdir.mkdir(parents=True)
     create = {
         "timestamp": "100-0-abc",

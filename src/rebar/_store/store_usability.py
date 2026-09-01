@@ -91,6 +91,7 @@ import os
 
 from rebar._store.compat import COMPAT_FILENAME
 from rebar._store.gitutil import run_git_bounded
+from rebar._store.ticket_layout import iter_ticket_dirs
 
 # The store's git plumbing bounds every child with this wall-clock timeout; the SEAM
 # (run_git_bounded's rc-124 timeout fold) is shared with push.py / event_commit_git,
@@ -149,14 +150,7 @@ def _carries_store_structure(tracker: str) -> bool:
     """
     if os.path.exists(os.path.join(tracker, COMPAT_FILENAME)):
         return True
-    try:
-        entries = os.listdir(tracker)
-    except OSError:
-        return False
-    return any(
-        not entry.startswith(".") and _looks_like_event_dir(os.path.join(tracker, entry))
-        for entry in entries
-    )
+    return any(_looks_like_event_dir(entry.path) for entry in iter_ticket_dirs(tracker))
 
 
 def store_is_usable(tracker: str) -> bool:

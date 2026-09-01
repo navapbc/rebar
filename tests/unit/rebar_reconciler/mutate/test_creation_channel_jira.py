@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir
 from rebar.reducer import reduce_ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -97,11 +98,12 @@ def _make_mutation(mut_mod, *, direction, action, target, payload=None, provenan
 
 
 def _read_create(tracker_dir: Path, local_id: str) -> dict:
-    for path in sorted((tracker_dir / local_id).glob("*.json")):
+    event_dir = Path(ticket_dir(tracker_dir, local_id))
+    for path in sorted(event_dir.glob("*.json")):
         ev = json.loads(path.read_text())
         if ev.get("event_type") == "CREATE":
             return ev
-    raise AssertionError(f"no CREATE event in {tracker_dir / local_id}")
+    raise AssertionError(f"no CREATE event in {event_dir}")
 
 
 def _inbound_create(applier, mut_mod, fixture_repo, *, assignee=None):
@@ -178,7 +180,7 @@ def test_outbound_sync_edit_preserves_creation_channel(fixture_repo):
     # A Jira-driven writeback edit + status change (the shapes an outbound sync uses).
     rebar.edit_ticket(tid, description="synced from jira", repo_root=str(fixture_repo))
     rebar.claim(tid, assignee="me", repo_root=str(fixture_repo))
-    assert reduce_ticket(str(tracker / tid))["creation_channel"] == "python"
+    assert reduce_ticket(ticket_dir(tracker, tid))["creation_channel"] == "python"
 
 
 # ── legacy_positive (AC5): all three signals match -> jira + inferred marker ──

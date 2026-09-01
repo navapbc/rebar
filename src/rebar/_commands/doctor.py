@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from rebar._commands import doctor_locks, doctor_mapping, doctor_mcp_client
@@ -56,6 +57,7 @@ from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._mcp_errors import js_safe_dumps
 from rebar._store import lock as _store_lock
 from rebar._store.gitutil import run_git
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.graph._hierarchy import resolve_hierarchy_link
 from rebar.graph._links import CyclicDependencyError, add_dependency
 from rebar.graph._loader import reduce_all_tickets
@@ -122,11 +124,9 @@ def _unlink_would_cancel(tracker: str, source: str, target: str) -> str:
     against the relation they intend to remove and decline on a mismatch, because
     the event model offers no relation-scoped unlink to reach for instead.
     """
-    from pathlib import Path
-
     from rebar._commands.unlink import _get_link_info
 
-    _uuid, relation = _get_link_info(Path(tracker) / source, target)
+    _uuid, relation = _get_link_info(Path(layout_ticket_dir(tracker, source)), target)
     return relation
 
 

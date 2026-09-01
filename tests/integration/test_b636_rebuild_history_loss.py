@@ -14,6 +14,7 @@ lossy snapshot.
 from __future__ import annotations
 
 import json as _json
+from pathlib import Path
 
 from test_concurrency_regression import (  # noqa: F401
     _engine_run,
@@ -22,6 +23,8 @@ from test_concurrency_regression import (  # noqa: F401
     two_clones,
 )
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 
 def _legacy_compacted_closed_ticket(repo_a, seed, tracker_a):
     """Shape a ticket like a legacy (delete-style) compaction left it: a SNAPSHOT whose
@@ -29,7 +32,7 @@ def _legacy_compacted_closed_ticket(repo_a, seed, tracker_a):
     plus a surviving earlier STATUS (the ``open -> in_progress`` claim)."""
     from rebar.reducer import reduce_ticket
 
-    seed_dir = tracker_a / seed
+    seed_dir = Path(layout_ticket_dir(tracker_a, seed))
     create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text())["uuid"]
 
     # A surviving claim STATUS (open -> in_progress) — this is what a lossy replay falls
@@ -141,7 +144,7 @@ def test_rebuild_still_folds_orphan_when_log_is_complete(two_clones):  # noqa: F
 
     _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
-    seed_dir = tracker_a / seed
+    seed_dir = Path(layout_ticket_dir(tracker_a, seed))
 
     create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text())["uuid"]
     compiled = {k: v for k, v in reduce_ticket(str(seed_dir)).items() if k != "updated_at"}
@@ -208,7 +211,7 @@ def test_restore_recovers_a_source_deleted_by_legacy_compaction(two_clones):  # 
 
     _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
-    seed_dir = tracker_a / seed
+    seed_dir = Path(layout_ticket_dir(tracker_a, seed))
 
     _engine_run(repo_a, "comment", seed, "body-that-must-survive")
     victim = sorted(seed_dir.glob("*-COMMENT.json"))[-1]
@@ -255,7 +258,7 @@ def test_restore_takes_the_newest_pre_image_when_deleted_twice(two_clones):  # n
 
     _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
-    seed_dir = tracker_a / seed
+    seed_dir = Path(layout_ticket_dir(tracker_a, seed))
     name = "1700000000000000000-66666666-6666-4666-8666-666666666666-COMMENT.json"
     target = seed_dir / name
 
@@ -285,7 +288,7 @@ def test_restore_falls_back_to_per_uuid_lookup(two_clones, monkeypatch):  # noqa
 
     _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
-    seed_dir = tracker_a / seed
+    seed_dir = Path(layout_ticket_dir(tracker_a, seed))
 
     _engine_run(repo_a, "comment", seed, "body-recovered-by-fallback")
     victim = sorted(seed_dir.glob("*-COMMENT.json"))[-1]

@@ -17,6 +17,7 @@ event-composers (create/edit/link/unlink/revert) live in sibling modules
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from rebar._commands._seam import (
     CommandError,
@@ -27,6 +28,7 @@ from rebar._commands._seam import (
     tracker_dir,
     validate_tag_name,
 )
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _jq_type(value) -> str:
@@ -204,7 +206,7 @@ def archive(ticket_id: str, *, repo_root=None) -> dict:
     if not ticket_id:
         raise CommandError("Error: ticket_id must be non-empty")
     resolved = require_id(ticket_id, tracker)
-    ticket_dir = tracker / resolved
+    ticket_dir = Path(layout_ticket_dir(tracker, resolved))
 
     if (ticket_dir / ".archived").exists():
         return {"wrote": False, "id": resolved}

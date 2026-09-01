@@ -11,6 +11,7 @@ import pytest
 
 import rebar
 from rebar import config
+from rebar._store.ticket_layout import ticket_dir
 
 # Import ``generation`` at module scope so its ``from .relation_snapshot import
 # collect_plan_relation_snapshot`` binding is captured from the REAL function before any
@@ -99,8 +100,10 @@ def test_same_canonical_target_can_be_child_and_prerequisite(
     subject = "1111-2222-3333-4444"
     dual = "aaaa-bbbb-cccc-dddd"
     tracker = tmp_path / "tracker"
-    (tracker / subject).mkdir(parents=True)
-    (tracker / dual).mkdir()
+    for tid in (subject, dual):
+        tdir = Path(ticket_dir(tracker, tid))
+        tdir.mkdir(parents=True)
+        (tdir / "1-u-CREATE.json").write_text("{}", encoding="utf-8")
     states = [
         {
             "ticket_id": subject,
@@ -147,7 +150,9 @@ def test_store_preload_accepts_canonical_jira_local_id(
 
     subject = "jira-reb-1160"
     tracker = tmp_path / "tracker"
-    (tracker / subject).mkdir(parents=True)
+    tdir = Path(ticket_dir(tracker, subject))
+    tdir.mkdir(parents=True)
+    (tdir / "1-u-CREATE.json").write_text("{}", encoding="utf-8")
     state = {
         "ticket_id": subject,
         "ticket_type": "epic",
@@ -234,7 +239,7 @@ def test_deleted_target_is_missing_target(repo: str) -> None:
     target = rebar.create_ticket("task", "Target", repo_root=repo)
     rebar.link(subject, target, "depends_on", repo_root=repo)
     tracker = Path(config.tracker_dir(repo))
-    shutil.rmtree(tracker / target)
+    shutil.rmtree(ticket_dir(tracker, target))
     subprocess.run(["git", "add", "-A"], cwd=tracker, check=True)
     subprocess.run(["git", "commit", "-qm", "remove target"], cwd=tracker, check=True)
 
@@ -631,8 +636,8 @@ def test_event_less_ticket_directory_does_not_fail_an_unrelated_snapshot(repo: s
     child = rebar.create_ticket("story", "Child", parent=subject, repo_root=repo)
 
     orphan = "0de5-6db1-8058-4e80"
-    orphan_dir = Path(config.tracker_dir(repo)) / orphan
-    orphan_dir.mkdir()
+    orphan_dir = Path(ticket_dir(config.tracker_dir(repo), orphan))
+    orphan_dir.mkdir(parents=True)
     assert not any(orphan_dir.iterdir()), "the artifact under test is an EMPTY directory"
 
     messages, logger, handler = _capture_warnings("rebar.llm.plan_review.relation_snapshot")
@@ -665,8 +670,8 @@ def test_a_populated_but_unreducible_ticket_directory_still_fails_closed(repo: s
     subject = rebar.create_ticket("epic", "Unrelated subject", repo_root=repo)
 
     broken = "4ab3-411d-9736-4a41"
-    broken_dir = Path(config.tracker_dir(repo)) / broken
-    broken_dir.mkdir()
+    broken_dir = Path(ticket_dir(config.tracker_dir(repo), broken))
+    broken_dir.mkdir(parents=True)
     (broken_dir / "1700000000000000000-aaaaaaaa-COMMENT.json").write_text(
         '{"event_type": "COMMENT", "uuid": "aaaaaaaa", "timestamp": 1700000000000000000,'
         ' "data": {"body": "no CREATE precedes me"}}',

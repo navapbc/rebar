@@ -46,6 +46,7 @@ import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from rebar.llm.config import LLMConfig, resolve_gate_config
@@ -119,13 +120,13 @@ def _first_in_progress_ns(ticket_id: str, repo_root) -> int | None:
     ``include_retired=True``) — snapshot compaction folds old events, so the compiled state
     alone cannot supply this anchor. ``None`` when no such event exists (never claimed)."""
     import json as _json
-    import os as _os
 
     from rebar import config as _config
+    from rebar._store.ticket_layout import ticket_dir as _ticket_dir
     from rebar.metrics.event_metrics import _event_files
 
-    ticket_dir = _os.path.join(str(_config.tracker_dir(repo_root)), ticket_id)
-    if not _os.path.isdir(ticket_dir):
+    ticket_dir = _ticket_dir(_config.tracker_dir(repo_root), ticket_id)
+    if not Path(ticket_dir).is_dir():
         return None
     for path in _event_files(ticket_dir, "STATUS", include_retired=True):
         try:

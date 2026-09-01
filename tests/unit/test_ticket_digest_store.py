@@ -122,8 +122,9 @@ def test_emit_preserves_append_only_history(repo: str) -> None:
     _emit(repo, tid)
     _emit(repo, tid)
     from rebar._commands._seam import tracker_dir
+    from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
-    ticket_dir = Path(tracker_dir(repo)) / tid
+    ticket_dir = Path(layout_ticket_dir(tracker_dir(repo), tid))
     digests = list(ticket_dir.glob("*-TICKET_DIGEST.json"))
     assert len(digests) == 3
 

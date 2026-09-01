@@ -36,6 +36,7 @@ from rebar._store.gitutil import (  # noqa: F401  (compat re-export — see the 
     _ticket_dirs,
     run_git,
 )
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import KNOWN_EVENT_TYPES
 from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
@@ -349,7 +350,7 @@ def _repair_run(
     lines: list[str] = []
     flagged: list[tuple[str, dict]] = []
     for tid in _ticket_dirs(tracker, include_archived=include_archived):
-        plan = _repair_plan(os.path.join(tracker, tid), tid)
+        plan = _repair_plan(layout_ticket_dir(tracker, tid), tid)
         if only == "stale-channel":
             if plan["stale_channel"]:
                 flagged.append((tid, plan))
@@ -426,7 +427,7 @@ def _repair_run(
         disp = _repair_ticket(
             tracker,
             tid,
-            os.path.join(tracker, tid),
+            layout_ticket_dir(tracker, tid),
             dry_run=False,
             repair_stale_channel=only == "stale-channel",
             no_commit=True,
@@ -467,7 +468,7 @@ def _repair_run(
         remaining = sum(
             1
             for tid in _ticket_dirs(tracker, include_archived=include_archived)
-            if _repair_plan(os.path.join(tracker, tid), tid)["stale_channel"]
+            if _repair_plan(layout_ticket_dir(tracker, tid), tid)["stale_channel"]
         )
         lines.append(
             f"a3-remediation: {len(flagged)} ticket(s) processed; "
@@ -478,10 +479,10 @@ def _repair_run(
     remaining = sum(
         1
         for tid in _ticket_dirs(tracker, include_archived=include_archived)
-        if (p := _repair_plan(os.path.join(tracker, tid), tid))["retire"] or p["auto_orphans"]
+        if (p := _repair_plan(layout_ticket_dir(tracker, tid), tid))["retire"] or p["auto_orphans"]
     )
     triage = sum(
-        len(_repair_plan(os.path.join(tracker, tid), tid)["triage_orphans"])
+        len(_repair_plan(layout_ticket_dir(tracker, tid), tid)["triage_orphans"])
         for tid in _ticket_dirs(tracker, include_archived=include_archived)
     )
     lines.append(

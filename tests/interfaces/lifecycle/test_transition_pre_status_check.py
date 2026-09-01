@@ -12,6 +12,7 @@ from rebar import config
 from rebar._commands import txn
 from rebar._commands._seam import CommandError
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._store.ticket_layout import ticket_dir
 
 
 def _resolved(ticket_id: str, repo: Path) -> tuple[str, str]:
@@ -25,7 +26,7 @@ def _status_event_count(tracker: str, ticket_id: str) -> int:
     return len(
         [
             name
-            for name in os.listdir(os.path.join(tracker, ticket_id))
+            for name in os.listdir(ticket_dir(tracker, ticket_id))
             if name.endswith("-STATUS.json")
         ]
     )

@@ -99,8 +99,9 @@ def ticket_needs_folding(tracker: str, ticket_id: str, *, repo_root=None) -> boo
     from rebar._commands import compact_plan
     from rebar._commands.compact import _foldable_event_count
     from rebar._store import hlc
+    from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
-    ticket_dir = os.path.join(tracker, ticket_id)
+    ticket_dir = layout_ticket_dir(tracker, ticket_id)
     if not os.path.isdir(ticket_dir):
         return False
     try:

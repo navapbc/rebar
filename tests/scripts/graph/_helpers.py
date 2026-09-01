@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from types import ModuleType
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 # graph/_helpers.py -> graph -> scripts -> tests -> <repo>
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -35,7 +37,7 @@ def _write_ticket(
 
     Returns the ticket directory path.
     """
-    ticket_dir = tracker_dir / ticket_id
+    ticket_dir = Path(layout_ticket_dir(tracker_dir, ticket_id))
     ticket_dir.mkdir(parents=True, exist_ok=True)
 
     # A real initialized tracker always carries an .env-id; seed it (idempotently)
@@ -93,7 +95,7 @@ def _write_blocks_link(
     """
     if link_uuid is None:
         link_uuid = f"link-{blocker_id}-blocks-{blocked_id}"
-    blocker_dir = tracker_dir / blocker_id
+    blocker_dir = Path(layout_ticket_dir(tracker_dir, blocker_id))
     blocker_dir.mkdir(parents=True, exist_ok=True)
     link_event = {
         "event_type": "LINK",
@@ -117,7 +119,7 @@ def _write_archive_event(tracker_dir: Path, ticket_id: str, timestamp: int = 300
     This marks the ticket as archived in the event-sourced state.
     The ticket-reducer.py handles ARCHIVED events by setting state['archived'] = True.
     """
-    ticket_dir = tracker_dir / ticket_id
+    ticket_dir = Path(layout_ticket_dir(tracker_dir, ticket_id))
     ticket_dir.mkdir(parents=True, exist_ok=True)
     archive_event = {
         "event_type": "ARCHIVED",
@@ -133,7 +135,7 @@ def _write_archive_event(tracker_dir: Path, ticket_id: str, timestamp: int = 300
 
 def _make_ticket(tracker: Path, ticket_id: str, ticket_type: str = "task") -> Path:
     """Write a minimal ticket directory with a CREATE event. Returns the ticket dir."""
-    ticket_dir = tracker / ticket_id
+    ticket_dir = Path(layout_ticket_dir(tracker, ticket_id))
     ticket_dir.mkdir(parents=True, exist_ok=True)
     create_event = {
         "event_type": "CREATE",
@@ -160,7 +162,7 @@ def _write_link_event(
     timestamp: int = 1500,
 ) -> None:
     """Write a LINK event in source_id's directory pointing at target_id."""
-    source_dir = Path(tracker_dir) / source_id
+    source_dir = Path(layout_ticket_dir(tracker_dir, source_id))
     source_dir.mkdir(parents=True, exist_ok=True)
     link_uuid = f"link-{source_id}-{relation}-{target_id}"
     link_event = {

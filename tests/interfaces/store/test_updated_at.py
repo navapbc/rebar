@@ -19,10 +19,13 @@ from pathlib import Path
 from _subprocess_env import subprocess_env
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _snapshot_compiled_state(repo: Path, tid: str) -> dict:
-    snaps = glob.glob(str(repo / ".tickets-tracker" / tid / "*-SNAPSHOT.json"))
+    snaps = glob.glob(
+        str(Path(layout_ticket_dir(repo / ".tickets-tracker", tid)) / "*-SNAPSHOT.json")
+    )
     assert snaps, "expected a SNAPSHOT after compaction"
     snaps.sort()
     return json.loads(Path(snaps[-1]).read_text())
@@ -94,7 +97,7 @@ def test_stale_pre_p1_1_cache_is_invalidated(rebar_repo: Path) -> None:
     from rebar.reducer._cache import compute_dir_hash, write_cache
 
     tid = rebar.create_ticket("task", "cache check")
-    tdir = str(rebar_repo / ".tickets-tracker" / tid)
+    tdir = str(Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", tid)))
     events = sorted(f for f in os.listdir(tdir) if f.endswith(".json") and not f.startswith("."))
 
     # Forge a cache as the PREVIOUS version (2) would have: a reduced state with
@@ -130,7 +133,7 @@ def test_stale_pre_attestations_cache_is_invalidated(rebar_repo: Path) -> None:
     # A signed manifest whose first line kinds the `plan-review` attestation.
     rebar.sign_manifest(tid, ["plan-review: PASS", "ticket: t"], repo_root=str(rebar_repo))
 
-    tdir = str(rebar_repo / ".tickets-tracker" / tid)
+    tdir = str(Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", tid)))
     events = sorted(f for f in os.listdir(tdir) if f.endswith(".json") and not f.startswith("."))
 
     # Sanity: a fresh reduce (current version) DOES project the attestation.

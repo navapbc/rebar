@@ -26,6 +26,7 @@ from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 
 _VALID_STATUSES = ("idea", "open", "in_progress", "closed", "blocked")
@@ -85,7 +86,7 @@ def _usage() -> int:
 
 
 def _read_status(tracker: str, ticket_id: str) -> str | None:
-    state = reduce_ticket(os.path.join(tracker, ticket_id))
+    state = reduce_ticket(layout_ticket_dir(tracker, ticket_id))
     if state is None:
         return None
     status = state.get("status")
@@ -103,14 +104,14 @@ def _resolve_parent_in_status(tracker: str, ticket_id: str, status: str) -> str 
     ``open -> in_progress``, ``"closed"`` for both the ``closed -> open`` reopen and
     the ``closed -> in_progress`` reactivation). A parent in any other status (or absent
     / unreadable) yields ``None`` — no cascade, the child op proceeds alone."""
-    state = reduce_ticket(os.path.join(tracker, ticket_id))
+    state = reduce_ticket(layout_ticket_dir(tracker, ticket_id))
     if state is None:
         return None
     raw_parent = state.get("parent_id")
     if not raw_parent:
         return None
     parent_id = resolve_ticket_id(raw_parent, tracker) or raw_parent
-    parent_state = reduce_ticket(os.path.join(tracker, parent_id))
+    parent_state = reduce_ticket(layout_ticket_dir(tracker, parent_id))
     if parent_state is None or parent_state.get("status") != status:
         return None
     return parent_id
@@ -297,7 +298,7 @@ def transition_compute(
         from rebar.reducer import reduce_ticket
         from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 
-        _state = reduce_ticket(os.path.join(tracker, ticket_id))
+        _state = reduce_ticket(layout_ticket_dir(tracker, ticket_id))
         if _state is not None and _state.get("ticket_type") in _NON_GRAPH_ARTIFACT_TYPES:
             _t = _state.get("ticket_type")
             raise CommandError(
@@ -314,7 +315,7 @@ def transition_compute(
         }
 
     # Ghost check (ticket dir exists + has a CREATE/SNAPSHOT event).
-    ticket_dir = os.path.join(tracker, ticket_id)
+    ticket_dir = layout_ticket_dir(tracker, ticket_id)
     if not os.path.isdir(ticket_dir):
         raise CommandError(f"Error: ticket '{ticket_id}' does not exist", returncode=1)
     if not any(
@@ -506,7 +507,7 @@ def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: 
             f"(un-archive). Use: ticket transition {ticket_id} archived open\n"
         )
         return 1
-    archived_uuid = _latest_live_archived_uuid(os.path.join(tracker, ticket_id))
+    archived_uuid = _latest_live_archived_uuid(layout_ticket_dir(tracker, ticket_id))
     if not archived_uuid:
         sys.stderr.write("Error: no live ARCHIVED event (status may be stale)\n")
         return 1

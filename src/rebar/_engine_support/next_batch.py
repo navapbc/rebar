@@ -26,6 +26,8 @@ from typing import Any, cast
 from rebar._engine_support.output import error_envelope
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.ticket_layout import iter_ticket_dirs
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import is_terminal_status, reduce_all_tickets, reduce_ticket
 
 # Files that are shared-by-design and support concurrent additive edits.
@@ -103,7 +105,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
     if resolved is None:
         raise EpicNotFound(epic_id)
     try:
-        epic_state = reduce_ticket(os.path.join(tracker, resolved))
+        epic_state = reduce_ticket(layout_ticket_dir(tracker, resolved))
     except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible epic is reported as not-found below
         epic_state = None
     if not isinstance(epic_state, dict) or epic_state.get("status") is None:
@@ -152,17 +154,15 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
     # Tombstone override: .tombstone.json carries the terminal status (the reducer
     # does not read it, so list returns the pre-delete status).
     if tracker and os.path.isdir(tracker):
-        for entry in os.scandir(tracker):
-            if not entry.is_dir():
-                continue
+        for entry in iter_ticket_dirs(tracker):
             tb = os.path.join(entry.path, ".tombstone.json")
             if os.path.isfile(tb):
                 try:
                     with open(tb) as tbf:
                         ts = json.loads(tbf.read())
-                    ticket_status_map[entry.name] = str(ts.get("status", "deleted")).lower()
+                    ticket_status_map[entry.ticket_id] = str(ts.get("status", "deleted")).lower()
                 except Exception:  # noqa: BLE001 — per-entry tombstone read fail-open: a malformed tombstone defaults to deleted
-                    ticket_status_map[entry.name] = "deleted"
+                    ticket_status_map[entry.ticket_id] = "deleted"
 
     # Derive ready (unblocked) tasks scoped to the epic's descendants.
     # Only "open-ish" statuses are candidates; `idea` is excluded by omission so an

@@ -31,6 +31,7 @@ from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
+from rebar._store.ticket_layout import ticket_dir
 from rebar.attest import sshsig
 
 try:
@@ -139,7 +140,7 @@ def test_unresolvable_null_commit_ledger_does_not_fail_gate(
     rebar.compact(tid, repo_root=str(repo))
 
     tracker = str(tracker_dir(str(repo)))
-    tdir = Path(tracker) / tid
+    tdir = Path(ticket_dir(tracker, tid))
     snapf = next(tdir.glob("*-SNAPSHOT.json"))
     snap = json.loads(snapf.read_text(encoding="utf-8"))
     ledger = snap["data"]["compiled_state"]["authorship_ledger"]

@@ -21,6 +21,7 @@ import pytest
 
 import rebar
 from rebar._snapshot import materialize_tickets
+from rebar._store.ticket_layout import ticket_dir
 from rebar.llm import gate_source
 from rebar.llm.config import current_tickets_root
 
@@ -73,10 +74,8 @@ def test_materialize_tickets_holds_event_dir(repo_with_origin, gate_tmpdir):
     root = Path(materialize_tickets(repo_root=str(repo)))
     tracker = root / ".tickets-tracker"
     assert tracker.is_dir()
-    # The ticket's event dir is named by its (full) id; the short id is a prefix of it.
-    short = tid.split("-")[0]
-    matches = [d for d in tracker.iterdir() if d.is_dir() and d.name.startswith(short)]
-    assert matches, f"no event dir for {tid!r} under {tracker}"
+    event_dir = Path(ticket_dir(tracker, tid))
+    assert event_dir.is_dir(), f"no event dir for {tid!r} under {tracker}"
 
 
 def test_materialize_tickets_caches_by_path(repo_with_origin, gate_tmpdir):

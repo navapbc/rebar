@@ -12,6 +12,12 @@ from __future__ import annotations
 import json
 import os
 
+from rebar._store.ticket_layout import (
+    existing_ticket_dir,
+    iter_ticket_dirs,
+    tracker_root_from_ticket_dir,
+)
+
 from ._cache import is_active_event, prepare_event_files, write_cache
 from ._replay import replay_events
 from ._state import make_error_dict, make_initial_state
@@ -166,6 +172,12 @@ def reduce_ticket(
     the whole set. This path is never cached.
     """
     ticket_dir = os.path.normpath(str(ticket_dir_path))
+    if not os.path.isdir(ticket_dir):
+        resolved_dir = existing_ticket_dir(
+            os.path.dirname(ticket_dir), os.path.basename(ticket_dir)
+        )
+        if resolved_dir is not None:
+            ticket_dir = os.path.normpath(resolved_dir)
     ticket_id = os.path.basename(ticket_dir)
 
     if event_files_override is not None:
@@ -185,7 +197,7 @@ def reduce_ticket(
     # canonical UUIDs.  ticket_dir is <tracker>/<ticket_id>, so the parent is
     # the tracker root.  When ticket_dir has no parent (unlikely but defensive),
     # we pass None and alias resolution degrades gracefully to verbatim storage.
-    tracker_dir: str | None = os.path.dirname(ticket_dir) or None
+    tracker_dir: str | None = tracker_root_from_ticket_dir(ticket_dir) or None
 
     state = make_initial_state()
     valid_event_count, early_result = replay_events(
@@ -254,17 +266,8 @@ def reduce_all_tickets(
     tracker_path = os.path.normpath(str(tracker_dir))
     results: list[dict] = []
 
-    try:
-        entries = sorted(os.listdir(tracker_path))
-    except OSError:
-        return results
-
-    for entry in entries:
-        if entry.startswith("."):
-            continue
-        entry_path = os.path.join(tracker_path, entry)
-        if not os.path.isdir(entry_path):
-            continue
+    for entry in iter_ticket_dirs(tracker_path):
+        entry_path = entry.path
 
         if exclude_archived and os.path.exists(os.path.join(entry_path, ".archived")):
             if _is_net_archived(entry_path):
@@ -274,7 +277,7 @@ def reduce_all_tickets(
         state = reduce_ticket(entry_path)
 
         if state is None:
-            results.append(make_error_dict(entry, "error", "reducer_failed"))
+            results.append(make_error_dict(entry.ticket_id, "error", "reducer_failed"))
         else:
             if exclude_archived:
                 _heal_missing_marker(entry_path, state)

@@ -42,6 +42,7 @@ import uuid as _uuid
 from dataclasses import dataclass
 
 from rebar._store import lock_owner as _owner
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 # The staging-path prefix. Dot-prefixed on purpose — see the module docstring.
 STAGING_PREFIX = ".tmp-newticket-"
@@ -186,6 +187,7 @@ class StagedEvent:
             return
         # Never publish our own scratch stamp into the ticket directory.
         _silent_unlink(os.path.join(self.staging_dir, _OWNER_FILE))
+        os.makedirs(os.path.dirname(self.ticket_dir), exist_ok=True)
         try:
             os.rename(self.staging_dir, self.ticket_dir)
         except OSError as exc:
@@ -235,7 +237,7 @@ def stage_event(
     No lock is held here and nothing under ``<tracker>/<ticket_id>`` is touched: for a new
     ticket the directory is built out of sight and only appears at :meth:`StagedEvent
     .promote`. Raises :class:`OSError` on a staging failure, leaving no partial state."""
-    ticket_dir = os.path.join(tracker, ticket_id)
+    ticket_dir = layout_ticket_dir(tracker, ticket_id)
     final_path = os.path.join(ticket_dir, filename)
     relative_path = os.path.relpath(final_path, tracker)
 

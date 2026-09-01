@@ -26,6 +26,7 @@ import rebar
 from rebar._commands import fsck as _fsck
 from rebar._store import event_append, lock_owner, staging
 from rebar._store.lock import LockTimeout
+from rebar._store.ticket_layout import ticket_dir
 
 
 def _tracker(repo: Path) -> str:
@@ -92,7 +93,7 @@ def test_interrupted_create_leaves_no_fsck_visible_debris(
     with pytest.raises(LockTimeout):
         event_append.stage_and_commit(tracker, ticket_id, _event())
 
-    assert not os.path.exists(os.path.join(tracker, ticket_id)), (
+    assert not os.path.exists(ticket_dir(tracker, ticket_id)), (
         "the interrupted create stranded a ticket directory — the debris this fix removes"
     )
     assert _fsck_findings(tracker, ticket_id) == []
@@ -132,7 +133,7 @@ def test_successful_create_publishes_dir_and_event_together(rebar_repo: Path) ->
 
     assert event_append.stage_and_commit(tracker, ticket_id, event) == 0
 
-    landed = _events_in(os.path.join(tracker, ticket_id))
+    landed = _events_in(ticket_dir(tracker, ticket_id))
     assert landed == [event_append.event_filename(event["timestamp"], event["uuid"], "CREATE")], (
         f"the published ticket directory holds unexpected contents: {landed}"
     )
@@ -149,7 +150,7 @@ def test_second_event_for_an_existing_ticket_is_unchanged(rebar_repo: Path) -> N
     event_append.stage_and_commit(tracker, ticket_id, _event())
     event_append.stage_and_commit(tracker, ticket_id, _event("COMMENT"))
 
-    assert len(_events_in(os.path.join(tracker, ticket_id))) == 2
+    assert len(_events_in(ticket_dir(tracker, ticket_id))) == 2
     assert _fsck_findings(tracker, ticket_id) == []
 
 
@@ -166,7 +167,7 @@ def test_interrupted_batch_create_leaves_no_debris(
         event_append.batch_stage_and_commit(tracker, [(t, _event()) for t in ids])
 
     for ticket_id in ids:
-        assert not os.path.exists(os.path.join(tracker, ticket_id))
+        assert not os.path.exists(ticket_dir(tracker, ticket_id))
         assert _fsck_findings(tracker, ticket_id) == []
 
 
@@ -178,7 +179,7 @@ def test_batch_create_publishes_every_new_ticket(rebar_repo: Path) -> None:
     assert event_append.batch_stage_and_commit(tracker, [(t, _event()) for t in ids]) == 2
 
     for ticket_id in ids:
-        assert len(_events_in(os.path.join(tracker, ticket_id))) == 1
+        assert len(_events_in(ticket_dir(tracker, ticket_id))) == 1
         assert _fsck_findings(tracker, ticket_id) == []
     assert [n for n in os.listdir(tracker) if n.startswith(staging.STAGING_PREFIX)] == []
 
@@ -249,8 +250,8 @@ def test_sweep_never_touches_ticket_directories(rebar_repo: Path) -> None:
     """043f — an event-less ticket directory is tolerated, never tidied, by this sweep."""
     rebar.create_ticket("task", "seed", repo_root=str(rebar_repo))
     tracker = _tracker(rebar_repo)
-    orphan = os.path.join(tracker, "0000-1111-2222-3333")
-    os.mkdir(orphan)
+    orphan = ticket_dir(tracker, "0000-1111-2222-3333")
+    os.makedirs(orphan)
 
     staging.sweep_stale_staging(tracker)
 

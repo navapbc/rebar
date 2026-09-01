@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _git_out(*args: str, cwd: Path) -> str:
@@ -39,7 +40,7 @@ def test_git_add_never_stages_cache_json(rebar_repo: Path) -> None:
 
     # A real ticket dir with event files (so the in-ticket cache has a home).
     tid = rebar.create_ticket("task", "cache gitignore test", repo_root=str(rebar_repo))
-    ticket_dir = tracker / tid
+    ticket_dir = Path(layout_ticket_dir(tracker, tid))
     assert ticket_dir.is_dir()
 
     # Stray caches: one at the tracker root, one inside the ticket dir, plus the

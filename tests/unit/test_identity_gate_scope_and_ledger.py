@@ -31,6 +31,7 @@ from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
+from rebar._store.ticket_layout import ticket_dir
 from rebar.attest import sshsig
 
 try:
@@ -93,7 +94,7 @@ def _write_and_commit_event(repo: Path, ticket_id: str, event: dict, suffix: str
     tracker branch (the gate scans working-tree ticket dirs; committing also gives the
     file a resolvable introducing commit)."""
     tracker = str(tracker_dir(str(repo)))
-    tdir = Path(tracker) / ticket_id
+    tdir = Path(ticket_dir(tracker, ticket_id))
     fname = f"{event['timestamp']}-{event['uuid']}-{suffix}.json"
     (tdir / fname).write_text(json.dumps(event), encoding="utf-8")
     subprocess.run(["git", "-C", tracker, "add", "-A"], check=True, capture_output=True)
@@ -240,7 +241,7 @@ def test_ledger_null_commit_sha_reresolves_to_verified(
     # Corrupt the persisted ledger the way compaction's null-commit_sha bug does: every
     # entry keeps its real ``position`` string but loses its resolved commit_sha.
     tracker = str(tracker_dir(str(repo)))
-    tdir = Path(tracker) / tid
+    tdir = Path(ticket_dir(tracker, tid))
     snapf = next(tdir.glob("*-SNAPSHOT.json"))
     snap = json.loads(snapf.read_text(encoding="utf-8"))
     ledger = snap["data"]["compiled_state"]["authorship_ledger"]
@@ -285,7 +286,7 @@ def test_ledger_non_null_commit_sha_reresolves_after_history_rewrite(
     rebar.compact(tid, repo_root=str(repo))
 
     tracker = str(tracker_dir(str(repo)))
-    snapf = next((Path(tracker) / tid).glob("*-SNAPSHOT.json"))
+    snapf = next(Path(ticket_dir(tracker, tid)).glob("*-SNAPSHOT.json"))
     snapshot_bytes = snapf.read_bytes()
     ledger = json.loads(snapshot_bytes)["data"]["compiled_state"]["authorship_ledger"]
     anchors = {entry["position"]["position"]: entry["position"]["commit_sha"] for entry in ledger}
@@ -333,7 +334,7 @@ def test_ledger_non_null_commit_sha_is_fallback_when_position_is_unresolvable(
     monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
     rebar.compact(tid, repo_root=str(repo))
 
-    snapf = next((Path(tracker) / tid).glob("*-SNAPSHOT.json"))
+    snapf = next(Path(ticket_dir(tracker, tid)).glob("*-SNAPSHOT.json"))
     snap = json.loads(snapf.read_text(encoding="utf-8"))
     ledger = snap["data"]["compiled_state"]["authorship_ledger"]
     assert ledger, "precondition: compaction recorded a signed ledger"

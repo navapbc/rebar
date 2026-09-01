@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import types
+import uuid
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,13 @@ _VALID = "abcd-1234-ef56-7890"
 
 def _tracker_with_ticket(tmp_path: Path) -> str:
     tracker = tmp_path / "tracker"
-    (tracker / _VALID).mkdir(parents=True)
+    ticket_dir = tracker / _VALID
+    ticket_dir.mkdir(parents=True)
+    event_uuid = str(uuid.uuid4())
+    (ticket_dir / f"1700000000000000000-{event_uuid}-CREATE.json").write_text(
+        json.dumps({"timestamp": 1700000000000000000, "uuid": event_uuid, "event_type": "CREATE"}),
+        encoding="utf-8",
+    )
     # A real directory OUTSIDE the tracker that a `..` traversal would try to reach.
     (tmp_path / "secret").mkdir()
     return str(tracker)

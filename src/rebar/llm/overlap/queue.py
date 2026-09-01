@@ -36,6 +36,8 @@ from pathlib import Path
 from typing import Any
 
 from rebar._store.paths import StorePaths
+from rebar._store.ticket_layout import iter_ticket_ids
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +183,7 @@ def reduce_ticket(ticket_id: str, tracker: str, *, now_ns: int | None = None) ->
     """The queue state for one ticket: ``{enqueued, not_before_ns, claimed, lease_expires_ns,
     done, pending}`` derived from its latest ENQUEUE/CLAIM/DONE events."""
     now = now_ns if now_ns is not None else _now_ns()
-    ticket_dir = os.path.join(tracker, _resolve(ticket_id, tracker))
+    ticket_dir = layout_ticket_dir(tracker, _resolve(ticket_id, tracker))
     enq = _latest(ticket_dir, ENQUEUE)
     done = _latest(ticket_dir, DONE)
     claim = _latest(ticket_dir, CLAIM)
@@ -430,15 +432,7 @@ def _fresh_marker(now_ns: int, tracker: str) -> tuple[int | None, list[str] | No
 def _ticket_dir_names(tracker: str) -> list[str]:
     """Every ticket directory name in *tracker* (the full-walk candidate set). Tolerates a
     missing/unreadable tracker as empty, matching the pre-existing full-scan behaviour."""
-    try:
-        entries = os.listdir(tracker)
-    except OSError:
-        return []
-    return [
-        name
-        for name in entries
-        if not name.startswith(".") and os.path.isdir(os.path.join(tracker, name))
-    ]
+    return iter_ticket_ids(tracker)
 
 
 def pending_enrichment(now_ns: int, tracker: str) -> list[str]:
@@ -534,7 +528,7 @@ def claim(
     # Arbitrate: among CLAIM events after the latest enqueue whose lease is STILL LIVE at
     # `now`, the earliest (ts, uuid) wins. Filtering by live lease is what makes lease expiry
     # self-healing — an expired prior claim is not a contender, so the next claimant wins.
-    ticket_dir = os.path.join(tracker, _resolve(ticket_id, tracker))
+    ticket_dir = layout_ticket_dir(tracker, _resolve(ticket_id, tracker))
     enq = _latest(ticket_dir, ENQUEUE)
     if enq is None:
         return False
