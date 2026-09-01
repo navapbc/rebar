@@ -33,7 +33,7 @@ from rebar._cli import _registry
 from rebar._cli import main as cli_main
 from rebar._cli._parser import ParseError, RebarArgumentParser
 
-# The 49 core commands S2b migrates. ``metrics`` is intentionally excluded — its
+# The 50 core commands S2b migrates. ``metrics`` is intentionally excluded — its
 # Route already carries an advanced ``parser_factory`` from S2c and re-migrating
 # it is forbidden by this ticket.
 CORE_COMMANDS = frozenset(
@@ -60,6 +60,7 @@ CORE_COMMANDS = frozenset(
         "verify-signature",
         "compact",
         "compact-all",
+        "reclaim-collapse",
         "export",
         "import",
         "transition",
@@ -101,10 +102,10 @@ def _resolve(ref: str):
     return getattr(module, attr)
 
 
-def test_the_core_inventory_is_the_expected_49_commands() -> None:
-    """Guards the census: exactly these 49 core commands are S2b's scope."""
+def test_the_core_inventory_is_the_expected_50_commands() -> None:
+    """Guards the census: exactly these 50 core commands are S2b's scope."""
 
-    assert len(CORE_COMMANDS) == 49
+    assert len(CORE_COMMANDS) == 50
     present = {r.name for r in _registry.ROUTES}
     assert CORE_COMMANDS <= present, CORE_COMMANDS - present
     # metrics is migrated already and must NOT be in scope here.
@@ -206,7 +207,7 @@ for route in _registry.ROUTES:
     parser = getattr(mod, attr)(prog='rebar ' + route.name)
     assert parser.prog == 'rebar ' + route.name, route.name
     built += 1
-assert built == 49, built
+assert built == 50, built
 print('OK', built)
 """
     result = subprocess.run(
