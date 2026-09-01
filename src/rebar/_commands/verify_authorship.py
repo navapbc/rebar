@@ -48,6 +48,8 @@ from rebar import config
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced.verify import build_identity
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.ticket_layout import iter_ticket_dirs
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import KNOWN_EVENT_TYPES
 
 # Classifications (also the human-facing labels; ``verified`` is the only pass).
@@ -108,7 +110,7 @@ def _is_identity_author(author_id, tracker: str) -> bool:
     try:
         from rebar.reducer import reduce_ticket
 
-        d = os.path.join(tracker, str(author_id))
+        d = layout_ticket_dir(tracker, str(author_id))
         if not os.path.isdir(d):
             return False
         state = reduce_ticket(d)
@@ -410,22 +412,20 @@ def _event_from_file(ticket_id: str, filename: str, path: str) -> list[_ScopedEv
 
 def _collect_all(tracker: str) -> list[_ScopedEvent]:
     events: list[_ScopedEvent] = []
-    try:
-        ticket_ids = sorted(
-            d
-            for d in os.listdir(tracker)
-            if not d.startswith(".") and os.path.isdir(os.path.join(tracker, d))
-        )
-    except OSError:
-        return events
-    for ticket_id in ticket_ids:
-        ticket_dir = os.path.join(tracker, ticket_id)
+    for ticket_entry in iter_ticket_dirs(tracker):
+        ticket_dir = ticket_entry.path
         if _is_gate_exempt_ticket(ticket_dir) or _is_archived_ticket(ticket_dir):
             # identity/session_log/code_review are bootstrap/verbose, and a net-ARCHIVED ticket
             # is retired work — neither is authored work the gate enforces.
             continue
         for filename in _active_event_files(ticket_dir):
-            events.extend(_event_from_file(ticket_id, filename, os.path.join(ticket_dir, filename)))
+            events.extend(
+                _event_from_file(
+                    ticket_entry.ticket_id,
+                    filename,
+                    os.path.join(ticket_dir, filename),
+                )
+            )
     return events
 
 
@@ -434,6 +434,7 @@ def _collect_range(tracker: str, base: str) -> list[_ScopedEvent]:
     import subprocess
 
     from rebar._store.gitutil import run_git
+    from rebar._store.ticket_layout import is_shard_name
 
     cp = run_git(tracker, "diff", "--name-only", "--diff-filter=AM", f"{base}..HEAD", check=False)
     if cp.returncode != 0:
@@ -458,8 +459,12 @@ def _collect_range(tracker: str, base: str) -> list[_ScopedEvent]:
         rel = rel.strip()
         if not rel.endswith(".json") or "/" not in rel:
             continue
-        ticket_id, filename = rel.split("/", 1)
-        if "/" in filename:  # only top-level ticket-dir event files
+        parts = rel.split("/")
+        if len(parts) == 2:
+            ticket_id, filename = parts
+        elif len(parts) == 3 and is_shard_name(parts[0]):
+            _shard, ticket_id, filename = parts
+        else:
             continue
         events.extend(_event_from_file(ticket_id, filename, os.path.join(tracker, rel)))
     return events

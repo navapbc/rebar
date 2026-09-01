@@ -23,6 +23,7 @@ import rebar
 from rebar._commands import fsck as fsck_mod
 from rebar._commands.fsck import _transform_json
 from rebar._errors import RebarError
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 pytestmark = pytest.mark.interface
 
@@ -52,7 +53,7 @@ def _payload(*lines: str) -> dict:
 
 
 def _seed_missing_create(repo: Path, ticket_id: str = "aaaa-bbbb-cccc-dddd") -> str:
-    d = repo / ".tickets-tracker" / ticket_id
+    d = Path(layout_ticket_dir(repo / ".tickets-tracker", ticket_id))
     d.mkdir(parents=True, exist_ok=True)
     (d / "0001-comment.json").write_text(
         json.dumps({"type": "COMMENT", "ticket_id": ticket_id, "body": "orphan"})

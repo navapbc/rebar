@@ -16,9 +16,9 @@ already unblocked before the batch close, and all its direct blockers
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
+from rebar._store.ticket_layout import iter_ticket_dirs
 from rebar.reducer import is_terminal_status, reduce_all_tickets, reduce_ticket
 
 from ._relations import build_blocked_by
@@ -55,20 +55,18 @@ def _load_states_with_tombstones(tracker_path: Path) -> dict[str, dict]:
     still skipped.
     """
     states: dict[str, dict] = {}
-    for entry in os.scandir(tracker_path):
-        if not entry.is_dir() or entry.name.startswith("."):
-            continue
+    for entry in iter_ticket_dirs(tracker_path):
         tombstone_status = _read_tombstone_status(entry.path)
         state = reduce_ticket(entry.path)
         if state is None:
             if tombstone_status is not None:
-                states[entry.name] = {"status": tombstone_status}
+                states[entry.ticket_id] = {"status": tombstone_status}
             continue
         if state.get("status") in ("error", "fsck_needed"):
             continue
         if tombstone_status is not None:
             state["status"] = tombstone_status
-        states[entry.name] = state
+        states[entry.ticket_id] = state
     return states
 
 

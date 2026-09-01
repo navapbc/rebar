@@ -29,6 +29,7 @@ import rebar
 from rebar._commands import fsck as _fsck
 from rebar._commands.fsck_authorship import EnvAuthorshipTally
 from rebar._store import env_identity
+from rebar._store.ticket_layout import iter_ticket_dirs
 
 _OTHER_ENV = "ade0f2ef-51cc-45a2-bb97-c09846cd3df5"
 
@@ -40,9 +41,8 @@ def _tracker(repo: Path) -> Path:
 def _restamp_events(tracker: Path, env_id: str, *, author: str | None = None) -> int:
     """Rewrite every event in the store as if another environment had written it."""
     count = 0
-    for ticket_dir in tracker.iterdir():
-        if ticket_dir.name.startswith(".") or not ticket_dir.is_dir():
-            continue
+    for layout in iter_ticket_dirs(tracker):
+        ticket_dir = Path(layout.path)
         for event in ticket_dir.glob("*.json"):
             payload = json.loads(event.read_text(encoding="utf-8"))
             payload["env_id"] = env_id
@@ -69,10 +69,9 @@ def test_genesis_mints_silently(rebar_repo: Path, capsys: pytest.CaptureFixture[
     """A store with no events is a NEW environment — mint, say nothing."""
     tracker = _tracker(rebar_repo)
     (tracker / env_identity.ENV_ID_FILE).unlink()
-    for ticket_dir in list(tracker.iterdir()):
-        if not ticket_dir.name.startswith(".") and ticket_dir.is_dir():
-            for event in ticket_dir.glob("*.json"):
-                event.unlink()
+    for layout in iter_ticket_dirs(tracker):
+        for event in Path(layout.path).glob("*.json"):
+            event.unlink()
 
     capsys.readouterr()
     outcome = env_identity.ensure_env_id_unit(str(tracker))
@@ -159,7 +158,7 @@ def test_override_env_name_matches_the_read_site(monkeypatch: pytest.MonkeyPatch
 
 def test_unreadable_events_do_not_crash_the_scan(rebar_repo: Path) -> None:
     tracker = _foreign_store(rebar_repo)
-    garbage = next(d for d in tracker.iterdir() if d.is_dir() and not d.name.startswith("."))
+    garbage = Path(next(iter(iter_ticket_dirs(tracker))).path)
     (garbage / "1700000000000000000-dead-CREATE.json").write_text("{not json", encoding="utf-8")
 
     assert env_identity.store_event_env_ids(tracker) == {_OTHER_ENV}
@@ -189,9 +188,8 @@ def _sole_author(tracker: Path) -> str:
 def _identity_pairs(tracker: Path) -> set[tuple[str, str]]:
     """The store's ``(env_id, author)`` pairs, via the production collector."""
     tally = EnvAuthorshipTally()
-    for ticket_dir in tracker.iterdir():
-        if ticket_dir.name.startswith(".") or not ticket_dir.is_dir():
-            continue
+    for layout in iter_ticket_dirs(tracker):
+        ticket_dir = Path(layout.path)
         for event in ticket_dir.glob("*.json"):
             tally.observe(event.name, json.loads(event.read_text(encoding="utf-8")))
     return tally.identity_pairs()

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import rebar
+from rebar._store.ticket_layout import iter_ticket_dirs
 from rebar.llm.plan_review import sidecar
 
 _SUBSTANTIVE_REVERT_TARGETS = {"STATUS", "COMMITS"}
@@ -88,7 +89,8 @@ def classify_backfill(repo_root: str) -> list[dict[str, Any]]:
     if not tracker.is_dir():
         return records
 
-    for ticket_dir in sorted(p for p in tracker.iterdir() if p.is_dir()):
+    for layout in iter_ticket_dirs(tracker):
+        ticket_dir = Path(layout.path)
         state = rebar.reduce_ticket(ticket_dir, include_retired=True)
         if not state:
             continue

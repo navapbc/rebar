@@ -16,6 +16,7 @@ from _git_counts import commit_count
 
 import rebar
 from rebar._store import event_append
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.llm import enrich_drain as D
 from rebar.llm.overlap import digest_sidecar as ds
 from rebar.llm.overlap import queue as Q
@@ -130,23 +131,29 @@ def test_successful_drain_batches_finalize_events_after_visible_claim(
     assert result["processed"] == 1
     assert commit_count(tracker) == base + 2
 
+    ticket_relpath = Path(layout_ticket_dir(tracker, tid)).relative_to(tracker)
+    ticket_prefix = f"{ticket_relpath.as_posix()}/"
     claim_paths = _changed_paths(tracker, "HEAD~1")
     finalize_paths = _changed_paths(tracker, "HEAD")
     assert any(
-        path.startswith(f"{tid}/") and path.endswith("-CLAIM_ENRICH.json") for path in claim_paths
+        path.startswith(ticket_prefix) and path.endswith("-CLAIM_ENRICH.json")
+        for path in claim_paths
     )
     assert not any(
-        path.startswith(f"{tid}/") and path.endswith("-TICKET_DIGEST.json") for path in claim_paths
+        path.startswith(ticket_prefix) and path.endswith("-TICKET_DIGEST.json")
+        for path in claim_paths
     )
     assert not any(
-        path.startswith(f"{tid}/") and path.endswith("-DONE_ENRICH.json") for path in claim_paths
+        path.startswith(ticket_prefix) and path.endswith("-DONE_ENRICH.json")
+        for path in claim_paths
     )
     assert any(
-        path.startswith(f"{tid}/") and path.endswith("-TICKET_DIGEST.json")
+        path.startswith(ticket_prefix) and path.endswith("-TICKET_DIGEST.json")
         for path in finalize_paths
     )
     assert any(
-        path.startswith(f"{tid}/") and path.endswith("-DONE_ENRICH.json") for path in finalize_paths
+        path.startswith(ticket_prefix) and path.endswith("-DONE_ENRICH.json")
+        for path in finalize_paths
     )
 
     assert ds.freshness(tid, repo_root=repo) == "present-fresh"
@@ -698,7 +705,7 @@ def test_drain_preserves_committed_queue_history(repo: str) -> None:
     tid = rebar.create_ticket("task", "T", repo_root=repo)
     Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
     D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
-    ticket_dir = Path(_tracker(repo)) / tid
+    ticket_dir = Path(layout_ticket_dir(_tracker(repo), tid))
     queue_events = [
         f
         for f in ticket_dir.glob("*.json")
@@ -1167,7 +1174,7 @@ def test_detached_drain_child_is_handed_the_canonical_tracker(
 
 def _count(tid: str, tracker: str, event_type: str) -> int:
     """Number of persisted queue events of *event_type* for *tid* (fan-out oracle)."""
-    ticket_dir = os.path.join(tracker, Q._resolve(tid, tracker))
+    ticket_dir = layout_ticket_dir(tracker, Q._resolve(tid, tracker))
     return len(Q._event_names(ticket_dir, event_type))
 
 
@@ -1210,7 +1217,7 @@ def test_reenrich_debounce_allows_reenrichment_after_the_window(
     D.drain(tracker, repo_root=repo, runner=_DigestRunner())
     assert _count(tid, tracker, Q.DONE) == 1
     rebar.edit_ticket(tid, description="drifted", repo_root=repo)
-    done = Q._latest(os.path.join(tracker, Q._resolve(tid, tracker)), Q.DONE)
+    done = Q._latest(layout_ticket_dir(tracker, Q._resolve(tid, tracker)), Q.DONE)
     assert done is not None
     future = done[0] + (1441 * 60 * 1_000_000_000)  # one minute past the 1440-min window
     monkeypatch.setattr(Q, "_now_ns", lambda: future)

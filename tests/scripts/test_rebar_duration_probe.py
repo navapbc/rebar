@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 import rebar_duration_probe as probe
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 pytestmark = pytest.mark.scripts
 
 
@@ -671,7 +673,7 @@ def test_summary_reports_direct_timings_workload_and_legacy_residual(
     log_root = tmp_path / "logs"
     log_root.mkdir()
     tracker = tmp_path / "tracker"
-    ticket_dir = tracker / ticket_id
+    ticket_dir = Path(layout_ticket_dir(tracker, ticket_id))
     ticket_dir.mkdir(parents=True)
     source = (
         "const r = await tools.exec_command({cmd:`rtk rebar transition "

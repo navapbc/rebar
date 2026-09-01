@@ -30,6 +30,7 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar_reconciler.inbound_fields import _LOCAL_STATUS_VOCAB, recover_status_label  # noqa: F401
 
 # Map Jira issuetype -> local ticket_type. Anything else falls through to 'task'.
@@ -182,7 +183,7 @@ def _read_latest_status(tracker_dir: Path, ticket_id: str) -> str:
     Tolerant of missing / unreadable / error tickets — returns ``"open"`` (the
     reducer's initial state) in those cases.
     """
-    ticket_dir = tracker_dir / ticket_id
+    ticket_dir = Path(layout_ticket_dir(tracker_dir, ticket_id))
     if not ticket_dir.is_dir():
         return "open"
     try:

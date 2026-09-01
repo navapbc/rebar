@@ -17,6 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
@@ -119,7 +121,7 @@ def _patch_apply_deps(applier, monkeypatch):
 
 
 def _event_files(tracker_dir: Path, local_id: str) -> list[Path]:
-    return sorted((tracker_dir / local_id).glob("*.json"))
+    return sorted(Path(layout_ticket_dir(tracker_dir, local_id)).glob("*.json"))
 
 
 def _read_create(tracker_dir: Path, local_id: str) -> dict:
@@ -127,7 +129,7 @@ def _read_create(tracker_dir: Path, local_id: str) -> dict:
         ev = json.loads(path.read_text())
         if ev.get("event_type") == "CREATE":
             return ev
-    raise AssertionError(f"no CREATE event in {tracker_dir / local_id}")
+    raise AssertionError(f"no CREATE event in {layout_ticket_dir(tracker_dir, local_id)}")
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +157,7 @@ def test_inbound_create_writes_local_ticket(applier, mut_mod, fixture_repo):
 
     tracker = fixture_repo / ".tickets-tracker"
     local_id = "jira-dig-123"
-    assert (tracker / local_id).is_dir()
+    assert Path(layout_ticket_dir(tracker, local_id)).is_dir()
     create_ev = _read_create(tracker, local_id)
     data = create_ev["data"]
     assert data["title"] == "X"
@@ -465,7 +467,8 @@ def test_inbound_create_dedups_against_binding_store(applier, mut_mod, fixture_r
     assert mapping.get("uuid-bound-7") == "DIG-77"
 
     # 3. No phantom local ticket materialised under the jira-key-derived id.
-    assert not (fixture_repo / ".tickets-tracker" / "jira-dig-77").exists(), (
+    tracker = fixture_repo / ".tickets-tracker"
+    assert not Path(layout_ticket_dir(tracker, "jira-dig-77")).exists(), (
         "must not materialise a phantom local ticket when already bound"
     )
 
@@ -480,7 +483,7 @@ def test_inbound_create_dedups_against_binding_store(applier, mut_mod, fixture_r
         payload={"fields": {"summary": "brand new", "issuetype": "Task"}},
     )
     applier._apply_typed(unbound, repo_root=fixture_repo, binding_store=unbound_store)
-    assert (fixture_repo / ".tickets-tracker" / "jira-dig-88").exists(), (
+    assert Path(layout_ticket_dir(tracker, "jira-dig-88")).exists(), (
         "an unbound inbound create must still materialise a local ticket"
     )
     # ticket robe-creek-zealot: the create must record the binding at creation
@@ -885,5 +888,5 @@ def test_inbound_create_tolerates_store_without_bind_confirm(
     )
     result = applier._apply_typed(mutation, repo_root=fixture_repo, binding_store=_LegacyStore())
     assert result.payload["local_id"] == "jira-dig-914"
-    assert (fixture_repo / ".tickets-tracker" / "jira-dig-914").exists()
+    assert Path(layout_ticket_dir(fixture_repo / ".tickets-tracker", "jira-dig-914")).exists()
     assert "lacks bind_confirm" in capsys.readouterr().err

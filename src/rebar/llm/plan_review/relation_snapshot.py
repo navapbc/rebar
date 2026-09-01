@@ -21,6 +21,8 @@ from typing import Any, Literal, cast
 
 from rebar import config
 from rebar._engine_support import reads as ticket_reads
+from rebar._store.ticket_layout import is_shard_name, iter_ticket_ids
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_all_tickets
 
 logger = logging.getLogger(__name__)
@@ -244,13 +246,43 @@ def _holds_no_events(ticket_dir: Path) -> bool:
         return False
 
 
-def _load_states(tracker: Path) -> tuple[dict[str, dict], dict[str, set[str]]]:
+def _iter_eventless_ticket_dirs(tracker: Path) -> list[Path]:
     try:
-        entries = sorted(
-            entry.name
-            for entry in tracker.iterdir()
-            if entry.is_dir() and not entry.name.startswith(".")
+        entries = sorted(tracker.iterdir(), key=lambda p: p.name)
+    except OSError:
+        return []
+    eventless: list[Path] = []
+    for entry in entries:
+        if entry.name.startswith(".") or not entry.is_dir():
+            continue
+        if is_shard_name(entry.name):
+            try:
+                children = sorted(entry.iterdir(), key=lambda p: p.name)
+            except OSError:
+                continue
+            eventless.extend(
+                child
+                for child in children
+                if child.is_dir() and not child.name.startswith(".") and _holds_no_events(child)
+            )
+        elif _holds_no_events(entry):
+            eventless.append(entry)
+    return eventless
+
+
+def _warn_eventless_ticket_dirs(tracker: Path) -> None:
+    for ticket_dir in _iter_eventless_ticket_dirs(tracker):
+        logger.warning(
+            "skipping ticket directory with no CREATE/SNAPSHOT event: %s "
+            "(debris of an interrupted write; safe to delete)",
+            ticket_dir,
         )
+
+
+def _load_states(tracker: Path) -> tuple[dict[str, dict], dict[str, set[str]]]:
+    _warn_eventless_ticket_dirs(tracker)
+    try:
+        entries = iter_ticket_ids(tracker)
     except (OSError, ValueError, TypeError):
         raise _store_error(tracker) from None
     try:
@@ -275,7 +307,7 @@ def _load_states(tracker: Path) -> tuple[dict[str, dict], dict[str, set[str]]]:
             # and git cannot see the artifact (it cannot track empty directories) so
             # no .gitignore remedy reaches it. Skip it, and NAME THE PATH so the
             # operator can delete it.
-            ticket_dir = tracker / directory_id
+            ticket_dir = Path(layout_ticket_dir(tracker, directory_id))
             if _holds_no_events(ticket_dir):
                 logger.warning(
                     "skipping ticket directory with no CREATE/SNAPSHOT event: %s "

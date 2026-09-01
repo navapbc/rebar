@@ -365,6 +365,7 @@ def forget_identity_mapping(repo: Path, provider: str, external_id: str) -> list
     import shutil
 
     import rebar
+    from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
     removed: list[str] = []
     tracker = Path(repo) / ".tickets-tracker"
@@ -378,7 +379,7 @@ def forget_identity_mapping(repo: Path, provider: str, external_id: str) -> list
                 f"identity was removed from {tracker} — removal is not what makes "
                 f"resolve_mapping miss, so the oracle's precondition cannot be established"
             )
-        directory = tracker / identity_id
+        directory = Path(layout_ticket_dir(tracker, identity_id))
         if not directory.is_dir():
             raise AssertionError(
                 f"{provider}/{external_id!r} resolves to {identity_id!r} but there is no "

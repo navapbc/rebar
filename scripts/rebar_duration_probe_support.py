@@ -501,12 +501,24 @@ def _completion_phase_timestamps(
     return {"status_at": status_at, "signature_at": signature_at}
 
 
+def _ticket_dirs(tracker: Path) -> list[Path]:
+    if not tracker.is_dir():
+        return []
+    from rebar._store.ticket_layout import iter_ticket_dirs
+
+    return [Path(entry.path) for entry in iter_ticket_dirs(tracker)]
+
+
 def load_tracker(config: ProbeConfig) -> tuple[dict[str, str], list[dict[str, Any]], Counter[str]]:
     aliases: dict[str, str] = {}
     ids: set[str] = set()
     audit: Counter[str] = Counter()
     tracker = config.tracker.expanduser()
-    for cache in tracker.glob("*/.cache.json"):
+    ticket_dirs = _ticket_dirs(tracker)
+    for ticket_dir in ticket_dirs:
+        cache = ticket_dir / ".cache.json"
+        if not cache.exists():
+            continue
         try:
             state = json.loads(cache.read_text()).get("state", {})
         except (OSError, json.JSONDecodeError):
@@ -522,94 +534,97 @@ def load_tracker(config: ProbeConfig) -> tuple[dict[str, str], list[dict[str, An
 
     events: list[dict[str, Any]] = []
     for operation, suffix in (("plan", "REVIEW_RESULT"), ("close", "COMPLETION_VERDICT")):
-        for path in tracker.glob(f"*/*-{suffix}.json"):
-            try:
-                raw = json.loads(path.read_text())
-            except (OSError, json.JSONDecodeError):
-                audit["bad_event"] += 1
-                continue
-            data = raw.get("data")
-            if not isinstance(data, dict):
-                continue
-            metrics = data.get("metrics")
-            if not isinstance(metrics, dict):
-                coverage = data.get("coverage")
-                metrics = coverage.get("metrics") if isinstance(coverage, dict) else None
-            provenance = data.get("provider_provenance")
-            ran_model = provenance.get("ran_model") if isinstance(provenance, dict) else None
-            ticket_id = data.get("ticket_id")
-            timestamp_ns = raw.get("timestamp")
-            if not isinstance(ticket_id, str) or not isinstance(timestamp_ns, int):
-                continue
-            timestamp = timestamp_ns / 1_000_000_000
-            if config.until is not None and timestamp > config.until:
-                continue
-            events.append(
-                {
-                    "operation": operation,
-                    "ticket_id": aliases.get(ticket_id, ticket_id),
-                    "timestamp": timestamp,
-                    "llm_calls": metrics.get("llm_calls") if isinstance(metrics, dict) else None,
-                    "total_ms": metrics.get("total_ms") if isinstance(metrics, dict) else None,
-                    "det_ms": metrics.get("det_ms") if isinstance(metrics, dict) else None,
-                    "llm_ms": metrics.get("llm_ms") if isinstance(metrics, dict) else None,
-                    **{
-                        name: metrics.get(name) if isinstance(metrics, dict) else None
-                        for name in (
-                            "pre_verifier_total_ms",
-                            "structural_scan_ms",
-                            "material_policy_ms",
-                            "descendant_scope_ms",
-                            "landing_check_ms",
-                            "verifier_call_ms",
-                            "git_history_read_ms",
-                            "alias_index_build_ms",
-                            "ticket_ref_resolution_ms",
-                            "diff_validation_ms",
-                            "verifier_wrapper_setup_ms",
-                            "verifier_reusable_lookup_ms",
-                            "verifier_resume_config_ms",
-                            "verifier_attempts_ms",
-                            "verifier_between_attempts_ms",
-                            "verifier_wrapper_finalization_ms",
-                            "verifier_wrapper_total_ms",
-                            "verifier_attempt_setup_ms",
-                            "verifier_handle_resolution_ms",
-                            "verifier_snapshot_enter_ms",
-                            "verifier_handle_apply_ms",
-                            "verifier_inner_setup_ms",
-                            "verifier_dispatch_ms",
-                            "verifier_annotation_ms",
-                            "verifier_snapshot_exit_ms",
-                            "verifier_handle_defaults_ms",
-                            "verifier_code_snapshot_ms",
-                            "verifier_build_drift_ms",
-                            "verifier_ticket_snapshot_ms",
-                            "verifier_snapshot_gc_ms",
-                            "verifier_dispatch_setup_ms",
-                            "verifier_workflow_ms",
-                            "verifier_precheck_context_ms",
-                            "verifier_completion_agent_ms",
-                            "verifier_verdict_reconcile_ms",
-                            "verifier_no_llm_passthrough_ms",
-                            "verifier_unclassified_workflow_steps_ms",
-                            "verifier_workflow_residual_ms",
-                            "verifier_dispatch_finalization_ms",
-                            "commits_inspected",
-                            "distinct_references",
-                            "descendant_ids",
-                            "referencing_commits_found",
-                            "verifier_attempt_count",
-                            "verifier_resume_count",
-                            "verifier_workflow_step_count",
-                        )
-                    },
-                    "ran_model": ran_model,
-                    "verdict": data.get("verdict"),
-                    "schema": data.get("schema"),
-                    "path": str(path),
-                }
-            )
+        for ticket_dir in ticket_dirs:
+            for path in ticket_dir.glob(f"*-{suffix}.json"):
+                try:
+                    raw = json.loads(path.read_text())
+                except (OSError, json.JSONDecodeError):
+                    audit["bad_event"] += 1
+                    continue
+                data = raw.get("data")
+                if not isinstance(data, dict):
+                    continue
+                metrics = data.get("metrics")
+                if not isinstance(metrics, dict):
+                    coverage = data.get("coverage")
+                    metrics = coverage.get("metrics") if isinstance(coverage, dict) else None
+                provenance = data.get("provider_provenance")
+                ran_model = provenance.get("ran_model") if isinstance(provenance, dict) else None
+                ticket_id = data.get("ticket_id")
+                timestamp_ns = raw.get("timestamp")
+                if not isinstance(ticket_id, str) or not isinstance(timestamp_ns, int):
+                    continue
+                timestamp = timestamp_ns / 1_000_000_000
+                if config.until is not None and timestamp > config.until:
+                    continue
+                events.append(
+                    {
+                        "operation": operation,
+                        "ticket_id": aliases.get(ticket_id, ticket_id),
+                        "timestamp": timestamp,
+                        "llm_calls": (
+                            metrics.get("llm_calls") if isinstance(metrics, dict) else None
+                        ),
+                        "total_ms": metrics.get("total_ms") if isinstance(metrics, dict) else None,
+                        "det_ms": metrics.get("det_ms") if isinstance(metrics, dict) else None,
+                        "llm_ms": metrics.get("llm_ms") if isinstance(metrics, dict) else None,
+                        **{
+                            name: metrics.get(name) if isinstance(metrics, dict) else None
+                            for name in (
+                                "pre_verifier_total_ms",
+                                "structural_scan_ms",
+                                "material_policy_ms",
+                                "descendant_scope_ms",
+                                "landing_check_ms",
+                                "verifier_call_ms",
+                                "git_history_read_ms",
+                                "alias_index_build_ms",
+                                "ticket_ref_resolution_ms",
+                                "diff_validation_ms",
+                                "verifier_wrapper_setup_ms",
+                                "verifier_reusable_lookup_ms",
+                                "verifier_resume_config_ms",
+                                "verifier_attempts_ms",
+                                "verifier_between_attempts_ms",
+                                "verifier_wrapper_finalization_ms",
+                                "verifier_wrapper_total_ms",
+                                "verifier_attempt_setup_ms",
+                                "verifier_handle_resolution_ms",
+                                "verifier_snapshot_enter_ms",
+                                "verifier_handle_apply_ms",
+                                "verifier_inner_setup_ms",
+                                "verifier_dispatch_ms",
+                                "verifier_annotation_ms",
+                                "verifier_snapshot_exit_ms",
+                                "verifier_handle_defaults_ms",
+                                "verifier_code_snapshot_ms",
+                                "verifier_build_drift_ms",
+                                "verifier_ticket_snapshot_ms",
+                                "verifier_snapshot_gc_ms",
+                                "verifier_dispatch_setup_ms",
+                                "verifier_workflow_ms",
+                                "verifier_precheck_context_ms",
+                                "verifier_completion_agent_ms",
+                                "verifier_verdict_reconcile_ms",
+                                "verifier_no_llm_passthrough_ms",
+                                "verifier_unclassified_workflow_steps_ms",
+                                "verifier_workflow_residual_ms",
+                                "verifier_dispatch_finalization_ms",
+                                "commits_inspected",
+                                "distinct_references",
+                                "descendant_ids",
+                                "referencing_commits_found",
+                                "verifier_attempt_count",
+                                "verifier_resume_count",
+                                "verifier_workflow_step_count",
+                            )
+                        },
+                        "ran_model": ran_model,
+                        "verdict": data.get("verdict"),
+                        "schema": data.get("schema"),
+                        "path": str(path),
+                    }
+                )
     events.sort(key=lambda item: item["timestamp"])
     close_by_ticket: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for event in events:

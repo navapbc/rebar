@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ._backend import TicketTransport
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar_reconciler import projects_store
 from rebar_reconciler.batch_dispatch import _call_with_retry
 from rebar_reconciler.inbound_translate import (
@@ -452,7 +453,7 @@ def _inbound_update_apply_labels(mutation, payload, tracker_dir, local_id, writt
         current_state: dict | None = None
         try:
             reducer_mod = _load_ticket_reducer()
-            current_state = reducer_mod.reduce_ticket(str(tracker_dir / local_id))
+            current_state = reducer_mod.reduce_ticket(layout_ticket_dir(tracker_dir, local_id))
         except Exception as _reducer_exc:  # noqa: BLE001 — see bc8f docstring
             reducer_failed = True
             print(

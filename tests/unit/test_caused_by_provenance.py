@@ -118,9 +118,10 @@ def test_legacy_unmarked_event_replays_without_provenance_key(rebar_repo) -> Non
     origin = rebar.create_ticket("task", "the origin change", repo_root=repo)
     bug = rebar.create_ticket("bug", "the bug", repo_root=repo)
 
+    from rebar._store.ticket_layout import ticket_dir
     from rebar.config import tracker_dir
 
-    bug_dir = Path(str(tracker_dir(repo))) / bug
+    bug_dir = Path(ticket_dir(tracker_dir(repo), bug))
     ts = 1_700_000_000_000_000_000
     ev_uuid = str(uuid.uuid4())
     event = {

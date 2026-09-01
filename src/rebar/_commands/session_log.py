@@ -33,6 +33,7 @@ from rebar._commands._seam import (
 )
 from rebar._commands.composer import create_core, link_core
 from rebar._commands.session_id import resolve_session_id
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 _DEFAULT_TITLE = "Session log"
 _POINTER_NAME = "current_session_log"
@@ -94,7 +95,7 @@ def _is_live_session_log(ticket_id: str, tracker: str) -> bool:
     """True iff ``ticket_id`` is an existing, non-deleted/archived session_log."""
     from rebar.reducer import reduce_ticket
 
-    d = os.path.join(tracker, ticket_id)
+    d = layout_ticket_dir(tracker, ticket_id)
     if not os.path.isdir(d):
         return False
     try:

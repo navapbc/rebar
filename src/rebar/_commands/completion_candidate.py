@@ -16,6 +16,7 @@ from pathlib import Path
 
 from rebar._snapshot.ticket_view import TicketsOID
 from rebar._store.gitutil import run_git_bounded
+from rebar._store.ticket_layout import ticket_relpath
 
 _GIT_TIMEOUT_SECONDS = 30
 
@@ -112,6 +113,7 @@ def prepare_candidate(
             "set",
             "--skip-checks",
             ticket_id,
+            ticket_relpath(ticket_id),
         )
         _require(selected, "select candidate ticket directory")
         checked_out = _git(  # raw-git-ok: checkout mutates only this disposable candidate

@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.graph import _links
 
 
@@ -46,7 +47,7 @@ def _cross_tier_promoted_link(repo: Path):
 
 
 def _link_event_count(tracker: Path, ticket_id: str) -> int:
-    d = tracker / ticket_id
+    d = Path(layout_ticket_dir(tracker, ticket_id))
     return len(list(d.glob("*-LINK.json"))) if d.is_dir() else 0
 
 

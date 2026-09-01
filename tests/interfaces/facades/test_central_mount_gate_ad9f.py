@@ -55,7 +55,7 @@ def clone_with_origin_tickets(tmp_path, monkeypatch):
     _git("push", "-q", "origin", "tickets:tickets", cwd=seed / ".tickets-tracker")
 
     clone = tmp_path / "clone"
-    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True)
+    subprocess.run(["git", "clone", "--no-local", "-q", str(origin), str(clone)], check=True)
     _git("config", "user.email", "t@t", cwd=clone)
     _git("config", "user.name", "t", cwd=clone)
     assert not (clone / ".tickets-tracker").exists()

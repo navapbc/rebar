@@ -256,6 +256,10 @@ ensure.hint_interval_secs = 86400    # min seconds between write-path "store is 
                                       # process (rate-limit; env REBAR_ENSURE_HINT_INTERVAL_SECS). Min 0.
 ensure.hint_enabled       = true     # kill-switch: false silences the nudge entirely
                                       # (env REBAR_ENSURE_HINT_ENABLED)
+ensure.ticket_layout_shards_cutover = false
+                                      # operator-only opt-in that lets `ticket-layout-shards`
+                                      # move existing flat ticket dirs during `fsck --repair`
+                                      # (env REBAR_ENSURE_TICKET_LAYOUT_SHARDS_CUTOVER)
 
 # cross-session ticket-operation warning (epic concave-pale-sheldrake)
 warnings.cross_session = true        # emit a warning when this session mutates a ticket that

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _new_ticket(repo: Path) -> str:
@@ -82,8 +83,8 @@ def test_leaf_writes_enforce_env_id_gate_like_create(rebar_repo: Path):
     assert env_id_file.is_file()
 
     # Count COMMENT events before, then drop .env-id (the half-initialized state).
-    ticket_dir = tracker / tid
-    comments_before = len(list(ticket_dir.glob("*-COMMENT.json")))
+    event_dir = Path(layout_ticket_dir(tracker, tid))
+    comments_before = len(list(event_dir.glob("*-COMMENT.json")))
     env_id_file.unlink()
 
     # create already enforces the gate (the asymmetry the bug is about)...
@@ -96,7 +97,7 @@ def test_leaf_writes_enforce_env_id_gate_like_create(rebar_repo: Path):
         rebar.tag(tid, "should:reject", repo_root=str(rebar_repo))
 
     # No env-id-less event may have been appended.
-    comments_after = len(list(ticket_dir.glob("*-COMMENT.json")))
+    comments_after = len(list(event_dir.glob("*-COMMENT.json")))
     assert comments_after == comments_before, "a COMMENT was committed without .env-id"
 
     # Restoring .env-id makes the same writes succeed again.
@@ -241,7 +242,7 @@ def test_library_unlink_python_no_link_errors(rebar_repo: Path, monkeypatch: pyt
 def _event_uuid(tracker: Path, tid: str, suffix: str) -> str:
     import json as _json
 
-    for p in (tracker / tid).iterdir():
+    for p in Path(layout_ticket_dir(tracker, tid)).iterdir():
         if p.name.endswith(suffix) and not p.name.startswith("."):
             return _json.loads(p.read_text())["uuid"]
     raise AssertionError(f"no {suffix} event for {tid}")

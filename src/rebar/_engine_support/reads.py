@@ -39,6 +39,7 @@ from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._engine_support.ticket_query import TicketQuery
 from rebar._errors import TrackerRootError
 from rebar._ids import binding_jira_key_map
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.graph._graph import build_dep_graph
 from rebar.graph._ready import find_ready_tickets
 from rebar.reducer import (
@@ -335,7 +336,7 @@ def inbound_deps_state(ticket_id: str, tracker: str) -> list[dict]:
     """
     entries: list[dict] = []
     for link in find_inbound_relationships(ticket_id, tracker)["inbound_links"]:
-        src = reduce_ticket(os.path.join(tracker, link["from_id"]))
+        src = reduce_ticket(layout_ticket_dir(tracker, link["from_id"]))
         status = src.get("status", "") if isinstance(src, dict) else ""
         entries.append({"from_id": link["from_id"], "relation": link["relation"], "status": status})
     return entries
@@ -351,7 +352,7 @@ def show_state(
     resolved = resolve_ticket_id(ticket_id, tracker)
     if resolved is None:
         raise TicketNotFoundError(f"Ticket '{ticket_id}' not found")
-    ticket_path = os.path.join(tracker, resolved)
+    ticket_path = layout_ticket_dir(tracker, resolved)
     if not os.path.isdir(ticket_path):
         raise TicketNotFoundError(f"Ticket '{ticket_id}' not found")
     state = reduce_ticket(ticket_path)
@@ -546,7 +547,7 @@ def deps_state(ticket_id: str, tracker: str, *, include_archived: bool = False) 
         raise ReadError(f"ticket '{ticket_id}' does not exist")
     if not include_archived:
         try:
-            target_state = reduce_ticket(os.path.join(tracker, resolved))
+            target_state = reduce_ticket(layout_ticket_dir(tracker, resolved))
         except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible target skips the archived check
             target_state = None
         if isinstance(target_state, dict) and target_state.get("archived") is True:

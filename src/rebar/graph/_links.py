@@ -8,6 +8,7 @@ import logging
 import os
 from collections.abc import Callable
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer._sort import prefix_ts as _prefix_ts
 
 from ._graph import check_cycle_at_level, check_would_create_cycle
@@ -47,7 +48,7 @@ def _is_active_link(source_id: str, target_id: str, relation: str, tracker_dir: 
     are found — ticket-compact.sh bakes LINK events into a SNAPSHOT and deletes the
     original *-LINK.json files (f5a8).
     """
-    ticket_dir = os.path.join(tracker_dir, source_id)
+    ticket_dir = layout_ticket_dir(tracker_dir, source_id)
     if not os.path.isdir(ticket_dir):
         return False
 
@@ -266,7 +267,7 @@ def add_dependency(
             f"Adding {resolved_source} → {resolved_target} ({relation}) would create a cycle"
         )
 
-    resolved_source_dir = os.path.join(tracker_dir, resolved_source)
+    resolved_source_dir = layout_ticket_dir(tracker_dir, resolved_source)
     resolved_source_state = (
         reduce_ticket(resolved_source_dir) if os.path.isdir(resolved_source_dir) else None
     )
@@ -378,7 +379,9 @@ def remove_dependency(
     _write_unlink(source_id, target_id, tracker, repo_root=None, relation=relation)
 
     if relation == "relates_to":
-        recip_uuid, _ = _get_link_info(tracker / target_id, source_id, relation)
+        recip_uuid, _ = _get_link_info(
+            Path(layout_ticket_dir(tracker_dir, target_id)), source_id, relation
+        )
         if recip_uuid:
             _write_unlink(target_id, source_id, tracker, repo_root=None, relation=relation)
         else:

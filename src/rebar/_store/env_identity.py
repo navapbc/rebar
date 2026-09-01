@@ -52,6 +52,7 @@ import sys
 import uuid
 
 from rebar._store.ensures import EnsureOutcome
+from rebar._store.ticket_layout import iter_ticket_dirs
 
 #: The git-ignored per-environment identity file, relative to the tracker root.
 ENV_ID_FILE = ".env-id"
@@ -130,14 +131,8 @@ def store_event_env_ids(
     root = os.fspath(tracker)
     found: set[str] = set()
     read = 0
-    try:
-        entries = sorted(os.listdir(root))
-    except OSError:
-        return found
-    for name in entries:
-        if name.startswith("."):
-            continue  # store artifacts (.git, .env-id, .opcert-key…) are never tickets
-        ticket_dir = os.path.join(root, name)
+    for entry in iter_ticket_dirs(root):
+        ticket_dir = entry.path
         try:
             files = sorted(os.listdir(ticket_dir))
         except OSError:

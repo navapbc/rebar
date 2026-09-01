@@ -8,7 +8,6 @@ non-zero — plus the offline-default guard on `verify.opcert_remote_url`.
 
 from __future__ import annotations
 
-import os
 import subprocess
 
 import pytest
@@ -36,13 +35,11 @@ MERGED = "0" * 40
 
 
 def _a_ticket_id(tracker: str) -> str:
-    dirs = sorted(
-        d
-        for d in os.listdir(tracker)
-        if os.path.isdir(os.path.join(tracker, d)) and not d.startswith(".")
-    )
-    assert dirs, "store has no ticket dirs"
-    return dirs[0]
+    from rebar._store.ticket_layout import iter_ticket_dirs
+
+    tickets = sorted(iter_ticket_dirs(tracker), key=lambda ticket: ticket.ticket_id)
+    assert tickets, "store has no ticket dirs"
+    return tickets[0].ticket_id
 
 
 def _service_job(ticket_id: str, priv: str) -> dict:

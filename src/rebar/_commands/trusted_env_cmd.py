@@ -21,6 +21,7 @@ import yaml
 
 from rebar._cli._parser import ParseError, render_parse_error
 from rebar._cli._parsers.advanced.certs import build_trusted_env
+from rebar._store.ticket_layout import iter_ticket_dirs
 from rebar.attest.trusted_env import TRUSTED_ENV_FILENAME
 
 _USAGE = (
@@ -39,14 +40,8 @@ def _tip_position(repo_root) -> str | None:
 
     tracker = tracker_dir(repo_root)
     best: str | None = None
-    try:
-        entries = os.listdir(tracker)
-    except OSError:
-        return None
-    for d in entries:
-        dp = os.path.join(str(tracker), d)
-        if d.startswith(".") or not os.path.isdir(dp):
-            continue
+    for entry in iter_ticket_dirs(str(tracker)):
+        dp = entry.path
         try:
             names = os.listdir(dp)
         except OSError:

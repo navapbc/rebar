@@ -13,18 +13,21 @@ from pathlib import Path
 import pytest
 
 from rebar._store import hlc
+from rebar._store.ticket_layout import ticket_dir
 
 
 @pytest.fixture
 def tracker(tmp_path: Path) -> Path:
     """A bare tracker dir with one ticket subdir (no events yet)."""
     trk = tmp_path / "repo" / ".tickets-tracker"
-    (trk / "tk-1").mkdir(parents=True)
+    Path(ticket_dir(trk, "tk-1")).mkdir(parents=True)
     return trk
 
 
 def _write_event(tracker: Path, ticket_id: str, prefix: int, etype: str = "EDIT") -> None:
-    (tracker / ticket_id / f"{prefix}-uuid-{etype}.json").write_text("{}", encoding="utf-8")
+    (Path(ticket_dir(tracker, ticket_id)) / f"{prefix}-uuid-{etype}.json").write_text(
+        "{}", encoding="utf-8"
+    )
 
 
 # ── kill-switch & injection ─────────────────────────────────────────────────

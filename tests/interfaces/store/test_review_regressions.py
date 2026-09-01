@@ -20,6 +20,7 @@ import pytest
 
 import rebar
 from rebar._cli import main
+from rebar._store.ticket_layout import ticket_dir
 
 
 def test_delete_aborts_and_rolls_back_on_commit_failure(
@@ -43,7 +44,8 @@ def test_delete_aborts_and_rolls_back_on_commit_failure(
     assert code == 2, "delete must NOT report success when the commit fails"
     assert "Deleted ticket" not in out
     # Rolled back: tombstone removed, ticket still reduces as a live (non-deleted) ticket.
-    assert not (rebar_repo / ".tickets-tracker" / tid / ".tombstone.json").exists()
+    tombstone = Path(ticket_dir(rebar_repo / ".tickets-tracker", tid)) / ".tombstone.json"
+    assert not tombstone.exists()
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
 
 
@@ -72,7 +74,8 @@ def test_transition_unstages_orphaned_event_on_commit_failure(
         ["git", "-C", tracker, "diff", "--cached", "--quiet"], capture_output=True, check=False
     )
     assert diff.returncode == 0, "orphaned event left STAGED in the index"
-    assert not list((rebar_repo / ".tickets-tracker" / tid).glob("*-STATUS.json"))
+    event_dir = Path(ticket_dir(rebar_repo / ".tickets-tracker", tid))
+    assert not list(event_dir.glob("*-STATUS.json"))
 
 
 def test_consent_gate_no_reprompt_when_root_differs_from_toplevel(

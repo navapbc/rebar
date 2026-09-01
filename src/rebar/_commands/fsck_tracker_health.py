@@ -26,6 +26,7 @@ import subprocess
 from rebar import config
 from rebar._store import env_identity
 from rebar._store.gitutil import path_is_foreign_to_branch, run_git
+from rebar._store.ticket_layout import is_store_data_dir
 from rebar.reducer._cache import RETIRED_SUFFIX
 
 # Watchdog on fsck's read-only local git calls (bug 9305): NOT a latency budget — these
@@ -116,25 +117,18 @@ def foreign_store_path_list(tracker: str) -> list[str]:
     rule would be free to drift, and a repair that disagreed with the report it was shown
     could delete something fsck never named.
 
-    A top-level entry is ticket data iff it is a directory holding at least one event file
-    (active or ``*.retired``); store artifacts all begin with a dot and are skipped."""
-
-    def _holds_events(path: str) -> bool:
-        try:
-            return any(
-                n.endswith(".json") or n.endswith(RETIRED_SUFFIX)
-                for n in os.listdir(path)
-                if not n.startswith(".")
-            )
-        except OSError:
-            return False
+    A top-level entry is ticket data when it is either a legacy flat ticket directory
+    holding at least one event file (active or ``*.retired``), or a current-layout
+    two-hex shard container. Store artifacts all begin with a dot and are skipped."""
 
     try:
         entries = sorted(os.listdir(tracker))
     except OSError:
         return []
     return [
-        n for n in entries if not n.startswith(".") and not _holds_events(os.path.join(tracker, n))
+        n
+        for n in entries
+        if not n.startswith(".") and not is_store_data_dir(os.path.join(tracker, n))
     ]
 
 
@@ -149,13 +143,14 @@ def _foreign_store_paths(tracker: str) -> str | None:
     fact that something is writing source files into the store.
 
     Classification is deliberately structural rather than a filename denylist, and it uses
-    the same "is this a ticket?" test as the rest of fsck: a top-level entry is ticket data
-    if it is a directory holding at least one event file. Matching on the ticket-id SHAPE
-    instead would be wrong — ticket directories are not required to be id-shaped, and doing
-    so reports healthy stores as polluted. Store artifacts (``.git``, ``.bridge_state``,
-    ``.env-id``, ``.opcert-key``…) all begin with a dot and are skipped. Entries the branch
-    actually TRACKS are called out separately: those were committed into the tickets branch
-    and will propagate on the next push, which is strictly worse than a working-tree stray."""
+    the same store-data test as the rest of fsck: a top-level entry is ticket data if it is
+    a legacy flat event directory, or a current-layout two-hex shard container. Matching on
+    the ticket-id SHAPE instead would be wrong — ticket directories are not required to be
+    id-shaped, and doing so reports healthy stores as polluted. Store artifacts (``.git``,
+    ``.bridge_state``, ``.env-id``, ``.opcert-key``…) all begin with a dot and are skipped.
+    Entries the branch actually TRACKS are called out separately: those were committed into
+    the tickets branch and will propagate on the next push, which is strictly worse than a
+    working-tree stray."""
 
     strays = foreign_store_path_list(tracker)
     if not strays:

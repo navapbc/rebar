@@ -29,6 +29,7 @@ from rebar._snapshot.ticket_receipt import (
     tracker_head,
     validate_receipt,
 )
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 if TYPE_CHECKING:
     from rebar._engine_support.ticket_query import TicketQuery
@@ -142,7 +143,10 @@ class PinnedTicketView:
     def _materialize_resolver_support(self, raw: str) -> None:
         directories, blobs = self._objects.resolver_material(raw)
         for ticket_id in directories:
-            (self._temp_tracker / ticket_id).mkdir(exist_ok=True)
+            Path(layout_ticket_dir(self._temp_tracker, ticket_id)).mkdir(
+                parents=True,
+                exist_ok=True,
+            )
         for path, blob in blobs.items():
             target = self._temp_tracker / path
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -154,8 +158,8 @@ class PinnedTicketView:
             return cached
         paths = list(self._objects.ticket_event_paths(canonical))
         blobs = self._objects.cat_files(paths)
-        ticket_dir = self._temp_tracker / canonical
-        ticket_dir.mkdir(exist_ok=True)
+        ticket_dir = Path(layout_ticket_dir(self._temp_tracker, canonical))
+        ticket_dir.mkdir(parents=True, exist_ok=True)
         for path, blob in blobs.items():
             target = self._temp_tracker / path
             target.parent.mkdir(parents=True, exist_ok=True)

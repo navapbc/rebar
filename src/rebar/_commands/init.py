@@ -426,7 +426,15 @@ def _untrack_runtime_markers_unit(tracker: str) -> EnsureOutcome:
     (archival's source of truth is ARCHIVED events) and the reader self-heals the
     fast-path marker (see ``reduce_all_tickets``)."""
     uid = "untrack-runtime-markers"
-    ls = _git(tracker, "ls-files", "--", f"*/{ARCHIVE_MARKER_NAME}", f"*/{MARKER_LOCK_NAME}")
+    ls = _git(
+        tracker,
+        "ls-files",
+        "--",
+        f"*/{ARCHIVE_MARKER_NAME}",
+        f"*/{MARKER_LOCK_NAME}",
+        f"*/*/{ARCHIVE_MARKER_NAME}",
+        f"*/*/{MARKER_LOCK_NAME}",
+    )
     tracked = [ln for ln in ls.stdout.splitlines() if ln]
     if not tracked:
         return EnsureOutcome(uid, "ok", "no tracked runtime markers")

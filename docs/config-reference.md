@@ -56,7 +56,7 @@ or conversely if false positives prove noisy once an acting id is resolved.
 
 ## Configuration keys
 
-The 103 typed `section.field` keys with type, default, description, and lifecycle.
+The 104 typed `section.field` keys with type, default, description, and lifecycle.
 
 | Key | Type | Default | Description | Lifecycle |
 |-----|------|---------|-------------|-----------|
@@ -159,6 +159,7 @@ The 103 typed `section.field` keys with type, default, description, and lifecycl
 | `tracker.branch` | `str` | `'tickets'` | Names the orphan Git branch that stores ticket event history. | active |
 | `ensure.hint_interval_secs` | `int` | `86400` | Sets the minimum seconds between pending-migration repair hints on writes. | active |
 | `ensure.hint_enabled` | `bool` | `True` | Controls whether writes warn when the store is behind the ensure registry. | active |
+| `ensure.ticket_layout_shards_cutover` | `bool` | `False` | Allows the ticket-layout-shards ensure unit to move existing flat ticket dirs. | active |
 | `code_health.scan_roots` | `list[str]` | `[]` | Lists the directories inspected by code-health metric analyzers. | active |
 | `code_health.include_extensions` | `list[str]` | `[]` | Limits module-size metrics to listed extensions. Empty includes every scc file type. | active |
 | `code_health.size_cap` | `int \| None` | `None` | Sets the line-count cap used for module-size distribution and oversized-module metrics. | active |

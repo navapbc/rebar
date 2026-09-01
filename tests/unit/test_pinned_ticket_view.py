@@ -31,6 +31,8 @@ from rebar._snapshot.ticket_view import (
     tracker_head,
     validate_receipt,
 )
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+from rebar._store.ticket_layout import ticket_dir_relpath
 
 pytestmark = pytest.mark.unit
 
@@ -90,7 +92,9 @@ def _write_raw_event(
         "author": "test",
         "data": data,
     }
-    path = Path(tracker) / ticket_id / f"{timestamp:020d}-{event_uuid}-{event_type}.json"
+    path = Path(layout_ticket_dir(tracker, ticket_id)) / (
+        f"{timestamp:020d}-{event_uuid}-{event_type}.json"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(event), encoding="utf-8")
 
@@ -558,9 +562,11 @@ def test_link_reduction_has_full_alias_short_and_jira_target_parity(repo: Path) 
             "author": "test",
             "data": {"target_id": raw_target, "relation": "relates_to"},
         }
-        path = Path(tracker) / source / f"{timestamp:020d}-{event_uuid}-LINK.json"
+        path = Path(layout_ticket_dir(tracker, source)) / (
+            f"{timestamp:020d}-{event_uuid}-LINK.json"
+        )
         path.write_text(json.dumps(event), encoding="utf-8")
-    _git(tracker, "add", *sources)
+    _git(tracker, "add", *(ticket_dir_relpath(tracker, source) for source in sources))
     _git(tracker, "commit", "-q", "-m", "test: raw link reference forms")
 
     with PinnedTicketView.at_oid(tracker, tracker_head(tracker)) as view:
@@ -607,7 +613,13 @@ def test_ambiguous_alias_link_resolution_is_independent_of_prior_reads(repo: Pat
         {"target_id": shared_alias, "relation": "relates_to"},
         timestamp=base + 3,
     )
-    _git(tracker, "add", first, second, source)
+    _git(
+        tracker,
+        "add",
+        ticket_dir_relpath(tracker, first),
+        ticket_dir_relpath(tracker, second),
+        ticket_dir_relpath(tracker, source),
+    )
     _git(tracker, "commit", "-q", "-m", "test: ambiguous raw alias")
 
     live = rebar.show_ticket(source, repo_root=str(repo))
@@ -623,7 +635,9 @@ def test_corrupt_event_json_fails_closed(repo: Path) -> None:
     ticket = rebar.create_ticket("task", "corrupt object", repo_root=str(repo))
     tracker = _tracker(repo)
     event_uuid = str(uuid.uuid4())
-    path = Path(tracker) / ticket / f"1700000000000000000-{event_uuid}-COMMENT.json"
+    path = Path(layout_ticket_dir(tracker, ticket)) / (
+        f"1700000000000000000-{event_uuid}-COMMENT.json"
+    )
     path.write_text("{not-json", encoding="utf-8")
     _git(tracker, "add", str(path.relative_to(tracker)))
     _git(tracker, "commit", "-q", "-m", "test: corrupt event")
@@ -699,7 +713,9 @@ def test_tree_listed_ticket_blob_missing_from_object_database_fails_closed(
     _freeze_gc(tracker)
 
     ticket = rebar.create_ticket("task", f"missing object {shape}", repo_root=str(repo))
-    create_path = next(Path(tracker, ticket).glob("*-CREATE.json")).relative_to(tracker)
+    create_path = next(Path(layout_ticket_dir(tracker, ticket)).glob("*-CREATE.json")).relative_to(
+        tracker
+    )
     blob_oid = _git(tracker, "rev-parse", f"HEAD:{create_path.as_posix()}")
 
     drop(tracker, _object_root(tracker), blob_oid)
@@ -715,7 +731,9 @@ def test_non_regular_ticket_tree_entry_fails_closed(repo: Path) -> None:
     ticket = rebar.create_ticket("task", "unsafe mode", repo_root=str(repo))
     tracker = _tracker(repo)
     event_uuid = str(uuid.uuid4())
-    path = Path(tracker) / ticket / f"1700000000000000000-{event_uuid}-COMMENT.json"
+    path = Path(layout_ticket_dir(tracker, ticket)) / (
+        f"1700000000000000000-{event_uuid}-COMMENT.json"
+    )
     path.symlink_to("missing-event-target")
     _git(tracker, "add", str(path.relative_to(tracker)))
     _git(tracker, "commit", "-q", "-m", "test: symlink event")

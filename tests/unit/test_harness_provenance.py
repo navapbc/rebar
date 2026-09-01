@@ -16,6 +16,7 @@ import pytest
 import rebar
 from rebar._commands._seam import tracker_dir
 from rebar._commands.session_id import resolve_harness, resolve_remote_session
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import make_initial_state, reduce_ticket
 from rebar.reducer._processors import process_status
 from rebar.reducer.llm_format import to_llm
@@ -49,7 +50,7 @@ def rebar_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _state(tid: str, repo: Path) -> dict:
-    return reduce_ticket(str(tracker_dir(str(repo)) / tid))
+    return reduce_ticket(layout_ticket_dir(tracker_dir(str(repo)), tid))
 
 
 # ------------------------------------------------------------------ resolvers

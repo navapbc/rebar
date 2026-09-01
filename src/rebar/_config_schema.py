@@ -640,6 +640,10 @@ class EnsureConfig:
         True,
         "Controls whether writes warn when the store is behind the ensure registry.",
     )  # kill-switch: false silences the nudge entirely
+    ticket_layout_shards_cutover: bool = _documented(
+        False,
+        "Allows the ticket-layout-shards ensure unit to move existing flat ticket dirs.",
+    )
 
 
 @dataclass

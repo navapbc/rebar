@@ -158,6 +158,7 @@ _SECTIONS: dict[str, dict] = {
     "ensure": {
         "hint_interval_secs": lambda v, k: _as_int(v, k, minimum=0),
         "hint_enabled": lambda v, k: _as_bool(v, k),
+        "ticket_layout_shards_cutover": lambda v, k: _as_bool(v, k),
     },
     "code_health": {
         "scan_roots": lambda v, k: _as_str_list(v, k),

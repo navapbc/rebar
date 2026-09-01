@@ -60,10 +60,16 @@ def _tracker(store: Path) -> Path:
     return Path(tracker_dir(str(store)))
 
 
+def _ticket_dir(store: Path, tid: str) -> Path:
+    from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
+    return Path(layout_ticket_dir(_tracker(store), tid))
+
+
 def _signature_event_data(store: Path, tid: str) -> dict:
     """The most-recent persisted SIGNATURE event's ``data`` block (raw, pre-reduce)."""
     resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
-    tdir = _tracker(store) / resolved
+    tdir = _ticket_dir(store, resolved)
     sig_files = sorted(f for f in os.listdir(tdir) if f.endswith("-SIGNATURE.json"))
     assert sig_files, f"no SIGNATURE event for {tid}"
     payload = json.loads((tdir / sig_files[-1]).read_text(encoding="utf-8"))
@@ -177,7 +183,7 @@ def test_plan_review_never_sign_guard_refuses_non_pass(store: Path) -> None:
         )
     # No SIGNATURE event was written.
     resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
-    tdir = _tracker(store) / resolved
+    tdir = _ticket_dir(store, resolved)
     assert not any(f.endswith("-SIGNATURE.json") for f in os.listdir(tdir))
 
 
@@ -431,7 +437,7 @@ def test_degrade_sign_raises_openssh_remediation(
     assert "OpenSSH" in ei.value.message and "8.9" in ei.value.message
     # The operation did not wedge: no SIGNATURE event was written.
     resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
-    tdir = _tracker(store) / resolved
+    tdir = _ticket_dir(store, resolved)
     assert not any(f.endswith("-SIGNATURE.json") for f in os.listdir(tdir))
 
 
@@ -514,7 +520,7 @@ def test_orchestrator_degrade_ssh_keygen_unavailable_records_unsigned(
 
     assert verdict["signature"]["signed"] is False  # in-band unsigned, not a crash / forged sig
     resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
-    tdir = _tracker(store) / resolved
+    tdir = _ticket_dir(store, resolved)
     assert not any(f.endswith("-SIGNATURE.json") for f in os.listdir(tdir))
 
 
@@ -554,5 +560,5 @@ def test_orchestrator_degrade_key_unregenerable_records_unsigned(
 
     assert verdict["signature"]["signed"] is False  # graceful in-band unsigned outcome
     resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
-    tdir = _tracker(store) / resolved
+    tdir = _ticket_dir(store, resolved)
     assert not any(f.endswith("-SIGNATURE.json") for f in os.listdir(tdir))

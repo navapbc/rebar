@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from rebar._commands.delete import scan_and_write_unlinks
+from rebar._store.ticket_layout import ticket_dir
 
 _ENV_ID = "eeee-0000-4000-8000-000000000001"
 _AUTHOR = "test-user"
@@ -50,8 +51,8 @@ def _make_tracker(tmp_path: Path) -> Path:
 
 
 def _make_ticket(tracker: Path, ticket_id: str) -> Path:
-    d = tracker / ticket_id
-    d.mkdir()
+    d = Path(ticket_dir(tracker, ticket_id))
+    d.mkdir(parents=True)
     _write_event(d, "CREATE", {"ticket_type": "task", "title": f"Ticket {ticket_id}"})
     return d
 

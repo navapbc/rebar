@@ -48,6 +48,8 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, cast
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 from . import _provenance
 
 logger = logging.getLogger(__name__)
@@ -101,7 +103,7 @@ def _scan_existing_source_ids(tracker: str) -> dict[str, str]:
 
     out: dict[str, str] = {}
     for name in _ticket_dir_names(tracker):
-        state = reduce_ticket(os.path.join(tracker, name))
+        state = reduce_ticket(layout_ticket_dir(tracker, name))
         if state and state.get("source_id"):
             out[str(state["source_id"])] = state.get("ticket_id") or name
     return out
