@@ -34497,6 +34497,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:46Z"
     },
+    "897e-8ad4-0444-49d9": {
+      "created_at": "2026-09-01T21:33:43Z",
+      "jira_id": "4591358",
+      "jira_key": "REB-4418",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T21:33:46Z"
+    },
     "897f-afbe-b6b4-4767": {
       "baseline": {
         "assignee": null,
@@ -56061,6 +56068,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:17Z"
     },
+    "ddc2-66ae-a863-4e09": {
+      "created_at": "2026-09-01T21:33:47Z",
+      "jira_id": "4591359",
+      "jira_key": "REB-4419",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T21:33:50Z"
+    },
     "ddc3-0e47-bd47-4d0c": {
       "baseline": {
         "assignee": null,
@@ -62865,7 +62879,7 @@
         },
         "description": "## Problem\n\n`src/rebar/_store/gitutil.py` is at **798 lines against the locked 800-LOC hard cap** \u2014 two lines of headroom. The next change adding three lines fails CI; there is no allowlist and `.github/module-size-limit.txt` is locked (a contributor change to it fails the build by design).\n\nNot hypothetical: change 2359 (`bd66-28a4-fd31-4c9f`) hit it \u2014 788 on main, +45, CI refused at 833 on all four platforms. It landed by relocating one function and compressing a comment, clearing the cap but leaving 798. Other in-flight changes are growing `src/rebar` modules concurrently.\n\n### What the size test enforces, and where RED begins\n\n`tests/unit/test_module_size_contract.py::test_no_src_module_over_the_hard_cap` mirrors the CI gate and enforces **only the 800-line cap** \u2014 NOT the 200-500 target. At 798 it is **already GREEN**: this work does not flip it RED to GREEN, it keeps it GREEN with room. Measured: 798 PASSES; 801 (append three blank lines) FAILS with \"over the 800-LOC hard cap\"; 373 (after the split) PASSES. The RED boundary is exactly **three added lines** away, so the proving evidence is the measured post-split LOC and restored headroom, not a RED-to-GREEN flip.\n\n## The seam \u2014 it already exists in the file\n\n`gitutil.py`'s docstring already carves out a policy essay, \"Blocking policy under local git lock contention\". That is the boundary: **`gitutil` RUNS a git subprocess; the extracted `git_locking.py` DECIDES what happens when git's own locks are contended.** The dependency runs one way (`gitutil` -> `git_locking`).\n\n### What moves\n\nFunctions: `_store_git_op_lock`, `_store_git_lock_path`, `fetch_coordination_lock`, `_resolve_common_git_dir`, `_acquire_fetch_coord_flock`, `_with_index_lock_retry`, `_reclaim_if_stale_index_lock`, `_augment_lock_exhaustion`, `_is_index_lock_error`, `_is_git_lock_error`, `_jitter`, `_backoff_sleep`, `_lock_backoff_s`, `_lock_retry_budget_s`, `_resolve_tracker_git_dir`.\n\nModule state the moved bodies read as globals, which MUST travel with them: `_INDEX_LOCK_STALE_S`, `_INDEX_LOCK_ATTEMPTS`, `_INDEX_LOCK_BACKOFF_S`, `_INDEX_LOCK_BACKOFF_CAP_S`, the `_STORE_GIT_LOCK_*` and `_FETCH_COORD_*` triples, `_LOCK_PATH_RE`, `_LOCK_REF_RE`, and the probes `_retry_probe` / `_reclaim_probe`.\n\nBecause the moved bodies stay byte-identical, `git_locking.py` must ALSO independently reconstruct every other module-level name they reference, or they raise `NameError`: its own `logger = logging.getLogger(__name__)` (read by `_store_git_op_lock`, `_with_index_lock_retry`, `fetch_coordination_lock`, `_acquire_fetch_coord_flock`), `from rebar._store import git_outcome` (read by the moved predicates), and the stdlib imports `fcntl`, `logging`, `os`, `random`, `re`, `subprocess`, `time`, `contextlib.contextmanager`, `collections.abc.Callable`/`Iterator`.\n\n### What stays\n\n`run_git`, `run_git_bounded`, `run_git_write`, `_with_transient_fault_retry` + its `_TRANSIENT_*` tables/predicates, `_LOCAL_GIT_TIMEOUT`, `_AUTOMAINT_OFF`, `_ticket_dirs`, `_dir_is_archived`, `path_is_foreign_to_branch`, `discard_unmerged_paths`.\n\n### Production importers the re-export must keep (found by parsing import nodes)\n\n`_resolve_tracker_git_dir` -> `_commands/` `bridge_repair.py:49`, `fsck.py:57`, `fsck_recover.py:20`, `fsck_repair.py:32`, `fsck_scan.py:43`, `tracker_maintenance.py:99`; `_reclaim_if_stale_index_lock` -> `fsck_scan.py:43`; `_with_index_lock_retry` -> `_store/event_commit_git.py:29`; `_INDEX_LOCK_STALE_S` -> `_store/event_append.py:103`; `_backoff_sleep`/`_jitter` -> `_store/lock.py:71`; `fetch_coordination_lock` -> `_snapshot/git_fetch.py:23`, `_store/sync.py:52`.\n\n### Test consumers, by HOW they depend on a moved name\n\n**(a) `monkeypatch.setattr` on the module object** \u2014 retarget to `git_locking`; a mis-target RAISES (`raising=True` default, and the probes/tunables are deliberately not re-exported): `test_git_contention_9305.py`, `test_delete_init_index_lock.py`, `test_compact_index_lock.py`, `test_event_append_index_lock.py`, `test_fsck_index_lock_reclaim_toctou.py`, `test_stale_lock_reclaim_write.py`, `test_fetch_common_dir_coordination.py`.\n\n**(b) `monkeypatch.setattr` whose READER STAYED** \u2014 must NOT be retargeted: `test_git_outcome.py` (string form `\"rebar._store.gitutil._backoff_sleep\"`) and `test_gitutil_transient_write_retry.py` (`gitutil._backoff_sleep`, `gitutil.run_git`); their readers stay in `gitutil`.\n\n**(c) Direct attribute CALLS/READS** \u2014 `gitutil._with_index_lock_retry(...)`, `._reclaim_if_stale_index_lock(...)`, `._is_index_lock_error(...)`, `._store_git_lock_path(...)`, `._jitter(...)`, `._lock_retry_budget_s()` across the same files (one inside a subprocess script STRING). These keep working via re-export and raise `AttributeError` if it is dropped.\n\n**(d) `getattr` READ with a silent default \u2014 a vacuity channel that does NOT raise.** `test_delete_init_index_lock.py:24` and `test_compact_index_lock.py:22` do `getattr(gitutil, \"_INDEX_LOCK_STALE_S\", 300)`. Drop the re-export and they fall through to the literal `300` instead of failing \u2014 and the real constant IS `300`, so comparing values proves nothing. The proof needs a SENTINEL default. `test_event_append_index_lock.py:40` and `test_txn_index_lock.py:21` read it through `event_append`, which re-exports from `gitutil`, so the same chain must hold.\n\n## Acceptance Criteria\n\n- [x] `tests/unit/test_module_size_contract.py` passes (it passes before the work too; no regression).\n- [x] `gitutil.py` is within the 200-500 LOC target.\n- [x] `git_locking.py` is within the 200-500 LOC target.\n- [x] Every moved function body is byte-identical to its original, shown by `difflib` over the moved line ranges.\n- [x] The retained half of `gitutil.py` differs only in its docstring and import block; no executable line changes.\n- [x] The same test set passes before and after, with no test going from passing to failing.\n- [x] Every `monkeypatch.setattr` whose reader MOVED is retargeted to `git_locking`.\n- [x] Every `monkeypatch.setattr` whose reader STAYED is left on `gitutil`.\n- [x] Each retarget is shown to be load-bearing by the evidence under Testing.\n- [x] Every `getattr(gitutil, <moved name>, <default>)` READ still resolves, proven with a sentinel default rather than by comparing the value.\n- [x] Production importers need no change, shown by importing every `rebar` module without error.\n\n## Testing\n\n- Compare moved line ranges against the new module with `difflib`; the diff must be empty apart from join whitespace.\n- **`monkeypatch.setattr` is the dangerous part and needs explicit proof.** A patch aimed at the wrong module is **silently vacuous**, not a loud failure. A green suite is NOT evidence. For each retarget, use ONE of:\n  - **Mis-target probe** \u2014 aim the patch at the module the reader left; the run must fail loudly (`AttributeError`, since the name is absent there).\n  - **Seeded mutant** \u2014 for a name still present on both modules (`_backoff_sleep`), seed the behaviour the patch observes and show the correct target notices it while the old target passes vacuously.\n  - **Invocation probe** \u2014 for a patch deliberately LEFT on `gitutil`, record calls and assert it actually fired.\n- **`getattr` reads with a default need a DIFFERENT proof**: they fall through rather than raise, and when the default equals the real value the fallback is invisible. Assert with a sentinel default that the name resolves, and is the same object `git_locking` holds.\n- Grep for the module path and every moved symbol **as a STRING** (`monkeypatch.setattr`, `getattr`, `importlib`, subprocess script text, docs); an LSP cannot see these, so an empty semantic search is not evidence of absence.\n- Run `make lint` (including the complexity ratchet: `new=0 increased=0`) and `make typecheck` to zero, plus `check_comment_hygiene`, `check_raw_git_writes`, `check_wall_clock_asserts`.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Split _store/gitutil.py along its git-lock-contention seam: 798/800 leaves two lines of headroom"
       },
       "created_at": "2026-08-29T03:35:14Z",
@@ -66981,7 +66995,34 @@
     "1788294406379099001": "__rebar_unknown_comment_id__",
     "1788294460104616001": "__rebar_unknown_comment_id__",
     "1788294501336784319": "__rebar_unknown_comment_id__",
-    "1788294651268944001": "__rebar_unknown_comment_id__"
+    "1788294651268944001": "__rebar_unknown_comment_id__",
+    "1788294675488794591": "__rebar_unknown_comment_id__",
+    "1788294714675016458": "__rebar_unknown_comment_id__",
+    "1788294716434441090": "__rebar_unknown_comment_id__",
+    "1788294716435256248": "__rebar_unknown_comment_id__",
+    "1788294786273002001": "__rebar_unknown_comment_id__",
+    "1788294793919287001": "__rebar_unknown_comment_id__",
+    "1788294802445388001": "__rebar_unknown_comment_id__",
+    "1788294809330044001": "__rebar_unknown_comment_id__",
+    "1788294816753705001": "__rebar_unknown_comment_id__",
+    "1788294823439667001": "__rebar_unknown_comment_id__",
+    "1788294829345018001": "__rebar_unknown_comment_id__",
+    "1788294847218756001": "__rebar_unknown_comment_id__",
+    "1788294854287185001": "__rebar_unknown_comment_id__",
+    "1788294860688525001": "__rebar_unknown_comment_id__",
+    "1788294933107517001": "__rebar_unknown_comment_id__",
+    "1788294940787649001": "__rebar_unknown_comment_id__",
+    "1788295591038485001": "__rebar_unknown_comment_id__",
+    "1788295823209069001": "__rebar_unknown_comment_id__",
+    "1788296028516790001": "__rebar_unknown_comment_id__",
+    "1788296057751135001": "__rebar_unknown_comment_id__",
+    "1788296323843069001": "__rebar_unknown_comment_id__",
+    "1788297049921072553": "__rebar_unknown_comment_id__",
+    "1788297049930753908": "__rebar_unknown_comment_id__",
+    "1788297205418058400": "__rebar_unknown_comment_id__",
+    "1788297205422761196": "__rebar_unknown_comment_id__",
+    "1788297459267144077": "__rebar_unknown_comment_id__",
+    "1788297459272568049": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -69805,6 +69846,8 @@
     "REB-4415": "fe7f-9634-d97e-4587",
     "REB-4416": "3e03-786b-cdc7-460b",
     "REB-4417": "d9a2-7bc1-9ceb-4c37",
+    "REB-4418": "897e-8ad4-0444-49d9",
+    "REB-4419": "ddc2-66ae-a863-4e09",
     "REB-442": "70c7-8745-2be8-4e5c",
     "REB-443": "fa49-2687-4daf-4afc",
     "REB-444": "1ba5-39de-2fc2-45f0",
