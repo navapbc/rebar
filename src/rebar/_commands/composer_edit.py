@@ -21,6 +21,8 @@ from rebar._commands._seam import (
     validate_tag_name,
 )
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._store.ticket_layout import existing_ticket_dir
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _parse_tag_list(value, *, validate: bool) -> list[str]:
@@ -101,7 +103,7 @@ def _apply_tag_deltas(
     from rebar.reducer import reduce_ticket
     from rebar.reducer._version import TAG_DELTA
 
-    observed = list((reduce_ticket(str(tracker / resolved)) or {}).get("tags") or [])
+    observed = list((reduce_ticket(layout_ticket_dir(tracker, resolved)) or {}).get("tags") or [])
     if has_set:
         added = [t for t in set_list if t not in observed]
         removed = [t for t in observed if t not in set_list]
@@ -134,7 +136,7 @@ def _edit_description_warning(
     from rebar import config as _config
     from rebar._commands.gates import description_cap_warning
 
-    state = reduce_ticket(str(tracker / resolved)) or {}
+    state = reduce_ticket(layout_ticket_dir(tracker, resolved)) or {}
     return description_cap_warning(
         out["description"],
         str(out.get("ticket_type") or state.get("ticket_type") or ""),
@@ -157,11 +159,11 @@ def _resolve_new_parent(value: str, ticket_id: str, tracker, reduce_ticket) -> s
     if value == "null":
         return ""
     new_parent = resolve_ticket_id(value, str(tracker))
-    if not new_parent or not (tracker / new_parent).is_dir():
+    if not new_parent or existing_ticket_dir(tracker, new_parent) is None:
         raise CommandError(f"Error: parent ticket '{value}' does not exist")
     if new_parent == ticket_id:
         raise CommandError("Error: ticket cannot be its own parent")
-    status = (reduce_ticket(str(tracker / new_parent)) or {}).get("status", "") or ""
+    status = (reduce_ticket(layout_ticket_dir(tracker, new_parent)) or {}).get("status", "") or ""
     if status not in ("open", "in_progress"):
         if status == "":
             raise CommandError(
@@ -175,7 +177,9 @@ def _resolve_new_parent(value: str, ticket_id: str, tracker, reduce_ticket) -> s
         )
     walk_id, count = new_parent, 0
     while walk_id and count < 64:
-        walk_parent = (reduce_ticket(str(tracker / walk_id)) or {}).get("parent_id", "") or ""
+        walk_parent = (reduce_ticket(layout_ticket_dir(tracker, walk_id)) or {}).get(
+            "parent_id", ""
+        ) or ""
         if not walk_parent or walk_parent == "None":
             break
         if walk_parent == ticket_id:

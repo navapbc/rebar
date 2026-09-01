@@ -21,6 +21,7 @@ import pytest
 from _subprocess_env import subprocess_env
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.graph._links import add_dependency
 
 pytestmark = pytest.mark.unit
@@ -66,9 +67,8 @@ def _event_count(repo: Path, tid: str) -> int:
     # Count real event records only; dotfiles like the reducer's ``.cache.json``
     # are regenerable read caches, not events (see reducer/_cache.py's own dir-hash,
     # which skips dotfiles). ``glob("*.json")`` matches dotfiles on pathlib, so filter.
-    return len(
-        [p for p in (repo / ".tickets-tracker" / tid).glob("*.json") if not p.name.startswith(".")]
-    )
+    event_dir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
+    return len([p for p in event_dir.glob("*.json") if not p.name.startswith(".")])
 
 
 def _alias_of(repo: Path, tid: str) -> str:
@@ -289,7 +289,7 @@ def test_edit_json_envelope(repo: Path) -> None:
 def test_revert_confirmation_keeps_event_uuid_and_id(repo: Path) -> None:
     tid = _create(repo)
     _cli("comment", tid, "to be reverted", repo=repo)
-    events = sorted((repo / ".tickets-tracker" / tid).glob("*COMMENT.json"))
+    events = sorted(Path(layout_ticket_dir(repo / ".tickets-tracker", tid)).glob("*COMMENT.json"))
     uuid = json.loads(events[-1].read_text())["uuid"]
     proc = _cli("revert", tid, uuid, repo=repo)
     assert proc.returncode == 0, proc.stderr

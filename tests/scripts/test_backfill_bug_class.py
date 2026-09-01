@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 pytestmark = pytest.mark.scripts
 
 _ENV = "eeee-0000-4000-8000-000000000001"
@@ -50,7 +52,7 @@ def _write(d: Path, ts_ns: int, et: str, data: dict) -> None:
 
 
 def _closed_bug(tracker: Path, tid: str) -> Path:
-    d = tracker / tid
+    d = Path(layout_ticket_dir(tracker, tid))
     d.mkdir(parents=True)
     _write(d, _ns("2026-01-01T00:00:00"), "CREATE", {"ticket_type": "bug", "title": tid})
     _write(

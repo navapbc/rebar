@@ -25,6 +25,9 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+from rebar._store.ticket_layout import ticket_dir_relpath
+
 logger = logging.getLogger(__name__)
 
 EVENT_TYPE = "COMPLETION_VERDICT"
@@ -262,7 +265,7 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)
@@ -271,7 +274,8 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         old = files[: max(0, len(files) - keep)]
         if not old:
             return 0
-        rels = [f"{rid}/{f}" for f in old]
+        base_relpath = ticket_dir_relpath(tracker, rid)
+        rels = [f"{base_relpath}/{f}" for f in old]
         # Delete through the canonical locked write path (bug malevolent-emigratory-umbrette):
         # a raw git rm + whole-index commit here races normal store writes.
         delete_events(tracker, rels, f"prune: COMPLETION_VERDICT sidecar for {rid} (retain {keep})")
@@ -296,7 +300,7 @@ def latest_fail_verdict(ticket_id: str, *, repo_root=None) -> dict[str, Any] | N
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)
@@ -340,7 +344,7 @@ def latest_pass_record(ticket_id: str, *, repo_root=None) -> dict[str, Any] | No
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)
@@ -407,7 +411,7 @@ def latest_screen_tally(ticket_id: str, *, repo_root=None) -> dict[str, Any] | N
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)

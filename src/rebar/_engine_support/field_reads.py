@@ -29,6 +29,7 @@ from rebar._engine_support.output import (
 from rebar._engine_support.reads import ReadError, show_state
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 
 
@@ -38,7 +39,7 @@ def file_impact(ticket_id: str, tracker: str) -> list:
     resolved = resolve_ticket_id(ticket_id, tracker)
     if resolved is None:
         return []
-    path = os.path.join(tracker, resolved)
+    path = layout_ticket_dir(tracker, resolved)
     if not os.path.isdir(path):
         return []
     state = reduce_ticket(path)

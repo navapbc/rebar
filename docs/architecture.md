@@ -23,6 +23,27 @@ over one git-backed store.
         git: tickets orphan branch  ·  worktree at .tickets-tracker/
 ```
 
+## Ticket-store layout
+
+Ticket identities are stable, separator-free ids (for example
+`a945-15b8-ff0e-4bfc`); the filesystem layout is an internal store concern.
+Current stores place each ticket log under a deterministic shard directory:
+
+```
+.tickets-tracker/
+  <sha256(ticket_id)[:2]>/
+    <ticket_id>/
+      <timestamp>-<uuid>-CREATE.json
+      ...
+```
+
+The `rebar._store.ticket_layout` helper is the single mapping point from a
+canonical id to its store path. Readers use it to enumerate both current sharded
+directories and legacy flat `tickets/<id>` directories during rollout; writers
+create new ticket directories in the sharded layout. The public resolver,
+short-id matching, alias resolution, event replay, and graph/reconciler APIs
+continue to expose canonical ticket ids only.
+
 ## Components
 
 - **The three interfaces** are thin layers over one in-process core:

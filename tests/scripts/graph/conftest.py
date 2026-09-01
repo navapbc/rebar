@@ -82,13 +82,14 @@ def _link_writes_persist_without_repo(monkeypatch):
     import os
 
     from rebar._store import event_append as _ea
+    from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
     _real_write_and_push = _ea.write_and_push
 
     def _persist(tracker, ticket_id, event):
         if os.path.exists(os.path.join(str(tracker), ".git")):
             return _real_write_and_push(tracker, ticket_id, event)
-        ticket_dir = os.path.join(str(tracker), ticket_id)
+        ticket_dir = layout_ticket_dir(tracker, ticket_id)
         os.makedirs(ticket_dir, exist_ok=True)
         fname = _ea.event_filename(event["timestamp"], event["uuid"], event["event_type"])
         with open(os.path.join(ticket_dir, fname), "wb") as fh:

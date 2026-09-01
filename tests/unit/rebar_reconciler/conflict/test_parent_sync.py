@@ -471,9 +471,11 @@ class TestApplierInboundCreateParent:
 
         import json
 
+        from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
         # Read the CREATE event that was written
         local_id = "jira-dig-60"
-        ticket_dir = tracker_dir / local_id
+        ticket_dir = Path(layout_ticket_dir(tracker_dir, local_id))
         assert ticket_dir.exists(), f"Ticket dir not created: {ticket_dir}"
         events = list(ticket_dir.glob("*-CREATE.json"))
         assert events, f"No CREATE event found in {ticket_dir}"
@@ -501,6 +503,8 @@ class TestApplierInboundUpdateParent:
         import json
         import os
 
+        from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
         applier = self._load_applier()
         mut_mod_spec = importlib.util.spec_from_file_location(
             "mutation_parent_upd_test", _REC / "mutation.py"
@@ -511,7 +515,7 @@ class TestApplierInboundUpdateParent:
         mut_mod_spec.loader.exec_module(mm)  # type: ignore[union-attr]
 
         tracker_dir = tmp_path / ".tickets-tracker"
-        ticket_dir = tracker_dir / "jira-dig-70"
+        ticket_dir = Path(layout_ticket_dir(tracker_dir, "jira-dig-70"))
         ticket_dir.mkdir(parents=True)
         # Write a minimal CREATE event so the ticket exists
         import time

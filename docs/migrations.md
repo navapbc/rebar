@@ -29,7 +29,7 @@ Each unit has a **stable, immutable id** and a callable `(tracker) -> EnsureOutc
 class EnsureOutcome:
     id: str
     status: Literal["ok", "changed", "failed"]  # ok = already converged (no-op);
-    detail: str = ""                             # changed = drift corrected; failed = raised
+    detail: str = ""  # changed = drift corrected; failed = raised
 ```
 
 `run_ensures(tracker)` runs **every** unit unconditionally under the store write lock. It catches an exception from an individual unit, records `failed`, excludes that unit from the applied set, and continues. Lock acquisition failures, marker write failures, and other sweep failures are logged without aborting the caller. `StoreIncompatibleError` from the write-lock compatibility gate is the deliberate exception. It escapes the sweep so an incompatible store fails closed during init, MCP boot, and `fsck --repair`.
@@ -48,7 +48,7 @@ class EnsureOutcome:
    applied-set marker.
 3. That's it — the unit now runs at every entry point below and is surfaced by `fsck`.
 
-The registry contains nine units: `env-id`, `gc-config`, `merge-ours`, `gitattributes`, `gitignore`, `store-compat`, `projects-seed`, `projects-compat-stamp`, and `untrack-runtime-markers`.
+The registry contains ten units: `env-id`, `gc-config`, `merge-ours`, `gitattributes`, `gitignore`, `store-compat`, `projects-seed`, `projects-compat-stamp`, `untrack-runtime-markers`, and `ticket-layout-shards`.
 
 Two of these units migrate a legacy store to the many-to-many projects model (ticket 462d)
 **without writing any per-ticket events** — they only stamp committed tickets-branch files:
@@ -93,6 +93,21 @@ Worktree copies are untouched on the machine that runs it; a peer merging the co
 delete its worktree marker copies — safe, because archival's source of truth is the ARCHIVED
 events, and the reader self-heals the fast-path cache: `reduce_all_tickets` re-materializes a
 missing `.archived` marker for a net-archived ticket on the next default list.
+
+One unit migrates legacy flat ticket directories to the sharded ticket-store layout:
+**`ticket-layout-shards`** moves each `tickets/<ticket-id>` directory to
+`tickets/<sha256(ticket-id)[:2]>/<ticket-id>`, stages the move with `git add -A`, and
+commits the whole layout change once. The unit is idempotent and resumable: already-sharded
+ticket directories are left alone, remaining flat directories are moved on the next sweep,
+and a destination collision raises rather than merging two identities. It also stamps the
+`sharded-ticket-layout` required capability in `.store-compat.json` so older binaries that do
+not know the layout fail closed before writing. `rebar._store.ticket_layout` keeps readers
+compatible with both layouts during rollout, while new writes go to the sharded path.
+
+Live-store cutover sequencing is an operator decision. The ensure unit is safe to run when
+the operator chooses to converge a store, but feature development and tests must exercise it
+only on fixture or throwaway stores unless that operator cutover has explicitly been
+authorized.
 
 ## Where `run_ensures` runs
 

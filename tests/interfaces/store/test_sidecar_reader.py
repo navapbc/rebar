@@ -15,6 +15,7 @@ from pathlib import Path
 
 import rebar
 from rebar import config as _config
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.llm.plan_review import sidecar
 
 
@@ -87,7 +88,7 @@ def test_latest_review_result_none_on_malformed_json(rebar_repo: Path) -> None:
     from rebar._engine_support.resolver import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, tracker) or tid
-    ticket_dir = os.path.join(tracker, rid)
+    ticket_dir = layout_ticket_dir(tracker, rid)
     files = sorted(f for f in os.listdir(ticket_dir) if f.endswith("-REVIEW_RESULT.json"))
     with open(os.path.join(ticket_dir, files[-1]), "w", encoding="utf-8") as fh:
         fh.write("{ this is not valid json")
@@ -106,7 +107,7 @@ def test_latest_review_result_walks_back_past_corrupt_newest(rebar_repo: Path) -
     from rebar._engine_support.resolver import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, tracker) or tid
-    ticket_dir = os.path.join(tracker, rid)
+    ticket_dir = layout_ticket_dir(tracker, rid)
     files = sorted(f for f in os.listdir(ticket_dir) if f.endswith("-REVIEW_RESULT.json"))
     with open(os.path.join(ticket_dir, files[-1]), "w", encoding="utf-8") as fh:
         fh.write("{ corrupt mid-emit")  # clobber the NEWEST
@@ -126,7 +127,7 @@ def test_latest_review_result_schema_guard_rejects_foreign_payload(rebar_repo: P
     from rebar._engine_support.resolver import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, tracker) or tid
-    ticket_dir = os.path.join(tracker, rid)
+    ticket_dir = layout_ticket_dir(tracker, rid)
     files = sorted(f for f in os.listdir(ticket_dir) if f.endswith("-REVIEW_RESULT.json"))
     path = os.path.join(ticket_dir, files[-1])
     with open(path, encoding="utf-8") as fh:
@@ -158,7 +159,7 @@ def test_emit_appends_past_the_retain_bound_without_deleting(rebar_repo: Path) -
     from rebar._engine_support.resolver import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, tracker) or tid
-    ticket_dir = os.path.join(tracker, rid)
+    ticket_dir = layout_ticket_dir(tracker, rid)
     remaining = [f for f in os.listdir(ticket_dir) if f.endswith("-REVIEW_RESULT.json")]
     assert len(remaining) == n, (
         f"emit deleted committed events: {len(remaining)} of {n} remain. Retention must not "

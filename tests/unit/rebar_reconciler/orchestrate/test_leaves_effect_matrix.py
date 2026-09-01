@@ -35,6 +35,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar_reconciler import apply_outbound
 from rebar_reconciler._errors import JiraAPIError
 
@@ -111,7 +112,7 @@ def _mk(mut_mod, direction: str, action: str, *, target: str, payload=None):
 
 
 def _event_files(tracker_dir: Path, local_id: str) -> list[Path]:
-    return sorted((tracker_dir / local_id).glob("*.json"))
+    return sorted(Path(layout_ticket_dir(tracker_dir, local_id)).glob("*.json"))
 
 
 def _read_event(tracker_dir: Path, local_id: str, event_type: str) -> dict:
@@ -119,7 +120,7 @@ def _read_event(tracker_dir: Path, local_id: str, event_type: str) -> dict:
         ev = json.loads(path.read_text())
         if ev.get("event_type") == event_type:
             return ev
-    raise AssertionError(f"no {event_type} event in {tracker_dir / local_id}")
+    raise AssertionError(f"no {event_type} event in {layout_ticket_dir(tracker_dir, local_id)}")
 
 
 # ---------------------------------------------------------------------------

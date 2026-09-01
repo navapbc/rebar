@@ -50,6 +50,7 @@ from rebar._store import hlc
 from rebar._store import lock as _lock
 from rebar._store import lock_owner as _lock_owner
 from rebar._store.gitutil import _AUTOMAINT_OFF
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,7 @@ def compact_cli(
     ):
         sys.stderr.write("Error: ticket system not initialized. Run 'ticket init' first.\n")
         return 1
-    ticket_dir = os.path.join(tracker, ticket_id)
+    ticket_dir = layout_ticket_dir(tracker, ticket_id)
     if not os.path.isdir(ticket_dir):
         sys.stderr.write(f"Error: ticket directory not found: {ticket_dir}\n")
         return 1
@@ -256,7 +257,7 @@ def _scan_snapshot_state(
     except OSError:
         return [], 0
     for name in names:
-        path = os.path.join(tracker, name)
+        path = layout_ticket_dir(tracker, name)
         foldable = _foldable_event_count(path, now, horizon)
         probe = compact_plan.has_snapshot(path)
         # unreadable: never select it on the backfill arm, the fold would fail anyway
@@ -422,12 +423,12 @@ def _sweep_one_ticket(
     argv = [tid, "--threshold=0", "--skip-sync"]
     if no_commit:
         argv.append("--no-commit")
-    before = _snapshot_names(os.path.join(tracker, tid))
+    before = _snapshot_names(layout_ticket_dir(tracker, tid))
     with contextlib.redirect_stderr(io.StringIO()):  # bash 2>/dev/null
         rc = compact_cli(argv, repo_root=repo_root, position_commits=position_commits)
     if rc != 0:
         return "E"
-    return "." if _snapshot_names(os.path.join(tracker, tid)) - before else "-"
+    return "." if _snapshot_names(layout_ticket_dir(tracker, tid)) - before else "-"
 
 
 def _sweep_position_map(repo_root) -> dict[str, str] | None:

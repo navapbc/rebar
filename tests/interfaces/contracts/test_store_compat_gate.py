@@ -33,6 +33,7 @@ import pytest
 from _subprocess_env import subprocess_env
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 COMPAT_FILE = ".store-compat.json"
 
@@ -76,7 +77,7 @@ def _event_files(repo: Path, tid: str) -> set[str]:
     # Only the canonical event/snapshot files (`<ts>-<uuid>-<TYPE>.json`) — NOT the
     # reducer's derived `.cache.json` (a read-side cache, not a ticket mutation). The
     # gate blocks the EVENT write; the read that precedes it may still refresh the cache.
-    tdir = _tracker(repo) / tid
+    tdir = Path(layout_ticket_dir(_tracker(repo), tid))
     return {p.name for p in tdir.glob("*.json") if not p.name.startswith(".")}
 
 
@@ -138,7 +139,7 @@ def test_ensure_unit_writes_record_when_absent(rebar_repo: Path) -> None:
     assert cp.exists(), "ensure unit did not write .store-compat.json"
     rec = json.loads(cp.read_text())
     assert rec["format_version"] == compat.CURRENT_FORMAT_VERSION
-    assert rec["required_capabilities"] == []
+    assert rec["required_capabilities"] == ["sharded-ticket-layout"]
     # And it is a COMMITTED file on the tickets branch (not gitignored).
     tracker = _tracker(rebar_repo)
     out = subprocess.run(
@@ -274,7 +275,7 @@ def test_optional_additive_event_not_blocked(rebar_repo: Path) -> None:
     )
     tid = _seed(rebar_repo)
     # Hand-write a future/unknown-type event file.
-    tdir = _tracker(rebar_repo) / tid
+    tdir = Path(layout_ticket_dir(_tracker(rebar_repo), tid))
     env_id = (_tracker(rebar_repo) / ".env-id").read_text().strip()
     ts = 1_781_000_000_000_000_000
     uuid = "ffffffff-0000-4000-8000-000000000042"

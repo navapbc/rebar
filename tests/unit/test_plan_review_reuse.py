@@ -29,6 +29,7 @@ import pytest
 
 import rebar
 import rebar.llm
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.llm.plan_review import sidecar
 from rebar.llm.runner import FakeRunner
 
@@ -169,7 +170,7 @@ def _make_blocked(repo: Path) -> str:
 
 
 def _sidecar_count(repo: Path, tid: str) -> int:
-    ticket_dir = repo / ".tickets-tracker" / tid
+    ticket_dir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     return len(list(ticket_dir.glob(f"*-{sidecar.EVENT_TYPE}.json")))
 
 

@@ -35,6 +35,7 @@ import rebar
 from rebar._commands import compact as _compact
 from rebar._commands import compact_plan
 from rebar._store import lock as _lock
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer._cache import RETIRED_SUFFIX
 
 
@@ -48,7 +49,7 @@ def _seed(repo: Path, title: str) -> str:
 
 
 def _events(repo: Path, tid: str) -> list[Path]:
-    tdir = repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     return [p for p in tdir.glob("*.json") if not p.name.startswith(".")]
 
 
@@ -57,7 +58,7 @@ def _has_snapshot(repo: Path, tid: str) -> bool:
 
 
 def _retired(repo: Path, tid: str) -> list[Path]:
-    tdir = repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     return list(tdir.glob("*.retired"))
 
 
@@ -79,7 +80,7 @@ def test_compact_retires_folded_events_not_deleted(
     rebar.comment(tid, "one", repo_root=str(rebar_repo))
     rebar.comment(tid, "two", repo_root=str(rebar_repo))
 
-    tdir = rebar_repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", tid))
     sources_before = {p.name for p in _events(rebar_repo, tid)}
     state_before = reduce_ticket(str(tdir))
 
@@ -269,7 +270,7 @@ def test_forward_rename_fault_clean_rollback_removes_snapshot(
     from rebar.reducer import reduce_ticket
 
     tid = _seed_foldable(rebar_repo, "fwd-fault", n_events=3)
-    tdir = rebar_repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", tid))
     sources_before = {p.name for p in _events(rebar_repo, tid)}
     state_before = reduce_ticket(str(tdir))
 
@@ -317,7 +318,7 @@ def test_reverse_rename_fault_retains_snapshot_reads_safe(
     from rebar.reducer import reduce_ticket
 
     tid = _seed_foldable(rebar_repo, "rev-fault", n_events=3)
-    tdir = rebar_repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", tid))
     state_before = reduce_ticket(str(tdir))
 
     # Fail the 3rd forward rename (renames 1,2 succeeded), then fail the SECOND

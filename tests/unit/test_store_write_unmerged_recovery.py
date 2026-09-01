@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from rebar._store import event_append
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 pytestmark = pytest.mark.unit
 
@@ -82,7 +83,7 @@ def test_write_self_heals_preexisting_unmerged_bridge_state(
     assert _git(tracker, "ls-files", "-u").stdout.strip() == ""
     # The event actually committed.
     fn = event_append.event_filename(event["timestamp"], event["uuid"], "COMMENT")
-    assert (Path(tracker) / "tk" / fn).exists()
+    assert (Path(layout_ticket_dir(tracker, "tk")) / fn).exists()
 
 
 # ── bug 2fa6: a path the tickets branch does not track is FOREIGN, not ticket data ────────
@@ -139,7 +140,7 @@ def test_write_self_heals_unmerged_path_foreign_to_the_branch(tmp_path: Path) ->
     assert _git(tracker, "ls-files", "-u").stdout.strip() == "", "index must be consistent"
     assert not (Path(tracker) / rel).exists(), "the foreign file itself must be gone"
     fn = event_append.event_filename(1700000000000000000, "u-2", "COMMENT")
-    assert (Path(tracker) / "tk" / fn).exists(), "the event must have committed"
+    assert (Path(layout_ticket_dir(tracker, "tk")) / fn).exists(), "the event must have committed"
 
 
 def test_write_still_refuses_unmerged_path_the_branch_tracks(tmp_path: Path) -> None:

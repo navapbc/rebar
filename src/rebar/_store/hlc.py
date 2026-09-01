@@ -51,6 +51,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from rebar._store.paths import StorePaths
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ def physical_now() -> int:
 def _max_event_prefix(tracker: str | os.PathLike, ticket_id: str) -> int:
     """The largest integer filename-prefix among the TARGET ticket's committed
     event files (0 if none / unreadable). This is the cross-clone causal floor."""
-    ticket_dir = Path(tracker) / ticket_id
+    ticket_dir = Path(layout_ticket_dir(tracker, ticket_id))
     best = 0
     try:
         entries = os.listdir(ticket_dir)

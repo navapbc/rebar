@@ -19,6 +19,7 @@ from rebar._commands._seam import CommandError
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 _CLAIM_USAGE = (
     "Usage: ticket claim <ticket_id> [--assignee=<name>] [--force[=<reason>]] [--review]\n"
@@ -116,7 +117,9 @@ def _review_before_claim(ticket_id: str, tracker: str, repo_root) -> None:
     # repo_root (possibly None -> discover), NOT the tracker's parent: a relocated store
     # would otherwise resolve an empty config and the gate would read as disabled.
     cfg_root = repo_root
-    ticket_type = (reduce_ticket(os.path.join(tracker, ticket_id)) or {}).get("ticket_type", "")
+    ticket_type = (reduce_ticket(layout_ticket_dir(tracker, ticket_id)) or {}).get(
+        "ticket_type", ""
+    )
     if not gates._plan_review_gate_applies(cfg_root, ticket_type, ticket_id=ticket_id):
         sys.stderr.write("plan-review gate not enabled for this ticket; --review skipped\n")
         return
@@ -164,7 +167,7 @@ def claim_compute(
     failure aborts the child with an error naming the parent. ``_cascade_seen`` is the
     internal recursion guard — callers leave it ``None``."""
     tracker = str(config.tracker_dir(repo_root))
-    ticket_dir = os.path.join(tracker, ticket_id)
+    ticket_dir = layout_ticket_dir(tracker, ticket_id)
     if not os.path.isdir(ticket_dir):
         raise CommandError(f"Error: ticket '{ticket_id}' does not exist", returncode=1)
     if not any(
@@ -262,7 +265,7 @@ def claim_compute(
     if assignee:
         from rebar.reducer import reduce_ticket
 
-        reduced = reduce_ticket(os.path.join(tracker, ticket_id))
+        reduced = reduce_ticket(layout_ticket_dir(tracker, ticket_id))
         won = reduced.get("assignee") if reduced else None
         if won and won != assignee:
             raise ConcurrencyMismatch(

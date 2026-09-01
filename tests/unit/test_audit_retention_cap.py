@@ -14,6 +14,7 @@ import pytest
 import rebar
 from rebar import config as _config
 from rebar._commands._seam import append_event
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.llm.code_review import sidecar as code_sidecar
 from rebar.llm.plan_review import sidecar as plan_sidecar
 
@@ -42,7 +43,7 @@ def _events_in(repo: Path, tid: str) -> list[str]:
     from rebar._engine_support.resolver import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, tracker) or tid
-    d = os.path.join(tracker, rid)
+    d = layout_ticket_dir(tracker, rid)
     return sorted(f for f in os.listdir(d) if f.endswith("-REVIEW_RESULT.json"))
 
 

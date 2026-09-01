@@ -30,6 +30,7 @@ import rebar
 import rebar.llm
 from rebar import _cli
 from rebar import config as _config
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.llm.runner import FakeRunner
 
 
@@ -558,7 +559,8 @@ def test_sidecar_is_reducer_ignored(rebar_repo: Path) -> None:
     from rebar._engine_support.resolver import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, str(tracker))
-    files = list((tracker / rid).glob("*-REVIEW_RESULT.json"))
+    assert rid is not None
+    files = list(Path(layout_ticket_dir(tracker, rid)).glob("*-REVIEW_RESULT.json"))
     assert files, "REVIEW_RESULT event was not written"
     from rebar.reducer._version import is_unknown_newer_type
 
@@ -608,7 +610,8 @@ def test_sidecar_prune_bounds_growth(rebar_repo: Path) -> None:
     tracker = Path(_config.tracker_dir(str(rebar_repo)))
     rid = resolve_ticket_id(tid, str(tracker))
     sidecar.prune(tid, keep=2, repo_root=str(rebar_repo))
-    remaining = list((tracker / rid).glob("*-REVIEW_RESULT.json"))
+    assert rid is not None
+    remaining = list(Path(layout_ticket_dir(tracker, rid)).glob("*-REVIEW_RESULT.json"))
     assert len(remaining) == 2, f"prune should retain 2, found {len(remaining)}"
     # The ticket is still readable (reducer-ignored events never affect state).
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"

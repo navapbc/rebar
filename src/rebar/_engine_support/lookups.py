@@ -13,6 +13,8 @@ import os
 import sys
 
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._store.ticket_layout import iter_ticket_ids
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _has_ticket_events(ticket_dir: str) -> bool:
@@ -47,11 +49,7 @@ def _short_prefix(ticket_id: str, tracker: str) -> str:
     """Shortest unambiguous dash-stripped prefix (min 4 chars), else ``ticket_id``."""
     nodash = ticket_id.replace("-", "")
     try:
-        bases = [
-            os.path.basename(e).replace("-", "")
-            for e in glob.glob(os.path.join(tracker, "*"))
-            if os.path.isdir(e) and not os.path.basename(e).startswith(".")
-        ]
+        bases = [ticket.replace("-", "") for ticket in iter_ticket_ids(tracker)]
     except OSError:
         bases = []
     for plen in range(4, len(nodash) + 1):
@@ -83,12 +81,12 @@ def exists_cli(argv: list[str], tracker: str) -> int:
     # is genuinely argparse-inexpressible, so the first token is read raw. The
     # registry declares ``build_exists`` for lazy census + canonical help (RP-05 S2d).
     raw = argv[0]
-    if _has_ticket_events(os.path.join(tracker, raw)):  # fast exact-dir path
+    if _has_ticket_events(layout_ticket_dir(tracker, raw)):  # fast exact-dir path
         return 0
     resolved = resolve_ticket_id(raw, tracker)
     if not resolved:
         return 1
-    return 0 if _has_ticket_events(os.path.join(tracker, resolved)) else 1
+    return 0 if _has_ticket_events(layout_ticket_dir(tracker, resolved)) else 1
 
 
 def resolve_cli(argv: list[str], tracker: str) -> int:
@@ -120,7 +118,7 @@ def format_cli(argv: list[str], tracker: str, repo_root: str | None) -> int:
         mode = _display_mode(repo_root)
 
     def _auto() -> str:
-        data = _create_data(os.path.join(tracker, ticket_id))
+        data = _create_data(layout_ticket_dir(tracker, ticket_id))
         if data.get("jira_key"):
             return data["jira_key"]
         if data.get("alias"):
@@ -132,7 +130,7 @@ def format_cli(argv: list[str], tracker: str, repo_root: str | None) -> int:
     elif mode == "canonical":
         out = ticket_id
     elif mode == "alias":
-        out = _create_data(os.path.join(tracker, ticket_id)).get("alias") or ticket_id
+        out = _create_data(layout_ticket_dir(tracker, ticket_id)).get("alias") or ticket_id
     elif mode == "short":
         out = _short_prefix(ticket_id, tracker)
     else:

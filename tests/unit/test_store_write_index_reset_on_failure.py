@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from rebar._store import event_append
+from rebar._store.ticket_layout import ticket_dir_relpath
 
 pytestmark = pytest.mark.unit
 
@@ -75,7 +76,9 @@ def test_commit_failure_resets_index_and_next_write_has_no_phantom(tracker, monk
     # A subsequent successful write commits ONLY its own event — not the failed A.
     rc = event_append.stage_and_commit(tracker, "tk", _event("u-B", 1700000000000000001))
     assert rc == 0
-    committed = _git(tracker, "ls-tree", "-r", "--name-only", "HEAD", "tk").stdout
+    committed = _git(
+        tracker, "ls-tree", "-r", "--name-only", "HEAD", ticket_dir_relpath(tracker, "tk")
+    ).stdout
     fn_a = event_append.event_filename(1700000000000000000, "u-A", "COMMENT")
     fn_b = event_append.event_filename(1700000000000000001, "u-B", "COMMENT")
     assert fn_b in committed

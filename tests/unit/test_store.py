@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from rebar._store import event_append, lock, push, sync
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 @pytest.fixture
@@ -48,10 +49,10 @@ def _event(**over):
 def test_committed_bytes_are_canonical(tracker: str):
     ev = _event(data={"body": "héllo", "z": 1, "a": [3, 2, 1]})
     event_append.stage_and_commit(tracker, "tk", dict(ev))
-    path = os.path.join(
-        tracker, "tk", event_append.event_filename(ev["timestamp"], ev["uuid"], "COMMENT")
+    path = Path(layout_ticket_dir(tracker, "tk")) / event_append.event_filename(
+        ev["timestamp"], ev["uuid"], "COMMENT"
     )
-    raw = Path(path).read_bytes()
+    raw = path.read_bytes()
     assert raw == json.dumps(ev, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
     assert not raw.endswith(b"\n")
     # And a commit landed with the canonical message.
@@ -190,10 +191,11 @@ def test_event_filename_timestamp_prefix_equals_body_timestamp(tracker: str):
     """
     ev = _event(timestamp=1786312582640037001, uuid="u-ts", event_type="COMMENT")
     event_append.stage_and_commit(tracker, "tk", dict(ev))
-    names = [f for f in os.listdir(os.path.join(tracker, "tk")) if f.endswith(".json")]
+    tdir = Path(layout_ticket_dir(tracker, "tk"))
+    names = [f for f in os.listdir(tdir) if f.endswith(".json")]
     assert len(names) == 1, names
     fname = names[0]
-    on_disk = json.loads(Path(tracker, "tk", fname).read_text(encoding="utf-8"))
+    on_disk = json.loads((tdir / fname).read_text(encoding="utf-8"))
     assert fname.split("-", 1)[0] == str(on_disk["timestamp"])
     assert on_disk["timestamp"] == ev["timestamp"]
     # And the name is still the full {timestamp}-{uuid}-{TYPE}.json shape.

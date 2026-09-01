@@ -33,13 +33,14 @@ from rebar._snapshot.ticket_view import (
     tracker_head,
 )
 from rebar._store import event_append, hlc, push, push_classify, push_state, staging
+from rebar._store.ticket_layout import ticket_dir_relpath
 from rebar.llm.gate_context import use_ticket_view
 from rebar.llm.plan_review.attest import current_material_fingerprint
 
 
 def _git(repo: str | Path, *args: str) -> str:
     proc = subprocess.run(
-        ["git", "-C", str(repo), *args],
+        ["git", "-c", "safe.bareRepository=all", "-C", str(repo), *args],
         check=True,
         capture_output=True,
         text=True,
@@ -159,7 +160,14 @@ def _assert_no_bundle_after(tracker: str, baseline: str, ticket: str) -> None:
     assert _git(tracker, "rev-parse", "HEAD") == baseline
     assert _git(tracker, "status", "--porcelain") == ""
     assert _git(tracker, "diff", "--cached", "--name-only") == ""
-    names = _git(tracker, "ls-tree", "-r", "--name-only", "HEAD", ticket).splitlines()
+    names = _git(
+        tracker,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "HEAD",
+        ticket_dir_relpath(tracker, ticket),
+    ).splitlines()
     assert not any(name.endswith("-COMPLETION_VERDICT.json") for name in names)
     assert not any(name.endswith("-SIGNATURE.json") for name in names)
 
@@ -399,7 +407,14 @@ def test_relevant_remote_rejection_never_places_candidate_on_shared_head(
     _assert_no_bundle_after(tracker, baseline, ticket)
     assert rebar.show_ticket(ticket, repo_root=str(rebar_repo))["status"] == "in_progress"
     assert _git(remote, "rev-parse", "refs/heads/tickets") == remote_tip
-    names = _git(remote, "ls-tree", "-r", "--name-only", "refs/heads/tickets", ticket).splitlines()
+    names = _git(
+        remote,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "refs/heads/tickets",
+        ticket_dir_relpath(tracker, ticket),
+    ).splitlines()
     assert not any(name.endswith("-COMPLETION_VERDICT.json") for name in names)
     assert not any(name.endswith("-SIGNATURE.json") for name in names)
 
@@ -453,7 +468,12 @@ def test_unrelated_remote_rejection_merges_and_rebuilds_private_candidate(
         "safe concurrent delta"
     )
     remote_names = _git(
-        remote, "ls-tree", "-r", "--name-only", "refs/heads/tickets", ticket
+        remote,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "refs/heads/tickets",
+        ticket_dir_relpath(config.tracker_dir(str(rebar_repo)), ticket),
     ).splitlines()
     assert sum(name.endswith("-COMPLETION_VERDICT.json") for name in remote_names) == 1
     assert sum(name.endswith("-STATUS.json") for name in remote_names) >= 1
@@ -491,7 +511,12 @@ def test_lost_push_ack_is_confirmed_without_publishing_a_second_bundle(
     assert outcome.atomic_close["delivery"] == "pushed_after_ambiguous_ack"
     assert outcome.atomic_close["atomic_close_push_attempts"] == 1
     remote_names = _git(
-        remote, "ls-tree", "-r", "--name-only", "refs/heads/tickets", ticket
+        remote,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "refs/heads/tickets",
+        ticket_dir_relpath(config.tracker_dir(str(rebar_repo)), ticket),
     ).splitlines()
     assert sum(name.endswith("-COMPLETION_VERDICT.json") for name in remote_names) == 1
     assert sum(name.endswith("-STATUS.json") for name in remote_names) >= 1
@@ -574,6 +599,11 @@ def test_post_push_convergence_preserves_concurrent_local_delivery_pending(
         "committed locally while completion converged"
     )
     remote_names = _git(
-        remote, "ls-tree", "-r", "--name-only", "refs/heads/tickets", unrelated
+        remote,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "refs/heads/tickets",
+        ticket_dir_relpath(config.tracker_dir(str(rebar_repo)), unrelated),
     ).splitlines()
     assert not any(name.endswith("-COMMENT.json") for name in remote_names)

@@ -31,6 +31,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from rebar._store.ticket_layout import iter_ticket_dirs
+
 # ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
 # _loader.py). Import it normally when package context exists, else bootstrap it
 # by file path — this module is itself exec'd standalone via
@@ -246,10 +248,8 @@ def load_local_tickets(tracker_dir: Path) -> list[dict[str, Any]]:
     tickets: list[dict[str, Any]] = []
     if not tracker_dir.is_dir():
         return tickets
-    for entry in sorted(tracker_dir.iterdir()):
-        if not entry.is_dir() or ".scratch" in entry.parts:
-            continue
-        cache_path = entry / ".cache.json"
+    for entry in iter_ticket_dirs(str(tracker_dir)):
+        cache_path = Path(entry.path) / ".cache.json"
         if not cache_path.exists():
             continue
         try:
@@ -261,7 +261,7 @@ def load_local_tickets(tracker_dir: Path) -> list[dict[str, Any]]:
         ticket = dict(state)
         # The compiled state carries ``ticket_id``; keep ``id`` too so both the
         # reconcile_check matcher (ticket_id-or-id) and legacy callers resolve.
-        ticket.setdefault("ticket_id", entry.name)
+        ticket.setdefault("ticket_id", entry.ticket_id)
         ticket.setdefault("id", ticket["ticket_id"])
         tickets.append(ticket)
     return tickets

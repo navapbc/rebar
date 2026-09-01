@@ -32,6 +32,7 @@ import pytest
 from adapters import _unwrap
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SCHEMA_DIR = Path(rebar.__file__).resolve().parent / "schemas"
@@ -44,7 +45,7 @@ _U2 = "22222222-2222-4222-8222-222222222222"
 def _create_data(rebar_repo: Path, ticket_id: str) -> dict:
     """The persisted CREATE event ``data`` dict for a ticket (immutable genesis)."""
     tracker = rebar_repo / ".tickets-tracker"
-    matches = sorted(tracker.glob(f"{ticket_id}/*-CREATE.json"))
+    matches = sorted(Path(layout_ticket_dir(tracker, ticket_id)).glob("*-CREATE.json"))
     assert len(matches) == 1, f"expected one CREATE for {ticket_id}, got {matches}"
     return json.loads(matches[0].read_bytes())["data"]
 

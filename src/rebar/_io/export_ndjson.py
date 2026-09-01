@@ -23,6 +23,8 @@ from typing import Any, TextIO
 
 from rebar import config
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.ticket_layout import iter_ticket_ids
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 from rebar.reducer._present import public_state
@@ -43,17 +45,7 @@ EXPORT_SCHEMA_VERSION = 2
 
 def _ticket_dir_names(tracker: str) -> list[str]:
     """Sorted ticket-id directory names under ``tracker`` (cheap; no replay)."""
-    try:
-        entries = sorted(os.listdir(tracker))
-    except OSError:
-        return []
-    out: list[str] = []
-    for entry in entries:
-        if entry.startswith("."):
-            continue
-        if os.path.isdir(os.path.join(tracker, entry)):
-            out.append(entry)
-    return out
+    return iter_ticket_ids(tracker)
 
 
 def _csv_set(value: Any) -> set[str] | None:
@@ -98,7 +90,7 @@ def iter_export_states(
     type_filter = _csv_set(ticket_type)
 
     for tid in _ticket_dir_names(tracker):
-        state = reduce_ticket(os.path.join(tracker, tid))
+        state = reduce_ticket(layout_ticket_dir(tracker, tid))
         if not state:
             continue
         # Skip reducer error states (corrupt / no real CREATE) — not exportable.

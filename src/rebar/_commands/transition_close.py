@@ -16,7 +16,6 @@ close tail here never calls back up.
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import time
 from collections.abc import Callable, Mapping
@@ -38,6 +37,7 @@ from rebar._commands.close_precheck import (  # noqa: F401 — re-exported compa
     _referencing_commit_exists,
 )
 from rebar._commands.completion_bundle import verdict_manifest as _verdict_manifest
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.graph._unblock import batch_close_operations
 
 logger = logging.getLogger(__name__)
@@ -332,7 +332,7 @@ def _apply_caused_by(
     try:
         from rebar.reducer import reduce_ticket as _reduce
 
-        state = _reduce(os.path.join(tracker, ticket_id)) or {}
+        state = _reduce(layout_ticket_dir(tracker, ticket_id)) or {}
         if state.get("ticket_type") != "bug":
             return
 
@@ -618,7 +618,7 @@ def close_ticket(
         ref = _pin_completion_ref(ref, repo_root)
         from rebar.reducer import reduce_ticket as _reduce
 
-        ticket_state = _reduce(os.path.join(tracker, ticket_id)) or {}
+        ticket_state = _reduce(layout_ticket_dir(tracker, ticket_id)) or {}
         ticket_type = ticket_state.get("ticket_type", "")
         if not force_close and ticket_type in _PLAN_REVIEW_CLOSE_TYPES:
             plan_review_recheck = _timed_close_phase(

@@ -35,6 +35,7 @@ from pathlib import Path
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.metrics.bug_trends import (
     caused_by_fan_in,
     caused_by_provenance,
@@ -70,7 +71,7 @@ def _write_event(ticket_dir: Path, ts_ns: int, event_type: str, data: dict) -> N
 
 
 def _bug(tracker: Path, tid: str, created_iso: str, **create_extra) -> Path:
-    d = tracker / tid
+    d = Path(layout_ticket_dir(tracker, tid))
     d.mkdir(parents=True)
     data = {"ticket_type": "bug", "title": tid, **create_extra}
     _write_event(d, _ns(created_iso), "CREATE", data)

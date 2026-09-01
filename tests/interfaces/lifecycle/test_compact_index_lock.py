@@ -18,6 +18,7 @@ from pathlib import Path
 import rebar
 from rebar._commands import compact as _compact
 from rebar._store import git_locking, gitutil
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 _STALE_S = getattr(gitutil, "_INDEX_LOCK_STALE_S", 300)
 
@@ -46,7 +47,7 @@ def _index_lock_path(tracker: str) -> Path:
 
 
 def _has_snapshot(repo: Path, tid: str) -> bool:
-    tdir = repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     return any(p.name.endswith("-SNAPSHOT.json") for p in tdir.glob("*.json"))
 
 

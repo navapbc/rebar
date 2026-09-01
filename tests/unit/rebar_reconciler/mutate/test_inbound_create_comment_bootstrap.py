@@ -21,6 +21,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
 MUTATION_PATH = APPLIER_PATH.parent / "mutation.py"
@@ -79,7 +81,7 @@ def _make_inbound_create(mut_mod, *, target, payload):
 
 
 def _read_events_of_type(tracker_dir: Path, local_id: str, event_type: str) -> list[dict]:
-    ticket_dir = tracker_dir / local_id
+    ticket_dir = Path(layout_ticket_dir(tracker_dir, local_id))
     events = []
     for path in sorted(ticket_dir.glob("*.json")):
         ev = json.loads(path.read_text())
@@ -246,7 +248,7 @@ def test_inbound_create_get_comments_failure_degrades(applier, mut_mod, fixture_
 
     tracker = fixture_repo / ".tickets-tracker"
     # CREATE event must exist
-    create_dir = tracker / local_id
+    create_dir = Path(layout_ticket_dir(tracker, local_id))
     assert create_dir.is_dir(), "ticket directory must be created"
     all_events = sorted(create_dir.glob("*.json"))
     assert any(json.loads(p.read_text()).get("event_type") == "CREATE" for p in all_events), (

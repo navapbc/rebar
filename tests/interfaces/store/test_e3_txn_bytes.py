@@ -17,6 +17,7 @@ from pathlib import Path
 
 import rebar
 from rebar._store.canonical import canonical_bytes
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _newest(ticket_dir: Path, suffix: str) -> Path:
@@ -47,7 +48,7 @@ def test_status_event_bytes_are_canonical(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "E3 status bytes", repo_root=str(rebar_repo))
     rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
 
-    raw = _newest(tracker / tid, "-STATUS.json").read_bytes()
+    raw = _newest(Path(layout_ticket_dir(tracker, tid)), "-STATUS.json").read_bytes()
     parsed = _assert_canonical(raw)
     # Keys are now emitted sorted (the canonical form); the reducer reads keys, not
     # byte order, so this is replay-safe.
@@ -70,10 +71,14 @@ def test_claim_writes_status_and_edit_bytes(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "E3 claim bytes", repo_root=str(rebar_repo))
     rebar.claim(tid, assignee="alice", repo_root=str(rebar_repo))
 
-    status = _assert_canonical((_newest(tracker / tid, "-STATUS.json")).read_bytes())
+    status = _assert_canonical(
+        (_newest(Path(layout_ticket_dir(tracker, tid)), "-STATUS.json")).read_bytes()
+    )
     assert status["data"]["status"] == "in_progress"
 
-    edit = _assert_canonical((_newest(tracker / tid, "-EDIT.json")).read_bytes())
+    edit = _assert_canonical(
+        (_newest(Path(layout_ticket_dir(tracker, tid)), "-EDIT.json")).read_bytes()
+    )
     assert edit["event_type"] == "EDIT"
     assert edit["data"]["fields"]["assignee"] == "alice"
     # Atomic single-commit: STATUS sorts before EDIT (ts2 sampled after ts1).

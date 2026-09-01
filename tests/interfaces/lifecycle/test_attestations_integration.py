@@ -16,6 +16,7 @@ import pytest
 import rebar
 from rebar import config, signing
 from rebar._commands._seam import append_event
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.llm.plan_review.attest import compute_validity
 from rebar.reducer import reduce_ticket
 
@@ -46,9 +47,7 @@ def _sign(store: Path, tid: str, kind: str, material: str | None = None) -> None
 
 def _tdir(store: Path, tid: str) -> Path:
     tracker = Path(config.tracker_dir(str(store)))
-    return next(
-        d for d in tracker.iterdir() if d.is_dir() and (d.name == tid or tid.startswith(d.name[:4]))
-    )
+    return Path(layout_ticket_dir(tracker, tid))
 
 
 # ── coexistence (the grumpy-site-beard regression) ──────────────────────────────
@@ -175,7 +174,7 @@ def test_legacy_snapshot_signature_folds_into_map(store: Path) -> None:
         resolved,
         "SNAPSHOT",
         {"compiled_state": legacy_state, "source_event_uuids": uuids, "compacted_at": 1},
-        tdir.parent,
+        Path(config.tracker_dir(str(store))),
         repo_root=str(store),
     )
     state = reduce_ticket(str(tdir))

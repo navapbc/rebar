@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import glob
 import json
-import os
 from pathlib import Path
 
 import pytest
 
 import rebar
 from rebar._commands import composer
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _seed(repo: Path, tags=None) -> str:
@@ -39,7 +39,7 @@ def _tags(repo: Path, tid: str) -> list[str]:
 
 def _event_types(repo: Path, tid: str) -> set[str]:
     types = set()
-    for f in glob.glob(os.path.join(str(repo), ".tickets-tracker", tid, "*.json")):
+    for f in glob.glob(str(Path(layout_ticket_dir(repo / ".tickets-tracker", tid)) / "*.json")):
         with open(f) as fh:
             types.add(json.load(fh).get("event_type"))
     return types

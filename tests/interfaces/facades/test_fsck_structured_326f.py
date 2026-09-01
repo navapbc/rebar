@@ -29,6 +29,7 @@ import pytest
 
 import rebar
 from rebar._errors import RebarError
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 pytestmark = pytest.mark.interface
 
@@ -203,7 +204,9 @@ def _seed_status_fork(repo: Path) -> str:
         "parent_status_uuid": None,
         "data": {"status": "closed", "current_status": "in_progress", "parent_status_uuid": None},
     }
-    path = _tracker(repo) / ticket_id / f"{_FORK_TS}-{_FORK_UUID}-STATUS.json"
+    path = (
+        Path(layout_ticket_dir(_tracker(repo), ticket_id)) / f"{_FORK_TS}-{_FORK_UUID}-STATUS.json"
+    )
     path.write_text(json.dumps(event))
     tracker = _tracker(repo)
     subprocess.run(["git", "add", "-A"], cwd=tracker, check=True)

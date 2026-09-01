@@ -18,13 +18,14 @@ import sys
 from pathlib import Path
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir
 from rebar.reducer._processors import process_create
 from rebar.reducer._state import make_initial_state
 
 
 def _events(repo: Path, tid: str) -> list[str]:
     """Event-type names for a ticket, from its raw event-log filenames."""
-    d = repo / ".tickets-tracker" / tid
+    d = Path(ticket_dir(repo / ".tickets-tracker", tid))
     return sorted(
         p.name.split("-")[-1].removesuffix(".json") for p in d.glob("*.json") if "-" in p.name
     )

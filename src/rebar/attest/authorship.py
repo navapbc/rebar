@@ -20,11 +20,11 @@ guarantees:
 
 from __future__ import annotations
 
-import os
 import subprocess
 from collections.abc import Callable
 from typing import cast
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.attest import dsse, registry, sshsig
 from rebar.attest.authorship_resolution import (
     build_introducing_commit_map as build_introducing_commit_map,
@@ -241,7 +241,7 @@ def verify_authorship_at_commit(
         from rebar._commands._seam import tracker_dir
 
         tracker = str(tracker_dir(repo_root))
-        ticket_dir = os.path.join(tracker, identity_id)
+        ticket_dir = layout_ticket_dir(tracker, identity_id)
 
         def _is_ancestor(ancestor: str, descendant: str) -> bool:
             proc = subprocess.run(
