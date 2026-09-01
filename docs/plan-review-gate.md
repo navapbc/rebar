@@ -1749,3 +1749,42 @@ exercises it end-to-end. The coaching move is **add a live/end-to-end acceptance
 criterion for the path you are defaulting to** (Pass-4 moves 7 *thin vertical slice* /
 9 *plan the verification*). The honest discriminator: *could this AC be marked done
 without the changed risky path ever executing?* If yes, add the live DoD.
+
+## Validating a gate change: which replay tier, and what counts as noise
+
+**ADR 0109** covers the case ADR 0054 does not: a change to a **prompt or pipeline**
+(a finder criterion prompt, a Pass-2 question, the finder system prompt/chunking) that
+alters what the model would produce, rather than a threshold/impact-model change that
+can be validated by ADR 0054's offline, zero-LLM replay of the persisted corpus. The
+replay harness family lives under `src/rebar/llm/evals/plan_replay/`.
+
+### Tier-selection table
+
+| Change | Required tier(s) |
+| --- | --- |
+| Pass-3 code, threshold, or routing change | Tier 0, always |
+| Pass-2 question or prompt change | Tier 1 (N≥40) + Tier 0 |
+| Pass-1 criterion-prompt change | Tier 2 single-criterion (N=20) + downstream |
+| Finder system prompt or chunking strategy change | Tier 2 full mode |
+
+Every replay call MUST use the exact production frontier model for the pass it
+replays (Bedrock only, no substitution) — each tier refuses to run otherwise. Attach
+the generated report's path in the Gerrit commit message under an advisory
+`plan-review-eval:` trailer (no CI enforcement, to stay portable).
+
+### The per-tier noise band — each tier is judged against its own metric
+
+"Indistinguishable from noise" is defined **per tier**, never shared across tiers,
+because each tier scores a different metric:
+
+| Tier | Metric | Noise floor source |
+| --- | --- | --- |
+| 0 | run-level verdict flip rate (PASS↔BLOCK) | identical-material flips: rerun the same stored material through the unchanged pipeline |
+| 1 | per-question raw agreement + Cohen's kappa | the Tier-1 reproduction run's own agreement floor, plus Tier 0's flip-rate floor (Tier 1 always runs with Tier 0) |
+| 2 | finding-set Jaccard (by `norm_id`/criterion) + candidate-vs-stored verdict flip matrix | an identical-candidate reproduction run: rerun the unchanged candidate against the same fixed sample |
+
+A Tier-2 Pass-1 criterion-prompt change is judged only against the Tier-2-native
+Jaccard/flip-matrix floor — never against Tier 1's per-question-agreement numbers,
+which measure a different pass and are not comparable. See ADR 0109 for the full
+decision record, the cost table observed from commissioning runs, and why sidecar
+replay (not recorded-response mocking) is the required approach.

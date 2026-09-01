@@ -195,3 +195,12 @@ wrote it" is not an answer.
 On a re-push, a novel low-priority advisory finding is dropped **only if the cited code region
 is unchanged**; a repeat finding on code you *did* touch is re-raised. So don't expect an
 advisory to disappear just because you pushed again — change the cited region or address it.
+
+## Changing the plan-review/code-review gate itself
+
+Editing a finder criterion prompt, a Pass-2 question, a Pass-3 threshold, or the finder
+system prompt/chunking is a change to the gate, not to application code — it needs its
+own validation protocol before it can be judged safe. See
+[plan-review-gate.md](https://github.com/navapbc/rebar/blob/main/docs/plan-review-gate.md#validating-a-gate-change-which-replay-tier-and-what-counts-as-noise)
+for the required replay tier per change kind and the per-tier noise band that decides
+signal vs. noise.
