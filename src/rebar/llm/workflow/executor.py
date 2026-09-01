@@ -252,6 +252,8 @@ class ExpressionError(WorkflowError):
     """An expression could not be resolved at run time (a value the linter could
     not have known was missing — e.g. an upstream step produced no such output)."""
 
+    error_code = "invalid_input"
+
 
 def _resolve_one(expr: str, state: RunState, secrets: Mapping[str, str]) -> Any:
     expr = expr.strip()

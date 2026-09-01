@@ -49,6 +49,7 @@ from rebar.llm.errors import (
     LLMRunnerError,
     LLMUnavailableError,
     StructuredOutputError,
+    WorkflowAssetsUnavailableError,
 )
 from rebar.llm.findings import build_result, normalize_finding, validate_result
 from rebar.llm.gate_runs import (
@@ -101,6 +102,7 @@ __all__ = [
     # runner seam (custom ops / tests)
     "Runner",
     "StructuredOutputError",
+    "WorkflowAssetsUnavailableError",
     "agents_extra_installed",
     "aggregate_findings",
     "available_backends",

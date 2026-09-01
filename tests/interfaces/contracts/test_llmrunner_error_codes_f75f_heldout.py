@@ -9,9 +9,8 @@ headline case or over-reaches:
 - the dbca-97ac-ad96-4d6d workflow taxonomy is PRESERVED, not collapsed
   (``WorkflowNotFoundError`` -> ``not_found``; the parse/validation/version/unknown-step
   family -> ``invalid_input``);
-- the bare ``WorkflowError`` / bare ``LLMError`` bases stay at the ``llm_unavailable``
-  catch-all (dbca's pinned choice; 551b owns any future change) — this guards against a
-  blanket ``LLMError -> command_failed`` over-reach; and
+- the bare ``WorkflowError`` base stays at dbca's ``llm_unavailable`` compatibility
+  contract, while the bare ``LLMError`` base now falls to ``command_failed`` (ce6b); and
 - the routing is OBSERVABLE through the real MCP gate-tool failure envelope
   (``_structured_llm_failure``), not only the classifier return value.
 """
@@ -83,11 +82,11 @@ def test_dbca_workflow_taxonomy_preserved() -> None:
         assert rebar.error_code_for(exc) == "invalid_input", type(exc).__name__
 
 
-def test_bare_bases_stay_at_llm_unavailable_catch_all() -> None:
-    # Guards against a blanket ``LLMError -> command_failed`` over-reach: the bare bases
-    # remain at dbca's pinned catch-all (551b owns any future change here).
+def test_bare_workflow_base_stays_llm_unavailable_bare_llm_base_is_command_failed() -> None:
+    # dbca's execute-base compatibility stays reserved, but ce6b removes the generic
+    # bare-LLMError catch-all so an unspecified framework failure no longer claims an outage.
     assert rebar.error_code_for(WorkflowError("execute-time outage")) == "llm_unavailable"
-    assert rebar.error_code_for(LLMError("unspecified llm failure")) == "llm_unavailable"
+    assert rebar.error_code_for(LLMError("unspecified llm failure")) == "command_failed"
 
 
 def test_input_rejected_surfaces_as_command_failed_through_gate_envelope() -> None:

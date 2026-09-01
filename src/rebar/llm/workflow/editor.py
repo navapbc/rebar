@@ -470,9 +470,9 @@ def edit_workflow(
     import webbrowser
 
     if not assets_available():
-        from rebar.llm.errors import WorkflowError
+        from rebar.llm.errors import WorkflowAssetsUnavailableError
 
-        raise WorkflowError(
+        raise WorkflowAssetsUnavailableError(
             "the editor front-end bundle is missing "
             f"({_ASSETS_DIR}/editor.js). Build it with: "
             "npm --prefix src/rebar/llm/workflow/editor_assets install && "

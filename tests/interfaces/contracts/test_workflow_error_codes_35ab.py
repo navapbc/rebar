@@ -78,7 +78,7 @@ def test_execute_base_and_outages_still_llm_unavailable() -> None:
         "llm_unavailable"
     )
     assert rebar.error_code_for(LLMUnavailableError("no API key")) == "llm_unavailable"
-    assert rebar.error_code_for(LLMError("generic llm failure")) == "llm_unavailable"
+    assert rebar.error_code_for(LLMError("generic llm failure")) == "command_failed"
 
 
 # ── AC4: WorkflowUnknownStepError is a WorkflowError subtype (inherits the engine tree) ───

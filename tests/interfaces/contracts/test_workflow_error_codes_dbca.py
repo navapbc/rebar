@@ -102,7 +102,32 @@ def test_execute_base_and_outage_still_llm_unavailable() -> None:
         "llm_unavailable"
     )
     assert rebar.error_code_for(LLMUnavailableError("no API key")) == "llm_unavailable"
-    assert rebar.error_code_for(LLMError("generic llm failure")) == "llm_unavailable"
+    assert rebar.error_code_for(LLMError("generic llm failure")) == "command_failed"
+
+
+def test_expression_error_is_invalid_input() -> None:
+    import rebar
+    from rebar._mcp_llm import _structured_llm_failure
+    from rebar.llm.workflow.executor import ExpressionError
+
+    exc = ExpressionError("input 'missing' is not set for this run")
+    assert rebar.error_code_for(exc) == "invalid_input"
+    assert _structured_llm_failure(exc)["error"] == "invalid_input"
+
+
+def test_editor_missing_bundle_is_command_failed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import rebar
+    from rebar.llm.errors import WorkflowAssetsUnavailableError
+    from rebar.llm.workflow import editor
+
+    monkeypatch.setattr(editor, "assets_available", lambda: False)
+    with pytest.raises(WorkflowAssetsUnavailableError) as caught:
+        editor.edit_workflow(tmp_path / "workflow.yaml", open_browser=False, serve_forever=False)
+    assert "editor front-end bundle is missing" in str(caught.value)
+    assert rebar.error_code_for(caught.value) == "command_failed"
+    assert rebar.error_code_for(caught.value) != "llm_unavailable"
 
 
 # ── AC3 (second site): _structured_llm_failure keeps genuine outages as llm_unavailable ──

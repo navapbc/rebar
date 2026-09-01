@@ -109,22 +109,25 @@ def _workflow_caller_code(exc: BaseException) -> str | None:
 def _llm_error_code(exc: BaseException) -> str | None:
     """Classify an ``LLMError``-family exception (branch 7 of :func:`error_code_for`).
 
-    The ``LLMRunnerError`` subtree — input-rejection, self-imposed budget/tool-loop stops,
-    context-window overflow, and structured-output defects — is NOT a provider-availability
-    fault: those types' own docstrings forbid the "provider call failed / outage" framing, so
-    they map to the honest broad ``command_failed`` (bug f75f-5509-10c0-4430), never
-    ``llm_unavailable``. A genuine ``LLMUnavailableError`` (and its ``LLMConfigError`` subclass),
-    and the bare ``LLMError`` base, stay ``llm_unavailable``. Returns ``None`` when ``exc`` is
-    not an ``LLMError`` (or the ``agents`` extra is absent), so the caller falls through.
+    The availability subtree (``LLMUnavailableError`` and its ``LLMConfigError`` /
+    prompt/reviewer config subclasses) stays ``llm_unavailable``. The ``LLMRunnerError``
+    subtree and every other non-availability ``LLMError`` map to the honest broad
+    ``command_failed``. The bare ``WorkflowError`` base keeps dbca's execute-outage
+    compatibility contract at ``llm_unavailable``; dedicated workflow subclasses use their
+    explicit/earlier codes or fall through to ``command_failed``.
     """
     try:
-        from rebar.llm.errors import LLMError, LLMRunnerError
+        from rebar.llm.errors import LLMError, LLMRunnerError, LLMUnavailableError, WorkflowError
     except ImportError:
         return None
     if isinstance(exc, LLMRunnerError):
         return "command_failed"
-    if isinstance(exc, LLMError):
+    if isinstance(exc, LLMUnavailableError):
         return "llm_unavailable"
+    if type(exc) is WorkflowError:
+        return "llm_unavailable"
+    if isinstance(exc, LLMError):
+        return "command_failed"
     return None
 
 
@@ -143,10 +146,10 @@ def error_code_for(exc: BaseException) -> str:
     6. a workflow-engine caller-input error → ``WorkflowNotFoundError`` (unknown name/run) →
        ``not_found``; ``WorkflowParseError`` / ``WorkflowValidationError`` /
        ``WorkflowVersionError`` / ``WorkflowUnknownStepError`` (a workflow that WAS found but
-       will not parse/lint/migrate, or names an unknown scripted step) → ``invalid_input``. The
-       bare ``WorkflowError`` base is deliberately NOT remapped — a workflow EXECUTE step can
-       genuinely fail on LLM unavailability, so it falls through to 7.
-    7. ``LLMError`` → ``llm_unavailable``
+       will not parse/lint/migrate, or names an unknown scripted step) → ``invalid_input``.
+    7. ``LLMUnavailableError`` → ``llm_unavailable``; bare ``WorkflowError`` keeps dbca's
+       execute-outage compatibility at ``llm_unavailable``; other ``LLMError`` →
+       ``command_failed``
     8. fallback → ``command_failed``
 
     Imports exception types lazily to avoid cycles (this is a stdlib-only leaf).
@@ -210,7 +213,7 @@ def error_code_for(exc: BaseException) -> str:
     if workflow_code is not None:
         return workflow_code
 
-    # 7. LLMError family — availability vs. runner-fault discrimination (f75f)
+    # 7. LLMError family — availability vs. non-availability discrimination (ce6b/f75f)
     llm_code = _llm_error_code(exc)
     if llm_code is not None:
         return llm_code

@@ -115,6 +115,12 @@ class WorkflowError(LLMError):
     """Base class for the workflow engine (DSL parse/lint/migrate/execute)."""
 
 
+class WorkflowAssetsUnavailableError(WorkflowError):
+    """A local workflow editor/runtime asset needed for the command is missing."""
+
+    error_code = "command_failed"
+
+
 class WorkflowNotFoundError(WorkflowError):
     """A workflow NAME or RUN could not be resolved — a caller-input NOT-FOUND lookup miss:
     an unknown workflow name, an unknown ``run_id``, or a run absent from its ticket. A

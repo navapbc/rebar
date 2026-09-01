@@ -10,7 +10,10 @@ Reconciled taxonomy (by exception TYPE, precedence high→low):
   * ``LLMUnavailableError`` (incl. ``LLMConfigError`` + prompt subtree)  -> ``llm_unavailable``
   * ``LLMRunnerError`` subtree (input-rejected / budget / context-window /
     tool-loop / output-defect)                                -> ``command_failed`` (f75f)
-  * bare ``WorkflowError`` base, ``FindingsError``, bare ``LLMError``    -> ``llm_unavailable``
+  * bare ``WorkflowError`` base                                -> ``llm_unavailable`` (dbca)
+  * bare ``LLMError``, ``FindingsError``, ``EvalError``,
+    ``SnapshotError``, ``WorkflowAssetsUnavailableError``       -> ``command_failed`` (ce6b)
+  * ``ExpressionError``                                        -> ``invalid_input``  (73d8)
 
 The map is asserted to be EXHAUSTIVE: the set of live ``LLMError`` subclasses must equal the
 keys below, so adding a new subclass FAILS this test until its intended code is recorded here —
@@ -56,7 +59,7 @@ _materialize_llm_error_tree()
 #: forces a conscious decision when the hierarchy grows.
 EXPECTED_CODE: dict[str, str] = {
     # availability faults — the only members that keep ``llm_unavailable`` by their own type
-    "LLMError": "llm_unavailable",
+    "LLMError": "command_failed",
     "LLMUnavailableError": "llm_unavailable",
     "LLMConfigError": "llm_unavailable",
     "PromptError": "llm_unavailable",
@@ -67,9 +70,9 @@ EXPECTED_CODE: dict[str, str] = {
     "InvalidPromptIdError": "llm_unavailable",
     "PromptExistsError": "llm_unavailable",
     "ReviewerError": "llm_unavailable",
-    # bare LLMError-family leaves with no availability/runner/workflow role → llm_unavailable base
-    "FindingsError": "llm_unavailable",
-    "EvalError": "llm_unavailable",
+    # bare LLMError-family leaves with no availability/runner/workflow role → command_failed
+    "FindingsError": "command_failed",
+    "EvalError": "command_failed",
     # runner subtree — NOT an availability fault (f75f): honest broad ``command_failed``
     "LLMRunnerError": "command_failed",
     "LLMBudgetExhaustedError": "command_failed",
@@ -86,13 +89,9 @@ EXPECTED_CODE: dict[str, str] = {
     "WorkflowParseError": "invalid_input",
     "WorkflowValidationError": "invalid_input",
     "WorkflowVersionError": "invalid_input",
-    # Non-caller-input ``WorkflowError`` subclasses fall through the workflow-caller classifier to
-    # the bare-``WorkflowError``-base disposition (``llm_unavailable``). This PINS the current
-    # status quo — it does NOT pre-decide it: the accurate code for these editor/snapshot/
-    # expression faults is the subject of the still-open escalation 551b, which will update BOTH
-    # ``error_code_for`` and this entry together when it resolves.
-    "SnapshotError": "llm_unavailable",
-    "ExpressionError": "llm_unavailable",
+    "WorkflowAssetsUnavailableError": "command_failed",
+    "SnapshotError": "command_failed",
+    "ExpressionError": "invalid_input",
 }
 
 
