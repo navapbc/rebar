@@ -223,6 +223,28 @@ def test_sweep_removes_dead_owner_staging_but_spares_a_live_one(rebar_repo: Path
     assert sorted(n for n in os.listdir(tracker) if not n.startswith(".")) == seed_dirs
 
 
+def test_sweep_removes_recycled_pid_staging(rebar_repo: Path, monkeypatch) -> None:
+    """A live pid with a differing known start time is not the staging owner."""
+    rebar.create_ticket("task", "seed", repo_root=str(rebar_repo))
+    tracker = _tracker(rebar_repo)
+    monkeypatch.setattr(lock_owner, "_pid_alive", lambda _pid: True)
+    monkeypatch.setattr(lock_owner, "_process_start_time", lambda _pid: "222")
+    recycled = staging._new_staging_path(tracker)
+    os.mkdir(recycled)
+    staging._write_owner_stamp(
+        recycled,
+        stamp=(
+            f"{lock_owner._STAMP_V2_PREFIX} host={lock_owner._host_identity()} "
+            f"ns={lock_owner._read_pid_namespace_id() or lock_owner._STAMP_UNKNOWN} "
+            "pid=4321 start=111"
+        ),
+    )
+
+    staging.sweep_stale_staging(tracker)
+
+    assert not os.path.exists(recycled), "the sweep kept a recycled-pid staging owner"
+
+
 def test_sweep_never_touches_ticket_directories(rebar_repo: Path) -> None:
     """043f — an event-less ticket directory is tolerated, never tidied, by this sweep."""
     rebar.create_ticket("task", "seed", repo_root=str(rebar_repo))

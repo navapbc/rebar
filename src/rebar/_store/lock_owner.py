@@ -227,16 +227,15 @@ def _parse_v2_stamp(stamp: str) -> dict[str, str] | None:
 
 
 def _describe_stamped_pid(fields: dict[str, str]) -> str:
-    """Liveness verdict for a stamp's ``pid``: ``live``, ``not-running``, or
-    ``unprobeable`` — the distinction between "a process really is holding this" and "the
-    stamp is stale".
+    """Liveness verdict for a stamp's ``pid``.
 
-    Probing is only meaningful under exactly the conditions :func:`_mkdir_lock_is_stale`
-    already requires: the same :func:`_host_identity` AND a comparable pid namespace.
-    Anywhere else the number names a different process, or nothing, so this reports
-    ``unprobeable`` rather than a verdict — mirroring that function's refusal-without-proof
-    rule (bug yaw-gravel-linen) so a message can never suggest a reclaim the lock itself
-    would refuse. This is DESCRIPTIVE ONLY: nothing here feeds a reclamation decision."""
+    ``live`` is reserved for a pid whose current process start time corroborates the
+    stamp. A bare pid-number hit is not proof of ownership: pids recycle, and on
+    platforms without ``/proc`` the start-time discriminator is unavailable. Those cases
+    are reported as unverified/not-owner rather than as a live holder. This is
+    DESCRIPTIVE ONLY for the write lock; staging cleanup also consumes the string and
+    treats only ``not-running`` / ``not-owner`` as positive abandonment proof.
+    """
     if fields["host"] != _host_identity():
         return "unprobeable (foreign host)"
     stamped_ns = None if fields["ns"] == _STAMP_UNKNOWN else fields["ns"]
@@ -246,7 +245,19 @@ def _describe_stamped_pid(fields: dict[str, str]) -> str:
         pid = int(fields["pid"])
     except ValueError:
         return "unprobeable (malformed pid)"
-    return "live" if _pid_alive(pid) else "not-running"
+    if not _pid_alive(pid):
+        return "not-running"
+    if pid == os.getpid():
+        return "live"
+    stamped_start = None if fields["start"] == _STAMP_UNKNOWN else fields["start"]
+    current_start = _process_start_time(pid)
+    if current_start is None:
+        return "unverified-live (start unknown)"
+    if stamped_start is None:
+        return "unverified-live (stamp start unknown)"
+    if stamped_start != current_start:
+        return "not-owner (recycled pid)"
+    return "live"
 
 
 def _mkdir_lock_age_s(lock_dir: str) -> float | None:
@@ -382,16 +393,19 @@ def _stamp_is_stale(
        license a reclaim (bug yaw-gravel-linen) — refused until the age ceiling, then
        reclaimed so a shared-filesystem orphan cannot wedge forever.
     5. Same host and the pid namespaces are comparable (stamped ``ns`` equals ours,
-       including both being unknown) → probe the pid, QUALIFIED BY START TIME. Dead pid
-       ⇒ stale. Live pid whose start time is known on both sides and differs ⇒ the
-       number was recycled by an unrelated process and the true owner is gone ⇒ stale.
-       Live pid whose start time is CORROBORATED (both known and equal) ⇒ False, and the
-       ceiling does NOT apply: that is a positive liveness signal and breaking a lock on a
-       timer alone over a live owner is forbidden ("never on a timer alone"). Live pid whose
-       current start time is UNAVAILABLE (no ``/proc``: every macOS probe) ⇒ the verdict is
-       unqualified — a bare pid-NUMBER match, not proof of the stamped owner — so this is a
-       refuse-without-proof branch and carries the ceiling like the others (bug
-       larval-tribal-tigermoth; before it, that case wedged the store with NO bound at all).
+       including both being unknown) → probe the pid, QUALIFIED BY START TIME and by the
+       kernel fcntl leg. Dead pid ⇒ stale. If this caller holds the fcntl leg and the
+       stamped pid is a DIFFERENT process, the mkdir artifact is stale immediately: a live
+       owner would still hold that kernel lock, so reaching this point proves it is not
+       the owner. Without that fcntl proof, a live pid whose start time is known on both
+       sides and differs ⇒ the number was recycled by an unrelated process and the true
+       owner is gone ⇒ stale. Live pid whose start time is CORROBORATED (both known and
+       equal) ⇒ False, and the ceiling does NOT apply: that is a positive liveness signal
+       and breaking a lock on a timer alone over a live owner is forbidden ("never on a
+       timer alone"). Live pid whose current start time is UNAVAILABLE (no ``/proc``:
+       every macOS probe) ⇒ the verdict is unqualified — a bare pid-NUMBER match, not
+       proof of the stamped owner — so, absent fcntl proof, this is a refuse-without-proof
+       branch and carries the ceiling like the others (bug larval-tribal-tigermoth).
     6. Same host, namespaces NOT comparable (different, or exactly one unknown) — the
        container-recreate case, where the stamped pid is not probeable at all → stale
        iff *fcntl_held*, else refused until the age ceiling.
@@ -426,21 +440,20 @@ def _stamp_is_stale(
         return True
     stamped_start = None if fields["start"] == _STAMP_UNKNOWN else fields["start"]
     current_start = _process_start_time(pid)
+    if fcntl_held and pid != os.getpid():
+        # The caller already holds the kernel fcntl leg for this same-host v2 stamp.
+        # A different live process still owning the write lock would be holding that leg,
+        # so reaching this point proves the mkdir artifact is orphaned. Keep the
+        # same-process case conservative because POSIX fcntl locks are process-scoped:
+        # another thread in this process can reacquire the fcntl leg while a sibling
+        # thread legitimately owns the mkdir leg.
+        return True
     if current_start is None:
         # UNQUALIFIED live-pid verdict (bug larval-tribal-tigermoth). `_process_start_time`
         # reads /proc, so on a platform without it (macOS) it ALWAYS returns None — the
-        # recycled-pid discriminator below is then unsatisfiable BY CONSTRUCTION and this
-        # branch used to `return False` forever. "Live pid" there is not proof the stamped
-        # owner lives; it is a bare pid-NUMBER match, and pids recycle (kern.maxproc 16000).
-        # Without a bound that wedges the store PERMANENTLY. So this is a refuse-without-proof
-        # branch like every other, and takes the same ceiling backstop.
-        #
-        # This cannot break a genuinely-live owner. `_mkdir_lock_is_stale` is only reached
-        # from `_acquire_mkdir`, which by its stated precondition runs only AFTER this
-        # acquirer took the exclusive fcntl leg — held for the ENTIRE lifetime of the mkdir
-        # leg. A live owner inside its own hold would still hold that fcntl leg, so we could
-        # not have acquired it and could not be here. Arriving here is itself evidence the
-        # stamped owner let go: the ceiling only ever fires on an orphan.
+        # recycled-pid discriminator below is then unsatisfiable BY CONSTRUCTION. Without
+        # the fcntl proof above, this remains a refuse-without-proof branch and takes the
+        # same ceiling backstop.
         return _mkdir_lock_age_exceeds_ceiling(artifact_path)
     if stamped_start is not None and stamped_start != current_start:
         # The pid is live but it is a DIFFERENT process wearing a recycled number.

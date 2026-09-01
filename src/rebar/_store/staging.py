@@ -114,7 +114,7 @@ def _is_abandoned(staging_dir: str) -> bool:
             verdict = _owner._describe_stamped_pid(fields)
             if verdict == "live":
                 return False
-            if verdict == "not-running":
+            if verdict == "not-running" or verdict.startswith("not-owner"):
                 return True
         # A torn or foreign stamp carries no verdict: fall through to the age ceiling.
     age = _age_s(staging_dir)
