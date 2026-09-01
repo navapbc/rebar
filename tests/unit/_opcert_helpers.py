@@ -36,6 +36,7 @@ def store_with_chain(tmp_path, monkeypatch, n: int) -> tuple[Path, str, list[tup
     """
     import rebar
     from rebar._commands._seam import tracker_dir
+    from rebar._store.ticket_layout import iter_ticket_dirs
     from rebar.attest import authorship
 
     monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", "9" * 18)
@@ -56,14 +57,11 @@ def store_with_chain(tmp_path, monkeypatch, n: int) -> tuple[Path, str, list[tup
     tracker = str(tracker_dir(str(repo)))
     commit_map = authorship.build_introducing_commit_map(repo_root=str(repo))
     positions: list[tuple[str, str]] = []
-    for d in sorted(os.listdir(tracker)):
-        dp = os.path.join(tracker, d)
-        if d.startswith(".") or not os.path.isdir(dp):
-            continue
-        for fn in sorted(os.listdir(dp)):
+    for ticket in sorted(iter_ticket_dirs(tracker), key=lambda ticket: ticket.relpath):
+        for fn in sorted(os.listdir(ticket.path)):
             if not fn.endswith(".json") or fn.startswith("."):
                 continue
-            commit = commit_map.get(f"{d}/{fn}")
+            commit = commit_map.get(f"{ticket.relpath}/{fn}")
             if commit:
                 positions.append((fn[:-5].rsplit("-", 1)[0], commit))
     positions.sort()

@@ -46,13 +46,12 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _active_event_paths(tracker: str) -> list[tuple[str, str, str]]:
     """(rel_path, position, ticket_dir) for every active event file, mirroring _collect_all."""
+    from rebar._store.ticket_layout import iter_ticket_dirs
     from rebar.reducer._cache import is_active_event
 
     out: list[tuple[str, str, str]] = []
-    for tid in sorted(os.listdir(tracker)):
-        td = os.path.join(tracker, tid)
-        if tid.startswith(".") or not os.path.isdir(td):
-            continue
+    for entry in iter_ticket_dirs(tracker):
+        td = entry.path
         for fn in sorted(os.listdir(td)):
             if not fn.endswith(".json") or fn.startswith(".") or not is_active_event(fn):
                 continue
@@ -61,7 +60,7 @@ def _active_event_paths(tracker: str) -> list[tuple[str, str, str]]:
             if ev.get("event_type") == "SNAPSHOT":
                 continue
             position = f"{ev.get('timestamp')}-{ev.get('uuid')}"
-            out.append((f"{tid}/{fn}", position, td))
+            out.append((f"{entry.relpath}/{fn}", position, str(td)))
     return out
 
 

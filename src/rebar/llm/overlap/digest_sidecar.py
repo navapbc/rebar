@@ -23,6 +23,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 logger = logging.getLogger(__name__)
 
 EVENT_TYPE = "TICKET_DIGEST"
@@ -124,7 +126,7 @@ def latest_ticket_digest(
     try:
         tracker = _tracker(tracker, repo_root)
         rid = _resolve(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)

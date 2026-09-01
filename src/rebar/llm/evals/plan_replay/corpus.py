@@ -28,7 +28,8 @@ from rebar.llm.plan_review.pass1 import material_fingerprint
 from rebar.reducer._processors import _file_impact_scope
 
 _PATH_RE = re.compile(
-    r"^(?P<tid>[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4})/"
+    r"^(?:(?:[0-9a-f]{2})/)?"
+    r"(?P<tid>[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4})/"
     r"(?P<ts>\d+)-(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-"
     r"(?P<type>[A-Z_]+)\.json(?:\.retired)?$"
 )

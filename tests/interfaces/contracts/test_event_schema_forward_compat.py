@@ -26,6 +26,7 @@ from pathlib import Path
 from _subprocess_env import subprocess_env
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 FUTURE_TYPE = "FUTURE_TYPE"
 FUTURE_UUID = "ffffffff-0000-4000-8000-000000000001"
@@ -46,7 +47,7 @@ def _cli(*args: str, cwd: str, **env: str) -> subprocess.CompletedProcess:
 
 
 def _ticket_dir(repo: Path, tid: str) -> Path:
-    return repo / ".tickets-tracker" / tid
+    return Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
 
 
 def _write_future_event(repo: Path, tid: str) -> Path:

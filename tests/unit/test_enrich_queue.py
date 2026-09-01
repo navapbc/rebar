@@ -14,6 +14,7 @@ import pytest
 
 import rebar
 from rebar._store import event_append
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.llm.overlap import queue as Q
 from rebar.reducer._version import _NON_REPLAY_KNOWN_TYPES, is_unknown_newer_type
 
@@ -246,7 +247,7 @@ def test_reduce_opens_at_most_one_file_per_event_type(repo: str, monkeypatch) ->
     per file — the asymptote the enrich-drain gate was paying."""
     tid = rebar.create_ticket("task", "T", repo_root=repo)
     tracker = _tracker(repo)
-    ticket_dir = Path(tracker) / tid
+    ticket_dir = Path(layout_ticket_dir(tracker, tid))
     for i in range(30):
         _seed_event(ticket_dir, _BASE_NS + i, Q.ENQUEUE, {"not_before_ns": _BASE_NS}, f"e{i:03d}")
         _seed_event(
@@ -282,7 +283,7 @@ def test_claim_arbitration_skips_pre_enqueue_claims(repo: str, monkeypatch) -> N
     """
     tid = rebar.create_ticket("task", "T", repo_root=repo)
     tracker = _tracker(repo)
-    ticket_dir = Path(tracker) / tid
+    ticket_dir = Path(layout_ticket_dir(tracker, tid))
     stale = [
         _seed_event(
             ticket_dir,
@@ -312,7 +313,7 @@ def test_corrupt_newest_event_falls_back_to_older(repo: str) -> None:
     """An unparseable newest file does not blind the reduce — it walks to the next-older."""
     tid = rebar.create_ticket("task", "T", repo_root=repo)
     tracker = _tracker(repo)
-    ticket_dir = Path(tracker) / tid
+    ticket_dir = Path(layout_ticket_dir(tracker, tid))
     good_not_before = _BASE_NS + 500
     _seed_event(ticket_dir, _BASE_NS + 10, Q.ENQUEUE, {"not_before_ns": good_not_before}, "eok")
     (ticket_dir / f"{_BASE_NS + 20}-ebad-{Q.ENQUEUE}.json").write_text("{not json", "utf-8")
@@ -328,7 +329,7 @@ def test_all_events_corrupt_reads_as_absent(repo: str) -> None:
     reduces as absent, exactly as if no file existed."""
     tid = rebar.create_ticket("task", "T", repo_root=repo)
     tracker = _tracker(repo)
-    ticket_dir = Path(tracker) / tid
+    ticket_dir = Path(layout_ticket_dir(tracker, tid))
     for i in range(3):
         (ticket_dir / f"{_BASE_NS + i}-bad{i}-{Q.ENQUEUE}.json").write_text("{", "utf-8")
 

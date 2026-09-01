@@ -15,11 +15,13 @@ behaviour-preservation guarantee that no id form gained or lost the ability to r
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from rebar._alias import compute_alias
 from rebar._ids import resolve_ticket_id
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.metrics import blame
 
 _TARGET = "a9dd-7326-9cac-45e4"
@@ -32,8 +34,8 @@ def _mk_tracker(tmp_path, tickets: dict[str, str]) -> str:
     tracker = tmp_path / "tracker"
     tracker.mkdir()
     for ticket_id, alias in tickets.items():
-        d = tracker / ticket_id
-        d.mkdir()
+        d = Path(layout_ticket_dir(tracker, ticket_id))
+        d.mkdir(parents=True)
         (d / "0001-CREATE.json").write_text(json.dumps({"data": {"alias": alias}}))
     return str(tracker)
 

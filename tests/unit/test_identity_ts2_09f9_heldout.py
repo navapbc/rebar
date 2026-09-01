@@ -25,6 +25,7 @@ from _tree_scan import parsed_python_files
 
 import rebar
 from rebar._commands._seam import tracker_dir
+from rebar._store.ticket_layout import ticket_dir
 from rebar.attest import authorship, sshsig
 
 try:
@@ -87,7 +88,7 @@ def _revoke_sig(ident: str, pub: str, priv: str):
 
 
 def _ticket_dir(store: Path, ticket_id: str) -> str:
-    return os.path.join(_tracker(store), ticket_id)
+    return ticket_dir(_tracker(store), ticket_id)
 
 
 # ── AC1: resolved record binds real commit SHAs ───────────────────────────────

@@ -24,6 +24,9 @@ from __future__ import annotations
 
 import os
 
+from rebar._store.ticket_layout import iter_ticket_dirs
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 from ._api import reduce_ticket
 
 # Source tickets in these terminal states are not surfaced as live
@@ -44,17 +47,10 @@ def _mentioning_dirs(tracker_dir: str, ticket_id: str) -> list[str]:
     """
     needle = ticket_id.encode("utf-8")
     candidates: list[str] = []
-    try:
-        entries = sorted(os.listdir(tracker_dir))
-    except OSError:
-        return candidates
-
-    for entry in entries:
-        if entry.startswith(".") or entry == ticket_id:
+    for entry in iter_ticket_dirs(tracker_dir):
+        if entry.ticket_id == ticket_id:
             continue
-        entry_path = os.path.join(tracker_dir, entry)
-        if not os.path.isdir(entry_path):
-            continue
+        entry_path = entry.path
         try:
             event_names = os.listdir(entry_path)
         except OSError:
@@ -65,7 +61,7 @@ def _mentioning_dirs(tracker_dir: str, ticket_id: str) -> list[str]:
             try:
                 with open(os.path.join(entry_path, name), "rb") as fh:
                     if needle in fh.read():
-                        candidates.append(entry)
+                        candidates.append(entry.ticket_id)
                         break
             except OSError:
                 continue
@@ -85,7 +81,7 @@ def find_inbound_relationships(ticket_id: str, tracker_dir: str) -> dict:
     # The subject's own outgoing symmetric links — used to suppress the
     # reciprocal half of a relates_to that the subject already lists.
     own_symmetric: set[tuple[str, str]] = set()
-    subject_state = reduce_ticket(os.path.join(tracker_dir, ticket_id))
+    subject_state = reduce_ticket(layout_ticket_dir(tracker_dir, ticket_id))
     if isinstance(subject_state, dict):
         for dep in subject_state.get("deps") or []:
             rel = dep.get("relation", "")
@@ -97,7 +93,7 @@ def find_inbound_relationships(ticket_id: str, tracker_dir: str) -> dict:
     children: list[str] = []
 
     for cand in _mentioning_dirs(tracker_dir, ticket_id):
-        state = reduce_ticket(os.path.join(tracker_dir, cand))
+        state = reduce_ticket(layout_ticket_dir(tracker_dir, cand))
         if not isinstance(state, dict):
             continue
         if state.get("status") in _INACTIVE_SOURCE_STATUSES or state.get("archived"):

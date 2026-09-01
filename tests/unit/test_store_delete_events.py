@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from rebar._store import event_append
+from rebar._store.ticket_layout import ticket_dir_relpath
 
 pytestmark = pytest.mark.unit
 
@@ -58,7 +59,7 @@ def _commit_events(tracker: str, ticket: str, n: int) -> list[str]:
         ev = _event(f"u-{i}", 1700000000000000000 + i)
         event_append.stage_and_commit(tracker, ticket, ev)
         fn = event_append.event_filename(ev["timestamp"], ev["uuid"], "REVIEW_RESULT")
-        rels.append(f"{ticket}/{fn}")
+        rels.append(f"{ticket_dir_relpath(tracker, ticket)}/{fn}")
     return rels
 
 
@@ -69,7 +70,9 @@ def test_deletes_only_named_events_and_commits(tracker):
     n = event_append.delete_events(tracker, to_delete, "prune: REVIEW_RESULT sidecar for tk")
     assert n == 2
 
-    committed = _git(tracker, "ls-tree", "-r", "--name-only", "HEAD", "tk").stdout
+    committed = _git(
+        tracker, "ls-tree", "-r", "--name-only", "HEAD", ticket_dir_relpath(tracker, "tk")
+    ).stdout
     for rel in to_delete:
         assert Path(rel).name not in committed  # deleted
     for rel in rels[2:]:

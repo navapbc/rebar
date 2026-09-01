@@ -23,8 +23,9 @@ legitimate review.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
+
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ def not_claimable_verdict(ticket_id: str, *, cfg, repo_root=None) -> dict[str, A
         return None
     resolved_id = graph.get("ticket_id", ticket_id)
     try:
-        state = reduce_ticket(os.path.join(tracker, resolved_id)) or {}
+        state = reduce_ticket(layout_ticket_dir(tracker, resolved_id)) or {}
     except Exception:  # noqa: BLE001 — fail-open: an unreducible ticket falls through to the full path
         return None
     ticket_type = str(state.get("ticket_type", ""))
@@ -92,7 +93,7 @@ def _open_blockers(graph: dict[str, Any], tracker: str) -> list[str]:
     open_ids: list[str] = []
     for bid in graph.get("blockers") or []:
         try:
-            st = reduce_ticket(os.path.join(tracker, bid)) or {}
+            st = reduce_ticket(layout_ticket_dir(tracker, bid)) or {}
         except Exception:  # noqa: BLE001 — an unreducible blocker is reported (conservatively) as still-open
             st = {}
         if str(st.get("status", "")) not in ("closed", "deleted"):

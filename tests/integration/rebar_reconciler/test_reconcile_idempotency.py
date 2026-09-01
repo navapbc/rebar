@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ENGINE_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 RECONCILER_DIR = ENGINE_DIR / "rebar_reconciler"
@@ -410,7 +412,7 @@ def test_import_materialises_faithfully_and_binds(git_repo, reconciler_modules, 
     def _events(local_id: str, kind: str) -> list[dict]:
         return [
             json.loads(p.read_text())
-            for p in sorted((tracker / local_id).glob("*.json"))
+            for p in sorted(Path(layout_ticket_dir(tracker, local_id)).glob("*.json"))
             if f"-{kind}." in p.name
         ]
 

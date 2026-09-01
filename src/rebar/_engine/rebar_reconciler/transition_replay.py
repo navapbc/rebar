@@ -29,6 +29,7 @@ import sys
 import urllib.error
 from pathlib import Path
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.config import reconciler_repo_root, tracker_dir
 
 from ._backend import BackendHTTPError, TicketTransport
@@ -69,7 +70,7 @@ def recorded_status_hops(local_id: str, tracker: str | Path) -> list[str]:
     ``LOCAL_STATUS_TO_JIRA``. An unmappable local status is skipped. e.g.
     ``["To Do", "In Progress", "Done"]``.
     """
-    ticket_dir = Path(tracker) / local_id
+    ticket_dir = Path(layout_ticket_dir(str(tracker), local_id))
     hops: list[str] = []
     for path in sorted(ticket_dir.glob("*-STATUS.json"), key=lambda p: p.name):
         try:

@@ -15,6 +15,7 @@ from _repo_root import REPO_ROOT
 
 from rebar import config as cfg
 from rebar._commands import verify_commit as vc
+from rebar._store.ticket_layout import ticket_dir
 
 pytestmark = pytest.mark.unit
 
@@ -36,8 +37,9 @@ def _store(tmp_path: Path) -> Path:
     Jira key `REB-1`."""
     tracker = tmp_path / "store"
     tid = "abcd-1234-ef56-7890"
-    (tracker / tid).mkdir(parents=True)
-    (tracker / tid / "001-CREATE.json").write_text(
+    tdir = Path(ticket_dir(tracker, tid))
+    tdir.mkdir(parents=True)
+    (tdir / "001-CREATE.json").write_text(
         json.dumps({"data": {"alias": "my-alias"}}), encoding="utf-8"
     )
     (tracker / ".bridge_state").mkdir()

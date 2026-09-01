@@ -17,13 +17,14 @@ from pathlib import Path
 
 import rebar
 from rebar._commands import compact as _compact
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def test_rebuild_increments_the_counter_through_the_reexport(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "counter", repo_root=str(rebar_repo))
     rebar.comment(tid, "one", repo_root=str(rebar_repo))
     tracker = rebar_repo / ".tickets-tracker"
-    ticket_dir = tracker / tid
+    ticket_dir = Path(layout_ticket_dir(tracker, tid))
 
     before = _compact.get_rebuild_count()
     rebuilt = _compact.rebuild_snapshot_from_full_log(

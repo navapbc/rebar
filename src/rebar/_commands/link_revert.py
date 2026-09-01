@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 
 from rebar._commands._seam import (
     CommandError,
@@ -24,6 +25,7 @@ from rebar._commands._seam import (
     tracker_dir,
 )
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +269,7 @@ def revert_core(ticket_id: str, target_uuid: str, reason: str = "", *, repo_root
     if not (tracker / ".env-id").is_file():
         raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
     resolved = require_id(ticket_id, tracker)
-    ticket_dir = tracker / resolved
+    ticket_dir = Path(layout_ticket_dir(tracker, resolved))
     require_not_ghost(resolved, tracker)
 
     target_type = None

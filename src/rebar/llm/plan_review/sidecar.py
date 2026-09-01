@@ -1,16 +1,13 @@
 """The ``REVIEW_RESULT`` observability sidecar (child db7b).
 
 Every plan review emits a ``REVIEW_RESULT`` event capturing the per-criterion
-verdicts + finding fingerprints + metadata, so per-criterion FP / remediation
-analysis can be reconstructed OFFLINE without taxing rebar's hot paths.
+verdicts + finding fingerprints + metadata for offline remediation analysis.
 
-It is a **reducer-ignored** sidecar: ``REVIEW_RESULT`` is NOT in
-``KNOWN_EVENT_TYPES``, so the reducer skips it (it never enters compiled state,
-deps, validate, or the close/claim hot paths) and compaction PRESERVES it
+It is a **reducer-ignored** sidecar: the reducer skips it (it never enters
+compiled state, deps, validate, or the close/claim hot paths) and compaction PRESERVES it
 (forward-compat payload, never absorbed into a SNAPSHOT). It IS in the write-path
-allow-list (so it can be emitted) and in ``_NON_REPLAY_KNOWN_TYPES`` (so ``fsck``
-recognises it and does not warn "newer than me"). This mirrors the SYNC /
-PRECONDITIONS precedent. Like every event it follows the
+allow-list and in ``_NON_REPLAY_KNOWN_TYPES`` (so ``fsck`` recognises it and does not warn
+"newer than me"). This mirrors the SYNC / PRECONDITIONS precedent. Like every event it follows the
 preserved-and-ignored-by-older-clones rollout (upgrade reconcile hosts first).
 """
 
@@ -24,6 +21,8 @@ import re
 from collections.abc import Mapping, MutableMapping, Sequence
 from typing import Any
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+from rebar._store.ticket_layout import ticket_dir_relpath
 from rebar.llm.review_kernel import DISCOVERY_NAMESPACE_VERSION
 
 from .manifest import ManifestFormatError, ReviewPhaseMetadata, validate_review_phase_metadata
@@ -124,7 +123,7 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)
@@ -133,7 +132,8 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         old = files[: max(0, len(files) - keep)]
         if not old:
             return 0
-        rels = [f"{rid}/{f}" for f in old]
+        base_relpath = ticket_dir_relpath(tracker, rid)
+        rels = [f"{base_relpath}/{f}" for f in old]
         # Delete through the canonical locked write path (bug malevolent-emigratory-umbrette):
         # a raw git rm + whole-index commit here races normal store writes.
         delete_events(tracker, rels, f"prune: REVIEW_RESULT sidecar for {rid} (retain {keep})")
@@ -173,7 +173,7 @@ def latest_review_result(ticket_id: str, *, repo_root=None) -> dict[str, Any] | 
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)
@@ -221,7 +221,7 @@ def all_review_results(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)
@@ -276,7 +276,7 @@ def latest_review_timestamp(ticket_id: str, *, repo_root=None) -> int | None:
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_dir_name(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
+        ticket_dir = layout_ticket_dir(tracker, rid)
         files = sorted(
             f
             for f in os.listdir(ticket_dir)

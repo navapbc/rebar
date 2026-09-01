@@ -35,7 +35,7 @@ split the precheck cluster out) changes by two lines.
 
 from __future__ import annotations
 
-import os
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 #: Close classes that are DISPOSITIONS — a statement about where the work lives (or why it
 #: will not happen), not a claim that this ticket's acceptance criteria were implemented.
@@ -115,7 +115,7 @@ def replacement_of(
         return bool(candidate) and (not require_live or _is_live_ticket(candidate, tracker))
 
     try:
-        state = reduce_ticket(os.path.join(tracker, ticket_id))
+        state = reduce_ticket(layout_ticket_dir(tracker, ticket_id))
     except Exception:  # noqa: BLE001 — an unreadable source never fails toward a bypass
         state = None
     if not isinstance(state, dict):

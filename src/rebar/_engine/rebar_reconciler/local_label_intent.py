@@ -23,6 +23,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 
 def _extract_tags_from_event(event: dict[str, Any]) -> list[str] | None:
     """Return the tags list contributed by a single event, or None.
@@ -101,7 +103,7 @@ def compute_label_intent_set(ticket_id: str, tracker_dir: Path) -> set[str]:
           A single corrupt file must not abort the pass.
         - Unreadable file -> skip silently (same rationale).
     """
-    ticket_dir = Path(tracker_dir) / ticket_id
+    ticket_dir = Path(layout_ticket_dir(str(tracker_dir), ticket_id))
     if not ticket_dir.is_dir():
         return set()
 

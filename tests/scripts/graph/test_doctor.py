@@ -19,6 +19,8 @@ from _helpers import (
     _write_ticket,
 )
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 
 def _tracker(tmp_path: Path) -> Path:
     tracker = tmp_path / "tracker"
@@ -136,7 +138,7 @@ def test_scan_classifies_an_unreadable_endpoint(graph: ModuleType, tmp_path: Pat
 
     import shutil
 
-    shutil.rmtree(tracker / "task-b")
+    shutil.rmtree(layout_ticket_dir(tracker, "task-b"))
 
     findings = doctor.scan(str(tracker))
     assert len(findings) == 1, findings
@@ -284,7 +286,7 @@ def test_repair_never_touches_an_unreadable_finding(graph: ModuleType, tmp_path:
 
     import shutil
 
-    shutil.rmtree(tracker / "task-b")
+    shutil.rmtree(layout_ticket_dir(tracker, "task-b"))
 
     findings = doctor.scan(str(tracker))
     before = _event_count(tracker)
@@ -333,7 +335,10 @@ def _seed_link(tracker: Path, source: str, target: str, relation: str, suffix: s
         "env_id": "00000000-0000-4000-8000-000000000001",
         "data": {"target_id": target, "relation": relation},
     }
-    path = tracker / source / f"{2000 + int(suffix)}-link-{source}-{target}-{suffix}-LINK.json"
+    path = (
+        Path(layout_ticket_dir(tracker, source))
+        / f"{2000 + int(suffix)}-link-{source}-{target}-{suffix}-LINK.json"
+    )
     path.write_text(json.dumps(event), encoding="utf-8")
 
 

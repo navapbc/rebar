@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
 from rebar._snapshot.ticket_receipt import TicketsOID, _run_git
+from rebar._store.ticket_layout import is_shard_name, shard_for_ticket_id
 
 _JIRA_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]+-[0-9]+$")
 _SHORT_RE = re.compile(r"^[0-9a-f]{4}-[0-9a-f]{4}$")
@@ -107,32 +108,47 @@ class TicketObjectStore:
         return self._paths
 
     @staticmethod
-    def is_root_event_path(path: str) -> bool:
-        if path.startswith(".") or path.count("/") != 1:
-            return False
-        name = path.rsplit("/", 1)[1]
+    def event_path_ticket_id(path: str) -> str | None:
+        if path.startswith("."):
+            return None
+        parts = path.split("/")
+        if len(parts) == 2:
+            ticket_id, name = parts
+        elif len(parts) == 3 and is_shard_name(parts[0]):
+            ticket_id, name = parts[1], parts[2]
+        else:
+            return None
+        if ticket_id.startswith("."):
+            return None
         if name.startswith(".") or not name.endswith(".json"):
-            return False
+            return None
         from rebar.reducer._cache import is_active_event
 
-        return is_active_event(name)
+        return ticket_id if is_active_event(name) else None
+
+    @staticmethod
+    def is_root_event_path(path: str) -> bool:
+        return TicketObjectStore.event_path_ticket_id(path) is not None
 
     def ticket_event_paths(self, ticket_id: str) -> tuple[str, ...]:
-        prefix = f"{ticket_id}/"
+        flat_prefix = f"{ticket_id}/"
+        sharded_prefix = f"{shard_for_ticket_id(ticket_id)}/{ticket_id}/"
         return tuple(
             path
             for path in self.tree_paths()
-            if path.startswith(prefix) and self.is_root_event_path(path)
+            if (path.startswith(flat_prefix) or path.startswith(sharded_prefix))
+            and self.is_root_event_path(path)
         )
 
     def ticket_ids(self) -> tuple[str, ...]:
         if self._ticket_ids is None:
-            ids = {
-                path.split("/", 1)[0]
-                for path in self.tree_paths()
-                if self.is_root_event_path(path)
-                and (path.endswith("-CREATE.json") or path.endswith("-SNAPSHOT.json"))
-            }
+            ids = set()
+            for path in self.tree_paths():
+                ticket_id = self.event_path_ticket_id(path)
+                if ticket_id is not None and (
+                    path.endswith("-CREATE.json") or path.endswith("-SNAPSHOT.json")
+                ):
+                    ids.add(ticket_id)
             self._ticket_ids = tuple(sorted(ids))
         return self._ticket_ids
 
@@ -186,7 +202,9 @@ class TicketObjectStore:
         for path in self.tree_paths():
             if not self.is_root_event_path(path):
                 continue
-            ticket_id = path.split("/", 1)[0]
+            ticket_id = self.event_path_ticket_id(path)
+            if ticket_id is None:
+                continue
             if ticket_id not in known_ids:
                 continue
             if path.endswith("-CREATE.json") and ticket_id not in creates:
@@ -317,10 +335,14 @@ class TicketObjectStore:
         paths: list[str] = []
         if raw in known:
             directories.add(raw)
-            return tuple(sorted(directories)), {}
+            paths.extend(index.alias_sources.get(raw, ()))
+            return tuple(sorted(directories)), self.cat_files(paths)
         if _SHORT_RE.fullmatch(raw):
-            directories.update(tid for tid in index.ticket_ids if tid.startswith(raw))
-            return tuple(sorted(directories)), {}
+            matches = [tid for tid in index.ticket_ids if tid.startswith(raw)]
+            directories.update(matches)
+            for ticket_id in matches:
+                paths.extend(index.alias_sources.get(ticket_id, ()))
+            return tuple(sorted(directories)), self.cat_files(paths)
         if _JIRA_RE.fullmatch(raw):
             paths.append(".bridge_state/bindings.json")
             bound = index.jira_reverse.get(raw) or index.jira_reverse.get(raw.upper())
@@ -333,7 +355,10 @@ class TicketObjectStore:
             for ticket_id in aliases:
                 paths.extend(index.alias_sources.get(ticket_id, ()))
         elif len(raw) >= 4:
-            directories.update(tid for tid in index.ticket_ids if tid.startswith(raw))
+            matches = [tid for tid in index.ticket_ids if tid.startswith(raw)]
+            directories.update(matches)
+            for ticket_id in matches:
+                paths.extend(index.alias_sources.get(ticket_id, ()))
         return tuple(sorted(directories)), self.cat_files(paths)
 
     def grep_ticket_ids(self, needle: str) -> tuple[str, ...]:
@@ -354,8 +379,9 @@ class TicketObjectStore:
         known = frozenset(self.ticket_ids())
         for line in proc.stdout.decode(errors="surrogateescape").splitlines():
             path = line.split(":", 1)[-1]
-            if "/" in path and path.split("/", 1)[0] in known:
-                ids.add(path.split("/", 1)[0])
+            ticket_id = self.event_path_ticket_id(path)
+            if ticket_id in known:
+                ids.add(ticket_id)
         return tuple(sorted(ids))
 
     def inbound_candidate_ids(self, canonical: str) -> tuple[str, ...]:
@@ -380,7 +406,9 @@ class TicketObjectStore:
                 raw = str(data.get("target_id", data.get("target", "")) or "")
                 resolved, _kind = self.resolve(raw) if raw else (None, "")
                 if resolved is not None:
-                    by_target.setdefault(resolved, set()).add(path.split("/", 1)[0])
+                    source_id = self.event_path_ticket_id(path)
+                    if source_id is not None:
+                        by_target.setdefault(resolved, set()).add(source_id)
             self._raw_link_sources = {
                 target: tuple(sorted(sources)) for target, sources in by_target.items()
             }

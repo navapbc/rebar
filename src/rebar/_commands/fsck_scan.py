@@ -46,6 +46,7 @@ from rebar._store.gitutil import (
     _resolve_tracker_git_dir,
     _ticket_dirs,
 )
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 from rebar.reducer._cache import is_active_event
 
@@ -64,7 +65,7 @@ def _check_json_validity(
     lines: list[str] = []
     issues = 0
     for ticket_id in _ticket_dirs(tracker, include_archived=True):
-        ticket_dir = os.path.join(tracker, ticket_id)
+        ticket_dir = layout_ticket_dir(tracker, ticket_id)
         reported = include_archived or not _dir_is_archived(ticket_dir)
         for filename in sorted(os.listdir(ticket_dir)):
             if not filename.endswith(".json") or filename.startswith("."):
@@ -101,7 +102,7 @@ def _check_create_events(
     signed_total = 0
     unsigned_total = 0
     for ticket_id in _ticket_dirs(tracker, include_archived=True):
-        ticket_dir = os.path.join(tracker, ticket_id)
+        ticket_dir = layout_ticket_dir(tracker, ticket_id)
         reported = include_archived or not _dir_is_archived(ticket_dir)
         with contextlib.redirect_stderr(io.StringIO()):
             state = reduce_ticket(ticket_dir)
@@ -197,7 +198,7 @@ def _check_ticket_snapshots(
     lines: list[str] = []
     issues = 0
     for ticket_id in _ticket_dirs(tracker, include_archived=include_archived):
-        ticket_dir = os.path.join(tracker, ticket_id)
+        ticket_dir = layout_ticket_dir(tracker, ticket_id)
 
         def _snap_findings(_dir: str = ticket_dir, _tid: str = ticket_id) -> list[str]:
             out: list[str] = []
@@ -240,7 +241,7 @@ def _check_forward_compat(tracker: str, *, include_archived: bool = False) -> li
 
     unknown_types: set[str] = set()
     for ticket_id in _ticket_dirs(tracker, include_archived=include_archived):
-        ticket_dir = os.path.join(tracker, ticket_id)
+        ticket_dir = layout_ticket_dir(tracker, ticket_id)
         for filename in os.listdir(ticket_dir):
             if not filename.endswith(".json") or filename.startswith("."):
                 continue

@@ -56,6 +56,7 @@ from rebar._store.git_locking import (  # noqa: F401  (compat re-export — see 
     _with_index_lock_retry,
     fetch_coordination_lock,
 )
+from rebar._store.ticket_layout import iter_ticket_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -90,14 +91,10 @@ def _ticket_dirs(tracker: str, *, include_archived: bool = False) -> list[str]:
     matched dot-dirs, and ticket ids never start with '.'. Archived tickets are excluded
     unless ``include_archived`` — an archive is terminal (the fold at archive time leaves no
     unfolded tail), so maintenance walks cost store ACTIVITY, not store history."""
-    dirs = sorted(
-        d
-        for d in os.listdir(tracker)
-        if not d.startswith(".") and os.path.isdir(os.path.join(tracker, d))
-    )
+    dirs = iter_ticket_dirs(tracker)
     if include_archived:
-        return dirs
-    return [d for d in dirs if not _dir_is_archived(os.path.join(tracker, d))]
+        return [d.ticket_id for d in dirs]
+    return [d.ticket_id for d in dirs if not _dir_is_archived(d.path)]
 
 
 # raw-git-ok: locked store seam internal

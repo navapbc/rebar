@@ -41,6 +41,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import rebar
+from rebar._store.ticket_layout import iter_ticket_dirs
 from rebar.config import tracker_dir
 from rebar.metrics.event_metrics import _bounds, _in_range
 from rebar.metrics.registry import REGISTRY, MetricSpec
@@ -58,11 +59,7 @@ def _ticket_dirs(repo_root: Any) -> list[str]:
     root = str(tracker_dir(repo_root))
     if not os.path.isdir(root):
         return []
-    return [
-        os.path.join(root, name)
-        for name in os.listdir(root)
-        if os.path.isdir(os.path.join(root, name))
-    ]
+    return [entry.path for entry in iter_ticket_dirs(root)]
 
 
 def _last_close_ts(ticket_dir: str) -> int | None:
