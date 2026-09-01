@@ -70,11 +70,12 @@ def _written_event(store: Path, ticket_id: str) -> tuple[dict, Path]:
     # reconciler process starts with the identity already existing, so clear the cache here
     # to simulate that fresh-process resolution.
     from rebar._commands import _seam
+    from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
     _seam._ATTRIBUTION_CACHE.clear()
     tracker = Path(tracker_dir(str(store)))
     inbound_translate._write_event_file(tracker, ticket_id, "COMMENT", {"body": "from jira"})
-    ticket_dir = tracker / ticket_id
+    ticket_dir = Path(layout_ticket_dir(tracker, ticket_id))
     files = sorted(ticket_dir.glob("*-COMMENT.json"))
     assert files, "inbound writer produced no COMMENT event file"
     return json.loads(files[-1].read_text(encoding="utf-8")), ticket_dir

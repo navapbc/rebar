@@ -36,6 +36,7 @@ import pytest
 import rebar
 from rebar._commands import compact_trigger
 from rebar._store.paths import StorePaths
+from rebar._store.ticket_layout import ticket_dir
 
 pytestmark = pytest.mark.unit
 
@@ -116,7 +117,7 @@ def test_fires_when_the_written_ticket_needs_folding(
     monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
     tid = _seed(repo, "needs folding", comments=4)
     tracker = _tracker(repo)
-    _age_events(Path(tracker) / tid, _HOUR_NS)
+    _age_events(Path(ticket_dir(tracker, tid)), _HOUR_NS)
     compact_trigger.record_sweep(tracker)  # a fresh sweep, so ONLY the ticket arm can fire
 
     compact_trigger.maybe_compact(tracker, tid, repo_root=str(repo))
@@ -135,7 +136,7 @@ def test_quiet_when_neither_condition_holds(
     from rebar._commands import compact as _compact
 
     _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(repo))
-    _age_events(Path(tracker) / tid, _HOUR_NS)
+    _age_events(Path(ticket_dir(tracker, tid)), _HOUR_NS)
     compact_trigger.record_sweep(tracker)
 
     compact_trigger.maybe_compact(tracker, tid, repo_root=str(repo))
@@ -187,7 +188,7 @@ def test_does_not_spawn_while_a_worker_holds_the_lock(
     monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
     tid = _seed(repo, "burst of closes", comments=4)
     tracker = _tracker(repo)
-    _age_events(Path(tracker) / tid, _HOUR_NS)
+    _age_events(Path(ticket_dir(tracker, tid)), _HOUR_NS)
 
     held = compact_trigger._acquire_trigger_lock(tracker)
     assert held is not None, "precondition: the lock was free"
@@ -233,7 +234,7 @@ def test_off_never_triggers(
     monkeypatch.setenv("REBAR_COMPACT_TRIGGER", "off")
     tid = _seed(repo, "operator drives compaction", comments=4)
     tracker = _tracker(repo)
-    _age_events(Path(tracker) / tid, _HOUR_NS)
+    _age_events(Path(ticket_dir(tracker, tid)), _HOUR_NS)
     # Guard against a vacuous pass: `maybe_compact` also returns quietly when the config cannot
     # be read, so assert the knob genuinely resolved to "off" before trusting the absence of a
     # spawn. Without this the test would still pass if the env wiring silently broke.
@@ -259,7 +260,7 @@ def test_always_folds_inline(store: Path, monkeypatch: pytest.MonkeyPatch) -> No
 
     compact_trigger.maybe_compact(tracker, tid, repo_root=str(repo))
 
-    assert list((Path(tracker) / tid).glob("*-SNAPSHOT.json")), (
+    assert list(Path(ticket_dir(tracker, tid)).glob("*-SNAPSHOT.json")), (
         "trigger=always must fold inline, so the fold is observable in-process"
     )
 
@@ -292,7 +293,7 @@ def test_the_close_neither_folds_nor_holds_the_lock(
     tid = _seed(repo, "close with trigger armed", comments=3)
     rebar.claim(tid, repo_root=str(repo))
     tracker = _tracker(repo)
-    tdir = Path(tracker) / tid
+    tdir = Path(ticket_dir(tracker, tid))
     lock_dir = Path(tracker) / ".ticket-write.lock.d"
 
     locked_during_fold: list[str] = []
@@ -351,7 +352,7 @@ def test_the_worker_stands_aside_while_a_foreground_writer_holds_the_lock(
     finally:
         handle.release()
 
-    assert not list((Path(tracker) / tid).glob("*-SNAPSHOT.json")), (
+    assert not list(Path(ticket_dir(tracker, tid)).glob("*-SNAPSHOT.json")), (
         "the worker folded while a foreground writer held the store lock — optional "
         "housekeeping must yield, not compete"
     )
@@ -370,7 +371,7 @@ def test_the_worker_folds_when_the_store_is_free(
 
     compact_trigger.run_sweep(tracker)
 
-    assert list((Path(tracker) / tid).glob("*-SNAPSHOT.json")), (
+    assert list(Path(ticket_dir(tracker, tid)).glob("*-SNAPSHOT.json")), (
         "the worker did not fold an eligible ticket on a free store"
     )
 

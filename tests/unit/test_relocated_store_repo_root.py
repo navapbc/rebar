@@ -20,8 +20,13 @@ from pathlib import Path
 import pytest
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 pytestmark = pytest.mark.unit
+
+
+def _ticket_dir(tracker: Path, tid: str) -> Path:
+    return Path(layout_ticket_dir(tracker, tid))
 
 
 def _init_relocated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
@@ -272,11 +277,13 @@ def test_run_sweep_folds_by_the_repo_compact_config_on_relocated_store(
     from rebar._commands import compact_trigger
 
     _repo, external, tid = _relocated_store_folding_everything(tmp_path, monkeypatch)
-    assert not list((external / tid).glob("*-SNAPSHOT.json")), "precondition: never folded"
+    assert not list(_ticket_dir(external, tid).glob("*-SNAPSHOT.json")), (
+        "precondition: never folded"
+    )
 
     compact_trigger.run_sweep(str(external))
 
-    assert list((external / tid).glob("*-SNAPSHOT.json")), (
+    assert list(_ticket_dir(external, tid).glob("*-SNAPSHOT.json")), (
         "the sweep did not fold an eligible ticket: it resolved its config root from the "
         "STORE's parent, read the default threshold/horizon instead of the repo's "
         "[compact] block, and folded the right tickets by the wrong rule"
@@ -347,7 +354,7 @@ def test_run_sweep_respects_a_repo_config_that_folds_nothing(
         f"the sweep did not run to a clean return code, so the absence of a SNAPSHOT below "
         f"proves nothing about the configured horizon. got: {outcome!r}"
     )
-    assert not list((external / tid).glob("*-SNAPSHOT.json")), (
+    assert not list(_ticket_dir(external, tid).glob("*-SNAPSHOT.json")), (
         "the sweep folded events its repo config puts INSIDE the compaction horizon"
     )
 
@@ -385,7 +392,7 @@ def test_run_sweep_resolves_the_code_root_without_rebar_root(
 
     compact_trigger.run_sweep(str(external))
 
-    assert list((external / tid).glob("*-SNAPSHOT.json")), (
+    assert list(_ticket_dir(external, tid).glob("*-SNAPSHOT.json")), (
         "with REBAR_ROOT unset the sweep failed to resolve the code root from the git "
         "toplevel of its anchored cwd, so it fell back to default compaction config"
     )

@@ -34,6 +34,8 @@ from rebar._mcp_errors import js_safe_dumps
 from rebar._store import hlc
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import _AUTOMAINT_OFF, run_git_write
+from rebar._store.ticket_layout import iter_ticket_dirs, tracker_root_from_ticket_dir
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_all_tickets
 from rebar.reducer.marker import write_marker
@@ -45,7 +47,7 @@ logger = logging.getLogger(__name__)
 def _has_any_link_refs(tracker_path: Path, deleted_id: str) -> bool:
     """Conservative fast-path: False only when no LINK/SNAPSHOT anywhere references
     the deleted ticket (so the O(N) reduce can be skipped)."""
-    deleted_dir = tracker_path / deleted_id
+    deleted_dir = Path(layout_ticket_dir(tracker_path, deleted_id))
     if deleted_dir.is_dir():
         for _ in deleted_dir.glob("*-LINK.json"):
             return True
@@ -113,7 +115,9 @@ def _write_unlink(
 ) -> str | None:
     if not source_dir.is_dir():
         return None
-    ts = hlc.next_tick(source_dir.parent, source_dir.name)
+    tracker = tracker_root_from_ticket_dir(source_dir)
+    ticket_id = source_dir.name
+    ts = hlc.next_tick(tracker, ticket_id)
     ev_uuid = str(uuid.uuid4())
     unlink_data = {"link_uuid": link_uuid, "target_id": target_id}
     event = {
@@ -128,8 +132,7 @@ def _write_unlink(
     # BEFORE the file is written so a require_authenticated refusal leaves nothing on disk.
     from rebar._commands._seam import finalize_event
 
-    tracker = str(source_dir.parent)
-    finalize_event(event, source_dir.name, "UNLINK", unlink_data, tracker, repo_root)
+    finalize_event(event, ticket_id, "UNLINK", unlink_data, tracker, repo_root)
     dest = source_dir / f"{ts}-{ev_uuid}-UNLINK.json"
     dest.write_text(canonical_str(event), encoding="utf-8")
     return str(dest)
@@ -148,7 +151,7 @@ def scan_and_write_unlinks(
         source_id = state.get("ticket_id", "")
         if not source_id:
             continue
-        source_dir = tracker_path / source_id
+        source_dir = Path(layout_ticket_dir(tracker_path, source_id))
         if source_id == deleted_id:
             for dep in state.get("deps", []):
                 link_uuid = dep.get("link_uuid", "")
@@ -196,16 +199,15 @@ def _children(tracker: str, parent_id: str) -> list[str]:
     from rebar.reducer import reduce_ticket
 
     children: list[str] = []
-    for entry in sorted(Path(tracker).iterdir()):
-        if not entry.is_dir():
+    for entry in iter_ticket_dirs(tracker):
+        tid = entry.ticket_id
+        if tid == parent_id:
             continue
-        tid = entry.name
-        if tid.startswith(".") or tid == parent_id:
-            continue
-        if (entry / ".tombstone.json").is_file() or (entry / ".archived").is_file():
+        path = Path(entry.path)
+        if (path / ".tombstone.json").is_file() or (path / ".archived").is_file():
             continue
         try:
-            state = reduce_ticket(str(entry))
+            state = reduce_ticket(entry.path)
         except Exception:  # noqa: BLE001 — unreadable/corrupt ticket — fsck's job, don't block delete here
             continue
         if state and state.get("status") not in ("error", "fsck_needed"):
@@ -301,7 +303,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stderr.write(f"Error: ticket '{raw_id}' not found\n")
         return 1
 
-    ticket_dir = os.path.join(tracker, ticket_id)
+    ticket_dir = layout_ticket_dir(tracker, ticket_id)
     already_tombstoned = os.path.isfile(os.path.join(ticket_dir, ".tombstone.json"))
 
     if not already_tombstoned:

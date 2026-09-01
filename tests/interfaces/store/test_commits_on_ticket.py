@@ -20,6 +20,7 @@ from _subprocess_env import subprocess_env
 import rebar
 from rebar._commands import _seam
 from rebar._engine_support import commit_impact
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _tracker(repo: Path) -> Path:
@@ -129,7 +130,8 @@ def test_convergence_replay_order(rebar_repo: Path) -> None:
             "author": "t",
             "data": {"commits": [sha]},
         }
-        (_tracker(rebar_repo) / tid / f"{ts}-{uid}-COMMITS.json").write_text(json.dumps(ev))
+        path = Path(layout_ticket_dir(_tracker(rebar_repo), tid)) / f"{ts}-{uid}-COMMITS.json"
+        path.write_text(json.dumps(ev))
 
     write(base + 5, "ffffffff-0000-4000-8000-000000000002", "second")
     write(base + 1, "ffffffff-0000-4000-8000-000000000001", "first")
@@ -212,7 +214,8 @@ def test_dedup_converges_under_reorder(rebar_repo: Path) -> None:
             "author": "t",
             "data": {"commits": shas},
         }
-        (_tracker(rebar_repo) / tid / f"{ts}-{uid}-COMMITS.json").write_text(json.dumps(ev))
+        path = Path(layout_ticket_dir(_tracker(rebar_repo), tid)) / f"{ts}-{uid}-COMMITS.json"
+        path.write_text(json.dumps(ev))
 
     write(base + 9, "ffffffff-0000-4000-8000-000000000002", ["dup", "later"])
     write(base + 1, "ffffffff-0000-4000-8000-000000000001", ["dup", "early"])

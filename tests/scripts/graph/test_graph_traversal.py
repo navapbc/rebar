@@ -17,6 +17,8 @@ from _helpers import (
     _write_ticket,
 )
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 # ---------------------------------------------------------------------------
 # Graph traversal & ready_to_work
 # ---------------------------------------------------------------------------
@@ -160,7 +162,7 @@ def test_graph_archived_ticket_treated_as_closed(graph: ModuleType, tmp_path: Pa
 
     # Write ticket-b with a CREATE event and a LINK event (depends_on ticket-a).
     # The LINK lives in ticket-b's directory — ticket-a's directory is never created.
-    ticket_b_dir = tracker_dir / "ticket-b"
+    ticket_b_dir = Path(layout_ticket_dir(tracker_dir, "ticket-b"))
     ticket_b_dir.mkdir(parents=True)
 
     create_event = {
@@ -195,7 +197,7 @@ def test_graph_archived_ticket_treated_as_closed(graph: ModuleType, tmp_path: Pa
         json.dump(link_event, f)
 
     # ticket-a directory intentionally absent (archived/tombstoned)
-    assert not (tracker_dir / "ticket-a").exists(), (
+    assert not Path(layout_ticket_dir(tracker_dir, "ticket-a")).exists(), (
         "ticket-a directory must not exist to simulate archival"
     )
 
@@ -225,7 +227,7 @@ def test_graph_tombstone_tombstone_json_respected(graph: ModuleType, tmp_path: P
     _write_ticket(tracker_dir, "ticket-b", status="open")
 
     # Create ticket-a directory with only a .tombstone.json
-    ticket_a_dir = tracker_dir / "ticket-a"
+    ticket_a_dir = Path(layout_ticket_dir(tracker_dir, "ticket-a"))
     ticket_a_dir.mkdir(parents=True)
     tombstone = {"status": "closed", "closed_at": 1700000000}
     with open(ticket_a_dir / ".tombstone.json", "w") as f:
@@ -269,7 +271,7 @@ def test_ready_to_work_when_blocker_has_deleted_tombstone(
     # _get_ticket_status reads .tombstone.json first and returns "deleted",
     # but the current check `status != "closed"` fails to recognise "deleted" as terminal.
     _write_ticket(tracker_dir, "ticket-a", status="open")
-    ticket_a_dir = tracker_dir / "ticket-a"
+    ticket_a_dir = Path(layout_ticket_dir(tracker_dir, "ticket-a"))
     tombstone = {"status": "deleted", "deleted_at": 1700000000}
     with open(ticket_a_dir / ".tombstone.json", "w") as f:
         json.dump(tombstone, f)

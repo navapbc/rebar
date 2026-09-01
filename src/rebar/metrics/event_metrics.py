@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import rebar
+from rebar._store.ticket_layout import iter_ticket_dirs
 from rebar.config import tracker_dir
 from rebar.metrics.registry import REGISTRY, MetricSpec
 from rebar.reducer._cache import is_active_event
@@ -54,12 +55,7 @@ def _ticket_dirs(repo_root: Any) -> list[str]:
     root = str(tracker_dir(repo_root))
     if not os.path.isdir(root):
         return []
-    out: list[str] = []
-    for name in os.listdir(root):
-        path = os.path.join(root, name)
-        if os.path.isdir(path):
-            out.append(path)
-    return out
+    return [entry.path for entry in iter_ticket_dirs(root)]
 
 
 def _event_files(

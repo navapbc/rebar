@@ -26,6 +26,7 @@ from pathlib import Path
 from rebar import config
 from rebar import secret_screen as _secret_screen
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,7 @@ def require_not_ghost(ticket_id: str, tracker: Path) -> None:
     Mirrors the bash ``find ... -name '*-CREATE.json' -o -name '*-SNAPSHOT.json'``
     guard that prevents writing an event onto a ticket that was never created.
     """
-    tdir = tracker / ticket_id
+    tdir = Path(layout_ticket_dir(tracker, ticket_id))
     if tdir.is_dir():
         for entry in os.listdir(tdir):
             if entry.startswith("."):
@@ -331,7 +332,7 @@ def current_tags(ticket_id: str, tracker: Path) -> list[str]:
     from rebar.reducer import reduce_ticket
 
     try:
-        state = reduce_ticket(str(tracker / ticket_id))
+        state = reduce_ticket(layout_ticket_dir(tracker, ticket_id))
         return list((state or {}).get("tags") or [])
     except Exception:  # noqa: BLE001 — bash tag helpers swallow show failures too; fall open to no observed tags
         return []
@@ -355,7 +356,7 @@ def _event_ticket_type(ticket_id, event_type, data, tracker) -> str | None:
     try:
         from rebar.reducer import reduce_ticket
 
-        state = reduce_ticket(os.path.join(str(tracker), ticket_id))
+        state = reduce_ticket(layout_ticket_dir(tracker, ticket_id))
         t = state.get("ticket_type") if isinstance(state, dict) else None
         return t if isinstance(t, str) else None
     except Exception:  # noqa: BLE001 — an unreadable ticket is simply "type unknown" (non-exempt)

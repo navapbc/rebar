@@ -29,6 +29,7 @@ one-way.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 # Back-compat: ``_inbound_update_write_edit_event`` moved to ``apply_inbound_events``
 # with the rest of the event writers, but it is still driven as
@@ -161,6 +162,7 @@ def _inbound_unlink_one(local_id, target_local_id, relation, repo_root, confirm_
     import rebar
     from rebar._commands._seam import tracker_dir
     from rebar._commands.unlink import _get_link_info
+    from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
     # G3 DISCRIMINATOR (epic a4bd): "managed" proves ownership, NOT that the peer ever saw the
     # link, and G4 misses the outbound-ADD-deduped case. Require positive evidence instead, so
@@ -179,7 +181,11 @@ def _inbound_unlink_one(local_id, target_local_id, relation, repo_root, confirm_
         return False
 
     try:
-        link_uuid, _ = _get_link_info(tracker_dir(repo_root) / local_id, target_local_id, relation)
+        link_uuid, _ = _get_link_info(
+            Path(layout_ticket_dir(tracker_dir(repo_root), local_id)),
+            target_local_id,
+            relation,
+        )
     except Exception as exc:  # noqa: BLE001 — fail-open: decline the removal, never guess
         logger.warning(
             "_apply_inbound_update: cannot resolve the net-active link %s -> %s, "

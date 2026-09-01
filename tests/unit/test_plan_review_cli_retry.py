@@ -26,6 +26,7 @@ import pytest
 from _subprocess_env import SubprocessEnv, subprocess_env
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.llm.plan_review import sidecar
 
 pytestmark = pytest.mark.unit
@@ -171,7 +172,7 @@ def _mkticket(repo: Path) -> str:
 
 
 def _sidecar_files(repo: Path, tid: str) -> list[Path]:
-    ticket_dir = repo / ".tickets-tracker" / tid
+    ticket_dir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     return sorted(ticket_dir.glob(f"*-{sidecar.EVENT_TYPE}.json"))
 
 

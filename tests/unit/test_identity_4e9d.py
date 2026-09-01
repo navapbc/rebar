@@ -17,6 +17,7 @@ import pytest
 
 import rebar
 from rebar._commands._seam import tracker_dir
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 GIT_EMAIL = "dev@example.com"
 
@@ -39,7 +40,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _events(repo: Path, tid: str, etype: str) -> list[dict]:
     """Raw stored event envelopes of ``etype`` for ``tid`` (chronological)."""
-    tdir = Path(tracker_dir(str(repo))) / tid
+    tdir = Path(layout_ticket_dir(tracker_dir(str(repo)), tid))
     out = []
     for name in sorted(os.listdir(tdir)):
         if name.endswith(f"-{etype}.json") and not name.startswith("."):

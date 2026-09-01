@@ -19,6 +19,7 @@ from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands import _seam
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _tracker(repo: Path) -> Path:
@@ -40,7 +41,7 @@ def _write_event_file(repo: Path, tid: str, etype: str, ts: int, uid: str, data:
         "author": "test",
         "data": data,
     }
-    path = tracker / tid / f"{ts}-{uid}-{etype}.json"
+    path = Path(layout_ticket_dir(tracker, tid)) / f"{ts}-{uid}-{etype}.json"
     path.write_text(json.dumps(event, ensure_ascii=False))
     return path
 
@@ -186,7 +187,7 @@ def test_survives_compaction(rebar_repo: Path) -> None:
         check=False,
     )
     assert cp.returncode == 0, cp.stderr
-    snaps = list((_tracker(rebar_repo) / tid).glob("*-SNAPSHOT.json"))
+    snaps = list(Path(layout_ticket_dir(_tracker(rebar_repo), tid)).glob("*-SNAPSHOT.json"))
     assert snaps, "expected a SNAPSHOT after compaction"
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     assert state["workflow_runs"]["r"]["status"] == "succeeded"

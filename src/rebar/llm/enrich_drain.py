@@ -28,6 +28,7 @@ import time
 
 from rebar._store.paths import StorePaths
 from rebar._store.stamped_lock import release_stamped_lock, stamped_file_lock
+from rebar._store.ticket_layout import iter_ticket_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -137,13 +138,8 @@ def status(tracker: str, *, now_ns: int | None = None, repo_root=None) -> dict[s
 
     now = now_ns if now_ns is not None else _queue._now_ns()
     pending = claimed = soaking = 0
-    try:
-        entries = os.listdir(tracker)
-    except OSError:
-        entries = []
-    for name in entries:
-        if name.startswith(".") or not os.path.isdir(os.path.join(tracker, name)):
-            continue
+    for entry in iter_ticket_dirs(tracker):
+        name = entry.ticket_id
         st = _queue.reduce_ticket(name, tracker, now_ns=now)
         if not st.get("enqueued") or st.get("done"):
             continue
@@ -176,17 +172,12 @@ def _stale_digest_ids(tracker: str, repo_root, *, now: int, debounce_ns: int) ->
 
     out: list[str] = []
     debounced = 0
-    try:
-        entries = os.listdir(tracker)
-    except OSError:
-        return out
-    for name in entries:
-        if name.startswith(".") or not os.path.isdir(os.path.join(tracker, name)):
-            continue
+    for entry in iter_ticket_dirs(tracker):
+        name = entry.ticket_id
         if ds.freshness(name, tracker=tracker, repo_root=repo_root) != "present-stale":
             continue
         if debounce_ns > 0:
-            done = _queue._latest(os.path.join(tracker, name), _queue.DONE)
+            done = _queue._latest(entry.path, _queue.DONE)
             if done is not None and (now - done[0]) < debounce_ns:
                 debounced += 1
                 continue
@@ -351,16 +342,11 @@ def _live_drainer_ids(tracker: str, now: int) -> set[str]:
     from rebar.llm.overlap import queue as _queue
 
     out: set[str] = set()
-    try:
-        entries = os.listdir(tracker)
-    except OSError:
-        return out
-    for name in entries:
-        if name.startswith(".") or not os.path.isdir(os.path.join(tracker, name)):
-            continue
+    for entry in iter_ticket_dirs(tracker):
+        name = entry.ticket_id
         if not _queue.reduce_ticket(name, tracker, now_ns=now).get("claimed"):
             continue
-        latest = _queue._latest(os.path.join(tracker, name), _queue.CLAIM)
+        latest = _queue._latest(entry.path, _queue.CLAIM)
         did = (latest[2] or {}).get("drainer_id") if latest else None
         if did:
             out.add(str(did))

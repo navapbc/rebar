@@ -32,6 +32,8 @@ import rebar
 from rebar._commands import compact as _compact
 from rebar._commands import compact_recovery
 from rebar._commands import compact_txn as _txn
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+from rebar._store.ticket_layout import ticket_dir_relpath
 from rebar.reducer import reduce_ticket
 
 pytestmark = pytest.mark.unit
@@ -60,7 +62,11 @@ def _tracker(repo: Path) -> Path:
 
 
 def _tdir(repo: Path, tid: str) -> Path:
-    return _tracker(repo) / tid
+    return Path(layout_ticket_dir(_tracker(repo), tid))
+
+
+def _trel(repo: Path, tid: str) -> str:
+    return ticket_dir_relpath(_tracker(repo), tid)
 
 
 def _status(repo: Path) -> str:
@@ -471,7 +477,9 @@ def test_successful_fold_commits_and_leaves_no_journal(store: Path) -> None:
 
     snaps = _snapshots(repo, tid)
     assert len(snaps) == 1
-    assert _in_head(repo, f"{tid}/{snaps[0].name}"), "the fold's SNAPSHOT must be committed"
+    assert _in_head(repo, f"{_trel(repo, tid)}/{snaps[0].name}"), (
+        "the fold's SNAPSHOT must be committed"
+    )
     assert _status(repo) == ""
     assert not compact_recovery.pending_intents(str(_tracker(repo)))
     assert _semantic(reduce_ticket(str(_tdir(repo, tid)))) == before
@@ -537,7 +545,7 @@ def test_crash_state_is_json_round_trippable(store: Path) -> None:
     )
     record = json.loads(Path(journal).read_text(encoding="utf-8"))
     assert record["ticket_id"] == tid
-    assert record["snapshot"] == f"{tid}/x-SNAPSHOT.json"
-    assert record["sources"] == [f"{tid}/{Path(f).name}" for f in files]
+    assert record["snapshot"] == f"{_trel(repo, tid)}/x-SNAPSHOT.json"
+    assert record["sources"] == [f"{_trel(repo, tid)}/{Path(f).name}" for f in files]
     compact_recovery.discard(journal)
     assert not compact_recovery.pending_intents(tracker)

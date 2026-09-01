@@ -19,6 +19,8 @@ import rebar
 from rebar._commands import fsck as fsck_mod
 from rebar._store import ensures
 
+_ENSURE_COUNT = len(ensures.REGISTRY_IDS)
+
 
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -53,7 +55,7 @@ def _tickets_head(tracker: Path) -> str:
 # ── read-only ensures: N/M line ───────────────────────────────────────────────
 def test_plain_fsck_prints_converged_line(repo: Path) -> None:
     out = rebar.fsck(repo_root=str(repo))
-    assert "ensures: 9/9 applied" in out
+    assert f"ensures: {_ENSURE_COUNT}/{_ENSURE_COUNT} applied" in out
     assert "run `rebar fsck --repair`" not in out  # converged → no nudge
 
 
@@ -62,7 +64,7 @@ def test_plain_fsck_pending_line_and_no_sweep(repo: Path) -> None:
     (tracker / ensures.APPLIED_MARKER).unlink()  # simulate a pre-feature/pending store
     before = _tickets_head(tracker)
     out = rebar.fsck(repo_root=str(repo))
-    assert "ensures: 0/9 applied" in out
+    assert f"ensures: 0/{_ENSURE_COUNT} applied" in out
     assert "run `rebar fsck --repair` to converge" in out
     # read-only fsck must NOT sweep: no marker rewritten, no commits.
     assert not (tracker / ensures.APPLIED_MARKER).exists()
@@ -88,10 +90,10 @@ def test_repair_converges_pending_store(repo: Path, capsys) -> None:
     ensures._reset_pending_cache()
     fsck_mod.fsck_cli(["--repair"], repo_root=str(repo))
     out = capsys.readouterr().out
-    assert "ensures: swept 9 unit(s)" in out
-    # marker rewritten → converged, and the re-scan line now reads 9/9.
+    assert f"ensures: swept {_ENSURE_COUNT} unit(s)" in out
+    # marker rewritten → converged, and the re-scan line now reports every unit applied.
     assert ensures.applied_ids(tracker) == set(ensures.REGISTRY_IDS)
-    assert "ensures: 9/9 applied" in out
+    assert f"ensures: {_ENSURE_COUNT}/{_ENSURE_COUNT} applied" in out
 
 
 def test_repair_ensure_phase_is_idempotent(repo: Path, capsys) -> None:

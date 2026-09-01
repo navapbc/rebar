@@ -38,6 +38,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 logger = logging.getLogger("rebar")
 
 _JOURNAL_NAME = "recent-creates.json"
@@ -106,7 +108,7 @@ def _candidate_status(tracker: Any, ticket_id: str) -> str:
     try:
         from rebar.reducer import reduce_ticket
 
-        status = (reduce_ticket(os.path.join(str(tracker), ticket_id)) or {}).get("status")
+        status = (reduce_ticket(layout_ticket_dir(tracker, ticket_id)) or {}).get("status")
         return status if isinstance(status, str) and status else "unknown"
     except Exception:  # noqa: BLE001 — best-effort: the advisory is still worth emitting
         return "unknown"

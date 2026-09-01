@@ -1027,7 +1027,13 @@ def test_reconverge_waits_for_a_lock_owned_push_recovery_merge(tmp_path: Path) -
 
 # ─────────────────── RC2b: snapshot horizon + rebuild-on-stray (36d1) ─────────
 def _seed_dir_files(tracker: Path, ticket_id: str, suffix: str) -> list[Path]:
-    return sorted(p for p in (tracker / ticket_id).glob(f"*{suffix}") if not p.name.startswith("."))
+    from rebar._store.ticket_layout import ticket_dir
+
+    return sorted(
+        p
+        for p in Path(ticket_dir(tracker, ticket_id)).glob(f"*{suffix}")
+        if not p.name.startswith(".")
+    )
 
 
 def test_compaction_horizon_keeps_young_events_live(two_clones):

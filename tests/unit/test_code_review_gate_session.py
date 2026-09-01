@@ -24,6 +24,7 @@ from typing import ClassVar
 import pytest
 
 import rebar
+from rebar._store.ticket_layout import iter_ticket_dirs
 from rebar.llm import config as llmcfg
 from rebar.llm.config import LLMConfig, current_code_root, current_tickets_root
 from rebar.llm.runner import FakeRunner
@@ -135,7 +136,7 @@ def test_code_review_gate_runs_attested_with_code_and_ticket_roots(
     tracker = Path(seen["tickets_root"]) / ".tickets-tracker"
     assert tracker.is_dir()
     short = tid.split("-")[0]
-    assert any(d.is_dir() and d.name.startswith(short) for d in tracker.iterdir()), (
+    assert any(ticket.ticket_id.startswith(short) for ticket in iter_ticket_dirs(tracker)), (
         f"the pinned ticket store has no event dir for {tid!r}"
     )
     assert seen.get("cfg_tickets") == seen.get("tickets_root"), (

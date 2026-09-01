@@ -25,6 +25,7 @@ import pytest
 
 import rebar
 from rebar import signing
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 
 
@@ -49,7 +50,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _ticket_dir(store: Path, tid: str) -> Path:
-    return store / ".tickets-tracker" / tid
+    return Path(layout_ticket_dir(store / ".tickets-tracker", tid))
 
 
 def _read_cache_file(ticket_dir: Path) -> dict:

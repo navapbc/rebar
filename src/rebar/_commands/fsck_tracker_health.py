@@ -26,6 +26,7 @@ import subprocess
 from rebar import config
 from rebar._store import env_identity
 from rebar._store.gitutil import path_is_foreign_to_branch, run_git
+from rebar._store.ticket_layout import is_store_data_dir
 from rebar.reducer._cache import RETIRED_SUFFIX
 
 # Watchdog on fsck's read-only local git calls (bug 9305): NOT a latency budget — these
@@ -119,22 +120,14 @@ def foreign_store_path_list(tracker: str) -> list[str]:
     A top-level entry is ticket data iff it is a directory holding at least one event file
     (active or ``*.retired``); store artifacts all begin with a dot and are skipped."""
 
-    def _holds_events(path: str) -> bool:
-        try:
-            return any(
-                n.endswith(".json") or n.endswith(RETIRED_SUFFIX)
-                for n in os.listdir(path)
-                if not n.startswith(".")
-            )
-        except OSError:
-            return False
-
     try:
         entries = sorted(os.listdir(tracker))
     except OSError:
         return []
     return [
-        n for n in entries if not n.startswith(".") and not _holds_events(os.path.join(tracker, n))
+        n
+        for n in entries
+        if not n.startswith(".") and not is_store_data_dir(os.path.join(tracker, n))
     ]
 
 

@@ -20,6 +20,7 @@ from rebar import config
 from rebar._commands import delete as _delete
 from rebar._commands import init as _init
 from rebar._store import git_locking, gitutil
+from rebar._store.ticket_layout import ticket_dir
 
 _STALE_S = getattr(gitutil, "_INDEX_LOCK_STALE_S", 300)
 
@@ -61,7 +62,7 @@ def test_delete_reclaims_stale_index_lock(tmp_path: Path) -> None:
     assert rc == 0, "delete must self-heal a stale index.lock, not fail hard"
     assert not lock.exists(), "the stale lock should have been reclaimed by the delete write"
     # the ticket is tombstoned (its .tombstone.json marker was committed)
-    assert (Path(_tracker(repo)) / tid / ".tombstone.json").is_file()
+    assert (Path(ticket_dir(_tracker(repo), tid)) / ".tombstone.json").is_file()
 
 
 def test_init_git_commit_reclaims_stale_index_lock(tmp_path: Path) -> None:
@@ -130,7 +131,7 @@ def test_delete_rides_out_contended_index_lock(tmp_path: Path, monkeypatch) -> N
 
     rc = _delete.delete_cli([tid, "--user-approved"], repo_root=str(repo))
     assert rc == 0, "delete must ride out a contended index.lock via retry backoff"
-    assert (Path(_tracker(repo)) / tid / ".tombstone.json").is_file()
+    assert (Path(ticket_dir(_tracker(repo), tid)) / ".tombstone.json").is_file()
     _assert_retry_exercised(attempts)
 
 

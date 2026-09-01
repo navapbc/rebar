@@ -7,7 +7,6 @@ conftest.py; event-writing helpers + the module loader in _helpers.py.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from types import ModuleType
 
@@ -88,38 +87,33 @@ def test_compute_archive_eligible_regression(graph: ModuleType, tmp_path: Path) 
         since it's already archived).
     """
 
-    tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
+    tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir(parents=True)
 
-    try:
-        # ticket-already-archived: closed and already archived
-        _write_ticket(tracker_dir, "ticket-already-archived", status="closed")
-        _write_archive_event(tracker_dir, "ticket-already-archived")
+    # ticket-already-archived: closed and already archived
+    _write_ticket(tracker_dir, "ticket-already-archived", status="closed")
+    _write_archive_event(tracker_dir, "ticket-already-archived")
 
-        # ticket-eligible: closed, not archived, no open deps — should be eligible
-        _write_ticket(tracker_dir, "ticket-eligible", status="closed")
+    # ticket-eligible: closed, not archived, no open deps — should be eligible
+    _write_ticket(tracker_dir, "ticket-eligible", status="closed")
 
-        # ticket-open: open, not linked to anything
-        _write_ticket(tracker_dir, "ticket-open", status="open")
+    # ticket-open: open, not linked to anything
+    _write_ticket(tracker_dir, "ticket-open", status="open")
 
-        eligible = graph.compute_archive_eligible(str(tracker_dir))
+    eligible = graph.compute_archive_eligible(str(tracker_dir))
 
-        assert "ticket-eligible" in eligible, (
-            f"ticket-eligible should be archive-eligible; got {eligible}. "
-            "compute_archive_eligible must still scan all tickets including archived ones."
-        )
+    assert "ticket-eligible" in eligible, (
+        f"ticket-eligible should be archive-eligible; got {eligible}. "
+        "compute_archive_eligible must still scan all tickets including archived ones."
+    )
 
-        assert "ticket-already-archived" not in eligible, (
-            f"ticket-already-archived is already archived, must not be re-eligible; got {eligible}"
-        )
+    assert "ticket-already-archived" not in eligible, (
+        f"ticket-already-archived is already archived, must not be re-eligible; got {eligible}"
+    )
 
-        assert "ticket-open" not in eligible, (
-            f"ticket-open is not closed, must not be eligible; got {eligible}"
-        )
-    finally:
-        import shutil
-
-        shutil.rmtree(str(tracker_dir.parent), ignore_errors=True)
+    assert "ticket-open" not in eligible, (
+        f"ticket-open is not closed, must not be eligible; got {eligible}"
+    )
 
 
 @pytest.mark.unit
@@ -138,30 +132,23 @@ def test_transitive_traversal_includes_archived_midchain(graph: ModuleType, tmp_
     Expected: check_would_create_cycle('ticket-c', 'ticket-a', 'blocks', ...) == True
     """
 
-    tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
+    tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir(parents=True)
 
-    try:
-        _write_ticket(tracker_dir, "ticket-a", status="open")
-        _write_ticket(tracker_dir, "ticket-b", status="open")
-        _write_ticket(tracker_dir, "ticket-c", status="open")
-        _write_blocks_link(tracker_dir, "ticket-a", "ticket-b", timestamp=1500)
-        _write_blocks_link(tracker_dir, "ticket-b", "ticket-c", timestamp=1501)
-        _write_archive_event(tracker_dir, "ticket-b")
+    _write_ticket(tracker_dir, "ticket-a", status="open")
+    _write_ticket(tracker_dir, "ticket-b", status="open")
+    _write_ticket(tracker_dir, "ticket-c", status="open")
+    _write_blocks_link(tracker_dir, "ticket-a", "ticket-b", timestamp=1500)
+    _write_blocks_link(tracker_dir, "ticket-b", "ticket-c", timestamp=1501)
+    _write_archive_event(tracker_dir, "ticket-b")
 
-        would_cycle = graph.check_would_create_cycle(
-            "ticket-c", "ticket-a", "blocks", str(tracker_dir)
-        )
+    would_cycle = graph.check_would_create_cycle("ticket-c", "ticket-a", "blocks", str(tracker_dir))
 
-        assert would_cycle is True, (
-            "check_would_create_cycle must detect cycle through archived mid-chain ticket-b. "
-            "Archived exclusion must NOT prune nodes during transitive traversal. "
-            f"Got would_cycle={would_cycle!r} (expected True)."
-        )
-    finally:
-        import shutil
-
-        shutil.rmtree(str(tracker_dir.parent), ignore_errors=True)
+    assert would_cycle is True, (
+        "check_would_create_cycle must detect cycle through archived mid-chain ticket-b. "
+        "Archived exclusion must NOT prune nodes during transitive traversal. "
+        f"Got would_cycle={would_cycle!r} (expected True)."
+    )
 
 
 @pytest.mark.unit
@@ -277,7 +264,7 @@ def test_build_dep_graph_excludes_archived_children(graph: ModuleType, tmp_path:
     (default True) and filter children by archived status.
     """
 
-    tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
+    tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir(parents=True)
 
     try:
@@ -320,7 +307,7 @@ def test_build_dep_graph_excludes_archived_blockers(graph: ModuleType, tmp_path:
     This test is RED — archived exclusion in blockers is not yet implemented.
     """
 
-    tracker_dir = Path(tempfile.mkdtemp()) / "tracker"
+    tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir(parents=True)
 
     try:

@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _git(tracker: Path, *args: str) -> str:
@@ -77,7 +78,7 @@ def legacy_compacted(rebar_repo: Path):
     rebar.comment(tid, "victim-body-that-must-be-restored")
     rebar.comment(tid, "surviving-orphan-body")
 
-    ticket_dir = tracker / tid
+    ticket_dir = Path(layout_ticket_dir(tracker, tid))
     comments = sorted(ticket_dir.glob("*-COMMENT.json"))
     assert len(comments) == 2, f"fixture expects two COMMENTs, got {[c.name for c in comments]}"
     victim = comments[0]

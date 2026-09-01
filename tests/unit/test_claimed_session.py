@@ -16,6 +16,7 @@ import pytest
 
 import rebar
 from rebar._commands._seam import tracker_dir
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import make_initial_state, reduce_ticket
 from rebar.reducer._processors import process_status
 
@@ -39,11 +40,11 @@ def rebar_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _state(tid: str, repo: Path) -> dict:
-    return reduce_ticket(str(tracker_dir(str(repo)) / tid))
+    return reduce_ticket(layout_ticket_dir(tracker_dir(str(repo)), tid))
 
 
 def _status_events(tid: str, repo: Path) -> list[dict]:
-    ticket_dir = tracker_dir(str(repo)) / tid
+    ticket_dir = Path(layout_ticket_dir(tracker_dir(str(repo)), tid))
     out = []
     for path in sorted(glob.glob(str(ticket_dir / "*-STATUS.json"))):
         out.append(json.loads(Path(path).read_text(encoding="utf-8")))

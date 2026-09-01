@@ -2,12 +2,9 @@
 (link / unlink / revert live in ``link_revert.py``).
 
 These are the heavier leaf writes — multi-flag arg parsing, validation with
-``--output json`` error envelopes, alias generation, and structured output. Each
-splits into a ``*_core`` (validation + event compose + append through the seam,
-returning structured data) shared by the library, and a ``*_cli`` (output-format
-parsing + text/json formatting) invoked by the argparse CLI. The core and CLI
-share the same Python helpers (alias compute, the shared reducer,
-``rebar._engine_support.output``) so library and CLI behaviour match.
+``--output json`` error envelopes, and alias generation. Each splits into a ``*_core``
+shared by the library, and a ``*_cli`` invoked by the argparse CLI. Both share the
+same Python helpers so library and CLI behaviour match.
 """
 
 from __future__ import annotations
@@ -15,6 +12,7 @@ from __future__ import annotations
 import logging
 import sys
 import uuid as _uuid
+from pathlib import Path
 
 from rebar._commands._seam import (
     CommandError,
@@ -34,6 +32,8 @@ from rebar._commands.composer_edit import (
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.ticket_layout import existing_ticket_dir
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 logger = logging.getLogger(__name__)
 
@@ -182,9 +182,9 @@ def create_core(
     parent_id = ""
     if parent:
         resolved = resolve_ticket_id(parent, str(tracker)) or parent
-        if not (tracker / resolved).is_dir():
+        if existing_ticket_dir(tracker, resolved) is None:
             raise CommandError(f"Error: parent ticket '{resolved}' does not exist")
-        pdir = tracker / resolved
+        pdir = Path(layout_ticket_dir(tracker, resolved))
         if not any(
             p.name.endswith(("-CREATE.json", "-SNAPSHOT.json")) and not p.name.startswith(".")
             for p in pdir.iterdir()

@@ -41,6 +41,7 @@ from rebar._commands import compact as _compact
 from rebar._commands import fsck as _fsck
 from rebar._commands.fsck_scan import _check_snapshot
 from rebar._store.event_prepare import event_filename
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 
 pytestmark = pytest.mark.unit
@@ -69,7 +70,7 @@ def _tracker(repo: Path) -> Path:
 
 
 def _tdir(repo: Path, tid: str) -> Path:
-    return _tracker(repo) / tid
+    return Path(layout_ticket_dir(_tracker(repo), tid))
 
 
 def _comments(repo: Path, tid: str) -> list[str]:

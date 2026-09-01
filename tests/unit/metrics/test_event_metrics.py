@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.metrics.event_metrics import attempts_per_ticket
 
 pytestmark = pytest.mark.unit
@@ -46,7 +47,7 @@ def _write_event(ticket_dir: Path, ts_ns: int, event_type: str, data: dict) -> N
 
 
 def _ticket(tracker: Path, tid: str, ttype: str = "task") -> Path:
-    d = tracker / tid
+    d = Path(layout_ticket_dir(tracker, tid))
     d.mkdir(parents=True)
     _write_event(d, _ns("2026-01-01T00:00:00"), "CREATE", {"ticket_type": ttype, "title": tid})
     return d
