@@ -129,6 +129,7 @@ _CORE_FACTORIES: dict[str, str] = {
     "verify-signature": f"{_CORE_P}.signing:build_verify_signature",
     "compact": f"{_CORE_P}.compact:build_compact",
     "compact-all": f"{_CORE_P}.compact:build_compact_all",
+    "reclaim-collapse": f"{_CORE_P}.reclaim:build_reclaim_collapse",
     "export": f"{_CORE_P}.io:build_export",
     "import": f"{_CORE_P}.io:build_import",
     "transition": f"{_CORE_P}.lifecycle:build_transition",
@@ -305,6 +306,15 @@ def _simple_read_groups() -> tuple[Route, ...]:
             handler="rebar._commands.compact:compact_all_cli",
             adapter="argv",
             init="full",
+        ),
+        Route(
+            "reclaim-collapse",
+            group="static_read",
+            no_auto_mount=True,
+            parser_factory=_core_factory("reclaim-collapse"),
+            handler="rebar._commands.reclaim_collapse:cli",
+            adapter="argv",
+            init="none",
         ),
         Route(
             "export",
