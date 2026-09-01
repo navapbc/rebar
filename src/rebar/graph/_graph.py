@@ -6,6 +6,8 @@ import os
 from collections.abc import Callable, Iterator
 from typing import Any
 
+from rebar._store.ticket_layout import iter_ticket_dirs
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import is_terminal_status
 
 from . import _loader as _loader_module
@@ -73,7 +75,7 @@ def _compute_dep_graph(
         # it is itself a session_log. Logs are excluded as *graph nodes* of other
         # tickets, but `deps <session_log>` must still surface the log's own
         # non-blocking links (relates_to / discovered_from) — reduce it singly.
-        ticket_dir = os.path.join(tracker_dir, ticket_id)
+        ticket_dir = layout_ticket_dir(tracker_dir, ticket_id)
         if os.path.isdir(ticket_dir):
             single = reduce_ticket(ticket_dir)
             if single is not None and isinstance(single, dict):
@@ -143,27 +145,15 @@ def _blocks_targets(state: dict[str, Any]) -> Iterator[str]:
 
 def _dependents_of(tracker_dir: str, current: str, visited: set[str]) -> Iterator[str]:
     """Yield every not-yet-visited ticket dir carrying a ``depends_on`` dep on ``current``."""
-    try:
-        entries = os.listdir(tracker_dir)
-    except OSError:
-        return
-
-    for entry in entries:
-        if entry in visited:
+    for entry in iter_ticket_dirs(tracker_dir):
+        if entry.ticket_id in visited:
             continue
-        # Skip hidden directories (.suggestions, .review-events, .index, etc.)
-        # — they are not ticket dirs and their JSON files are not ticket events.
-        if entry.startswith("."):
-            continue
-        entry_path = os.path.join(tracker_dir, entry)
-        if not os.path.isdir(entry_path):
-            continue
-        e_state = _reduce_or_none(entry_path)
+        e_state = _reduce_or_none(entry.path)
         if e_state is None:
             continue
         for dep in e_state.get("deps", []):
             if dep.get("relation") == "depends_on" and dep.get("target_id") == current:
-                yield entry
+                yield entry.ticket_id
 
 
 def _get_all_blocked_by(ticket_id: str, tracker_dir: str) -> set[str]:
@@ -176,7 +166,7 @@ def _get_all_blocked_by(ticket_id: str, tracker_dir: str) -> set[str]:
     """
 
     def neighbors(current: str, visited: set[str]) -> Iterator[str]:
-        current_dir = os.path.join(tracker_dir, current)
+        current_dir = layout_ticket_dir(tracker_dir, current)
         if os.path.isdir(current_dir):
             state = _reduce_or_none(current_dir)
             if state is not None:
@@ -229,7 +219,7 @@ def _is_at_level(tracker_dir: str, ticket_id: str, level: str) -> bool:
 
     A missing or unreducible dir is not at any level, so it is never traversed.
     """
-    ticket_dir = os.path.join(tracker_dir, ticket_id)
+    ticket_dir = layout_ticket_dir(tracker_dir, ticket_id)
     if not os.path.isdir(ticket_dir):
         return False
     state = _reduce_or_none(ticket_dir)
@@ -244,7 +234,7 @@ def _same_level_neighbors(tracker_dir: str, level: str) -> Callable[[str, set[st
     """
 
     def neighbors(current: str, visited: set[str]) -> Iterator[str]:
-        current_dir = os.path.join(tracker_dir, current)
+        current_dir = layout_ticket_dir(tracker_dir, current)
         if not os.path.isdir(current_dir):
             return
         state = _reduce_or_none(current_dir)

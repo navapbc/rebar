@@ -26,10 +26,11 @@ import pytest
 
 import rebar
 from rebar._commands import compact as _compact
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _events(repo: Path, tid: str) -> list[Path]:
-    tdir = repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     return [p for p in tdir.glob("*.json") if not p.name.startswith(".")]
 
 
@@ -83,7 +84,7 @@ def test_a_genuinely_missing_raw_source_is_still_reported(
     capsys.readouterr()
 
     # Delete a retired RAW source the snapshot cites — a truncated log, not a fold.
-    tdir = rebar_repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", tid))
     retired = [p for p in tdir.glob("*.retired") if "-SNAPSHOT.json" not in p.name]
     assert retired, "expected retired raw sources after the fold"
     retired[0].unlink()

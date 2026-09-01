@@ -10,8 +10,9 @@ reference keeps working.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
+
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 class RunRecorder:
@@ -103,7 +104,7 @@ class TicketEventRecorder(RunRecorder):
 
         tracker = _seam.tracker_dir(self.repo_root)
         try:
-            state = reduce_ticket(str(Path(tracker) / self.ticket))
+            state = reduce_ticket(layout_ticket_dir(str(tracker), self.ticket))
         except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket yields no state (None)
             return None
         if not state:

@@ -31,6 +31,7 @@ import pytest
 import rebar
 from rebar._commands import close_disposition, gates, transition, txn
 from rebar._commands._seam import CommandError
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 
 pytestmark = pytest.mark.unit
@@ -64,7 +65,7 @@ def _make(repo: Path, ticket_type: str, title: str, *, claim: bool = True) -> st
 
 
 def _state(repo: Path, tid: str) -> dict:
-    return reduce_ticket(str(repo / ".tickets-tracker" / tid)) or {}
+    return reduce_ticket(layout_ticket_dir(repo / ".tickets-tracker", tid)) or {}
 
 
 def _close(repo: Path, tid: str, *flags: str) -> int:

@@ -103,17 +103,14 @@ def _tracker_head(repo: Path) -> str:
 
 
 def _tip_position(repo: Path) -> str:
-    import os
-
+    from rebar._store.ticket_layout import iter_ticket_dirs
     from rebar.reducer._cache import is_active_event
 
     tracker = _tracker(repo)
     best = ""
-    for d in os.listdir(tracker):
-        dp = os.path.join(tracker, d)
-        if d.startswith(".") or not os.path.isdir(dp):
-            continue
-        for fn in os.listdir(dp):
+    for entry in iter_ticket_dirs(tracker):
+        for path in Path(entry.path).iterdir():
+            fn = path.name
             if not fn.endswith(".json") or fn.startswith(".") or not is_active_event(fn):
                 continue
             pos = fn[:-5].rsplit("-", 1)[0]

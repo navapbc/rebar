@@ -75,19 +75,17 @@ def _positions(repo: Path) -> list[tuple[str, str]]:
     import os
 
     from rebar._commands._seam import tracker_dir
+    from rebar._store.ticket_layout import iter_ticket_dirs
     from rebar.attest import authorship
 
     tracker = str(tracker_dir(str(repo)))
     commit_map = authorship.build_introducing_commit_map(repo_root=str(repo))
     out: list[tuple[str, str]] = []
-    for d in sorted(os.listdir(tracker)):
-        dp = os.path.join(tracker, d)
-        if d.startswith(".") or not os.path.isdir(dp):
-            continue
-        for fn in sorted(os.listdir(dp)):
+    for entry in sorted(iter_ticket_dirs(tracker), key=lambda ticket: ticket.relpath):
+        for fn in sorted(os.listdir(entry.path)):
             if not fn.endswith(".json") or fn.startswith("."):
                 continue
-            commit = commit_map.get(f"{d}/{fn}")
+            commit = commit_map.get(f"{entry.relpath}/{fn}")
             if commit:
                 out.append((fn[:-5].rsplit("-", 1)[0], commit))
     out.sort()

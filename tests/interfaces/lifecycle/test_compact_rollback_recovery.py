@@ -23,6 +23,7 @@ import pytest
 import rebar
 from rebar._commands import compact as _compact
 from rebar._commands import fsck as _fsck
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 from rebar.reducer._cache import RETIRED_SUFFIX
 
@@ -41,7 +42,7 @@ def _seed_foldable(repo: Path, title: str, n_events: int) -> str:
 
 
 def _events(repo: Path, tid: str) -> list[Path]:
-    tdir = repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     return [p for p in tdir.glob("*.json") if not p.name.startswith(".")]
 
 
@@ -50,7 +51,7 @@ def _has_snapshot(repo: Path, tid: str) -> bool:
 
 
 def _retired(repo: Path, tid: str) -> list[Path]:
-    return list((repo / ".tickets-tracker" / tid).glob("*.retired"))
+    return list(Path(layout_ticket_dir(repo / ".tickets-tracker", tid)).glob("*.retired"))
 
 
 def _semantic(state: dict) -> dict:
@@ -99,7 +100,7 @@ def _make_mixed_state(
     """Drive an incomplete rollback so the ticket lands in the retained-snapshot
     mixed state, and return ``(tid, tdir, state_before)``."""
     tid = _seed_foldable(repo, "mixed", n_events=3)
-    tdir = repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     state_before = reduce_ticket(str(tdir))
     fault = _RenameFault(fail_forward_on=3, fail_reverse_on=2)
     monkeypatch.setattr(_compact.os, "rename", fault)

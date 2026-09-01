@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.metrics.registry import is_authoritative
 
 pytestmark = pytest.mark.scripts
@@ -50,7 +51,7 @@ def _write(d: Path, ts_ns: int, et: str, data: dict) -> None:
 
 
 def _closed_bug(tracker: Path, tid: str, close_class: str | None = None) -> Path:
-    d = tracker / tid
+    d = Path(layout_ticket_dir(tracker, tid))
     d.mkdir(parents=True)
     _write(d, _ns("2026-01-01T00:00:00"), "CREATE", {"ticket_type": "bug", "title": tid})
     _write(

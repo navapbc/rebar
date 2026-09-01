@@ -17,6 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -68,6 +70,14 @@ def _make_create_mutation(local_id: str) -> dict:
     }
 
 
+def _alert_files(repo_root: Path, local_id: str) -> list[Path]:
+    return list(
+        Path(layout_ticket_dir(repo_root / ".tickets-tracker", local_id)).glob(
+            "*-BRIDGE_ALERT.json"
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -82,7 +92,7 @@ def test_bridge_alert_emitted_on_set_entity_property_failure(applier, tmp_path):
     with pytest.raises(RuntimeError, match="property write failed"):
         applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    alert_files = list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
+    alert_files = _alert_files(tmp_path, local_id)
     assert len(alert_files) == 1, (
         f"Expected exactly 1 BRIDGE_ALERT file, found {len(alert_files)}: {alert_files}"
     )
@@ -97,7 +107,7 @@ def test_bridge_alert_tag_is_create_identity_write_failed(applier, tmp_path):
     with pytest.raises(RuntimeError):
         applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    alert_files = list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
+    alert_files = _alert_files(tmp_path, local_id)
     assert len(alert_files) == 1
     payload = json.loads(alert_files[0].read_text())
     data = payload.get("data", {})
@@ -118,7 +128,7 @@ def test_bridge_alert_emitted_on_add_label_failure(applier, tmp_path):
     with pytest.raises(RuntimeError, match="label write failed"):
         applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    alert_files = list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
+    alert_files = _alert_files(tmp_path, local_id)
     assert len(alert_files) == 1, (
         f"Expected exactly 1 BRIDGE_ALERT file, found {len(alert_files)}: {alert_files}"
     )
@@ -137,7 +147,7 @@ def test_no_bridge_alert_on_successful_identity_writes(applier, tmp_path):
     result = applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
     assert result == {"key": "DIG-999"}
-    tracker_dir = tmp_path / ".tickets-tracker" / local_id
+    tracker_dir = Path(layout_ticket_dir(tmp_path / ".tickets-tracker", local_id))
     if tracker_dir.exists():
         alert_files = list(tracker_dir.glob("*-BRIDGE_ALERT.json"))
         assert len(alert_files) == 0, (

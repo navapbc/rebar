@@ -27,6 +27,7 @@ import pytest
 import rebar
 from rebar import signing
 from rebar._opcert_binding import bound_signer
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.attest import sshsig
 
 try:
@@ -142,7 +143,7 @@ def _forge_payload(store: Path, tid: str) -> None:
 
     from rebar._commands._seam import tracker_dir
 
-    tdir = Path(tracker_dir(str(store))) / tid
+    tdir = Path(layout_ticket_dir(tracker_dir(str(store)), tid))
     sig_files = sorted(tdir.glob("*-SIGNATURE.json"))
     assert sig_files, "expected a SIGNATURE event to forge"
     path = sig_files[-1]
@@ -170,7 +171,7 @@ def _resign_with_attacker_key(store: Path, tmp_path: Path, tid: str) -> None:
     from rebar.attest import dsse
 
     attacker = _keypair(tmp_path, "attacker-key")
-    tdir = Path(tracker_dir(str(store))) / tid
+    tdir = Path(layout_ticket_dir(tracker_dir(str(store)), tid))
     path = sorted(tdir.glob("*-SIGNATURE.json"))[-1]
     ev = json.loads(path.read_text(encoding="utf-8"))
     envelope = dsse.decode(ev["data"]["envelope"])
@@ -300,7 +301,7 @@ def test_envelope_with_no_parsable_key_is_refused_not_waved_through(
 
     tid = rebar.create_ticket("task", "keyless", repo_root=str(store))
     _sign_as_env_a(store, tmp_path, tid)
-    tdir = Path(tracker_dir(str(store))) / tid
+    tdir = Path(layout_ticket_dir(tracker_dir(str(store)), tid))
     path = sorted(tdir.glob("*-SIGNATURE.json"))[-1]
     ev = json.loads(path.read_text(encoding="utf-8"))
     envelope = dsse.decode(ev["data"]["envelope"])

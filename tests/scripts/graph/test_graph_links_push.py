@@ -23,6 +23,8 @@ from _helpers import (
     _write_ticket,
 )
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 # ---------------------------------------------------------------------------
 # Same-second LINK/UNLINK timestamp ordering — _is_active_link must not allow
 # UNLINK to replay before LINK when they share the same Unix-second timestamp
@@ -52,7 +54,7 @@ def test_is_active_link_same_second_unlink_sorts_after_link(
     _write_ticket(tracker_dir, "src-ticket", status="open")
     _write_ticket(tracker_dir, "tgt-ticket", status="open")
 
-    src_dir = tracker_dir / "src-ticket"
+    src_dir = Path(layout_ticket_dir(tracker_dir, "src-ticket"))
 
     # The link UUID embedded in the LINK event (and referenced by UNLINK's link_uuid)
     link_uuid = "ffffffff-ffff-4fff-ffff-ffffffffffff"

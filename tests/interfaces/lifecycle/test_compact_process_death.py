@@ -26,6 +26,7 @@ import pytest
 from _subprocess_env import subprocess_env
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer import reduce_ticket
 
 pytestmark = pytest.mark.skipif(
@@ -34,7 +35,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _events(repo: Path, tid: str) -> list[Path]:
-    tdir = repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     return [p for p in tdir.glob("*.json") if not p.name.startswith(".")]
 
 
@@ -47,13 +48,13 @@ def _snapshots(repo: Path, tid: str) -> list[Path]:
 
 
 def _retired(repo: Path, tid: str) -> list[Path]:
-    return list((repo / ".tickets-tracker" / tid).glob("*.retired"))
+    return list(Path(layout_ticket_dir(repo / ".tickets-tracker", tid)).glob("*.retired"))
 
 
 def _all_source_uuids(repo: Path, tid: str) -> set[str]:
     """Every event UUID present on disk across active ``*.json`` and ``*.retired``
     (a UUID is the middle field of ``{ts}-{uuid}-{TYPE}.json``)."""
-    tdir = repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(repo / ".tickets-tracker", tid))
     uuids: set[str] = set()
     for p in list(tdir.glob("*.json")) + list(tdir.glob("*.retired")):
         if p.name.startswith(".") or "-SNAPSHOT." in p.name:
@@ -91,7 +92,7 @@ def test_sigkill_mid_retirement_recovers_from_fresh_process(
     rebar_repo: Path, tmp_path: Path
 ) -> None:
     tid = _seed_foldable(rebar_repo, "sigkill", n_events=3)
-    tdir = rebar_repo / ".tickets-tracker" / tid
+    tdir = Path(layout_ticket_dir(rebar_repo / ".tickets-tracker", tid))
     state_before = reduce_ticket(str(tdir))
     uuids_before = _all_source_uuids(rebar_repo, tid)
 

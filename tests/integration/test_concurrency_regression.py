@@ -37,6 +37,8 @@ from _topology_template import clone_topology_template
 from rebar import _engine
 from rebar._commands import fsck
 from rebar._store import push
+from rebar._store.ticket_layout import pinned_tree_ticket_id
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 pytestmark = pytest.mark.integration
 
@@ -186,6 +188,16 @@ def _event_files(tracker: Path) -> set[str]:
     }
 
 
+def _tree_path_ticket_id(path: str) -> str:
+    ticket_id = pinned_tree_ticket_id(path)
+    assert ticket_id is not None, path
+    return ticket_id
+
+
+def _ticket_dir(tracker: Path, ticket_id: str) -> Path:
+    return Path(layout_ticket_dir(tracker, ticket_id))
+
+
 def _status_events_for(tracker: Path, ticket_id: str) -> list[dict[str, str]]:
     """Return the STATUS events committed for *ticket_id*, each as
     ``{"uuid", "status", "current_status", "filename"}``.
@@ -202,7 +214,7 @@ def _status_events_for(tracker: Path, ticket_id: str) -> list[dict[str, str]]:
     for path in listing.splitlines():
         if not path.endswith("-STATUS.json"):
             continue
-        if path.split("/")[0] != ticket_id:
+        if _tree_path_ticket_id(path) != ticket_id:
             continue
         blob = _git("show", f"tickets:{path}", cwd=tracker).stdout
         ev = json.loads(blob)
@@ -426,7 +438,7 @@ def test_two_clone_union_deterministic_replay_and_fork_tiebreak(two_clones):
     # set from git rather than guessing the (UUID-embedding) filename shape.
     listing = _git("ls-tree", "-r", "--name-only", "tickets", cwd=tracker_a).stdout
     create_dirs = {
-        line.split("/")[0] for line in listing.splitlines() if line.endswith("-CREATE.json")
+        _tree_path_ticket_id(line) for line in listing.splitlines() if line.endswith("-CREATE.json")
     }
     assert ta in create_dirs, f"ta CREATE event lost in union (have {sorted(create_dirs)})"
     assert tb in create_dirs, f"tb CREATE event lost in union (have {sorted(create_dirs)})"
@@ -612,7 +624,7 @@ def _edit_prefix_for_title(tracker: Path, ticket_id: str, title: str) -> int:
     merged union on the tickets branch)."""
     listing = _git("ls-tree", "-r", "--name-only", "tickets", cwd=tracker).stdout
     for path in listing.splitlines():
-        if not path.endswith("-EDIT.json") or path.split("/")[0] != ticket_id:
+        if not path.endswith("-EDIT.json") or _tree_path_ticket_id(path) != ticket_id:
             continue
         ev = json.loads(_git("show", f"tickets:{path}", cwd=tracker).stdout)
         if ev.get("data", {}).get("fields", {}).get("title") == title:
@@ -704,8 +716,8 @@ def test_push_retry_spends_the_fifth_merge_with_one_terminal_push(two_clones, mo
             push_attempts += 1
             if push_attempts <= 5:
                 ticket_id = f"99{push_attempts:02d}-comp-9999-9999"
-                ticket_dir = tracker_b / ticket_id
-                ticket_dir.mkdir()
+                ticket_dir = _ticket_dir(tracker_b, ticket_id)
+                ticket_dir.mkdir(parents=True)
                 event = ticket_dir / f"170000000000000000{push_attempts}-{ticket_id}-CREATE.json"
                 event.write_text('{"side":"competitor"}\n', encoding="utf-8")
                 _git("add", "-A", cwd=tracker_b)
@@ -745,7 +757,7 @@ def test_push_retry_spends_the_fifth_merge_with_one_terminal_push(two_clones, mo
             ).returncode
             == 0
         )
-    assert (tracker_a / local_ticket).is_dir()
+    assert _ticket_dir(tracker_a, local_ticket).is_dir()
 
 
 def test_commit_and_push_preserves_local_and_competing_remote_events(two_clones, monkeypatch):
@@ -1027,7 +1039,13 @@ def test_reconverge_waits_for_a_lock_owned_push_recovery_merge(tmp_path: Path) -
 
 # ─────────────────── RC2b: snapshot horizon + rebuild-on-stray (36d1) ─────────
 def _seed_dir_files(tracker: Path, ticket_id: str, suffix: str) -> list[Path]:
-    return sorted(p for p in (tracker / ticket_id).glob(f"*{suffix}") if not p.name.startswith("."))
+    from rebar._store.ticket_layout import ticket_dir
+
+    return sorted(
+        p
+        for p in Path(ticket_dir(tracker, ticket_id)).glob(f"*{suffix}")
+        if not p.name.startswith(".")
+    )
 
 
 def test_compaction_horizon_keeps_young_events_live(two_clones):
@@ -1077,7 +1095,7 @@ def test_sub_horizon_append_orphan_recovered_by_fsck_rebuild(two_clones):
 
     # Merge-as-union outcome: B's comment file lands in A's ticket dir (union never
     # drops a file the other side added). It now sorts before A's SNAPSHOT.
-    dest = tracker_a / seed / b_comment.name
+    dest = _ticket_dir(tracker_a, seed) / b_comment.name
     dest.write_text(b_comment.read_text())
     _git("add", "-A", cwd=tracker_a)
     _git("commit", "-q", "--no-verify", "-m", "merge: union in B orphan", cwd=tracker_a)
@@ -1107,7 +1125,7 @@ def test_a3_repair_dry_run_noop_then_live_repair_pretag_and_rollback(two_clones)
 
     _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
-    seed_dir = tracker_a / seed
+    seed_dir = _ticket_dir(tracker_a, seed)
 
     # Craft SNAPSHOT_INCONSISTENT: a SNAPSHOT that lists the still-present CREATE as a
     # folded source (the live-store fault class, ~2422 of them).
@@ -1161,7 +1179,7 @@ def _craft_inconsistent_snapshot(tracker: Path, seed: str) -> Path:
     it. Returns the still-present CREATE file that repair must retire."""
     from rebar.reducer import reduce_ticket
 
-    seed_dir = tracker / seed
+    seed_dir = _ticket_dir(tracker, seed)
     create_file = next(seed_dir.glob("*-CREATE.json"))
     create_uuid = json.loads(create_file.read_text())["uuid"]
     compiled = {k: v for k, v in reduce_ticket(str(seed_dir)).items() if k != "updated_at"}
@@ -1204,7 +1222,8 @@ def test_a3_repair_aborts_when_push_fails_leaving_pretag_for_rollback(two_clones
     # The retire was applied+committed locally (abort is AFTER the failed push), so the
     # operator recovers via the pre-tag, not by hoping nothing was written.
     assert (
-        not create_file.exists() and (tracker_a / seed / (create_file.name + ".retired")).exists()
+        not create_file.exists()
+        and (_ticket_dir(tracker_a, seed) / (create_file.name + ".retired")).exists()
     )
 
 
@@ -1343,7 +1362,9 @@ def test_a3_marker_is_optimization_not_authority_crash_before_marker(two_clones)
     marker.unlink()
     out = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
     assert "no repairable faults" in out, out  # fsck-authoritative: nothing to redo
-    assert not (tracker_a / seed / (create_file.name + ".retired" + ".retired")).exists()
+    assert not (
+        _ticket_dir(tracker_a, seed) / (create_file.name + ".retired" + ".retired")
+    ).exists()
     assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "fsck", check=False).stdout
 
 
@@ -1355,8 +1376,8 @@ def test_a3_repair_surfaces_missing_create_without_auto_writing(two_clones):
     tracker_a = _tracker(repo_a)
 
     # A ticket dir with a lone COMMENT and no CREATE → reduce_ticket returns None.
-    ghost = tracker_a / "reb-ghost-nocreate"
-    ghost.mkdir()
+    ghost = _ticket_dir(tracker_a, "reb-ghost-nocreate")
+    ghost.mkdir(parents=True)
     (ghost / "1000000000000000000-cccccccc-1111-2222-3333-444444444444-COMMENT.json").write_text(
         json.dumps({"uuid": "cccccccc-1111-2222-3333-444444444444", "event_type": "COMMENT"})
     )
@@ -1380,7 +1401,7 @@ def test_two_clone_compaction_resurrection_no_data_loss_and_repairable(two_clone
     """
     _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
-    seed_dir = tracker_a / seed
+    seed_dir = _ticket_dir(tracker_a, seed)
 
     # A compacts: the CREATE source is folded and RENAMED to *.retired (not deleted).
     create_file = next(seed_dir.glob("*-CREATE.json"))
@@ -1415,7 +1436,7 @@ def test_rebuild_restarts_from_stale_bak_sentinel(two_clones):
 
     _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
-    seed_dir = tracker_a / seed
+    seed_dir = _ticket_dir(tracker_a, seed)
 
     # An orphan COMMENT (absent from the snapshot's source_event_uuids), sorting before
     # the snapshot → the RC2 silent-drop shape.
@@ -1877,7 +1898,7 @@ def _dirs_with_blob(tracker: Path, needle: str) -> set[str]:
         if not path.endswith(".json"):
             continue
         if needle in _git("show", f"tickets:{path}", cwd=tracker).stdout:
-            hit.add(path.split("/")[0])
+            hit.add(_tree_path_ticket_id(path))
     return hit
 
 
@@ -2083,7 +2104,7 @@ def test_enrichment_drain_preserves_two_clone_union(two_clones):
             for path in _git(
                 "ls-tree", "-r", "--name-only", revision, cwd=tracker
             ).stdout.splitlines()
-            if path.startswith(f"{ticket_id}/")
+            if _tree_path_ticket_id(path) == ticket_id
             and any(path.endswith(f"-{event_type}.json") for event_type in event_types)
         }
 
@@ -2150,7 +2171,7 @@ def _sidecar_paths(tracker: Path, ticket_id: str, event_type: str, revision: str
     return {
         path
         for path in listing
-        if path.startswith(f"{ticket_id}/") and path.endswith(f"-{event_type}.json")
+        if _tree_path_ticket_id(path) == ticket_id and path.endswith(f"-{event_type}.json")
     }
 
 

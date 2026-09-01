@@ -36,6 +36,7 @@ import pytest
 import rebar
 from rebar._commands import compact as _compact
 from rebar._commands import compact_txn as _compact_txn
+from rebar._store.ticket_layout import ticket_dir
 
 pytestmark = pytest.mark.unit
 
@@ -65,7 +66,7 @@ def _tracker(repo: Path) -> str:
 
 
 def _tdir(repo: Path, tid: str) -> Path:
-    return Path(_tracker(repo)) / tid
+    return Path(ticket_dir(_tracker(repo), tid))
 
 
 def _seed(repo: Path, title: str, comments: int) -> str:

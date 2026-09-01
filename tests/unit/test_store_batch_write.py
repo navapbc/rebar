@@ -23,6 +23,8 @@ import pytest
 from rebar._commands import _seam
 from rebar._store import event_append, staging
 from rebar._store.canonical import canonical_bytes
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+from rebar._store.ticket_layout import ticket_dir_relpath
 
 pytestmark = pytest.mark.unit
 
@@ -81,7 +83,7 @@ def test_batch_commits_all_events_in_a_single_commit(tracker):
     committed = _git(tracker, "ls-tree", "-r", "--name-only", "HEAD").stdout
     for ticket_id, ev in items:
         fn = event_append.event_filename(ev["timestamp"], ev["uuid"], "COMMENT")
-        assert f"{ticket_id}/{fn}" in committed
+        assert f"{ticket_dir_relpath(tracker, ticket_id)}/{fn}" in committed
 
     # No temp/staging residue and a clean index.
     assert _git(tracker, "diff", "--cached", "--name-only").stdout.strip() == ""
@@ -92,7 +94,7 @@ def test_batch_bytes_are_canonical_and_identical_to_single_path(tracker):
     ev = _event("u-canon", 1700000000000000010)
     event_append.batch_stage_and_commit(tracker, [("tk", ev)])
     fn = event_append.event_filename(ev["timestamp"], ev["uuid"], "COMMENT")
-    on_disk = (Path(tracker) / "tk" / fn).read_bytes()
+    on_disk = (Path(layout_ticket_dir(tracker, "tk")) / fn).read_bytes()
     assert on_disk == canonical_bytes(ev)
 
 
@@ -237,12 +239,14 @@ def test_commit_failure_rolls_back_whole_batch_and_next_write_is_clean(tracker, 
         fn = event_append.event_filename(
             1700000000000000030 if uuid == "u-A" else 1700000000000000031, uuid, "COMMENT"
         )
-        assert not (Path(tracker) / "tk" / fn).exists()
+        assert not (Path(layout_ticket_dir(tracker, "tk")) / fn).exists()
 
     # A subsequent successful write commits ONLY its own event — not the failed batch.
     n = event_append.batch_stage_and_commit(tracker, [("tk", _event("u-C", 1700000000000000032))])
     assert n == 1
-    committed = _git(tracker, "ls-tree", "-r", "--name-only", "HEAD", "tk").stdout
+    committed = _git(
+        tracker, "ls-tree", "-r", "--name-only", "HEAD", ticket_dir_relpath(tracker, "tk")
+    ).stdout
     assert "u-C" in committed
     assert "u-A" not in committed and "u-B" not in committed
 
@@ -279,4 +283,7 @@ def test_batch_self_heals_preexisting_unmerged_bridge_state(tmp_path):
     # The unmerged entry is healed and both batch events landed in one commit.
     assert _git(tracker, "ls-files", "-u").stdout.strip() == ""
     for uuid, ts in (("u-A", 1700000000000000040), ("u-B", 1700000000000000041)):
-        assert (Path(tracker) / "tk" / event_append.event_filename(ts, uuid, "COMMENT")).exists()
+        assert (
+            Path(layout_ticket_dir(tracker, "tk"))
+            / event_append.event_filename(ts, uuid, "COMMENT")
+        ).exists()

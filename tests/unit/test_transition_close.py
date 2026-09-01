@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -40,7 +41,15 @@ def scan_env(tmp_path: Path) -> tuple[str, str]:
     tracker = tmp_path / "tracker"
     tracker.mkdir()
     for name in (f"{AMBIG_PREFIX}-aaaa-0000-0001", f"{AMBIG_PREFIX}-bbbb-0000-0002", TARGET):
-        (tracker / name).mkdir()
+        ticket_dir = tracker / name
+        ticket_dir.mkdir()
+        event_uuid = str(uuid.uuid4())
+        (ticket_dir / f"1700000000000000000-{event_uuid}-CREATE.json").write_text(
+            json.dumps(
+                {"timestamp": 1700000000000000000, "uuid": event_uuid, "event_type": "CREATE"}
+            ),
+            encoding="utf-8",
+        )
     repo = tmp_path / "repo"
     repo.mkdir()
 
@@ -272,8 +281,9 @@ def _status_events(repo: Path, ticket_id: str) -> list[dict]:
     Resolved through rebar's own tracker resolver rather than a guessed path, so the
     assertion is about the EVENT's contents and cannot silently pass if the layout moves."""
     from rebar import config
+    from rebar._store.ticket_layout import ticket_dir
 
-    tdir = Path(config.tracker_dir(str(repo))) / ticket_id
+    tdir = Path(ticket_dir(config.tracker_dir(str(repo)), ticket_id))
     paths = sorted(tdir.glob("*-STATUS.json"))
     assert paths, f"no STATUS events found on disk for {ticket_id} under {tdir}"
     return [json.loads(p.read_text()) for p in paths]

@@ -17,6 +17,7 @@ import pytest
 from _subprocess_env import subprocess_env
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SCHEMA_DIR = Path(rebar.__file__).resolve().parent / "schemas"
@@ -25,7 +26,7 @@ _U1 = "11111111-1111-4111-8111-111111111111"
 
 def _create_data(rebar_repo: Path, ticket_id: str) -> dict:
     tracker = rebar_repo / ".tickets-tracker"
-    matches = sorted(tracker.glob(f"{ticket_id}/*-CREATE.json"))
+    matches = sorted(Path(layout_ticket_dir(tracker, ticket_id)).glob("*-CREATE.json"))
     assert len(matches) == 1
     return json.loads(matches[0].read_bytes())["data"]
 

@@ -23,7 +23,6 @@ gate-specific and stays in ``transition.py``.
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Mapping
 from enum import Enum
 from typing import Any, cast
@@ -405,15 +404,15 @@ def plan_review_precheck(
     """
     from rebar import config
     from rebar._commands._seam import CommandError
+    from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
     from rebar.reducer import reduce_ticket as _reduce
 
     # Shared resolution + error-on-unreadable-config posture (see gate_enabled),
     # mirroring the completion close gate so the two can't drift. Applicability
     # (flag on + non-exempt type) is single-sourced in _plan_review_gate_applies,
     # which `claim --review` also senses (story a114).
-    ticket_type = (_reduce(os.path.join(str(config.tracker_dir(repo_root)), ticket_id)) or {}).get(
-        "ticket_type", ""
-    )
+    tracker = config.tracker_dir(repo_root)
+    ticket_type = (_reduce(layout_ticket_dir(tracker, ticket_id)) or {}).get("ticket_type", "")
     if not _plan_review_gate_applies(cfg_root, ticket_type, ticket_id=ticket_id):
         return None
     if force_reason:

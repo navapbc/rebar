@@ -61,6 +61,8 @@ import tempfile
 import time
 from typing import Any
 
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
@@ -141,7 +143,7 @@ def _endpoint_fingerprint(ticket_id: str, tracker_dir: str) -> str:
         status = _get_ticket_status(current, tracker_dir)
         state: dict[str, Any] | None
         try:
-            state = reduce_ticket(os.path.join(tracker_dir, current))
+            state = reduce_ticket(layout_ticket_dir(tracker_dir, current))
         except Exception:  # noqa: BLE001 — an unreducible ancestor contributes no structure
             state = None
         deps = (

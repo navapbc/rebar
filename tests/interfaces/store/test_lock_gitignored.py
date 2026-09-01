@@ -21,6 +21,7 @@ import pytest
 
 import rebar
 from rebar._store.lock import MKDIR_LOCK_NAME, WRITE_LOCK_NAME
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.graph._cache import _GRAPH_CACHE_FILE
 from rebar.reducer import marker as marker_module
 
@@ -77,7 +78,8 @@ def test_archiving_leaves_only_ignored_per_ticket_markers(rebar_repo: Path) -> N
 
     rebar.archive(tid, repo_root=str(rebar_repo))
 
-    assert (tracker / tid / archive_marker).exists()
-    assert (tracker / tid / marker_lock).exists()
+    tdir = Path(layout_ticket_dir(tracker, tid))
+    assert (tdir / archive_marker).exists()
+    assert (tdir / marker_lock).exists()
     porcelain = _git_out("status", "--porcelain", cwd=tracker).splitlines()
     assert [line for line in porcelain if line.startswith("??")] == []

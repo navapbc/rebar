@@ -19,6 +19,7 @@ from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.attest import sshsig
 
 try:
@@ -68,7 +69,7 @@ def test_reducer_never_rejects_bad_signature(store: Path) -> None:
     from rebar.reducer import reduce_ticket
 
     tid = "0000-aaaa-bbbb-cccc"
-    tdir = Path(tracker_dir(str(store))) / tid
+    tdir = Path(layout_ticket_dir(tracker_dir(str(store)), tid))
     tdir.mkdir(parents=True)
     ev_uuid = str(_uuid.uuid4())
     event = {
@@ -159,7 +160,7 @@ def test_verify_authorship_flags_unknown_author(store: Path) -> None:
     """An event whose author_id references a NON-identity is classified unknown-author
     and fails the merge-gate when require_authenticated is on."""
     tid = "1111-dddd-eeee-ffff"
-    tdir = Path(tracker_dir(str(store))) / tid
+    tdir = Path(layout_ticket_dir(tracker_dir(str(store)), tid))
     tdir.mkdir(parents=True)
     ev_uuid = str(_uuid.uuid4())
     event = {

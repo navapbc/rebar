@@ -22,6 +22,7 @@ from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.attest import authorship, sshsig
 
 try:
@@ -75,7 +76,7 @@ def _verify_authorship(store: Path, priv: str | None = None) -> subprocess.Compl
 
 def _snapshot_ledger(store: Path, ticket_id: str) -> list[dict]:
     """Read the authorship_ledger from the ticket's SNAPSHOT event file."""
-    tdir = Path(tracker_dir(str(store))) / ticket_id
+    tdir = Path(layout_ticket_dir(tracker_dir(str(store)), ticket_id))
     for f in tdir.glob("*-SNAPSHOT.json"):
         snap = json.loads(f.read_text(encoding="utf-8"))
         led = snap.get("data", {}).get("compiled_state", {}).get("authorship_ledger")
@@ -157,7 +158,7 @@ def test_forged_signature_is_bad_signature(tmp_path: Path, monkeypatch) -> None:
     # Hand-write a CREATE event authored by the identity but signed by Mallory's key
     # (which the identity never held) — a well-formed in-toto Statement, wrong signer.
     tid = "aaaa-bbbb-cccc-dddd"
-    tdir = Path(tracker_dir(str(repo))) / tid
+    tdir = Path(layout_ticket_dir(tracker_dir(str(repo)), tid))
     tdir.mkdir(parents=True)
     event = {
         "timestamp": 1,
@@ -202,7 +203,7 @@ def test_forged_signature_bad_after_compaction(tmp_path: Path, monkeypatch) -> N
     ident = rebar.create_identity("Ada", "ada@example.com", keys=[pub], repo_root=str(repo))
 
     tid = "eeee-ffff-0000-1111"
-    tdir = Path(tracker_dir(str(repo))) / tid
+    tdir = Path(layout_ticket_dir(tracker_dir(str(repo)), tid))
     tdir.mkdir(parents=True)
     event = {
         "timestamp": 1,

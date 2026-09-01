@@ -19,11 +19,12 @@ from pathlib import Path
 from _subprocess_env import subprocess_env
 
 import rebar
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 
 
 def _create_data(rebar_repo: Path, ticket_id: str) -> dict:
     tracker = rebar_repo / ".tickets-tracker"
-    matches = sorted(tracker.glob(f"{ticket_id}/*-CREATE.json"))
+    matches = sorted(Path(layout_ticket_dir(tracker, ticket_id)).glob("*-CREATE.json"))
     assert len(matches) == 1, f"expected one CREATE for {ticket_id}, got {matches}"
     return json.loads(matches[0].read_bytes())["data"]
 

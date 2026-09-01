@@ -82,6 +82,7 @@ REGISTRY_IDS: tuple[str, ...] = (
     "projects-seed",
     "projects-compat-stamp",
     "untrack-runtime-markers",
+    "ticket-layout-shards",
 )
 
 
@@ -95,7 +96,7 @@ def _registry() -> dict[str, object]:
     """Map id → check-then-act callable. Lazy-imports the unit implementations from
     :mod:`rebar._commands.init` (cold path — only :func:`run_ensures` calls this)."""
     from rebar._commands import init
-    from rebar._store import env_identity, project_ensures
+    from rebar._store import env_identity, project_ensures, ticket_layout
 
     return {
         # env-id lives in `env_identity` (not `init`) because minting is guarded: it
@@ -110,6 +111,7 @@ def _registry() -> dict[str, object]:
         "projects-seed": project_ensures.seed_projects_mapping_unit,
         "projects-compat-stamp": project_ensures.converge_multi_project_stamp_unit,
         "untrack-runtime-markers": init._untrack_runtime_markers_unit,
+        "ticket-layout-shards": ticket_layout.migrate_flat_ticket_dirs_unit,
     }
 
 

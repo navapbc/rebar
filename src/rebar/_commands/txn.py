@@ -40,6 +40,8 @@ from rebar._store import compat, event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.event_commit_git import run_auto_maintenance
 from rebar._store.gitutil import _AUTOMAINT_OFF, run_git_write
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
+from rebar._store.ticket_layout import ticket_dir_relpath
 from rebar.reducer import reduce_ticket
 from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 from rebar.reducer._sort import prefix_ts as _prefix_ts
@@ -328,7 +330,7 @@ def prepare_transition_event_locked(
     event_uuid: str | None = None,
 ) -> dict[str, Any]:
     """Re-read, validate, and compose a STATUS event while the caller holds the write lock."""
-    state = reduce_ticket(os.path.join(tracker_dir, ticket_id))
+    state = reduce_ticket(layout_ticket_dir(tracker_dir, ticket_id))
     if state is None:
         raise CommandError(
             "Error: reducer returned no state (ticket may be corrupt or missing events)",
@@ -365,7 +367,7 @@ def prepare_transition_event_locked(
     )
     if refusal:
         raise CommandError(f"Error: {refusal}", returncode=1)
-    ticket_dir_path = os.path.join(tracker_dir, ticket_id)
+    ticket_dir_path = layout_ticket_dir(tracker_dir, ticket_id)
     parent_status_uuid = _parent_status_uuid(ticket_dir_path)
     status_data = {
         "status": target_status,
@@ -439,11 +441,13 @@ def transition_core(
             pre_status_check=pre_status_check,
         )
         final_filename = event_append.event_filename(event["timestamp"], event["uuid"], "STATUS")
-        ticket_dir_path = os.path.join(tracker_dir, ticket_id)
+        ticket_dir_path = layout_ticket_dir(tracker_dir, ticket_id)
+        ticket_relpath = ticket_dir_relpath(tracker_dir, ticket_id)
+        os.makedirs(ticket_dir_path, exist_ok=True)
         final_path = os.path.join(ticket_dir_path, final_filename)
         fsutil.atomic_write(final_path, canonical_str(event), encoding="utf-8")
 
-        _git(tracker_dir, "add", f"{ticket_id}/{final_filename}")
+        _git(tracker_dir, "add", os.path.join(ticket_relpath, final_filename))
         _git_commit(tracker_dir, f"ticket: STATUS {ticket_id}")
     except CommandError:
         if final_path is not None:
@@ -481,7 +485,7 @@ def claim_core(
     status_path = None
     edit_path = None
     try:
-        state = reduce_ticket(os.path.join(tracker_dir, ticket_id))
+        state = reduce_ticket(layout_ticket_dir(tracker_dir, ticket_id))
         if state is None:
             raise CommandError(
                 "Error: reducer returned no state (ticket may be corrupt or missing events)",
@@ -502,7 +506,9 @@ def claim_core(
                 '"open" (already claimed or not claimable).'
             )
 
-        ticket_dir_path = os.path.join(tracker_dir, ticket_id)
+        ticket_dir_path = layout_ticket_dir(tracker_dir, ticket_id)
+        ticket_relpath = ticket_dir_relpath(tracker_dir, ticket_id)
+        os.makedirs(ticket_dir_path, exist_ok=True)
         parent_status_uuid = _parent_status_uuid(ticket_dir_path)
         rel_paths = []
 
@@ -534,7 +540,7 @@ def claim_core(
         status_filename = event_append.event_filename(ts1, uuid1, "STATUS")
         status_path = os.path.join(ticket_dir_path, status_filename)
         fsutil.atomic_write(status_path, canonical_str(status_event), encoding="utf-8")
-        rel_paths.append(f"{ticket_id}/{status_filename}")
+        rel_paths.append(os.path.join(ticket_relpath, status_filename))
 
         # EDIT(assignee) — only when supplied. ts2 ticked AFTER ts1 so STATUS sorts
         # before EDIT in replay (the HLC +1 floor makes ts2 > ts1 strictly).
@@ -554,7 +560,7 @@ def claim_core(
             edit_filename = event_append.event_filename(ts2, uuid2, "EDIT")
             edit_path = os.path.join(ticket_dir_path, edit_filename)
             fsutil.atomic_write(edit_path, canonical_str(edit_event), encoding="utf-8")
-            rel_paths.append(f"{ticket_id}/{edit_filename}")
+            rel_paths.append(os.path.join(ticket_relpath, edit_filename))
 
         # Stage BOTH events and commit ONCE (atomic).
         _git(tracker_dir, "add", *rel_paths)
@@ -586,7 +592,7 @@ def ensure_ac_boxes_checked(
         state = (
             ticket_state
             if ticket_state is not None
-            else reduce_ticket(os.path.join(tracker, ticket_id))
+            else reduce_ticket(layout_ticket_dir(tracker, ticket_id))
         )
         if not isinstance(state, dict):
             return
@@ -638,7 +644,7 @@ def ensure_attested_items_valid(
         state = (
             ticket_state
             if ticket_state is not None
-            else reduce_ticket(os.path.join(tracker, ticket_id))
+            else reduce_ticket(layout_ticket_dir(tracker, ticket_id))
         )
         if not isinstance(state, dict):
             return

@@ -22,6 +22,7 @@ from pathlib import Path
 
 from rebar._commands._seam import CommandError, append_event, tracker_dir
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._store.ticket_layout import ticket_dir as layout_ticket_dir
 from rebar.reducer._sort import prefix_ts as _prefix_ts
 
 _USAGE = (
@@ -121,10 +122,12 @@ def _write_unlink(
     if not (tracker / ".env-id").is_file():
         raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
     for tid in (source_id, target_id):
-        if not (tracker / tid).is_dir():
+        if not Path(layout_ticket_dir(tracker, tid)).is_dir():
             raise CommandError(f"Error: ticket '{tid}' does not exist")
 
-    link_uuid, link_relation = _get_link_info(tracker / source_id, target_id, relation)
+    link_uuid, link_relation = _get_link_info(
+        Path(layout_ticket_dir(tracker, source_id)), target_id, relation
+    )
     if not link_uuid:
         scope = f" with relation '{relation}'" if relation else ""
         raise CommandError(
@@ -172,11 +175,11 @@ def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo
     if id2 is None:
         raise CommandError(f"Error: ticket '{id2_raw}' does not exist")
 
-    _, link_relation = _get_link_info(tracker / id1, id2, relation)
+    _, link_relation = _get_link_info(Path(layout_ticket_dir(tracker, id1)), id2, relation)
     _write_unlink(id1, id2, tracker, repo_root=repo_root, relation=relation)
 
     if link_relation == "relates_to":
-        recip_uuid, _ = _get_link_info(tracker / id2, id1, relation)
+        recip_uuid, _ = _get_link_info(Path(layout_ticket_dir(tracker, id2)), id1, relation)
         if recip_uuid:
             _write_unlink(id2, id1, tracker, repo_root=repo_root, relation=relation)
         else:
