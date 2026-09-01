@@ -1,0 +1,116 @@
+name: Setup uv
+description: Install the repository-pinned uv release without fetching the setup-uv manifest.
+inputs:
+  enable-cache:
+    description: Restore and save uv's cache directory.
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Install repository-pinned uv
+      shell: pwsh
+      env:
+        UV_SHA256_AARCH64_APPLE_DARWIN: 127ebdda7ad953cdf198e964b570ea5771b85467ea93eb7cb6d6f8e6f55408f3
+        UV_SHA256_AARCH64_PC_WINDOWS_MSVC: 1611d0f4be72b0a354ad9a6ae954093dd4c91e93e36b8b490326a05a039ffe14
+        UV_SHA256_AARCH64_UNKNOWN_LINUX_GNU: 66393193038dd7eb108abd7a218d9cec04ac70ab98242b0720fa94de19223b7c
+        UV_SHA256_X86_64_APPLE_DARWIN: 06b8ae1da8c2661c5434507a66f8c2b0b835933bf955b5958a9ac357a37d1959
+        UV_SHA256_X86_64_PC_WINDOWS_MSVC: bf1518af459a3915511a11fdc6e2f43ef9a2afa138b9d498eeb9642fe9d85218
+        UV_SHA256_X86_64_UNKNOWN_LINUX_GNU: 788f18abea7c5f55d6216e4f5613fd89d4d59b631efeec117b2b07fe72f1da21
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        $pyproject = Join-Path $env:GITHUB_WORKSPACE 'pyproject.toml'
+        $version = $null
+        $inToolUv = $false
+        foreach ($line in Get-Content -LiteralPath $pyproject) {
+          $trimmed = $line.Trim()
+          if ($trimmed -match '^\[(.+)\]\s*$') {
+            $inToolUv = $Matches[1] -eq 'tool.uv'
+            continue
+          }
+          if ($inToolUv -and $trimmed -match '^required-version\s*=\s*"==([0-9]+(?:\.[0-9]+)+)"\s*(?:#.*)?$') {
+            $version = $Matches[1]
+            break
+          }
+        }
+        if (-not $version) {
+          throw 'pyproject.toml must define [tool.uv] required-version as "==X.Y.Z"'
+        }
+
+        switch ($env:RUNNER_OS) {
+          'Linux' { $osTarget = 'unknown-linux-gnu'; $extension = 'tar.gz' }
+          'macOS' { $osTarget = 'apple-darwin'; $extension = 'tar.gz' }
+          'Windows' { $osTarget = 'pc-windows-msvc'; $extension = 'zip' }
+          default { throw "Unsupported runner OS '$env:RUNNER_OS'" }
+        }
+        switch ($env:RUNNER_ARCH) {
+          'X64' { $archTarget = 'x86_64' }
+          'ARM64' { $archTarget = 'aarch64' }
+          default { throw "Unsupported runner architecture '$env:RUNNER_ARCH'" }
+        }
+
+        $target = "$archTarget-$osTarget"
+        $asset = "uv-$target.$extension"
+        $checksumName = "UV_SHA256_$($target.ToUpperInvariant().Replace('-', '_'))"
+        $expectedHash = [Environment]::GetEnvironmentVariable($checksumName)
+        if ($expectedHash -notmatch '^[0-9a-f]{64}$') {
+          throw "Missing checksum for $asset ($checksumName)"
+        }
+
+        $workRoot = Join-Path $env:RUNNER_TEMP "setup-uv-$version-$target"
+        $extractDir = Join-Path $workRoot 'extract'
+        New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+        $archive = Join-Path $workRoot $asset
+        $url = "https://github.com/astral-sh/uv/releases/download/$version/$asset"
+        Invoke-WebRequest -Uri $url -OutFile $archive
+
+        $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualHash -ne $expectedHash) {
+          throw "Checksum mismatch for $asset: expected $expectedHash, got $actualHash"
+        }
+
+        if ($extension -eq 'zip') {
+          Expand-Archive -LiteralPath $archive -DestinationPath $extractDir -Force
+          $uvExecutable = 'uv.exe'
+        } else {
+          tar -xzf $archive -C $extractDir
+          $uvExecutable = 'uv'
+        }
+
+        $uv = Get-ChildItem -LiteralPath $extractDir -Recurse -File -Filter $uvExecutable |
+          Where-Object { $_.FullName -like "*$target*" } |
+          Select-Object -First 1
+        if (-not $uv) {
+          throw "Could not find $uvExecutable in $asset"
+        }
+
+        $toolRoot = if ($env:RUNNER_TOOL_CACHE) { $env:RUNNER_TOOL_CACHE } else { $env:RUNNER_TEMP }
+        $installDir = Join-Path (Join-Path $toolRoot 'uv') "$version-$target"
+        New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+        $installedUv = Join-Path $installDir $uvExecutable
+        Copy-Item -LiteralPath $uv.FullName -Destination $installedUv -Force
+        if ($env:RUNNER_OS -ne 'Windows') {
+          chmod +x $installedUv
+        }
+        & $installedUv --version
+        Add-Content -LiteralPath $env:GITHUB_PATH -Value $installDir
+        Write-Host "Successfully installed uv $version from $asset"
+
+    - name: Resolve uv cache directory
+      id: uv-cache-dir
+      if: inputs.enable-cache == 'true'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $cacheDir = uv cache dir
+        "dir=$cacheDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+    - name: Cache uv downloads and wheels
+      if: inputs.enable-cache == 'true'
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.uv-cache-dir.outputs.dir }}
+        key: ${{ runner.os }}-${{ runner.arch }}-uv-${{ hashFiles('uv.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-uv-

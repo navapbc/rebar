@@ -329,14 +329,12 @@ rebar-mcp = "rebar.mcp_server:main"
 #
 # Why the `==` form is load-bearing and NOT cosmetic: the action normalizes a leading `==` away
 # and then classifies the remainder with `tc.isExplicitVersion` (src/version/specifier.ts). An
-# exact version takes the ExactVersionResolver branch, which returns without any network call.
-# A RANGE (`>=0.12.7`) instead takes the range/latest branch, which fetches
-# https://raw.githubusercontent.com/astral-sh/versions/.../uv.ndjson to RESOLVE the version, which
-# is the dependency this pin removes. (Note the action fetches that manifest a SECOND time, in
-# downloadVersion -> getArtifact, to obtain the download URL; that one is unconditional and is
-# NOT removed by this pin — see bug 5caa-4b63-7ea2-4e71.) scripts/check_uv_pin.py
-# (run from `make lint`) fails the build if this is ever loosened to a range, removed, shadowed
-# by a root uv.toml, or overridden by a per-call-site `version:` input.
+# exact version takes the ExactVersionResolver branch, which returns without any network call in
+# the upstream action. rebar's local setup action keeps the same single source but bypasses the
+# upstream manifest entirely by downloading the version-pinned GitHub release artifact directly
+# and verifying its committed checksum. scripts/check_uv_pin.py (run from `make lint`) fails the
+# build if this is ever loosened to a range, removed, shadowed by a root uv.toml, overridden by a
+# per-call-site `version:` input, or bypassed through the upstream setup action.
 #
 # 0.12.7 is what CI already resolved to via "falling back to latest" (run 33225196631,
 # `Successfully installed uv version 0.12.7` across every job of the matrix), so pinning it is
