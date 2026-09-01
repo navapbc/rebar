@@ -48,7 +48,7 @@ jobs:
           persist-credentials: false
       - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
         if: inputs.gerrit-refspec != ''
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -56,7 +56,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
       - name: Install rebar from the committed lock (dev extra)
