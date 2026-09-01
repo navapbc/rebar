@@ -8,8 +8,10 @@ tests drive the real `_build_retrying_anthropic_model` helper with a counting Mo
 
 from __future__ import annotations
 
+import json
 import time
 
+import anthropic
 import httpx
 import pytest
 
@@ -28,6 +30,19 @@ from rebar.llm.config import (
 from rebar.llm.errors import LLMConfigError
 
 pytestmark = pytest.mark.unit
+
+
+def _anthropic_expects_httpx2_client() -> bool:
+    import inspect
+
+    http_client = inspect.signature(anthropic.AsyncAnthropic.__init__).parameters.get("http_client")
+    return http_client is not None and "httpx2.AsyncClient" in str(http_client.annotation)
+
+
+def _transport_http_module():
+    if _anthropic_expects_httpx2_client():
+        return pytest.importorskip("httpx2")
+    return httpx
 
 
 @pytest.fixture(autouse=True)
@@ -53,17 +68,18 @@ def _ok_body(text: str = "OK") -> dict:
     }
 
 
-def _sequence_transport(responses):
+def _sequence_transport(responses, *, http_module=None):
     """A MockTransport that returns ``responses[i]`` on the i-th request, holding the last.
     Returns (transport, state) where state['n'] counts requests."""
+    http_module = http_module or _transport_http_module()
     state = {"n": 0}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request):
         i = min(state["n"], len(responses) - 1)
         state["n"] += 1
         return responses[i]()
 
-    return httpx.MockTransport(handler), state
+    return http_module.MockTransport(handler), state
 
 
 def _cfg(**kw) -> LLMConfig:
@@ -71,12 +87,12 @@ def _cfg(**kw) -> LLMConfig:
     return LLMConfig(**kw)
 
 
-def _run(model) -> object:
+def _run(model, *, model_settings: dict[str, object] | None = None) -> object:
     # A MockTransport makes NO real network call, so allow the (fake) model request; the
     # conftest socket guard still blocks any accidental real connect.
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = True
     try:
-        return Agent(model).run_sync("go")
+        return Agent(model).run_sync("go", model_settings=model_settings)
     finally:
         pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
 
@@ -93,12 +109,12 @@ def test_429_with_retry_after_retries_below_the_sdk(base_url):
     still exercising the retry."""
     transport, state = _sequence_transport(
         [
-            lambda: httpx.Response(
+            lambda: _transport_http_module().Response(
                 429,
                 headers={"retry-after": "0"},
                 json={"type": "error", "error": {"type": "rate_limit_error"}},
             ),
-            lambda: httpx.Response(200, json=_ok_body("HEALED")),
+            lambda: _transport_http_module().Response(200, json=_ok_body("HEALED")),
         ]
     )
     model, _http_client = _build_retrying_anthropic_model(
@@ -118,8 +134,10 @@ def test_500_without_retry_after_retries_via_jittered_fallback():
     non-jittered fixed backoff."""
     transport, state = _sequence_transport(
         [
-            lambda: httpx.Response(500, json={"type": "error", "error": {"type": "api_error"}}),
-            lambda: httpx.Response(200, json=_ok_body("OK500")),
+            lambda: _transport_http_module().Response(
+                500, json={"type": "error", "error": {"type": "api_error"}}
+            ),
+            lambda: _transport_http_module().Response(200, json=_ok_body("OK500")),
         ]
     )
     model, _ = _build_retrying_anthropic_model(
@@ -141,7 +159,7 @@ def test_500_without_retry_after_retries_via_jittered_fallback():
 def test_non_retriable_statuses_are_not_retried(status):
     transport, state = _sequence_transport(
         [
-            lambda: httpx.Response(
+            lambda: _transport_http_module().Response(
                 status, json={"type": "error", "error": {"type": "invalid_request_error"}}
             )
         ]
@@ -158,7 +176,7 @@ def test_non_retriable_statuses_are_not_retried(status):
 def test_exhaustion_reraises_after_all_attempts():
     transport, state = _sequence_transport(
         [
-            lambda: httpx.Response(
+            lambda: _transport_http_module().Response(
                 503,
                 headers={"retry-after": "0"},
                 json={"type": "error", "error": {"type": "overloaded_error"}},
@@ -180,12 +198,12 @@ def test_exhaustion_reraises_after_all_attempts():
 def test_retry_attempt_is_logged(caplog):
     transport, _ = _sequence_transport(
         [
-            lambda: httpx.Response(
+            lambda: _transport_http_module().Response(
                 429,
                 headers={"retry-after": "0"},
                 json={"type": "error", "error": {"type": "rate_limit_error"}},
             ),
-            lambda: httpx.Response(200, json=_ok_body()),
+            lambda: _transport_http_module().Response(200, json=_ok_body()),
         ]
     )
     model, _ = _build_retrying_anthropic_model(
@@ -213,11 +231,74 @@ def test_construction_guard_fails_fast_on_nonzero_sdk_retries(monkeypatch):
             self.max_retries = 2
 
     monkeypatch.setattr(anthropic, "AsyncAnthropic", _BadClient)
-    transport, _ = _sequence_transport([lambda: httpx.Response(200, json=_ok_body())])
+    transport, _ = _sequence_transport(
+        [lambda: _transport_http_module().Response(200, json=_ok_body())]
+    )
     with pytest.raises(LLMConfigError, match="max_retries"):
         _build_retrying_anthropic_model(
             "claude-sonnet-4-6", base_url=None, cfg=_cfg(), _wrapped_transport=transport
         )
+
+
+def test_httpx2_sdk_contract_gets_httpx2_client_with_retrying_transport():
+    """Under anthropic's httpx2 contract, rebar still owns retry below the SDK."""
+    httpx2 = pytest.importorskip("httpx2")
+    if not _anthropic_expects_httpx2_client():
+        pytest.skip("installed anthropic SDK still accepts stdlib httpx.AsyncClient")
+
+    transport, state = _sequence_transport(
+        [
+            lambda: httpx2.Response(
+                429,
+                headers={"retry-after": "0"},
+                json={"type": "error", "error": {"type": "rate_limit_error"}},
+            ),
+            lambda: httpx2.Response(200, json=_ok_body("HTTPX2_HEALED")),
+        ],
+        http_module=httpx2,
+    )
+    model, http_client = _build_retrying_anthropic_model(
+        "claude-sonnet-4-6",
+        base_url=None,
+        cfg=_cfg(llm_retry_max_wait_s=0),
+        _wrapped_transport=transport,
+    )
+
+    assert isinstance(http_client, httpx2.AsyncClient)
+    assert http_client._transport.__class__.__name__ == "_Httpx2AsyncTenacityTransport"
+    out = _run(model)
+    assert state["n"] == 2
+    assert "HTTPX2_HEALED" in str(out.output)
+
+
+def test_httpx2_sdk_contract_moves_removed_sampling_kwargs_to_extra_body():
+    """Anthropic 1.x removed sampling kwargs from the create() signature, not the wire body."""
+    httpx2 = pytest.importorskip("httpx2")
+    if not _anthropic_expects_httpx2_client():
+        pytest.skip("installed anthropic SDK still accepts stdlib httpx.AsyncClient")
+
+    captured: list[bytes] = []
+
+    def handler(request):
+        captured.append(request.content)
+        return httpx2.Response(200, json=_ok_body("NO_TEMP"))
+
+    model, http_client = _build_retrying_anthropic_model(
+        "claude-sonnet-4-6",
+        base_url=None,
+        cfg=_cfg(temperature=0.0),
+        _wrapped_transport=httpx2.MockTransport(handler),
+    )
+    try:
+        out = _run(model, model_settings={"temperature": 0.0})
+    finally:
+        import asyncio
+
+        asyncio.run(http_client.aclose())
+
+    assert "NO_TEMP" in str(out.output)
+    assert len(captured) == 1
+    assert json.loads(captured[0].decode())["temperature"] == 0.0
 
 
 # ── Config: the two LLMConfig keys + env override ─────────────────────────────
@@ -239,7 +320,7 @@ def test_attempts_one_disables_retry_failfast():
     """The back-out: llm_retry_max_attempts=1 makes a single attempt (no retry)."""
     transport, state = _sequence_transport(
         [
-            lambda: httpx.Response(
+            lambda: _transport_http_module().Response(
                 429,
                 headers={"retry-after": "0"},
                 json={"type": "error", "error": {"type": "rate_limit_error"}},
@@ -299,24 +380,24 @@ def test_midrun_429_self_heals_without_duplicate_comment():
     comment_calls = {"n": 0}
     sends = {"total": 0, "followup": 0}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request):
         sends["total"] += 1
         posted_already = b"tool_result" in request.content
         if not posted_already:
             # Turn 1: the model asks to call the comment tool (side-effect not yet run).
-            return httpx.Response(200, json=_tool_use_body("post_comment"))
+            return _transport_http_module().Response(200, json=_tool_use_body("post_comment"))
         # Turn 2 carries the tool_result — the comment has already been posted once by the
         # agent loop. Inject a transient 429 on the FIRST send of this turn, heal on retry.
         sends["followup"] += 1
         if sends["followup"] == 1:
-            return httpx.Response(
+            return _transport_http_module().Response(
                 429,
                 headers={"retry-after": "0"},
                 json={"type": "error", "error": {"type": "rate_limit_error"}},
             )
-        return httpx.Response(200, json=_ok_body("HEALED"))
+        return _transport_http_module().Response(200, json=_ok_body("HEALED"))
 
-    transport = httpx.MockTransport(handler)
+    transport = _transport_http_module().MockTransport(handler)
     model, _ = _build_retrying_anthropic_model(
         "claude-sonnet-4-6",
         base_url=None,
