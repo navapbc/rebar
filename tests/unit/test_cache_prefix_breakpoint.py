@@ -106,7 +106,7 @@ def _mapped_system(kwargs, settings):
 
     captured: dict = {}
 
-    model = _make_model(settings)
+    model, closeable = _make_model(settings)
     # anthropic exposes ``_map_message``; bedrock ``_map_messages`` — spy whichever exists.
     method_name = "_map_message" if hasattr(model, "_map_message") else "_map_messages"
     orig = getattr(model, method_name)
@@ -134,6 +134,8 @@ def _mapped_system(kwargs, settings):
     except Exception:  # noqa: BLE001 — no real API key; the mapped request is already captured
         pass
     finally:
+        if closeable is not None:
+            loop.run_until_complete(closeable.aclose())
         models.ALLOW_MODEL_REQUESTS = prev_allow
         loop.close()
         asyncio.set_event_loop(None)
@@ -145,20 +147,45 @@ def _mapped_system(kwargs, settings):
 def _make_model(settings):
     style = "bedrock" if "bedrock_cache_instructions" in settings else "anthropic"
     if style == "anthropic":
-        from pydantic_ai.models.anthropic import AnthropicModel
-        from pydantic_ai.providers.anthropic import AnthropicProvider
+        from anthropic import AsyncAnthropic
 
-        return AnthropicModel("claude-3-5-sonnet-latest", provider=AnthropicProvider(api_key="x"))
+        from rebar.llm.anthropic_model import (
+            _anthropic_http_client_module,
+            _build_retrying_anthropic_model,
+        )
+        from rebar.llm.auth import AnthropicAuth
+        from rebar.llm.config import LLMConfig
+
+        transport_http = _anthropic_http_client_module(AsyncAnthropic)
+        model, client = _build_retrying_anthropic_model(
+            "claude-3-5-sonnet-latest",
+            base_url=None,
+            cfg=LLMConfig(repo_path="."),
+            _wrapped_transport=transport_http.MockTransport(
+                lambda request: transport_http.Response(
+                    401,
+                    json={
+                        "type": "error",
+                        "error": {"type": "authentication_error", "message": "dummy"},
+                    },
+                )
+            ),
+            auth=AnthropicAuth(api_key="x"),
+        )
+        return model, client
     from pydantic_ai.models.bedrock import BedrockConverseModel
     from pydantic_ai.providers.bedrock import BedrockProvider
 
-    return BedrockConverseModel(
-        "anthropic.claude-3-5-sonnet-20240620-v1:0",
-        provider=BedrockProvider(
-            region_name="us-east-1",
-            aws_access_key_id="x",
-            aws_secret_access_key="y",
+    return (
+        BedrockConverseModel(
+            "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            provider=BedrockProvider(
+                region_name="us-east-1",
+                aws_access_key_id="x",
+                aws_secret_access_key="y",
+            ),
         ),
+        None,
     )
 
 

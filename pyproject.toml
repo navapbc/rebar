@@ -131,17 +131,11 @@ agents = [
     # rather than silently withdrawing the tool — which is exactly the failure 129e fixed. It
     # therefore belongs in `agents` itself, not in an opt-in extra a deployment could forget.
     "pydantic-ai-slim[anthropic,retries,duckduckgo]>=1.107,<2",
-    # Direct cap on the anthropic SDK itself (bug 1f35). `pydantic-ai-slim[anthropic]` pulls
-    # the SDK but bounds only pydantic-ai, so an unlocked resolve floats anthropic to its
-    # latest: 1.0.0+ switched the client to a vendored `httpx2` and REJECTS the stdlib
-    # `httpx.AsyncClient` the provider seam passes (`anthropic_model.py`), raising
-    # `TypeError: Invalid http_client argument; Expected ... httpx2.AsyncClient`. uv.lock masks
-    # it on the merge gate (pins 0.121.0); only the unlocked mirror-sweep legs float and fail.
-    # Range, not a bare ceiling: the `--resolution lowest-direct` sweep leg pins a DIRECT
-    # constraint to its floor, so `>=0.121.0` (what uv.lock resolves; satisfies pydantic-ai's
-    # own `anthropic>=0.108.0`) keeps it off an ancient SDK, and `<1` stays below the first
-    # httpx2-vendoring release (1.0.0). Lift once the seam speaks httpx2 (follow-up 2bd6).
-    "anthropic>=0.121.0,<1",
+    # Direct floor on the anthropic SDK itself: keeps the `--resolution lowest-direct` sweep leg
+    # on the first pre-httpx2 SDK version this seam is verified against, while allowing the
+    # httpx2-vendoring 1.x line that 2bd6 adapts below; <2 keeps the mirror sweep off the next
+    # unreviewed SDK major.
+    "anthropic>=0.121.0,<2",
     "json-repair>=0.61",  # >=0.61 for repair_json(schema=…) schema-guided repair (story drake)
     "pydantic>=2",
 ]

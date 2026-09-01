@@ -27,7 +27,6 @@ import json
 import subprocess
 import sys
 
-import httpx
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -46,6 +45,7 @@ from test_candidate_tracing import (
     OUTCOME_RETURNED,
     RecordingTracer,
     _ok_body,
+    _transport_http_module,
     install_failover,
     install_recording_tracer,
     run_standard,
@@ -119,15 +119,20 @@ def _install_native_downgrade(monkeypatch) -> list[int]:
             monkeypatch.delenv(f"REBAR_LLM_{name}_{field}", raising=False)
 
     calls: list[int] = []
+    transport_http = _transport_http_module()
 
-    def _handler(request: httpx.Request) -> httpx.Response:
+    def _handler(request) -> object:
         idx = len(calls)
         calls.append(idx)
         if idx == 0:
-            return httpx.Response(400, json=_grammar_400_body())
-        return httpx.Response(200, json=_ok_body(_PRIMARY, text='{"verdict": "PASS"}'))
+            return transport_http.Response(400, json=_grammar_400_body())
+        return transport_http.Response(200, json=_ok_body(_PRIMARY, text='{"verdict": "PASS"}'))
 
-    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda *a, **kw: httpx.MockTransport(_handler))
+    monkeypatch.setattr(
+        transport_http,
+        "AsyncHTTPTransport",
+        lambda *a, **kw: transport_http.MockTransport(_handler),
+    )
     monkeypatch.setattr(pydantic_ai.models, "ALLOW_MODEL_REQUESTS", True)
 
     from pydantic_ai import NativeOutput

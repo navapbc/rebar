@@ -35,6 +35,21 @@ from rebar.llm.config import DEFAULT_LLM_TOOL_TIMEOUT_S, LLMConfig
 pytestmark = pytest.mark.unit
 
 
+def _anthropic_expects_httpx2_client() -> bool:
+    import inspect
+
+    import anthropic
+
+    http_client = inspect.signature(anthropic.AsyncAnthropic.__init__).parameters["http_client"]
+    return "httpx2.AsyncClient" in str(http_client.annotation)
+
+
+def _transport_http_module():
+    if _anthropic_expects_httpx2_client():
+        return pytest.importorskip("httpx2")
+    return httpx
+
+
 def _cfg(**kw) -> LLMConfig:
     kw.setdefault("repo_path", ".")
     return LLMConfig(**kw)
@@ -172,7 +187,9 @@ def test_stalled_server_trips_read_timeout_under_run_sync(_dummy_anthropic_key):
     # The raised ReadTimeout is the PRIMARY proof; elapsed is a loose sanity bound that it
     # aborted BEFORE the server's 5s stall (generous headroom for slow/loaded CI runners —
     # connection + SDK overhead, not the read window, dominates wall-time).
-    assert any(isinstance(e, httpx.ReadTimeout) for e in _exc_chain(exc_info.value))
+    assert any(
+        isinstance(e, _transport_http_module().ReadTimeout) for e in _exc_chain(exc_info.value)
+    )
     # timing: hang-guard — abort-before-stall proof; the 5s server stall is the failure mode
     assert elapsed < 4.5  # aborted at ~read timeout, well before the 5s stall
 
