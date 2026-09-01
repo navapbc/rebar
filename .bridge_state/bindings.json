@@ -100,6 +100,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T01:20:52Z"
     },
+    "0068-322f-ac9a-41e2": {
+      "created_at": "2026-09-01T03:41:20Z",
+      "jira_id": "4591202",
+      "jira_key": "REB-4329",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:22Z"
+    },
     "0078-fa3e-05d1-4e12": {
       "baseline": {
         "assignee": {
@@ -1486,6 +1493,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:12Z"
     },
+    "057d-3eb9-b45c-44c3": {
+      "created_at": "2026-09-01T03:41:23Z",
+      "jira_id": "4591203",
+      "jira_key": "REB-4330",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:25Z"
+    },
     "0582-74a2-1811-43f0": {
       "baseline": {
         "assignee": null,
@@ -1590,6 +1604,13 @@
       "jira_key": "REB-11",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:20Z"
+    },
+    "063d-5af6-fad9-49bf": {
+      "created_at": "2026-09-01T03:41:25Z",
+      "jira_id": "4591204",
+      "jira_key": "REB-4331",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:28Z"
     },
     "064f-0484-2795-4ac7": {
       "baseline": {
@@ -1945,6 +1966,13 @@
       "peer_parent": "REB-2574",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:31Z"
+    },
+    "0752-c215-390f-4e1a": {
+      "created_at": "2026-09-01T03:41:28Z",
+      "jira_id": "4591205",
+      "jira_key": "REB-4332",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:31Z"
     },
     "0754-cfc5-e451-4e9b": {
       "baseline": {
@@ -2433,6 +2461,13 @@
       "jira_key": "REB-16",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:41Z"
+    },
+    "09c7-e2f2-ec21-4a86": {
+      "created_at": "2026-09-01T03:41:31Z",
+      "jira_id": "4591206",
+      "jira_key": "REB-4333",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:33Z"
     },
     "09d8-9fd6-75f1-4de7": {
       "created_at": "2026-08-15T14:51:42Z",
@@ -3500,10 +3535,24 @@
     },
     "0e7d-ee49-f92b-44c6": {
       "baseline": {
-        "assignee": null,
-        "description": "## Problem\nThe scheduled Test Suite (mirror) Windows sweep reports hundreds of setup errors with `AttributeError: 'NoneType' object has no attribute 'flock'`. The suspected path is `src/rebar/_store/git_locking.py`: it explicitly tolerates `import fcntl` failure by setting `fcntl = None`, but later lock acquisition/release call sites invoke `fcntl.flock(...)` unconditionally.\n\n## Plan\n1. Confirm the Windows/no-fcntl contract by inspecting the guarded import, CI sweep matrix, nearby docs/tests, and any existing fallback/no-op/alternative advisory-lock patterns.\n2. Prove the mechanism locally on macOS by simulating Windows with `git_locking.fcntl = None` and driving `_store_git_op_lock` / `fetch_coordination_lock` through tests that fail with the current AttributeError.\n3. If legitimacy is `defect`, preserve Unix behavior exactly and add the smallest no-fcntl-safe branch/fallback consistent with existing precedent.\n4. Add regression coverage for no-fcntl operation and ensure the test has mutation teeth by reintroducing the missing guard in a sandboxed mutation check.\n5. Run targeted tests, then `make lint` and the default suite before Gerrit.\n\n## Acceptance Criteria\n- [ ] A no-fcntl simulation for `_store_git_op_lock` no longer raises `AttributeError` and still executes the protected operation.\n- [ ] A no-fcntl simulation for `fetch_coordination_lock` no longer raises `AttributeError` and still preserves existing cleanup semantics.\n- [ ] Unix `fcntl.flock` behavior is unchanged and covered by existing tests or a focused assertion.\n- [ ] The RCA comment cites the confirmed mechanism, legitimacy source, caller sweep, sibling sweep, and caused-by attribution.\n- [ ] Gerrit change is submitted only after `LLM-Review +1` and `Verified +1`.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Problem\nThe scheduled Test Suite (mirror) Windows sweep reports hundreds of setup errors with `AttributeError: 'NoneType' object has no attribute 'flock'`. The suspected path is `src/rebar/_store/git_locking.py`: it explicitly tolerates `import fcntl` failure by setting `fcntl = None`, but later lock acquisition/release call sites invoke `fcntl.flock(...)` unconditionally.\n\n## Plan\n1. Confirm the Windows/no-fcntl contract by inspecting the guarded import, CI sweep matrix, nearby docs/tests, and any existing fallback/no-op/alternative advisory-lock patterns.\n2. Prove the mechanism locally on macOS by simulating Windows with `git_locking.fcntl = None` and driving `_store_git_op_lock` / `fetch_coordination_lock` through tests that fail with the current AttributeError.\n3. If legitimacy is `defect`, preserve Unix behavior exactly and add the smallest no-fcntl-safe branch/fallback consistent with existing precedent.\n4. Add regression coverage for no-fcntl operation and ensure the test has mutation teeth by reintroducing the missing guard in a sandboxed mutation check.\n5. Run targeted tests, then `make lint` and the default suite before Gerrit.\n\n## Acceptance Criteria\n- [x] A no-fcntl simulation for `_store_git_op_lock` no longer raises `AttributeError` and still executes the protected operation.\n- [x] A no-fcntl simulation for `fetch_coordination_lock` no longer raises `AttributeError` and still preserves existing cleanup semantics.\n- [x] Unix `fcntl.flock` behavior is unchanged and covered by existing tests or a focused assertion.\n- [x] The RCA comment cites the confirmed mechanism, legitimacy source, caller sweep, sibling sweep, and caused-by attribution.\n- [x] Gerrit change is submitted only after `LLM-Review +1` and `Verified +1`.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Windows sweep fails when git locking calls fcntl.flock while fcntl is absent"
       },
       "created_at": "2026-08-31T23:30:51Z",
@@ -3845,6 +3894,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:15Z"
     },
+    "1008-c5fb-1286-4b11": {
+      "created_at": "2026-09-01T03:41:34Z",
+      "jira_id": "4591207",
+      "jira_key": "REB-4334",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:36Z"
+    },
     "100b-6146-8018-4400": {
       "baseline": {
         "assignee": null,
@@ -3928,6 +3984,13 @@
       "peer_parent": "REB-1387",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:18Z"
+    },
+    "107a-307f-f2d9-4332": {
+      "created_at": "2026-09-01T03:41:36Z",
+      "jira_id": "4591208",
+      "jira_key": "REB-4335",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:39Z"
     },
     "1086-ca69-007b-4732": {
       "baseline": {
@@ -4607,6 +4670,13 @@
       "peer_parent": "REB-3630",
       "state": "confirmed",
       "updated_at": "2026-08-27T01:17:44Z"
+    },
+    "13b4-4db7-a2f2-4d07": {
+      "created_at": "2026-09-01T03:41:39Z",
+      "jira_id": "4591209",
+      "jira_key": "REB-4336",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:41Z"
     },
     "13b4-c597-200b-4e31": {
       "baseline": {
@@ -5352,6 +5422,13 @@
       "peer_parent": "REB-601",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:49Z"
+    },
+    "16e3-6db8-fee9-464e": {
+      "created_at": "2026-09-01T03:41:42Z",
+      "jira_id": "4591210",
+      "jira_key": "REB-4337",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:44Z"
     },
     "1701-8bc1-e3b7-4984": {
       "baseline": {
@@ -9439,6 +9516,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:38Z"
     },
+    "2826-c792-51c0-4d1c": {
+      "created_at": "2026-09-01T03:41:44Z",
+      "jira_id": "4591211",
+      "jira_key": "REB-4338",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:47Z"
+    },
     "283e-70af-5f7f-46e6": {
       "baseline": {
         "assignee": null,
@@ -9939,6 +10023,13 @@
       "peer_parent": "REB-1093",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:48Z"
+    },
+    "299b-9bf1-520b-4c92": {
+      "created_at": "2026-09-01T03:41:47Z",
+      "jira_id": "4591212",
+      "jira_key": "REB-4339",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:49Z"
     },
     "29a4-48de-65a6-4d59": {
       "baseline": {
@@ -10625,6 +10716,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:01Z"
     },
+    "2c21-5662-443c-454c": {
+      "created_at": "2026-09-01T03:41:50Z",
+      "jira_id": "4591213",
+      "jira_key": "REB-4340",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:52Z"
+    },
     "2c2d-651d-8081-41c7": {
       "baseline": {
         "assignee": null,
@@ -11250,6 +11348,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T23:35:52Z"
+    },
+    "2df8-d823-ba58-4467": {
+      "created_at": "2026-09-01T03:41:53Z",
+      "jira_id": "4591214",
+      "jira_key": "REB-4341",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:55Z"
     },
     "2dfe-2552-ff1e-42ae": {
       "created_at": "2026-08-15T14:55:15Z",
@@ -12880,6 +12985,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:14Z"
     },
+    "3365-48ab-ce63-4271": {
+      "created_at": "2026-09-01T03:41:55Z",
+      "jira_id": "4591215",
+      "jira_key": "REB-4342",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:41:58Z"
+    },
     "3388-96e8-e14e-4221": {
       "baseline": {
         "assignee": {
@@ -13942,6 +14054,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:17Z"
     },
+    "3740-fda5-d538-41e5": {
+      "created_at": "2026-09-01T03:41:58Z",
+      "jira_id": "4591216",
+      "jira_key": "REB-4343",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:01Z"
+    },
     "374d-9aaf-7d5b-4331": {
       "created_at": "2026-08-15T14:56:18Z",
       "jira_key": "REB-670",
@@ -14423,6 +14542,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:33Z"
     },
+    "39c6-255f-97f6-406f": {
+      "created_at": "2026-09-01T03:42:01Z",
+      "jira_id": "4591217",
+      "jira_key": "REB-4344",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:03Z"
+    },
+    "39e8-93ba-230a-4259": {
+      "created_at": "2026-09-01T03:42:04Z",
+      "jira_id": "4591218",
+      "jira_key": "REB-4345",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:06Z"
+    },
     "39f8-ae7c-f651-4333": {
       "baseline": {
         "assignee": {
@@ -14767,6 +14900,13 @@
       "peer_parent": "REB-1580",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:43Z"
+    },
+    "3b69-8208-bfd2-4fff": {
+      "created_at": "2026-09-01T03:42:07Z",
+      "jira_id": "4591219",
+      "jira_key": "REB-4346",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:09Z"
     },
     "3b78-0256-bf68-4748": {
       "baseline": {
@@ -17574,6 +17714,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-27T19:05:49Z"
     },
+    "4651-f0dd-4388-4221": {
+      "created_at": "2026-09-01T03:42:10Z",
+      "jira_id": "4591220",
+      "jira_key": "REB-4347",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:12Z"
+    },
     "465d-c541-5e52-4e62": {
       "baseline": {
         "assignee": {
@@ -17909,6 +18056,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:08Z"
+    },
+    "47c7-751e-d27c-4695": {
+      "created_at": "2026-09-01T03:42:12Z",
+      "jira_id": "4591221",
+      "jira_key": "REB-4348",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:15Z"
     },
     "47e9-728e-ba93-485e": {
       "baseline": {
@@ -18404,6 +18558,13 @@
       "peer_parent": "REB-244",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:24Z"
+    },
+    "4ace-472a-01a7-40bd": {
+      "created_at": "2026-09-01T03:42:15Z",
+      "jira_id": "4591222",
+      "jira_key": "REB-4349",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:18Z"
     },
     "4af3-793e-6b34-4290": {
       "baseline": {
@@ -19174,6 +19335,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-28T22:18:22Z"
     },
+    "4db9-0314-959b-46bc": {
+      "created_at": "2026-09-01T03:42:18Z",
+      "jira_id": "4591223",
+      "jira_key": "REB-4350",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:21Z"
+    },
     "4dc0-d003-c236-45de": {
       "baseline": {
         "assignee": null,
@@ -19909,9 +20077,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\nObserved in the DEPLOYED review-bot's logs (2026-08-28), once per run:\n\n```\ncurrent gate-ref snapshot unavailable; hashing the working tree\n  File \"/app/src/rebar/llm/plan_review/manifest.py\", line 254, in _hash_basis\n    sha = resolve_ref(gate_source.default_ref(root), root, fetch=False)\n  File \"/app/src/rebar/_snapshot/repo_snapshot.py\", line 292, in resolve_ref\nrebar._snapshot.git_fetch.SnapshotRefError: cannot resolve ref 'origin/main' to a commit in '/tmp/reviewbot-cjb9jh6c'.\n```\n\n## Proven mechanism\n\n`_hash_basis(repo_root, *, at_current_gate_ref=True)` (`src/rebar/llm/plan_review/manifest.py:246-260`) wraps the gate-ref resolution in a bare `except Exception`, logs a WARNING, and returns `_config.repo_root(repo_root)` \u2014 the in-place working tree \u2014 as the hashing basis.\n\nIts sole production caller is the CLAIM-GATE freshness re-check (`src/rebar/llm/plan_review/attest.py:605-613`, inside `compute_validity` for `kind == plan-review`), which re-hashes the attestation's SIGNED dependency paths against that basis to decide `stale-code`.\n\nSigning-time hashing (`manifest.py:398 dependency_hashes`, `attest.py:237 _rehash`) uses the OTHER branch (`current_code_root()`), so **no signed attestation's `verified_at_sha` or manifest hashes are affected**. The defect is entirely on the VERIFY side.\n\n### The fallback is fail-OPEN, contrary to its own stated rationale\n\nThe docstring claims the degradation is \"the conservative direction, since the checkout normally contains the drift\". A runtime experiment falsifies this. With one signed attestation and a genuinely drifted `origin/main`, toggling ONLY whether the gate ref resolves:\n\n* gate ref resolvable  -> `{'ok': False, 'verdict': 'stale-code'}`  (claim BLOCKED)\n* gate ref unresolvable -> `{'ok': True,  'verdict': 'certified'}`  (claim ALLOWED)\n\nWhenever the working tree happens to match the reviewed content while the gate ref has moved (a worktree not yet fast-forwarded; a checkout pinned at the reviewed SHA), the substituted basis reports NO drift and the gate certifies a stale attestation.\n\n### Violated authority\n\n`docs/plan-review-gate.md:1566-1574`:\n\n    | Claim gate | **fail-closed** | a missing/stale plan-review attestation BLOCKS the claim |\n    ... reserve fail-closed for the claim gate.\n\nand ADR 0002 (`docs/adr/0002-code-drift-invalidation.md:46`) \"keeping the fallback fail-closed\". `verify.require_plan_review_for_claim = true` in this project's `rebar.toml`, so the gate is live.\n\n### Reachability\n\nThe `except Exception` catches far more than a missing ref: any failure of `resolve_ref` OR `_cache.acquire` (snapshot materialization) \u2014 disk pressure, a corrupt/evicted cache entry, a lock timeout, a transient git fault \u2014 degrades the same way, on the on-box MCP server (`REBAR_ROOT=/var/gerrit/site/mcp-code`) where claims are actually decided. The only trace is a WARNING line.\n\nIn the review-bot's own clone (`gerrit_client.py:396 clone_change_ref` does `git init` + `git fetch <url> <patchset-ref>` with NO `origin` remote) the ref can NEVER resolve, so the fallback fires on 100% of runs. There the consumer is the bugfix-size gate, whose `ACCEPTED_VERDICTS = {certified, stale-code, stale-head}` absorbs both outcomes \u2014 so the observed log line does not change the review-bot's vote. The review-bot is the messenger, not the victim.\n\n## What is NOT the defect\n\nThe fallback's EXISTENCE is intended and documented (ADR 0002 \"Shared ref-resolution boundary\"; the operator-approved decision on ticket 72d9-8fbd-3a9e-48a6 \u2014 \"source=local config or an unresolvable ref degrades to the working tree\"; and the existing test `tests/interfaces/lifecycle/test_ref_coherence.py::test_hash_basis_resolution` asserts \"an unresolvable ref -> degrade to the working tree (never crash)\"). The fix must NOT remove it. The defect is that the substitution is invisible to the consumer, so the fail-closed claim gate silently becomes fail-open.\n\n## Expected Behavior\n\nWhen the claim gate's drift check cannot obtain the configured ATTESTED basis, it must not certify. The substitution must be visible to the verdict consumer, and the claim must be blocked with a reason naming the unobtainable basis. A configured `source=local` gate is UNCHANGED: there the working tree is the correct, documented basis, not a degradation.\n\n## Approach\n\n1. Keep `_hash_basis`'s public behaviour and signature exactly as today (the tested,\n   ADR-documented contract). Extract the gate-ref resolution into a sibling that also\n   reports whether it degraded, and have `_hash_basis` delegate to it \u2014 preserving the\n   ADR 0002 \"ONE shared ref-resolution boundary\" invariant.\n2. In `compute_validity`'s plan-review drift arm, consume the degradation signal: when\n   the gate is configured ATTESTED and the basis degraded, return the existing\n   `stale-code` verdict with a reason naming the unobtainable gate ref, instead of\n   comparing hashes against a substituted tree.\n3. Reuse the EXISTING `stale-code` literal deliberately: it is already in\n   `bugfix_size_gate.ACCEPTED_VERDICTS`, so the review-bot's vote is unchanged (it\n   already lands on `stale-code` for most runs today), while the claim gate blocks.\n   No new verdict literal, no change to `KNOWN_VERDICTS`.\n\n## Scope\n\n- `src/rebar/llm/plan_review/manifest.py`\n- `src/rebar/llm/plan_review/attest.py`\n- `tests/interfaces/lifecycle/test_ref_coherence.py`\n\n## Acceptance Criteria\n\n- [ ] With an attested gate config, a signed attestation whose dependency drifted on the\n      gate ref, and a working tree still matching the signed content: the claim gate\n      returns `ok=False` / `verdict=stale-code` when the gate ref CANNOT be resolved\n      (today it returns `ok=True` / `certified`).\n- [ ] The denial reason names the unobtainable gate ref rather than claiming the files\n      drifted.\n- [ ] With the gate ref RESOLVABLE, every existing behaviour is unchanged: committed\n      drift in a signed dependency still invalidates; an unrelated committed change and an\n      uncommitted working-tree edit still do NOT.\n- [ ] A configured `source=local` gate is unchanged (working-tree basis on both sides; no\n      degradation reported).\n- [ ] `_hash_basis(..., at_current_gate_ref=True)` still returns the working-tree path on\n      an unresolvable ref (never raises) \u2014 `test_hash_basis_resolution` stays green.\n- [ ] No new verdict literal: `bugfix_size_gate.KNOWN_VERDICTS` is untouched and the\n      review-bot's bucket for these runs is unchanged.\n- [ ] `make lint`, `make typecheck`, and the default pytest suite exit zero.",
+        "description": "## Context / Problem\n\nObserved in the DEPLOYED review-bot's logs (2026-08-28), once per run:\n\n```\ncurrent gate-ref snapshot unavailable; hashing the working tree\n  File \"/app/src/rebar/llm/plan_review/manifest.py\", line 254, in _hash_basis\n    sha = resolve_ref(gate_source.default_ref(root), root, fetch=False)\n  File \"/app/src/rebar/_snapshot/repo_snapshot.py\", line 292, in resolve_ref\nrebar._snapshot.git_fetch.SnapshotRefError: cannot resolve ref 'origin/main' to a commit in '/tmp/reviewbot-cjb9jh6c'.\n```\n\n## Proven mechanism\n\n`_hash_basis(repo_root, *, at_current_gate_ref=True)` (`src/rebar/llm/plan_review/manifest.py:246-260`) wraps the gate-ref resolution in a bare `except Exception`, logs a WARNING, and returns `_config.repo_root(repo_root)` \u2014 the in-place working tree \u2014 as the hashing basis.\n\nIts sole production caller is the CLAIM-GATE freshness re-check (`src/rebar/llm/plan_review/attest.py:605-613`, inside `compute_validity` for `kind == plan-review`), which re-hashes the attestation's SIGNED dependency paths against that basis to decide `stale-code`.\n\nSigning-time hashing (`manifest.py:398 dependency_hashes`, `attest.py:237 _rehash`) uses the OTHER branch (`current_code_root()`), so **no signed attestation's `verified_at_sha` or manifest hashes are affected**. The defect is entirely on the VERIFY side.\n\n### The fallback is fail-OPEN, contrary to its own stated rationale\n\nThe docstring claims the degradation is \"the conservative direction, since the checkout normally contains the drift\". A runtime experiment falsifies this. With one signed attestation and a genuinely drifted `origin/main`, toggling ONLY whether the gate ref resolves:\n\n* gate ref resolvable  -> `{'ok': False, 'verdict': 'stale-code'}`  (claim BLOCKED)\n* gate ref unresolvable -> `{'ok': True,  'verdict': 'certified'}`  (claim ALLOWED)\n\nWhenever the working tree happens to match the reviewed content while the gate ref has moved (a worktree not yet fast-forwarded; a checkout pinned at the reviewed SHA), the substituted basis reports NO drift and the gate certifies a stale attestation.\n\n### Violated authority\n\n`docs/plan-review-gate.md:1566-1574`:\n\n    | Claim gate | **fail-closed** | a missing/stale plan-review attestation BLOCKS the claim |\n    ... reserve fail-closed for the claim gate.\n\nand ADR 0002 (`docs/adr/0002-code-drift-invalidation.md:46`) \"keeping the fallback fail-closed\". `verify.require_plan_review_for_claim = true` in this project's `rebar.toml`, so the gate is live.\n\n### Reachability\n\nThe `except Exception` catches far more than a missing ref: any failure of `resolve_ref` OR `_cache.acquire` (snapshot materialization) \u2014 disk pressure, a corrupt/evicted cache entry, a lock timeout, a transient git fault \u2014 degrades the same way, on the on-box MCP server (`REBAR_ROOT=/var/gerrit/site/mcp-code`) where claims are actually decided. The only trace is a WARNING line.\n\nIn the review-bot's own clone (`gerrit_client.py:396 clone_change_ref` does `git init` + `git fetch <url> <patchset-ref>` with NO `origin` remote) the ref can NEVER resolve, so the fallback fires on 100% of runs. There the consumer is the bugfix-size gate, whose `ACCEPTED_VERDICTS = {certified, stale-code, stale-head}` absorbs both outcomes \u2014 so the observed log line does not change the review-bot's vote. The review-bot is the messenger, not the victim.\n\n## What is NOT the defect\n\nThe fallback's EXISTENCE is intended and documented (ADR 0002 \"Shared ref-resolution boundary\"; the operator-approved decision on ticket 72d9-8fbd-3a9e-48a6 \u2014 \"source=local config or an unresolvable ref degrades to the working tree\"; and the existing test `tests/interfaces/lifecycle/test_ref_coherence.py::test_hash_basis_resolution` asserts \"an unresolvable ref -> degrade to the working tree (never crash)\"). The fix must NOT remove it. The defect is that the substitution is invisible to the consumer, so the fail-closed claim gate silently becomes fail-open.\n\n## Expected Behavior\n\nWhen the claim gate's drift check cannot obtain the configured ATTESTED basis, it must not certify. The substitution must be visible to the verdict consumer, and the claim must be blocked with a reason naming the unobtainable basis. A configured `source=local` gate is UNCHANGED: there the working tree is the correct, documented basis, not a degradation.\n\n## Approach\n\n1. Keep `_hash_basis`'s public behaviour and signature exactly as today (the tested,\n   ADR-documented contract). Extract the gate-ref resolution into a sibling that also\n   reports whether it degraded, and have `_hash_basis` delegate to it \u2014 preserving the\n   ADR 0002 \"ONE shared ref-resolution boundary\" invariant.\n2. In `compute_validity`'s plan-review drift arm, consume the degradation signal: when\n   the gate is configured ATTESTED and the basis degraded, return the existing\n   `stale-code` verdict with a reason naming the unobtainable gate ref, instead of\n   comparing hashes against a substituted tree.\n3. Reuse the EXISTING `stale-code` literal deliberately: it is already in\n   `bugfix_size_gate.ACCEPTED_VERDICTS`, so the review-bot's vote is unchanged (it\n   already lands on `stale-code` for most runs today), while the claim gate blocks.\n   No new verdict literal, no change to `KNOWN_VERDICTS`.\n\n## Scope\n\n- `src/rebar/llm/plan_review/manifest.py`\n- `src/rebar/llm/plan_review/attest.py`\n- `tests/interfaces/lifecycle/test_ref_coherence.py`\n\n## Acceptance Criteria\n\n- [x] With an attested gate config, a signed attestation whose dependency drifted on the\n      gate ref, and a working tree still matching the signed content: the claim gate\n      returns `ok=False` / `verdict=stale-code` when the gate ref CANNOT be resolved\n      (today it returns `ok=True` / `certified`).\n- [x] The denial reason names the unobtainable gate ref rather than claiming the files\n      drifted.\n- [x] With the gate ref RESOLVABLE, every existing behaviour is unchanged: committed\n      drift in a signed dependency still invalidates; an unrelated committed change and an\n      uncommitted working-tree edit still do NOT.\n- [x] A configured `source=local` gate is unchanged (working-tree basis on both sides; no\n      degradation reported).\n- [x] `_hash_basis(..., at_current_gate_ref=True)` still returns the working-tree path on\n      an unresolvable ref (never raises) \u2014 `test_hash_basis_resolution` stays green.\n- [x] No new verdict literal: `bugfix_size_gate.KNOWN_VERDICTS` is untouched and the\n      review-bot's bucket for these runs is unchanged.\n- [x] `make lint`, `make typecheck`, and the default pytest suite exit zero.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Claim gate fails OPEN when the current gate ref cannot be resolved: _hash_basis silently substitutes the working tree"
       },
       "created_at": "2026-08-29T01:01:41Z",
@@ -19920,6 +20088,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-29T01:01:44Z"
+    },
+    "5061-f253-ebf4-4063": {
+      "created_at": "2026-09-01T03:42:21Z",
+      "jira_id": "4591224",
+      "jira_key": "REB-4351",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:23Z"
     },
     "5062-30a8-9153-4c61": {
       "created_at": "2026-08-15T14:59:14Z",
@@ -20762,6 +20937,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:35Z"
     },
+    "5441-83be-9c11-4338": {
+      "created_at": "2026-09-01T03:42:24Z",
+      "jira_id": "4591225",
+      "jira_key": "REB-4352",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:26Z"
+    },
     "544e-0a25-eabb-4220": {
       "baseline": {
         "assignee": {
@@ -20890,6 +21072,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:36Z"
+    },
+    "54ae-1c78-788e-4b28": {
+      "created_at": "2026-09-01T03:42:26Z",
+      "jira_id": "4591226",
+      "jira_key": "REB-4353",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:29Z"
     },
     "54b2-9e46-b4ba-486e": {
       "baseline": {
@@ -21547,7 +21736,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Problem\n\nEvery CI job makes an avoidable network call to `raw.githubusercontent.com` before it can start; when that call fails the job fails with `##[error]fetch failed`, unrelated to the change under test. Observed 2026-08-28 on the `pip-audit` job of run 33214025855, dead after 21 seconds, in three consecutive lines: `Could not determine uv version from uv.toml or pyproject.toml. Falling back ...` / `Fetching manifest data from https://raw.githubusercontent.com/astral-sh ...` / `##[error]fetch failed`.\n\n## Root cause\n\n`astral-sh/setup-uv` is correctly SHA-pinned everywhere (`ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0`), but **uv itself is not pinned**: no `version:` input at any call site, no `[tool.uv] required-version`, no `uv.toml`.\n\nRead from the pinned action's own source at that SHA (full extract in a ticket comment):\n\n- `src/version/version-request-resolver.ts` \u2014 `WorkspaceVersionResolver.resolve` scans `getWorkspaceCandidates()`, exactly `<working-directory>/uv.toml` then `pyproject.toml`; when neither yields a specifier it logs the observed fallback line and `LatestVersionResolver` supplies `\"latest\"`.\n- `src/version/resolve.ts` \u2014 `LatestVersionResolver.resolve` calls `getLatestVersion(manifestUrl)`: that is the fetch. `ExactVersionResolver.resolve` returns immediately and is ordered **first** in `CONCRETE_VERSION_RESOLVERS`, so an exact version never reaches the network.\n- `src/version/file-parser.ts` \u2014 the `pyproject.toml` parser reads `pyproject.tool?.uv?.[\"required-version\"]`.\n- `src/version/specifier.ts` \u2014 `normalizeVersionSpecifier` strips a leading `==`, then `parseVersionSpecifier` classifies via `tc.isExplicitVersion`. `\"==0.12.7\"` becomes `kind: \"exact\"` (no network); `\">=0.12.7\"` becomes `kind: \"range\"` and **still fetches**. Only an exact `==` pin removes the fetch.\n\nThere are **25** call sites, not 8 (`grep -rn \"setup-uv@\" .github/workflows/`), across 12 workflow files. **None** sets `working-directory`, so all resolve against the repository root, and every one is preceded in its job by a checkout (24 `actions/checkout`, plus `gerrit-verify.yaml:178` via `lfreleng-actions/checkout-gerrit-change-action`). One root-level pin therefore reaches all 25 with no call-site edits.\n\n`release.yml` is a call site, so this is also a supply-chain surface on the publishing path: the resolved uv can change between runs with no repository change. `docs/jira-sync-setup.md` already pins `acli` by version and sha256 with \"Never run `latest` in CI.\"\n\n## Approach\n\nAdd `[tool.uv] required-version = \"==0.12.7\"` to the root `pyproject.toml`, plus a guard keeping it the single source.\n\n**Why `pyproject.toml`.** It is the only already-committed file the action's zero-input workspace scan reads. A new `.github/uv-version.txt` \u2014 sibling of `.github/python-version.txt` \u2014 would need a `version-file:` input at all 25 sites, the duplication the third acceptance criterion exists to prevent. `uv.toml` is also read, but rejected: uv treats it as a *replacement* for `[tool.uv]` in `pyproject.toml`, silently orphaning any future `[tool.uv]` setting.\n\n**Why `0.12.7`.** It is what CI resolves to today, so the pin is a no-op for CI behavior rather than a silent up/downgrade. From run 33225196631, job `build-and-test / lint + type-check`, 2026-08-29T01:08:42-43Z: `Downloading uv from \".../download/0.12.7/uv-x86_64-unknown-linux-gnu.tar.gz\"` then `Successfully installed uv version 0.12.7`. The same value appears in `sweep (py3.14)`, `(py3.15)`, `(py3.14t)` and `(macos, full suite)` of that run, so it holds across the matrix.\n\n**Accepted consequence.** `required-version` is read by uv itself, so a contributor on a different uv gets a hard error naming the fix (verified locally against uv 0.7.18: `error: Required uv version ==0.12.7 does not match the running version 0.7.18. Update uv by running uv self update 0.12.7`). Taken as a benefit: local 0.7.18 against CI's 0.12.7 is the silent divergence `uv sync --locked` exists to prevent, and the pin makes it loud and one-command fixable. `docs/local-dev-env.md` gains a note so the error is expected.\n\n**The guard.** The one realistic regression path is a later change adding a `version:`/`version-file:` input at one call site, which `ExplicitInputVersionResolver` honours **ahead of** the workspace scan, silently diverging that job. `scripts/check_uv_pin.py` asserts: (1) `[tool.uv] required-version` exists and is an exact `==X.Y.Z`, not a range; (2) no `setup-uv` step in `.github/workflows/**` carries `version:` or `version-file:`; (3) no root `uv.toml`. Wired into `make lint` beside the existing `check_shellcheck.py` / `check_templatefile_escapes.py` gates, so it runs offline with no CI provider required and CI inherits it through that same step.\n\n## Scope\n\n- `pyproject.toml` \u2014 add `[tool.uv]` with `required-version = \"==0.12.7\"` and a comment on why `==` is load-bearing.\n- `scripts/check_uv_pin.py` \u2014 new guard (three assertions above).\n- `Makefile` \u2014 invoke the guard from `lint`.\n- `tests/unit/test_uv_pin_guard.py` \u2014 new; guard passes on the real tree, fails on each skew.\n- `docs/local-dev-env.md` \u2014 the pin and the `uv self update` remedy.\n- `CHANGELOG.md` \u2014 one entry.\n\nNo `.github/workflows/**` file changes: fixing all 25 sites without editing any is the point of the mechanism. The `setup-uv` SHA pins are untouched.\n\n## Testing\n\n**Guard unit tests** (`tests/unit/test_uv_pin_guard.py`), each building a temporary tree and invoking the checker, so failure modes are proven not asserted:\n\n- Happy path: exit 0 against this repository's real root.\n- Skew, workflow: a `setup-uv` step carrying `version: \"0.11.0\"` makes it exit non-zero and name that file. This is the \"prove the check FAILS when one site is skewed\" requirement; without it the guard could only ever pass.\n- Skew, range: `required-version = \">=0.12.7\"` exits non-zero (a range still fetches the manifest, per `parseVersionSpecifier`).\n- Skew, absent: no `[tool.uv] required-version` exits non-zero.\n- Skew, shadow: a root `uv.toml` exits non-zero.\n\n**Real-CI-log verification, anchored.** A zero-match grep proves nothing \u2014 an empty log, a skipped step, or a job that never reached setup all give zero matches. So against the Gerrit Verified run for this change (`gh run view <id> --log`), in order: first assert the **anchor** `Successfully installed uv version 0.12.7` is PRESENT (emitted only after uv is actually installed, so it proves the step ran, and its value proves installed == pin \u2014 a separate claim from \"the message disappeared\"); only then assert `Could not determine uv version` and `raw.githubusercontent.com` are ABSENT. The action's positive line `Found version for uv in <path>: 0.12.7` (`file-parser.ts`) is recorded as corroboration. All results are pasted verbatim into a ticket comment.\n\n## Acceptance Criteria\n\n- [ ] `pyproject.toml` pins uv exactly; checked by `grep -qF 'required-version = \"==0.12.7\"' pyproject.toml` exiting 0.\n- [ ] No workflow file is modified; checked by `[ -z \"$(git diff --name-only origin/main -- .github/workflows)\" ]` exiting 0.\n- [ ] The guard passes on this tree; checked by `python scripts/check_uv_pin.py` exiting 0.\n- [ ] The guard FAILS on each of the four skews; checked by `pytest tests/unit/test_uv_pin_guard.py` exiting 0.\n- [ ] `make lint` runs the guard; checked by `grep -qE '^\\s*python scripts/check_uv_pin\\.py$' Makefile` exiting 0 and `make lint` exiting 0.\n- [ ] A real CI log for this change contains the anchor; checked by `gh run view <id> --log | grep -qF 'Successfully installed uv version 0.12.7'` exiting 0.\n- [ ] That same CI log shows no fallback; checked by `gh run view <id> --log | grep -qF 'Could not determine uv version'` exiting NON-zero, and the same for `raw.githubusercontent.com`.\n- [ ] Upgrading uv is a one-line change; checked by `[ \"$(grep -rlF '0.12.7' pyproject.toml Makefile scripts/check_uv_pin.py | wc -l)\" -eq 1 ]` exiting 0.",
+        "description": "## Problem\n\nEvery CI job makes an avoidable network call to `raw.githubusercontent.com` before it can start; when that call fails the job fails with `##[error]fetch failed`, unrelated to the change under test. Observed 2026-08-28 on the `pip-audit` job of run 33214025855, dead after 21 seconds, in three consecutive lines: `Could not determine uv version from uv.toml or pyproject.toml. Falling back ...` / `Fetching manifest data from https://raw.githubusercontent.com/astral-sh ...` / `##[error]fetch failed`.\n\n## Root cause\n\n`astral-sh/setup-uv` is correctly SHA-pinned everywhere (`ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0`), but **uv itself is not pinned**: no `version:` input at any call site, no `[tool.uv] required-version`, no `uv.toml`.\n\nRead from the pinned action's own source at that SHA (full extract in a ticket comment):\n\n- `src/version/version-request-resolver.ts` \u2014 `WorkspaceVersionResolver.resolve` scans `getWorkspaceCandidates()`, exactly `<working-directory>/uv.toml` then `pyproject.toml`; when neither yields a specifier it logs the observed fallback line and `LatestVersionResolver` supplies `\"latest\"`.\n- `src/version/resolve.ts` \u2014 `LatestVersionResolver.resolve` calls `getLatestVersion(manifestUrl)`: that is the fetch. `ExactVersionResolver.resolve` returns immediately and is ordered **first** in `CONCRETE_VERSION_RESOLVERS`, so an exact version never reaches the network.\n- `src/version/file-parser.ts` \u2014 the `pyproject.toml` parser reads `pyproject.tool?.uv?.[\"required-version\"]`.\n- `src/version/specifier.ts` \u2014 `normalizeVersionSpecifier` strips a leading `==`, then `parseVersionSpecifier` classifies via `tc.isExplicitVersion`. `\"==0.12.7\"` becomes `kind: \"exact\"` (no network); `\">=0.12.7\"` becomes `kind: \"range\"` and **still fetches**. Only an exact `==` pin removes the fetch.\n\nThere are **25** call sites, not 8 (`grep -rn \"setup-uv@\" .github/workflows/`), across 12 workflow files. **None** sets `working-directory`, so all resolve against the repository root, and every one is preceded in its job by a checkout (24 `actions/checkout`, plus `gerrit-verify.yaml:178` via `lfreleng-actions/checkout-gerrit-change-action`). One root-level pin therefore reaches all 25 with no call-site edits.\n\n`release.yml` is a call site, so this is also a supply-chain surface on the publishing path: the resolved uv can change between runs with no repository change. `docs/jira-sync-setup.md` already pins `acli` by version and sha256 with \"Never run `latest` in CI.\"\n\n## Approach\n\nAdd `[tool.uv] required-version = \"==0.12.7\"` to the root `pyproject.toml`, plus a guard keeping it the single source.\n\n**Why `pyproject.toml`.** It is the only already-committed file the action's zero-input workspace scan reads. A new `.github/uv-version.txt` \u2014 sibling of `.github/python-version.txt` \u2014 would need a `version-file:` input at all 25 sites, the duplication the third acceptance criterion exists to prevent. `uv.toml` is also read, but rejected: uv treats it as a *replacement* for `[tool.uv]` in `pyproject.toml`, silently orphaning any future `[tool.uv]` setting.\n\n**Why `0.12.7`.** It is what CI resolves to today, so the pin is a no-op for CI behavior rather than a silent up/downgrade. From run 33225196631, job `build-and-test / lint + type-check`, 2026-08-29T01:08:42-43Z: `Downloading uv from \".../download/0.12.7/uv-x86_64-unknown-linux-gnu.tar.gz\"` then `Successfully installed uv version 0.12.7`. The same value appears in `sweep (py3.14)`, `(py3.15)`, `(py3.14t)` and `(macos, full suite)` of that run, so it holds across the matrix.\n\n**Accepted consequence.** `required-version` is read by uv itself, so a contributor on a different uv gets a hard error naming the fix (verified locally against uv 0.7.18: `error: Required uv version ==0.12.7 does not match the running version 0.7.18. Update uv by running uv self update 0.12.7`). Taken as a benefit: local 0.7.18 against CI's 0.12.7 is the silent divergence `uv sync --locked` exists to prevent, and the pin makes it loud and one-command fixable. `docs/local-dev-env.md` gains a note so the error is expected.\n\n**The guard.** The one realistic regression path is a later change adding a `version:`/`version-file:` input at one call site, which `ExplicitInputVersionResolver` honours **ahead of** the workspace scan, silently diverging that job. `scripts/check_uv_pin.py` asserts: (1) `[tool.uv] required-version` exists and is an exact `==X.Y.Z`, not a range; (2) no `setup-uv` step in `.github/workflows/**` carries `version:` or `version-file:`; (3) no root `uv.toml`. Wired into `make lint` beside the existing `check_shellcheck.py` / `check_templatefile_escapes.py` gates, so it runs offline with no CI provider required and CI inherits it through that same step.\n\n## Scope\n\n- `pyproject.toml` \u2014 add `[tool.uv]` with `required-version = \"==0.12.7\"` and a comment on why `==` is load-bearing.\n- `scripts/check_uv_pin.py` \u2014 new guard (three assertions above).\n- `Makefile` \u2014 invoke the guard from `lint`.\n- `tests/unit/test_uv_pin_guard.py` \u2014 new; guard passes on the real tree, fails on each skew.\n- `docs/local-dev-env.md` \u2014 the pin and the `uv self update` remedy.\n- `CHANGELOG.md` \u2014 one entry.\n\nNo `.github/workflows/**` file changes: fixing all 25 sites without editing any is the point of the mechanism. The `setup-uv` SHA pins are untouched.\n\n## Testing\n\n**Guard unit tests** (`tests/unit/test_uv_pin_guard.py`), each building a temporary tree and invoking the checker, so failure modes are proven not asserted:\n\n- Happy path: exit 0 against this repository's real root.\n- Skew, workflow: a `setup-uv` step carrying `version: \"0.11.0\"` makes it exit non-zero and name that file. This is the \"prove the check FAILS when one site is skewed\" requirement; without it the guard could only ever pass.\n- Skew, range: `required-version = \">=0.12.7\"` exits non-zero (a range still fetches the manifest, per `parseVersionSpecifier`).\n- Skew, absent: no `[tool.uv] required-version` exits non-zero.\n- Skew, shadow: a root `uv.toml` exits non-zero.\n\n**Real-CI-log verification, anchored.** A zero-match grep proves nothing \u2014 an empty log, a skipped step, or a job that never reached setup all give zero matches. So against the Gerrit Verified run for this change (`gh run view <id> --log`), in order: first assert the **anchor** `Successfully installed uv version 0.12.7` is PRESENT (emitted only after uv is actually installed, so it proves the step ran, and its value proves installed == pin \u2014 a separate claim from \"the message disappeared\"); only then assert `Could not determine uv version` and `raw.githubusercontent.com` are ABSENT. The action's positive line `Found version for uv in <path>: 0.12.7` (`file-parser.ts`) is recorded as corroboration. All results are pasted verbatim into a ticket comment.\n\n## Acceptance Criteria\n\n- [ ] `pyproject.toml` pins uv exactly; checked by `grep -qF 'required-version = \"==0.12.7\"' pyproject.toml` exiting 0.\n- [ ] No workflow file is modified; checked by `[ -z \"$(git diff --name-only origin/main -- .github/workflows)\" ]` exiting 0.\n- [ ] The guard passes on this tree; checked by `python scripts/check_uv_pin.py` exiting 0.\n- [ ] The guard FAILS on each of the four skews; checked by `pytest tests/unit/test_uv_pin_guard.py` exiting 0.\n- [ ] `make lint` runs the guard; checked by `grep -qE '^\\s*python scripts/check_uv_pin\\.py$' Makefile` exiting 0 and `make lint` exiting 0.\n- [ ] A real CI log for this change contains the anchor; checked by `gh run view <id> --log | grep -qF 'Successfully installed uv version 0.12.7'` exiting 0.\n- [ ] That same CI log shows no fallback; checked by `gh run view <id> --log | grep -qF 'Could not determine uv version'` exiting NON-zero, and the same for `raw.githubusercontent.com`.\n- [x] Upgrading uv is a one-line change; checked by `[ \"$(grep -rlF '0.12.7' pyproject.toml Makefile scripts/check_uv_pin.py | wc -l)\" -eq 1 ]` exiting 0.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "CI depends on an avoidable network fetch on every job: uv is unpinned, so setup-uv falls back to fetching a remote manifest"
@@ -22817,6 +23006,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T04:33:02Z"
     },
+    "5bcd-e4c8-28fe-4742": {
+      "created_at": "2026-09-01T03:42:29Z",
+      "jira_id": "4591227",
+      "jira_key": "REB-4354",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:31Z"
+    },
     "5bd1-2343-ed83-40f0": {
       "baseline": {
         "assignee": {
@@ -22975,9 +23171,17 @@
       "updated_at": "2026-08-21T06:38:44Z"
     },
     "5c48-90aa-8bd3-4ce1": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Problem\n\nOn 2026-08-31 (~17:30-18:00 PDT), three consecutive MCP log_session writes failed with: flock: could not acquire lock after 181s (holder: host=boot-bf4c34b1-475c-4363-8ff6-aada80c3c3ab pid=49003 start=19655570 held=155-174s pid_state=live op=compact-sweep).\n\n## Executed evidence (all captured during the incident)\n\n- ps -p 49003 returns nothing (rc=1) - the pid does not exist on this host.\n- lsof on /Users/joeoakhart/rebar/.tickets-tracker/.ticket-write.lock shows NO holder (rc=1); the file is the 0-byte flock target.\n- held values across the three attempts were non-monotonic (158s, 155s, 174s) while start stayed constant - consistent with a stale stamp being re-read, not a live re-acquiring sweep.\n- Discriminator: an immediate local-CLI write (rebar session-log append) from the main checkout succeeded instantly (log heinous-undivining-ungulate / 0a3b-4201-6528-4f30), proving the store lock itself was free.\n\n## Hypothesis (mechanism to confirm at RCA)\n\nThe MCP server's lock acquisition reads a holder stamp naming a dead pid and its liveness check judges it live (macOS pid-reuse or kill(pid,0) semantics; the larval-tribal-tigermoth class - stale lock unbounded without /proc), so every MCP write waits the full 181s and fails while the underlying flock is uncontended. Possibly interacting with the MCP server's own tracker path/clone rather than the shared checkout (the local CLI on the same store did not see the holder). The compact-sweep at pid 49003 exited without its stamp being cleared.\n\n## Acceptance criteria\n\n- [ ] Root cause confirmed by reproduction: which lock/stamp the MCP server path reads, and why pid_state reported live for a dead pid.\n- [ ] A dead-holder stamp can no longer wedge MCP writes for the full timeout: liveness verification cannot return live for a nonexistent pid (or the stamp is advisory and the kernel flock is authoritative).\n- [ ] Regression test covering the dead-pid-stamp case on the MCP write path.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "MCP server write path wedged: dead compact-sweep holder (pid 49003) reported pid_state=live, all writes time out at 181s"
+      },
       "created_at": "2026-09-01T02:45:15Z",
       "jira_id": "4591201",
       "jira_key": "REB-4328",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-01T02:45:18Z"
     },
@@ -23915,6 +24119,13 @@
       "peer_parent": "REB-262",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:42Z"
+    },
+    "60d0-8e6f-5d66-4ca9": {
+      "created_at": "2026-09-01T03:42:32Z",
+      "jira_id": "4591228",
+      "jira_key": "REB-4355",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:34Z"
     },
     "610c-2bba-bc7b-46d4": {
       "baseline": {
@@ -24975,6 +25186,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-22T13:38:39Z"
     },
+    "6575-0886-a6fe-45f8": {
+      "created_at": "2026-09-01T03:42:34Z",
+      "jira_id": "4591229",
+      "jira_key": "REB-4356",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:37Z"
+    },
     "657a-47a3-436f-4a16": {
       "baseline": {
         "assignee": {
@@ -25265,6 +25483,13 @@
       "peer_parent": "REB-4020",
       "state": "confirmed",
       "updated_at": "2026-08-31T06:59:55Z"
+    },
+    "668f-1ef2-7a35-4e90": {
+      "created_at": "2026-09-01T03:42:37Z",
+      "jira_id": "4591230",
+      "jira_key": "REB-4357",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:39Z"
     },
     "66ac-fd03-6d4d-4249": {
       "baseline": {
@@ -26246,6 +26471,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:45Z"
     },
+    "6a80-e227-17d4-4c19": {
+      "created_at": "2026-09-01T03:42:40Z",
+      "jira_id": "4591231",
+      "jira_key": "REB-4358",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:42Z"
+    },
     "6a81-8ecd-0cd6-41cd": {
       "baseline": {
         "assignee": {
@@ -26638,6 +26870,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:55Z"
     },
+    "6c34-2d41-5f22-42a6": {
+      "created_at": "2026-09-01T03:42:43Z",
+      "jira_id": "4591232",
+      "jira_key": "REB-4359",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:45Z"
+    },
     "6c4b-a058-fa9e-4142": {
       "created_at": "2026-08-15T15:01:55Z",
       "jira_key": "REB-759",
@@ -26671,6 +26910,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:57Z"
+    },
+    "6c9f-d06e-8541-4415": {
+      "created_at": "2026-09-01T03:42:45Z",
+      "jira_id": "4591233",
+      "jira_key": "REB-4360",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:47Z"
     },
     "6cb3-c2fa-1365-48f6": {
       "baseline": {
@@ -27675,6 +27921,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-27T19:05:55Z"
     },
+    "71e8-fa57-f32e-4b54": {
+      "created_at": "2026-09-01T03:42:48Z",
+      "jira_id": "4591234",
+      "jira_key": "REB-4361",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:50Z"
+    },
     "71fe-2579-28cc-409c": {
       "baseline": {
         "assignee": {
@@ -27731,6 +27984,13 @@
       "peer_parent": "REB-3501",
       "state": "confirmed",
       "updated_at": "2026-08-22T17:34:39Z"
+    },
+    "721c-63db-e4b1-4693": {
+      "created_at": "2026-09-01T03:42:50Z",
+      "jira_id": "4591235",
+      "jira_key": "REB-4362",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:53Z"
     },
     "7226-f308-b8ff-4412": {
       "baseline": {
@@ -27921,6 +28181,13 @@
       "peer_parent": "REB-155",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:23Z"
+    },
+    "7289-0fea-14e9-4791": {
+      "created_at": "2026-09-01T03:42:53Z",
+      "jira_id": "4591236",
+      "jira_key": "REB-4363",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:55Z"
     },
     "72ab-4e0b-ada4-4919": {
       "baseline": {
@@ -28335,6 +28602,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-20T04:41:24Z"
+    },
+    "739f-c96f-57fd-4a72": {
+      "created_at": "2026-09-01T03:42:56Z",
+      "jira_id": "4591237",
+      "jira_key": "REB-4364",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:42:58Z"
     },
     "73b2-6194-c430-45ab": {
       "baseline": {
@@ -29324,6 +29598,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-31T23:32:28Z"
     },
+    "7843-d736-8cea-4efe": {
+      "created_at": "2026-09-01T03:42:59Z",
+      "jira_id": "4591238",
+      "jira_key": "REB-4365",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:01Z"
+    },
     "7851-e06b-9e85-4c9e": {
       "baseline": {
         "assignee": {
@@ -29890,6 +30171,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-16T23:36:44Z"
+    },
+    "7a1d-fd01-dc88-4101": {
+      "created_at": "2026-09-01T03:43:01Z",
+      "jira_id": "4591239",
+      "jira_key": "REB-4366",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:04Z"
     },
     "7a41-95f4-c38c-4b5a": {
       "baseline": {
@@ -30792,6 +31080,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T23:36:35Z"
     },
+    "7e15-a945-121e-44fd": {
+      "created_at": "2026-09-01T03:43:04Z",
+      "jira_id": "4591240",
+      "jira_key": "REB-4367",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:06Z"
+    },
     "7e17-d75e-dfa2-4055": {
       "baseline": {
         "assignee": null,
@@ -30943,6 +31238,13 @@
       "peer_parent": "REB-993",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:43Z"
+    },
+    "7f1c-2b59-da62-419f": {
+      "created_at": "2026-09-01T03:43:07Z",
+      "jira_id": "4591241",
+      "jira_key": "REB-4368",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:09Z"
     },
     "7f24-2ea5-e593-4ff1": {
       "baseline": {
@@ -31149,6 +31451,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-31T23:32:36Z"
+    },
+    "7fc2-354f-900e-4b4f": {
+      "created_at": "2026-09-01T03:43:10Z",
+      "jira_id": "4591242",
+      "jira_key": "REB-4369",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:12Z"
     },
     "7fe2-eef7-a1ef-4919": {
       "baseline": {
@@ -33599,6 +33908,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-23T02:51:50Z"
     },
+    "890c-8717-df28-48f8": {
+      "created_at": "2026-09-01T03:43:12Z",
+      "jira_id": "4591243",
+      "jira_key": "REB-4370",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:15Z"
+    },
     "890d-4733-1c88-4976": {
       "baseline": {
         "assignee": null,
@@ -34421,6 +34737,13 @@
       "peer_parent": "REB-1580",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:04Z"
+    },
+    "8c3a-d287-d488-43ea": {
+      "created_at": "2026-09-01T03:43:15Z",
+      "jira_id": "4591244",
+      "jira_key": "REB-4371",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:17Z"
     },
     "8c3b-7479-e09d-465b": {
       "baseline": {
@@ -35782,6 +36105,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:42Z"
     },
+    "91a9-c7d3-4555-4d79": {
+      "created_at": "2026-09-01T03:43:18Z",
+      "jira_id": "4591245",
+      "jira_key": "REB-4372",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:20Z"
+    },
     "91aa-167f-1061-4f17": {
       "baseline": {
         "assignee": {
@@ -36283,6 +36613,13 @@
       "peer_parent": "REB-1580",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:55Z"
+    },
+    "942f-8b68-8ef0-4019": {
+      "created_at": "2026-09-01T03:43:21Z",
+      "jira_id": "4591246",
+      "jira_key": "REB-4373",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:23Z"
     },
     "943f-8303-829b-443a": {
       "baseline": {
@@ -37155,6 +37492,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:17Z"
     },
+    "978f-fda5-7e72-42fa": {
+      "created_at": "2026-09-01T03:43:23Z",
+      "jira_id": "4591247",
+      "jira_key": "REB-4374",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:25Z"
+    },
     "9790-cafa-dffa-462e": {
       "baseline": {
         "assignee": {
@@ -38011,6 +38355,13 @@
       "peer_parent": "REB-687",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:36Z"
+    },
+    "9a82-7d5a-ae10-495a": {
+      "created_at": "2026-09-01T03:43:26Z",
+      "jira_id": "4591248",
+      "jira_key": "REB-4375",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:28Z"
     },
     "9a8f-2f2d-617e-4f31": {
       "baseline": {
@@ -38959,6 +39310,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-18T23:37:17Z"
     },
+    "9e54-11ef-183c-4152": {
+      "created_at": "2026-09-01T03:43:29Z",
+      "jira_id": "4591249",
+      "jira_key": "REB-4376",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:31Z"
+    },
     "9e76-deb8-13c6-486c": {
       "baseline": {
         "assignee": {
@@ -39835,6 +40193,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:36Z"
     },
+    "a334-c72d-b201-4da7": {
+      "created_at": "2026-09-01T03:43:32Z",
+      "jira_id": "4591250",
+      "jira_key": "REB-4377",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:34Z"
+    },
     "a337-c69c-3147-4104": {
       "baseline": {
         "assignee": null,
@@ -40211,6 +40576,13 @@
       "peer_parent": "REB-1215",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:44Z"
+    },
+    "a3ea-517f-9fbd-497c": {
+      "created_at": "2026-09-01T03:43:34Z",
+      "jira_id": "4591251",
+      "jira_key": "REB-4378",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:37Z"
     },
     "a3f5-5c19-faad-417b": {
       "baseline": {
@@ -42631,6 +43003,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T01:26:42Z"
     },
+    "ad2c-d8a1-0332-4516": {
+      "created_at": "2026-09-01T03:43:37Z",
+      "jira_id": "4591252",
+      "jira_key": "REB-4379",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:40Z"
+    },
     "ad2e-5db8-7ad0-4fa4": {
       "baseline": {
         "assignee": {
@@ -43132,6 +43511,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:54Z"
     },
+    "aeb8-0475-ad5b-4495": {
+      "created_at": "2026-09-01T03:43:40Z",
+      "jira_id": "4591253",
+      "jira_key": "REB-4380",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:42Z"
+    },
     "aec1-76e7-bb95-4c86": {
       "baseline": {
         "assignee": {
@@ -43274,6 +43660,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-27T15:07:31Z"
+    },
+    "af54-00ed-b38b-472e": {
+      "created_at": "2026-09-01T03:43:43Z",
+      "jira_id": "4591254",
+      "jira_key": "REB-4381",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:46Z"
     },
     "af77-9e53-226f-4f46": {
       "baseline": {
@@ -43941,6 +44334,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:09Z"
     },
+    "b203-7f31-0f3e-4004": {
+      "created_at": "2026-09-01T03:43:46Z",
+      "jira_id": "4591255",
+      "jira_key": "REB-4382",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:49Z"
+    },
     "b20c-22aa-b686-41c7": {
       "created_at": "2026-08-15T15:09:09Z",
       "jira_key": "REB-279",
@@ -44037,6 +44437,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:12Z"
+    },
+    "b290-a353-bba9-4545": {
+      "created_at": "2026-09-01T03:43:49Z",
+      "jira_id": "4591256",
+      "jira_key": "REB-4383",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:52Z"
     },
     "b2bb-2ac7-5ce3-4412": {
       "baseline": {
@@ -44765,9 +45172,9 @@
     "b4f5-11c0-8633-4204": {
       "baseline": {
         "assignee": null,
-        "description": "## Problem\nThe scheduled Test Suite (mirror) Windows sweep reports `ValueError: the environment variable is longer than 32767 characters` in run 33426859481. Pytest sets `PYTEST_CURRENT_TEST` to `<nodeid> (setup|call|teardown)` for each test. One parametrized test embeds a 60,000-character/75,000-character payload in its generated parameter id, so the Windows environment-variable ceiling is exceeded before the test body runs.\n\n## Root Cause Summary\n`tests/unit/rebar_reconciler/mutate/test_outbound_comment_marker_survives_truncation.py::test_undecorated_text_is_byte_identical_to_the_bare_fitter` parametrizes `(\"label\", \"text\")` with long string values but no explicit short ids. Pytest's default id includes both the short label and the full `text` parameter, producing nodeids measured locally at 60,163 and 75,169 characters. Windows raises `ValueError: the environment variable is longer than 32767 characters` when pytest writes that nodeid into `PYTEST_CURRENT_TEST`.\n\n## Plan\n1. Keep the product payload large; only shorten pytest's generated parameter IDs by giving the long cases explicit ids derived from the existing `label` values.\n2. Add a regression test in the same module that collects this module's nodeids from `request.session.items`, constructs pytest's real env value shape (`f\"{item.nodeid} (setup)\"`, also representative for teardown), and passes it through a small test-local `_assert_windows_env_value_fits` seam that implements Windows' documented 32767-character single-env-var ceiling and raises the exact `ValueError` message. This is RED on current code because the collected nodeid itself is too long; it is GREEN only when pytest would stop writing overlong `PYTEST_CURRENT_TEST` values.\n3. Verify the sibling set by collecting the module and listing all nodeids over the Windows cap; the repair must reduce the set to zero while preserving the existing large-payload product assertions.\n4. Attribute the defect by blaming the long parametrization and citing commit `6724e79e8ff857b54dd36a62006a89445fc10ad6` / `rebar-ticket: 5931-78a3-95d2-44cd`.\n5. Run the focused module, a sandboxed mutation check that removes the explicit ids and confirms the new test returns to RED, then `make lint` and the default suite before Gerrit.\n\n## Acceptance Criteria\n- [ ] CI run 33426859481's failing test/helper is identified as pytest writing `PYTEST_CURRENT_TEST` for the long parametrized nodeids in `test_outbound_comment_marker_survives_truncation.py`.\n- [ ] The RED test constructs `PYTEST_CURRENT_TEST`-shaped values from real collected nodeids and fails through `_assert_windows_env_value_fits` with the same `ValueError` text when any exceeds 32767 characters.\n- [ ] After the fix, no nodeid in that module produces a `PYTEST_CURRENT_TEST` value over 32767 characters.\n- [ ] The original large-input assertions still execute with the 60,000-character and multiline payloads; only pytest ids change.\n- [ ] The RCA records the legitimacy verdict, sibling sweep result, and caused-by attribution to ticket `5931-78a3-95d2-44cd`.\n- [ ] Mutation check removing the explicit ids makes the RED test fail again inside the sandbox.",
+        "description": "## Problem\nThe scheduled Test Suite (mirror) Windows sweep reports `ValueError: the environment variable is longer than 32767 characters` in run 33426859481. Pytest sets `PYTEST_CURRENT_TEST` to `<nodeid> (setup|call|teardown)` for each test. One parametrized test embeds a 60,000-character/75,000-character payload in its generated parameter id, so the Windows environment-variable ceiling is exceeded before the test body runs.\n\n## Root Cause Summary\n`tests/unit/rebar_reconciler/mutate/test_outbound_comment_marker_survives_truncation.py::test_undecorated_text_is_byte_identical_to_the_bare_fitter` parametrizes `(\"label\", \"text\")` with long string values but no explicit short ids. Pytest's default id includes both the short label and the full `text` parameter, producing nodeids measured locally at 60,163 and 75,169 characters. Windows raises `ValueError: the environment variable is longer than 32767 characters` when pytest writes that nodeid into `PYTEST_CURRENT_TEST`.\n\n## Plan\n1. Keep the product payload large; only shorten pytest's generated parameter IDs by giving the long cases explicit ids derived from the existing `label` values.\n2. Add a regression test in the same module that collects this module's nodeids from `request.session.items`, constructs pytest's real env value shape (`f\"{item.nodeid} (setup)\"`, also representative for teardown), and passes it through a small test-local `_assert_windows_env_value_fits` seam that implements Windows' documented 32767-character single-env-var ceiling and raises the exact `ValueError` message. This is RED on current code because the collected nodeid itself is too long; it is GREEN only when pytest would stop writing overlong `PYTEST_CURRENT_TEST` values.\n3. Verify the sibling set by collecting the module and listing all nodeids over the Windows cap; the repair must reduce the set to zero while preserving the existing large-payload product assertions.\n4. Attribute the defect by blaming the long parametrization and citing commit `6724e79e8ff857b54dd36a62006a89445fc10ad6` / `rebar-ticket: 5931-78a3-95d2-44cd`.\n5. Run the focused module, a sandboxed mutation check that removes the explicit ids and confirms the new test returns to RED, then `make lint` and the default suite before Gerrit.\n\n## Acceptance Criteria\n- [x] CI run 33426859481's failing test/helper is identified as pytest writing `PYTEST_CURRENT_TEST` for the long parametrized nodeids in `test_outbound_comment_marker_survives_truncation.py`.\n- [x] The RED test constructs `PYTEST_CURRENT_TEST`-shaped values from real collected nodeids and fails through `_assert_windows_env_value_fits` with the same `ValueError` text when any exceeds 32767 characters.\n- [x] After the fix, no nodeid in that module produces a `PYTEST_CURRENT_TEST` value over 32767 characters.\n- [x] The original large-input assertions still execute with the 60,000-character and multiline payloads; only pytest ids change.\n- [x] The RCA records the legitimacy verdict, sibling sweep result, and caused-by attribution to ticket `5931-78a3-95d2-44cd`.\n- [x] [non-codebase] Mutation check removing the explicit ids makes the RED test fail again inside the sandbox.\n  provenance: environment=debug-b4f5-pytestid macOS sandbox-exec; principal=joeoakhart@navapbc.com; privilege_posture=narrower; instrument=simulation \u2014 defect-seeded local mutation removed explicit pytest ids inside a sandbox permitting writes only under the worktree and .debug-b4f5-sandbox, and the held-out test failed with the exact Windows env-var ValueError before the script restored the file.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Windows sweep hits 32767-character environment variable limit in tests"
       },
       "created_at": "2026-08-31T23:33:59Z",
@@ -46720,6 +47127,13 @@
       "peer_parent": "REB-3096",
       "state": "confirmed",
       "updated_at": "2026-08-17T19:41:21Z"
+    },
+    "bbeb-aedf-7f84-45a7": {
+      "created_at": "2026-09-01T03:43:52Z",
+      "jira_id": "4591257",
+      "jira_key": "REB-4384",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:54Z"
     },
     "bbf1-82e1-cf9d-494a": {
       "baseline": {
@@ -49153,6 +49567,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:11Z"
     },
+    "c828-eac8-dfd5-4cde": {
+      "created_at": "2026-09-01T03:43:55Z",
+      "jira_id": "4591258",
+      "jira_key": "REB-4385",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:43:57Z"
+    },
     "c82d-8426-c48d-4a42": {
       "created_at": "2026-08-15T15:11:11Z",
       "jira_key": "REB-858",
@@ -49843,6 +50264,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:29Z"
     },
+    "cb9c-97c3-20eb-4817": {
+      "created_at": "2026-09-01T03:43:58Z",
+      "jira_id": "4591259",
+      "jira_key": "REB-4386",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:00Z"
+    },
     "cbca-7684-3df1-4a01": {
       "baseline": {
         "assignee": null,
@@ -50310,6 +50738,20 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T15:43:39Z"
+    },
+    "cd62-607b-e5dc-4928": {
+      "created_at": "2026-09-01T03:44:00Z",
+      "jira_id": "4591260",
+      "jira_key": "REB-4387",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:03Z"
+    },
+    "cd70-9194-49c0-49ff": {
+      "created_at": "2026-09-01T03:44:03Z",
+      "jira_id": "4591261",
+      "jira_key": "REB-4388",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:05Z"
     },
     "cd73-6b68-3806-4bf8": {
       "created_at": "2026-08-15T15:11:39Z",
@@ -50839,6 +51281,13 @@
       "peer_parent": "REB-2108",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:50Z"
+    },
+    "cedd-e0dc-0227-46c3": {
+      "created_at": "2026-09-01T03:44:06Z",
+      "jira_id": "4591262",
+      "jira_key": "REB-4389",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:08Z"
     },
     "cef7-7ac5-18e6-41a3": {
       "baseline": {
@@ -51959,6 +52408,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-28T12:17:42Z"
     },
+    "d244-9513-77f9-4381": {
+      "created_at": "2026-09-01T03:44:08Z",
+      "jira_id": "4591263",
+      "jira_key": "REB-4390",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:11Z"
+    },
+    "d248-7bab-96c6-4c79": {
+      "created_at": "2026-09-01T03:44:11Z",
+      "jira_id": "4591264",
+      "jira_key": "REB-4391",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:13Z"
+    },
     "d251-05e1-eb55-43b2": {
       "baseline": {
         "assignee": {
@@ -52297,6 +52760,13 @@
       "peer_parent": "REB-100",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:20Z"
+    },
+    "d373-e207-b940-41ba": {
+      "created_at": "2026-09-01T03:44:14Z",
+      "jira_id": "4591265",
+      "jira_key": "REB-4392",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:16Z"
     },
     "d378-a89b-30aa-41e6": {
       "baseline": {
@@ -53485,6 +53955,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:47Z"
     },
+    "d8bd-96e9-7672-4ed0": {
+      "created_at": "2026-09-01T03:44:17Z",
+      "jira_id": "4591266",
+      "jira_key": "REB-4393",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:19Z"
+    },
     "d8c1-e75e-77d8-4c00": {
       "baseline": {
         "assignee": {
@@ -53996,6 +54473,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:55Z"
     },
+    "da8b-36cd-6b6e-415e": {
+      "created_at": "2026-09-01T03:44:19Z",
+      "jira_id": "4591267",
+      "jira_key": "REB-4394",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:22Z"
+    },
+    "daa2-789e-df12-4d9b": {
+      "created_at": "2026-09-01T03:44:22Z",
+      "jira_id": "4591268",
+      "jira_key": "REB-4395",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:24Z"
+    },
     "daa7-e840-19b9-4851": {
       "baseline": {
         "assignee": {
@@ -54495,6 +54986,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:08Z"
     },
+    "dc60-e21c-2fb2-4c23": {
+      "created_at": "2026-09-01T03:44:25Z",
+      "jira_id": "4591269",
+      "jira_key": "REB-4396",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:27Z"
+    },
     "dc89-cd11-acd6-4e61": {
       "baseline": {
         "assignee": {
@@ -54892,6 +55390,13 @@
       "peer_parent": "REB-3575",
       "state": "confirmed",
       "updated_at": "2026-08-24T17:38:52Z"
+    },
+    "de67-c6d9-3308-4b84": {
+      "created_at": "2026-09-01T03:44:28Z",
+      "jira_id": "4591270",
+      "jira_key": "REB-4397",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:30Z"
     },
     "de7c-323a-05e4-4fda": {
       "baseline": {
@@ -55915,6 +56420,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-31T07:01:00Z"
     },
+    "e269-5026-d27d-461d": {
+      "created_at": "2026-09-01T03:44:31Z",
+      "jira_id": "4591271",
+      "jira_key": "REB-4398",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:33Z"
+    },
     "e27c-5a20-cd13-43b2": {
       "baseline": {
         "assignee": {
@@ -56186,6 +56698,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:49Z"
+    },
+    "e358-a5ad-d031-48e1": {
+      "created_at": "2026-09-01T03:44:34Z",
+      "jira_id": "4591272",
+      "jira_key": "REB-4399",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:36Z"
     },
     "e369-a449-4773-48fb": {
       "baseline": {
@@ -56472,6 +56991,13 @@
       "peer_parent": "REB-3171",
       "state": "confirmed",
       "updated_at": "2026-08-18T16:44:13Z"
+    },
+    "e4a5-1e8e-e441-43a3": {
+      "created_at": "2026-09-01T03:44:37Z",
+      "jira_id": "4591273",
+      "jira_key": "REB-4400",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:39Z"
     },
     "e4a6-545b-36af-456d": {
       "baseline": {
@@ -57358,6 +57884,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:20Z"
     },
+    "e7d7-0f86-0b5b-406a": {
+      "created_at": "2026-09-01T03:44:40Z",
+      "jira_id": "4591274",
+      "jira_key": "REB-4401",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:42Z"
+    },
     "e7e0-49af-7200-4340": {
       "baseline": {
         "assignee": {
@@ -57420,6 +57953,13 @@
       "jira_key": "REB-908",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:22Z"
+    },
+    "e7fc-2d5b-3fcf-448d": {
+      "created_at": "2026-09-01T03:44:43Z",
+      "jira_id": "4591275",
+      "jira_key": "REB-4402",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:45Z"
     },
     "e800-c107-d4ac-463b": {
       "baseline": {
@@ -58539,6 +59079,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:47Z"
     },
+    "ec6d-e7ad-3de0-44df": {
+      "created_at": "2026-09-01T03:44:45Z",
+      "jira_id": "4591276",
+      "jira_key": "REB-4403",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:48Z"
+    },
     "ec89-224e-1ca5-47f8": {
       "baseline": {
         "assignee": {
@@ -59070,6 +59617,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T01:28:34Z"
     },
+    "ee1c-9af7-82b2-49e7": {
+      "created_at": "2026-09-01T03:44:48Z",
+      "jira_id": "4591277",
+      "jira_key": "REB-4404",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:51Z"
+    },
     "ee1e-e086-e579-4fa9": {
       "baseline": {
         "assignee": null,
@@ -59281,6 +59835,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-16T16:38:26Z"
+    },
+    "eef4-4681-7350-4bce": {
+      "created_at": "2026-09-01T03:44:51Z",
+      "jira_id": "4591278",
+      "jira_key": "REB-4405",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:53Z"
     },
     "eefd-49b1-995f-488d": {
       "baseline": {
@@ -60164,6 +60725,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-29T17:29:57Z"
     },
+    "f273-719f-b4ae-4852": {
+      "created_at": "2026-09-01T03:44:54Z",
+      "jira_id": "4591279",
+      "jira_key": "REB-4406",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:56Z"
+    },
     "f2d6-0e1a-3438-425b": {
       "baseline": {
         "assignee": null,
@@ -60177,6 +60745,13 @@
       "peer_parent": "REB-289",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:23Z"
+    },
+    "f2e1-6ac6-adc9-4fd5": {
+      "created_at": "2026-09-01T03:44:57Z",
+      "jira_id": "4591280",
+      "jira_key": "REB-4407",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:44:59Z"
     },
     "f2f3-9cb1-335b-4e31": {
       "baseline": {
@@ -60255,6 +60830,13 @@
       "jira_key": "REB-1047",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:24Z"
+    },
+    "f330-9100-2f4b-4d14": {
+      "created_at": "2026-09-01T03:44:59Z",
+      "jira_id": "4591281",
+      "jira_key": "REB-4408",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:45:02Z"
     },
     "f361-26d8-89ad-4c55": {
       "baseline": {
@@ -61235,6 +61817,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:43Z"
     },
+    "f78f-282d-d5b9-4082": {
+      "created_at": "2026-09-01T03:45:02Z",
+      "jira_id": "4591282",
+      "jira_key": "REB-4409",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:45:05Z"
+    },
     "f79d-e364-5fdb-417d": {
       "baseline": {
         "assignee": {
@@ -61914,6 +62503,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T08:38:55Z"
     },
+    "f9aa-6981-a0cb-43b6": {
+      "created_at": "2026-09-01T03:45:05Z",
+      "jira_id": "4591283",
+      "jira_key": "REB-4410",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:45:08Z"
+    },
     "f9b6-744e-636b-4430": {
       "baseline": {
         "assignee": null,
@@ -62053,6 +62649,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:00Z"
     },
+    "fa8f-e53f-d6b9-475e": {
+      "created_at": "2026-09-01T03:45:08Z",
+      "jira_id": "4591284",
+      "jira_key": "REB-4411",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:45:11Z"
+    },
     "fa90-3292-38d4-4fd2": {
       "baseline": {
         "assignee": {
@@ -62157,6 +62760,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:04Z"
     },
+    "fae0-c5dc-cd67-4cf3": {
+      "created_at": "2026-09-01T03:45:11Z",
+      "jira_id": "4591285",
+      "jira_key": "REB-4412",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:45:13Z"
+    },
     "fb03-2609-ef83-4b41": {
       "baseline": {
         "assignee": {
@@ -62185,6 +62795,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-16T15:34:37Z"
+    },
+    "fb06-e6b1-f5d7-4b2e": {
+      "created_at": "2026-09-01T03:45:14Z",
+      "jira_id": "4591286",
+      "jira_key": "REB-4413",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:45:16Z"
     },
     "fb2e-2aa1-9e0f-457a": {
       "baseline": {
@@ -62936,6 +63553,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:19Z"
     },
+    "fe20-2387-be36-4d2e": {
+      "created_at": "2026-09-01T03:45:17Z",
+      "jira_id": "4591287",
+      "jira_key": "REB-4414",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:45:19Z"
+    },
     "fe28-c6d0-b20c-4571": {
       "baseline": {
         "assignee": null,
@@ -63112,6 +63736,13 @@
       "jira_key": "REB-403",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:23Z"
+    },
+    "fe7f-9634-d97e-4587": {
+      "created_at": "2026-09-01T03:45:20Z",
+      "jira_id": "4591288",
+      "jira_key": "REB-4415",
+      "state": "confirmed",
+      "updated_at": "2026-09-01T03:45:22Z"
     },
     "fea4-f98c-f1a2-4168": {
       "baseline": {
@@ -65365,8 +65996,10 @@
     "1788222942634439001": "__rebar_unknown_comment_id__",
     "1788223056332936001": "__rebar_unknown_comment_id__",
     "1788223971169668001": "__rebar_unknown_comment_id__",
+    "1788224399989235721": "__rebar_unknown_comment_id__",
     "1788224916714377001": "__rebar_unknown_comment_id__",
     "1788225588786757001": "__rebar_unknown_comment_id__",
+    "1788226382721154916": "__rebar_unknown_comment_id__",
     "1788226541454163001": "__rebar_unknown_comment_id__",
     "1788226550246070001": "__rebar_unknown_comment_id__",
     "1788226552739990001": "__rebar_unknown_comment_id__",
@@ -65381,7 +66014,13 @@
     "1788228782739860001": "__rebar_unknown_comment_id__",
     "1788229499449751001": "__rebar_unknown_comment_id__",
     "1788229625714158001": "__rebar_unknown_comment_id__",
-    "1788230097201404001": "__rebar_unknown_comment_id__"
+    "1788230097201404001": "__rebar_unknown_comment_id__",
+    "1788230588353035001": "__rebar_unknown_comment_id__",
+    "1788230858736089001": "__rebar_unknown_comment_id__",
+    "1788231696575240615": "__rebar_unknown_comment_id__",
+    "1788231696576300659": "__rebar_unknown_comment_id__",
+    "1788232062511920001": "__rebar_unknown_comment_id__",
+    "1788233849522888001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -68106,16 +68745,103 @@
     "REB-4326": "ff2e-f82d-fa49-47c6",
     "REB-4327": "ff9d-0742-479c-44c0",
     "REB-4328": "5c48-90aa-8bd3-4ce1",
+    "REB-4329": "0068-322f-ac9a-41e2",
     "REB-433": "0408-e8e5-f8aa-4d70",
+    "REB-4330": "057d-3eb9-b45c-44c3",
+    "REB-4331": "063d-5af6-fad9-49bf",
+    "REB-4332": "0752-c215-390f-4e1a",
+    "REB-4333": "09c7-e2f2-ec21-4a86",
+    "REB-4334": "1008-c5fb-1286-4b11",
+    "REB-4335": "107a-307f-f2d9-4332",
+    "REB-4336": "13b4-4db7-a2f2-4d07",
+    "REB-4337": "16e3-6db8-fee9-464e",
+    "REB-4338": "2826-c792-51c0-4d1c",
+    "REB-4339": "299b-9bf1-520b-4c92",
     "REB-434": "ab8c-3219-d60b-4898",
+    "REB-4340": "2c21-5662-443c-454c",
+    "REB-4341": "2df8-d823-ba58-4467",
+    "REB-4342": "3365-48ab-ce63-4271",
+    "REB-4343": "3740-fda5-d538-41e5",
+    "REB-4344": "39c6-255f-97f6-406f",
+    "REB-4345": "39e8-93ba-230a-4259",
+    "REB-4346": "3b69-8208-bfd2-4fff",
+    "REB-4347": "4651-f0dd-4388-4221",
+    "REB-4348": "47c7-751e-d27c-4695",
+    "REB-4349": "4ace-472a-01a7-40bd",
     "REB-435": "66ac-fd03-6d4d-4249",
+    "REB-4350": "4db9-0314-959b-46bc",
+    "REB-4351": "5061-f253-ebf4-4063",
+    "REB-4352": "5441-83be-9c11-4338",
+    "REB-4353": "54ae-1c78-788e-4b28",
+    "REB-4354": "5bcd-e4c8-28fe-4742",
+    "REB-4355": "60d0-8e6f-5d66-4ca9",
+    "REB-4356": "6575-0886-a6fe-45f8",
+    "REB-4357": "668f-1ef2-7a35-4e90",
+    "REB-4358": "6a80-e227-17d4-4c19",
+    "REB-4359": "6c34-2d41-5f22-42a6",
     "REB-436": "0895-14b6-1d03-49c5",
+    "REB-4360": "6c9f-d06e-8541-4415",
+    "REB-4361": "71e8-fa57-f32e-4b54",
+    "REB-4362": "721c-63db-e4b1-4693",
+    "REB-4363": "7289-0fea-14e9-4791",
+    "REB-4364": "739f-c96f-57fd-4a72",
+    "REB-4365": "7843-d736-8cea-4efe",
+    "REB-4366": "7a1d-fd01-dc88-4101",
+    "REB-4367": "7e15-a945-121e-44fd",
+    "REB-4368": "7f1c-2b59-da62-419f",
+    "REB-4369": "7fc2-354f-900e-4b4f",
     "REB-437": "9788-69c5-1972-4537",
+    "REB-4370": "890c-8717-df28-48f8",
+    "REB-4371": "8c3a-d287-d488-43ea",
+    "REB-4372": "91a9-c7d3-4555-4d79",
+    "REB-4373": "942f-8b68-8ef0-4019",
+    "REB-4374": "978f-fda5-7e72-42fa",
+    "REB-4375": "9a82-7d5a-ae10-495a",
+    "REB-4376": "9e54-11ef-183c-4152",
+    "REB-4377": "a334-c72d-b201-4da7",
+    "REB-4378": "a3ea-517f-9fbd-497c",
+    "REB-4379": "ad2c-d8a1-0332-4516",
     "REB-438": "4e70-0cd4-0d04-4d31",
+    "REB-4380": "aeb8-0475-ad5b-4495",
+    "REB-4381": "af54-00ed-b38b-472e",
+    "REB-4382": "b203-7f31-0f3e-4004",
+    "REB-4383": "b290-a353-bba9-4545",
+    "REB-4384": "bbeb-aedf-7f84-45a7",
+    "REB-4385": "c828-eac8-dfd5-4cde",
+    "REB-4386": "cb9c-97c3-20eb-4817",
+    "REB-4387": "cd62-607b-e5dc-4928",
+    "REB-4388": "cd70-9194-49c0-49ff",
+    "REB-4389": "cedd-e0dc-0227-46c3",
     "REB-439": "65e3-1fc6-5f3b-4c67",
+    "REB-4390": "d244-9513-77f9-4381",
+    "REB-4391": "d248-7bab-96c6-4c79",
+    "REB-4392": "d373-e207-b940-41ba",
+    "REB-4393": "d8bd-96e9-7672-4ed0",
+    "REB-4394": "da8b-36cd-6b6e-415e",
+    "REB-4395": "daa2-789e-df12-4d9b",
+    "REB-4396": "dc60-e21c-2fb2-4c23",
+    "REB-4397": "de67-c6d9-3308-4b84",
+    "REB-4398": "e269-5026-d27d-461d",
+    "REB-4399": "e358-a5ad-d031-48e1",
     "REB-44": "1f3e-5785-8884-41a0",
     "REB-440": "1f19-adf2-ffb2-4b09",
+    "REB-4400": "e4a5-1e8e-e441-43a3",
+    "REB-4401": "e7d7-0f86-0b5b-406a",
+    "REB-4402": "e7fc-2d5b-3fcf-448d",
+    "REB-4403": "ec6d-e7ad-3de0-44df",
+    "REB-4404": "ee1c-9af7-82b2-49e7",
+    "REB-4405": "eef4-4681-7350-4bce",
+    "REB-4406": "f273-719f-b4ae-4852",
+    "REB-4407": "f2e1-6ac6-adc9-4fd5",
+    "REB-4408": "f330-9100-2f4b-4d14",
+    "REB-4409": "f78f-282d-d5b9-4082",
     "REB-441": "6d56-8c12-9953-4d25",
+    "REB-4410": "f9aa-6981-a0cb-43b6",
+    "REB-4411": "fa8f-e53f-d6b9-475e",
+    "REB-4412": "fae0-c5dc-cd67-4cf3",
+    "REB-4413": "fb06-e6b1-f5d7-4b2e",
+    "REB-4414": "fe20-2387-be36-4d2e",
+    "REB-4415": "fe7f-9634-d97e-4587",
     "REB-442": "70c7-8745-2be8-4e5c",
     "REB-443": "fa49-2687-4daf-4afc",
     "REB-444": "1ba5-39de-2fc2-45f0",
