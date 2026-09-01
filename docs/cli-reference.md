@@ -77,7 +77,7 @@ The golden record of the normalization: what each verb printed before the confir
 
 ## Command syntax
 
-One section per visible command that is not retired (76 in total), in registry order. Every section embeds its committed package help bytes.
+One section per visible command that is not retired (77 in total), in registry order. Every section embeds its committed package help bytes.
 
 ### `show`
 
@@ -425,6 +425,27 @@ options:
   --limit N           compact at most N tickets
   --no-commit         stage the snapshots without committing
   --include-archived  also compact archived tickets
+```
+
+### `reclaim-collapse`
+
+```
+Usage: rebar reclaim-collapse --shadow-tracker SHADOW_TRACKER --boundary
+                              BOUNDARY [--branch BRANCH] [--apply]
+                              [--format {text,json}]
+
+Build an offline below-horizon tickets history collapse in a shadow clone.
+
+options:
+  --shadow-tracker SHADOW_TRACKER
+                        path to an explicitly marked disposable tickets-branch
+                        shadow clone
+  --boundary BOUNDARY   oldest retained boundary commit to collapse into the
+                        checkpoint
+  --branch BRANCH       shadow branch/ref tip to rewrite (default: HEAD)
+  --apply               update the shadow clone's current branch; omitted means
+                        dry-run only
+  --format {text,json}  output format
 ```
 
 ### `export`

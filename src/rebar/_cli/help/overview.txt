@@ -25,6 +25,7 @@ Subcommands:
   verify-signature      Certify that a ticket's verified steps match its signature.
   compact               Compact a ticket's event log.
   compact-all           Compact all eligible tickets.
+  reclaim-collapse      Build an offline below-horizon tickets history collapse in a shadow clone.
   export                Export the store as NDJSON (one ticket per line).
   import                Import tickets from export NDJSON for a clean rebar-to-rebar migration.
   transition            Transition ticket status (optimistic concurrency).

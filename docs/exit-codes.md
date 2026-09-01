@@ -145,6 +145,7 @@ guarantee `2`).
 | `next-batch` | 0 | 1 | — | |
 | `quality-check` | 0 | 1 | — | **gate**: 0=dispatch-ready, 1=not-ready **or** not-found |
 | `ready` | 0 | — | — | structured read (unknown option → 2); empty result still 0 |
+| `reclaim-collapse` | 0 | — | — | offline shadow-clone-only history rewrite engine; dry-run/apply success → 0, safety refusal / invalid boundary / ineligible horizon → 2 |
 | `reopen` | 0 | 1 | 10 | 10 when the ticket is not closed |
 | `resolve` | 0 | 1 | — | |
 | `revert` | 0 | 1 | — | missing `<ticket_id> <uuid>` → 1 |
