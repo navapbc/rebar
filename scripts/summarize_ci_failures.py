@@ -3,8 +3,8 @@
 
 WHY THIS EXISTS
 ---------------
-The Gerrit ``Verified`` vote is cast by ``lfreleng-actions/gerrit-review-action``, which
-builds its own message and offers no input for custom text:
+The Gerrit ``Verified`` vote helper preserves the original
+``lfreleng-actions/gerrit-review-action`` message shape:
 
     MESSAGE="${STATUS}: ${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
 

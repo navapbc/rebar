@@ -61,18 +61,21 @@ def _step(steps: list[dict[str, Any]], needle: str) -> dict[str, Any]:
 
 def test_cast_step_still_votes_the_normalized_conclusion(steps: list[dict[str, Any]]) -> None:
     """The single source of the vote decision must remain the normalize step's output."""
-    cast = _step(steps, "gerrit-review-action")
-    assert cast["with"]["vote-type"] == "${{ steps.normalize.outputs.vote-type }}"
+    cast = _step(steps, "Cast Verified from the CI conclusion")
+    assert cast["env"]["VOTE_TYPE"] == "${{ steps.normalize.outputs.vote-type }}"
+    assert cast["run"].strip().endswith("python3 scripts/cast_gerrit_verified_vote.py")
 
 
 def test_vote_needs_cover_every_verify_route(vote_job: dict[str, Any]) -> None:
     assert set(vote_job["needs"]) == EXPECTED_VOTE_NEEDS
 
 
-def test_only_one_step_casts_a_vote(steps: list[dict[str, Any]]) -> None:
-    """Exactly one gerrit-review-action invocation in `vote`, so no second label is cast."""
-    casts = [s for s in steps if "gerrit-review-action" in str(s.get("uses", ""))]
+def test_the_final_vote_uses_the_tolerant_local_helper(steps: list[dict[str, Any]]) -> None:
+    """The final vote must be able to classify Gerrit's closed-change race."""
+    casts = [s for s in steps if s.get("name") == "Cast Verified from the CI conclusion"]
     assert len(casts) == 1
+    assert "gerrit-review-action" not in str(casts[0].get("uses", ""))
+    assert "cast_gerrit_verified_vote.py" in casts[0]["run"]
 
 
 # --- the triage comment is comment-only ----------------------------------------------
@@ -105,7 +108,7 @@ def test_the_new_steps_cannot_fail_the_vote_job(steps: list[dict[str, Any]]) -> 
 def test_the_comment_is_posted_after_the_vote_is_cast(steps: list[dict[str, Any]]) -> None:
     """Cast first: if the comment path breaks, the vote is already on the change."""
     names = [f"{s.get('name', '')} {s.get('uses', '')}" for s in steps]
-    cast_index = next(i for i, n in enumerate(names) if "gerrit-review-action" in n)
+    cast_index = next(i for i, n in enumerate(names) if "Cast Verified from the CI conclusion" in n)
     post_index = next(i for i, n in enumerate(names) if "Post the triage detail" in n)
     assert cast_index < post_index
 
@@ -165,6 +168,7 @@ def test_the_summarizer_is_checked_out_from_the_default_branch(steps: list[dict[
     """The vote job must never run patchset-controlled code; it sparse-checks out from main."""
     checkout = _step(steps, "Fetch the trusted conclusion-normalization script")
     assert "scripts/summarize_ci_failures.py" in checkout["with"]["sparse-checkout"]
+    assert "scripts/cast_gerrit_verified_vote.py" in checkout["with"]["sparse-checkout"]
     assert checkout["with"]["persist-credentials"] is False
 
 
