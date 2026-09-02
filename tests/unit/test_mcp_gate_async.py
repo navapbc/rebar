@@ -3,11 +3,9 @@
 Phase 1 de-dups a concurrent retry; Phase 2 removes the client timeout from the
 request path entirely with an async ``review_plan_start`` / ``verify_completion_start``
 that return a durable ``job_id`` in milliseconds while the gate runs on a background
-daemon thread. These tests pin the four behaviours the ticket calls out — a sub-100ms
-handle while the gate blocks, a poll that transitions running -> passed, a duplicate
+daemon thread. These tests pin fast handle return, terminal poll, a duplicate
 ``*_start`` that shares ONE run's job_id, and a fresh (post-restart) registry that still
-resolves the durable verdict from the on-disk store — deterministically and with zero
-tokens (the gate is a fake that blocks on a ``threading.Event``).
+resolves the durable verdict from the on-disk store.
 """
 
 from __future__ import annotations
@@ -75,9 +73,6 @@ class _BlockingReviewPlan:
         return {"verdict": "PASS", "ticket_id": ticket_id}
 
 
-# ── begin_gate_job: the non-blocking singleflight reservation ────────────────────
-
-
 def test_begin_gate_job_attaches_to_an_inflight_key_with_the_same_job_id():
     inflight.reset_registry()
     first = inflight.begin_gate_job("plan_review", "d80d", variant="source=attested")
@@ -102,16 +97,14 @@ def test_begin_gate_job_force_never_attaches():
     assert b.job_id != a.job_id
 
 
-# ── gate_run_status: resolving a handle to a poll record ─────────────────────────
-
-
 def test_gate_status_unknown_for_an_unrecorded_job(store):
-    assert gate_runs.gate_run_status("no-such-job")["status"] == "unknown"
+    out = gate_runs.gate_run_status("no-such-job")
+    assert out["status"] == "unknown"
+    assert "findings" not in out
 
 
 def test_gate_status_running_then_terminal_from_the_index(store):
     inflight.reset_registry()
-    # A recorded run whose daemon is still active reads 'running'…
     handle = inflight.begin_gate_job("plan_review", "d80d", variant="source=attested")
     gate_runs.record_gate_run(
         {
@@ -122,8 +115,9 @@ def test_gate_status_running_then_terminal_from_the_index(store):
             "started_at": time.time(),
         }
     )
-    assert gate_runs.gate_run_status(handle.job_id)["status"] == "running"
-    # …and the recorded terminal status wins once the daemon settles.
+    running = gate_runs.gate_run_status(handle.job_id)
+    assert running["status"] == "running"
+    assert running["findings"]["reason"] == "run-running"
     handle.complete(result={"verdict": "PASS"})
     gate_runs.record_gate_run(
         {
@@ -138,12 +132,12 @@ def test_gate_status_running_then_terminal_from_the_index(store):
     out = gate_runs.gate_run_status(handle.job_id)
     assert out["status"] == "passed"
     assert out["verdict"] == "PASS"
+    assert out["findings"]["readable"] is False
+    assert out["findings"]["reason"] == "review-result-generation-unknown"
 
 
 def test_gate_status_stale_running_when_daemon_gone_and_index_still_running(store):
     inflight.reset_registry()
-    # An index that reads 'running' with NO active daemon and past the grace window is a
-    # crashed leader — surfaced as stale-running (the run_finished marker never fired).
     gate_runs.record_gate_run(
         {
             "job_id": "wedged-job",
@@ -372,6 +366,7 @@ def test_gate_daemon_records_failed_when_the_gate_raises(store):
         time.sleep(0.02)
     out = gate_runs.gate_run_status(handle.job_id)
     assert out["status"] == "failed"
+    assert out["findings"]["reason"] == "run-failed"
     assert "gate exploded" in str(out.get("error") or out.get("verdict") or "")
 
 

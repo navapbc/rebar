@@ -217,14 +217,16 @@ def _register_plan_review_tools(mcp, annotations) -> None:
 
         Reads the durable run handle via replay of the local `.rebar/gate_runs` index
         (no LLM, no execution) -> {job_id, status, ticket_id, gate_type, verdict?,
-        error?, durable?}. `status` is 'running' while the background gate is in flight,
+        error?, durable?, findings?}. `status` is 'running' while the background gate is in flight,
         then 'passed' / 'failed'; 'stale-running' if the run's daemon died before
         recording a terminal status; 'attaching' if a duplicate start attached to an
         in-flight run whose index record has not landed yet (keep polling); 'unknown' if
         the job_id is unrecognised. For a plan-review or completion job `durable` carries
         the gate's own signed-attestation currency (the same answer plan_review_status /
         verify_completion_status give), so a caller can confirm the verdict actually
-        persisted."""
+        persisted. For a plan-review job, `findings.readable` says whether this run's
+        REVIEW_RESULT sidecar is readable yet; callers must not read latest findings until
+        it is true."""
         import rebar.llm
 
         return GateRunOut.model_validate(rebar.llm.gate_run_status(job_id))

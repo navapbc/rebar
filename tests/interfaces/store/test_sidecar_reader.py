@@ -54,12 +54,11 @@ def test_latest_review_result_returns_newest_payload_with_prose(rebar_repo: Path
     """Two reviews emitted in order → the reader returns the SECOND (newest) payload,
     and that payload carries the e344 prose fields the novelty sub-call re-grounds on."""
     tid = _make_ticket(rebar_repo)
-    assert sidecar.emit(
-        _verdict(tid, "first review finding"), material="m1", repo_root=str(rebar_repo)
-    )
-    assert sidecar.emit(
-        _verdict(tid, "second review finding"), material="m2", repo_root=str(rebar_repo)
-    )
+    first = _verdict(tid, "first review finding")
+    assert sidecar.emit(first, material="m1", repo_root=str(rebar_repo))
+    assert isinstance(first["sidecar_reviewed_at"], int)
+    second = _verdict(tid, "second review finding")
+    assert sidecar.emit(second, material="m2", repo_root=str(rebar_repo))
 
     got = sidecar.latest_review_result(tid, repo_root=str(rebar_repo))
     assert got is not None
