@@ -359,6 +359,28 @@ When your change makes a baselined function **simpler**, `--check` reports it as
 `.github/complexity-baseline.json` and do **not** run `--update-stale` to tidy the entry away;
 maintenance drains stale entries later.
 
+A third gate ratchets **mechanism growth** the same way. `make lint` runs
+`python scripts/check_mechanism_delta.py --check`, a **shrink-only** ratchet over
+`.github/mechanism-baseline.json` that censuses seven kinds of mechanism — `lock`, `env_var`,
+`config_key`, `feature_flag`, `ci_gate`, `autouse_fixture`, `test_helper` — and **fails on any
+`new>0`**. It exists because 56% of sampled fixes ADD a mechanism against 30% that are pure
+logic fixes: each cycle grows the surface that produces the next cycle's defect classes, and
+nothing pushed back. The gate does not forbid a new mechanism; it forbids an *unjustified*
+one. **Removing** a mechanism always passes (it buckets as `stale`) — that asymmetry is what
+makes it a ratchet rather than a freeze. When you genuinely need one, justify it in the tree,
+at the definition site:
+
+```
+# mechanism-ok: <kind> <name> — <reason or ticket id>
+```
+
+The marker admits **exactly** the `(kind, name)` it names, never its whole kind, and a **blank
+reason is itself an error**. Do **not** hand-edit `.github/mechanism-baseline.json`;
+`--update-stale` is maintenance-only, and it refuses to write at all while anything is new.
+Names, marker placement per detection shape, and the kind partition (`feature_flag` claims the
+boolean config keys, `config_key` the non-boolean remainder; both are section-qualified) are in
+`docs/architecture.md` §"Mechanism-delta ratchet".
+
 ## Navigating the codebase (when editing rebar itself)
 
 This checkout has the **Serena** MCP server configured (LSP-backed, Pyright over `src/rebar`)
