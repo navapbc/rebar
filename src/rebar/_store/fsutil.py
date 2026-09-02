@@ -27,6 +27,34 @@ Guarantees
   overridden, so a migrated ``open``-based site keeps its usual 0o644).
 
 The parent directory must already exist (callers that need it created still do so).
+
+Why the temp name must NOT come from the target (ticket b0ac-3c0f-3f64-4344)
+---------------------------------------------------------------------------
+A temp whose name is derived from the TARGET (``<target>.tmp``) — or from the PID
+(``<target>.<pid>.tmp``, unique across processes but SHARED by every thread of one
+process, and the MCP server is threaded) — is the SAME pathname for every concurrent
+writer of that target. The first ``os.replace`` consumes it; the second raises
+``FileNotFoundError``, which a best-effort ``except`` swallows, and that writer is
+**silently lost**. ``mkstemp`` gives each writer its own ``O_EXCL`` name, so both land.
+The audited sites, all now routed here:
+
+===================================================  ============================
+Site                                                 Was
+===================================================  ============================
+``llm/workflow/completion_verdict_cache``            target-derived (fixed 89981d8e)
+``review_bot/reconcile._write_cursor``               target-derived ``.tmp``
+``_config_writer.write_jira_config``                 target-derived ``.tmp``
+``_cli._suggest_mapping_write``                      target-derived ``.tmp``
+``_opcert_signing._derive_opcert_pub``               pid-derived ``.tmp``
+``_snapshot/janitor.reverify_entry``                 no temp (torn reads)
+``llm/workflow/completion_banking`` (bank upsert)    no temp (torn reads)
+===================================================  ============================
+
+The audit's negative result is worth keeping: every module-level cache and
+``functools.lru_cache`` under ``src/rebar`` was checked and **none is root-unkeyed** —
+they key on an absolute path, the repo root, or a stat token, and the two store-state
+``lru_cache``\\ s are explicitly repo-root + overlay-signature keyed. So the defect class
+is confined to temp-file NAMING; no cache needed re-keying.
 """
 
 from __future__ import annotations

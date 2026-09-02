@@ -208,13 +208,12 @@ def _suggest_mapping_write(key: str, block: dict) -> int:
     NEVER edited. The whole file is read with stdlib ``tomllib``, mutated in memory, and
     re-emitted via ``_emit_config_toml`` (existing keys win under
     ``mapping.projects.<KEY>``), preserving flat ``[jira]``/``[tracker]`` siblings."""
-    import os
-
     import tomllib
 
     from rebar import config as _config
     from rebar._config_schema import ConfigError
     from rebar._config_writer import _emit_config_toml
+    from rebar._store.fsutil import atomic_write
 
     base = _config.repo_root()
     proj = _config._discover_project_config()
@@ -250,9 +249,9 @@ def _suggest_mapping_write(key: str, block: dict) -> int:
         return 1
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, target)
+        # Unique same-dir temp (mkstemp) + os.replace — a target-derived `rebar.toml.tmp`
+        # is shared by every concurrent writer, so one of them is silently lost.
+        atomic_write(target, text, encoding="utf-8")
     except OSError as exc:
         sys.stderr.write(f"Error: could not write config {target}: {exc}\n")
         return 1

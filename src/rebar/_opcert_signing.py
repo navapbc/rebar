@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rebar import config
+from rebar._store.fsutil import atomic_write
 
 if TYPE_CHECKING:
     from rebar._opcert_binding import OpcertBinding
@@ -74,17 +75,16 @@ def _derive_opcert_pub(key_path: str) -> str | None:
             "could not derive op-cert public key %s (best-effort)", pub_path, exc_info=True
         )
         return None
-    tmp = f"{pub_path}.{os.getpid()}.tmp"
     try:
-        with open(tmp, "wb") as fh:
-            fh.write(proc.stdout)
-        os.replace(tmp, pub_path)  # derivative artifact — os.replace is fine (not a commit point)
+        # A UNIQUE same-dir temp (mkstemp) + os.replace — derivative artifact, so replace is
+        # fine (not a commit point). The temp name must NOT be derived from the target or the
+        # pid: `<pub>.<pid>.tmp` is unique across PROCESSES but SHARED by every thread of one
+        # process, and the MCP server is threaded — so the first replace consumes the temp and
+        # the second thread's write is silently lost in the best-effort `except` below
+        # (ticket b0ac-3c0f-3f64-4344). atomic_write unlinks its own temp on failure.
+        atomic_write(pub_path, proc.stdout, mode="wb")
     except OSError:
         logger.debug("could not write op-cert public key %s (best-effort)", pub_path, exc_info=True)
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
     return proc.stdout.decode("utf-8", "replace").strip() or None
 
 
