@@ -21,6 +21,7 @@
       "items": { "$ref": "common.schema.json#/$defs/batch_item" }
     },
     "skipped_overlap": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } },
+    "skipped_blocked": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } },
     "skipped_blocked_story": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } },
     "skipped_design_awaiting": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } },
     "skipped_manual_awaiting": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/skipped_item" } },

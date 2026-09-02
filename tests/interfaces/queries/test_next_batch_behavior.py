@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from rebar._engine_support import next_batch as nb
+from rebar._engine_support import reads
 
 
 def _write(base: Path, tid: str, idx: int, et: str, data: dict, ts: int) -> None:
@@ -91,6 +92,7 @@ def test_to_json_dict_exact_keys_and_values(tracker: Path) -> None:
         "available_pool",
         "batch",
         "skipped_overlap",
+        "skipped_blocked",
         "skipped_blocked_story",
         "skipped_design_awaiting",
         "skipped_manual_awaiting",
@@ -423,3 +425,83 @@ def test_deleted_dependency_does_not_block(tracker: Path) -> None:
     (tracker / "dep" / ".tombstone.json").write_text(json.dumps({"status": "deleted"}))
     r = nb.compute(str(tracker), "e")
     assert "t" in {c.id for c in r.batch}
+
+
+def test_inbound_blocks_ticket_is_skipped_and_agrees_with_deps(tracker: Path) -> None:
+    """A direct inbound ``blocks`` edge blocks the target exactly like deps says.
+
+    Contract card: docs/ticket-model.md defines ``blocks`` as directional
+    ``id1 blocks id2`` and says blocked-ness is an inbound ``blocks`` or outgoing
+    ``depends_on`` consistent with what ready/next-batch compute. This unit test
+    uses the smallest production path crossing the seam: real reducer-backed
+    ``next_batch.compute`` and ``reads.deps_state`` over the same store.
+    """
+    ts = 1700000000000000000
+    _create(tracker, "e", "epic", None, priority=1, ts=ts)
+    _create(tracker, "s", "story", "e", priority=2, ts=ts + 1)
+    _create(tracker, "blocker", "task", "s", priority=1, ts=ts + 2)
+    _create(tracker, "blocked", "task", "s", priority=2, ts=ts + 3)
+    _write(tracker, "blocker", 2, "LINK", {"relation": "blocks", "target_id": "blocked"}, ts + 4)
+
+    deps = reads.deps_state("blocked", str(tracker), include_archived=False)
+    assert deps["blockers"] == ["blocker"]
+    assert deps["ready_to_work"] is False
+
+    result = nb.compute(str(tracker), "e")
+    batch_ids = {candidate.id for candidate in result.batch}
+    not_ready_ids = {
+        ticket_id
+        for ticket_id in ("blocker", "blocked")
+        if not reads.deps_state(ticket_id, str(tracker), include_archived=False)["ready_to_work"]
+    }
+    assert batch_ids.isdisjoint(not_ready_ids), "next_batch scheduled tickets deps reports blocked"
+
+    d = nb.to_json_dict(result)
+    assert d["skipped_blocked"] == [
+        {"id": "blocked", "title": "Title blocked", "blocker": "blocker"}
+    ]
+
+
+def test_closed_inbound_blocks_ticket_becomes_available(tracker: Path) -> None:
+    """The inbound ``blocks`` exclusion is only for live blockers."""
+    ts = 1700000000000000000
+    _create(tracker, "e", "epic", None, priority=1, ts=ts)
+    _create(tracker, "s", "story", "e", priority=2, ts=ts + 1)
+    _create(tracker, "blocker", "task", "s", priority=1, ts=ts + 2)
+    _create(tracker, "blocked", "task", "s", priority=2, ts=ts + 3)
+    _write(tracker, "blocker", 2, "LINK", {"relation": "blocks", "target_id": "blocked"}, ts + 4)
+    _write(tracker, "blocker", 3, "STATUS", {"status": "closed"}, ts + 5)
+
+    assert (
+        reads.deps_state("blocked", str(tracker), include_archived=False)["ready_to_work"] is True
+    )
+    result = nb.compute(str(tracker), "e")
+    assert "blocked" in {candidate.id for candidate in result.batch}
+    assert nb.to_json_dict(result)["skipped_blocked"] == []
+
+
+def test_outgoing_depends_on_ticket_is_skipped_and_agrees_with_deps(tracker: Path) -> None:
+    """The pre-existing outgoing ``depends_on`` blocking behavior remains intact."""
+    ts = 1700000000000000000
+    _create(tracker, "e", "epic", None, priority=1, ts=ts)
+    _create(tracker, "s", "story", "e", priority=2, ts=ts + 1)
+    _create(tracker, "blocker", "task", "s", priority=1, ts=ts + 2)
+    _create(tracker, "blocked", "task", "s", priority=2, ts=ts + 3)
+    _write(
+        tracker,
+        "blocked",
+        2,
+        "LINK",
+        {"relation": "depends_on", "target_id": "blocker"},
+        ts + 4,
+    )
+
+    deps = reads.deps_state("blocked", str(tracker), include_archived=False)
+    assert deps["blockers"] == ["blocker"]
+    assert deps["ready_to_work"] is False
+
+    result = nb.compute(str(tracker), "e")
+    assert "blocked" not in {candidate.id for candidate in result.batch}
+    assert nb.to_json_dict(result)["skipped_blocked"] == [
+        {"id": "blocked", "title": "Title blocked", "blocker": "blocker"}
+    ]
