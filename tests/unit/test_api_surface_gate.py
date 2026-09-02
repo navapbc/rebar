@@ -25,7 +25,13 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.allow_unharnessed_subprocess(
+        "every test runs the API-surface gate in a clean interpreter rooted at the\n"
+        "committed tree, deliberately escaping the unit tier's autouse monkeypatches"
+    ),
+]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GEN_PATH = REPO_ROOT / "scripts" / "gen_api_surface.py"

@@ -41,7 +41,7 @@ def test_pai_tools_consume_the_shared_cluster() -> None:
     assert pai_tools._SCAN_MAX_FILES is fs_tools._SCAN_MAX_FILES
 
 
-def test_importing_fs_tools_does_not_pull_the_agent_runtime() -> None:
+def test_importing_fs_tools_does_not_pull_the_agent_runtime(tmp_path) -> None:
     # The optionality invariant: importing the module must not import the heavy
     # agents extra (the agent runtime is imported lazily inside the runner). Run in a
     # CLEAN subprocess — mutating this process's sys.modules (deleting pydantic_ai)
@@ -55,7 +55,14 @@ def test_importing_fs_tools_does_not_pull_the_agent_runtime() -> None:
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
-        env={"PYTHONPATH": "src", "PATH": __import__("os").environ.get("PATH", "")},
+        # REBAR_ROOT is pinned at tmp_path: this hand-built env drops the tier's
+        # inherited isolation root, so the child would otherwise resolve its root to
+        # the git toplevel of the inherited cwd — the real checkout.
+        env={
+            "PYTHONPATH": "src",
+            "PATH": __import__("os").environ.get("PATH", ""),
+            "REBAR_ROOT": str(tmp_path),
+        },
         check=False,
     )
     assert cp.returncode == 0, cp.stderr

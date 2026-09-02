@@ -182,6 +182,9 @@ def test_map_local_to_remote_accepts_every_protocol_keyword(applier):
         "src/rebar/_engine/rebar_reconciler/apply_outbound.py",
     ],
 )
+@pytest.mark.allow_unharnessed_subprocess(
+    "lints the real committed module; a sandbox copy would assert nothing"
+)
 def test_swept_module_passes_default_ruff(rel_path):
     """Every swept module passes the REAL CI lint gate (default ``ruff check``).
 
@@ -209,6 +212,9 @@ def test_swept_module_passes_default_ruff(rel_path):
     assert err_lines == [], f"unused-noqa (RUF100) in {rel_path}:\n" + "\n".join(err_lines)
 
 
+@pytest.mark.allow_unharnessed_subprocess(
+    "the whole-tree ARG backlog is a property of the real committed src/rebar"
+)
 def test_arg_backlog_is_substantially_reduced():
     """The ``--select ARG`` audit backlog is driven down to its irreducible floor.
 

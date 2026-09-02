@@ -87,6 +87,9 @@ def test_raw_json_census_exits_1_with_live_count():
     assert len(findings) > 0
 
 
+@pytest.mark.allow_unharnessed_subprocess(
+    "the complexity census is a property of the real committed src/rebar"
+)
 def test_census_transport_exit_zero_same_count():
     """Command 2: --exit-zero census exits 0 with the same live census count."""
     proc = subprocess.run(
@@ -114,6 +117,9 @@ def test_census_transport_exit_zero_same_count():
     assert len(findings) == len(raw)
 
 
+@pytest.mark.allow_unharnessed_subprocess(
+    "asserts the committed baseline is current for THIS checkout's real source"
+)
 def test_wrapper_check_on_committed_baseline():
     """Command 3: --check on the committed tree exits 0 with the shrink-only verdict.
 
@@ -762,6 +768,9 @@ def test_run_check_prints_detail_after_summary(tmp_path, monkeypatch, capsys):
 # ─────────────────────────────── --help / docs ──────────────────────────────
 
 
+@pytest.mark.allow_unharnessed_subprocess(
+    "runs the committed gate script itself; the checkout is the artifact under test"
+)
 def test_help_documents_contracts():
     proc = subprocess.run(
         [sys.executable, str(SCRIPT_PATH), "--help"],

@@ -14,6 +14,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.allow_unharnessed_subprocess(
+    "the shared `_run_gen` helper runs the generator against the committed tree it documents"
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GEN = REPO_ROOT / "scripts" / "gen_cli_help.py"
 HELP_DIR = REPO_ROOT / "src" / "rebar" / "_cli" / "help"
