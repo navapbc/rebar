@@ -579,6 +579,85 @@ modules — `apply_inbound.py`, `_advisory_lock.py`, `acli.py`, `inbound_differ.
 `differ.py`, `batch_dispatch.py`, `acli_cli_ops.py`) are at the ceiling, not over
 it — watch, don't split preemptively.
 
+## Mechanism-delta ratchet
+
+Ticket `unblacked-loveless-toad` (9ca8-675e-4dfb-427d). A sample of merged fixes found that
+**56% ADD a mechanism** — a lock, a knob, an env var, a gate script, an autouse fixture, a
+test helper, a feature flag — against **30%** that are pure logic fixes. Every such fix leaves
+the repository with more surface than it found, and that surface is exactly what produces the
+*next* cycle's defect classes; nothing in the build pushed back on the growth. The
+mechanism-delta ratchet is that counter-pressure. It is modelled directly on
+`scripts/check_complexity_baseline.py` — same shrink-only shape, same four mutually-exclusive
+buckets (`active` / `new` / `increased` / `stale`), same `has_regression = new or increased`.
+
+`make lint` runs `python scripts/check_mechanism_delta.py --check`, which censuses the tree
+and compares it against `.github/mechanism-baseline.json`. Adding a mechanism fails;
+**removing one always passes** (it buckets as `stale`). That asymmetry is the whole point: a
+freeze would block legitimate work, a ratchet only makes growth cost a written justification.
+
+### The seven kinds
+
+The kinds **partition** the surface: every definition site yields exactly **one**
+`(kind, name)` entry, so no mechanism needs two justifications and none can hide in a gap
+between kinds.
+
+| kind | what is detected | name |
+|---|---|---|
+| `lock` | `ast.ClassDef` matching `.*Lock.*`, and string literals matching `\.lock$`, under `src/` and `scripts/` | the class name, or the lock filename |
+| `env_var` | `scripts/gen_env_registry.py`'s fail-closed `scan()`, filtered to `REBAR_*`, **unioned** with the two families `scan` cannot see (env-channel aliases from `rebar._deprecations.REGISTRY`, and the derived `REBAR_MCP_*` from `rebar.mcp_server.MCP_ENV_VARS`) exactly as `render()` unions them | the variable name |
+| `config_key` | the **non-boolean** remainder of `rebar._config_sections._SECTIONS` | `<section>.<key>` |
+| `feature_flag` | the `_SECTIONS` entries whose coercer mentions `_as_bool` | `<section>.<key>` |
+| `ci_gate` | `scripts/check_*.py`, plus every `.github/workflows/` step carrying a `run:` | the script path, or `<workflow>::<step>` |
+| `autouse_fixture` | a decorator resolving to `pytest.fixture` carrying `autouse=True`, under `tests/` | `<path>::<fixture>` |
+| `test_helper` | `tests/_*.py` | the file path |
+
+Two consequences of the partition rule are load-bearing rather than cosmetic. **`feature_flag`
+claims the boolean keys and `config_key` claims only the remainder** — counting a boolean key
+as both would demand two justifications for one definition site, which a per-kind marker
+cannot express. And **config names are section-qualified**, never the bare key: `_SECTIONS`
+repeats key names across sections (`allow_insecure` in both `reconciler` and `jira`,
+`threshold` in both `ticket_clarity` and `compact`), so a bare-key baseline would silently
+merge four definition sites into two entries — and a fifth could then be added for free.
+
+### The marker
+
+```
+# mechanism-ok: <kind> <name> — <reason or ticket id>
+```
+
+It admits **exactly** the `(kind, name)` it names, never its whole kind, so a second lock does
+not ride in on the first one's justification. A **blank reason is itself an error**: an
+unexplained marker is indistinguishable from a rubber stamp (the same lesson the
+tickets-boundary gate learned, where seven of thirteen sanctioned defects carried a bare
+marker). Placement follows the detection shape, and each detector scans exactly its own:
+
+| shape | kinds | where the marker may sit |
+|---|---|---|
+| Python definition line | `lock` classes, `autouse_fixture`, `config_key`, `feature_flag` | that line, or the one before it |
+| string literal | `lock` filenames, `env_var` | the literal's line or the one before it, in any attributed file |
+| filename glob | `ci_gate` scripts, `test_helper` | the matched file's first 20 lines |
+| YAML step | `ci_gate` workflow `run:` steps | the step's `- name:`/`run:` line, or the one before it |
+
+### Layout and maintenance
+
+The entrypoint is `scripts/check_mechanism_delta.py`; the detectors live in the private
+`scripts/_mechanism_delta/` subpackage, split **by input surface** — `detect_code.py` (Python
+AST), `detect_config.py` (the config registries), `detect_ci.py` (globs and YAML) — plus
+`baseline.py`, `compare.py` and `markers.py`. Seven detectors in one file would breach both
+the module-size cap and the complexity ceiling; a flat `{kind: callable}` dispatch table keeps
+the entrypoint's own complexity near 4. The subpackage is private because
+`scripts/check_import_walk.py` imports every top-level `scripts/*.py` standalone with the
+scripts directory stripped from `sys.path`, and a subpackage is invisible to that walk.
+
+`--update-stale` drops entries whose definition site is gone and rewrites canonical sorted
+JSON. It **refuses to write** — leaving the baseline byte-identical — while anything is new or
+increased, so it can never bless a regression into the baseline. It is maintenance-only; a
+contributor's path is the marker, or removing the mechanism.
+
+The gate is stdlib plus PyYAML (already a dev dep, used read-only) and needs **no CI
+provider**: it runs identically from `make lint`, a pre-commit hook, or a bare shell, so a
+checkout with no CI at all still gets it (`project.portability`).
+
 ## mypy strictness ratchet
 
 `make typecheck` (`mypy src/rebar`) gates the whole library. Two ratchet dials in
