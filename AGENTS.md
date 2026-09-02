@@ -238,8 +238,8 @@ restated here:
   auto-rotation (incl. the ops error-sweep ledger convention) → `docs/event-schema.md`
   and `docs/user-guide.md`.
 - **LLM agent operations** — `review-plan`, `verify-completion`, `review-code`, `scan-spec` (the
-  optional `[agents]` framework; the old single-pass `review` verb is deprecated and now forwards
-  to `review-plan`) → `docs/llm-framework.md`.
+  optional `[agents]` framework; the old single-pass `review` verb has been removed, not
+  deprecated-and-forwarding) → `docs/llm-framework.md`.
 - **Library / reuse surface** — the full library API and reusable subsystems →
   `docs/reuse-surface.md`.
 - **Metrics** — the `rebar metrics` command (agent-process / code-health / delivery /
