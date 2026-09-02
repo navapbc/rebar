@@ -182,12 +182,16 @@ def test_plan_precheck_blocks_every_oversize_work_ticket_without_llm(
     assert any(finding["criteria"] == ["P4"] for finding in result["det_blocking"])
 
 
-def test_bug_tier_still_downgrades_non_p4_blocks_to_advisory(monkeypatch) -> None:
+def test_bug_tier_still_downgrades_non_readiness_blocks_to_advisory(monkeypatch) -> None:
     state = {
         "ticket_id": _TARGET,
         "ticket_type": "bug",
-        "title": "Missing acceptance criteria",
-        "description": "## Reproduction Steps\n1. Trigger the bug.\n2. Observe the failure.\n",
+        "title": "Vague acceptance criteria",
+        "description": (
+            "## Reproduction Steps\n1. Trigger the bug.\n2. Observe the failure.\n\n"
+            "## Acceptance Criteria\n- [ ] improve the thing\n\n"
+            "## Testing\nRun `pytest tests/unit/test_bug.py -q`.\n"
+        ),
         "deps": [],
     }
     _patch_plan_reads(monkeypatch, state)
@@ -196,7 +200,7 @@ def test_bug_tier_still_downgrades_non_p4_blocks_to_advisory(monkeypatch) -> Non
 
     assert result["run_llm"] is True
     assert result["det_blocking"] == []
-    assert any(finding["criteria"] == ["P1"] for finding in result["det_advisory"])
+    assert any(finding["criteria"] == ["P11"] for finding in result["det_advisory"])
 
 
 def test_completion_precheck_accepts_description_at_exact_limit(monkeypatch) -> None:
