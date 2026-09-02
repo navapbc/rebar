@@ -90,6 +90,12 @@ def test_run_pass_does_not_say_converged_when_applied_nonzero(main_mod, tmp_path
     The historical lying message was 'OK: steady-state pass converged — N
     mutations' where N was the computed count. After the fix, 'converged'
     must NOT appear on the line when mutations_applied > 0.
+
+    A prior version of this test asserted ONLY the absence of "converged",
+    which empty stdout satisfies vacuously (bug: an implementation that
+    printed nothing at all would pass). The assertion below additionally
+    requires the exact nonempty applied/total tally line, so a silent or
+    tally-less pass fails this test too.
     """
     stub = _make_stub_reconcile(
         {
@@ -107,6 +113,23 @@ def test_run_pass_does_not_say_converged_when_applied_nonzero(main_mod, tmp_path
         f"'converged' verb leaks onto applied>0 pass — historical lying-message "
         f"regression; got: {out!r}"
     )
+    assert out.strip() != "", "a successful applied>0 pass must not print empty output"
+    assert "applied 10" in out or "applied=10" in out, (
+        f"OK line must report the exact nonempty applied/total tally truthfully; got: {out!r}"
+    )
+
+
+def test_run_pass_empty_stdout_fails_truthful_tally() -> None:
+    """Negative control: empty stdout must NOT satisfy the truthful-tally oracle.
+
+    Directly proves the oracle strengthened above rejects the vacuous case
+    that the prior (converged-absence-only) assertion let through.
+    """
+    out = ""
+    assert "converged" not in out.lower()  # the old, insufficient check still holds...
+    with pytest.raises(AssertionError):
+        # ...but the strengthened tally assertion correctly rejects it.
+        assert out.strip() != "", "a successful applied>0 pass must not print empty output"
 
 
 def test_run_pass_says_converged_only_when_applied_zero(main_mod, tmp_path, capsys):
