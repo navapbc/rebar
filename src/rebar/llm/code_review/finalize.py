@@ -32,6 +32,13 @@ _LLM_STEP_KINDS = frozenset({"agent", "batch"})  # the billable LLM tier (finder
 # The code-review gate's Pass-0 assemble (changed-files/diff) step id.
 STEP_ASSEMBLE_DIFF = "assemble_diff"
 
+#: Every code-review step id this module looks up BY NAME. DERIVED from the constants
+#: above rather than re-typed, so it cannot become yet another copy of the same strings
+#: (mirror F13). The dispatcher validates the loaded gate YAML against this: a rename in
+#: gates/code-review.yaml would otherwise make these lookups silently return None and
+#: degrade a recoverable run, exactly as the plan-review gate's own validator prevents.
+CODE_REVIEW_STEP_IDS = frozenset({_STEP_VERIFY, _STEP_DECIDE, STEP_ASSEMBLE_DIFF})
+
 #: High-priority floor for the approach-viability signal: a finding with kernel ``priority``
 #: (validity × impact ∈ [0,1]) ≥ this is "high-priority" (keyed off priority, not severity label).
 _HIGH_PRIORITY_FLOOR = 0.7

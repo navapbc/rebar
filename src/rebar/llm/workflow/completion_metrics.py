@@ -37,6 +37,13 @@ _WORKFLOW_STEP_FIELDS = {
     "reconcile": "verifier_verdict_reconcile_ms",
     "passthrough": "verifier_no_llm_passthrough_ms",
 }
+#: The completion-verification step ids this module looks up BY NAME. DERIVED from the
+#: mapping above so it can never become a third copy of the same strings (mirror F13).
+#: The dispatcher validates the loaded gate YAML against this, because a rename here
+#: degrades silently: the row falls through `_WORKFLOW_STEP_FIELDS.get(...)` into
+#: `_UNCLASSIFIED_FIELD`, so the timing lands in "unclassified" and NOTHING errors.
+WORKFLOW_STEP_IDS = frozenset(_WORKFLOW_STEP_FIELDS)
+
 _UNCLASSIFIED_FIELD = "verifier_unclassified_workflow_steps_ms"
 _RESIDUAL_FIELD = "verifier_workflow_residual_ms"
 _WORKFLOW_TOTAL_FIELD = "verifier_workflow_ms"

@@ -35,12 +35,16 @@ from typing import Any, NamedTuple
 # Back-compat re-export (load-bearing): tests/unit/test_code_review_fp_ledger.py calls
 # ``gate_dispatch._attach_code_review_metrics`` at 7 sites. The code-review finalization cluster
 # moved to the code_review/finalize.py strict leaf; this keeps the attribute resolving here.
-from rebar.llm.code_review.finalize import _attach_code_review_metrics  # noqa: F401
+from rebar.llm.code_review.finalize import (  # noqa: F401
+    CODE_REVIEW_STEP_IDS,
+    _attach_code_review_metrics,
+)
 from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.gate_error_sidecar import emit_gate_error
 from rebar.llm.run_identity import with_identity
 from rebar.llm.tracing import run_span
 from rebar.llm.workflow.completion_metrics import (  # noqa: F401
+    WORKFLOW_STEP_IDS,
     _add_phase,
     _attach_completion_metrics,
     _sum_run_consumption,
@@ -435,6 +439,10 @@ def _assemble_code_review_run(request: CodeReviewRequest) -> _CodeReviewPrep:
     # scope-intent overlay (ONLY ticket-aware one): commit-trailer scope/AC, ONLY when >=1 resolved.
     context_overrides = {"code-review-scope-intent": dc.scope_context} if dc.scope_context else None
     doc = _gate_doc("code-review", request.repo_root)
+    # Same guard the plan-review dispatch gets at :154 — catch a step-id rename in
+    # gates/code-review.yaml LOUDLY, before the billable run, instead of letting
+    # finalize's lookups silently return None (mirror F13).
+    _validate_gate_step_ids(doc, CODE_REVIEW_STEP_IDS, gate_name="code-review")
     rec = MemoryRecorder()
     t_total = time.monotonic()
     inputs = {
@@ -695,6 +703,10 @@ def produce_completion_verdict(
     # graph by ticket type — that override made an epic close re-verify every descendant and blew
     # the step budget (see the step-floor history in completion.py).
     doc = _gate_doc("completion-verification", repo_root)
+    # Mirror F13. This gate degrades even more quietly than the other two: a renamed
+    # step falls through completion_metrics' mapping into the "unclassified" bucket,
+    # so the timing is silently mis-filed and nothing errors.
+    _validate_gate_step_ids(doc, WORKFLOW_STEP_IDS, gate_name="completion-verification")
     # Publish the caller-resolved cfg for the run so the completion ops (precheck child-failure,
     # reconcile) read the SAME config via resolve_gate_config, not a per-op from_env (586c).
     completion_step = CompletionAgentStep(
