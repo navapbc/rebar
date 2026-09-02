@@ -859,9 +859,17 @@
       "updated_at": "2026-08-15T14:51:00Z"
     },
     "038d-f5ff-b371-4ba5": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/_deprecations.py:75-91` retains eight approved-for-removal aliases: `REBAR_NO_SYNC`, `COMPACT_THRESHOLD`, `SCRATCH_BASE_DIR`, `REBAR_ACLI_TIMEOUT`, `RECONCILER_ABSENT_GET_BUDGET`, `REBAR_ID_GUARD_MODE`, `REBAR_VERIFY_OVERLAP_ENABLED`, and `verify.overlap_enabled`. Two transform semantics rather than only spelling, making accidental retention particularly misleading.\n\n## Approach\n\nRemove parsing, conversion, warnings, docs, and tests for all eight old names. Keep only the canonical typed fields and explicitly test their existing semantics: `REBAR_NO_SYNC` maps historically to `sync.pull` inversion and ID guard `warn` maps to unsafe bypass; after removal, callers must use canonical names directly.\n\n## Scope\n\n- `src/rebar/_deprecations.py`\n- config source/section parsing and canonical typed fields\n- config docs, generated env reference, changelog, and tests\n\n## Testing\n\nFor every old alias, assert public rejection/ignore per the project removal policy; for every replacement, prove canonical parsing. Include transformed-value controls.\n\n## Acceptance Criteria\n\n- [ ] All eight old environment/config spellings are absent from live parsing, warnings, docs, examples, and schemas.\n- [ ] Canonical replacements retain current typed behavior and validation.\n- [ ] Tests cover the former `REBAR_NO_SYNC` and `REBAR_ID_GUARD_MODE` transformation boundaries through canonical fields.\n- [ ] Changelog and release notes identify every removed alias and replacement.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Remove all approved environment and configuration aliases"
+      },
       "created_at": "2026-09-02T02:58:27Z",
       "jira_id": "4591380",
       "jira_key": "REB-4437",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:58:30Z"
     },
@@ -2172,16 +2180,30 @@
     },
     "0880-0afb-7fe3-48c9": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context\n\nBefore any change-size/decomposition rule can enter the DET floor, measure whether change shape actually drives the defect-rework loop here (11-plan-v3 I-4; measurement-first matches the field: Prow's size/* labels are non-blocking \u2014 12c). Tooling anchor (12a): extend scripts/backtest_bugfix_size.py (442 lines; imports the shipped threshold predicate so it cannot drift), and check overlap with the Tier-2 replay harness (ADR 0109) first. 2026 grounding (12b): MSR'26 agentic-PR studies show files-touched/commit fragmentation is a sharper variable than raw LOC, and the size-quality relationship is nonstationary; context-fragmentation is an independent causal variable (39% quality drop in a controlled study). The two doubling friction categories (CI-at-landing regressions 25/60; environment 13/60 \u2014 R2S3) are unexplained and get mechanism reads, not guesses.\n\n## Approach\n\nThree reads, published under reports/stability/: (a) extend the backtest to all work (not just bugs): rework/negative-vote/regression rate vs non-test LOC, files touched, and commit fragmentation; (b) mechanism-read 20 CI-at-landing regressions from the doubling window \u2014 for each: what failed, change shape, cross-session interference?, isolation class?, drift class?; (c) mechanism-read the environment-failure session reports \u2014 worktree provisioning, dependency drift, the hourly global-install tracker. Then record the enforcement decision (size/decomposition DET rule: yes with threshold + re-tune cadence, or no with reason) in the decisions index either way.\n\n## Acceptance criteria\n\n- [ ] AC1: reports/stability/change-shape-backtest.md with the three variables' distributions and rework correlations, method stated, reproducible via the extended script.\n- [ ] AC2: reports/stability/ci-landing-regressions-read.md with a per-case table (20 cases: mechanism, change shape, class).\n- [ ] AC3: reports/stability/environment-failures-read.md with per-case mechanisms and the class dispositions feeding the doctor-checks scope.\n- [ ] AC4: the enforcement decision recorded (either way) with its evidence, in the decisions index/ADR per the program's B-3 convention.\n\n## File impact\n\n- scripts/backtest_bugfix_size.py (extend: all-work mode + files-touched/fragmentation variables)\n- reports/stability/change-shape-backtest.md, ci-landing-regressions-read.md, environment-failures-read.md (new reports)",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\n\nBefore any change-size/decomposition rule can enter the DET floor, measure whether change shape actually drives the defect-rework loop here (11-plan-v3 I-4; measurement-first matches the field \u2014 Prow's `size/*` labels are non-blocking, 12c). Tooling anchor (12a): extend `scripts/backtest_bugfix_size.py` (442 lines), which imports the shipped predicate `BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES` and `escalation_for_diff` from `rebar.llm.code_review.bugfix_size_gate` so its threshold cannot drift from the gate that ships. 2026 grounding (12b): MSR'26 agentic-PR studies show files-touched/commit fragmentation is a sharper variable than raw LOC, the size-quality relationship is nonstationary (re-tune, never freeze), and context fragmentation is an independent causal variable (39% quality drop in a controlled study). The two doubling friction categories (CI-at-landing 25/60; environment 13/60 \u2014 R2S3) are unexplained and get mechanism reads, not guesses.\n\n## Approach\n\n**Step 0 \u2014 overlap check, before building.** 11-plan-v3 I-4 requires confirming this does not duplicate the Tier-2 replay harness (ADR 0109, `1299d9deb6da`, `src/rebar/llm/evals/plan_replay/`). The finding is recorded in the backtest report's Method section either way; if the harness already supplies a variable, this task consumes it rather than re-deriving it.\n\n**Read (a) \u2014 change shape.** Extend the backtest with an all-work mode (not just bug-typed tickets) measuring rework against three variables: non-test LOC (via the already-imported `count_non_test_diff_lines`), files touched (`git show --name-only`), and commit fragmentation (commits per ticket, grouped by the `rebar-ticket:` trailer). The script computes no correlation today \u2014 only a recall summary \u2014 so this adds a statistical layer rather than extending one. Rework signals, in order of cost: ticket-level proxies already shipped in `rebar metrics` (`attempts_per_ticket`, `revert_recovery`, `reopen_recovery`, `first_pass_rate`); store `caused_by` fan-in, which is the same label source the script already uses; and patchset count from Gerrit `o=ALL_REVISIONS`, which is the cheapest per-change rework proxy and the only one requiring the network.\n\n**Read (b) \u2014 CI-at-landing.** The doubling window is 2026-08-25..2026-08-30 (the newer-30 half of R2S3's 60 session logs). No case list is committed, so the 20 cases are derived: session-log mining over that window for `Verified -1` / CI-failure patterns, cross-referenced to the specific Gerrit changes R2S3 already names. Each case is read for mechanism, change shape, cross-session interference, isolation class, and drift class.\n\n**Read (c) \u2014 environment.** Session reports are `session_log` tickets, queryable offline via `rebar session-logs -o json`. The automated `llm-degrade NEEDS_INVESTIGATION` logs carry a structured JSON body (`exception_type`, `message`, `model`) and are countable without keyword heuristics; the remainder are read for mechanism. Output projects specific fields \u2014 a full dump is dominated by authorship ledgers and is unusably large.\n\n**Decision.** The size/decomposition enforcement decision is recorded either way as ADR 0110 (next free number; `docs/adr/.numbers/0110` marker committed alongside, which is the race-free uniqueness mechanism). `docs/adr/README.md` is GENERATED by `scripts/gen_adr_index.py` and must be regenerated, never hand-edited.\n\n**Dependency.** `reports/` is gitignored; the `.gitignore` re-inclusion of `reports/stability/` lands in sibling `yogic-soapstone-takin` (f9b9-83ad-931c-4833), which sits below this change in the stack. This task inherits it and adds no second `.gitignore` edit.\n\n## Acceptance criteria\n\n- [ ] AC1: `reports/stability/change-shape-backtest.md` is committed, giving the distribution of all three variables (non-test LOC, files touched, commit fragmentation) and each one's measured relationship to rework, with n stated inline. Verified by `git ls-files reports/stability/change-shape-backtest.md`.\n- [ ] AC2: read (a) is reproducible \u2014 the report's Method section names the exact command, and re-running it reproduces the reported n. Verified by running the documented `python scripts/backtest_bugfix_size.py ...` invocation.\n- [ ] AC3: `reports/stability/ci-landing-regressions-read.md` is committed with a 20-row per-case table (mechanism, change shape, class) and states how the cases were selected from the 2026-08-25..2026-08-30 window.\n- [ ] AC4: `reports/stability/environment-failures-read.md` is committed with per-case mechanisms and a class disposition per case, naming which dispositions feed the doctor-checks scope.\n- [ ] AC5: the enforcement decision is recorded either way as `docs/adr/0110-*.md` with its supporting evidence, and `docs/adr/.numbers/0110` is committed. Verified by `python scripts/gen_adr_index.py --check` exiting 0 and `python scripts/check_adr_numbers.py` confirming the bijection.\n- [ ] AC6: the Step-0 overlap finding against ADR 0109's replay harness is stated in the backtest report, so a later reader knows the boundary was checked.\n- [ ] AC7: the extended script still imports the shipped threshold predicate rather than re-deriving it, so the backtest cannot drift from the gate. Verified by the existing import remaining, exercised by the script's tests.\n\n## Testing\n\n- `python scripts/backtest_bugfix_size.py --check-planning-corpus` \u2014 the existing pinned-corpus self-check still passes, proving the all-work extension did not perturb the shipped bug-corpus path (AC7).\n- the documented all-work invocation from the report's Method section \u2014 re-runs read (a) and reproduces its n (AC2).\n- `python scripts/gen_adr_index.py --check` and `python scripts/check_adr_numbers.py` \u2014 the ADR is indexed and its number is uniquely claimed (AC5).\n- `git ls-files reports/stability/` \u2014 the three reports are tracked (AC1, AC3, AC4).\n- `make lint && make typecheck` \u2014 the script extension clears the house gates, including the complexity ratchet.\n\nMeasurement reads are evidence documents, not executable behavior, so their oracle is reproducibility (AC2) rather than a new automated test; the script change itself is covered by the pinned-corpus check above.\n\n## File impact\n\n- `scripts/backtest_bugfix_size.py` (extend: all-work mode + files-touched/fragmentation variables and the correlation layer)\n- `reports/stability/change-shape-backtest.md` (new)\n- `reports/stability/ci-landing-regressions-read.md` (new)\n- `reports/stability/environment-failures-read.md` (new)\n- `docs/adr/0110-<slug>.md` and `docs/adr/.numbers/0110` (new; the enforcement decision)\n- `docs/adr/README.md` (regenerated by `scripts/gen_adr_index.py`)",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Upstream introduction measurement: change-shape backtest + CI-at-landing and environment mechanism reads"
       },
       "created_at": "2026-09-02T01:46:03Z",
       "jira_id": "4591365",
       "jira_key": "REB-4422",
-      "peer_parent": "",
+      "peer_parent": "REB-4427",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:05Z"
     },
@@ -2538,9 +2560,17 @@
       "updated_at": "2026-08-15T14:51:42Z"
     },
     "09f6-215a-34f4-4d89": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/llm/plan_review/passes.py:562-593::pass4_coach` has only three direct unit-test callers; commit `52d7a3dc16810` records it as unit-test-only after workflow cutover. `src/rebar/llm/workflow/executor.py:335-352::_guard_passes` has only `test_prior_art_hardening.py:64-65` callers; the v2 runtime uses `workflow/interpreter.py:284-305::_guard_scoped`.\n\n## Approach\n\nFirst migrate direct tests, inventories, and maintained documentation to workflow operations/shared `review_kernel.coach` and interpreter-level `_guard_scoped` behavior. Preserve semantic behavior, then delete both superseded helpers.\n\n## Scope\n\n- `llm/plan_review/passes.py`\n- `llm/workflow/executor.py` and interpreter\n- plan-review workflow YAML, inventories/docs, and direct tests\n\n## Testing\n\nCover coach move applicability, decision inclusion, deterministic rendering, model selection, clean-plan no-call behavior, and fail-closed frame-scoped guards.\n\n## Acceptance Criteria\n\n- [ ] Tests and maintained material name workflow operations/shared `review_kernel.coach` as the coach owner.\n- [ ] `pass4_coach` is removed after its three direct test consumers migrate.\n- [ ] The fail-closed bare-string guard oracle executes through `_guard_scoped` or interpreter-level behavior before `_guard_passes` is removed.\n- [ ] Coach rendering/model-selection/no-call behavior and scoped guard failure behavior remain covered.\n- [ ] Focused workflow and plan-review suites pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Retire superseded LLM workflow helpers after test migration"
+      },
       "created_at": "2026-09-02T02:58:34Z",
       "jira_id": "4591381",
       "jira_key": "REB-4438",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:58:37Z"
     },
@@ -2780,6 +2810,13 @@
       "peer_parent": "REB-3937",
       "state": "confirmed",
       "updated_at": "2026-08-30T02:41:06Z"
+    },
+    "0af1-44ec-0b47-4611": {
+      "created_at": "2026-09-02T03:41:06Z",
+      "jira_id": "4591425",
+      "jira_key": "REB-4482",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:41:08Z"
     },
     "0b00-0aad-e5bb-421f": {
       "baseline": {
@@ -3188,9 +3225,17 @@
       "updated_at": "2026-08-15T14:51:56Z"
     },
     "0cfc-e511-8f8a-4c8b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe legacy `reconcile` family spans CLI registration, direct-engine modes, library/MCP `mode=` acceptance, compatibility profiles, exit behavior, manifests/tallies, and `bridge_state/reconcile-check.json`. It is not a simple rename. In particular, historical `\"reconcile-check\"` state appears in `src/rebar/_engine/rebar_reconciler/_ref_lock.py:658,717`.\n\n## Approach\n\nThis container separates canonical bridge capability migration from deletion of legacy command/mode/state surfaces. Child 1 maps and implements all useful reconcile-check observables under `bridge preview`, `bridge fsck`, `bridge status`, or one coherent new bridge diagnostic subverb. Child 2 removes CLI/direct-engine modes and persisted-state compatibility only after migration. Child 3 removes library/MCP compatibility methods and schemas after the new bridge contracts are live.\n\n## Acceptance Criteria\n\n- [ ] Canonical bridge operations retain or explicitly retire every current reconcile-check observable with documented evidence.\n- [ ] No live route, mode, state path, docs, schema, or compatibility profile retains `reconcile` or `reconcile-check` vocabulary.\n- [ ] Persisted historical reconcile-check data is migrated or read by a narrowly retained decoder until safe to retire.\n- [ ] CLI, Python, and MCP consumers use explicit bridge operations rather than compatibility `mode=` dispatch.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Retire the reconcile and reconcile-check compatibility family"
+      },
       "created_at": "2026-09-02T02:58:41Z",
       "jira_id": "4591382",
       "jira_key": "REB-4439",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:58:44Z"
     },
@@ -3310,9 +3355,17 @@
       "updated_at": "2026-09-01T01:21:28Z"
     },
     "0d3c-ff25-5317-4d73": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F13 (reports/stability/mirror-inventory.md), HIGH.\n\n- src/rebar/llm/workflow/gates/code-review.yaml:174 (- id: verify), :206 (- id: decide)\n- src/rebar/llm/code_review/finalize.py:28-29 _STEP_VERIFY/_STEP_DECIDE, used at :205,211,217,300\n\nfinalize.py:15,27 states the coupling: \"a rename of those there must be mirrored here.\"\n\nThe validator already exists \u2014 `_validate_gate_step_ids` \u2014 with exactly ONE call site: gate_dispatch.py:154, gate_name=\"plan-review\". plan_review_recovery.py:31-36,84-87 records why it was written: a step-id rename \"would otherwise make the recovery lookups silently return None and degrade a recoverable run to INDETERMINATE.\" Renaming verify/decide reproduces exactly that, unguarded. completion-verification.yaml is equally unvalidated.\n\nProposed fix: add-parity-check \u2014 call the existing helper at the code-review (and completion- verification) dispatch sites. One line each. This is also the portable runtime-parity pattern (no CI provider required) that F1, F3 and F11 should follow.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Validate code-review and completion-verification gate step ids (mirror F13)"
+      },
       "created_at": "2026-09-02T02:58:48Z",
       "jira_id": "4591383",
       "jira_key": "REB-4440",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:58:50Z"
     },
@@ -5241,16 +5294,30 @@
     },
     "15f2-f3d4-ffcd-4223": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context\n\nTest isolation under ~90-worktree/xdist parallelism is 15.8% of the defect stream (R2S1), and the harness root already exists and propagates (tests/conftest.py:487-513 `_rebar_root_sandbox_repo` + autouse REBAR_ROOT setenv, per-worker under xdist via tmp_path_factory \u2014 12a Part 1). What is missing is ENFORCEMENT: nothing stops a new unit-tier test from spawning a subprocess with its own ad-hoc temp/HOME/root, which is exactly how the recent class instances arose (82a0d5cd: doctor scan resolving the operator's real Path.home(); ef9e1d74: subprocess timing conflation). Precedent: pip's pytest_collection_modifyitems raising on forbidden patterns; Bazel's hermetic TEST_TMPDIR contract (12c) recorded as the escalation path.\n\n## Approach\n\nA collection-time check in the unit-tier conftest: tests whose module spawns subprocesses (detected statically: subprocess/Popen/pytest.main markers, or an explicit marker) must either use the harness-provided root fixtures/env or carry an explicit opt-out marker with a reason. Violations fail collection with a message naming the fixture to use (fail-loud, names-the-fix pattern already used by the network guard). Bound the static detection conservatively (no false positives on the 564 existing subprocess-spawning files: run the check across the tier and baseline any legitimate existing patterns rather than mass-editing).\n\n## Acceptance criteria\n\n- [ ] AC1: collection fails with an instructive error when a unit-tier test spawns a subprocess without taking its root from the harness (test proves it fires on a seeded violation).\n- [ ] AC2: the full unit tier collects clean at introduction (existing legitimate patterns baselined or fixed, no blanket opt-outs).\n- [ ] AC3: the opt-out marker requires a reason string and is counted (greppable) so growth is visible to the mechanism ratchet.\n- [ ] AC4: the check and marker documented alongside the existing isolation helpers.\n\n## File impact\n\n- tests/unit/conftest.py or tests/conftest.py (collection hook)\n- tests/_isolation.py or a new tests/_collection_guards.py helper (detection logic)\n- tests/unit/test_collection_isolation_guard.py (new; RED/GREEN proof)\n- docs (the testing/isolation section that documents existing guards)",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\n\nTest isolation under ~90-worktree/xdist parallelism is 15.8% of the defect stream (R2S1). The harness root already exists and propagates: `tests/conftest.py:486-513` provides the session-scoped `_rebar_root_sandbox_repo` and an autouse fixture that `monkeypatch.setenv(\"REBAR_ROOT\", ...)`, per-worker under xdist via `tmp_path_factory`. Propagation to children is by **environment inheritance**, so a test that builds its own `env=` dict from scratch silently drops `REBAR_ROOT` and the child falls back to the git toplevel of cwd \u2014 the real checkout.\n\nWhat is missing is ENFORCEMENT: nothing stops a new unit-tier test from spawning a subprocess with its own ad-hoc temp/HOME/root, which is how the recent class instances arose (`82a0d5cd`: a `home=Path.home()` default reached transitively, resolving the operator's real home; `ef9e1d74`: a single subprocess wall-clock bound conflating a product deadline with machine slack). Precedent: pip's `pytest_collection_modifyitems` raising on forbidden patterns; Bazel's hermetic `TEST_TMPDIR` contract (12c) recorded as the escalation path.\n\n## Approach\n\nA fourth arm in the existing `pytest_collection_modifyitems` (`tests/conftest.py:220`), delegating to a **pure predicate** in a new `tests/_subprocess_isolation.py` \u2014 mirroring the `_live_jira_confinement` split, so the predicate is unit-testable without spawning pytest.\n\nDetection is **AST, not regex**: resolve `ast.Call` sites whose callee binds to `subprocess.{run,Popen,check_output,check_call,call}`, `os.system`, `os.popen`, or `pytest.main`, resolving module aliases from the file's own imports. Regex is disqualified \u2014 a naive `run(` pattern matches 126 `asyncio.run` sites.\n\nThe census on the current tier is 866 spawn sites across 334 files, of which ~841 already take their root from the harness (`cwd=<fixture path>`, `git -C <fixture path>`, a positional `git init <tmp_path>`, `env=subprocess_env(...)`, or plain env inheritance). Only ~26 are hazards, in three shapes: an `env=` dict literal carrying neither `os.environ` nor `REBAR_ROOT` (3), `cwd=REPO_ROOT`/`git -C REPO_ROOT` (23), and one site reading the operator's `$HOME`.\n\n**Bounding the check conservatively is a requirement, not a nicety.** Roughly 58 sites pass `env=<bare variable>` and are undecidable without a def-site trace; these are REPORTED, never failed \u2014 failing them would redden 42 files on day one. The sanctioned nested-pytest funnel `tests/_nested_pytest.py` and its four documented exceptions are exempt by name.\n\nFailures raise `pytest.UsageError`, not `pytest.fail`: this arm can fire from the xdist controller, where a `pytest.fail` escapes as a 20-line `INTERNALERROR>` traceback \u2014 the precedent and its rationale are already recorded at `tests/conftest.py:264-274` (\"a guard whose whole value is a clear message must not look like a crash\").\n\nThe opt-out is `@pytest.mark.allow_unharnessed_subprocess(\"<reason>\")`. `--strict-markers` validates only the marker NAME, so the mandatory-reason rule is enforced by the guard itself (empty/blank args fail collection) \u2014 the same \"reason is mandatory\" convention as `# read-via:` in `check_config_reads.py`.\n\n## Acceptance criteria\n\n- [ ] AC1: collection fails with an instructive error naming the fixture to use, when a unit-tier test spawns a subprocess without taking its root from the harness. Verified by `pytest tests/unit/test_collection_isolation_guard.py`, which drives the predicate over a seeded violation fixture.\n- [ ] AC2: the full unit tier collects clean at introduction, with the ~26 hazard sites fixed or explicitly marked and no blanket opt-out. Verified by `pytest --collect-only -q tests/unit` exiting 0.\n- [ ] AC3: the guard raises `pytest.UsageError` (not `pytest.fail`) so an xdist-controller failure reads as a clean `ERROR:` banner. Verified by a test asserting the raised type.\n- [ ] AC4: the opt-out marker requires a non-blank reason string, and a bare or empty-reason marker fails collection. Verified by a test over both forms.\n- [ ] AC5: opt-out growth is greppable and countable, so the mechanism ratchet can see it. Verified by `grep -rn \"allow_unharnessed_subprocess\" tests/ | wc -l` returning the marked-site count.\n- [ ] AC6: statically undecidable `env=<bare variable>` sites are reported, not failed. Verified by a test asserting such a site yields a report entry and no collection failure.\n- [ ] AC7: the check and the marker are documented alongside the existing isolation helpers.\n\n## Testing\n\n- `pytest tests/unit/test_collection_isolation_guard.py -v` \u2014 the guard's own suite: seeded violation fires (AC1), `UsageError` type (AC3), marker reason required (AC4), undecidable site reported not failed (AC6). The predicate is exercised directly, so no nested pytest spawn is needed.\n- `pytest --collect-only -q tests/unit` \u2014 proves the tier collects clean at introduction (AC2).\n- `pytest -n 4 --collect-only -q tests/unit` \u2014 proves the controller path renders the message cleanly rather than as an INTERNALERROR (AC3).\n- `grep -rn \"allow_unharnessed_subprocess\" tests/ | wc -l` \u2014 the countable opt-out census (AC5).\n- `make lint && make typecheck` \u2014 house gates stay green.\n\n## File impact\n\n- `tests/_subprocess_isolation.py` (new; the pure AST predicate, unit-testable in isolation)\n- `tests/conftest.py` (fourth arm in `pytest_collection_modifyitems`; register the marker in `pytest_configure`)\n- `tests/unit/test_collection_isolation_guard.py` (new; seeded-violation RED proof and the marker/undecidable cases)\n- the ~26 hazard sites fixed or marked (final set from the AST census)\n- `docs/` (the testing/isolation section documenting the existing guards)",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Collection-time enforcement: unit-tier subprocess tests must take isolation roots from the harness"
       },
       "created_at": "2026-09-02T01:46:05Z",
       "jira_id": "4591366",
       "jira_key": "REB-4423",
-      "peer_parent": "",
+      "peer_parent": "REB-4427",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:08Z"
     },
@@ -6651,9 +6718,17 @@
       "updated_at": "2026-08-15T14:53:20Z"
     },
     "1c70-319a-2ded-43f9": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`.github/workflows/reconcile-bridge.yml:68-184,397` invokes third-party major tags in a workflow with contents/actions-write and OIDC capability. Existing full-SHA enforcement covered release flow but not this privileged reconciliation path.\n\n## Approach\n\nReplace every mutable third-party action reference in the reconciliation workflow with its reviewed full commit SHA and preserve readable version comments. Extend the existing actionlint/zizmor/pin contract to cover this workflow.\n\n## Scope\n\n- `.github/workflows/reconcile-bridge.yml`\n- `tests/unit/test_release_workflow_pins.py`\n- security-lint configuration only if needed to include the workflow\n\n## Testing\n\nRun the existing pin, actionlint, and zizmor checks with a mutable-tag negative fixture/control.\n\n## Acceptance Criteria\n\n- [ ] Every third-party action in `reconcile-bridge.yml` is referenced by a full SHA with a readable version comment.\n- [ ] Existing actionlint and zizmor coverage include the credentialed/OIDC reconciliation workflow.\n- [ ] The pin test fails for a mutable tag in that workflow.\n- [ ] Normal CI workflow behavior is otherwise unchanged and focused security checks pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "SHA-pin third-party actions in the privileged reconciliation workflow"
+      },
       "created_at": "2026-09-02T02:58:51Z",
       "jira_id": "4591384",
       "jira_key": "REB-4441",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:58:54Z"
     },
@@ -6754,6 +6829,13 @@
       "jira_key": "REB-1020",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:23Z"
+    },
+    "1cef-7fbc-e402-467c": {
+      "created_at": "2026-09-02T03:41:09Z",
+      "jira_id": "4591426",
+      "jira_key": "REB-4483",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:41:12Z"
     },
     "1cf6-f902-5bfa-438f": {
       "baseline": {
@@ -7045,9 +7127,17 @@
       "updated_at": "2026-08-15T14:53:29Z"
     },
     "1daf-a435-2387-412c": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F11 (reports/stability/mirror-inventory.md), LOW.\n\n- src/rebar/_cli/_registry.py ROUTES (78 live route names)\n- src/rebar/_cli/_execute.py:22 _CROSS_SESSION_WARN_COMMANDS \u2014 14 hardcoded spellings, used at :74\n\nAll 14 are live route names today, so this is preventive.\n\nScope note from the sweep: WHICH verbs warn cross-session is a DISTINCT CONCEPT (a predicate subset, the same rule that makes _NOT_CLAIMABLE_STATUSES not a mirror). The mirror is only the SPELLINGS, which must match route names with nothing enforcing it. It is the one CLI policy subset not folded into derive_policy_sets (_registry.py:680), so a route rename silently drops the warning.\n\nProposed fix: add-route-flag \u2014 a warn_cross_session flag on Route, folded into derive_policy_sets.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Validate _CROSS_SESSION_WARN_COMMANDS spellings against ROUTES, or add a route flag (mirror F11)"
+      },
       "created_at": "2026-09-02T02:58:57Z",
       "jira_id": "4591385",
       "jira_key": "REB-4442",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:00Z"
     },
@@ -8000,9 +8090,17 @@
       "updated_at": "2026-08-15T14:53:54Z"
     },
     "2164-97a8-ca89-4546": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nPrivate aliases remain across plan-review orchestrator sizing/context/move registries, runner Anthropic/tool/structured-run names, workflow gate-dispatch recovery names, and `llm.config` gate-context names. `llm.usage_log.failure_usage` also misnames the neutral `run_shape` record and has live callers. The governing private-shim policy is the direct prerequisite ADR `earthen-wheat-chick`; the parent container is ordered after the LLM configuration-reader extraction.\n\n## Approach\n\nAfter the prerequisite ADR and configuration-reader extraction complete, migrate every consumer to `plan_review.sizing`, `context_assembly`, `passes`, `anthropic_model`, `runner_support`, `structured_run`, `workflow.plan_review_recovery`, and `llm.gate_context`. Rename `failure_usage` completely to `run_shape` and prove emitted dictionaries and durable JSONL rows are byte/field identical. Remove each old private binding only after semantic and raw dynamic/monkeypatch census is empty.\n\n## Scope\n\n- plan-review, runner, workflow-dispatch, and gate-context private re-exports\n- usage-log implementation, callers, docs, experiment prose, and JSONL tests\n- all source/test/string/dynamic/monkeypatch consumers\n\n## Testing\n\nRun focused plan-review/workflow/runner suites; compare old/new usage record dictionaries and JSONL rows across success and failure paths; run semantic and raw reference scans.\n\n## Acceptance Criteria\n\n- [ ] Every enumerated old LLM/workflow private binding has no repository consumer and its named canonical owner is the sole binding.\n- [ ] `failure_usage` is absent and `run_shape` owns all former behavior.\n- [ ] Success and failure records retain byte/field-identical dictionaries and durable JSONL rows after the rename.\n- [ ] Gate-context, plan-review recovery, runner, and workflow behavior remain covered by focused tests.\n- [ ] Static, string, dynamic-import, `getattr`, and monkeypatch census proves old paths absent.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Migrate and remove LLM, plan-review, and workflow internal shims"
+      },
       "created_at": "2026-09-02T02:59:00Z",
       "jira_id": "4591386",
       "jira_key": "REB-4443",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:03Z"
     },
@@ -8076,9 +8174,17 @@
       "updated_at": "2026-08-15T14:53:58Z"
     },
     "21de-f9d9-475f-414c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`docs/user-guide.md:423-440` and `docs/maintenance-audit-runbook.md:57-67` advertise `module_size_trend` and `cap_change_events`, but `src/rebar/metrics/git_metrics.py:248-275` no longer exposes those IDs. Janitor is now a concrete consumer, changing the prior no-consumer decision that removed placeholders.\n\n## Approach\n\nImplement both metrics from Git history in the existing metrics subsystem. Preserve the structured `unavailable` contract when history, Git, or required analyzer data is absent; never fabricate zero or placeholder values. Register, document, and test the metrics through the existing CLI/registry paths.\n\n## Scope\n\n- `src/rebar/metrics/git_metrics.py`\n- metric registry/schema/CLI composition\n- user guide and maintenance runbook\n- focused Git-history fixture tests\n\n## Testing\n\nUse temporary Git histories for growth and cap-change cases, plus shallow/no-Git/unavailable controls.\n\n## Acceptance Criteria\n\n- [ ] `module_size_trend` reports Git-derived module-size history with source and confidence metadata.\n- [ ] `cap_change_events` reports Git-derived module-cap changes with source and confidence metadata.\n- [ ] Missing history, unavailable Git, and insufficient evidence produce the existing structured `unavailable` result rather than a zero/placeholder.\n- [ ] Registry, CLI, schema, user guide, and runbook expose the implemented metrics consistently.\n- [ ] Focused Git-history and unavailable-path tests pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Implement Git-backed module-size trend and cap-change metrics"
+      },
       "created_at": "2026-09-02T02:59:06Z",
       "jira_id": "4591387",
       "jira_key": "REB-4444",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:10Z"
     },
@@ -8307,9 +8413,17 @@
       "updated_at": "2026-08-15T14:54:05Z"
     },
     "22ec-e638-c896-4b54": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nClosed epic `pink-complex-xenurine` and child `byzantine-spinelike-penguin` removed the severity configuration in commit `8db373933654c7c21fa214565426f562ca55cd80`. A post-epic census found no live parser/config field, but `docs/gerrit-aws-setup.md:383` still advertises a threshold and `src/rebar/review_bot/config.py:4,12` describes it as configurable.\n\n## Approach\n\nRemove only current operational claims, examples, and configuration descriptions of blocking-severity control. Preserve accurate historical ADR and archived-experiment references, and do not add a tombstone or revive a compatibility layer.\n\n## Scope\n\n- `docs/gerrit-aws-setup.md`\n- `src/rebar/review_bot/config.py`\n- maintained deployment/examples and focused documentation checks\n\n## Testing\n\nSearch maintained operational material for the removed configuration and run review-bot/documentation tests. Historical records are an explicit negative control.\n\n## Acceptance Criteria\n\n- [ ] No live parser, config field, deployment example, or maintained operator guidance advertises `BLOCKING_SEVERITIES` or a blocking-severity threshold.\n- [ ] Historical ADRs and archived experiments retain accurate historical context and are not rewritten.\n- [ ] Four-pass Pass 3 remains the sole current voting-policy description.\n- [ ] Focused review-bot/documentation checks and a maintained-surface census pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Remove residual blocking-severity guidance after completed severity retirement"
+      },
       "created_at": "2026-09-02T02:59:13Z",
       "jira_id": "4591388",
       "jira_key": "REB-4445",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:16Z"
     },
@@ -11425,9 +11539,17 @@
       "updated_at": "2026-08-15T14:55:13Z"
     },
     "2dbf-07bf-452d-4543": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`AGENTS.md:225` and `docs/exit-codes.md:183` still advertise `rebar review`, but `src/rebar/_cli/_registry.py:406`, `src/rebar/llm/operations.py:146`, and the release record establish that the route was removed.\n\n## Approach\n\nCorrect the two maintained pages directly to use the live review-plan/review-code guidance and their actual exit behavior. Keep ownership beside the command and governance documentation; do not add a new command-reference generator.\n\n## Scope\n\n- `AGENTS.md`\n- `docs/exit-codes.md`\n- existing CLI/documentation checks if they assert removed-command guidance\n\n## Testing\n\nRun a repository search for the retired invocation in maintained guidance and execute the existing help/exit-code documentation checks.\n\n## Acceptance Criteria\n\n- [ ] Maintained agent guidance no longer instructs users to invoke `rebar review`.\n- [ ] Exit-code guidance reflects the current review-plan/review-code commands and their real outcomes.\n- [ ] A targeted maintained-documentation search finds no obsolete review-command instruction outside historical records.\n- [ ] Existing CLI and documentation checks pass without expanding generation ownership.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Remove obsolete review-command guidance from maintained CLI documentation"
+      },
       "created_at": "2026-09-02T02:59:20Z",
       "jira_id": "4591389",
       "jira_key": "REB-4446",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:23Z"
     },
@@ -14580,9 +14702,17 @@
       "updated_at": "2026-08-15T14:56:27Z"
     },
     "38ab-928f-edf3-4d0b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe current tests inspect replacement mechanics or final JSON rather than the write window (`test_applier_mapping.py:235-282`, `test_applier_provenance.py:155-185`), permit last-writer record loss (`test_bridge_state_atomic_write_concurrency.py:41-120`), and source-grep impossible-link durability (`test_impossible_links_cicada.py:467-493`). Live sidecars replace full snapshots in `peer_confirmations.py:192-217` and `impossible_links.py:376-401`.\n\n## Approach\n\nUse the existing locked store boundary for read-merge-write. Preserve distinct keys under concurrent writers, choose and document deterministic same-key resolution, and prove readers see either the old complete document or the new complete document. Verify real commit-back through a fresh store/read rather than source inspection.\n\n## Scope\n\n- reconciliation mapping, peer-confirmation, and impossible-link sidecar writers\n- atomic persistence helpers\n- focused concurrency, mapping, provenance, and durability tests\n\n## Testing\n\nUse barriers for two writers and an in-window reader; cover distinct keys, same key, malformed intermediate data, commit-back, and a fresh-reader control.\n\n## Acceptance Criteria\n\n- [ ] Concurrent writes for distinct sidecar keys retain both records.\n- [ ] Same-key conflict resolution is deterministic and covered by an explicit test.\n- [ ] A barrier reader observes only the complete old or complete new state, never partial JSON.\n- [ ] Mapping, peer-confirmation, and impossible-link writes use the common locked read-merge-write path.\n- [ ] A fresh store/read proves committed impossible-link and mapping state survives publication.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Make reconciliation sidecar persistence conflict-safe and observationally proven"
+      },
       "created_at": "2026-09-02T02:59:26Z",
       "jira_id": "4591390",
       "jira_key": "REB-4447",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:29Z"
     },
@@ -14963,9 +15093,17 @@
       "updated_at": "2026-08-15T14:56:36Z"
     },
     "3a46-32f3-2753-4632": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nPrivate compatibility aliases remain for CLI help routing, `run_security_detectors`, graph/reducer symbols, split reducer processors, and grounding `DIMENSIONS`. Their consumers are internal source or test/monkeypatch paths; no public wire or persisted-data contract requires them. The governing ADR is delivered by earthen-wheat-chick.\n\n## Approach\n\nAfter the ADR merges, migrate all consumers to `_help_route`, `run_detectors`, graph loader/reducer canonical owners, split reducer processor modules, and `grounding.oracle.DIMENSIONS`. Delete old aliases only when both semantic references and raw dynamic/string/monkeypatch census are empty.\n\n## Scope\n\n- CLI help aliases\n- code-review detector, graph/reducer, and grounding compatibility bindings\n- every source/test/patch/dynamic consumer\n\n## Testing\n\nRun targeted CLI/help, security-detector, graph/reducer, and grounding suites plus semantic and raw reference censuses.\n\n## Acceptance Criteria\n\n- [ ] Each listed old private name is absent after all consumers migrate to its named canonical owner.\n- [ ] Tests patch or import only canonical owners.\n- [ ] Public CLI behavior, security detector results, graph reduction, reducer events, and grounding dimensions remain unchanged.\n- [ ] Focused suites and complete semantic/raw reference scans pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Migrate and remove CLI, security, graph, reducer, and grounding internal shims"
+      },
       "created_at": "2026-09-02T02:59:33Z",
       "jira_id": "4591391",
       "jira_key": "REB-4448",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:36Z"
     },
@@ -15195,9 +15333,17 @@
       "updated_at": "2026-08-15T14:56:43Z"
     },
     "3b66-615c-fbfb-4b1f": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`reconcile-check` exposes discrepancies, orphaned rebar/Jira bindings, unbound counts, checked/in-sync totals, formatting, exit behavior, and persisted report output. Its replacement cannot be guessed from command spelling: field-diff information belongs with preview, integrity/bindings with fsck, and operational witnesses with status.\n\n## Approach\n\nEnumerate each current observable and assign it to `bridge preview`, `bridge fsck`, or `bridge status`. Implement a new well-named bridge diagnostic subverb only if an observable does not coherently fit those owners. Migrate report persistence away from `bridge_state/reconcile-check.json` while proving parity or recording explicit retirement for every field.\n\n## Scope\n\n- reconcile-check report construction and direct-engine output\n- bridge preview/fsck/status command/result contracts\n- persisted bridge-state reports, docs, and characterization tests\n\n## Testing\n\nUse characterization fixtures for healthy, discrepant, orphaned, and unbound state; compare fields, formatting, exits, and persistence before/after canonical bridge routing.\n\n## Acceptance Criteria\n\n- [ ] Every reconcile-check observable has a documented canonical bridge owner or an explicit approved retirement.\n- [ ] Preview exposes field-diff observations; fsck exposes binding/integrity diagnostics; status exposes operational witnesses.\n- [ ] Any new bridge diagnostic subverb has one coherent responsibility and a stable named result contract.\n- [ ] Persisted report behavior is migrated from `bridge_state/reconcile-check.json` with field/exit/format parity or explicit retirement evidence.\n- [ ] Characterization and canonical bridge tests cover healthy, discrepant, orphaned, and unbound cases.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Migrate reconcile-check diagnostics to canonical bridge operations"
+      },
       "created_at": "2026-09-02T02:59:38Z",
       "jira_id": "4591392",
       "jira_key": "REB-4449",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:41Z"
     },
@@ -15533,9 +15679,17 @@
       "updated_at": "2026-08-15T14:57:01Z"
     },
     "3c2f-01aa-7ea1-409b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe CLI and MCP accept reviewer selection at `src/rebar/_cli/_parsers/advanced/llm.py:56-72` and `src/rebar/_mcp_llm.py:93-124`, but `src/rebar/llm/code_review/shim.py:117-174` discards it. Callers can pay for the same gate-run while believing they selected its reviewers.\n\n## Approach\n\nImmediately remove reviewer-selection input from CLI parsing, the MCP method and generated input schema, and the keyword-only Python signature. Keep gate-owned overlay selection and the result `reviewers` field. This is an intentional pre-1.0 breaking change, not a deprecation period.\n\n## Scope\n\n- code-review CLI parser and help\n- MCP method/schema and Python review-code signature\n- API/MCP baselines, docs, changelog, and ADR 0075 supersession note\n- contract tests\n\nCascade flag: true. Recensus static, dynamic, documentation, fixture, and monkeypatch callers.\n\n## Testing\n\nExercise CLI parsing, MCP schema validation, Python signature rejection, and the no-billable-call boundary for old invocations.\n\n## Acceptance Criteria\n\n- [ ] CLI `--reviewer`, MCP `review_code.reviewers`, and Python `reviewers=` inputs are absent from their contracts.\n- [ ] Old calls fail at parsing, schema, or signature validation before a billable model call.\n- [ ] Gate-owned reviewer selection remains and result `reviewers` accurately reports reviewers that ran.\n- [ ] API/MCP baselines, docs, changelog, and ADR 0075 state the pre-1.0 breaking replacement: omit selection and inspect result reviewers.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Remove caller-selected reviewer inputs from code review contracts"
+      },
       "created_at": "2026-09-02T02:59:44Z",
       "jira_id": "4591393",
       "jira_key": "REB-4450",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:48Z"
     },
@@ -15885,10 +16039,24 @@
     },
     "3e03-786b-cdc7-460b": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# Fix f449 ADR citation for unbounded Jira DC reindex support\n\n## Problem\nThe f449 ticket description still cites \"ADR 0037 s3\" for the unbounded Jira DC reindex behavior, but ADR 0037 is now `oss-contribution-intake-posture`. The renumbered ADR that owns the **unbounded** Jira search-index-lag rule is `docs/adr/0085-reconciler-live-validation-harness.md` \u00a73 (\"Eventual-consistency discipline for live probes\"). The Jira-family sub-seam context for DC search-index lag is also recorded in `docs/adr/0055-jira-family-sub-seam.md`, in the \"Search-index lag\" row around line 282.\n\nThe current `src/rebar/_engine/rebar_reconciler/snapshot_lagfree_refresh.py` module docstring already cites ADR 0055 rather than ADR 0037; this ticket will make that docstring citation explicit and consistent by naming `docs/adr/0055-jira-family-sub-seam.md` / the \"Search-index lag\" row, and by citing ADR 0085 \u00a73 only for the unbounded-index-lag claim.\n\n## Scope\nIn scope for this ticket:\n- the f449 ticket description text (`f449-be6a-be56-4fef`, alias `seagreen-fortuitous-crayfish`);\n- `src/rebar/_engine/rebar_reconciler/snapshot_lagfree_refresh.py` module docstring only;\n- `docs/adr/0055-jira-family-sub-seam.md` only if the ADR wording itself needs consistency (expected read-only).\n\nOut of scope: other ADR 0037 references in live-harness/test documentation. A repo-wide grep will be reported so non-f449 stale references are visible, but this bug's fix is limited to the f449-era description/docstring citation.\n\n## Verification plan\n- Inspect `docs/adr/0037-oss-contribution-intake-posture.md` to confirm ADR 0037 is the GitHub PR / OSS contribution posture ADR, not Jira DC reindex support.\n- Inspect `docs/adr/0085-reconciler-live-validation-harness.md` \u00a73 to confirm the unbounded search-index-lag statement.\n- Inspect `docs/adr/0055-jira-family-sub-seam.md` around the \"Search-index lag\" row to confirm the Jira-family sub-seam citation target.\n- Run `grep -nE '\\bADR 0037\\b|0037 s3|oss-contribution-intake-posture|\\bADR 0055\\b|0055-jira-family-sub-seam|\\bADR 0085\\b' src/rebar/_engine/rebar_reconciler/snapshot_lagfree_refresh.py` and inspect the f449 description to prove the in-scope stale citation is gone and the replacement citation points to ADR 0055 / ADR 0085 according to each ADR's actual title and section content.\n- Run `grep -rnE '\\bADR 0037\\b|0037 s3' . | grep -iE 'reindex|Jira DC|Lucene|unbounded'` and record the hits, classifying each as in-scope (fixed here) or out-of-scope (reported).\n- Run the project verification commands (`make lint && make typecheck && make test`) after the docstring-only code change.\n\n## Acceptance criteria\n- [ ] The f449 ticket description no longer points readers to ADR 0037 / `oss-contribution-intake-posture` for Jira DC reindex behavior; it points the unbounded-index-lag claim to ADR 0085 \u00a73 and the Jira-family search-index-lag context to ADR 0055 / `docs/adr/0055-jira-family-sub-seam.md` instead.\n- [ ] `src/rebar/_engine/rebar_reconciler/snapshot_lagfree_refresh.py` cites `docs/adr/0055-jira-family-sub-seam.md` or ADR 0055 for the Jira-family sub-seam/search-index-lag support, cites ADR 0085 \u00a73 only for the unbounded search-index-lag rule if it uses that claim, and contains no `ADR 0037` / `0037 s3` Jira-DC-reindex citation.\n- [ ] A repo-wide grep for `ADR 0037` / `0037 s3` near `reindex`, `Jira DC`, `Lucene`, or `unbounded` is recorded, with in-scope hits fixed here and any out-of-scope hits explicitly reported.\n- [ ] Project verification is green with the worktree virtualenv first on `PATH`.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Fix f449 ADR citation for unbounded Jira DC reindex support"
       },
       "created_at": "2026-09-01T19:32:09Z",
@@ -20853,6 +21021,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-31T06:59:30Z"
     },
+    "5169-ab69-9c23-4f8b": {
+      "created_at": "2026-09-02T03:41:16Z",
+      "jira_id": "4591427",
+      "jira_key": "REB-4484",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:41:19Z"
+    },
     "518b-0558-fd18-4713": {
       "created_at": "2026-08-15T14:59:23Z",
       "jira_key": "REB-961",
@@ -21438,9 +21613,17 @@
       "updated_at": "2026-08-18T16:43:21Z"
     },
     "545a-4db5-3a64-42d9": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F1 (reports/stability/mirror-inventory.md), HIGH.\n\nTwo masters for one fact \u2014 the set of event types the reducer dispatches:\n- src/rebar/reducer/_replay.py:93 `_EVENT_HANDLERS` (19 keys)\n- src/rebar/reducer/_version.py:86 `KNOWN_EVENT_TYPES` (19 values)\n\nSymmetric difference is empty today, so this is preventive. The hazard is severe: _replay.py:195 gates on KNOWN_EVENT_TYPES before handler lookup, and _commands/compact_plan.py:131 makes known types eligible for SNAPSHOT squash and file retirement. A type in KNOWN_EVENT_TYPES with no handler is folded into nothing and then deleted \u2014 silent permanent data loss.\n\nThe claimed gate does not exist: tests/interfaces/contracts/test_event_schema_forward_compat.py:16 says it pins the parity; its body (:90-97) asserts 3 memberships, and grep \"EVENT_HANDLERS\" tests/ returns nothing.\n\nProposed fix: generate-from-canonical \u2014 `KNOWN_EVENT_TYPES = frozenset(_EVENT_HANDLERS)`. In-tree precedent: _capabilities.py:203.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Generate KNOWN_EVENT_TYPES from the reducer's _EVENT_HANDLERS (mirror F1)"
+      },
       "created_at": "2026-09-02T02:59:51Z",
       "jira_id": "4591394",
       "jira_key": "REB-4451",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:54Z"
     },
@@ -21487,6 +21670,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-23T08:37:16Z"
+    },
+    "549b-9cc5-940e-46c3": {
+      "created_at": "2026-09-02T03:41:23Z",
+      "jira_id": "4591428",
+      "jira_key": "REB-4485",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:41:27Z"
     },
     "549c-032f-6cb0-4258": {
       "baseline": {
@@ -24974,9 +25164,17 @@
       "updated_at": "2026-08-15T15:00:52Z"
     },
     "6262-84da-b9f9-46d8": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nIndependent validation confirmed stale rollout headers at `mapping_config.py:1-22`, adapter headers, and `apply_outbound.py:80-88`; arbitration prose conflicts with `outbound_differ.py:234`; `OutboundDiffConfig` documents five values despite nine at `outbound_differ.py:217-262,511-524`; and `docs/env-vars.md:149,153` omits rollback semantics.\n\n## Approach\n\nCorrect the maintained source headers and authoritative operator material to reflect current behavior. Treat `docs/env-vars.md` as generated: update its source metadata or provide an authoritative operator page plus generated link, never hand-edit generated output. Document the verified five-field baseline arbitration and consumer-specific legacy create-route effects.\n\n## Scope\n\n- reconciler module headers and outbound configuration documentation\n- authoritative rollback/config documentation and generated env-var output/source\n- documentation tests or generation checks\n\n## Testing\n\nRegenerate affected documentation, run its drift check, and verify the stated examples against focused arbitration/create-route tests.\n\n## Acceptance Criteria\n\n- [ ] Rollout headers describe active mappings, Cloud/DC transport, and create/update paths.\n- [ ] Documentation states that the five inbound-mirrored fields suppress outbound write only when local equals stored baseline; local changes, conflicts, non-arbitrated fields, and incomplete baselines retain local behavior.\n- [ ] All nine `OutboundDiffConfig` fields and explicit `mapping=`/`repo_root=` precedence over config values are documented.\n- [ ] Rollback documentation gives accepted values, defaults, and consumer-specific effects without claiming `legacy` always deletes.\n- [ ] Generated env-var documentation is regenerated from an authoritative source and its drift check passes.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Correct reconciler rollout, arbitration, config, and rollback documentation"
+      },
       "created_at": "2026-09-02T02:59:55Z",
       "jira_id": "4591395",
       "jira_key": "REB-4452",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T02:59:58Z"
     },
@@ -25132,9 +25330,17 @@
       "updated_at": "2026-09-01T01:23:54Z"
     },
     "62eb-5e6f-512a-420d": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F5 (reports/stability/mirror-inventory.md), HIGH, ALREADY DRIFTED. Distinct from the MCP-tool-vs-facade parity gate (ticket 8ce5-b870-601d-4715): this is models-vs-schemas.\n\nsrc/rebar/_mcp_models.py:1-24 declares itself a pydantic-only leaf with no rebar.* edges, so every enum must be hand-copied:\n- :61-68 PinStatus (6) vs llm/plan_review/pin_health.py:21\n- :54 TargetPinStatus (4) vs pin_health.py:29 (third copy as dict keys at :193)\n- :122 FileImpactScope vs types.py:22\n- :284-295, :298, :336 vs schemas/bridge_{run,status,access_check}.schema.json\n\nTwo gaps in schemas/check_mcp_models.py:\n1. missing_declarations (:51-57) is a PROPERTY-NAME set difference; it never reads `enum`.\n2. MODEL_SCHEMAS (:22-34) covers 11 of 34 *Out models. Running the gate predicate over the\n   unregistered ones: TicketStateOut missing 23 properties, NextBatchOut 11, GateResultOut 5,\n   CreateResultOut 1. Both PlanReviewHealth*Out (carrying the pin_status copies) absent entirely.\n\nThis is the published MCP wire contract.\n\nProposed fix: add-parity-check \u2014 compare enum values, and derive/assert MODEL_SCHEMAS completeness instead of hand-listing it.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "MCP output models re-type canonical enums and the drift gate is enum-blind (mirror F5)"
+      },
       "created_at": "2026-09-02T03:00:01Z",
       "jira_id": "4591396",
       "jira_key": "REB-4453",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:00:04Z"
     },
@@ -25945,9 +26151,17 @@
       "updated_at": "2026-08-18T23:37:11Z"
     },
     "6640-ac11-5c55-46b5": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nPrivate re-exports, wrappers, and alias assignments survive after ownership moved elsewhere. Their only beneficiaries are repository imports, strings, and monkeypatch targets, so they create a second binding without protecting a public compatibility contract. The approved policy requires every such consumer to migrate and prohibits new internal-only shims.\n\n## Approach\n\nA prerequisite ADR establishes the boundary and enforcement policy. After it merges, disjoint children migrate all source, tests, dynamic imports, string lookups, and monkeypatch consumers by subsystem and delete the old binding. Public facades, MCP wire schemas, event readers, and persisted-data migrations remain separate contracts.\n\n## Child Decomposition\n\n- The ADR child performs RESEARCH, DRAFT, HOLD, and MERGE for the no-internal-shim rule.\n- Core/reconciler, CLI/security/graph/grounding, and LLM/workflow/MCP-model children own disjoint migration censuses.\n- The LLM/workflow shard also owns approved SDC3 alias migrations.\n\n## Acceptance Criteria\n\n- [ ] A merged ADR defines one canonical binding after private moves, atomic consumer migration, valid exceptions, and recurrence prevention.\n- [ ] Every enumerated internal shim has its semantic/static and string/dynamic/monkeypatch consumers moved to its canonical owner.\n- [ ] No old private binding remains solely for internal compatibility.\n- [ ] Deliberate public facades, wire schemas, event readers, and persisted-data migrations retain their independently specified contracts.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Eliminate internal-only compatibility shims under an ADR-governed policy"
+      },
       "created_at": "2026-09-02T03:00:05Z",
       "jira_id": "4591397",
       "jira_key": "REB-4454",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:00:08Z"
     },
@@ -26377,6 +26591,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:21Z"
     },
+    "67aa-eb04-8814-4975": {
+      "created_at": "2026-09-02T03:41:30Z",
+      "jira_id": "4591429",
+      "jira_key": "REB-4486",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:41:34Z"
+    },
     "67b1-49ed-ba22-42b7": {
       "created_at": "2026-08-15T15:01:22Z",
       "jira_key": "REB-1803",
@@ -26655,9 +26876,17 @@
       "updated_at": "2026-08-15T15:01:26Z"
     },
     "6850-af5c-a4a1-4c5d": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F2 (reports/stability/mirror-inventory.md), MEDIUM.\n\n- src/rebar/signing.py:115 OPCERT_KINDS (exported in __all__ at :76) \u2014 canonical\n- src/rebar/opcert_service/jobs.py:38 VALID_KINDS (same 2)\n- src/rebar/_commands/remote_cert.py:24 _VALID_KINDS (same 2), plus a prose copy in _USAGE at :23\n\nNeither consumer imports the exported name; both gate client request validation. Churn is low (ADR 0049 fixes the count at two), but a miss silently rejects a legitimate kind.\n\nProposed fix: generate-from-canonical \u2014 import OPCERT_KINDS at both sites.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Single-source the op-cert kinds across signing, opcert_service and remote_cert (mirror F2)"
+      },
       "created_at": "2026-09-02T03:00:11Z",
       "jira_id": "4591398",
       "jira_key": "REB-4455",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:00:15Z"
     },
@@ -27292,9 +27521,17 @@
       "updated_at": "2026-08-31T07:00:03Z"
     },
     "6ba3-6406-cba1-4f04": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`tests/interfaces/lifecycle/test_caused_by_autoderive.py:66-130` and `test_caused_by_autoderive_heldout.py:58-125` contain AST-identical regressions with no distinct assertion or boundary. This is HARDENING: it has no demonstrated production defect but duplicates subprocess-heavy CI and future maintenance.\n\n## Approach\n\nRetain the canonical lifecycle regression, delete the AST-identical copy, and parameterize only cases that exercise genuinely distinct behavior. Do not weaken the actual caused-by autoderivation contract.\n\n## Scope\n\n- the canonical and held-out caused-by autoderivation tests\n- shared fixtures only if a distinct boundary case is preserved\n\nCascade flag: true. Recensus parametrization, dynamic test collection, and fixture references before deletion.\n\n## Testing\n\nRun both test modules before the change, then run the retained/parameterized suite and inspect collection to prove exactly one copy of the duplicate behavior remains.\n\n## Acceptance Criteria\n\n- [ ] The AST-identical duplicate regression is removed.\n- [ ] The canonical lifecycle regression remains and exercises the same autoderivation behavior.\n- [ ] Any retained parameterization corresponds to a documented distinct boundary, not the former duplicate.\n- [ ] Focused collection/test output proves the duplicate executes once and the lifecycle suite passes.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Remove the duplicate blame-autoderivation regression"
+      },
       "created_at": "2026-09-02T03:00:15Z",
       "jira_id": "4591399",
       "jira_key": "REB-4456",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:00:19Z"
     },
@@ -28370,9 +28607,17 @@
       "updated_at": "2026-08-15T15:02:16Z"
     },
     "70f5-2253-1671-474d": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F9 (reports/stability/mirror-inventory.md), LOW.\n\n- src/rebar/config.py:326 LAYER_ORDER = (\"default\",\"user\",\"project\",\"env\",\"cli\")\n- src/rebar/_operation_config.py:51 _SOURCE_KINDS (same 5)\n\n_operation_config.py:128 validates a provenance label whose domain config.py:337 documents as \"label in LAYER_ORDER\".\n\nProposed fix: generate-from-canonical \u2014 frozenset(config.LAYER_ORDER). Ordering is the tuple s only additional fact, so the set derivation is safe.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Derive _operation_config._SOURCE_KINDS from config.LAYER_ORDER (mirror F9)"
+      },
       "created_at": "2026-09-02T03:00:23Z",
       "jira_id": "4591400",
       "jira_key": "REB-4457",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:00:26Z"
     },
@@ -29765,9 +30010,17 @@
       "updated_at": "2026-09-01T01:24:39Z"
     },
     "7545-9faa-0dd0-4f92": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nPlanning consumes `requires_create` and `requires_parent` in `ticket_planner.py:74-82,192` and `batch_dispatch.py:524`, but production builders at `run_differs.py:568` and `create_route.py:210-216` do not emit them. A parent and child created in one pass can therefore reach Jira in the wrong order.\n\n## Approach\n\nHave production mutation builders attach the existing metadata whenever an operation needs its parent/create edge. Preserve current planner semantics and prove the dispatcher never applies a dependent child before its parent mapping exists.\n\n## Scope\n\n- mutation types and production builders\n- `run_differs.py`, `create_route.py`, planner, and batch dispatch\n- focused reconciliation create/dispatch tests\n\n## Testing\n\nCover a parent/child create batch, unrelated creates, missing parent mapping, and ordering under dispatch batching.\n\n## Acceptance Criteria\n\n- [ ] Production mutation construction emits `requires_create` and `requires_parent` for every applicable edge.\n- [ ] Planner ordering places required parent/create operations before dependent child operations.\n- [ ] Dispatcher coverage proves the child does not apply before its parent mapping exists.\n- [ ] Unrelated creates retain current ordering and no-op behavior.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Emit and enforce reconciliation create-order dependency metadata"
+      },
       "created_at": "2026-09-02T03:00:27Z",
       "jira_id": "4591401",
       "jira_key": "REB-4458",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:00:31Z"
     },
@@ -30825,9 +31078,17 @@
       "updated_at": "2026-08-15T15:03:15Z"
     },
     "79fb-2c91-241c-4a9d": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/_engine/rebar_reconciler/adapters/jira/backend.py:40-53::_fit_description` has no executable consumer; commit `e0eab05b0cceb` moved behavior to `OutboundFieldMapper(AdfCodec(...))`. `adapters/jira/acli_rest.py:115-126::_direct_rest_put` also has no production caller and applies a wrong universal envelope; live calls use `_direct_rest_put_raw`.\n\nThe shared link canonicalizer prerequisite is bacteroid-computable-vole [rebar:bacteroid-computable-vole].\n\n## Approach\n\nAfter the canonicalizer prerequisite, delete both unreachable helpers and stale mock/inventory/comment ownership. Retain mapper/codec sanitizer ordering and raw PUT body/auth/rate-limit/retry behavior.\n\n## Scope\n\n- Jira backend field helper and mapper ownership prose/tests\n- ACLI REST helper, mocks/inventories/comments, and raw-PUT contract tests\n\n## Testing\n\nRun mapper fit/normalization/sanitizer controls and raw PUT endpoint/body/auth/retry tests.\n\n## Acceptance Criteria\n\n- [ ] `_fit_description` is removed and maintained prose/tests name `OutboundFieldMapper` plus codec composition as owner.\n- [ ] `_direct_rest_put` is removed with unused mocks, inventories, and stale comments.\n- [ ] `_direct_rest_put_raw` retains exact body, authentication, rate-limit, and retry contracts.\n- [ ] Mapper fit/normalize/sanitizer ordering remains covered.\n- [ ] Focused Jira adapter and raw-PUT suites pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Remove dead Jira adapter description and PUT helpers"
+      },
       "created_at": "2026-09-02T03:00:35Z",
       "jira_id": "4591402",
       "jira_key": "REB-4459",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:00:40Z"
     },
@@ -32775,16 +33036,32 @@
       "updated_at": "2026-08-15T15:04:06Z"
     },
     "828b-fe4a-b05a-48fb": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe canonical registry at `src/rebar/_deprecations.py:94-112` schedules three removals: `transition(force_close=...)`, boolean `transition(force=True)`, and hosted `openai-chat:` selection. The Responses migration `upbeat-illadvised-springtail` is closed, so the narrow hosted-OpenAI removal is now eligible.\n\n## Approach\n\nDelete the scheduled aliases and require their canonical forms: reason-bearing `force=\"<reason>\"` and hosted `openai-responses:<model>`. Preserve custom OpenAI-compatible endpoints on Chat Completions; they are not the hosted surface being removed. Update release material, generated references, schemas, examples, and tests as a deliberate pre-1.0 break.\n\n## Scope\n\n- deprecation registry and transition/provider parsing\n- CLI/Python/MCP schemas and documentation/examples\n- changelog/release notes and focused compatibility tests\n\n## Testing\n\nCover each removed spelling failing at its public boundary, canonical replacements succeeding, and a custom endpoint still using Chat Completions.\n\n## Acceptance Criteria\n\n- [ ] `force_close=` and boolean `force=True` are rejected; `force=\"<explicit reason>\"` remains accepted.\n- [ ] Hosted `openai-chat:` selection is rejected; hosted `openai-responses:` works.\n- [ ] Custom OpenAI-compatible endpoints retain their Chat Completions dialect.\n- [ ] Changelog, release notes, schemas, generated references, examples, and tests record the breaking replacements.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Remove the three scheduled public deprecations"
+      },
       "created_at": "2026-09-02T03:00:45Z",
       "jira_id": "4591403",
       "jira_key": "REB-4460",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:00:48Z"
     },
     "82bb-439b-1c42-4abd": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nLegacy CLI and direct-engine `reconcile` modes still retain defaults, `--filter-local-ids`, exit values, manifest/tally output, and `reconcile-check` persisted state. The canonical bridge diagnostic migration is delivered by nosy-drooly-milksnake [rebar:nosy-drooly-milksnake].\n\n## Approach\n\nAfter that prerequisite is complete, remove all legacy CLI registrations and direct-engine mode values, including `Mode.RECONCILE_CHECK`. Migrate historical `\"reconcile-check\"` state or retain a narrow read decoder until it is safe to retire. Preserve live lock-loss `ReconcileLockLost -> RESCHEDULE`, canonical bridge exit 0, `snapshot_head` drift checks, and store `RebaseGuard` exit 75.\n\n## Scope\n\n- CLI registry/dispatch and direct-engine mode routing\n- persisted ref-lock/report readers and migration/decoder\n- release/docs and reconciliation tests\n\n## Testing\n\nUse pre-migration persisted state, live lock-loss, drift, exit, and canonical bridge behavior controls.\n\n## Acceptance Criteria\n\n- [ ] `reconcile` and `reconcile-check` are absent from CLI registration, direct-engine modes, docs, and help.\n- [ ] Existing persisted reconcile-check state is migrated or decoded safely without reintroducing legacy command vocabulary.\n- [ ] Live lock-loss rescheduling, snapshot drift, canonical bridge exit 0, and store RebaseGuard exit 75 remain unchanged.\n- [ ] Canonical bridge operations cover the migrated diagnostics and focused migration/exit tests pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Remove legacy reconcile CLI, direct-engine modes, and persisted state"
+      },
       "created_at": "2026-09-02T03:00:51Z",
       "jira_id": "4591404",
       "jira_key": "REB-4461",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:00:54Z"
     },
@@ -33562,9 +33839,17 @@
       "updated_at": "2026-08-15T15:04:22Z"
     },
     "852a-1e41-632d-4087": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`docs/plan-review-gate.md:795` makes a blanket claim-denial statement, contradicting the bug exemption in `src/rebar/_commands/gates.py:45` and the guide's own exception at lines 474 and 1477. The approved clarification is sequence-sensitive.\n\n## Approach\n\nCorrect the maintained guide directly. State that a bug may be claimed without plan review to perform root-cause analysis; after RCA, a complex bug with an implementation plan and file impact must receive LLM plan review before remediation begins. Preserve behavioral code/tests as authority.\n\n## Scope\n\n- `docs/plan-review-gate.md`\n- `src/rebar/_commands/gates.py` and `tests/unit/test_bug_review_tier.py` as behavior evidence/checks\n\n## Testing\n\nRun focused bug-review tier tests and add/update a documentation assertion that distinguishes claim-time exemption from implementation-time review.\n\n## Acceptance Criteria\n\n- [ ] The guide says bugs are exempt from plan review at claim time so RCA can establish remediation shape.\n- [ ] The guide says complex bugs require plan review after RCA, once implementation plan and file impact exist, before implementation.\n- [ ] The guide does not imply every bug needs review before claim or that complex bug remediation is permanently exempt.\n- [ ] Focused bug-review tier tests and the documentation check pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Document bug claim exemption and post-RCA complex-bug plan review"
+      },
       "created_at": "2026-09-02T03:00:58Z",
       "jira_id": "4591405",
       "jira_key": "REB-4462",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:01Z"
     },
@@ -34360,10 +34645,24 @@
     },
     "87cb-7121-a3b6-4606": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nTrack I of the stability program (plan: `.scratch/stability-analysis/11-plan-v3.md` \u00a72, evidence `09-complete-picture.md`, grounding `12a/12b/12c`). The defect stream's introduction-side engines, from a 120-bug mechanism-read sample (R2S1, seed 20260831): gate-runtime 20.8%, product-logic representation drift (dominant sub-mechanism of 18.3%), test isolation under ~90-worktree parallelism (15.8%); amplified by 56% of fixes adding a new mechanism. This epic ships the four introduction-reducing programs as six vertical, independently-landable child slices. Track II (loop integrity: gate runtime, store staging) is separate work and NOT in scope here.\n\n## Approach\n\nEach child is a vertical slice: one enforcement mechanism or measurement shipped end-to-end (implementation + tests + docs + `make lint`/CI wiring where applicable). No child consumes an artifact produced by a sibling, so children are order-independent and may run in parallel under `next-batch`. Grounding constraints honored: enforcement is deterministic and harness-neutral (make lint / Verified lane / collection-time checks \u2014 never prose or harness hooks); each mechanism added names what bounds it (the ratchet itself is the bound for the epic's own additions); patterns follow the repo's existing generated-registry and shrink-only-baseline precedents.\n\n## Acceptance criteria\n\n- [ ] AC1 (child: MCP parity gate): a deterministic drift gate cross-checks the MCP tool surface against the library facade and fails `make lint` on divergence, with a regression test proving it fires on a seeded mismatch.\n- [ ] AC2 (child: mirror sweep): a committed inventory of remaining hand-maintained representation mirrors exists under reports/, and every live mirror found is either gated/generated or has a linked child/discovered_from ticket.\n- [ ] AC3 (child: subprocess-isolation enforcement): the unit tier fails at collection time when a subprocess-spawning test does not take its isolation root from the harness, with a test proving the check fires.\n- [ ] AC4 (child: cache keying): shared-mutable-state-across-workers defects of the completion-cache class are prevented by per-isolation-root keying/reset, with a regression test for the shared-temp-file pattern.\n- [ ] AC5 (child: mechanism ratchet): `scripts/check_mechanism_delta.py` runs in `make lint` against a committed shrink-only baseline keyed per (kind, name), failing on any unjustified mechanism addition, with tests covering add/remove/justified-exception paths.\n- [ ] AC6 (child: upstream measurement): the three measurement reads (rework vs change size/files-touched; 20 CI-at-landing regressions; environment failures) are published under reports/ with per-case tables, and the size-rule enforcement decision is recorded either way.\n- [ ] AC7 (documentation): each shipped gate/check is documented where its siblings are (docs/ + the check script's --help), and docs drift gates stay green.\n\nProgram-level exit metrics (scoreboard, not close criteria): per-class bug counts at zero for 30 days per gated mirror / isolation class; additive-fix share \u226430% sustained.\n\n## File impact scope\n\nContainer epic \u2014 no direct code; see children's file impacts.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Track I \u2014 Reduce defect introduction: drift parity, isolation enforcement, mechanism ratchet, upstream measurement"
       },
       "created_at": "2026-09-02T01:46:24Z",
@@ -34829,10 +35128,24 @@
     },
     "897e-8ad4-0444-49d9": {
       "baseline": {
-        "assignee": null,
-        "description": "## Observed signal\nError sweep window 2026-08-30T21:20:00-07:00..2026-09-01T11:58:00-07:00 (2026-08-31T04:20:00Z..2026-09-01T18:58:00Z) found GitHub Actions run 33455923923 (`Jira DC Exact-Patchset Parity`, workflow_dispatch, triggered by JoeOakhartNava) failed before executing the live DC parity body.\n\nFailing job: `jira DC exact-patchset parity (real Jira Data Center, ephemeral)` at step `Verify the checkout landed on the exact patchset SHA`.\n\nError: `checked-out HEAD (d6c37680805fc8ae013832dd4c09c1fb100a1e0b) does not match the requested Gerrit patchset revision (a22257e7d10e3d079ee676cbb38d2b39811d0fd5) \u2014 refusing to run the DC lane against the wrong ref.`\n\n## Root-cause direction\nThis is workflow/checkout plumbing, not a Jira DC application failure: the exact-patchset workflow carried expected patchset SHA `a22257e7d10e3d079ee676cbb38d2b39811d0fd5`, but the checkout action left the workspace at `d6c37680805fc8ae013832dd4c09c1fb100a1e0b`. The guard correctly failed closed, but the workflow cannot currently provide parity evidence for the requested patchset.\n\n## Acceptance criteria\n- The Jira DC exact-patchset parity workflow checks out the exact requested Gerrit patchset SHA before any live DC operation runs.\n- If the requested patchset cannot be fetched, the workflow fails with a clear fetch/input error rather than landing on a different commit.\n- A rerun or equivalent dispatch for the affected patchset reaches the DC parity checks with `HEAD == expected_sha`.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Observed signal\nError sweep window 2026-08-30T21:20:00-07:00..2026-09-01T11:58:00-07:00 (2026-08-31T04:20:00Z..2026-09-01T18:58:00Z) found GitHub Actions run 33455923923 (`Jira DC Exact-Patchset Parity`, workflow_dispatch, triggered by JoeOakhartNava) failed before executing the live DC parity body.\n\nFailing job: `jira DC exact-patchset parity (real Jira Data Center, ephemeral)` at step `Verify the checkout landed on the exact patchset SHA`.\n\nError: `checked-out HEAD (d6c37680805fc8ae013832dd4c09c1fb100a1e0b) does not match the requested Gerrit patchset revision (a22257e7d10e3d079ee676cbb38d2b39811d0fd5) \u2014 refusing to run the DC lane against the wrong ref.`\n\n## Confirmed root cause\nGerrit change 2466 patchset 1 (`refs/changes/66/2466/1`) resolves to `d6c37680805fc8ae013832dd4c09c1fb100a1e0b`; patchset 2/current resolves to `a22257e7d10e3d079ee676cbb38d2b39811d0fd5`. Run 33455923923 combined the patchset-1 refspec with the patchset-2 revision. The pinned `checkout-gerrit-change-action` first checks out its `ref` default (`github.sha`) but then fetches `GERRIT_REFSPEC` and unconditionally checks out `FETCH_HEAD`, so the workflow landed on the stale refspec commit and only the later guard detected the mismatch.\n\nThe guard's fail-closed behavior is correct. The defect is that `.github/workflows/jira-dc-exact-patchset.yml` delegates the final checkout to a refspec-first third-party action even though this lane's authoritative requested commit is the `(GERRIT_REFSPEC, GERRIT_PATCHSET_REVISION)` pair.\n\n## Fix plan\nReplace only this workflow's first checkout step with explicit shell plumbing equivalent to the pinned action's fetch protocol, but with the missing SHA validation inserted before checkout. This is not a new protocol: the pinned action source at `lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832` defines `fetch_from_gerrit()` as `git fetch ${{ inputs.gerrit-url }}/${{ inputs.gerrit-project }} ${{ inputs.gerrit-refspec }}`, and run 33455923923 shows the workflow supplied `gerrit-url: https://rebar.solutions.navateam.com` plus `gerrit-project: rebar`, so the fallback URL form is `https://rebar.solutions.navateam.com/rebar`. The action fetches the GitHub mirror through `origin`; the workflow will recreate that source explicitly as `https://github.com/${{ github.repository }}.git` in the initialized workspace.\n\nImplementation steps:\n\n1. Initialize a git repository in the empty runner workspace and add `origin=https://github.com/${{ github.repository }}.git`.\n2. Fetch `GERRIT_REFSPEC` into `FETCH_HEAD` from `origin`; if that fails, fetch the same refspec from `https://${{ vars.GERRIT_SERVER }}/${{ inputs.GERRIT_PROJECT }}`. Do not check out either fetch result yet.\n3. If neither fetch succeeds, fail with a clear error naming both attempted sources and the refspec.\n4. Compare `git rev-parse FETCH_HEAD^{commit}` to `GERRIT_PATCHSET_REVISION`; if they differ, fail with a clear dispatch-input error naming the refspec SHA and expected SHA. This is the repaired form of run 33455923923.\n5. Only after the fetch/refspec SHA matches, check out `GERRIT_PATCHSET_REVISION` explicitly in detached HEAD mode and verify `git rev-parse HEAD` equals it before any Python/Jira DC setup or live DC operation runs.\n\nStrengthen `tests/unit/test_jira_dc_exact_patchset_workflow.py` by replacing the old `test_uses_pinned_gerrit_checkout_action` assertion with contract tests for the new shape: the workflow must not use the refspec-first third-party checkout action in this lane, its checkout shell must fail on an inconsistent temporary-git refspec/revision pair without checking out the refspec commit, its checkout shell must fail clearly when neither source has the requested refspec, and its success path must leave `HEAD == GERRIT_PATCHSET_REVISION`.\n\n## Acceptance Criteria\n- [ ] The Jira DC exact-patchset parity workflow checks out the exact requested Gerrit patchset SHA before any live DC operation runs; checked by `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/unit/test_jira_dc_exact_patchset_workflow.py -q` and by the existing `HEAD == GERRIT_PATCHSET_REVISION` guard embedded in the workflow.\n- [ ] If the requested patchset refspec cannot be fetched from either the GitHub mirror or Gerrit fallback, the workflow fails with a clear fetch/input error rather than landing on a different commit; checked by a focused temporary-git test in `tests/unit/test_jira_dc_exact_patchset_workflow.py`.\n- [ ] The workflow records enough evidence for a future CI dispatch to prove the live Data Center lane ran from `HEAD == expected_sha`; in-session completion rests on AC1/AC2 plus Gerrit review/Verified results, and the future live dispatch evidence is a GitHub Actions run id whose summary lists the verified SHA.\n  provenance: environment=GitHub Actions workflow_dispatch with real Jira Data Center image; principal=Gerrit/GitHub workflow actor; privilege_posture=production-equivalent; instrument=static-analysis \u2014 the real Jira DC Docker image only runs in CI, so this session proves the checkout/verify plumbing locally and relies on Gerrit `Verified` plus a future explicit dispatch for the live DC body.\n\n## Testing\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/unit/test_jira_dc_exact_patchset_workflow.py -q`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make test`\n\nDo not run the real Jira DC parity body locally; the operator confirmed the real Data Center Docker image used by this lane only runs in CI.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "[ci] Jira DC exact-patchset parity aborts after checking out the wrong patchset SHA"
       },
       "created_at": "2026-09-01T21:33:43Z",
@@ -35678,16 +35991,30 @@
     },
     "8ce5-b870-601d-4715": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nThe one confirmed ungated representation mirror (12a Part 1): `scripts/gen_api_surface.py` + `tests/unit/api_surface_baseline.json` gate the library's public surface, and `scripts/gen_mcp_reference.py` generates docs from the MCP registrar \u2014 but nothing cross-checks the MCP tool surface against the library facade, so the two can drift silently (the S1 sample's live example: MCP tool signatures diverging from the library surface). Precedent: Kubernetes `hack/verify-generated.sh` (regen-in-isolated-worktree + diff); the repo's own generated-registry pattern.\n\n## Approach\n\nIntrospect the MCP registrar's tool inventory (names, parameters, defaults) and the library facade functions they wrap; emit a normalized parity manifest; a `--check` mode diffs against the committed manifest and fails on divergence, wired into `make lint`. Regeneration documented in the script's --help. Where a tool intentionally diverges from the facade (e.g., enumerated MCP params vs **fields passthrough \u2014 the known edit_ticket case), the manifest records the divergence explicitly so drift is still caught relative to the declared shape.\n\n## Acceptance criteria\n\n- [ ] AC1: a script produces a normalized MCP\u2194library parity manifest and `--check` fails (exit != 0) when either side drifts from the committed manifest.\n- [ ] AC2: `make lint` runs the check; a seeded mismatch (test fixture) proves it fires RED.\n- [ ] AC3: intentional divergences are declared in the manifest with a reason field, and an undeclared divergence still fails.\n- [ ] AC4: regeneration is one documented command; docs updated where the sibling generators are documented.\n\n## File impact\n\n- scripts/check_mcp_library_parity.py (new; or extend gen_api_surface.py \u2014 decide at implementation against the existing script's structure)\n- tests/unit/test_mcp_library_parity.py (new)\n- Makefile (lint target wiring)\n- docs/mcp-reference.md or docs/reuse-surface.md (regeneration note)",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "MCP-tool-surface vs library-facade parity gate"
       },
       "created_at": "2026-09-02T01:46:26Z",
       "jira_id": "4591371",
       "jira_key": "REB-4428",
-      "peer_parent": "",
+      "peer_parent": "REB-4427",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:28Z"
     },
@@ -36140,9 +36467,17 @@
       "updated_at": "2026-08-28T12:17:37Z"
     },
     "8e5c-5c73-d540-41db": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`scripts/gen_api_surface.py:92-155` serializes parameter descriptors but omits return annotations although `docs/api-stability.md:24` includes return TypedDicts in the stable subset. A return-only contract regression currently leaves the baseline unchanged.\n\n## Approach\n\nNormalize and serialize stable return annotations with an explicit unannotated sentinel, regenerate the baseline, and add a held-out return-only drift case. Keep cross-Python normalization deterministic and do not expand beyond the documented public surface.\n\n## Scope\n\n- `scripts/gen_api_surface.py`\n- `tests/unit/api_surface_baseline.json`\n- API-surface gate tests and public-types contract tests\n\n## Testing\n\nCover annotated return change, unannotated sentinel, nested/typing normalization, and a parameter-identical return-only held-out drift case.\n\n## Acceptance Criteria\n\n- [ ] Every recorded public callable serializes a stable normalized return annotation or explicit unannotated sentinel.\n- [ ] Existing parameter serialization and baseline entries remain compatible except for deliberate return fields.\n- [ ] A return-only public API change fails the held-out drift test.\n- [ ] Baseline generation is deterministic on supported Python versions and focused API checks pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Include return annotations in public API surface snapshots"
+      },
       "created_at": "2026-09-02T03:01:05Z",
       "jira_id": "4591406",
       "jira_key": "REB-4463",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:08Z"
     },
@@ -36273,9 +36608,17 @@
       "updated_at": "2026-08-15T15:05:24Z"
     },
     "8eff-87c1-d09a-4893": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`docs/api-stability.md:24,41-46` defines underscore-prefixed modules/functions as private, while ADR 0083 already requires one canonical binding for reconciler moves. Contrary decisions remain: ADR 0016 retains `run_security_detectors`, ADR 0092 retains reconcile compatibility, and past split documentation retained private shims to avoid consumer migration.\n\n## Approach\n\nComplete the prescribed ADR lifecycle. In RESEARCH, catalog the cited contrary decisions and write a numbered critique covering public-versus-private boundaries, dynamic/monkeypatch consumers, persisted/wire exceptions, and enforcement. Record maintainer resolution for every critique item. Then DRAFT, HOLD for review, and MERGE an ADR that mandates one canonical private binding and atomic consumer migration.\n\n## Scope\n\n- new ADR allocated through `docs/adr/.numbers`\n- `docs/api-stability.md` and architecture/reuse guidance\n- enforcement/review guidance or a mechanical guard identified by the ADR\n\n## Testing\n\nAdd a policy/documentation check or deterministic enforcement test specified by the ADR; verify existing public facade, wire-schema, and persisted-event contract tests remain unaffected.\n\n## Acceptance Criteria\n\n- [ ] RESEARCH contains a numbered critique of ADR 0016, ADR 0083, ADR 0092, and prior split-shim guidance; each item has a recorded maintainer resolution.\n- [ ] The merged ADR defines one canonical binding after private moves and atomic source/test/string/dynamic/monkeypatch migration.\n- [ ] The ADR distinguishes valid public facades, MCP wire schemas, event readers, and persisted-data migrations from internal-only shims.\n- [ ] The ADR requires a durable review or mechanical recurrence-prevention mechanism and names its evidence.\n- [ ] The policy check/enforcement evidence passes without breaking the preserved public/wire/event contracts.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "ADR: prohibit internal-only compatibility shims"
+      },
       "created_at": "2026-09-02T03:01:12Z",
       "jira_id": "4591407",
       "jira_key": "REB-4464",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:15Z"
     },
@@ -37009,9 +37352,17 @@
       "updated_at": "2026-08-15T15:05:43Z"
     },
     "91b0-6185-b53c-4271": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F8 (reports/stability/mirror-inventory.md), LOW.\n\n- src/rebar/types.py:24 / schemas/common.schema.json#/$defs/relation (7 relations)\n- src/rebar/graph/_links.py:20 CANONICAL_RELATIONS (same 7)\n\ntests/interfaces/contracts/test_event_schema_relations.py:23 pins CANONICAL_RELATIONS to docs/event-schema.md. Nothing pins it to the schema or to types.Relation, so the doc arm is gated and the schema arm is not.\n\nProposed fix: add-parity-check \u2014 extend the existing test with the schema arm.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Pin CANONICAL_RELATIONS to the schema, not only to the docs (mirror F8)"
+      },
       "created_at": "2026-09-02T03:01:18Z",
       "jira_id": "4591408",
       "jira_key": "REB-4465",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:21Z"
     },
@@ -39787,7 +40138,7 @@
     "9ca8-675e-4dfb-427d": {
       "baseline": {
         "assignee": null,
-        "description": "## Context\n\n56% of sampled fixes add a new mechanism (lock, knob, env var, gate script, fixture, helper, flag) vs 30% pure logic fixes (R2S1) \u2014 the surface that produces future defect classes grows with every fix cycle. Confirmed genuinely new (12a: no unified detector exists); per-kind precedents prove detectability (check_config_reads.py AST detector, gen_env_registry.py). Pattern: the repo's own shrink-only complexity baseline (scripts/check_complexity_baseline.py, 644 lines: baseline JSON, --check fails on new>0/increased>0, --update-stale maintenance). Baseline keyed per (kind, name) \u2014 never a scalar sum \u2014 per the ESLint eslint-suppressions.json shape (12c), so one kind cannot be traded against another. 2026 grounding (12b): counter-pressure to general mechanism entropy (toggle-mining: deletions lag additions 13\u201335%), not an AI-specific premise.\n\n## Approach\n\nscripts/check_mechanism_delta.py detecting, per repo state (not per diff \u2014 state-diffing the baseline is simpler and equivalent): lock classes/lock files; REBAR_* env vars (reuse gen_env_registry's detector); rebar.toml keys (reuse the config schema); scripts/check_*.py + inline workflow run: steps; autouse fixtures; tests/_*.py helpers; feature flags. Baseline .github/mechanism-baseline.json keyed {kind: {name: 1}}; --check fails on any name present in the tree but absent from baseline (a NEW mechanism) unless the introducing change carries a declared justification consumed by the DET floor; removal of a name auto-shrinks via --update-stale (maintenance-only). Wire into make lint (and thus pre-commit + the Verified lane). CLI flags mirror the complexity baseline's real interface (--check / --update-stale \u2014 12a corrected v3's \"--lock\").\n\n## Acceptance criteria\n\n- [ ] AC1: the script detects all seven mechanism kinds with zero false positives on the current tree (baseline locked at introduction).\n- [ ] AC2: --check exits non-zero when a new (kind,name) appears without justification; a seeded test proves each kind fires.\n- [ ] AC3: mechanism removal passes and --update-stale drains the entry (shrink-only semantics identical to the complexity baseline).\n- [ ] AC4: make lint runs the check; the justified-exception path is documented and itself greppable/countable.\n- [ ] AC5: docs section explains the ratchet, its kinds, and the exception discipline.\n\n## File impact\n\n- scripts/check_mechanism_delta.py (new)\n- .github/mechanism-baseline.json (new, locked at introduction)\n- Makefile (lint wiring)\n- tests/scripts/test_check_mechanism_delta.py (new)\n- docs (contributor-facing ratchet note where the complexity ratchet is documented)",
+        "description": "## Context\n\n56% of sampled fixes add a new mechanism (lock, knob, env var, gate script, fixture, helper, flag) vs 30% pure logic fixes (R2S1) \u2014 the surface that produces future defect classes grows with every fix cycle. Confirmed genuinely new (12a: no unified detector exists); per-kind precedents prove detectability (`check_config_reads.py` AST detector, `gen_env_registry.py`). Baseline keyed per `(kind, name)` \u2014 never a scalar sum \u2014 per the ESLint `eslint-suppressions.json` shape (12c), so one kind cannot be traded against another. 2026 grounding (12b): counter-pressure to general mechanism entropy (toggle-mining: deletions lag additions 13\u201335%), not an AI-specific premise.\n\n## Approach\n\n`scripts/check_mechanism_delta.py` detects, per repo STATE (not per diff \u2014 state-diffing the baseline is simpler and equivalent), seven mechanism kinds. Live counts on the current tree, which the baseline is locked to at introduction:\n\n| kind | detection | count |\n|---|---|---|\n| `lock` | AST `ClassDef` matching `.*Lock.*` + string literals matching `\\.lock$` | 26 |\n| `env_var` | reuse `gen_env_registry.scan()`, filter `REBAR_*` | 132 |\n| `config_key` | `rebar._config_sections._SECTIONS` \u2192 `f\"{section}.{key}\"` | 103 |\n| `ci_gate` | `scripts/check_*.py` glob + workflow `run:` steps | 29 / 251 |\n| `autouse_fixture` | AST: `pytest.fixture(autouse=True)` decorators | 145 |\n| `test_helper` | `tests/_*.py` glob | 19 |\n| `feature_flag` | boolean-coerced `_SECTIONS` entries (no dedicated flag registry exists) | 27 |\n\n**Baseline and modes.** `.github/mechanism-baseline.json`, shape `{\"schema_version\": 1, \"mechanisms\": {\"<kind>::<name>\": 1}}`, sorted keys, duplicate-member and UTF-8 rejection \u2014 a near-verbatim port of the complexity baseline's validated schema. The four-bucket `compare()` (new / increased / active / stale) and `has_regression = new or increased` are ported unchanged; they are 16 proven lines.\n\n`check_complexity_baseline.py` exposes **three** gate commands \u2014 `--check`, `--update-stale`, and `--lock` (a real, dispatched mode that compares the branch baseline against main's copy). This plan adopts `--check` and `--update-stale` and **deliberately omits `--lock`**: `--lock` exists because the complexity *threshold* is administrator-locked, so a contributor raising a ceiling must be caught cross-branch. The mechanism baseline carries no administrator-locked limit \u2014 a new mechanism is caught by `--check` on the branch itself \u2014 so `--lock` would add ~135 LOC of base-fetch machinery guarding nothing. If the mechanism baseline later gains a locked limit, `--lock` is the known port.\n\n**The justified-exception path is an in-tree marker, parsed by this script.** A new mechanism may be admitted by an inline comment at its definition site:\n\n```\n# mechanism-ok: <kind> <name> \u2014 <reason or ticket id>\n```\n\n`check_mechanism_delta.py` reads these markers during its own per-state scan, exactly as `check_config_reads.py` consumes its own `# read-via:` markers, and a marker with a blank reason is itself an error. An earlier draft routed this through \"the DET floor\"; that was wrong and is dropped \u2014 the DET floor (`src/rebar/llm/plan_review/det_floor.py`, P1\u2013P11) is the per-ticket plan-review gate dispatched by the plan-review orchestrator over a ticket description. It is not wired into `make lint` and cannot be consulted by a static script scanning the repo tree, so it could not have consumed a justification. The in-tree marker also satisfies the greppable/countable requirement that a per-ticket justification could not.\n\n**Structure.** Seven detectors in one file would breach both the 800-LOC module cap and the complexity-15 ceiling, so the work is a package: `scripts/_mechanism_delta/{baseline,compare,detect_code,detect_config,detect_ci}.py` with a thin entrypoint. Detectors are split by INPUT SURFACE (Python AST / config registry / globs+YAML), and dispatch is a flat `{kind: callable}` table, which keeps the entrypoint at complexity ~4.\n\nPortable by construction: stdlib + PyYAML, triggered by `make lint` (and thus pre-commit and the Verified lane), with no CI-provider dependency.\n\n## Acceptance criteria\n\n- [ ] AC1: the script detects all seven kinds with zero false positives on the current tree, and the baseline is locked at introduction. Verified by `python scripts/check_mechanism_delta.py --check` exiting 0 on a clean tree.\n- [ ] AC2: `--check` exits non-zero when a new `(kind, name)` appears without justification, and a seeded fixture proves each of the seven kinds fires. Verified by the per-kind parameterized test.\n- [ ] AC3: a new mechanism carrying a valid `# mechanism-ok:` marker PASSES, and one whose marker has a blank reason FAILS. Verified by tests covering both directions.\n- [ ] AC4: mechanism removal passes, and `--update-stale` drains the entry with shrink-only semantics identical to the complexity baseline. Verified by a removal test plus a test that `--update-stale` refuses to write when `new>0` or `increased>0`.\n- [ ] AC5: `make lint` runs the check. Verified by a test asserting the Makefile `lint` target contains the invocation.\n- [ ] AC6: the ratchet, its seven kinds, and the marker discipline are documented where the complexity ratchet is documented.\n- [ ] AC7: every shipped module stays within the 800-LOC cap and the complexity-15 ceiling. Verified by `python scripts/check_complexity_baseline.py --check` and the module-size gate.\n\n## Testing\n\n- `pytest tests/unit/test_mechanism_delta.py -v` \u2014 the suite: per-kind seeded fire (AC2), marker pass/blank-reason fail (AC3), removal and `--update-stale` refusal (AC4), Makefile wiring (AC5). Census counts are derived LIVE from the tree, never hardcoded, following `tests/unit/test_complexity_baseline.py`'s stated discipline.\n- `python scripts/check_mechanism_delta.py --check` \u2014 exits 0 on the clean tree (AC1).\n- `make lint` \u2014 runs the new gate in place alongside `check_complexity_baseline.py --check` (AC5), and proves the additions clear the complexity ratchet (AC7).\n- `make typecheck` \u2014 the package type-checks.\n\n## File impact\n\n- `scripts/check_mechanism_delta.py` (new; entrypoint + dispatch table)\n- `scripts/_mechanism_delta/` (new package: `baseline.py`, `compare.py`, `detect_code.py`, `detect_config.py`, `detect_ci.py`)\n- `.github/mechanism-baseline.json` (new; per-`(kind, name)` baseline locked at introduction)\n- `Makefile` (lint wiring, after `check_complexity_baseline.py --check`)\n- `tests/unit/test_mechanism_delta.py` (new; the direct precedent `test_complexity_baseline.py` lives in `tests/unit/`, not `tests/scripts/`)\n- `docs/` (contributor-facing ratchet note beside the complexity ratchet)",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Deterministic mechanism-delta ratchet: check_mechanism_delta.py with per-(kind,name) shrink-only baseline"
@@ -39795,7 +40146,7 @@
       "created_at": "2026-09-02T01:46:34Z",
       "jira_id": "4591373",
       "jira_key": "REB-4430",
-      "peer_parent": "",
+      "peer_parent": "REB-4427",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:36Z"
     },
@@ -41960,9 +42311,17 @@
       "updated_at": "2026-08-21T23:36:52Z"
     },
     "a516-e61b-ede9-465c": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F6 (reports/stability/mirror-inventory.md), MEDIUM.\n\n- src/rebar/types.py:21 / schemas/common.schema.json#/$defs/ticket_status (canonical, 7 values)\n- src/rebar/reducer/_processors.py:33 _KNOWN_TICKET_STATUSES (same 7)\n\n_processors.py:565 raises ValueError(f\"unknown ticket status in snapshot: {status!r}\"), so the copy ASSERTS completeness. Ungated (grep tests/ returns nothing). A new status makes snapshots unreadable.\n\nProposed fix: generate-from-canonical \u2014 frozenset(get_args(TicketStatus)).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Derive the reducer's known ticket statuses from TicketStatus (mirror F6)"
+      },
       "created_at": "2026-09-02T03:01:21Z",
       "jira_id": "4591409",
       "jira_key": "REB-4466",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:24Z"
     },
@@ -42089,6 +42448,13 @@
       "peer_parent": "REB-585",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:57Z"
+    },
+    "a5bf-c1f8-3950-4f87": {
+      "created_at": "2026-09-02T03:41:38Z",
+      "jira_id": "4591430",
+      "jira_key": "REB-4487",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:41:41Z"
     },
     "a5df-978c-f034-431e": {
       "baseline": {
@@ -42303,16 +42669,32 @@
       "updated_at": "2026-08-19T21:44:02Z"
     },
     "a691-3cb9-7d1d-4ef1": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nPrivate reconciler forwarding bindings retain a second owner after moves: `apply_inbound_records._inbound_update_write_edit_event` forwards to `apply_inbound_events`; `reconcile` forwards listed pass helpers to `reconcile_helpers`/runtime; and `Mode.rank()` remains only because comparison dunders call it. The governing ADR is delivered by earthen-wheat-chick.\n\n## Approach\n\nAfter the ADR merges, migrate every source/test/string/dynamic/monkeypatch consumer to `apply_inbound_events`, `reconcile_helpers`, or runtime. Rewrite Mode comparisons to use the natural comparison dunders without `rank()`, then remove the old private bindings. Recensus on the implementation base before deletion.\n\n## Scope\n\n- inbound event-write compatibility re-export\n- reconciler pass-helper/runtime re-exports\n- `Mode.rank()` and comparison callers\n- all static and dynamic consumers\n\n## Testing\n\nRun semantic reference lookup plus raw string/`getattr`/monkeypatch scans; run inbound, orchestration, and mode-order tests.\n\n## Acceptance Criteria\n\n- [ ] Every old core/reconciler private name has no production, test, string, dynamic-load, or monkeypatch consumer.\n- [ ] The canonical owner is the only binding for each migrated operation.\n- [ ] Mode ordering comparisons retain all current ordering semantics without `rank()`.\n- [ ] Focused inbound/orchestration/mode tests and full scans pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Migrate and remove core and reconciler internal shims"
+      },
       "created_at": "2026-09-02T03:01:24Z",
       "jira_id": "4591410",
       "jira_key": "REB-4467",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:27Z"
     },
     "a691-f454-92c5-49bd": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F10 (reports/stability/mirror-inventory.md), MEDIUM, ALREADY DRIFTED.\n\n1. docs/reuse-surface.md:132-141 lists 8 verdicts vs schemas/verify_signature_result.schema.json:17\n   which has 9 \u2014 key_not_valid_at_era missing. It IS documented at docs/identity.md:138,147, so this\n   is stale rather than intentional.\n2. docs/oss-comparison-and-remediation.md:110-111 vs types.py:21/23/24 \u2014 statuses missing `idea`;\n   types missing session_log/code_review/identity; says \"six relations\" when there are seven.\n3. docs/user-guide.md:147 vs types.py:21 \u2014 5 of 7 statuses; archived/deleted missing although the\n   same file discusses them at :560,568-571.\n\nNone is generated or gated. gen_api_surface.py gates library SYMBOL NAMES only and does not cover prose in docs/reuse-surface.md.\n\nProposed fix: add-parity-check \u2014 a docs-vs-schema census. This is agent-facing guidance that is already wrong.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Three doc enumerations have drifted from their code masters (mirror F10)"
+      },
       "created_at": "2026-09-02T03:01:30Z",
       "jira_id": "4591411",
       "jira_key": "REB-4468",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:32Z"
     },
@@ -42947,7 +43329,7 @@
         },
         "description": "## Context\n\nThe current tickets branch stores ticket event dirs flat at `tickets/<id>`, making the root tree about 270 KB and causing every single-ticket commit to re-emit that large root tree. W2 changes only the on-disk layout to reduce per-commit tree churn. S1 history reclaim, W1 batching, and any live shared-store cutover are out of scope.\n\n## Scope\n\nImplement a fan-out layout `tickets/<sha256-2>/<id>` for canonical ticket ids. New code must read legacy flat and sharded stores during the expand phase, preserve all ids/aliases/events, and provide an idempotent ensure-registry migration. Do not run this migration against the live shared `.tickets-tracker`; fixture/throwaway stores only.\n\n## Acceptance Criteria\n\n- [ ] New ticket writes land at `tickets/<sha256-2>/<id>`; `tests/unit/test_store_sharded_layout.py` proves a fixture single-ticket mutation makes the top-level tree bytes at least 80% smaller than an equivalent flat layout.\n- [ ] Alias, short-id, and full-id resolution are unchanged for flat, mixed, and migrated stores; `tests/unit/test_store_sharded_layout_heldout.py` plus existing resolver selectors prove this.\n- [ ] Event replay/listing is unchanged for flat, mixed, and migrated stores; targeted reducer/list tests prove the same states are returned.\n- [ ] The migration maps every flat ticket dir to its deterministic shard, leaves no flat ticket dirs behind, preserves identities/event bytes, and a second run makes no commit; `tests/unit/test_store_sharded_layout.py` proves this.\n- [ ] An interrupted migration working tree with some already-sharded dirs resumes safely on rerun without identity loss or duplicate commits; `tests/unit/test_store_sharded_layout.py` proves this.\n- [ ] Migration collisions are fatal and atomic: two source paths mapping to the same sharded target abort before any partial commit/move; `tests/unit/test_store_sharded_layout.py` proves this.\n- [ ] Merge-as-union reconvergence still preserves both sides on a two-clone sharded fixture; `tests/unit/test_store_sharded_layout_heldout.py` proves both commits remain reachable.\n\n## Implementation Plan\n\n1. Add `rebar._store.ticket_layout` as the single layout owner: sha256 first-2-hex shard/relpath derivation, existing-dir resolution, ticket-path-to-tracker-root reverse derivation, deterministic ticket iteration, shard-container recognition, pinned-tree path parsing, shard-container mkdir, and `migrate_flat_ticket_dirs_unit`.\n2. Writers create the shard container with `exist_ok=True` under the write lock before the atomic `os.rename(staging_dir, ticket_dir)`, preserving ticket+first-event atomic publication while an empty shard container remains benign; rollback/unpublish may leave an empty shard container, which fsck classifies as store data.\n3. Keep resolver outputs separator-free. `_ids.py` returns ids/names only; exact lookup and prefix/alias scans build the same sorted id index from flat and sharded dirs through the layout helper.\n4. Route all flat ticket path consumers through the helper. Required inventory: `_store/{staging,gitutil,store_usability,compat,ensures,env_identity,hlc}.py`; `reducer/{_api,_inbound}.py` (including `reduce_ticket` reverse derivation); `_ids.py`; `_engine_support/{field_reads,lookups,reads,validate,next_batch,commit_impact}.py`; graph `{_cache,_graph,_hierarchy,_links,_status,_unblock}.py`; _commands `{_seam,gates,doctor,composer,composer_edit,leaf,link_revert,unlink,claim,transition,transition_close,txn,delete,recent_creates,completion_candidate,compact,compact_plan,compact_rebuild,compact_recovery,compact_trigger,compact_txn,close_precheck,close_disposition,fsck_scan,fsck_repair,fsck_tracker_health,fsck_recover,fsck_authorship,fsck_restore,identity,session_log,tracker_maintenance,trusted_env_cmd,verify_authorship}.py`; sidecar/bot readers `{attest/authorship,attest/authorship_resolution,signing,metrics/{blame,event_metrics,sidecar_metrics,bug_trends},_snapshot/{ticket_view,ticket_objects},llm/{completion_sidecar,code_review/sidecar,overlap/queue,overlap/digest_sidecar,enrich_drain,plan_review/claimability,plan_review/relation_snapshot,plan_review/sidecar,epic_bug_screen,workflow/recorder},_io/{export_ndjson,import_ndjson},_engine/rebar_reconciler/{__main__,transition_replay,local_label_intent,impossible_links,inbound_translate,reconcile_check,apply_inbound_events,apply_inbound_records}}.py`.\n5. Register ensure id `ticket-layout-shards` in `_store.ensures`. It runs under the write lock, precomputes all moves before mutation, refuses target collisions as fatal/permanent, treats already-sharded dirs as no-ops on rerun, stages old+new paths, and commits once only when drift exists. If killed after renames but before commit, no partial commit exists; rerun completes the mixed working tree or an operator can reset it; targeted tests cover this resume path.\n6. Register required-capability token `sharded-ticket-layout` in `compat.KNOWN_CAPABILITIES` before any store stamps it. The migration appends that token so older v1.0+ binaries fail closed while current binaries read the store.\n7. Make fsck/store-health depth-aware at shared `foreign_store_path_list` / `_holds_events`, so valid two-hex shard containers are store data even when empty and unrelated top-level dirs remain `FOREIGN_STORE_PATH`.\n8. Update pinned snapshot readers to parse both `<id>/<event>` and `<shard>/<id>/<event>` through the layout helper.\n9. Document the durable layout scheme, sha256 shard derivation, migration, and compat-token semantics in `docs/architecture.md` and `docs/migrations.md`.\n10. Preserve expand-phase compatibility: before migration, readers handle both layouts and existing flat tickets may be updated in place; after migration, all tickets resolve to shards. Live cutover is deferred to the operator.\n11. The migration holds the write lock for local filesystem renames and one local git commit only; no network push happens inside the lock. The live 6,008-ticket cutover is operator-scheduled for a maintenance window.\n## Surface-Parity Census\n\n- CLI: in scope via subprocess create/comment/show fixture tests.\n- MCP/API: out of scope for live MCP because the server may run older code; accepted because tools delegate to the same library/core paths.\n- Library: in scope via `import rebar` create/show/reduce tests.\n- Automated callers: in scope through inventory updates and targeted unit selectors; no live Jira/LLM calls.\n- Dual-direction: in scope for local read/write and import/export; outbound Jira field semantics unchanged.\n\n## Testing / Verification\n\nRun targeted RED/GREEN selectors: `python -m pytest tests/unit/test_store_sharded_layout.py tests/unit/test_store_sharded_layout_heldout.py -q`, existing resolver/reducer selectors, and reconvergence/store path selectors. Final preflight: `make lint`, `make typecheck`, `make test` with the worktree `.venv/bin` first on `PATH`.\n\n## Deployment / Rollback\n\nThis change ships mechanism only. Applying it to the live shared store is an operator decision and is not performed here. After an operator migrates a store, rollback is a tickets-branch revert or approved tracker-maintenance action that restores flat paths, relocates any post-migration sharded ticket dirs back to flat paths, and removes the capability stamp together; tests assert that post-migration tickets remain resolvable after the compensating rollback. No agent force/bypass.\n\n## Portability\n\nIn-process layout/migration only; no CI-provider dependency.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "W2: shard the 6,008 flat ticket dirs to cut per-commit root-tree churn"
       },
       "created_at": "2026-08-30T01:11:24Z",
@@ -45085,16 +45467,30 @@
     },
     "b0ac-3c0f-3f64-4344": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context\n\nThe second half of the isolation class (R2S1 category f): shared mutable state across concurrent workers/writers \u2014 the completion-cache temp-file collision fixed instance-by-instance in 89981d8e (two concurrent closes derived the same <criterion-hash>.tmp name; one silently lost its write). The class is \"a process-derived name or process-local cache shared across concurrent contexts\"; instances keep recurring because each fix is local. This story retires the class one place at a time: an audited pass over cache/temp-artifact naming in src/rebar, converting shared-name patterns to per-writer/per-root unique naming (tempfile.mkstemp or root-keyed paths) with a shared helper.\n\n## Approach\n\n(1) Enumerate cache-write and temp-artifact sites in src/rebar (grep .tmp, NamedTemporaryFile, mkstemp, cache-file writes; plus module-level mutable caches without root keying). (2) Classify: already-unique / shared-name-hazard / root-unkeyed-cache. (3) Introduce one helper (unique-temp-then-rename with root-scoped placement) and convert the hazard sites to it. (4) Regression test in the writer-storm shape: two concurrent writers to the same logical cache, both writes land.\n\n## Acceptance criteria\n\n- [ ] AC1: an enumerated site table (in the change description or a committed note) classifies every cache/temp write site found, with file:line.\n- [ ] AC2: every shared-name-hazard site uses the unique-write helper; no site derives a temp name solely from content/criterion hash.\n- [ ] AC3: a concurrency regression test (two writers, same logical target) passes with the helper and fails RED against the old shared-name pattern.\n- [ ] AC4: the helper documented where the isolation helpers are documented.\n\n## File impact\n\n- src/rebar/_store or src/rebar/_io (the unique-write helper; exact home decided against existing structure)\n- the hazard sites found by the enumeration (llm/completion cache and peers)\n- tests/unit/test_unique_cache_writes.py (new)",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\n\nThe second half of the isolation class (R2S1 category f): shared mutable state across concurrent writers. The exemplar is the completion-verdict cache fixed instance-by-instance in `89981d8e` \u2014 two concurrent closes derived the same `<criterion-hash>.tmp` pathname, the first `os.replace` consumed the shared temp, the second raised `FileNotFoundError`, and a best-effort `except Exception` swallowed it, so the loser silently returned 0. The class is \"a process-derived or content-derived name shared across concurrent contexts\"; instances keep recurring because each fix is local.\n\n**A shared helper already exists.** `src/rebar/_store/fsutil.py::atomic_write` (118 LOC, stdlib-only leaf, ~50 call sites) already implements exactly the exemplar's fix \u2014 `mkstemp` in the target directory, write, `chmod`, `os.replace`, `unlink` on any exception. Its own module docstring names `rebar.toml` among the sites it was meant to consolidate, yet that site still hand-rolls. So this story is a **conversion of the remaining hazard sites onto the existing helper**, not the authoring of a new one, and it deliberately adds no new module. (The ticket's original guess of `src/rebar/llm/completion_cache.py` and a new `_store/unique_write.py` were both wrong: the real exemplar is `src/rebar/llm/workflow/completion_verdict_cache.py`.)\n\n## Approach\n\n**Step 1 \u2014 the audit is already done and is a deliverable.** An enumeration of cache/temp write sites in `src/rebar` classified every site as ALREADY-UNIQUE, SHARED-NAME-HAZARD, or ROOT-UNKEYED-CACHE. Result: ~30 already-unique sites (using `atomic_write`, `mkstemp`, `NamedTemporaryFile`, `mkdtemp`, or uuid4 naming), **six shared-name hazards**, and \u2014 after auditing every module-level cache and `lru_cache` \u2014 **zero root-unkeyed caches**: all are keyed by absolute path, repo root, or a stat token, and the two store-state `lru_cache`s are explicitly repo-root + overlay-signature keyed. That negative result is reported, not silently dropped.\n\nThe six hazards:\n\n| site | derivation | atomic today |\n|---|---|---|\n| `review_bot/reconcile.py:177` `_write_cursor` | `p.with_suffix(\".tmp\")` \u2014 shared temp; swallows `OSError` | replace, shared temp |\n| `_config_writer.py:279` | `target.name + \".tmp\"` | replace, shared temp |\n| `_cli/__init__.py:253` | `target.name + \".tmp\"` | replace, shared temp |\n| `_opcert_signing.py:77` | `f\"{pub}.{os.getpid()}.tmp\"` \u2014 pid-derived, so it collides across THREADS in the threaded MCP server | replace, shared temp |\n| `_snapshot/janitor.py:300` | `f\"{sha}.integrity\"` written directly | **none** \u2014 torn read possible |\n| `llm/workflow/completion_banking.py:507` | `self._path(id).write_text(...)` | **none** \u2014 run-scoped dir limits collision, torn-read window remains |\n\n**Step 2 \u2014 convert.** Each site calls `fsutil.atomic_write`; sites that are deliberately best-effort keep their own `try/except` around the call, which is the contract `atomic_write`'s docstring already states. No site is left deriving its temp name solely from a content or criterion hash.\n\n**Step 3 \u2014 regress.** One concurrency test in the shape the exemplar's own regression already established at `tests/unit/workflow/test_completion_verdict_cache.py:487`: a `threading.Barrier(2)` with `monkeypatch.setattr` on the module's own `os.replace`, gating only the target write, two threads, asserting both writers' effects land and no `*.tmp` residue remains. This reuses the established in-repo pattern for this exact defect class rather than inventing a harness. The store-level suites are the wrong shape here and are deliberately not used: `tests/integration/test_store_concurrency.py` is a subprocess storm and `tests/interfaces/store/sync_contention_harness.py` covers sync/freshness contention, neither providing a two-writer barrier at a single file write.\n\nFor `review_bot/reconcile.py` specifically the write swallows `OSError` and returns `None`, so the assertion must be on file CONTENT, not on a return value.\n\n## Acceptance criteria\n\n- [ ] AC1: a site table classifying every cache/temp write site found, with `file:line` and verdict, is committed in the change description, including the explicit negative result that no root-unkeyed cache was found.\n- [ ] AC2: all six shared-name-hazard sites call `fsutil.atomic_write`, and no site derives a temp name solely from a content/criterion hash or a fixed literal. Verified by `grep -rn 'with_suffix(.*tmp\\|+ \\\".tmp\\\"\\|getpid()}.tmp' src/rebar` returning no write-path hits.\n- [ ] AC3: a two-writer concurrency regression test passes against the converted code and fails RED against the old shared-name pattern. Verified by `pytest tests/unit/test_unique_cache_writes.py -v`, and by the mutation check restoring a shared-temp derivation and observing the test go red.\n- [ ] AC4: the two no-temp sites (`janitor.py:300`, `completion_banking.py:507`) become atomic, closing the torn-read window. Verified by the same suite asserting a reader never observes a partial file.\n- [ ] AC5: no new module or helper is added \u2014 the change consumes the existing `fsutil.atomic_write`. Verified by the diff touching no new file under `src/rebar/_store/`.\n- [ ] AC6: `atomic_write`'s role as the single house helper for this class is documented where the isolation helpers are documented.\n\n## Testing\n\n- `pytest tests/unit/test_unique_cache_writes.py -v` \u2014 the two-writer barrier regression (AC3) and the torn-read assertions for the two previously non-atomic sites (AC4).\n- `pytest tests/unit/workflow/test_completion_verdict_cache.py -v` \u2014 the exemplar's existing concurrency regression still passes, proving the conversion did not regress the already-fixed site.\n- `grep -rn 'with_suffix(.*tmp\\|+ \\\".tmp\\\"\\|getpid()}.tmp' src/rebar` \u2014 no remaining shared-name temp derivations on a write path (AC2).\n- `make lint && make typecheck && make test` \u2014 the house gates, including the complexity ratchet over the touched modules.\n\n## File impact\n\n- `src/rebar/review_bot/reconcile.py`, `src/rebar/_config_writer.py`, `src/rebar/_cli/__init__.py`, `src/rebar/_opcert_signing.py`, `src/rebar/_snapshot/janitor.py`, `src/rebar/llm/workflow/completion_banking.py` (the six hazard sites converted to `fsutil.atomic_write`)\n- `tests/unit/test_unique_cache_writes.py` (new; two-writer barrier regression + torn-read assertions)\n- `docs/` (note `atomic_write` as the house helper for this class, beside the isolation helpers)",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Key process-local caches and shared temp artifacts by isolation root"
       },
       "created_at": "2026-09-02T01:46:47Z",
       "jira_id": "4591376",
       "jira_key": "REB-4433",
-      "peer_parent": "",
+      "peer_parent": "REB-4427",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:49Z"
     },
@@ -45700,9 +46096,17 @@
       "updated_at": "2026-08-15T15:09:18Z"
     },
     "b35a-abf6-02fd-4b31": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`docs/ticket-model.md:12` states that five ticket types and statuses exist, while `src/rebar/types.py:21` defines seven of each. The relationship prose is already current; the drift is limited to the type/status taxonomy.\n\n## Approach\n\nGenerate a marked taxonomy section in `docs/ticket-model.md` from the canonical ticket type/status definitions and add a drift check. Preserve hand-maintained relationship documentation outside the generated section.\n\n## Scope\n\n- `src/rebar/types.py`\n- `docs/ticket-model.md`\n- a focused taxonomy generator/check and its tests\n\n## Testing\n\nCover all live types and statuses, a deliberate source-vocabulary addition, and a deliberately stale generated block.\n\n## Acceptance Criteria\n\n- [ ] The documented ticket type and status vocabularies are generated from the canonical schema/definitions.\n- [ ] The generated block includes all seven current types and statuses and leaves current relationship prose untouched.\n- [ ] A source vocabulary change without documentation regeneration fails the drift check.\n- [ ] The generator is deterministic and its focused tests pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Generate ticket taxonomy documentation from the canonical schema"
+      },
       "created_at": "2026-09-02T03:01:33Z",
       "jira_id": "4591412",
       "jira_key": "REB-4469",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:36Z"
     },
@@ -49348,16 +49752,32 @@
       "updated_at": "2026-08-30T03:37:55Z"
     },
     "c181-20a2-1976-4d5d": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`tests/unit/rebar_reconciler/orchestrate/test_main_truthful_tally.py:87-106` only asserts that stdout lacks `converged`, although successful applied work must print an applied/total tally. Empty output can currently pass.\n\n## Approach\n\nStrengthen the existing liveness assertion to require the exact nonempty applied/total success line and add an empty-output negative control. This changes only the oracle, not reconcile behavior.\n\n## Scope\n\n- `tests/unit/rebar_reconciler/orchestrate/test_main_truthful_tally.py`\n\n## Testing\n\nExercise successful nonzero apply output, empty stdout, and an existing failure/non-success control.\n\n## Acceptance Criteria\n\n- [ ] A successful applied reconciliation must emit the exact expected nonempty applied/total tally line.\n- [ ] Empty stdout fails the truthful-tally test.\n- [ ] Existing non-success/failure output expectations remain covered.\n- [ ] The focused tally suite passes.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Require positive truthful tally output on successful reconciliation"
+      },
       "created_at": "2026-09-02T03:01:39Z",
       "jira_id": "4591413",
       "jira_key": "REB-4470",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:42Z"
     },
     "c195-03cd-fc03-4ae0": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/_lib_ops.py:373` and `src/rebar/_mcp_reads.py:575` retain `reconcile(mode=...)` compatibility even after canonical bridge operations exist. The canonical diagnostic/bridge contract is delivered by nosy-drooly-milksnake [rebar:nosy-drooly-milksnake].\n\n## Approach\n\nRemove the Python and MCP `reconcile(mode=...)` entrypoints and their schemas, examples, baselines, and tests. Replace every repository consumer with explicit `bridge_preview`, `bridge_sync`, or `bridge_run` operations and preserve their result contracts. This is a deliberate pre-1.0 public break.\n\n## Scope\n\n- library/MCP operation definitions and exports\n- input/output schemas/baselines, docs/examples, changelog\n- static, dynamic, string, and monkeypatch consumers\n\n## Testing\n\nAssert removed APIs reject before reconciliation execution; run each explicit bridge operation through existing result-contract tests.\n\n## Acceptance Criteria\n\n- [ ] Python and MCP `reconcile(mode=...)` contracts, schemas, examples, and exports are removed.\n- [ ] Every repository consumer calls one explicit canonical bridge operation.\n- [ ] Old library/MCP invocations fail at signature/schema validation before work begins.\n- [ ] Explicit bridge operations retain their documented result and error contracts.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Remove reconcile compatibility from Python and MCP contracts"
+      },
       "created_at": "2026-09-02T03:01:46Z",
       "jira_id": "4591414",
       "jira_key": "REB-4471",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:48Z"
     },
@@ -51270,9 +51690,17 @@
       "updated_at": "2026-08-22T18:38:41Z"
     },
     "cacb-8d57-efff-4ab1": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F4 (reports/stability/mirror-inventory.md), MEDIUM, ALREADY DRIFTED (prose).\n\n- src/rebar/graph/_relations.py:17 _BLOCKING_RELATIONS = {\"blocks\",\"depends_on\"} (canonical)\n- src/rebar/graph/_graph.py:210 hardcoded 5-element complement\n- src/rebar/graph/_links.py:279 hardcoded positive (\"blocks\",\"depends_on\"), not importing its sibling\n\nDrift present in prose: both docstrings list only FOUR non-blocking relations, omitting caused_by \u2014 _graph.py:194-196 (two lines above a five-element code list) and _links.py:277-279.\n\nConsequence of a future miss at _graph.py:210: a new non-blocking relation falls to the else: branch, is cycle-checked as `blocks`, and a valid link is rejected with CyclicDependencyError.\n\nProposed fix: generate-from-canonical \u2014 `return relation not in _BLOCKING_RELATIONS`.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Blocking/non-blocking relation partition is hardcoded three times; docstrings drifted (mirror F4)"
+      },
       "created_at": "2026-09-02T03:01:53Z",
       "jira_id": "4591415",
       "jira_key": "REB-4472",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:56Z"
     },
@@ -52001,9 +52429,17 @@
       "updated_at": "2026-08-15T15:11:40Z"
     },
     "cdc4-2896-50a8-4af3": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/_lib_identity.py:105` retains `rebar.create_placeholder(...)` as a compatibility alias for `rebar.ensure_identity_for(...)` and `_commands.identity.ensure_identity_for`. The maintainer approved removal of all Python/MCP operation aliases.\n\n## Approach\n\nMigrate every repository consumer, documentation example, dynamic reference, and monkeypatch target to `ensure_identity_for`, then delete the old public alias and export. Record the intentional pre-1.0 break and preserve the canonical identity result/error behavior.\n\n## Scope\n\n- `src/rebar/_lib_identity.py`, public exports, and canonical identity command\n- docs/examples/changelog and Python API tests\n- static, string, dynamic, and monkeypatch consumers\n\n## Testing\n\nAssert the old alias is absent/rejected at the Python boundary; run canonical identity creation, existing-identity, and validation-failure controls.\n\n## Acceptance Criteria\n\n- [ ] `create_placeholder` is absent from public Python exports, docs, examples, and repository consumers.\n- [ ] Every former consumer uses `ensure_identity_for` and its canonical command owner.\n- [ ] The canonical operation preserves identity creation, existing-identity, and validation-failure behavior.\n- [ ] Changelog/release material identifies the pre-1.0 breaking replacement and focused identity tests pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Remove the create_placeholder Python compatibility alias"
+      },
       "created_at": "2026-09-02T03:01:56Z",
       "jira_id": "4591416",
       "jira_key": "REB-4473",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:01:59Z"
     },
@@ -52333,9 +52769,17 @@
       "updated_at": "2026-08-15T15:11:47Z"
     },
     "ce8f-4da9-2836-4115": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F7 (reports/stability/mirror-inventory.md), MEDIUM.\n\n- src/rebar/types.py:23 (canonical, 7 types)\n- src/rebar/_commands/composer.py:40 _TYPES (same 7), plus a prose copy in _USAGE at :55\n\ncomposer.py is the outlier: _engine/rebar_reconciler/inbound_fields.py:119 already derives the same set as frozenset(get_args(TicketType)). A new ticket type is rejected at create.\n\nProposed fix: generate-from-canonical \u2014 copy the sibling derivation.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Derive composer._TYPES from TicketType as its sibling already does (mirror F7)"
+      },
       "created_at": "2026-09-02T03:02:04Z",
       "jira_id": "4591417",
       "jira_key": "REB-4474",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:02:07Z"
     },
@@ -56626,9 +57070,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Summary\nCI for Gerrit change 2480 exposed a py3.11 xdist leak: `tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip` created `.rebar-test-sidecar-material` under `Path.cwd()` / repo root. During xdist, another test could snapshot repo root while that directory existed and fail in `tests/conftest.py::_no_repo_root_leaks`.\n\n## Root cause\nThe test fixture used a repo-root scratch directory for its synthetic tracker. That directory was briefly visible to unrelated tests. The fix uses pytest `tmp_path`, which is per-test disposable storage outside the checkout.\n\n## Acceptance Criteria\n- [x] `test_legacy_payloads_without_material_still_round_trip` writes its synthetic tracker under `tmp_path`, not `Path.cwd()` / repo root.\n- [x] The targeted sidecar-material test passes.\n- [x] The 29a6 Gerrit change 2480 Verified gate no longer fails on `.rebar-test-sidecar-material` repo-root leakage.\n\n## Testing\n- `python -m pytest tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip -q` \u2014 passed.\n- `python -m pytest tests/scripts/test_autodeploy_mcp_bluegreen.py::test_port_exhausted_routine_backoff_does_not_inflate_deploy_errors tests/scripts/test_autodeploy_mcp_bluegreen.py::test_low_memory_routine_backoff_does_not_inflate_deploy_errors tests/scripts/test_autodeploy_mcp_bluegreen.py::test_mcp_failure_keeps_the_deploy_failed_metric_and_names_the_component -q` \u2014 passed.\n- `make lint` \u2014 passed.\n- Gerrit change 2480 Verified rerun pending.",
+        "description": "## Summary\nCI for Gerrit change 2480 exposed a py3.11 xdist leak: `tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip` created `.rebar-test-sidecar-material` under `Path.cwd()` / repo root. During xdist, another test could snapshot repo root while that directory existed and fail in `tests/conftest.py::_no_repo_root_leaks`.\n\n## Root cause\nThe test fixture used a repo-root scratch directory for its synthetic tracker. That directory was briefly visible to unrelated tests. The fix uses pytest `tmp_path`, which is per-test disposable storage outside the checkout.\n\n## Acceptance Criteria\n- [x] `test_legacy_payloads_without_material_still_round_trip` writes its synthetic tracker under `tmp_path`, not `Path.cwd()` / repo root.\n- [x] The targeted sidecar-material test passes.\n- [x] [non-codebase] The 29a6 Gerrit change 2480 Verified gate no longer fails on `.rebar-test-sidecar-material` repo-root leakage.\n  provenance: environment=gerrit-verify-ci-prod; principal=rebar CI bot; privilege_posture=production-equivalent; instrument=live-call \u2014 Gerrit REST confirms change 2480 status=MERGED at revision 6e3ecc060664 with Verified +1 by the rebar CI bot; on this project a merge requires Verified +1, so the merge attests the gate passed on the revision that moves the test onto tmp_path.\n\n## Testing\n- `python -m pytest tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip -q` \u2014 passed.\n- `python -m pytest tests/scripts/test_autodeploy_mcp_bluegreen.py::test_port_exhausted_routine_backoff_does_not_inflate_deploy_errors tests/scripts/test_autodeploy_mcp_bluegreen.py::test_low_memory_routine_backoff_does_not_inflate_deploy_errors tests/scripts/test_autodeploy_mcp_bluegreen.py::test_mcp_failure_keeps_the_deploy_failed_metric_and_names_the_component -q` \u2014 passed.\n- `make lint` \u2014 passed.\n- Gerrit change 2480 Verified rerun pending.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Completion sidecar material test leaks repo-root scratch dir under xdist"
       },
       "created_at": "2026-09-01T21:33:47Z",
@@ -58620,9 +59064,17 @@
       "updated_at": "2026-08-15T15:14:01Z"
     },
     "e54e-b184-2b0b-42c3": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/mcp_server.py:20-42` re-exports 21 output model names solely for old private Python imports; MCP tool names, JSON Schema, outputSchema, and wire payloads are unaffected. Test-only `_is_transient_add_error` aliases in event append/commit modules forward to `gitutil._is_transient_object_write_error`; `_referencing_commit_exists` re-exports/wrapper forward to `_referencing_commits`.\n\nThe governing ADR is earthen-wheat-chick [rebar:earthen-wheat-chick].\n\n## Approach\n\nAfter the ADR merges, migrate every source/test/string/dynamic/monkeypatch consumer to `rebar._mcp_models`, `gitutil._is_transient_object_write_error`, and `_referencing_commits`. Delete the re-exports, wrappers, mock setup, inventories, and stale comments. Preserve MCP wire schemas and end-to-end retry, corruption, post-ref, descendant-credit, and absence-blocking controls.\n\n## Scope\n\n- `mcp_server` output-model imports/`__all__` and model consumers\n- event commit/append aliases and classification tests\n- close-precheck/transition-close wrappers and lifecycle tests\n\n## Testing\n\nVerify all MCP schemas/wire outputs remain unchanged; test transient object-write classification plus end-to-end retry/corruption/post-ref controls; test descendant credit and missing referencing-commit blocking.\n\n## Acceptance Criteria\n\n- [ ] All 21 `mcp_server` output-model re-exports and private-import consumers are removed/migrated to `_mcp_models`.\n- [ ] MCP tool names, JSON Schema, outputSchema, and wire payloads are unchanged.\n- [ ] Old transient-error aliases are absent while retry, corruption, and post-ref negative controls pass.\n- [ ] Old referencing-commit wrappers are absent while descendant-credit and absence-blocking close behavior pass.\n- [ ] Static, string, dynamic-import, and monkeypatch census proves each removed name/path has no consumer.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Migrate and remove MCP-model, store, and close-workflow internal shims"
+      },
       "created_at": "2026-09-02T03:02:07Z",
       "jira_id": "4591418",
       "jira_key": "REB-4475",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:02:10Z"
     },
@@ -59145,9 +59597,17 @@
       "updated_at": "2026-08-15T15:14:16Z"
     },
     "e755-9371-7951-454a": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F3 (reports/stability/mirror-inventory.md), HIGH, comments already drifted.\n\nTwo complementary sets, six sites, nothing enforcing that they partition TicketType:\n- exempt (\"bug\",\"session_log\",\"code_review\",\"identity\"): _commands/gates.py:45,\n  _commands/composer.py:47, llm/plan_review/orchestrator.py:560\n- complement (\"task\",\"story\",\"epic\"): llm/plan_review/claimability.py:38,\n  _commands/transition_close.py:46, _commands/gates.py:215\n\nFalse single-sourcing claims: gates.py:42-44 says \"Single-sourced here so ... cannot drift\"; composer.py:42-46 admits \"Kept in lockstep with\"; claimability.py:40-41 prose names 2 of the 4 exempt types. Only test: assert \"bug\" in ... (test_bug_blast_radius_escalation_ad0d.py:199).\n\nConsequence: an eighth ticket type lands in neither set \u2014 neither gated nor exempted. This decides whether the plan-review claim gate runs at all.\n\nProposed fix: add-parity-check \u2014 assert set(get_args(TicketType)) == exempt | reviewed, with all six sites referencing one constant.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Plan-review ticket-type exemption is split across six sites with no enforcement (mirror F3)"
+      },
       "created_at": "2026-09-02T03:02:14Z",
       "jira_id": "4591419",
       "jira_key": "REB-4476",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:02:17Z"
     },
@@ -60575,9 +61035,17 @@
       "updated_at": "2026-08-15T15:14:49Z"
     },
     "ecb4-ceda-e276-4efb": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/_mcp_llm.py:217-254` and generated `docs/mcp-reference.md:54` advertise plan-review P1-P9 while production executes P1-P11 (`plan_review/registry.py:118`, `det_floor.py:1`, `workflow_ops.py:13`). Code-review lifecycle comments across review-kernel, prompting, workflow, and review-workflow modules also contradict the shipped four-pass gate.\n\n## Approach\n\nCorrect the existing canonical tool descriptions and source-local ownership comments, then regenerate the current MCP reference with the existing generator. Do not introduce a second executable review-policy registry.\n\n## Scope\n\n- MCP LLM tool descriptions and affected review/code-review source comments\n- `scripts/gen_mcp_reference.py`, generated MCP reference, and its tests\n\n## Testing\n\nRegenerate the reference, run its generator test, and assert the canonical descriptions name P1-P11 and the current four-pass lifecycle.\n\n## Acceptance Criteria\n\n- [ ] Canonical MCP tool descriptions advertise P1-P11 exactly as implemented.\n- [ ] Canonical code-review comments describe the shipped four-pass execution rather than future, legacy, or single-pass states.\n- [ ] `docs/mcp-reference.md` is regenerated from the corrected source descriptions.\n- [ ] `tests/unit/test_gen_mcp_reference.py` and focused documentation checks pass without adding a new registry.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Correct canonical review and gate descriptions and regenerate MCP reference"
+      },
       "created_at": "2026-09-02T03:02:18Z",
       "jira_id": "4591420",
       "jira_key": "REB-4477",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:02:23Z"
     },
@@ -61902,9 +62370,17 @@
       "updated_at": "2026-08-15T15:15:19Z"
     },
     "f1a4-1b43-b720-4dab": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`_concurrency.py:18-31,66-122` retains `ConcurrencyEvent`, `Result`, and `rebase_retry`; `pass_io.py:290-316` retains `_handle_failed_write_result`. Production call sites were removed by `fe5a447061cd`; remaining producers are test stubs. This is HARDENING, not a demonstrated runtime defect.\n\n## Approach\n\nDelete only dead `ConcurrencyEvent`, `Result`, `rebase_retry`, and `_handle_failed_write_result` plus their synthetic tests/stale prose. Do not remove `RescheduleError` or `EXIT_RESCHEDULE`; their live lock-loss, exit-translation, and persisted-state contracts belong to the ordered reconcile-family migration.\n\n## Scope\n\n- reconciler concurrency and pass-I/O residue\n- synthetic retry/result tests and stale documentation\n\n## Testing\n\nRun the focused rebase/reschedule suite and preserve controls for snapshot drift, lock loss, bridge exit, and store guard behavior.\n\n## Acceptance Criteria\n\n- [ ] Only the four unreachable retry/result names and their synthetic consumers are removed.\n- [ ] `snapshot_head` drift checks and live `ReconcileLockLost -> RESCHEDULE` behavior remain unchanged.\n- [ ] Canonical bridge exit 0 and store `RebaseGuard` exit 75 remain unchanged.\n- [ ] `RescheduleError`, `EXIT_RESCHEDULE`, legacy translation, and persisted `reconcile-check` handling remain for the ordered compatibility child.\n- [ ] Focused reconciliation tests and semantic/raw consumer census pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Remove unreachable reconciler retry and result residue"
+      },
       "created_at": "2026-09-02T03:02:27Z",
       "jira_id": "4591421",
       "jira_key": "REB-4478",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:02:30Z"
     },
@@ -62673,7 +63149,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "# Live DC rich-text lane: outbound echo re-diffs against stale JQL search snapshot\n\n## Observed failure\n`tests/external/live_jira_dc/test_dc_rich_text_live.py::test_live_rich_text_renders_and_echo_is_safe` and `::test_live_rich_text_both_sides_conflict_keeps_local` fail on the dispatched Live External Integration run (33052311279, DC lane), both with: `AssertionError: the index never reflected the pushed body ... within 240s (120 attempts)`. The indexed doc shows `description: None` and `updated` stuck at the binding step.\n\n## Corrected root cause (supersedes the \"index lag / widen the wait\" framing of bug 2c60)\nThe test's `_push_and_converge` blocks on `_wait_until_search_reflects` \u2014 waiting for the JQL SEARCH index to reflect the pushed `description`. That guards a REAL dependency: the outbound FIELD differ (`compute_outbound_mutations`, outbound_differ.py) diffs local tickets against the FETCHER'S JQL-SEARCH SNAPSHOT (`fetcher.fetch_snapshot` -> `search_issues`). For a key PRESENT in the snapshot (ours is \u2014 its key is indexed for existence via `wait_until_searchable`), the differ compares local `description` against the SNAPSHOT's `description`, which is STALE (`None`) until the background Lucene reindex catches up. Direct GET (`_safe_get_issue` / `get_issue_by_rest`, immediately consistent) is used ONLY for bound-but-ABSENT keys, not bound-and-present ones. So on the ephemeral DC \u2014 whose background reindex is UNBOUNDED (ADR 0037 s3) and, on a starved instance, never reflects the write within any fixed budget \u2014 the echo pass re-diffs the just-pushed field as changed and would churn, and the wait times out.\n\nTwo prior fixes (2c60: widen to 240s; then force a per-issue reindex) both targeted search VISIBILITY. Widening cannot bound an unbounded wait, and the forced-reindex helper had NO effect (and no observability \u2014 it no-ops silently), likely because `/rest/api/2/reindex/issue` is not an effective synchronous foreground reindex on DC 8.17. The fix must remove the dependence on unbounded search visibility, not chase it.\n\n## Candidate resolutions (to be decided by investigation + history)\n1. PRODUCT: outbound differ confirms a snapshot-detected field change via a bounded direct GET\n   before emitting the mutation, so a stale-snapshot false-positive cannot cause churn (extends\n   the existing bound-but-absent direct-GET seam to bound-and-present keys). Robust for ANY\n   eventually-consistent remote.\n2. HARNESS: configure the ephemeral Jira DC for synchronous/fast indexing at boot.\n3. TEST: verify the landed body via a direct GET (immediately consistent) and re-express echo-\n   safety so it does not depend on unbounded search visibility.\n\n## Acceptance criteria\n- [x] Root cause confirmed (which of 1/2/3, with history/ADR support).\n- [x] Fix removes the unbounded-search-visibility dependency; a held-out test proves it with teeth.\n- [x] The repo snapshot contains live rich-text echo-safety coverage: `tests/external/live_jira_dc/test_dc_rich_text_live.py` defines `test_live_rich_text_renders_and_echo_is_safe` and `test_live_rich_text_both_sides_conflict_keeps_local`, and both tests exercise the reconciler overlay while checking rich-text echo/conflict behavior.\n- [x] [non-codebase] A dispatched Live External Integration run shows the Jira DC lane GREEN and the Jira Cloud mutation lane GREEN. Run URL commented here.\n      provenance: environment=github-actions external-integration.yml run 33137402410 on main at 6fe5c0d54574; principal=github-actions workflow_dispatch runner; privilege_posture=production-equivalent; instrument=live-call \u2014 dispatched run job 98740362395 concluded success for the ephemeral Jira DC lane (74 passed, none skipped), and the Jira Cloud coordinator mutation lane also concluded success.\n- [x] `make lint && make typecheck && make test` green.",
+        "description": "# Live DC rich-text lane: outbound echo re-diffs against stale JQL search snapshot\n\n## Observed failure\n`tests/external/live_jira_dc/test_dc_rich_text_live.py::test_live_rich_text_renders_and_echo_is_safe` and `::test_live_rich_text_both_sides_conflict_keeps_local` fail on the dispatched Live External Integration run (33052311279, DC lane), both with: `AssertionError: the index never reflected the pushed body ... within 240s (120 attempts)`. The indexed doc shows `description: None` and `updated` stuck at the binding step.\n\n## Corrected root cause (supersedes the \"index lag / widen the wait\" framing of bug 2c60)\nThe test's `_push_and_converge` blocks on `_wait_until_search_reflects` \u2014 waiting for the JQL SEARCH index to reflect the pushed `description`. That guards a REAL dependency: the outbound FIELD differ (`compute_outbound_mutations`, outbound_differ.py) diffs local tickets against the FETCHER'S JQL-SEARCH SNAPSHOT (`fetcher.fetch_snapshot` -> `search_issues`). For a key PRESENT in the snapshot (ours is \u2014 its key is indexed for existence via `wait_until_searchable`), the differ compares local `description` against the SNAPSHOT's `description`, which is STALE (`None`) until the background Lucene reindex catches up. Direct GET (`_safe_get_issue` / `get_issue_by_rest`, immediately consistent) is used ONLY for bound-but-ABSENT keys, not bound-and-present ones. So on the ephemeral DC \u2014 whose background reindex is UNBOUNDED (ADR 0085 \u00a73; see also ADR 0055's `docs/adr/0055-jira-family-sub-seam.md` \"Search-index lag\" row for the Jira-family sub-seam) and, on a starved instance, never reflects the write within any fixed budget \u2014 the echo pass re-diffs the just-pushed field as changed and would churn, and the wait times out.\n\nTwo prior fixes (2c60: widen to 240s; then force a per-issue reindex) both targeted search VISIBILITY. Widening cannot bound an unbounded wait, and the forced-reindex helper had NO effect (and no observability \u2014 it no-ops silently), likely because `/rest/api/2/reindex/issue` is not an effective synchronous foreground reindex on DC 8.17. The fix must remove the dependence on unbounded search visibility, not chase it.\n\n## Candidate resolutions (to be decided by investigation + history)\n1. PRODUCT: outbound differ confirms a snapshot-detected field change via a bounded direct GET\n   before emitting the mutation, so a stale-snapshot false-positive cannot cause churn (extends\n   the existing bound-but-absent direct-GET seam to bound-and-present keys). Robust for ANY\n   eventually-consistent remote.\n2. HARNESS: configure the ephemeral Jira DC for synchronous/fast indexing at boot.\n3. TEST: verify the landed body via a direct GET (immediately consistent) and re-express echo-\n   safety so it does not depend on unbounded search visibility.\n\n## Acceptance criteria\n- [x] Root cause confirmed (which of 1/2/3, with history/ADR support).\n- [x] Fix removes the unbounded-search-visibility dependency; a held-out test proves it with teeth.\n- [x] The repo snapshot contains live rich-text echo-safety coverage: `tests/external/live_jira_dc/test_dc_rich_text_live.py` defines `test_live_rich_text_renders_and_echo_is_safe` and `test_live_rich_text_both_sides_conflict_keeps_local`, and both tests exercise the reconciler overlay while checking rich-text echo/conflict behavior.\n- [x] [non-codebase] A dispatched Live External Integration run shows the Jira DC lane GREEN and the Jira Cloud mutation lane GREEN. Run URL commented here.\n      provenance: environment=github-actions external-integration.yml run 33137402410 on main at 6fe5c0d54574; principal=github-actions workflow_dispatch runner; privilege_posture=production-equivalent; instrument=live-call \u2014 dispatched run job 98740362395 concluded success for the ephemeral Jira DC lane (74 passed, none skipped), and the Jira Cloud coordinator mutation lane also concluded success.\n- [x] `make lint && make typecheck && make test` green.",
         "priority": "Medium",
         "status": "Done",
         "summary": "Live DC rich-text echo re-diffs against stale JQL search snapshot"
@@ -63262,9 +63738,17 @@
       "updated_at": "2026-08-15T15:15:43Z"
     },
     "f773-ba24-78ea-4f0d": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nHidden CLI aliases remain in `src/rebar/_cli/_registry.py:415-450,519-595` and `src/rebar/_cli/__init__.py:13,76-80`: `bridge-status`, `bridge-fsck`, `bridge-probe`, `jira-onboard`, and `verify-authorship`. Each has a canonical command over the same implementation owner.\n\n## Approach\n\nDelete these aliases and their compatibility help/docs/tests, retaining only the canonical routes: `bridge status`, `bridge fsck`, `bridge check-access`, `bridge setup`, and `verify-identity`. Record the pre-1.0 break. The `reconcile` family is deliberately excluded; it has its own dependency-ordered container.\n\n## Scope\n\n- CLI registry and parser/help aliases\n- command references, examples, changelog, and CLI tests\n\n## Testing\n\nFor each old spelling, assert parser rejection; for each canonical spelling, assert it reaches the existing owner and preserves exit behavior.\n\n## Acceptance Criteria\n\n- [ ] Each of the five approved simple aliases is absent from the CLI registry, help, docs, and examples.\n- [ ] The five canonical commands reach the same existing implementation owners and preserve their current outcomes.\n- [ ] Old spellings fail at parsing before command execution.\n- [ ] Changelog/release notes list each removed spelling and canonical replacement.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Remove approved simple CLI compatibility aliases"
+      },
       "created_at": "2026-09-02T03:02:35Z",
       "jira_id": "4591422",
       "jira_key": "REB-4479",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:02:38Z"
     },
@@ -63310,6 +63794,13 @@
       "peer_parent": "REB-4412",
       "state": "confirmed",
       "updated_at": "2026-09-01T03:45:05Z"
+    },
+    "f79d-0d71-0fd7-439f": {
+      "created_at": "2026-09-02T03:41:44Z",
+      "jira_id": "4591431",
+      "jira_key": "REB-4488",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:41:47Z"
     },
     "f79d-e364-5fdb-417d": {
       "baseline": {
@@ -64021,16 +64512,30 @@
     },
     "f9b9-83ad-931c-4833": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context\n\nRepresentation drift (a schema/set/surface and a hand-maintained copy diverging) is the dominant sub-mechanism of the product-logic defect category (R2S1). Three mirror classes are already generated/gated (config\u2194docs via gen_config_reference.py, env-vars\u2194docs via gen_env_registry.py, library surface via gen_api_surface.py); the terminal-status set was unified by bug e63c; the MCP\u2194library gap is a sibling story. This task finds what else remains \u2014 unknown mirrors are unknown defect sources.\n\n## Approach\n\nSystematic sweep of src/rebar for hand-maintained duplicates of a canonical fact: enumerations duplicated across modules (status-like sets, error-code lists, event-type lists), doc tables restating code constants, schema fragments re-declared, hardcoded path/name lists mirroring a registry. Method: grep/AST passes for duplicate literal sets + cross-reference with schemas and generators; verify each candidate is a genuine mirror (same fact, two masters) not a distinct concept (the e63c audit's claimability-vs-terminal distinction). Deliverable is an inventory with dispositions; fixes land as follow-up tickets, not in this task.\n\n## Acceptance criteria\n\n- [ ] AC1: reports/stability/mirror-inventory.md committed, listing every candidate examined with verdict {genuine mirror / distinct concept / already gated} and file:line evidence.\n- [ ] AC2: every genuine live mirror has a linked ticket (discovered_from this task) proposing generate-or-gate using the existing pattern.\n- [ ] AC3: the inventory states the sweep method (patterns searched) so it is repeatable.\n- [ ] AC4: sibling story's mirror (MCP\u2194library) is referenced, not re-filed.\n\n## File impact\n\n- reports/stability/mirror-inventory.md (new; committed report)",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\n\nRepresentation drift (a schema/set/surface and a hand-maintained copy diverging) is the dominant sub-mechanism of the product-logic defect category (R2S1). Three mirror classes are already generated/gated (config\u2194docs via `gen_config_reference.py`, env-vars\u2194docs via `gen_env_registry.py`, library surface via `gen_api_surface.py`); the terminal-status set was unified by bug e63c; the MCP\u2194library gap is sibling story `cream-capitate-snake` (8ce5-b870-601d-4715). This task finds what else remains \u2014 unknown mirrors are unknown defect sources.\n\n## Approach\n\nSystematic sweep of `src/rebar` for hand-maintained duplicates of a canonical fact: enumerations duplicated across modules (status-like sets, error-code lists, event-type lists), doc tables restating code constants, schema fragments re-declared, hardcoded path/name lists mirroring a registry. Method: grep/AST passes for duplicate literal sets, cross-referenced with schemas and generators; each candidate is verified as a genuine mirror (same fact, two masters) rather than a distinct concept (the e63c audit's claimability-vs-terminal distinction). Deliverable is an inventory with dispositions; fixes land as follow-up tickets, not in this task.\n\n`reports/` is currently gitignored (`.gitignore` `/reports/`), so committing the deliverable requires re-including the `reports/stability/` subtree. Git does not descend into an excluded directory, so the rule must become `/reports/*` plus a `!/reports/stability/` negation.\n\n## Acceptance criteria\n\n- [ ] AC1: `reports/stability/mirror-inventory.md` is committed, and lists every candidate examined with a verdict of `genuine mirror` / `distinct concept` / `already gated`. Verified by `git ls-files reports/stability/mirror-inventory.md` printing the path.\n- [ ] AC2: every finding carries `file:line` evidence for at least two masters. Verified by reading the report: each genuine-mirror row cites two or more locations.\n- [ ] AC3: every genuine live mirror has a linked ticket created `discovered_from` this task, proposing generate-or-gate using an existing repo pattern. Verified by `rebar deps f9b9-83ad-931c-4833` listing those links.\n- [ ] AC4: the inventory states the sweep method (the exact grep/AST patterns searched, and candidates examined per area) so the sweep is repeatable by a later reader.\n- [ ] AC5: the sibling story's mirror (MCP\u2194library) is referenced as already-filed, not re-filed as a new ticket.\n- [ ] AC6: `reports/stability/` is committable \u2014 the `.gitignore` rule is changed to `/reports/*` plus `!/reports/stability/`, and no other previously-ignored `reports/` content becomes tracked. Verified by `git status --porcelain reports/` showing only the intended file, and `git check-ignore -v reports/` still ignoring the parent.\n\n## Testing\n\nThis task ships a report plus a one-line `.gitignore` change; its verification is the committed-artifact and link checks named in the acceptance criteria, run from the worktree:\n\n- `git ls-files reports/stability/mirror-inventory.md` \u2014 proves the deliverable is tracked (AC1) and that the `.gitignore` negation works (AC6).\n- `git status --porcelain reports/` \u2014 proves no unintended `reports/` content became tracked (AC6).\n- `rebar deps f9b9-83ad-931c-4833` \u2014 proves the `discovered_from` follow-up tickets exist and are linked (AC3).\n- `make lint` \u2014 proves the `.gitignore` edit breaks no existing gate (in particular the docs and deploy-manifest checks).\n\nNo new automated test is added: the change introduces no executable behavior, and the mechanism ratchet (sibling `unblacked-loveless-toad`) counts new gates rather than reports. A follow-up gate for any mirror found is scoped to that mirror's own ticket, not here.\n\n## File impact\n\n- `reports/stability/mirror-inventory.md` (new; committed inventory deliverable)\n- `.gitignore` (re-include `reports/stability/` so the deliverable can be committed)",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Representation-mirror inventory sweep: find and disposition remaining hand-maintained mirrors"
       },
       "created_at": "2026-09-02T01:47:00Z",
       "jira_id": "4591379",
       "jira_key": "REB-4436",
-      "peer_parent": "",
+      "peer_parent": "REB-4427",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:47:02Z"
     },
@@ -64379,6 +64884,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:05Z"
+    },
+    "fb55-04d6-4beb-4025": {
+      "created_at": "2026-09-02T03:41:47Z",
+      "jira_id": "4591432",
+      "jira_key": "REB-4489",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:41:51Z"
     },
     "fb8a-7363-e406-4e36": {
       "baseline": {
@@ -64927,9 +65439,17 @@
       "updated_at": "2026-08-30T01:11:32Z"
     },
     "fd6b-09c5-8f76-45ad": {
+      "baseline": {
+        "assignee": null,
+        "description": "Mirror inventory finding F12 (reports/stability/mirror-inventory.md), HIGH, ALREADY DRIFTED.\n\n- src/rebar/_cli/_registry.py `ROUTES` \u2014 78 live routes\n- docs/exit-codes.md \u2014 78 hand-maintained rows\n\nEqual counts, different sets (one addition and one stale row cancelling out):\n- live route with no doc row: `bridge-status`\n- doc row for a non-route: `review` (docs/exit-codes.md:184) \u2014 not retired=True, absent from ROUTES\n\nAggravating factor: docs/exit-codes.md:5-7 claims the file is \"the single source of truth ... pinned by tests/interfaces/lifecycle/test_exit_codes.py, which fails if the codes drift.\" The entire assertion touching the file (:236-243) is `assert \"\\`11\\`\" in text and \"block-but-retryable\" in text.lower()`. A reader has positive reason to trust a document nothing checks, and exit codes are load-bearing for agents driving the CLI.\n\nProposed fix: add-census-assertion-to-existing-test \u2014 set-difference the table rows against live ROUTES inside test_exit_codes.py. Note a count comparison would NOT have caught this.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "docs/exit-codes.md has drifted from ROUTES and advertises a gate it lacks (mirror F12)"
+      },
       "created_at": "2026-09-02T03:02:42Z",
       "jira_id": "4591423",
       "jira_key": "REB-4480",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:02:44Z"
     },
@@ -65024,9 +65544,17 @@
       "updated_at": "2026-08-15T15:16:18Z"
     },
     "fdd1-12fa-ce83-45d1": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/_store/hlc.py:35-41,60-66,137-156` still honors `REBAR_HLC=0`, although `docs/remediation-implementation-plan.md:590-592` calls it a one-release rollback and many releases have since shipped. Disabling HLC can reintroduce causal ordering errors under skewed clocks.\n\n## Approach\n\nRemove the production disable branch, its environment registration, documentation, and tests. Retain legacy event reads and deterministic test-time clock injection, which are distinct compatibility and testability contracts.\n\n## Scope\n\n- `src/rebar/_store/hlc.py`\n- HLC environment/config registry and maintained documentation\n- `tests/unit/test_hlc.py`\n\nCascade flag: true. Recensus environment parsing, dynamic reads, docs, fixtures, and monkeypatch consumers.\n\n## Testing\n\nCover legacy event reduction/read compatibility and deterministic injected-clock ordering after the disable branch is gone.\n\n## Acceptance Criteria\n\n- [ ] `REBAR_HLC=0` no longer disables HLC or appears in the live environment/config registry.\n- [ ] Maintained documentation and tests for the expired rollback branch are removed.\n- [ ] Legacy events remain readable and deterministic test-time clock injection remains available.\n- [ ] HLC ordering tests, focused store tests, lint, and typecheck pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Retire the expired HLC rollback switch"
+      },
       "created_at": "2026-09-02T03:02:45Z",
       "jira_id": "4591424",
       "jira_key": "REB-4481",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:02:48Z"
     },
@@ -70621,6 +71149,14 @@
     "REB-448": "db53-dcfc-18a9-4403",
     "REB-4480": "fd6b-09c5-8f76-45ad",
     "REB-4481": "fdd1-12fa-ce83-45d1",
+    "REB-4482": "0af1-44ec-0b47-4611",
+    "REB-4483": "1cef-7fbc-e402-467c",
+    "REB-4484": "5169-ab69-9c23-4f8b",
+    "REB-4485": "549b-9cc5-940e-46c3",
+    "REB-4486": "67aa-eb04-8814-4975",
+    "REB-4487": "a5bf-c1f8-3950-4f87",
+    "REB-4488": "f79d-0d71-0fd7-439f",
+    "REB-4489": "fb55-04d6-4beb-4025",
     "REB-449": "b73c-648f-f44d-4ac5",
     "REB-45": "1fa8-9db4-7c1c-48f3",
     "REB-450": "e308-daf0-d765-40d3",
