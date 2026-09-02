@@ -222,6 +222,18 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# checked-in .github/complexity-baseline.json. Fails on new/increased complexity;
 	@# the ruff/format checks above still cover both src and tests.
 	python scripts/check_complexity_baseline.py --check
+	@# Shrink-only MECHANISM-delta ratchet (ticket 9ca8-675e-4dfb-427d,
+	@# unblacked-loveless-toad). The defect it prevents: 56% of sampled fixes ADD a mechanism
+	@# — a lock, a knob, an env var, a gate script, an autouse fixture, a test helper, a
+	@# feature flag — against 30% that are pure logic fixes, so each cycle grows the very
+	@# surface that produces the next cycle's defect classes, and nothing pushed back. This
+	@# compares the live per-(kind, name) census against .github/mechanism-baseline.json and
+	@# fails on a new mechanism that carries no in-tree `# mechanism-ok: <kind> <name> —
+	@# <reason>` justification; REMOVING one is always allowed (it buckets as stale), which is
+	@# what makes it a ratchet rather than a freeze. Stdlib + PyYAML (a dev dep, read-only),
+	@# so it runs identically here, in a pre-commit hook, or on a checkout with no CI provider
+	@# at all (project.portability) — CI inherits it through this `make lint` step.
+	python scripts/check_mechanism_delta.py --check
 	@# Config-ownership + field-consumption gates (RP-04 S7.2, ticket 735b): the portable,
 	@# no-CI-required trigger for both config-boundary gates. CI inherits them via this
 	@# `make lint` step, so neither is a standalone CI step (no double-run). A patchset
