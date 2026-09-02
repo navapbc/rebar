@@ -19,9 +19,12 @@ import time
 from rebar import config
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced.certs import build_remote_cert
+from rebar.signing import OPCERT_KINDS
 
-_USAGE = "rebar remote-cert <ticket-id> {completion-verifier|plan-review} [--root <path>]"
-_VALID_KINDS = ("completion-verifier", "plan-review")
+# Derived from signing.OPCERT_KINDS (mirror F2). Kept an ORDERED TUPLE because argparse
+# renders it into `choices=` help and error text at _cli/_parsers/advanced/certs.py.
+_VALID_KINDS = tuple(sorted(OPCERT_KINDS))
+_USAGE = f"rebar remote-cert <ticket-id> {{{'|'.join(_VALID_KINDS)}}} [--root <path>]"
 #: Client-side polling budget (the service enforces its own per-run timeout; this bounds the wait).
 _POLL_INTERVAL_SECONDS = 2.0
 _POLL_TIMEOUT_SECONDS = 1200.0
