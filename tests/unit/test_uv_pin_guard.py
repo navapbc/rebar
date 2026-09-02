@@ -223,6 +223,21 @@ def test_powershell_colon_interpolation_in_local_action_is_rejected(tree: Path) 
     assert "$asset:" in result.stderr
 
 
+def test_legitimate_powershell_scoped_variables_in_local_action_are_allowed(tree: Path) -> None:
+    """The colon guard must not reject valid PowerShell scopes such as `$env:`."""
+    action = tree / ".github" / "actions" / "setup-uv" / "action.yml"
+    action.write_text(
+        action.read_text(encoding="utf-8").replace(
+            '        echo "placeholder"\n',
+            '        Write-Host "runner is $env:RUNNER_OS"\n'
+            '        Write-Host "path file is $env:GITHUB_PATH"\n',
+        ),
+        encoding="utf-8",
+    )
+    result = _run(tree)
+    assert result.returncode == 0, result.stderr
+
+
 def test_local_action_missing_checksum_is_rejected(tree: Path) -> None:
     """Every supported runner target needs a committed digest before CI can trust it."""
     action = tree / ".github" / "actions" / "setup-uv" / "action.yml"
