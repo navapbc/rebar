@@ -12,12 +12,11 @@ name: Jira DC Exact-Patchset Parity
 # verifies the checkout landed on it, or fails a wrong-ref/all-skipped run. This
 # workflow closes that gap: it is dispatched the SAME way `gerrit-verify.yaml` is (by
 # gerrit-to-platform on `patchset-created`/`recheck`, or manually with the same nine
-# GERRIT_* inputs), checks out the EXACT patchset via the same
-# `checkout-gerrit-change-action` used there, asserts the checked-out HEAD SHA matches
-# `GERRIT_PATCHSET_REVISION` byte-for-byte (fail on any mismatch — a stale mirror, a
-# race with a newer patchset, or a wrong ref resolves to a hard CI failure, never a
-# silent no-op), and RECORDS that verified SHA in the job summary before running the
-# live Jira DC harness.
+# GERRIT_* inputs), fetches the exact Gerrit refspec, proves it resolves to
+# `GERRIT_PATCHSET_REVISION` before checkout, then checks out and records that exact
+# SHA byte-for-byte (fail on any mismatch — a stale mirror, a race with a newer
+# patchset, or a wrong ref resolves to a hard CI failure, never a silent no-op)
+# before running the live Jira DC harness.
 #
 # This is ADDITIVE evidence (ticket AC5: "Portable/default CI remains authoritative
 # when Docker/DC is unavailable; the live lane is additive evidence") — it does not
@@ -54,34 +53,69 @@ jobs:
     name: jira DC exact-patchset parity (real Jira Data Center, ephemeral)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
-        with:
-          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
-          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
-          gerrit-url: https://${{ vars.GERRIT_SERVER }}
-
       # AC1: "CI checks out and records the exact Gerrit patchset SHA used for the
-      # ephemeral DC run; an all-skipped or wrong-ref run fails." The checkout action
-      # resolves GERRIT_REFSPEC, which names a patchset but is not itself proof of
-      # WHICH commit landed in the working tree (a stale mirror or a race with a
-      # newer patchset could resolve to the wrong SHA silently). Compare the actual
-      # checked-out HEAD against the input's own claimed revision and fail hard on any
-      # mismatch, then record the verified SHA in the job summary as durable evidence.
-      - name: Verify the checkout landed on the exact patchset SHA
+      # ephemeral DC run; an all-skipped or wrong-ref run fails." We do not use a
+      # third-party refspec-first checkout action here: such an action resolves
+      # GERRIT_REFSPEC and unconditionally checks out FETCH_HEAD *before* any
+      # verification runs, so a stale/mismatched refspec (a dispatch race with a
+      # newer patchset, or inconsistent GERRIT_REFSPEC/GERRIT_PATCHSET_REVISION
+      # inputs) can silently become the working-tree HEAD ahead of the guard meant to
+      # catch it (see run 33455923923). Instead: fetch the refspec ourselves (mirror
+      # first, Gerrit fallback), compare the fetched commit against the input's own
+      # claimed revision BEFORE checking anything out, and only check out the
+      # expected SHA once both agree. Any fetch failure or SHA mismatch fails hard,
+      # never a silent no-op, and no live DC setup runs before this check passes.
+      - name: Checkout the exact Gerrit patchset SHA
         shell: bash
+        env:
+          GERRIT_PROJECT: ${{ inputs.GERRIT_PROJECT }}
+          GERRIT_REFSPEC: ${{ inputs.GERRIT_REFSPEC }}
+          GERRIT_PATCHSET_REVISION: ${{ inputs.GERRIT_PATCHSET_REVISION }}
+          GERRIT_CHANGE_NUMBER: ${{ inputs.GERRIT_CHANGE_NUMBER }}
+          GERRIT_CHANGE_URL: ${{ inputs.GERRIT_CHANGE_URL }}
+          GERRIT_PATCHSET_NUMBER: ${{ inputs.GERRIT_PATCHSET_NUMBER }}
+          GERRIT_URL: https://${{ vars.GERRIT_SERVER }}
+          GITHUB_MIRROR_URL: https://github.com/${{ github.repository }}.git
         run: |
           set -euo pipefail
+
+          git init -q .
+          git remote add origin "$GITHUB_MIRROR_URL"
+
+          gerrit_project_url="${GERRIT_URL%/}/${GERRIT_PROJECT}"
+
+          fetched=
+          if git fetch --no-tags --depth=1 origin "$GERRIT_REFSPEC"; then
+            fetched=1
+          elif git fetch --no-tags --depth=1 "$gerrit_project_url" "$GERRIT_REFSPEC"; then
+            fetched=1
+          fi
+
+          if [ -z "$fetched" ]; then
+            echo "::error::failed to fetch GERRIT_REFSPEC ($GERRIT_REFSPEC) from either attempted source: $GITHUB_MIRROR_URL and $gerrit_project_url — refusing to run the DC lane."
+            exit 1
+          fi
+
+          fetched_sha="$(git rev-parse "FETCH_HEAD^{commit}")"
+          expected_sha="$GERRIT_PATCHSET_REVISION"
+
+          if [ "$fetched_sha" != "$expected_sha" ]; then
+            echo "::error::dispatch inputs disagree — GERRIT_REFSPEC ($GERRIT_REFSPEC) resolved to $fetched_sha but GERRIT_PATCHSET_REVISION claims $expected_sha — refusing to check out an ambiguous ref."
+            exit 1
+          fi
+
+          git checkout --detach --force "$expected_sha"
+
           actual_sha="$(git rev-parse HEAD)"
-          expected_sha="${{ inputs.GERRIT_PATCHSET_REVISION }}"
           if [ "$actual_sha" != "$expected_sha" ]; then
             echo "::error::checked-out HEAD ($actual_sha) does not match the requested Gerrit patchset revision ($expected_sha) — refusing to run the DC lane against the wrong ref."
             exit 1
           fi
+
           {
             echo "### Jira DC exact-patchset parity"
             echo ""
-            echo "- Gerrit change: [${{ inputs.GERRIT_CHANGE_URL }}](${{ inputs.GERRIT_CHANGE_URL }}) (change ${{ inputs.GERRIT_CHANGE_NUMBER }}, patchset ${{ inputs.GERRIT_PATCHSET_NUMBER }})"
+            echo "- Gerrit change: [$GERRIT_CHANGE_URL]($GERRIT_CHANGE_URL) (change $GERRIT_CHANGE_NUMBER, patchset $GERRIT_PATCHSET_NUMBER)"
             echo "- Verified patchset SHA: \`$actual_sha\`"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "verified_sha=$actual_sha" >> "$GITHUB_ENV"

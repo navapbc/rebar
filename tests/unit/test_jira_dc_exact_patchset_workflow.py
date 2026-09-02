@@ -10,10 +10,12 @@ properties actually hold, mirroring the config-as-artifact discipline used by
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
 
@@ -44,6 +46,88 @@ def _job(doc: dict) -> dict:
     return next(iter(jobs.values()))
 
 
+def _checkout_step(doc: dict) -> dict:
+    for step in _job(doc)["steps"]:
+        if step.get("name") == "Checkout the exact Gerrit patchset SHA":
+            return step
+    raise AssertionError("workflow must own deterministic exact-SHA checkout")
+
+
+def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _make_commit(repo: Path, name: str, body: str) -> str:
+    (repo / name).write_text(body)
+    _run(["git", "add", name], repo)
+    _run(["git", "commit", "-m", f"add {name}"], repo)
+    return _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+
+
+def _patchset_remotes(tmp_path: Path) -> tuple[Path, Path, str, str]:
+    source = tmp_path / "source"
+    source.mkdir()
+    _run(["git", "init"], source)
+    _run(["git", "config", "user.email", "ci@example.com"], source)
+    _run(["git", "config", "user.name", "CI"], source)
+    patchset_1 = _make_commit(source, "one.txt", "patchset 1\n")
+    patchset_2 = _make_commit(source, "two.txt", "patchset 2\n")
+
+    origin = tmp_path / "origin.git"
+    gerrit_root = tmp_path / "gerrit"
+    gerrit = gerrit_root / "rebar.git"
+    _run(["git", "init", "--bare", str(origin)], tmp_path)
+    _run(["git", "init", "--bare", str(gerrit)], tmp_path)
+
+    _run(["git", "push", str(origin), f"{patchset_1}:refs/changes/66/2466/1"], source)
+    _run(["git", "push", str(origin), f"{patchset_2}:refs/changes/66/2466/2"], source)
+    _run(["git", "push", str(gerrit), f"{patchset_1}:refs/changes/66/2466/1"], source)
+    _run(["git", "push", str(gerrit), f"{patchset_2}:refs/changes/66/2466/2"], source)
+    return origin, gerrit_root, patchset_1, patchset_2
+
+
+def _run_checkout_script(
+    tmp_path: Path,
+    *,
+    origin: Path,
+    gerrit_root: Path,
+    refspec: str,
+    expected_sha: str,
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    env = subprocess_env(
+        {
+            "GERRIT_PROJECT": "rebar.git",
+            "GERRIT_REFSPEC": refspec,
+            "GERRIT_PATCHSET_REVISION": expected_sha,
+            "GERRIT_CHANGE_NUMBER": "2466",
+            "GERRIT_CHANGE_URL": "https://gerrit.example/c/rebar/+/2466",
+            "GERRIT_PATCHSET_NUMBER": "2",
+            "GERRIT_URL": str(gerrit_root),
+            "GITHUB_MIRROR_URL": str(origin),
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+            "GITHUB_ENV": str(tmp_path / "github.env"),
+        }
+    )
+    result = subprocess.run(
+        ["bash", "-c", str(_checkout_step(_load())["run"])],
+        cwd=workspace,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    return result, workspace
+
+
 def test_dispatch_only_with_full_gerrit_input_set() -> None:
     doc = _load()
     # See jira-dc-capability-map's own test for why both keys are checked: PyYAML parses
@@ -59,12 +143,13 @@ def test_dispatch_only_with_full_gerrit_input_set() -> None:
     assert not missing, f"missing required Gerrit dispatch input(s): {sorted(missing)}"
 
 
-def test_uses_pinned_gerrit_checkout_action() -> None:
+def test_uses_owned_exact_sha_checkout_not_refspec_first_action() -> None:
+    doc = _load()
+    checkout = _checkout_step(doc)
+    assert checkout["shell"] == "bash"
+    assert checkout["env"]["GERRIT_PATCHSET_REVISION"] == "${{ inputs.GERRIT_PATCHSET_REVISION }}"
     text = _WORKFLOW.read_text()
-    assert "lfreleng-actions/checkout-gerrit-change-action@" in text
-    assert "@f87b90a3370e62dad310797fedc7fd3700c75832" in text, (
-        "checkout-gerrit-change-action must be pinned by commit SHA (mirrors gerrit-verify.yaml)"
-    )
+    assert "lfreleng-actions/checkout-gerrit-change-action@" not in text
 
 
 def test_verifies_checked_out_sha_against_the_patchset_revision_input() -> None:
@@ -77,6 +162,91 @@ def test_verifies_checked_out_sha_against_the_patchset_revision_input() -> None:
     )
     assert "GERRIT_PATCHSET_REVISION" in steps_text
     assert "exit 1" in steps_text, "a SHA mismatch must fail the job, not merely warn"
+
+
+def test_checkout_script_leaves_head_at_expected_sha(tmp_path: Path) -> None:
+    origin, gerrit_root, _patchset_1, patchset_2 = _patchset_remotes(tmp_path)
+    result, workspace = _run_checkout_script(
+        tmp_path,
+        origin=origin,
+        gerrit_root=gerrit_root,
+        refspec="refs/changes/66/2466/2",
+        expected_sha=patchset_2,
+    )
+    assert result.returncode == 0, result.stdout
+    assert _run(["git", "rev-parse", "HEAD"], workspace).stdout.strip() == patchset_2
+    assert f"verified_sha={patchset_2}" in (tmp_path / "github.env").read_text()
+
+
+def test_checkout_script_falls_back_to_gerrit_when_mirror_lacks_refspec(
+    tmp_path: Path,
+) -> None:
+    origin, gerrit_root, _patchset_1, patchset_2 = _patchset_remotes(tmp_path)
+    _run(["git", "--git-dir", str(origin), "update-ref", "-d", "refs/changes/66/2466/2"], tmp_path)
+
+    result, workspace = _run_checkout_script(
+        tmp_path,
+        origin=origin,
+        gerrit_root=gerrit_root,
+        refspec="refs/changes/66/2466/2",
+        expected_sha=patchset_2,
+    )
+
+    assert result.returncode == 0, result.stdout
+    assert _run(["git", "rev-parse", "HEAD"], workspace).stdout.strip() == patchset_2
+
+
+def test_checkout_script_rejects_refspec_revision_mismatch_before_checkout(
+    tmp_path: Path,
+) -> None:
+    origin, gerrit_root, patchset_1, patchset_2 = _patchset_remotes(tmp_path)
+    result, workspace = _run_checkout_script(
+        tmp_path,
+        origin=origin,
+        gerrit_root=gerrit_root,
+        refspec="refs/changes/66/2466/1",
+        expected_sha=patchset_2,
+    )
+    assert result.returncode != 0
+    assert "dispatch inputs disagree" in result.stdout
+    assert patchset_1 in result.stdout
+    assert patchset_2 in result.stdout
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=workspace,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        != 0
+    )
+
+
+def test_checkout_script_fails_clearly_when_refspec_cannot_be_fetched(
+    tmp_path: Path,
+) -> None:
+    origin, gerrit_root, _patchset_1, patchset_2 = _patchset_remotes(tmp_path)
+    result, workspace = _run_checkout_script(
+        tmp_path,
+        origin=origin,
+        gerrit_root=gerrit_root,
+        refspec="refs/changes/66/2466/99",
+        expected_sha=patchset_2,
+    )
+    assert result.returncode != 0
+    assert "failed to fetch GERRIT_REFSPEC" in result.stdout
+    assert "refs/changes/66/2466/99" in result.stdout
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=workspace,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        != 0
+    )
 
 
 def test_runs_the_live_harness_with_the_all_skip_canary_engaged() -> None:
