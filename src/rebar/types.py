@@ -24,6 +24,13 @@ TicketType = Literal["bug", "epic", "story", "task", "session_log", "code_review
 Relation = Literal[
     "blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from", "caused_by"
 ]
+#: The ticket types, as a tuple in DECLARATION order (mirror F7). Consumers that need the
+#: vocabulary — `create` validation and its usage line, the reconciler's inbound fields —
+#: derive it from here instead of re-listing it; a hand-copy silently REJECTS a newly added
+#: type at its own site. get_args preserves the Literal's order, so curated help text that
+#: reads bug/epic/story/task first is unaffected.
+TICKET_TYPES: tuple[str, ...] = get_args(TicketType)
+
 #: Ticket types the plan-review gate does NOT review, and its complement (mirror F3).
 #:
 #: This one predicate had SIX masters — the start-work gate, the create-time file-impact

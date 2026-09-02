@@ -34,11 +34,11 @@ from rebar._commands.composer_edit import (
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
-from rebar.types import PLAN_REVIEW_EXEMPT_TYPES
+from rebar.types import PLAN_REVIEW_EXEMPT_TYPES, TICKET_TYPES
 
 logger = logging.getLogger(__name__)
 
-_TYPES = ("bug", "epic", "story", "task", "session_log", "code_review", "identity")
+_TYPES = TICKET_TYPES  # canonical, see rebar.types (mirror F7)
 
 # Types exempt from the plan-review file-impact-coverage gate (P9); the create-time
 # warning mirrors it so a new work ticket records file_impact early. The SAME predicate
@@ -51,7 +51,7 @@ _USAGE = (
     "Usage: ticket create <ticket_type> <title> [--parent <id>] [--priority <n>] "
     "[--assignee <name>] [--description <text>] [--tags <tag1,tag2>] "
     "[--detected-by <source>]\n"
-    "  ticket_type: bug | epic | story | task | session_log | code_review | identity\n"
+    f"  ticket_type: {' | '.join(_TYPES)}\n"
     "  --priority, -p: 0-4 (0=critical, 4=backlog; default: 2)\n"
     "  --detected-by: detection channel (overrides REBAR_DETECTED_BY env var)"
 )
