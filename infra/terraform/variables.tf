@@ -13,7 +13,7 @@ variable "instance_type" {
 variable "root_volume_size_gb" {
   type        = number
   description = "Size of the EC2 root EBS volume, in GiB."
-  default     = 30
+  default     = 60
 }
 
 variable "data_volume_size_gb" {
