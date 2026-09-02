@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+from typing import get_args
+
+from rebar.types import TicketStatus
 
 from ._managed_refs import add_managed_ref, seed_managed_refs_from_current
 from ._processors_identity import (
@@ -30,9 +33,13 @@ from ._version import LEGACY_JIRA_AUTHOR, LEGACY_JIRA_ENV_ID
 
 logger = logging.getLogger(__name__)
 
-_KNOWN_TICKET_STATUSES = frozenset(
-    {"idea", "open", "in_progress", "blocked", "closed", "archived", "deleted"}
-)
+#: Derived from the canonical ``TicketStatus`` rather than re-listed (mirror F6).
+#:
+#: This is not a description but an ASSERTION: the snapshot reader below raises
+#: ``ValueError("unknown ticket status in snapshot")`` on anything outside it. A hand-copy
+#: that lagged ``TicketStatus`` would therefore make a newer clone's snapshot UNREADABLE —
+#: it raises rather than degrading, unlike the event-type path which preserves-and-ignores.
+_KNOWN_TICKET_STATUSES = frozenset(get_args(TicketStatus))
 
 
 def process_create(
