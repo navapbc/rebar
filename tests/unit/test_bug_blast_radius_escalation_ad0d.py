@@ -145,11 +145,11 @@ def test_escalated_bug_clean_plan_runs_full_llm_tier(monkeypatch):
 
 
 def test_bug_without_file_impact_keeps_light_tier(monkeypatch):
-    """No declared blast radius → the light advisory tier, even on a DET-tripping plan
-    (deterministic default; B2's Gerrit criterion backstops with the real diff)."""
+    """No declared blast radius keeps the bug tier, but P1/P10 readiness failures still block."""
     out = _precheck(monkeypatch, _state(description=_NO_AC_DESC, file_impact=None))
-    assert out["run_llm"] is True
-    assert out["det_blocking"] == []
+    assert out["run_llm"] is False
+    assert out["verdict"]["verdict"] == "BLOCK"
+    assert {c for f in out["det_blocking"] for c in f.get("criteria", [])} >= {"P1", "P10"}
     assert out["det_coverage"].get("bug_tier") is True
 
 
@@ -161,8 +161,9 @@ def test_bug_with_test_only_file_impact_keeps_light_tier(monkeypatch):
             file_impact=["tests/unit/test_x.py", "tests/conftest.py", "conftest.py"],
         ),
     )
-    assert out["run_llm"] is True
-    assert out["det_blocking"] == []
+    assert out["run_llm"] is False
+    assert out["verdict"]["verdict"] == "BLOCK"
+    assert {c for f in out["det_blocking"] for c in f.get("criteria", [])} >= {"P1", "P10"}
     assert out["det_coverage"].get("bug_tier") is True
 
 

@@ -246,9 +246,11 @@ def review_plan(
     advisory[], coaching[], indeterminate[], coverage, signature?, ...}``. ``session_log`` /
     ``code_review`` / ``identity`` short-circuit to a bare exempt PASS (``runner=exempt``, no
     review runs). A ``bug`` does NOT: since the bug review tier (epic 6982/R4) it gets a light
-    advisory review — the DET floor plus the restricted ``BUG_TIER_CRITERIA`` probe — that can
-    surface advisories but can never BLOCK, so a bug always PASSes. Raises only on a hard
-    context-assembly failure; an unavailable LLM degrades to a DET-only review.
+    advisory review — the DET floor plus the restricted ``BUG_TIER_CRITERIA`` probe. P1/P10
+    readiness-floor failures and P4 description admission failures still BLOCK before any LLM
+    pass; otherwise the bug tier surfaces advisory findings while a well-formed bug can PASS.
+    Raises only on a hard context-assembly failure; an unavailable LLM degrades to a DET-only
+    review.
 
     A ticket that is not yet claimable (status closed/idea/blocked, or ``open`` but
     blocked by an unclosed dependency) is FAST-FAILED with no LLM — an unsigned

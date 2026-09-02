@@ -470,9 +470,8 @@ def test_p1_det_block_short_circuits_before_llm(monkeypatch):
 
 # ── bug review tier: a light ADVISORY review, not the bare exempt short-circuit (R4) ──────────
 def test_bug_runs_light_advisory_tier_not_exempt(monkeypatch):
-    """R4 piece (b): a bug no longer short-circuits to a bare exempt-PASS — the gate runs a
-    light advisory tier (DET floor + the necessity probe) and never blocks the bug."""
-    state = _state(ttype="bug", description="A bug, reviewed under the light tier.")
+    """R4 piece (b): a well-formed bug runs the light tier instead of exempt-PASS."""
+    state = _state(ttype="bug")
     # The finder fires the sole bug-tier criterion (necessity) — proving the LLM tier ran.
     finder = _CountingFinder(
         structured={"analysis": "", "findings": [{"finding": "nit", "criteria": ["necessity"]}]}
@@ -484,7 +483,7 @@ def test_bug_runs_light_advisory_tier_not_exempt(monkeypatch):
     assert finder.calls > 0
     verdict = _terminal_verdict(rec)
     assert verdict and verdict["verdict"] == "PASS"
-    # ... a substantive review, not the bare exempt short-circuit, and never blocking.
+    # ... a substantive review, not the bare exempt short-circuit.
     assert verdict["runner"] != "exempt"
     assert verdict["blocking"] == []
 

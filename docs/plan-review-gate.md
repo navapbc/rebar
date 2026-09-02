@@ -533,10 +533,11 @@ no-auth), independently of the machine credentials (deploy keys/tokens) it confi
 Separately, **`session_log` / `code_review` / `identity` tickets are exempt** from the whole
 gate (a distinct exemption axis, not part of container/leaf scrutiny). A **bug is NOT
 exempt**: since the bug review tier (epic 6982/R4) it gets a light advisory review — the DET
-floor plus the restricted `BUG_TIER_CRITERIA` probe — whose findings are always downgraded to
-advisory, so a bug in that tier can be coached but never BLOCKED unless it escalates out of it:
-a bug whose declared blast radius names non-test paths is reviewed by the full blocking rubric
-instead (see R4(c) below). (A bug still needs no signed attestation
+floor plus the restricted `BUG_TIER_CRITERIA` probe. P1/P10 readiness-floor failures and P4
+description admission failures still BLOCK and short-circuit before the LLM tier; remaining DET
+findings are downgraded to advisory so a well-formed bug in that tier can be coached without the
+full rubric. A bug whose declared blast radius names non-test paths is reviewed by the full
+blocking rubric instead (see R4(c) below). (A bug still needs no signed attestation
 to be *claimed*; that CLI-side exemption is a separate axis and is unchanged.)
 Mechanical/test *leaves* suppress
 noisy criteria. Overlays fire from
@@ -1567,9 +1568,13 @@ bare exempt-PASS (`workflow_ops.plan_review_precheck` → `orchestrator._exempt_
 `llm_calls:0`), so a bug got no substantive review — verified on bug 5886, whose persisted
 `REVIEW_RESULT` was `{"runner":"exempt","verdict":"PASS","llm_calls":0}`. The bug tier instead
 runs a **light advisory review**: the DET floor + the `necessity` probe
-(`registry.BUG_TIER_CRITERIA = ("necessity",)`), and **never blocks a bug** not escalated out of
-the tier by (c) below: precheck downgrades every DET finding except P4's
-description admission limit to advisory, and the sole LLM criterion is advisory. The
+(`registry.BUG_TIER_CRITERIA = ("necessity",)`). The light tier is still subject to the
+deterministic readiness floor: P1 (missing `## Acceptance Criteria`), P10
+(verification-presence), and P4's description admission limit remain blocking and short-circuit
+before any LLM call. Other DET findings are advisory, and the sole LLM criterion is advisory: after P1/P10/P4
+pass, the light tier can be coached but never BLOCKED unless the bug escalates out of the
+tier; equivalently, the bug-tier LLM probe never blocks a bug unless escalation sends it to the
+full rubric. The
 restriction is centralised in the single routing seam (`orchestrator.route_criteria` returns only
 `BUG_TIER_CRITERIA` for a `bug`), so BOTH the assemble step and the batch-runner's project-criteria
 fan-in honor it — an activated blocking `project.*` criterion can never be fanned into a bug review
@@ -1581,9 +1586,10 @@ exempt-PASS. `session_log` / `code_review` / `identity` stay fully exempt.
 
 **(c) The blast-radius escalation out of the bug tier (ad0d B1).** The light tier is sized for a
 small fix, so it is keyed on the fix staying small. A bug whose **persisted `file_impact` declares
-any non-test path** leaves the tier and is reviewed by the FULL, blocking-capable rubric — this is
-the one way a bug review blocks, and it is why the never-blocking language in (a) and (b) is a
-statement about the tier, not about bugs. The predicate is
+any non-test path** leaves the tier and is reviewed by the FULL, blocking-capable rubric.
+Escalation is the way a bug receives the full default blocking rubric; P1/P10/P4 remain blocking
+even inside the light tier because they are deterministic admission requirements for a signed
+plan. The predicate is
 `orchestrator.bug_blast_radius_escalates(file_impact)`: a path counts as "test" iff it lives under
 `tests/` or its basename is `conftest.py` — the same classification the Gerrit bugfix-size gate
 (B2) applies to diff lines, so the plan-side and code-side ends agree. It is derived from ticket
