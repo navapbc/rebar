@@ -15,7 +15,7 @@ from ._cache import (
     _read_graph_cache,
     _write_graph_cache,
 )
-from ._relations import bfs
+from ._relations import _BLOCKING_RELATIONS, bfs
 from ._status import _get_ticket_status
 
 # Use module-level accessor so tests can patch _loader_module.reducer.reduce_all_tickets
@@ -191,9 +191,11 @@ def check_would_create_cycle(
 ) -> bool:
     """Return True if adding source_id→target_id would create a cycle.
 
-    Only 'blocks' and 'depends_on' relations can create cycles.
-    'relates_to', 'duplicates', 'supersedes', and 'discovered_from' never create
-    cycles and always return False.
+    Only the relations in ``_BLOCKING_RELATIONS`` can create cycles; every other
+    relation never creates one and always returns False. The complement is not
+    enumerated here on purpose (mirror F4): this docstring used to list four
+    non-blocking relations two lines above a five-element code list, having missed
+    ``caused_by`` when it was added.
 
     Cycle semantics:
     - ``source blocks target``  means source must precede target.  A cycle
@@ -207,7 +209,7 @@ def check_would_create_cycle(
     redundant transitive edge A→C→B plus proposed A→B is mis-reported as a
     cycle because A happens to be "blocked by" B in the reverse sense.
     """
-    if relation in ("relates_to", "duplicates", "supersedes", "discovered_from", "caused_by"):
+    if relation not in _BLOCKING_RELATIONS:
         return False
 
     if relation == "depends_on":
@@ -251,7 +253,7 @@ def _same_level_neighbors(tracker_dir: str, level: str) -> Callable[[str, set[st
         if state is None or state.get("ticket_type", "").lower() != level:
             return
         for dep in state.get("deps", []):
-            if dep.get("relation", "") not in ("blocks", "depends_on"):
+            if dep.get("relation", "") not in _BLOCKING_RELATIONS:
                 continue
             target = dep.get("target_id", "")
             if target and target not in visited and _is_at_level(tracker_dir, target, level):
