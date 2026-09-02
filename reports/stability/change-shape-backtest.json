@@ -1,0 +1,169 @@
+{
+  "mode": "all-work",
+  "rev_range": "origin/main",
+  "window": {
+    "since": "2026-07-01",
+    "until": "2026-09-02",
+    "until_exclusive": true
+  },
+  "threshold": 150,
+  "commits_walked": 2860,
+  "commits_in_window": 2207,
+  "commits_unresolved_ticket_ref": 125,
+  "commit_distributions": {
+    "non_test_lines": {
+      "n": 2207,
+      "mean": 184.8,
+      "p50": 73.0,
+      "p75": 218.0,
+      "p90": 445.6,
+      "p95": 675.7,
+      "p99": 1673.4,
+      "max": 7228
+    },
+    "total_diff_lines": {
+      "n": 2207,
+      "mean": 371.7,
+      "p50": 213.0,
+      "p75": 457.0,
+      "p90": 829.4,
+      "p95": 1124.7,
+      "p99": 2191.2,
+      "max": 18416
+    },
+    "files_touched": {
+      "n": 2207,
+      "mean": 6.0,
+      "p50": 4.0,
+      "p75": 7.0,
+      "p90": 12.0,
+      "p95": 16.0,
+      "p99": 38.0,
+      "max": 318
+    }
+  },
+  "tickets": 1795,
+  "ticket_distributions": {
+    "non_test_lines": {
+      "n": 1795,
+      "mean": 214.1,
+      "p50": 94.0,
+      "p75": 253.0,
+      "p90": 487.2,
+      "p95": 742.9,
+      "p99": 1870.1,
+      "max": 7228
+    },
+    "files_union": {
+      "n": 1795,
+      "mean": 6.8,
+      "p50": 4.0,
+      "p75": 7.0,
+      "p90": 13.0,
+      "p95": 18.0,
+      "p99": 41.0,
+      "max": 318
+    },
+    "commits": {
+      "n": 1795,
+      "mean": 1.2,
+      "p50": 1.0,
+      "p75": 1.0,
+      "p90": 1.0,
+      "p95": 2.0,
+      "p99": 4.0,
+      "max": 25
+    }
+  },
+  "commits_per_ticket": {
+    "1": 1617,
+    "2": 121,
+    "3": 34,
+    "4": 19,
+    "6": 1,
+    "7": 2,
+    "25": 1
+  },
+  "correlations": [
+    {
+      "signal": "completion-gate rounds",
+      "n": 1373,
+      "vs": {
+        "non-test LOC": {
+          "n": 1373,
+          "rho": 0.062,
+          "p": 0.020958518249246473
+        },
+        "files": {
+          "n": 1373,
+          "rho": 0.115,
+          "p": 1.8701219433500073e-05
+        },
+        "commits": {
+          "n": 1373,
+          "rho": 0.258,
+          "p": 4.5708870087797625e-23
+        }
+      }
+    },
+    {
+      "signal": "plan-review rounds",
+      "n": 1169,
+      "vs": {
+        "non-test LOC": {
+          "n": 1169,
+          "rho": 0.349,
+          "p": 5.047232115531008e-37
+        },
+        "files": {
+          "n": 1169,
+          "rho": 0.37,
+          "p": 4.2924386703979544e-42
+        },
+        "commits": {
+          "n": 1169,
+          "rho": 0.127,
+          "p": 1.2617940775990105e-05
+        }
+      }
+    },
+    {
+      "signal": "caused_by fan-in",
+      "n": 1795,
+      "vs": {
+        "non-test LOC": {
+          "n": 1795,
+          "rho": 0.175,
+          "p": 5.4737666255474465e-14
+        },
+        "files": {
+          "n": 1795,
+          "rho": 0.19,
+          "p": 2.725529568562467e-16
+        },
+        "commits": {
+          "n": 1795,
+          "rho": 0.083,
+          "p": 0.0004021415249571635
+        }
+      }
+    }
+  ],
+  "threshold_split": {
+    "threshold": 150,
+    "above": {
+      "n": 689,
+      "mean_completion_rounds": 1.39,
+      "mean_plan_review_rounds": 4.34,
+      "caused_by_tickets": 89,
+      "caused_by_rate": 12.9
+    },
+    "below": {
+      "n": 1106,
+      "mean_completion_rounds": 1.27,
+      "mean_plan_review_rounds": 2.62,
+      "caused_by_tickets": 48,
+      "caused_by_rate": 4.3
+    }
+  }
+}
