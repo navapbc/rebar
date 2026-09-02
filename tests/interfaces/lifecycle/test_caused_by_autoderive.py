@@ -4,7 +4,10 @@ Tier: interface (library/CLI over a real temp store). Pins the deterministic cor
 an explicit `--caused-by <id>` on a bug close draws a caused_by link from the
 (now-closed) bug to the culprit — proving the flag threads through the close path
 AND that the link is written via the direct-writer that bypasses the closed-source
-guard. Blame auto-derivation, the library facade, and ambiguity are held out.
+guard. This is also the canonical (sole) home for the single-culprit and ambiguous
+git-blame auto-derivation contracts (ticket 6ba3-6406-cba1-4f04 removed the
+AST-identical duplicate from `test_caused_by_autoderive_heldout.py`). The library
+facade and the user-guide advisory remain held out in that companion file.
 """
 
 from __future__ import annotations
