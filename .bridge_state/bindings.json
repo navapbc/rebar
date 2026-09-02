@@ -858,6 +858,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:00Z"
     },
+    "038d-f5ff-b371-4ba5": {
+      "created_at": "2026-09-02T02:58:27Z",
+      "jira_id": "4591380",
+      "jira_key": "REB-4437",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:58:30Z"
+    },
     "039b-d179-b669-4439": {
       "baseline": {
         "assignee": {
@@ -2164,9 +2171,17 @@
       "updated_at": "2026-08-15T14:51:33Z"
     },
     "0880-0afb-7fe3-48c9": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nBefore any change-size/decomposition rule can enter the DET floor, measure whether change shape actually drives the defect-rework loop here (11-plan-v3 I-4; measurement-first matches the field: Prow's size/* labels are non-blocking \u2014 12c). Tooling anchor (12a): extend scripts/backtest_bugfix_size.py (442 lines; imports the shipped threshold predicate so it cannot drift), and check overlap with the Tier-2 replay harness (ADR 0109) first. 2026 grounding (12b): MSR'26 agentic-PR studies show files-touched/commit fragmentation is a sharper variable than raw LOC, and the size-quality relationship is nonstationary; context-fragmentation is an independent causal variable (39% quality drop in a controlled study). The two doubling friction categories (CI-at-landing regressions 25/60; environment 13/60 \u2014 R2S3) are unexplained and get mechanism reads, not guesses.\n\n## Approach\n\nThree reads, published under reports/stability/: (a) extend the backtest to all work (not just bugs): rework/negative-vote/regression rate vs non-test LOC, files touched, and commit fragmentation; (b) mechanism-read 20 CI-at-landing regressions from the doubling window \u2014 for each: what failed, change shape, cross-session interference?, isolation class?, drift class?; (c) mechanism-read the environment-failure session reports \u2014 worktree provisioning, dependency drift, the hourly global-install tracker. Then record the enforcement decision (size/decomposition DET rule: yes with threshold + re-tune cadence, or no with reason) in the decisions index either way.\n\n## Acceptance criteria\n\n- [ ] AC1: reports/stability/change-shape-backtest.md with the three variables' distributions and rework correlations, method stated, reproducible via the extended script.\n- [ ] AC2: reports/stability/ci-landing-regressions-read.md with a per-case table (20 cases: mechanism, change shape, class).\n- [ ] AC3: reports/stability/environment-failures-read.md with per-case mechanisms and the class dispositions feeding the doctor-checks scope.\n- [ ] AC4: the enforcement decision recorded (either way) with its evidence, in the decisions index/ADR per the program's B-3 convention.\n\n## File impact\n\n- scripts/backtest_bugfix_size.py (extend: all-work mode + files-touched/fragmentation variables)\n- reports/stability/change-shape-backtest.md, ci-landing-regressions-read.md, environment-failures-read.md (new reports)",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Upstream introduction measurement: change-shape backtest + CI-at-landing and environment mechanism reads"
+      },
       "created_at": "2026-09-02T01:46:03Z",
       "jira_id": "4591365",
       "jira_key": "REB-4422",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:05Z"
     },
@@ -2521,6 +2536,13 @@
       "jira_key": "REB-812",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:42Z"
+    },
+    "09f6-215a-34f4-4d89": {
+      "created_at": "2026-09-02T02:58:34Z",
+      "jira_id": "4591381",
+      "jira_key": "REB-4438",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:58:37Z"
     },
     "09f9-f66c-9748-48e5": {
       "baseline": {
@@ -3165,6 +3187,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:56Z"
     },
+    "0cfc-e511-8f8a-4c8b": {
+      "created_at": "2026-09-02T02:58:41Z",
+      "jira_id": "4591382",
+      "jira_key": "REB-4439",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:58:44Z"
+    },
     "0cfd-44fe-3eb8-47ed": {
       "baseline": {
         "assignee": null,
@@ -3279,6 +3308,13 @@
       "peer_parent": "REB-4211",
       "state": "confirmed",
       "updated_at": "2026-09-01T01:21:28Z"
+    },
+    "0d3c-ff25-5317-4d73": {
+      "created_at": "2026-09-02T02:58:48Z",
+      "jira_id": "4591383",
+      "jira_key": "REB-4440",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:58:50Z"
     },
     "0d3e-8205-1e35-4db4": {
       "baseline": {
@@ -5204,9 +5240,17 @@
       "updated_at": "2026-08-31T23:31:09Z"
     },
     "15f2-f3d4-ffcd-4223": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nTest isolation under ~90-worktree/xdist parallelism is 15.8% of the defect stream (R2S1), and the harness root already exists and propagates (tests/conftest.py:487-513 `_rebar_root_sandbox_repo` + autouse REBAR_ROOT setenv, per-worker under xdist via tmp_path_factory \u2014 12a Part 1). What is missing is ENFORCEMENT: nothing stops a new unit-tier test from spawning a subprocess with its own ad-hoc temp/HOME/root, which is exactly how the recent class instances arose (82a0d5cd: doctor scan resolving the operator's real Path.home(); ef9e1d74: subprocess timing conflation). Precedent: pip's pytest_collection_modifyitems raising on forbidden patterns; Bazel's hermetic TEST_TMPDIR contract (12c) recorded as the escalation path.\n\n## Approach\n\nA collection-time check in the unit-tier conftest: tests whose module spawns subprocesses (detected statically: subprocess/Popen/pytest.main markers, or an explicit marker) must either use the harness-provided root fixtures/env or carry an explicit opt-out marker with a reason. Violations fail collection with a message naming the fixture to use (fail-loud, names-the-fix pattern already used by the network guard). Bound the static detection conservatively (no false positives on the 564 existing subprocess-spawning files: run the check across the tier and baseline any legitimate existing patterns rather than mass-editing).\n\n## Acceptance criteria\n\n- [ ] AC1: collection fails with an instructive error when a unit-tier test spawns a subprocess without taking its root from the harness (test proves it fires on a seeded violation).\n- [ ] AC2: the full unit tier collects clean at introduction (existing legitimate patterns baselined or fixed, no blanket opt-outs).\n- [ ] AC3: the opt-out marker requires a reason string and is counted (greppable) so growth is visible to the mechanism ratchet.\n- [ ] AC4: the check and marker documented alongside the existing isolation helpers.\n\n## File impact\n\n- tests/unit/conftest.py or tests/conftest.py (collection hook)\n- tests/_isolation.py or a new tests/_collection_guards.py helper (detection logic)\n- tests/unit/test_collection_isolation_guard.py (new; RED/GREEN proof)\n- docs (the testing/isolation section that documents existing guards)",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Collection-time enforcement: unit-tier subprocess tests must take isolation roots from the harness"
+      },
       "created_at": "2026-09-02T01:46:05Z",
       "jira_id": "4591366",
       "jira_key": "REB-4423",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:08Z"
     },
@@ -6606,6 +6650,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:20Z"
     },
+    "1c70-319a-2ded-43f9": {
+      "created_at": "2026-09-02T02:58:51Z",
+      "jira_id": "4591384",
+      "jira_key": "REB-4441",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:58:54Z"
+    },
     "1c79-1d10-26b0-4a4e": {
       "baseline": {
         "assignee": {
@@ -6992,6 +7043,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:29Z"
+    },
+    "1daf-a435-2387-412c": {
+      "created_at": "2026-09-02T02:58:57Z",
+      "jira_id": "4591385",
+      "jira_key": "REB-4442",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:00Z"
     },
     "1dbe-fc96-a71d-45e9": {
       "baseline": {
@@ -7941,6 +7999,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:54Z"
     },
+    "2164-97a8-ca89-4546": {
+      "created_at": "2026-09-02T02:59:00Z",
+      "jira_id": "4591386",
+      "jira_key": "REB-4443",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:03Z"
+    },
     "218b-c668-f21b-440c": {
       "created_at": "2026-08-15T14:53:55Z",
       "jira_key": "REB-1021",
@@ -7962,9 +8027,17 @@
       "updated_at": "2026-08-15T14:53:55Z"
     },
     "21b3-0e7b-f287-44c8": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/_commands/fsck_repair.py:330-491` contains a 162-line `_repair_run` with measured CCN 43 after the earlier extraction in commit `970b0dd4451e`. Further corruption shapes or restoration sources currently enlarge the same integrity-sensitive branch matrix.\n\n## Approach\n\nExtract the already-cohesive planning, per-ticket policy, restoration-source selection, pause ownership, and commit/application clusters. Keep `_repair_run` as the lifecycle facade with explicit state and abort semantics. This follows existing calls rather than introducing a new policy framework.\n\n## Scope\n\n- `src/rebar/_commands/fsck_repair.py`\n- `src/rebar/_commands/_repair_pause.py`\n- focused fsck repair and pause-ownership tests\n\nCascade flag: true. Recensus semantic callers plus string, reflection, dependency-injection, and monkeypatch references before moving symbols.\n\n## Testing\n\nRun focused restoration and pause-ownership suites for successful repair, skipped/aborted repair, source selection, and cleanup, then the normal lint/typecheck/test gates.\n\n## Acceptance Criteria\n\n- [ ] Planning, policy, restoration-source selection, pause ownership, and application are extracted along existing call relationships; verified by symbol/reference review and the module-size/complexity gates.\n- [ ] `_repair_run` remains a small lifecycle facade whose abort and partial-failure outcomes are explicit; verified by focused failure-path tests.\n- [ ] Existing repair source selection and tracker write results are unchanged; verified by `tests/interfaces/store/test_fsck_repair_restore_08c8.py`.\n- [ ] Pause acquisition/release ownership remains correct on success and failure; verified by the two pause-ownership suites.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Stage the fsck repair pipeline along existing call-graph seams"
+      },
       "created_at": "2026-09-02T01:46:08Z",
       "jira_id": "4591367",
       "jira_key": "REB-4424",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:11Z"
     },
@@ -8001,6 +8074,13 @@
       "peer_parent": "REB-1003",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:58Z"
+    },
+    "21de-f9d9-475f-414c": {
+      "created_at": "2026-09-02T02:59:06Z",
+      "jira_id": "4591387",
+      "jira_key": "REB-4444",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:10Z"
     },
     "21fb-f4cd-3eaa-4b60": {
       "created_at": "2026-08-15T14:53:58Z",
@@ -8225,6 +8305,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:05Z"
+    },
+    "22ec-e638-c896-4b54": {
+      "created_at": "2026-09-02T02:59:13Z",
+      "jira_id": "4591388",
+      "jira_key": "REB-4445",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:16Z"
     },
     "22f5-5a48-3ab1-463e": {
       "created_at": "2026-08-15T14:54:06Z",
@@ -11336,6 +11423,13 @@
       "peer_parent": "REB-2557",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:13Z"
+    },
+    "2dbf-07bf-452d-4543": {
+      "created_at": "2026-09-02T02:59:20Z",
+      "jira_id": "4591389",
+      "jira_key": "REB-4446",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:23Z"
     },
     "2dc4-9bcd-75b9-4544": {
       "baseline": {
@@ -14485,6 +14579,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:27Z"
     },
+    "38ab-928f-edf3-4d0b": {
+      "created_at": "2026-09-02T02:59:26Z",
+      "jira_id": "4591390",
+      "jira_key": "REB-4447",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:29Z"
+    },
     "38be-a778-43f5-4a4e": {
       "created_at": "2026-08-15T14:56:28Z",
       "jira_key": "REB-1022",
@@ -14861,6 +14962,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:36Z"
     },
+    "3a46-32f3-2753-4632": {
+      "created_at": "2026-09-02T02:59:33Z",
+      "jira_id": "4591391",
+      "jira_key": "REB-4448",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:36Z"
+    },
     "3a52-2d79-320d-4fed": {
       "baseline": {
         "assignee": {
@@ -15085,6 +15193,13 @@
       "peer_parent": "REB-1580",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:43Z"
+    },
+    "3b66-615c-fbfb-4b1f": {
+      "created_at": "2026-09-02T02:59:38Z",
+      "jira_id": "4591392",
+      "jira_key": "REB-4449",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:41Z"
     },
     "3b69-8208-bfd2-4fff": {
       "baseline": {
@@ -15417,6 +15532,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:01Z"
     },
+    "3c2f-01aa-7ea1-409b": {
+      "created_at": "2026-09-02T02:59:44Z",
+      "jira_id": "4591393",
+      "jira_key": "REB-4450",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:48Z"
+    },
     "3c55-2af3-0c9c-4b11": {
       "created_at": "2026-08-15T14:57:01Z",
       "jira_key": "REB-942",
@@ -15535,10 +15657,24 @@
     },
     "3cef-c948-68ba-40fd": {
       "baseline": {
-        "assignee": null,
-        "description": "## Summary\n\nOn 2026-09-01 the Gerrit `LLM-Review` bot on `rebar-gerrit` fail-closed reviews because root disk reached 91-95%; review clones/materializations hit ENOSPC and surfaced as `coverage-gap (review-error)`. Manual recovery required `docker builder prune -f` without `--keep-storage`, proving the automated prune could not reclaim below its 5GB build-cache floor. Operator approved implementing both fixes A+B.\n\n## Root cause\n\n1. `infra/scripts/autodeploy.sh` always runs `docker builder prune -f --keep-storage \"$BUILD_CACHE_KEEP\"` (`BUILD_CACHE_KEEP=5GB`), even on acute pressure/no-op tick paths. At the incident cache size (5.244GB), automated prune freed ~0.\n2. The review hot path starts clones/materializations without checking free disk first. In particular, `src/rebar/review_bot/voter.py` clones into `tempfile.TemporaryDirectory(prefix=\"reviewbot-\")` on the root temp volume, while `repo_snapshot.py` materializes into the snapshot-store volume.\n\n## Approved implementation plan\n\n### A. Acute pressure reclaim tier\n\nKeep normal warm-cache behavior unchanged. Add `DISK_PRESSURE_HARD_PCT` default 90, above existing soft `DISK_PRESSURE_PCT=80`. When root used-% is at or above the hard threshold, `prune_docker_caches()` escalates BuildKit reclaim to `docker builder prune -f` with keep->0 (no `--keep-storage`), best-effort/non-fatal and `timeout 120` bounded like existing docker calls. Measure before/after root filesystem bytes and log bytes actually freed; success evidence is `bytes_freed > 0`, not invocation.\n\n### B. Low-disk admission control\n\nAdd a target-path free-space helper in `src/rebar/_snapshot/janitor.py` (`shutil.disk_usage(path)`) and `REBAR_GATE_MIN_FREE_GIB` default 2. This independent knob is a hard pre-clone admission floor; existing janitor watermarks remain cleanup targets.\n\nCheck the target volume before cloning/materializing:\n\n- In `src/rebar/review_bot/voter.py`, immediately before `TemporaryDirectory` / `gc.clone_change_ref`, measure `tempfile.gettempdir()`.\n- In `src/rebar/_snapshot/repo_snapshot.py` / `src/rebar/llm/gate_source.py`, measure the snapshot-store path before attested snapshot clone/materialize.\n\nBelow the floor, do not clone. For the Gerrit voter, synthesize a decision with `verdict=\"BLOCK\"`, `gap_reason=\"low-disk\"`, and a first-line message using the existing tag grammar: `[LLM-Review: BLOCK \u2014 coverage-gap (low-disk)] ...`. Define `_TAG_SUFFIXES[\"low-disk\"] = \"BLOCK \u2014 coverage-gap (low-disk)\"` and add `low-disk` to `adapter.RETRYABLE_GAP_REASONS`; keep `retrigger.py` parsing compatible.\n\nIn `_handle_retryable_gap`, add an explicit `low-disk` arm: under budget it defers vote-less exactly like existing ADR 0069 retryable gaps; at/over the low-disk budget it returns/logs a distinct no-vote exhausted-deferral result (`gap_reason=\"low-disk\"`, labels unchanged). It must skip `append_retries_exhausted_note`, skip fail-closed `LLM-Review -1`, and skip `VOTER_ERROR` for low-disk only. Existing exhaustion behavior for non-low-disk review errors/coverage gaps is unchanged. Document this special case in ADR 0069, ADR 0077, `docs/review-policy.md`, and `src/rebar/_guides/passing-code-review.md`.\n\n## Acceptance Criteria\n\n- [ ] Hard-pressure reclaim: with root used-% >= `DISK_PRESSURE_HARD_PCT` and enough reclaimable build-cache excess, automated reclaim uses emergency keep->0 builder prune, measures/logs `bytes_freed > 0`, and the test fixture returns below soft `DISK_PRESSURE_PCT`; proof in `tests/unit/test_autodeploy_prune.py` and/or `tests/scripts/test_autodeploy_disk_pressure.py`.\n- [ ] Warm-cache regression: below `DISK_PRESSURE_HARD_PCT`, `prune_docker_caches()` still uses `--keep-storage \"$BUILD_CACHE_KEEP\"`; proof in `tests/unit/test_autodeploy_prune.py`.\n- [ ] Review-bot low-disk admission: when `tempfile.gettempdir()` free space is below `REBAR_GATE_MIN_FREE_GIB`, `voter.py` does not create the clone and defers retryably/vote-less through ADR 0069; proof by focused voter test simulating low free space and asserting no clone/vote.\n- [ ] Exhausted low-disk budget: if low-disk retries are exhausted, labels remain unchanged/no `LLM-Review -1`; proof by focused voter test contrasting `gap_reason=\"low-disk\"` with ordinary `gap_reason=\"review-error\"` exhaustion.\n- [ ] Snapshot low-disk admission: when the snapshot-store volume is below `REBAR_GATE_MIN_FREE_GIB`, snapshot materialization aborts before clone with a retryable low-disk condition; proof around `repo_snapshot.py` / `gate_source.py`.\n- [ ] Distinct semantics: `low-disk` uses literal suffix `BLOCK \u2014 coverage-gap (low-disk)` and is distinct from genuine coverage/review errors; proof by tag/vocabulary and routing tests.\n- [ ] Portability: all reclaim/admission logic is in-process/operation-linked, with no CI-provider dependency.\n\n## Testing / Verification\n\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/unit/test_autodeploy_prune.py tests/scripts/test_autodeploy_disk_pressure.py -q`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest <focused low-disk review admission/voter tests> -q`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n\n## File impact\n\n`infra/scripts/autodeploy.sh`; `tests/unit/test_autodeploy_prune.py`; `tests/scripts/test_autodeploy_disk_pressure.py`; `src/rebar/_snapshot/janitor.py`; `src/rebar/_snapshot/repo_snapshot.py`; `src/rebar/llm/gate_source.py`; `src/rebar/review_bot/voter.py`; `src/rebar/review_bot/adapter.py`; `src/rebar/review_bot/retrigger.py`; `docs/review-policy.md`; `src/rebar/_guides/passing-code-review.md`; `docs/adr/0069-retryable-coverage-gap-bounded-deferral.md`; `docs/adr/0077-code-review-voter-four-pass-rewire.md`; focused tests.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Summary\n\nOn 2026-09-01 the Gerrit `LLM-Review` bot on `rebar-gerrit` fail-closed reviews because root disk reached 91-95%; review clones/materializations hit ENOSPC and surfaced as `coverage-gap (review-error)`. Change 2481 exhausted its retry budget to a spurious LLM-Review -1. Recovery required manual `docker builder prune -f` without `--keep-storage`, proving automated prune could not reclaim below its 5GB build-cache floor. Operator approved implementing fixes A+B.\n\n## Root cause\n\n1. `infra/scripts/autodeploy.sh` always runs `docker builder prune -f --keep-storage \"$BUILD_CACHE_KEEP\"`, even on acute pressure/no-op tick paths. At 5.244GB cache, automated prune freed ~0.\n2. The review hot path starts clones/materializations without checking free disk first. `voter.py` clones into `tempfile.TemporaryDirectory(prefix=\"reviewbot-\")` on the root temp volume; `repo_snapshot.py` materializes into the snapshot-store volume.\n\n## Approved implementation plan\n\n### A. Acute pressure reclaim tier\n\nKeep normal warm-cache behavior unchanged. Add `DISK_PRESSURE_HARD_PCT` default 90, above soft `DISK_PRESSURE_PCT=80`. When root used-% is at/above hard threshold, `prune_docker_caches()` escalates BuildKit reclaim to `docker builder prune -f` with keep->0 (no `--keep-storage`), best-effort/non-fatal and `timeout 120` bounded like existing docker calls. Measure before/after root filesystem bytes and log bytes actually freed; success evidence is `bytes_freed > 0`, not invocation.\n\n### B. Low-disk admission control\n\nAdd target-path free-space helper in `src/rebar/_snapshot/janitor.py` (`shutil.disk_usage(path)`) and `REBAR_GATE_MIN_FREE_GIB` default 2. This is a hard pre-clone admission floor; existing janitor watermarks remain cleanup targets.\n\nCheck target volume before cloning/materializing:\n\n- In `src/rebar/review_bot/voter.py`, before `TemporaryDirectory` / `gc.clone_change_ref`, measure `tempfile.gettempdir()`.\n- In `src/rebar/_snapshot/repo_snapshot.py` / `src/rebar/llm/gate_source.py`, measure the snapshot-store path before attested snapshot clone/materialize.\n\nRepresent low disk explicitly. Snapshot admission raises a dedicated `LowDiskError` (or returns an equivalent low-disk sentinel) with target path/free/floor. `gate_source.py` maps that condition into structured coverage as `coverage[\"low_disk\"] = True` and preserves details; `adapter._coverage_gap_reason` gains a first branch `if coverage.get(\"low_disk\"): return \"low-disk\"`. Do not let low disk fall through to generic `review-error`.\n\nFor the Gerrit voter pre-clone guard, synthesize a decision with `verdict=\"BLOCK\"`, `gap_reason=\"low-disk\"`, and first line `[LLM-Review: BLOCK \u2014 coverage-gap (low-disk)] ...`. Define `_TAG_SUFFIXES[\"low-disk\"] = \"BLOCK \u2014 coverage-gap (low-disk)\"`; add `low-disk` to `adapter.RETRYABLE_GAP_REASONS`; keep `retrigger.py` parsing the existing `coverage-gap (<reason>)` grammar.\n\nIn `_handle_retryable_gap`, add explicit low-disk semantics. Under budget it defers vote-less like existing ADR 0069 retryable gaps. At/over the low-disk budget it returns `deferred_result` with a terminal status such as `deferred-exhausted`, `gap_reason=\"low-disk\"`, writes/logs an operator-visible neutral Gerrit comment/status explaining low disk exhausted retry holdback and that a `recheck`/new patchset will retry after disk remediation, but leaves labels unchanged: no `LLM-Review -1`, no `append_retries_exhausted_note`, no `VOTER_ERROR`. This converges safely by making the change non-submittable due to missing LLM vote while avoiding a false code veto; explicit recheck/new patchset remains the recovery path after the host is healthy. Existing exhaustion behavior for non-low-disk review errors/coverage gaps is unchanged. Document in ADR 0069, ADR 0077, `docs/review-policy.md`, and `src/rebar/_guides/passing-code-review.md`.\n\n## Acceptance Criteria\n\n- [ ] Hard-pressure reclaim: root used-% >= `DISK_PRESSURE_HARD_PCT` with enough reclaimable build-cache excess causes emergency keep->0 builder prune, logs/measures `bytes_freed > 0`, and fixture returns below soft `DISK_PRESSURE_PCT`; proof in `tests/unit/test_autodeploy_prune.py` and/or `tests/scripts/test_autodeploy_disk_pressure.py`.\n- [ ] Warm-cache regression: below `DISK_PRESSURE_HARD_PCT`, `prune_docker_caches()` still uses `--keep-storage \"$BUILD_CACHE_KEEP\"`; proof in `tests/unit/test_autodeploy_prune.py`.\n- [ ] Review-bot low-disk admission: below `REBAR_GATE_MIN_FREE_GIB` on `tempfile.gettempdir()`, `voter.py` does not create the clone and defers retryably/vote-less through ADR 0069; proof by focused voter test asserting no clone/vote.\n- [ ] Exhausted low-disk budget: labels remain unchanged/no `LLM-Review -1`, with a neutral operator-visible exhausted-deferral result recoverable by recheck/new patchset; proof contrasts `low-disk` with `review-error` exhaustion.\n- [ ] Snapshot low-disk admission: below `REBAR_GATE_MIN_FREE_GIB` on the snapshot-store volume, materialization aborts before clone with `coverage[\"low_disk\"]` -> `gap_reason=\"low-disk\"`; proof around `repo_snapshot.py` / `gate_source.py` / adapter coverage routing.\n- [ ] Distinct semantics: literal suffix `BLOCK \u2014 coverage-gap (low-disk)` and routing tests distinguish low-disk from genuine coverage/review errors.\n- [ ] Portability: all reclaim/admission logic is in-process/operation-linked, with no CI-provider dependency.\n\n## Testing / Verification\n\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/unit/test_autodeploy_prune.py tests/scripts/test_autodeploy_disk_pressure.py -q`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest <focused low-disk review admission/voter tests> -q`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n\n## File impact\n\n`infra/scripts/autodeploy.sh`; `tests/unit/test_autodeploy_prune.py`; `tests/scripts/test_autodeploy_disk_pressure.py`; `src/rebar/_snapshot/janitor.py`; `src/rebar/_snapshot/repo_snapshot.py`; `src/rebar/llm/gate_source.py`; `src/rebar/review_bot/voter.py`; `src/rebar/review_bot/adapter.py`; `src/rebar/review_bot/retrigger.py`; `docs/review-policy.md`; `src/rebar/_guides/passing-code-review.md`; `docs/adr/0069-retryable-coverage-gap-bounded-deferral.md`; `docs/adr/0077-code-review-voter-four-pass-rewire.md`; focused tests.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Disk-pressure reclaim cannot reach the build-cache floor under acute pressure, and the review clone path has no near-full admission control \u2014 review-bot fail-closes again"
       },
       "created_at": "2026-09-01T23:30:20Z",
@@ -15750,7 +15886,7 @@
     "3e03-786b-cdc7-460b": {
       "baseline": {
         "assignee": null,
-        "description": "# Fix f449 ADR citation for unbounded Jira DC reindex support\n\n## Problem\nThe f449 ticket description and `src/rebar/_engine/rebar_reconciler/snapshot_lagfree_refresh.py` module docstring cite \"ADR 0037 s3\" for the unbounded Jira DC reindex behavior, but ADR 0037 is `oss-contribution-intake-posture`. The cited support lives in `docs/adr/0055-jira-family-sub-seam.md` around line 282.\n\n## Acceptance criteria\n- [ ] The f449-era description/docstring reference no longer points readers to ADR 0037 for Jira DC reindex behavior.\n- [ ] `snapshot_lagfree_refresh.py` cites `docs/adr/0055-jira-family-sub-seam.md` (or ADR 0055) for the Jira-family sub-seam/reindex support.\n- [ ] Any related documentation wording remains consistent with the actual ADR titles and section content.",
+        "description": "# Fix f449 ADR citation for unbounded Jira DC reindex support\n\n## Problem\nThe f449 ticket description still cites \"ADR 0037 s3\" for the unbounded Jira DC reindex behavior, but ADR 0037 is now `oss-contribution-intake-posture`. The renumbered ADR that owns the **unbounded** Jira search-index-lag rule is `docs/adr/0085-reconciler-live-validation-harness.md` \u00a73 (\"Eventual-consistency discipline for live probes\"). The Jira-family sub-seam context for DC search-index lag is also recorded in `docs/adr/0055-jira-family-sub-seam.md`, in the \"Search-index lag\" row around line 282.\n\nThe current `src/rebar/_engine/rebar_reconciler/snapshot_lagfree_refresh.py` module docstring already cites ADR 0055 rather than ADR 0037; this ticket will make that docstring citation explicit and consistent by naming `docs/adr/0055-jira-family-sub-seam.md` / the \"Search-index lag\" row, and by citing ADR 0085 \u00a73 only for the unbounded-index-lag claim.\n\n## Scope\nIn scope for this ticket:\n- the f449 ticket description text (`f449-be6a-be56-4fef`, alias `seagreen-fortuitous-crayfish`);\n- `src/rebar/_engine/rebar_reconciler/snapshot_lagfree_refresh.py` module docstring only;\n- `docs/adr/0055-jira-family-sub-seam.md` only if the ADR wording itself needs consistency (expected read-only).\n\nOut of scope: other ADR 0037 references in live-harness/test documentation. A repo-wide grep will be reported so non-f449 stale references are visible, but this bug's fix is limited to the f449-era description/docstring citation.\n\n## Verification plan\n- Inspect `docs/adr/0037-oss-contribution-intake-posture.md` to confirm ADR 0037 is the GitHub PR / OSS contribution posture ADR, not Jira DC reindex support.\n- Inspect `docs/adr/0085-reconciler-live-validation-harness.md` \u00a73 to confirm the unbounded search-index-lag statement.\n- Inspect `docs/adr/0055-jira-family-sub-seam.md` around the \"Search-index lag\" row to confirm the Jira-family sub-seam citation target.\n- Run `grep -nE '\\bADR 0037\\b|0037 s3|oss-contribution-intake-posture|\\bADR 0055\\b|0055-jira-family-sub-seam|\\bADR 0085\\b' src/rebar/_engine/rebar_reconciler/snapshot_lagfree_refresh.py` and inspect the f449 description to prove the in-scope stale citation is gone and the replacement citation points to ADR 0055 / ADR 0085 according to each ADR's actual title and section content.\n- Run `grep -rnE '\\bADR 0037\\b|0037 s3' . | grep -iE 'reindex|Jira DC|Lucene|unbounded'` and record the hits, classifying each as in-scope (fixed here) or out-of-scope (reported).\n- Run the project verification commands (`make lint && make typecheck && make test`) after the docstring-only code change.\n\n## Acceptance criteria\n- [ ] The f449 ticket description no longer points readers to ADR 0037 / `oss-contribution-intake-posture` for Jira DC reindex behavior; it points the unbounded-index-lag claim to ADR 0085 \u00a73 and the Jira-family search-index-lag context to ADR 0055 / `docs/adr/0055-jira-family-sub-seam.md` instead.\n- [ ] `src/rebar/_engine/rebar_reconciler/snapshot_lagfree_refresh.py` cites `docs/adr/0055-jira-family-sub-seam.md` or ADR 0055 for the Jira-family sub-seam/search-index-lag support, cites ADR 0085 \u00a73 only for the unbounded search-index-lag rule if it uses that claim, and contains no `ADR 0037` / `0037 s3` Jira-DC-reindex citation.\n- [ ] A repo-wide grep for `ADR 0037` / `0037 s3` near `reindex`, `Jira DC`, `Lucene`, or `unbounded` is recorded, with in-scope hits fixed here and any out-of-scope hits explicitly reported.\n- [ ] Project verification is green with the worktree virtualenv first on `PATH`.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Fix f449 ADR citation for unbounded Jira DC reindex support"
@@ -16537,9 +16673,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Summary\n\nCurrent `origin/main` already contains the bug-2f46 core decoupling: `run_http_with_grace` drives certified-op drain through `InFlightGauge`/`drain_then_exit` and gives uvicorn a separate short graceful-shutdown timeout. This ticket closes the approved 2026-09-01 DECISION by making that separation explicit and durable for the parentless 40a7 bug: name the uvicorn timer as a transport backstop, set its concrete default to 30 seconds, preserve compatibility for existing callers, and add direct tests for the two shutdown directions the incident requires.\n\nThe certified-op drain grace remains `DEFAULT_SHUTDOWN_GRACE_SECONDS = 1200`. That value is the primary drain deadline for in-flight certified ops and is enforced by `drain_then_exit`; it is not uvicorn's `timeout_graceful_shutdown`.\n\nDeadline-elapse disposition: if the certified-op drain deadline expires while the gauge is still busy, the retiring process sets `server.should_exit`; uvicorn begins graceful shutdown and the in-flight client receives the terminal shutdown/connection disposition from the transport. That is distinct from the idle path, where `should_exit` is set only after the gauge is already idle and uvicorn's short backstop sweeps idle held-open streams.\n\n## Acceptance Criteria\n\n- [ ] `src/rebar/_mcp_health.py` exports `DEFAULT_UVICORN_BACKSTOP_SECONDS = 30` as the named uvicorn transport backstop.\n- [ ] Existing imports of `DEFAULT_UVICORN_GRACEFUL_SECONDS` remain compatible as an alias for the new backstop constant.\n- [ ] `run_http_with_grace` passes uvicorn `timeout_graceful_shutdown=int(uvicorn_backstop_seconds)` instead of using the certified-op `grace_seconds` value.\n- [ ] `run_http_with_grace` preserves the existing keyword `uvicorn_graceful_seconds` as a backward-compatible override for callers while documenting `uvicorn_backstop_seconds` as the preferred name.\n- [ ] `drain_then_exit` still uses `grace_seconds` as the certified-op drain deadline.\n- [ ] The SIGTERM handler calls `gauge.begin_draining()` immediately when retirement starts.\n- [ ] The SIGTERM handler sets `server.should_exit` only after the gauge is idle or the certified-op drain deadline elapses.\n- [ ] An idle-gauge retirement test proves `server.should_exit` is set immediately/quickly with `grace_seconds=1200`, demonstrating the early-exit path is well under the certified-op grace.\n- [ ] A busy-gauge retirement test injects a small `grace_seconds` and a shorter uvicorn backstop value and proves `server.should_exit` is not set until the gauge drains or the injected certified-op deadline elapses, so the short uvicorn backstop does not cut short an in-flight certified op.\n- [ ] The change is self-contained in in-process MCP shutdown logic and does not depend on any CI provider or deployment-specific external service.\n\n## Testing\n\n- Focused: `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/interfaces/facades/test_mcp_http_transport.py -k \"mcp_retirement or run_http_with_grace or drain_then_exit or sigterm\"`\n- Lint: `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- Typecheck: `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n- Gerrit: land only after `LLM-Review +1`, `Verified +1`, and no unresolved comments.",
+        "description": "## Summary\n\nCurrent `origin/main` already contains the bug-2f46 core decoupling: `run_http_with_grace` drives certified-op drain through `InFlightGauge`/`drain_then_exit` and gives uvicorn a separate short graceful-shutdown timeout. This ticket closes the approved 2026-09-01 DECISION by making that separation explicit and durable for the parentless 40a7 bug: name the uvicorn timer as a transport backstop, set its concrete default to 30 seconds, preserve compatibility for existing callers, and add direct tests for the two shutdown directions the incident requires.\n\nThe certified-op drain grace remains `DEFAULT_SHUTDOWN_GRACE_SECONDS = 1200`. That value is the primary drain deadline for in-flight certified ops and is enforced by `drain_then_exit`; it is not uvicorn's `timeout_graceful_shutdown`.\n\nDeadline-elapse disposition: if the certified-op drain deadline expires while the gauge is still busy, the retiring process sets `server.should_exit`; uvicorn begins graceful shutdown and the in-flight client receives the terminal shutdown/connection disposition from the transport. That is distinct from the idle path, where `should_exit` is set only after the gauge is already idle and uvicorn's short backstop sweeps idle held-open streams.\n\n## Acceptance Criteria\n\n- [x] `src/rebar/_mcp_health.py` exports `DEFAULT_UVICORN_BACKSTOP_SECONDS = 30` as the named uvicorn transport backstop.\n- [x] Existing imports of `DEFAULT_UVICORN_GRACEFUL_SECONDS` remain compatible as an alias for the new backstop constant.\n- [x] `run_http_with_grace` passes uvicorn `timeout_graceful_shutdown=int(uvicorn_backstop_seconds)` instead of using the certified-op `grace_seconds` value.\n- [x] `run_http_with_grace` preserves the existing keyword `uvicorn_graceful_seconds` as a backward-compatible override for callers while documenting `uvicorn_backstop_seconds` as the preferred name.\n- [x] `drain_then_exit` still uses `grace_seconds` as the certified-op drain deadline.\n- [x] The SIGTERM handler calls `gauge.begin_draining()` immediately when retirement starts.\n- [x] The SIGTERM handler sets `server.should_exit` only after the gauge is idle or the certified-op drain deadline elapses.\n- [x] An idle-gauge retirement test proves `server.should_exit` is set immediately/quickly with `grace_seconds=1200`, demonstrating the early-exit path is well under the certified-op grace.\n- [x] A busy-gauge retirement test injects a small `grace_seconds` and a shorter uvicorn backstop value and proves `server.should_exit` is not set until the gauge drains or the injected certified-op deadline elapses, so the short uvicorn backstop does not cut short an in-flight certified op.\n- [x] The change is self-contained in in-process MCP shutdown logic and does not depend on any CI provider or deployment-specific external service.\n\n## Testing\n\n- Focused: `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/interfaces/facades/test_mcp_http_transport.py -k \"mcp_retirement or run_http_with_grace or drain_then_exit or sigterm\"`\n- Lint: `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- Typecheck: `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n- Gerrit: land only after `LLM-Review +1`, `Verified +1`, and no unresolved comments.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "mcp retirement should codify a short uvicorn backstop separate from certified-op drain grace"
       },
       "created_at": "2026-08-27T01:17:54Z",
@@ -18813,9 +18949,17 @@
       "updated_at": "2026-08-15T14:58:24Z"
     },
     "4ac6-9eb3-b0a5-408f": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/_mcp_health.py:103-789` aggregates startup handshake, instrumentation, health routing, request lifecycle, transport, and shutdown at 789 lines. The maintainer approved only the cohesive handshake extraction, not a broader lifecycle redesign.\n\n## Approach\n\nMove the existing startup-handshake call-graph cluster into one focused sibling module. Keep `_mcp_health` as the compatibility and orchestration facade and retain its existing handshake exports. This buys module headroom while minimizing operational behavior change.\n\n## Scope\n\n- `src/rebar/_mcp_health.py`\n- new focused handshake sibling under `src/rebar/`\n- `src/rebar/mcp_server.py` only if import wiring requires it\n- MCP startup/health tests\n\nCascade flag: true. Recensus semantic, string, dynamic import, and monkeypatch references before moving symbols.\n\n## Testing\n\nPreserve successful and failed startup handshakes, signer binding, route readiness, offload/instrumentation ordering, and shutdown/transport behavior through the existing focused suites.\n\n## Acceptance Criteria\n\n- [ ] Only the cohesive startup-handshake cluster is extracted and `_mcp_health` remains the lifecycle/orchestration facade.\n- [ ] Existing handshake symbols and public/dynamic patch targets continue resolving through `_mcp_health`.\n- [ ] `wire_health` ordering, health routes, signer binding, instrumentation/offload, SIGTERM, transport, and shutdown behavior are unchanged.\n- [ ] MCP startup-handshake and health-store suites plus module-size and complexity gates pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Extract only the MCP startup-handshake call-graph unit"
+      },
       "created_at": "2026-09-02T01:46:13Z",
       "jira_id": "4591368",
       "jira_key": "REB-4425",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:16Z"
     },
@@ -21293,6 +21437,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-18T16:43:21Z"
     },
+    "545a-4db5-3a64-42d9": {
+      "created_at": "2026-09-02T02:59:51Z",
+      "jira_id": "4591394",
+      "jira_key": "REB-4451",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:54Z"
+    },
     "5462-5b1e-21b3-4082": {
       "baseline": {
         "assignee": null,
@@ -23530,9 +23681,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Problem\n\nPinning uv (bug 56b7-b21a-c8ab-4afc) removed the VERSION-RESOLUTION manifest fetch, but CI still makes one network call to `raw.githubusercontent.com` per job, so the `##[error]fetch failed` failure mode that killed run 33214025855 is still reachable.\n\nVerified on run 33230196661 (change 2367 patchset 1), five jobs sampled, all identical:\n\n    Found version for uv in /home/runner/work/rebar/rebar/pyproject.toml: 0.12.7\n    Fetching manifest data from https://raw.githubusercontent.com/astral-sh/versions/main/v1/uv.ndjson ...\n    Successfully installed uv version 0.12.7\n\nThe version came from the local pin \u2014 no `Could not determine uv version` line \u2014 and the manifest was fetched anyway.\n\n## Root cause\n\n`setup-uv` has a SECOND, independent manifest consumer. `setupUv` (`src/setup-uv.ts`) calls `tryGetFromToolCache`; on a miss it calls `downloadVersion`, whose first statement is:\n\n    const artifact = await getArtifact(version, arch, platform, manifestUrl);   // src/download/download-version.ts:42\n\nThe manifest supplies the download URL and sha256, so it is fetched unconditionally regardless of how the version was resolved. A GitHub-hosted runner starts each job with an empty uv tool cache, so the miss is guaranteed. This is unchanged in v10.0.1, the newest release. A committed local manifest does not help: `fetchManifestResponse` uses Node `fetch()`, which rejects `file:` URLs, and `manifest-file` is documented as a URL.\n\n## Candidate approaches (choose ONE during planning; none is pre-selected here)\n\n- Restore the uv binary into the runner tool cache with `actions/cache` keyed on the pinned version, so `tryGetFromToolCache` hits and `downloadVersion` never runs. Trades a raw.githubusercontent.com dependency for a GitHub-cache-service dependency, which is a different and better-instrumented failure domain \u2014 but it is still a network dependency, so state that honestly rather than claiming zero.\n- Install uv without the action (direct download from `releases.astral.sh` at the pinned version with a committed sha256, mirroring the `acli` precedent in `docs/jira-sync-setup.md`). Removes the manifest entirely; costs the action's caching and PATH wiring, which would have to be reimplemented at 25 call sites or in one composite action.\n- Upstream a change to `astral-sh/setup-uv` that skips `getArtifact` when the version is exact and the checksum is already in `KNOWN_CHECKSUMS`, then bump the pin.\n\n## Acceptance Criteria\n\n- [ ] A real CI log for the change contains the liveness anchor `Successfully installed uv version <pinned>` AND zero occurrences of `Fetching manifest data`; both greps recorded verbatim on this ticket. The anchor is asserted FIRST \u2014 a zero-match grep alone is also produced by an empty log or a skipped step, which is how an empty `gh run view --job=N --log` scored a clean vacuous pass during 56b7's verification.\n- [ ] The installed uv version in that same log still equals the pin in `pyproject.toml`, so the fix does not silently change which uv runs.\n- [ ] Whatever residual network dependency the chosen approach retains is named explicitly in the change description; the change does not claim 'no network dependency' unless the log shows zero external fetches in the install path.",
+        "description": "## Problem\n\nPinning uv (bug 56b7-b21a-c8ab-4afc) removed the VERSION-RESOLUTION manifest fetch, but CI still makes one network call to `raw.githubusercontent.com` per job, so the `##[error]fetch failed` failure mode that killed run 33214025855 is still reachable.\n\nVerified on run 33230196661 (change 2367 patchset 1), five jobs sampled, all identical:\n\n    Found version for uv in /home/runner/work/rebar/rebar/pyproject.toml: 0.12.7\n    Fetching manifest data from https://raw.githubusercontent.com/astral-sh/versions/main/v1/uv.ndjson ...\n    Successfully installed uv version 0.12.7\n\nThe version came from the local pin \u2014 no `Could not determine uv version` line \u2014 and the manifest was fetched anyway.\n\n## Root cause\n\n`setup-uv` has a SECOND, independent manifest consumer. `setupUv` (`src/setup-uv.ts`) calls `tryGetFromToolCache`; on a miss it calls `downloadVersion`, whose first statement is:\n\n    const artifact = await getArtifact(version, arch, platform, manifestUrl);   // src/download/download-version.ts:42\n\nThe manifest supplies the download URL and sha256, so it is fetched unconditionally regardless of how the version was resolved. A GitHub-hosted runner starts each job with an empty uv tool cache, so the miss is guaranteed. This is unchanged in v10.0.1, the newest release. A committed local manifest does not help: `fetchManifestResponse` uses Node `fetch()`, which rejects `file:` URLs, and `manifest-file` is documented as a URL.\n\n## Candidate approaches (choose ONE during planning; none is pre-selected here)\n\n- Restore the uv binary into the runner tool cache with `actions/cache` keyed on the pinned version, so `tryGetFromToolCache` hits and `downloadVersion` never runs. Trades a raw.githubusercontent.com dependency for a GitHub-cache-service dependency, which is a different and better-instrumented failure domain \u2014 but it is still a network dependency, so state that honestly rather than claiming zero.\n- Install uv without the action (direct download from `releases.astral.sh` at the pinned version with a committed sha256, mirroring the `acli` precedent in `docs/jira-sync-setup.md`). Removes the manifest entirely; costs the action's caching and PATH wiring, which would have to be reimplemented at 25 call sites or in one composite action.\n- Upstream a change to `astral-sh/setup-uv` that skips `getArtifact` when the version is exact and the checksum is already in `KNOWN_CHECKSUMS`, then bump the pin.\n\n## Acceptance Criteria\n\n- [x] A real CI log for the change contains the liveness anchor `Successfully installed uv version <pinned>` AND zero occurrences of `Fetching manifest data`; both greps recorded verbatim on this ticket. The anchor is asserted FIRST \u2014 a zero-match grep alone is also produced by an empty log or a skipped step, which is how an empty `gh run view --job=N --log` scored a clean vacuous pass during 56b7's verification.\n- [x] The installed uv version in that same log still equals the pin in `pyproject.toml`, so the fix does not silently change which uv runs.\n- [x] Whatever residual network dependency the chosen approach retains is named explicitly in the change description; the change does not claim 'no network dependency' unless the log shows zero external fetches in the install path.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "setup-uv fetches the version manifest for the artifact URL on every job even when uv is pinned"
       },
       "created_at": "2026-08-29T03:35:12Z",
@@ -24822,6 +24973,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:52Z"
     },
+    "6262-84da-b9f9-46d8": {
+      "created_at": "2026-09-02T02:59:55Z",
+      "jira_id": "4591395",
+      "jira_key": "REB-4452",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T02:59:58Z"
+    },
     "626d-0c60-0b4f-49ed": {
       "baseline": {
         "assignee": null,
@@ -24972,6 +25130,13 @@
       "peer_parent": "REB-4267",
       "state": "confirmed",
       "updated_at": "2026-09-01T01:23:54Z"
+    },
+    "62eb-5e6f-512a-420d": {
+      "created_at": "2026-09-02T03:00:01Z",
+      "jira_id": "4591396",
+      "jira_key": "REB-4453",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:00:04Z"
     },
     "62ec-3eb8-45ec-496c": {
       "baseline": {
@@ -25779,6 +25944,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-18T23:37:11Z"
     },
+    "6640-ac11-5c55-46b5": {
+      "created_at": "2026-09-02T03:00:05Z",
+      "jira_id": "4591397",
+      "jira_key": "REB-4454",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:00:08Z"
+    },
     "6642-814b-8bc5-4ff4": {
       "baseline": {
         "assignee": {
@@ -26482,6 +26654,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:26Z"
     },
+    "6850-af5c-a4a1-4c5d": {
+      "created_at": "2026-09-02T03:00:11Z",
+      "jira_id": "4591398",
+      "jira_key": "REB-4455",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:00:15Z"
+    },
     "68cb-504d-8c57-487e": {
       "baseline": {
         "assignee": null,
@@ -27111,6 +27290,13 @@
       "peer_parent": "REB-4040",
       "state": "confirmed",
       "updated_at": "2026-08-31T07:00:03Z"
+    },
+    "6ba3-6406-cba1-4f04": {
+      "created_at": "2026-09-02T03:00:15Z",
+      "jira_id": "4591399",
+      "jira_key": "REB-4456",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:00:19Z"
     },
     "6ba6-ae90-28a6-4394": {
       "created_at": "2026-08-15T15:01:52Z",
@@ -28182,6 +28368,13 @@
       "jira_key": "REB-1031",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:16Z"
+    },
+    "70f5-2253-1671-474d": {
+      "created_at": "2026-09-02T03:00:23Z",
+      "jira_id": "4591400",
+      "jira_key": "REB-4457",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:00:26Z"
     },
     "7153-e5ad-5e20-4ae9": {
       "baseline": {
@@ -29571,6 +29764,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T01:24:39Z"
     },
+    "7545-9faa-0dd0-4f92": {
+      "created_at": "2026-09-02T03:00:27Z",
+      "jira_id": "4591401",
+      "jira_key": "REB-4458",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:00:31Z"
+    },
     "754c-f6bd-0326-4ee8": {
       "baseline": {
         "assignee": {
@@ -30623,6 +30823,13 @@
       "peer_parent": "REB-1225",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:15Z"
+    },
+    "79fb-2c91-241c-4a9d": {
+      "created_at": "2026-09-02T03:00:35Z",
+      "jira_id": "4591402",
+      "jira_key": "REB-4459",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:00:40Z"
     },
     "7a03-74f2-e812-4104": {
       "baseline": {
@@ -32567,6 +32774,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:06Z"
     },
+    "828b-fe4a-b05a-48fb": {
+      "created_at": "2026-09-02T03:00:45Z",
+      "jira_id": "4591403",
+      "jira_key": "REB-4460",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:00:48Z"
+    },
+    "82bb-439b-1c42-4abd": {
+      "created_at": "2026-09-02T03:00:51Z",
+      "jira_id": "4591404",
+      "jira_key": "REB-4461",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:00:54Z"
+    },
     "82c4-de24-bef8-49a5": {
       "created_at": "2026-08-15T15:04:06Z",
       "jira_key": "REB-1607",
@@ -33340,6 +33561,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:22Z"
     },
+    "852a-1e41-632d-4087": {
+      "created_at": "2026-09-02T03:00:58Z",
+      "jira_id": "4591405",
+      "jira_key": "REB-4462",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:01Z"
+    },
     "8537-78ba-fe3f-42d9": {
       "baseline": {
         "assignee": {
@@ -33831,9 +34059,17 @@
       "updated_at": "2026-08-24T19:40:51Z"
     },
     "86c0-59ec-a28b-4f7c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nAt the audited snapshot, `src/rebar/llm/config.py` was 799 lines and `LLMConfig.from_env` occupied lines 566-768. ADR 0056 and closed ticket `candied-senseless-squirrel` anticipated this next headroom breach.\n\n## Approach\n\nKeep `LLMConfig.from_env` as the sole precedence and composition facade. Extract cohesive table-driven readers for model/provider, budgets, tracing, web, and path settings into focused sibling modules. Preserve current precedence, validation, defaults, and patch-visible exports during this extraction; the separately ADR-gated internal-shim work may later migrate private compatibility paths.\n\n## Scope\n\n- `src/rebar/llm/config.py`\n- focused LLM configuration reader siblings\n- `tests/unit/test_config_llm.py` and config precedence/patch tests\n\nCascade flag: true. Recensus semantic, string, dynamic-import, environment, and monkeypatch references.\n\n## Testing\n\nUse table-driven cases for config-file, environment, explicit override, malformed value, missing value, and cross-field precedence.\n\n## Acceptance Criteria\n\n- [ ] Model/provider, budget, tracing, web, and path parsing are owned by cohesive readers without duplicating precedence logic.\n- [ ] `LLMConfig.from_env` remains the only composition/precedence facade.\n- [ ] Existing defaults, validation failures, environment/config precedence, and patch-visible behavior are byte/value equivalent.\n- [ ] Focused config tests plus module-size, complexity, lint, and typecheck gates pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Extract cohesive table-driven LLM configuration readers"
+      },
       "created_at": "2026-09-02T01:46:18Z",
       "jira_id": "4591369",
       "jira_key": "REB-4426",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:21Z"
     },
@@ -34123,9 +34359,17 @@
       "updated_at": "2026-08-15T15:04:35Z"
     },
     "87cb-7121-a3b6-4606": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nTrack I of the stability program (plan: `.scratch/stability-analysis/11-plan-v3.md` \u00a72, evidence `09-complete-picture.md`, grounding `12a/12b/12c`). The defect stream's introduction-side engines, from a 120-bug mechanism-read sample (R2S1, seed 20260831): gate-runtime 20.8%, product-logic representation drift (dominant sub-mechanism of 18.3%), test isolation under ~90-worktree parallelism (15.8%); amplified by 56% of fixes adding a new mechanism. This epic ships the four introduction-reducing programs as six vertical, independently-landable child slices. Track II (loop integrity: gate runtime, store staging) is separate work and NOT in scope here.\n\n## Approach\n\nEach child is a vertical slice: one enforcement mechanism or measurement shipped end-to-end (implementation + tests + docs + `make lint`/CI wiring where applicable). No child consumes an artifact produced by a sibling, so children are order-independent and may run in parallel under `next-batch`. Grounding constraints honored: enforcement is deterministic and harness-neutral (make lint / Verified lane / collection-time checks \u2014 never prose or harness hooks); each mechanism added names what bounds it (the ratchet itself is the bound for the epic's own additions); patterns follow the repo's existing generated-registry and shrink-only-baseline precedents.\n\n## Acceptance criteria\n\n- [ ] AC1 (child: MCP parity gate): a deterministic drift gate cross-checks the MCP tool surface against the library facade and fails `make lint` on divergence, with a regression test proving it fires on a seeded mismatch.\n- [ ] AC2 (child: mirror sweep): a committed inventory of remaining hand-maintained representation mirrors exists under reports/, and every live mirror found is either gated/generated or has a linked child/discovered_from ticket.\n- [ ] AC3 (child: subprocess-isolation enforcement): the unit tier fails at collection time when a subprocess-spawning test does not take its isolation root from the harness, with a test proving the check fires.\n- [ ] AC4 (child: cache keying): shared-mutable-state-across-workers defects of the completion-cache class are prevented by per-isolation-root keying/reset, with a regression test for the shared-temp-file pattern.\n- [ ] AC5 (child: mechanism ratchet): `scripts/check_mechanism_delta.py` runs in `make lint` against a committed shrink-only baseline keyed per (kind, name), failing on any unjustified mechanism addition, with tests covering add/remove/justified-exception paths.\n- [ ] AC6 (child: upstream measurement): the three measurement reads (rework vs change size/files-touched; 20 CI-at-landing regressions; environment failures) are published under reports/ with per-case tables, and the size-rule enforcement decision is recorded either way.\n- [ ] AC7 (documentation): each shipped gate/check is documented where its siblings are (docs/ + the check script's --help), and docs drift gates stay green.\n\nProgram-level exit metrics (scoreboard, not close criteria): per-class bug counts at zero for 30 days per gated mirror / isolation class; additive-fix share \u226430% sustained.\n\n## File impact scope\n\nContainer epic \u2014 no direct code; see children's file impacts.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Track I \u2014 Reduce defect introduction: drift parity, isolation enforcement, mechanism ratchet, upstream measurement"
+      },
       "created_at": "2026-09-02T01:46:24Z",
       "jira_id": "4591370",
       "jira_key": "REB-4427",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:26Z"
     },
@@ -35433,9 +35677,17 @@
       "updated_at": "2026-09-01T01:25:33Z"
     },
     "8ce5-b870-601d-4715": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nThe one confirmed ungated representation mirror (12a Part 1): `scripts/gen_api_surface.py` + `tests/unit/api_surface_baseline.json` gate the library's public surface, and `scripts/gen_mcp_reference.py` generates docs from the MCP registrar \u2014 but nothing cross-checks the MCP tool surface against the library facade, so the two can drift silently (the S1 sample's live example: MCP tool signatures diverging from the library surface). Precedent: Kubernetes `hack/verify-generated.sh` (regen-in-isolated-worktree + diff); the repo's own generated-registry pattern.\n\n## Approach\n\nIntrospect the MCP registrar's tool inventory (names, parameters, defaults) and the library facade functions they wrap; emit a normalized parity manifest; a `--check` mode diffs against the committed manifest and fails on divergence, wired into `make lint`. Regeneration documented in the script's --help. Where a tool intentionally diverges from the facade (e.g., enumerated MCP params vs **fields passthrough \u2014 the known edit_ticket case), the manifest records the divergence explicitly so drift is still caught relative to the declared shape.\n\n## Acceptance criteria\n\n- [ ] AC1: a script produces a normalized MCP\u2194library parity manifest and `--check` fails (exit != 0) when either side drifts from the committed manifest.\n- [ ] AC2: `make lint` runs the check; a seeded mismatch (test fixture) proves it fires RED.\n- [ ] AC3: intentional divergences are declared in the manifest with a reason field, and an undeclared divergence still fails.\n- [ ] AC4: regeneration is one documented command; docs updated where the sibling generators are documented.\n\n## File impact\n\n- scripts/check_mcp_library_parity.py (new; or extend gen_api_surface.py \u2014 decide at implementation against the existing script's structure)\n- tests/unit/test_mcp_library_parity.py (new)\n- Makefile (lint target wiring)\n- docs/mcp-reference.md or docs/reuse-surface.md (regeneration note)",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "MCP-tool-surface vs library-facade parity gate"
+      },
       "created_at": "2026-09-02T01:46:26Z",
       "jira_id": "4591371",
       "jira_key": "REB-4428",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:28Z"
     },
@@ -35887,6 +36139,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-28T12:17:37Z"
     },
+    "8e5c-5c73-d540-41db": {
+      "created_at": "2026-09-02T03:01:05Z",
+      "jira_id": "4591406",
+      "jira_key": "REB-4463",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:08Z"
+    },
     "8e6f-3ad2-1f24-4b8b": {
       "baseline": {
         "assignee": null,
@@ -36012,6 +36271,13 @@
       "peer_parent": "REB-2574",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:24Z"
+    },
+    "8eff-87c1-d09a-4893": {
+      "created_at": "2026-09-02T03:01:12Z",
+      "jira_id": "4591407",
+      "jira_key": "REB-4464",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:15Z"
     },
     "8f14-9ee8-0f02-4d5c": {
       "baseline": {
@@ -36544,9 +36810,17 @@
       "updated_at": "2026-08-22T18:38:37Z"
     },
     "90e2-6d13-ecfb-4131": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`tests/unit/workflow/test_executor_tripwire.py:20-93` checks imports and prose but cannot detect a hand-written retry loop. ADR 0065 requires the synchronous workflow engine to invoke an effectful step once rather than scheduling bespoke retries.\n\n## Approach\n\nAdd a behavioral tripwire whose effectful step increments an external observation and raises. Execute it through the production interpreter and assert one invocation, serial ordering, and immediate propagation. Retain current source/import checks as secondary architecture diagnostics.\n\n## Scope\n\n- `tests/unit/workflow/test_executor_tripwire.py`\n- existing workflow test fixtures needed to execute the real interpreter\n\n## Testing\n\nCover a raising effectful step, an ordinary successful sequence, and a later step that must remain uncalled after failure.\n\n## Acceptance Criteria\n\n- [ ] A raising effectful step is observed exactly once through the production workflow runtime.\n- [ ] No downstream step runs after the injected failure and execution remains serial.\n- [ ] The successful multi-step control still executes each step once in declared order.\n- [ ] Existing import/prose tripwires remain as secondary diagnostics and the focused workflow suite passes.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Add a behavioral single-invocation workflow oracle"
+      },
       "created_at": "2026-09-02T01:46:29Z",
       "jira_id": "4591372",
       "jira_key": "REB-4429",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:31Z"
     },
@@ -36733,6 +37007,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:43Z"
+    },
+    "91b0-6185-b53c-4271": {
+      "created_at": "2026-09-02T03:01:18Z",
+      "jira_id": "4591408",
+      "jira_key": "REB-4465",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:21Z"
     },
     "91e7-7159-8af1-4d4d": {
       "baseline": {
@@ -39504,9 +39785,17 @@
       "updated_at": "2026-08-16T19:33:49Z"
     },
     "9ca8-675e-4dfb-427d": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\n56% of sampled fixes add a new mechanism (lock, knob, env var, gate script, fixture, helper, flag) vs 30% pure logic fixes (R2S1) \u2014 the surface that produces future defect classes grows with every fix cycle. Confirmed genuinely new (12a: no unified detector exists); per-kind precedents prove detectability (check_config_reads.py AST detector, gen_env_registry.py). Pattern: the repo's own shrink-only complexity baseline (scripts/check_complexity_baseline.py, 644 lines: baseline JSON, --check fails on new>0/increased>0, --update-stale maintenance). Baseline keyed per (kind, name) \u2014 never a scalar sum \u2014 per the ESLint eslint-suppressions.json shape (12c), so one kind cannot be traded against another. 2026 grounding (12b): counter-pressure to general mechanism entropy (toggle-mining: deletions lag additions 13\u201335%), not an AI-specific premise.\n\n## Approach\n\nscripts/check_mechanism_delta.py detecting, per repo state (not per diff \u2014 state-diffing the baseline is simpler and equivalent): lock classes/lock files; REBAR_* env vars (reuse gen_env_registry's detector); rebar.toml keys (reuse the config schema); scripts/check_*.py + inline workflow run: steps; autouse fixtures; tests/_*.py helpers; feature flags. Baseline .github/mechanism-baseline.json keyed {kind: {name: 1}}; --check fails on any name present in the tree but absent from baseline (a NEW mechanism) unless the introducing change carries a declared justification consumed by the DET floor; removal of a name auto-shrinks via --update-stale (maintenance-only). Wire into make lint (and thus pre-commit + the Verified lane). CLI flags mirror the complexity baseline's real interface (--check / --update-stale \u2014 12a corrected v3's \"--lock\").\n\n## Acceptance criteria\n\n- [ ] AC1: the script detects all seven mechanism kinds with zero false positives on the current tree (baseline locked at introduction).\n- [ ] AC2: --check exits non-zero when a new (kind,name) appears without justification; a seeded test proves each kind fires.\n- [ ] AC3: mechanism removal passes and --update-stale drains the entry (shrink-only semantics identical to the complexity baseline).\n- [ ] AC4: make lint runs the check; the justified-exception path is documented and itself greppable/countable.\n- [ ] AC5: docs section explains the ratchet, its kinds, and the exception discipline.\n\n## File impact\n\n- scripts/check_mechanism_delta.py (new)\n- .github/mechanism-baseline.json (new, locked at introduction)\n- Makefile (lint wiring)\n- tests/scripts/test_check_mechanism_delta.py (new)\n- docs (contributor-facing ratchet note where the complexity ratchet is documented)",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Deterministic mechanism-delta ratchet: check_mechanism_delta.py with per-(kind,name) shrink-only baseline"
+      },
       "created_at": "2026-09-02T01:46:34Z",
       "jira_id": "4591373",
       "jira_key": "REB-4430",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:36Z"
     },
@@ -40474,9 +40763,17 @@
       "updated_at": "2026-08-15T15:07:25Z"
     },
     "a07a-5eeb-1223-491c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`src/rebar/_engine/rebar_reconciler/adapters/jira/backend.py:319-357` and `adapters/jira_datacenter/backend.py:529-559` duplicate fallback, direction, deduplication, and observation construction. `jira_family/link_direction.py:1-58` records prior one-sided drift.\n\n## Approach\n\nPlace one pure canonicalizer beside the existing Jira-family direction seam. It parses raw `issuelinks`, determines inward/outward direction, handles malformed or unmapped links, deduplicates, and returns canonical link observations. Cloud and Data Center keep separate transports and delegate to it. The provider-neutral desired-versus-observed diff remains unchanged.\n\n## Scope\n\n- Jira Cloud and Data Center adapter link extraction\n- `src/rebar/_engine/rebar_reconciler/jira_family/link_direction.py`\n- shared behavior vectors and adapter delegation tests\n\nCascade flag: true. Recensus semantic, string, dynamic-import, and monkeypatch consumers before moving behavior.\n\n## Testing\n\nRun identical vectors through both adapters for inward/outward links, malformed payloads, unmapped types, duplicates, and empty input.\n\n## Acceptance Criteria\n\n- [ ] One pure Jira-family function owns link parsing, direction, fallback, deduplication, and canonical observation construction.\n- [ ] Cloud and Data Center transports remain separate and both delegate to the shared function.\n- [ ] Shared vectors prove both delegates produce identical canonical observations for all supported and fallback cases.\n- [ ] Provider-neutral relation contracts and desired-versus-observed diff behavior remain unchanged.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Centralize Jira-family link canonicalization across Cloud and Data Center"
+      },
       "created_at": "2026-09-02T01:46:36Z",
       "jira_id": "4591374",
       "jira_key": "REB-4431",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:39Z"
     },
@@ -41662,6 +41959,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T23:36:52Z"
     },
+    "a516-e61b-ede9-465c": {
+      "created_at": "2026-09-02T03:01:21Z",
+      "jira_id": "4591409",
+      "jira_key": "REB-4466",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:24Z"
+    },
     "a532-4e67-562c-4893": {
       "created_at": "2026-08-15T15:07:53Z",
       "jira_key": "REB-1411",
@@ -41997,6 +42301,20 @@
       "peer_parent": "REB-3270",
       "state": "confirmed",
       "updated_at": "2026-08-19T21:44:02Z"
+    },
+    "a691-3cb9-7d1d-4ef1": {
+      "created_at": "2026-09-02T03:01:24Z",
+      "jira_id": "4591410",
+      "jira_key": "REB-4467",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:27Z"
+    },
+    "a691-f454-92c5-49bd": {
+      "created_at": "2026-09-02T03:01:30Z",
+      "jira_id": "4591411",
+      "jira_key": "REB-4468",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:32Z"
     },
     "a698-8f9c-ca13-4266": {
       "baseline": {
@@ -42887,9 +43205,17 @@
       "updated_at": "2026-08-31T23:33:39Z"
     },
     "aa9e-3d35-fd3e-41ee": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nNine real scanner integration tests skip when binaries are absent at `tests/unit/test_code_review_conflict_markers.py:97-158`, `test_code_review_public_exposure.py:109-151`, and `test_code_review_ws5.py:347-399`. Verified installs neither scanner although `infra/compose/Dockerfile.reviewbot:43-71` makes them runtime prerequisites.\n\n## Approach\n\nCreate one checked-in scanner lock manifest consumed by the review-bot image and CI provisioning. Pin Semgrep and Gitleaks versions plus artifact hashes. Add a native-binary Make target that fails on missing/wrong binaries and runs the focused integration tests. Invoke it from a reusable parallel workflow used by mirror CI and the exact-patchset Gerrit lane, and include that job in `vote.needs`.\n\nDo not build Docker, install OpenGrep, or add this target to normal `make lint`/default local tests.\n\n## Scope\n\n- scanner version manifest and review-bot Dockerfile\n- provisioning helper and explicit Make target\n- scanner integration tests\n- reusable mirror/Gerrit workflow and Verified parity guard\n\n## Testing\n\nProve missing binary, wrong version/hash, valid Semgrep rule, and valid Gitleaks secret/SARIF behavior. Exercise workflow wiring and `vote.needs` parity structurally.\n\n## Acceptance Criteria\n\n- [ ] Semgrep and Gitleaks versions and downloadable artifact hashes are single-sourced and consumed by deployment plus CI.\n- [ ] The explicit native-binary target fails for missing or wrong scanners and passes the nine real integration contracts.\n- [ ] One parallel reusable lane serves mirror CI and exact Gerrit patchsets and is required by the Verified vote.\n- [ ] OpenGrep, Docker-image builds, normal `make lint`, and default local tests remain outside scope.\n- [ ] The lane's expected cold-run cost is documented as approximately 1.5-3 runner-minutes without extending the existing 22-23 minute critical path when capacity is available.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Run pinned deployed Semgrep and Gitleaks contracts in Verified"
+      },
       "created_at": "2026-09-02T01:46:42Z",
       "jira_id": "4591375",
       "jira_key": "REB-4432",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:45Z"
     },
@@ -44758,9 +45084,17 @@
       "updated_at": "2026-08-18T15:43:31Z"
     },
     "b0ac-3c0f-3f64-4344": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nThe second half of the isolation class (R2S1 category f): shared mutable state across concurrent workers/writers \u2014 the completion-cache temp-file collision fixed instance-by-instance in 89981d8e (two concurrent closes derived the same <criterion-hash>.tmp name; one silently lost its write). The class is \"a process-derived name or process-local cache shared across concurrent contexts\"; instances keep recurring because each fix is local. This story retires the class one place at a time: an audited pass over cache/temp-artifact naming in src/rebar, converting shared-name patterns to per-writer/per-root unique naming (tempfile.mkstemp or root-keyed paths) with a shared helper.\n\n## Approach\n\n(1) Enumerate cache-write and temp-artifact sites in src/rebar (grep .tmp, NamedTemporaryFile, mkstemp, cache-file writes; plus module-level mutable caches without root keying). (2) Classify: already-unique / shared-name-hazard / root-unkeyed-cache. (3) Introduce one helper (unique-temp-then-rename with root-scoped placement) and convert the hazard sites to it. (4) Regression test in the writer-storm shape: two concurrent writers to the same logical cache, both writes land.\n\n## Acceptance criteria\n\n- [ ] AC1: an enumerated site table (in the change description or a committed note) classifies every cache/temp write site found, with file:line.\n- [ ] AC2: every shared-name-hazard site uses the unique-write helper; no site derives a temp name solely from content/criterion hash.\n- [ ] AC3: a concurrency regression test (two writers, same logical target) passes with the helper and fails RED against the old shared-name pattern.\n- [ ] AC4: the helper documented where the isolation helpers are documented.\n\n## File impact\n\n- src/rebar/_store or src/rebar/_io (the unique-write helper; exact home decided against existing structure)\n- the hazard sites found by the enumeration (llm/completion cache and peers)\n- tests/unit/test_unique_cache_writes.py (new)",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Key process-local caches and shared temp artifacts by isolation root"
+      },
       "created_at": "2026-09-02T01:46:47Z",
       "jira_id": "4591376",
       "jira_key": "REB-4433",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:49Z"
     },
@@ -45364,6 +45698,13 @@
       "jira_key": "REB-282",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:18Z"
+    },
+    "b35a-abf6-02fd-4b31": {
+      "created_at": "2026-09-02T03:01:33Z",
+      "jira_id": "4591412",
+      "jira_key": "REB-4469",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:36Z"
     },
     "b394-6198-6010-42f7": {
       "baseline": {
@@ -49006,6 +49347,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-30T03:37:55Z"
     },
+    "c181-20a2-1976-4d5d": {
+      "created_at": "2026-09-02T03:01:39Z",
+      "jira_id": "4591413",
+      "jira_key": "REB-4470",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:42Z"
+    },
+    "c195-03cd-fc03-4ae0": {
+      "created_at": "2026-09-02T03:01:46Z",
+      "jira_id": "4591414",
+      "jira_key": "REB-4471",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:48Z"
+    },
     "c1bf-475a-5bbc-4976": {
       "created_at": "2026-08-15T15:10:39Z",
       "jira_key": "REB-561",
@@ -50914,6 +51269,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-22T18:38:41Z"
     },
+    "cacb-8d57-efff-4ab1": {
+      "created_at": "2026-09-02T03:01:53Z",
+      "jira_id": "4591415",
+      "jira_key": "REB-4472",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:56Z"
+    },
     "caed-6c07-2a14-4ef9": {
       "created_at": "2026-08-15T15:11:27Z",
       "jira_key": "REB-1259",
@@ -51638,6 +52000,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:40Z"
     },
+    "cdc4-2896-50a8-4af3": {
+      "created_at": "2026-09-02T03:01:56Z",
+      "jira_id": "4591416",
+      "jira_key": "REB-4473",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:01:59Z"
+    },
     "cdcb-8be8-425f-48ed": {
       "baseline": {
         "assignee": null,
@@ -51659,9 +52028,17 @@
       "updated_at": "2026-08-15T15:11:41Z"
     },
     "cdf9-7623-2ecc-4ce6": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`tests/unit/test_config_surface_golden.py:47-69` iterates only names already present in the golden although `docs/api-stability.md:27,30-33` promises compatibility aliases and tombstones. At the audited snapshot, 52 live keys and 53 canonical environment names were absent, so an unregistered addition can later disappear without the removal oracle noticing.\n\n## Approach\n\nDerive the live canonical schema-key and environment-name sets and require both directions: every golden entry is valid and every live canonical name is enrolled. Keep explicit alias and tombstone records as the only accepted removal path. This strengthens the existing golden instead of adding another registry.\n\n## Scope\n\n- `tests/unit/test_config_surface_golden.py`\n- the existing config-surface golden data/generator\n- canonical config and environment registries only as needed to expose deterministic inventory\n\n## Testing\n\nExercise missing-live-name, stale-golden-name, explicit-alias, and tombstone controls; regenerate the checked-in golden deterministically.\n\n## Acceptance Criteria\n\n- [ ] Adding a live canonical schema key without golden enrollment fails a focused test.\n- [ ] Adding a live canonical environment name without golden enrollment fails a focused test.\n- [ ] Explicit aliases and tombstones remain accepted and continue to prove removals.\n- [ ] The regenerated golden is deterministic and the config-surface suite passes.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Make config-surface golden enrollment bidirectional"
+      },
       "created_at": "2026-09-02T01:46:50Z",
       "jira_id": "4591377",
       "jira_key": "REB-4434",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:52Z"
     },
@@ -51954,6 +52331,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:47Z"
+    },
+    "ce8f-4da9-2836-4115": {
+      "created_at": "2026-09-02T03:02:04Z",
+      "jira_id": "4591417",
+      "jira_key": "REB-4474",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:02:07Z"
     },
     "ce94-8621-497a-4528": {
       "baseline": {
@@ -56242,7 +56626,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Summary\nCI for Gerrit change 2480 exposed a py3.11 xdist leak: `tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip` created `.rebar-test-sidecar-material` under `Path.cwd()` / repo root. During xdist, another test could snapshot repo root while that directory existed and fail in `tests/conftest.py::_no_repo_root_leaks`.\n\n## Root cause\nThe test fixture used a repo-root scratch directory for its synthetic tracker. That directory was briefly visible to unrelated tests. The fix uses pytest `tmp_path`, which is per-test disposable storage outside the checkout.\n\n## Acceptance Criteria\n- [x] `test_legacy_payloads_without_material_still_round_trip` writes its synthetic tracker under `tmp_path`, not `Path.cwd()` / repo root.\n- [x] The targeted sidecar-material test passes.\n- [ ] The 29a6 Gerrit change 2480 Verified gate no longer fails on `.rebar-test-sidecar-material` repo-root leakage.\n\n## Testing\n- `python -m pytest tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip -q` \u2014 passed.\n- `python -m pytest tests/scripts/test_autodeploy_mcp_bluegreen.py::test_port_exhausted_routine_backoff_does_not_inflate_deploy_errors tests/scripts/test_autodeploy_mcp_bluegreen.py::test_low_memory_routine_backoff_does_not_inflate_deploy_errors tests/scripts/test_autodeploy_mcp_bluegreen.py::test_mcp_failure_keeps_the_deploy_failed_metric_and_names_the_component -q` \u2014 passed.\n- `make lint` \u2014 passed.\n- Gerrit change 2480 Verified rerun pending.",
+        "description": "## Summary\nCI for Gerrit change 2480 exposed a py3.11 xdist leak: `tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip` created `.rebar-test-sidecar-material` under `Path.cwd()` / repo root. During xdist, another test could snapshot repo root while that directory existed and fail in `tests/conftest.py::_no_repo_root_leaks`.\n\n## Root cause\nThe test fixture used a repo-root scratch directory for its synthetic tracker. That directory was briefly visible to unrelated tests. The fix uses pytest `tmp_path`, which is per-test disposable storage outside the checkout.\n\n## Acceptance Criteria\n- [x] `test_legacy_payloads_without_material_still_round_trip` writes its synthetic tracker under `tmp_path`, not `Path.cwd()` / repo root.\n- [x] The targeted sidecar-material test passes.\n- [x] The 29a6 Gerrit change 2480 Verified gate no longer fails on `.rebar-test-sidecar-material` repo-root leakage.\n\n## Testing\n- `python -m pytest tests/unit/test_completion_sidecar_material_balding.py::test_legacy_payloads_without_material_still_round_trip -q` \u2014 passed.\n- `python -m pytest tests/scripts/test_autodeploy_mcp_bluegreen.py::test_port_exhausted_routine_backoff_does_not_inflate_deploy_errors tests/scripts/test_autodeploy_mcp_bluegreen.py::test_low_memory_routine_backoff_does_not_inflate_deploy_errors tests/scripts/test_autodeploy_mcp_bluegreen.py::test_mcp_failure_keeps_the_deploy_failed_metric_and_names_the_component -q` \u2014 passed.\n- `make lint` \u2014 passed.\n- Gerrit change 2480 Verified rerun pending.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Completion sidecar material test leaks repo-root scratch dir under xdist"
@@ -58235,6 +58619,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:01Z"
     },
+    "e54e-b184-2b0b-42c3": {
+      "created_at": "2026-09-02T03:02:07Z",
+      "jira_id": "4591418",
+      "jira_key": "REB-4475",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:02:10Z"
+    },
     "e594-e1d0-74f4-4d40": {
       "baseline": {
         "assignee": null,
@@ -58752,6 +59143,13 @@
       "jira_key": "REB-1338",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:16Z"
+    },
+    "e755-9371-7951-454a": {
+      "created_at": "2026-09-02T03:02:14Z",
+      "jira_id": "4591419",
+      "jira_key": "REB-4476",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:02:17Z"
     },
     "e759-c562-e233-4108": {
       "baseline": {
@@ -60092,9 +60490,17 @@
       "updated_at": "2026-09-01T03:44:48Z"
     },
     "ec79-7afb-c6a8-4af9": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`tests/unit/test_mcp_on_box_infra.py:122-176` searches Dockerfile text, so a later broken final stage can still pass. `tests/unit/test_review_bot.py:1944-1972` and `test_mcp_on_box_infra.py:97-101` accept commands that merely contain loopback health tokens without opening a socket.\n\n## Approach\n\nParse the shipped final Docker stage and inspect its effective entrypoint, installed artifacts, and health command. Execute the configured health command against controlled good and bad listeners so the oracle observes a real socket and response. Keep this in the portable Python test path; do not require Docker.\n\n## Scope\n\n- `tests/unit/test_mcp_on_box_infra.py`\n- `tests/unit/test_review_bot.py`\n- `infra/compose/Dockerfile.mcp`\n- `infra/compose/Dockerfile.reviewbot`\n- `infra/compose/docker-compose.yml`\n\n## Testing\n\nAdd a broken trailing-stage fixture, a no-op URL-print command, a healthy listener, and malformed/closed-listener controls.\n\n## Acceptance Criteria\n\n- [ ] A broken shipped final stage fails even when an earlier stage retains all expected tokens.\n- [ ] A command that only prints the health URL fails the oracle.\n- [ ] The real configured health command succeeds against a valid listener and fails on closed or malformed response paths.\n- [ ] The focused tests run without Docker and leave normal local/default test dependencies unchanged.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Parse shipped container stages and prove live health-command semantics"
+      },
       "created_at": "2026-09-02T01:46:55Z",
       "jira_id": "4591378",
       "jira_key": "REB-4435",
+      "peer_parent": "REB-4421",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:46:58Z"
     },
@@ -60167,6 +60573,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:49Z"
+    },
+    "ecb4-ceda-e276-4efb": {
+      "created_at": "2026-09-02T03:02:18Z",
+      "jira_id": "4591420",
+      "jira_key": "REB-4477",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:02:23Z"
     },
     "ecb9-c81b-2e36-406f": {
       "created_at": "2026-08-15T15:14:50Z",
@@ -61487,6 +61900,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:19Z"
+    },
+    "f1a4-1b43-b720-4dab": {
+      "created_at": "2026-09-02T03:02:27Z",
+      "jira_id": "4591421",
+      "jira_key": "REB-4478",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:02:30Z"
     },
     "f1bc-75f6-ed8c-472f": {
       "baseline": {
@@ -62841,6 +63261,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:43Z"
     },
+    "f773-ba24-78ea-4f0d": {
+      "created_at": "2026-09-02T03:02:35Z",
+      "jira_id": "4591422",
+      "jira_key": "REB-4479",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:02:38Z"
+    },
     "f789-3f9d-8b35-4e0d": {
       "baseline": {
         "assignee": {
@@ -63593,9 +64020,17 @@
       "updated_at": "2026-08-15T15:15:56Z"
     },
     "f9b9-83ad-931c-4833": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nRepresentation drift (a schema/set/surface and a hand-maintained copy diverging) is the dominant sub-mechanism of the product-logic defect category (R2S1). Three mirror classes are already generated/gated (config\u2194docs via gen_config_reference.py, env-vars\u2194docs via gen_env_registry.py, library surface via gen_api_surface.py); the terminal-status set was unified by bug e63c; the MCP\u2194library gap is a sibling story. This task finds what else remains \u2014 unknown mirrors are unknown defect sources.\n\n## Approach\n\nSystematic sweep of src/rebar for hand-maintained duplicates of a canonical fact: enumerations duplicated across modules (status-like sets, error-code lists, event-type lists), doc tables restating code constants, schema fragments re-declared, hardcoded path/name lists mirroring a registry. Method: grep/AST passes for duplicate literal sets + cross-reference with schemas and generators; verify each candidate is a genuine mirror (same fact, two masters) not a distinct concept (the e63c audit's claimability-vs-terminal distinction). Deliverable is an inventory with dispositions; fixes land as follow-up tickets, not in this task.\n\n## Acceptance criteria\n\n- [ ] AC1: reports/stability/mirror-inventory.md committed, listing every candidate examined with verdict {genuine mirror / distinct concept / already gated} and file:line evidence.\n- [ ] AC2: every genuine live mirror has a linked ticket (discovered_from this task) proposing generate-or-gate using the existing pattern.\n- [ ] AC3: the inventory states the sweep method (patterns searched) so it is repeatable.\n- [ ] AC4: sibling story's mirror (MCP\u2194library) is referenced, not re-filed.\n\n## File impact\n\n- reports/stability/mirror-inventory.md (new; committed report)",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Representation-mirror inventory sweep: find and disposition remaining hand-maintained mirrors"
+      },
       "created_at": "2026-09-02T01:47:00Z",
       "jira_id": "4591379",
       "jira_key": "REB-4436",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:47:02Z"
     },
@@ -64491,6 +64926,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-30T01:11:32Z"
     },
+    "fd6b-09c5-8f76-45ad": {
+      "created_at": "2026-09-02T03:02:42Z",
+      "jira_id": "4591423",
+      "jira_key": "REB-4480",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:02:44Z"
+    },
     "fd71-a0a0-d9b0-4769": {
       "baseline": {
         "assignee": null,
@@ -64580,6 +65022,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:18Z"
+    },
+    "fdd1-12fa-ce83-45d1": {
+      "created_at": "2026-09-02T03:02:45Z",
+      "jira_id": "4591424",
+      "jira_key": "REB-4481",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T03:02:48Z"
     },
     "fde0-5020-5923-490f": {
       "baseline": {
@@ -67274,7 +67723,10 @@
     "1788311578205257001": "__rebar_unknown_comment_id__",
     "1788312076099055481": "__rebar_unknown_comment_id__",
     "1788312151582247001": "__rebar_unknown_comment_id__",
-    "1788313359490450001": "__rebar_unknown_comment_id__"
+    "1788313359490450001": "__rebar_unknown_comment_id__",
+    "1788313526371295001": "__rebar_unknown_comment_id__",
+    "1788313705266233001": "__rebar_unknown_comment_id__",
+    "1788314371620766378": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -70119,11 +70571,56 @@
     "REB-4434": "cdf9-7623-2ecc-4ce6",
     "REB-4435": "ec79-7afb-c6a8-4af9",
     "REB-4436": "f9b9-83ad-931c-4833",
+    "REB-4437": "038d-f5ff-b371-4ba5",
+    "REB-4438": "09f6-215a-34f4-4d89",
+    "REB-4439": "0cfc-e511-8f8a-4c8b",
     "REB-444": "1ba5-39de-2fc2-45f0",
+    "REB-4440": "0d3c-ff25-5317-4d73",
+    "REB-4441": "1c70-319a-2ded-43f9",
+    "REB-4442": "1daf-a435-2387-412c",
+    "REB-4443": "2164-97a8-ca89-4546",
+    "REB-4444": "21de-f9d9-475f-414c",
+    "REB-4445": "22ec-e638-c896-4b54",
+    "REB-4446": "2dbf-07bf-452d-4543",
+    "REB-4447": "38ab-928f-edf3-4d0b",
+    "REB-4448": "3a46-32f3-2753-4632",
+    "REB-4449": "3b66-615c-fbfb-4b1f",
     "REB-445": "30b3-b001-4ee2-43d2",
+    "REB-4450": "3c2f-01aa-7ea1-409b",
+    "REB-4451": "545a-4db5-3a64-42d9",
+    "REB-4452": "6262-84da-b9f9-46d8",
+    "REB-4453": "62eb-5e6f-512a-420d",
+    "REB-4454": "6640-ac11-5c55-46b5",
+    "REB-4455": "6850-af5c-a4a1-4c5d",
+    "REB-4456": "6ba3-6406-cba1-4f04",
+    "REB-4457": "70f5-2253-1671-474d",
+    "REB-4458": "7545-9faa-0dd0-4f92",
+    "REB-4459": "79fb-2c91-241c-4a9d",
     "REB-446": "b7fa-6e96-3b8a-40f4",
+    "REB-4460": "828b-fe4a-b05a-48fb",
+    "REB-4461": "82bb-439b-1c42-4abd",
+    "REB-4462": "852a-1e41-632d-4087",
+    "REB-4463": "8e5c-5c73-d540-41db",
+    "REB-4464": "8eff-87c1-d09a-4893",
+    "REB-4465": "91b0-6185-b53c-4271",
+    "REB-4466": "a516-e61b-ede9-465c",
+    "REB-4467": "a691-3cb9-7d1d-4ef1",
+    "REB-4468": "a691-f454-92c5-49bd",
+    "REB-4469": "b35a-abf6-02fd-4b31",
     "REB-447": "4a40-ea6e-d3f7-4af7",
+    "REB-4470": "c181-20a2-1976-4d5d",
+    "REB-4471": "c195-03cd-fc03-4ae0",
+    "REB-4472": "cacb-8d57-efff-4ab1",
+    "REB-4473": "cdc4-2896-50a8-4af3",
+    "REB-4474": "ce8f-4da9-2836-4115",
+    "REB-4475": "e54e-b184-2b0b-42c3",
+    "REB-4476": "e755-9371-7951-454a",
+    "REB-4477": "ecb4-ceda-e276-4efb",
+    "REB-4478": "f1a4-1b43-b720-4dab",
+    "REB-4479": "f773-ba24-78ea-4f0d",
     "REB-448": "db53-dcfc-18a9-4403",
+    "REB-4480": "fd6b-09c5-8f76-45ad",
+    "REB-4481": "fdd1-12fa-ce83-45d1",
     "REB-449": "b73c-648f-f44d-4ac5",
     "REB-45": "1fa8-9db4-7c1c-48f3",
     "REB-450": "e308-daf0-d765-40d3",
