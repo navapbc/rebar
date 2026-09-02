@@ -1,6 +1,6 @@
 # Repo-snapshot isolation for the code-reading gates
 
-The rebar LLM code-reading operations include `review_plan`, `verify_completion`, `review_code`, and `scan_spec`. Their CLI forms are `rebar review-plan`, `verify-completion`, `review`, `review-code`, and `scan-spec`, with `review` retained as an alias. These operations read project source code. Reading a shared mutable checkout previously allowed another task's branch or uncommitted edits to change the reviewed material. That caused a false-negative completion verdict and made the result non-reproducible.
+The rebar LLM code-reading operations include `review_plan`, `verify_completion`, `review_code`, and `scan_spec`. Their CLI forms are `rebar review-plan`, `verify-completion`, `review-code`, and `scan-spec`. These operations read project source code. Reading a shared mutable checkout previously allowed another task's branch or uncommitted edits to change the reviewed material. That caused a false-negative completion verdict and made the result non-reproducible.
 
 Every code-reading operation now accepts a client-selected `ref` and `source` mode. The default attested mode reads an immutable repository view. The local mode reads the in-place checkout. The design is grounded in Gitaly, Sourcegraph gitserver and zoekt, the GitHub tarball API, Bazel, ccache, Nix, and in-toto. See [ADR 0005](adr/0005-snapshot-cache-architecture.md) for the snapshot architecture and [ADR 0002](adr/0002-code-drift-invalidation.md) for drift and ref coherence.
 
