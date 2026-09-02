@@ -61,6 +61,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from rebar._store.fsutil import atomic_write
 from rebar.review_bot import voter as _voter
 from rebar.review_bot.config import ReceiverConfig, review_timeout_seconds
 from rebar.review_bot.dedup import DedupStore
@@ -168,15 +169,18 @@ def _read_cursor(path: str) -> str | None:
 
 
 def _write_cursor(path: str, value: str) -> None:
-    """Persist the cursor atomically (write-temp + replace) so a crash mid-write can
-    never leave a truncated cursor. Best-effort: a write failure is logged, not fatal —
-    the next pass just rescans a little more (still idempotent)."""
+    """Persist the cursor atomically (unique same-dir temp + ``os.replace``) so a crash
+    mid-write can never leave a truncated cursor. Best-effort: a write failure is logged,
+    not fatal — the next pass just rescans a little more (still idempotent).
+
+    The temp name comes from ``atomic_write``'s ``mkstemp`` (unique, ``O_EXCL``), never
+    from the target: a target-derived ``<cursor>.tmp`` is SHARED by every concurrent
+    writer, so the first ``replace`` consumes it and the second is silently lost here in
+    the ``except`` below (ticket b0ac-3c0f-3f64-4344)."""
     try:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(p.suffix + ".tmp")
-        tmp.write_text(value, encoding="utf-8")
-        tmp.replace(p)
+        atomic_write(p, value, encoding="utf-8")
     except OSError as exc:
         _emit("reconcile_cursor_write_error", error=str(exc), path=path)
 
