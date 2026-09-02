@@ -2,8 +2,8 @@
 
 Tier: scripts (imports the module directly; the pure summarize() seam needs no subprocess).
 
-The Gerrit `Verified` vote message is built by lfreleng-actions/gerrit-review-action as
-`"<STATUS>: <run URL>"`, with no input for custom text. So every -1 reads `CANCELLED: <url>`
+The Gerrit `Verified` vote helper preserves the original gerrit-review-action message shape,
+`"<STATUS>: <run URL>"`. So every -1 reads `CANCELLED: <url>`
 regardless of cause: a job that blew its `timeout-minutes` and a job that failed on stale-base
 version skew are indistinguishable from the vote, though only the second needs a rebase.
 

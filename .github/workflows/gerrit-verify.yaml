@@ -446,6 +446,7 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: |
+            scripts/cast_gerrit_verified_vote.py
             scripts/normalize_ci_conclusion.py
             scripts/summarize_ci_failures.py
           sparse-checkout-cone-mode: false
@@ -501,25 +502,27 @@ jobs:
           echo "WORKFLOW_CONCLUSION='${CONCLUSION}' failure_observed='${FAILURE_OBSERVED}' -> vote-type='${vote}'"
           echo "vote-type=${vote}" >> "$GITHUB_OUTPUT"
 
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Cast Verified from the CI conclusion — ticket adab closed-race guard.
       - name: Cast Verified from the CI conclusion
-        uses: lfreleng-actions/gerrit-review-action@a1c036a59b94c8ab89de26d378f6a28cc7378b13  # v1.1.2
-        with:
-          host: ${{ vars.GERRIT_SERVER }}
-          username: ${{ vars.GERRIT_SSH_USER }}
-          key: ${{ secrets.GERRIT_SSH_PRIVKEY }}
-          known_hosts: ${{ vars.GERRIT_KNOWN_HOSTS }}
-          gerrit-change-number: ${{ inputs.GERRIT_CHANGE_NUMBER }}
-          gerrit-patchset-number: ${{ inputs.GERRIT_PATCHSET_NUMBER }}
+        shell: bash
+        env:
+          GERRIT_SSH_PRIVKEY: ${{ secrets.GERRIT_SSH_PRIVKEY }}
+          GERRIT_KNOWN_HOSTS: ${{ vars.GERRIT_KNOWN_HOSTS }}
+          GERRIT_SERVER: ${{ vars.GERRIT_SERVER }}
+          GERRIT_SSH_USER: ${{ vars.GERRIT_SSH_USER }}
+          CHANGE_NUMBER: ${{ inputs.GERRIT_CHANGE_NUMBER }}
+          PATCHSET_NUMBER: ${{ inputs.GERRIT_PATCHSET_NUMBER }}
           # success -> Verified+1, failure|cancelled -> Verified-1 (fail-closed).
           # Fed the NORMALIZED conclusion (see the normalize step): `skipped`/empty is coerced
           # into the action's vote-type domain so it can never crash the cast pre-vote.
-          # The action's vote message embeds THIS run's URL — its cast is
-          # `review --message "<STATUS>: <server>/<repo>/actions/runs/<run_id>"` — so the
-          # Gerrit vote always links back to the CI run's log surface (the "run URL in the
-          # vote message" requirement). The action exposes NO input for custom message text
-          # (verified at this pin and on the action's current main; v1.1.2 is its latest tag),
-          # which is why the triage detail below is posted as a SEPARATE comment-only review.
-          vote-type: ${{ steps.normalize.outputs.vote-type }}
+          VOTE_TYPE: ${{ steps.normalize.outputs.vote-type }}
+          # The helper preserves gerrit-review-action's vote message shape:
+          # `review --message "<STATUS>: <server>/<repo>/actions/runs/<run_id>"`, so the
+          # Gerrit vote always links back to this run's log surface. Unlike the action,
+          # it can classify Gerrit's `fatal: change is closed` race as a benign no-op
+          # while preserving fail-closed behavior for every other vote failure.
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/cast_gerrit_verified_vote.py
 
       # ---- Observability only (ticket be9d-2f2d-47ca-45d2) ----------------------------
       # A `Verified -1` reads exactly `CANCELLED: <run URL>` whatever went wrong, so a job
