@@ -37,6 +37,7 @@ from rebar.llm.capabilities import (
 )
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError, LLMError
+from rebar.llm.keepalive import emit_keepalive
 from rebar.llm.model_classes import (
     build_fallback_model,
     drive_off_event_loop,
@@ -593,6 +594,7 @@ class PydanticAIRunner:
                 else (_target_ticket_ids[0] if _target_ticket_ids else "?")
             )
             _t0 = time.monotonic()
+            emit_keepalive("llm-call-start", operation=_call_label, started_at=_t0)
             # Widened from `dict[str, int]` for bug aec1: the run-shape keys merged in after a
             # successful call are not all ints (`finish_reason` is a string,
             # `top_repeated_tool_calls` a list of dicts). The token counters it carries are still

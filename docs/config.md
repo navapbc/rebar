@@ -468,6 +468,13 @@ Liveness is activity-based, not a total-runtime cap: the per-request read timeou
 total-runtime timeout truncates a healthy long run. The async stream-event idle-watchdog is
 deferred pending an async-runner migration (see the liveness ADR).
 
+**Supervisor stall budgets.** Gate operations (`review-plan`, `verify-completion`, and
+completion-gated closes) can run longer than common 600s "no output" supervisor watchdogs.
+rebar emits coalesced keepalive log lines between LLM/tool/workflow calls at the default
+WARNING level, but one very long request can still be silent for its whole duration. The
+`timeout = 600` default is per request, and a close can issue many requests, so supervisors
+that enforce no-output budgets should set those budgets above the expected whole gate run.
+
 **Derived step caps.** The per-run step budget is DERIVED from `max_steps` (env
 `REBAR_LLM_MAX_STEPS`), not a hardcoded 50: `request_limit = max(1, ceil(min_steps/2))`
 and `tool_calls_limit = max(8, min_steps)`. The gate VERIFIER ops apply a review floor
