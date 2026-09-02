@@ -48,7 +48,13 @@ def test_cursor_provenance_valid_and_idempotent(tmp_path) -> None:
     assert subprocess.run(["bash", "-n", str(_CURSOR_SH)], check=False).returncode == 0
     home = tmp_path / "home"
     home.mkdir()
-    env = {"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    # REBAR_ROOT is pinned because this hand-built env drops the tier's inherited
+    # isolation root; without it the child falls back to the real checkout.
+    env = {
+        "HOME": str(home),
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "REBAR_ROOT": str(home),
+    }
     for _ in range(2):
         r = subprocess.run(
             ["bash", str(_CURSOR_SH)], capture_output=True, text=True, env=env, check=False

@@ -42,7 +42,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.allow_unharnessed_subprocess(
+    "the shared helper imports the shipped package in a clean interpreter rooted at\n"
+    "the checkout to read the REAL step registry"
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _PLAN_REVIEW_YAML = REPO_ROOT / "src" / "rebar" / "llm" / "workflow" / "gates" / "plan-review.yaml"

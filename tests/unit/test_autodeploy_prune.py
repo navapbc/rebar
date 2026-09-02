@@ -92,7 +92,15 @@ bo_cnt=3
         ["bash", "-c", harness],
         capture_output=True,
         text=True,
-        env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path)},
+        # The env is deliberately minimal so the stub PATH is the only one the harness
+        # script can see. REBAR_ROOT is pinned explicitly because that minimal mapping
+        # drops the unit tier's inherited isolation root, and a child without it falls
+        # back to the git toplevel of its cwd — the real checkout.
+        env={
+            "PATH": f"{bindir}:/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "REBAR_ROOT": str(tmp_path),
+        },
         check=False,
     )
 
