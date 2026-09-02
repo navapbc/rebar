@@ -34,9 +34,19 @@ BESIDE `flagged`; `--labels-from-caused-by` labels each fix from the store's own
 links ("this fix's ticket was later named as the cause of another bug") and prints labelled
 recall + escalation rate per predicate, which is how the two signals are compared.
 
+`--all-work` switches to a WIDER corpus: every commit in a window, not just bug fixes. It
+emits the commit- and ticket-level change-shape distributions and their rank correlation
+with the offline rework signals (`caused_by` fan-in, plan-review and completion-gate rounds),
+plus the above/below split at the shipped threshold. It is the reproducible form of
+`reports/stability/change-shape-backtest.md` read (a), and — like every other mode here — it
+imports `count_non_test_diff_lines` / `is_test_path` / the threshold constant rather than
+re-deriving them. It stays OFFLINE (git + the local store only, no CI provider, no network);
+the report's Gerrit `Verified-1` figures need credentials and are not reproduced by it.
+
 Usage:  python scripts/backtest_bugfix_size.py [--rev-range origin/main] [--out artifact.json]
         python scripts/backtest_bugfix_size.py --check-planning-corpus [--out artifact.json]
         python scripts/backtest_bugfix_size.py --repeat-fix --labels-from-caused-by
+        python scripts/backtest_bugfix_size.py --all-work --since 2026-07-01 --until 2026-09-02
 """
 
 from __future__ import annotations
@@ -51,6 +61,9 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+from _backtest import all_work  # noqa: E402
 
 from rebar import config as _config  # noqa: E402
 from rebar._commands.verify_commit import extract_ticket_refs  # noqa: E402
@@ -341,10 +354,48 @@ def _corpus_label(sha: str, subject: str, tracker: str) -> str:
     return prefix
 
 
+def _run_all_work(args: argparse.Namespace, tracker: str) -> int:
+    """The all-work mode: the reproducible form of the change-shape backtest report.
+
+    Everything it measures is OFFLINE — git history plus the local ticket store — so it runs
+    with no CI provider and no network. The report's Gerrit `Verified-1` figures are
+    deliberately not reproduced here; they need authenticated Gerrit access.
+    """
+    report = all_work.build_report(
+        repo_root=REPO_ROOT,
+        tracker_dir=Path(tracker),
+        rev_range=args.rev_range,
+        since=args.since,
+        until=args.until,
+    )
+    Path(args.out).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(all_work.render(report))
+    print(f"\n-> {args.out}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--rev-range", default="origin/main", help="rev to walk (default: origin/main)"
+    )
+    parser.add_argument(
+        "--all-work",
+        action="store_true",
+        help="measure ALL work (not just bug fixes): commit- and ticket-level change-shape "
+        "distributions and their rank correlation with the offline rework signals "
+        "(caused_by fan-in, gate rounds). Reproduces reports/stability/"
+        "change-shape-backtest.md read (a).",
+    )
+    parser.add_argument(
+        "--since",
+        default=all_work.DEFAULT_SINCE,
+        help=f"all-work window start, YYYY-MM-DD inclusive (default: {all_work.DEFAULT_SINCE})",
+    )
+    parser.add_argument(
+        "--until",
+        default=all_work.DEFAULT_UNTIL,
+        help=f"all-work window end, YYYY-MM-DD EXCLUSIVE (default: {all_work.DEFAULT_UNTIL})",
     )
     parser.add_argument("--out", default="backtest_bugfix_size.json", help="artifact path")
     parser.add_argument(
@@ -369,6 +420,9 @@ def main() -> int:
     args = parser.parse_args()
 
     tracker = str(_config.tracker_dir(str(REPO_ROOT)))
+    if args.all_work:
+        return _run_all_work(args, tracker)
+
     type_cache: dict[str, str | None] = {}
     rows: list[dict] = []
 
