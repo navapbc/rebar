@@ -26,6 +26,7 @@ laptop exactly as it runs in CI, which is the portability contract every gate he
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,18 @@ LOCAL_SETUP_UV_ACTION_FILE = Path(".github/actions/setup-uv/action.yml")
 #: both of which are ordered ahead of ``WorkspaceVersionResolver`` in the upstream action.
 OVERRIDING_INPUTS = ("version", "version-file")
 FORBIDDEN_ACTION_TEXT = ("raw.githubusercontent.com", "Fetching manifest data")
+POWERSHELL_SCOPED_VARIABLE_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*):")
+POWERSHELL_SCOPES = frozenset(
+    {
+        "env",
+        "global",
+        "local",
+        "private",
+        "script",
+        "using",
+        "variable",
+    }
+)
 REQUIRED_CHECKSUMS = {
     "UV_SHA256_X86_64_UNKNOWN_LINUX_GNU": (
         "788f18abea7c5f55d6216e4f5613fd89d4d59b631efeec117b2b07fe72f1da21"
@@ -270,9 +283,28 @@ def _has_cache_step(document: dict[str, Any]) -> bool:
     )
 
 
+def _check_powershell_colon_interpolation(text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    seen: set[str] = set()
+    for match in POWERSHELL_SCOPED_VARIABLE_PATTERN.finditer(text):
+        name = match.group("name")
+        if name.lower() in POWERSHELL_SCOPES or name in seen:
+            continue
+        seen.add(name)
+        findings.append(
+            Finding(
+                str(LOCAL_SETUP_UV_ACTION_FILE),
+                f"contains ${name}:, which PowerShell parses as a scoped variable. Use "
+                f"${{{name}}}: when a variable is immediately followed by a colon",
+            )
+        )
+    return findings
+
+
 def check_local_action(root: Path) -> list[Finding]:
     """Assert the committed local action preserves the manifest-free uv install contract."""
-    document, _text, findings = _load_action(root)
+    document, text, findings = _load_action(root)
+    findings.extend(_check_powershell_colon_interpolation(text))
     if document is None:
         return findings
 

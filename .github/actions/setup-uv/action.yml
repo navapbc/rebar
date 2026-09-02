@@ -67,7 +67,7 @@ runs:
 
         $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actualHash -ne $expectedHash) {
-          throw "Checksum mismatch for $asset: expected $expectedHash, got $actualHash"
+          throw "Checksum mismatch for ${asset}: expected $expectedHash, got $actualHash"
         }
 
         if ($extension -eq 'zip') {

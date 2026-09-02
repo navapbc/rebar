@@ -208,6 +208,21 @@ def test_manifest_source_in_local_action_is_rejected(tree: Path) -> None:
     assert "raw.githubusercontent.com" in result.stderr
 
 
+def test_powershell_colon_interpolation_in_local_action_is_rejected(tree: Path) -> None:
+    """PowerShell parses `$name:` in strings as a scoped variable, failing before install."""
+    action = tree / ".github" / "actions" / "setup-uv" / "action.yml"
+    action.write_text(
+        action.read_text(encoding="utf-8").replace(
+            '        echo "placeholder"\n',
+            '        throw "Checksum mismatch for $asset: bad"\n',
+        ),
+        encoding="utf-8",
+    )
+    result = _run(tree)
+    assert result.returncode == 1
+    assert "$asset:" in result.stderr
+
+
 def test_local_action_missing_checksum_is_rejected(tree: Path) -> None:
     """Every supported runner target needs a committed digest before CI can trust it."""
     action = tree / ".github" / "actions" / "setup-uv" / "action.yml"
