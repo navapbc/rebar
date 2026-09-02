@@ -26,6 +26,8 @@ import logging
 import os
 from typing import Any
 
+from rebar.types import PLAN_REVIEW_REVIEWED_TYPES
+
 logger = logging.getLogger(__name__)
 
 # Statuses from which `claim` (open -> in_progress) is impossible AND a re-review to
@@ -33,9 +35,11 @@ logger = logging.getLogger(__name__)
 # claimed ticket is worked in place and legitimately re-reviewed (drift/force).
 _NOT_CLAIMABLE_STATUSES = frozenset({"closed", "idea", "blocked"})
 
-# The graph types the plan-review gate actually reviews under an LLM. Exempt types
-# (bug/session_log) cost no LLM, so there is nothing to fast-fail for them.
-_REVIEWED_TYPES = ("task", "story", "epic")
+# The graph types the plan-review gate actually reviews under an LLM. The exempt types
+# — bug, session_log, code_review and identity — cost no LLM, so there is nothing to
+# fast-fail for them. (This comment used to name only two of the four.) Derived in
+# rebar.types from TicketType minus the exemption, so the two sets cannot disagree.
+_REVIEWED_TYPES = PLAN_REVIEW_REVIEWED_TYPES
 
 
 def not_claimable_verdict(ticket_id: str, *, cfg, repo_root=None) -> dict[str, Any] | None:
