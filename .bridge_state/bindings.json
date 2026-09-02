@@ -263,6 +263,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:50:46Z"
     },
+    "01c4-cca2-ec11-4530": {
+      "created_at": "2026-09-02T07:42:22Z",
+      "jira_id": "4591437",
+      "jira_key": "REB-4493",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T07:42:25Z"
+    },
     "01d8-c18d-b229-419a": {
       "baseline": {
         "assignee": {
@@ -35200,7 +35207,7 @@
         },
         "description": "## Observed signal\nError sweep window 2026-08-30T21:20:00-07:00..2026-09-01T11:58:00-07:00 (2026-08-31T04:20:00Z..2026-09-01T18:58:00Z) found GitHub Actions run 33455923923 (`Jira DC Exact-Patchset Parity`, workflow_dispatch, triggered by JoeOakhartNava) failed before executing the live DC parity body.\n\nFailing job: `jira DC exact-patchset parity (real Jira Data Center, ephemeral)` at step `Verify the checkout landed on the exact patchset SHA`.\n\nError: `checked-out HEAD (d6c37680805fc8ae013832dd4c09c1fb100a1e0b) does not match the requested Gerrit patchset revision (a22257e7d10e3d079ee676cbb38d2b39811d0fd5) \u2014 refusing to run the DC lane against the wrong ref.`\n\n## Confirmed root cause\nGerrit change 2466 patchset 1 (`refs/changes/66/2466/1`) resolves to `d6c37680805fc8ae013832dd4c09c1fb100a1e0b`; patchset 2/current resolves to `a22257e7d10e3d079ee676cbb38d2b39811d0fd5`. Run 33455923923 combined the patchset-1 refspec with the patchset-2 revision. The pinned `checkout-gerrit-change-action` first checks out its `ref` default (`github.sha`) but then fetches `GERRIT_REFSPEC` and unconditionally checks out `FETCH_HEAD`, so the workflow landed on the stale refspec commit and only the later guard detected the mismatch.\n\nThe guard's fail-closed behavior is correct. The defect is that `.github/workflows/jira-dc-exact-patchset.yml` delegates the final checkout to a refspec-first third-party action even though this lane's authoritative requested commit is the `(GERRIT_REFSPEC, GERRIT_PATCHSET_REVISION)` pair.\n\n## Fix implemented\nGerrit change 2508 landed as `a85cb4781845ccf0d8c0375adce9a01391ba4bc8` and replaced only this workflow's first checkout step with explicit shell plumbing equivalent to the pinned action's fetch protocol, but with the missing SHA validation inserted before checkout. This is not a new protocol: the pinned action source at `lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832` defines `fetch_from_gerrit()` as `git fetch ${{ inputs.gerrit-url }}/${{ inputs.gerrit-project }} ${{ inputs.gerrit-refspec }}`, and run 33455923923 shows the workflow supplied `gerrit-url: https://rebar.solutions.navateam.com` plus `gerrit-project: rebar`, so the fallback URL form is `https://rebar.solutions.navateam.com/rebar`. The action fetches the GitHub mirror through `origin`; the workflow now recreates that source explicitly as `https://github.com/${{ github.repository }}.git` in the initialized workspace.\n\nImplemented behavior:\n\n1. Initialize a git repository in the empty runner workspace and add `origin=https://github.com/${{ github.repository }}.git`.\n2. Fetch `GERRIT_REFSPEC` into `FETCH_HEAD` from `origin`; if that fails, fetch the same refspec from `https://${{ vars.GERRIT_SERVER }}/${{ inputs.GERRIT_PROJECT }}`. Do not check out either fetch result yet.\n3. If neither fetch succeeds, fail with a clear error naming both attempted sources and the refspec.\n4. Compare `git rev-parse FETCH_HEAD^{commit}` to `GERRIT_PATCHSET_REVISION`; if they differ, fail with a clear dispatch-input error naming the refspec SHA and expected SHA. This is the repaired form of run 33455923923.\n5. Only after the fetch/refspec SHA matches, check out `GERRIT_PATCHSET_REVISION` explicitly in detached HEAD mode and verify `git rev-parse HEAD` equals it before any Python/Jira DC setup or live DC operation runs.\n\n`tests/unit/test_jira_dc_exact_patchset_workflow.py` now executes the embedded workflow checkout script against temporary git remotes and covers the success path, mirror-to-Gerrit fallback path, stale refspec/revision mismatch path, and unfetchable-refspec path.\n\n## Acceptance Criteria\n- [x] The Jira DC exact-patchset parity workflow checks out the exact requested Gerrit patchset SHA before any live DC operation runs; checked by `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/unit/test_jira_dc_exact_patchset_workflow.py tests/unit/test_workflow_names.py tests/unit/test_subprocess_env_repr_security.py -q`, `actionlint .github/workflows/jira-dc-exact-patchset.yml`, Gerrit `Verified+1`, and the existing `HEAD == GERRIT_PATCHSET_REVISION` guard embedded in the workflow.\n- [x] If the requested patchset refspec cannot be fetched from either the GitHub mirror or Gerrit fallback, the workflow fails with a clear fetch/input error rather than landing on a different commit; checked by a focused temporary-git test in `tests/unit/test_jira_dc_exact_patchset_workflow.py`.\n- [x] The workflow records enough evidence for a future CI dispatch to prove the live Data Center lane ran from `HEAD == expected_sha`; in-session completion rests on AC1/AC2 plus Gerrit review/Verified results, and the future live dispatch evidence is a GitHub Actions run id whose summary lists the verified SHA.\n  provenance: environment=GitHub Actions workflow_dispatch with real Jira Data Center image; principal=Gerrit/GitHub workflow actor; privilege_posture=production-equivalent; instrument=static-analysis \u2014 the real Jira DC Docker image only runs in CI, so this session proves the checkout/verify plumbing locally and relies on Gerrit `LLM-Review+1`, Gerrit `Verified+1` on run 33592409853, and a future explicit dispatch for the live DC body.\n\n## Testing\n- `actionlint .github/workflows/jira-dc-exact-patchset.yml`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/unit/test_jira_dc_exact_patchset_workflow.py tests/unit/test_workflow_names.py tests/unit/test_subprocess_env_repr_security.py -q`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n- Gerrit `Verified+1`: https://github.com/navapbc/rebar/actions/runs/33592409853\n\nDo not run the real Jira DC parity body locally; the operator confirmed the real Data Center Docker image used by this lane only runs in CI.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "[ci] Jira DC exact-patchset parity aborts after checking out the wrong patchset SHA"
       },
       "created_at": "2026-09-01T21:33:43Z",
@@ -36248,9 +36255,17 @@
       "updated_at": "2026-08-15T15:05:10Z"
     },
     "8d66-52ad-b66c-485a": {
+      "baseline": {
+        "assignee": null,
+        "description": "Three evaluate() paths in the MCP<->library parity gate ship untested. Raised as non-blocking advisories by the LLM code review on Gerrit 2503 and deferred there; filed here rather than dropped.\n\n1. STALE DIVERGENCE. A declared divergence whose two surfaces have since CONVERGED must fail, so the\n   now-pointless declaration gets removed rather than lingering as a permanent waiver. The path\n   exists in _check_divergences but nothing exercises it.\n2. merge_declarations carry-forward. The commit s central safety claim is that --update carries\n   existing reasons forward and writes an EMPTY-reason stub for a newly-diverging tool, so it can\n   never launder a real divergence into silence. That behaviour is asserted nowhere.\n3. _check_normalization. Neither a schema_version change nor a change to\n   normalization.library_only_params between live and manifest is covered, so the category-level\n   rule that keeps 35 tools quiet could drift unnoticed.\n\nEach is a pure-function case against the already-injectable evaluate(live, manifest), so no new harness is needed. See scripts/check_mcp_library_parity.py and tests/unit/test_mcp_library_parity.py.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Cover the parity gate's untested evaluate paths"
+      },
       "created_at": "2026-09-02T06:56:30Z",
       "jira_id": "4591435",
       "jira_key": "REB-4491",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T06:56:33Z"
     },
@@ -49891,6 +49906,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:41Z"
     },
+    "c1ef-66e6-9aaa-4c98": {
+      "created_at": "2026-09-02T07:42:28Z",
+      "jira_id": "4591438",
+      "jira_key": "REB-4494",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T07:42:31Z"
+    },
     "c1f4-4a2f-b879-43db": {
       "created_at": "2026-08-15T15:10:41Z",
       "jira_key": "REB-1337",
@@ -50747,9 +50769,17 @@
       "updated_at": "2026-08-15T15:11:03Z"
     },
     "c678-e73c-b48a-4bbe": {
+      "baseline": {
+        "assignee": null,
+        "description": "Three follow-ups on the unit-tier subprocess-isolation guard, all raised as non-blocking advisories by the LLM code review on Gerrit 2506 and deferred there.\n\n1. _check_home_escape may OVER-FLAG. It treats any argv element referencing a name or attribute in\n   _HOME_ESCAPE_NAMES (home, mkdtemp, TemporaryDirectory) as a hazard. An unrelated local named\n   `home`, or a tmp_path-rooted mkdtemp that is perfectly harnessed, would be reported. Zero live\n   sites hit it today, so it is latent rather than active \u2014 but the guard s whole design premise is\n   that a false positive is as costly as a false negative, because reddening innocent files is how a\n   guard gets reverted. Narrow it to the attribute forms that actually escape (Path.home(),\n   os.environ[\"HOME\"]) and add both a positive and a negative case.\n2. The UsageError contract is verified only by GREPPING conftest.py text for the string within a\n   window. That asserts the source, not the behaviour: it would pass if the arm raised something\n   else while the word appeared nearby. The contract matters (from the xdist controller a\n   pytest.fail escapes as a 20-line INTERNALERROR), so it deserves a real assertion on the raised\n   type.\n3. The file-level opt-out fallback for hazards found in MODULE-LEVEL HELPERS is untested. That path\n   exists so a marked test s shared helper is covered when the finding carries no test name of its\n   own; five live sites rely on it via a module pytestmark. It was verified once by hand during\n   implementation and never pinned.\n\nSee tests/_subprocess_isolation.py and tests/unit/test_collection_isolation_guard.py.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Narrow the isolation guard's home-escape rule and pin two untested contracts"
+      },
       "created_at": "2026-09-02T06:56:34Z",
       "jira_id": "4591436",
       "jira_key": "REB-4492",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T06:56:37Z"
     },
@@ -71270,6 +71300,8 @@
     "REB-4490": "092c-a664-2477-4d83",
     "REB-4491": "8d66-52ad-b66c-485a",
     "REB-4492": "c678-e73c-b48a-4bbe",
+    "REB-4493": "01c4-cca2-ec11-4530",
+    "REB-4494": "c1ef-66e6-9aaa-4c98",
     "REB-45": "1fa8-9db4-7c1c-48f3",
     "REB-450": "e308-daf0-d765-40d3",
     "REB-451": "7f42-a88b-ec1a-4e8b",
