@@ -151,6 +151,9 @@ def test_criterion_prompt_exists_at_the_conventional_path():
         f".rebar/prompts/plan-review-{MOVE_ID}.md",
     ],
 )
+@pytest.mark.allow_unharnessed_subprocess(
+    "asks git whether THIS checkout tracks the overlay asset; that is the assertion"
+)
 def test_every_overlay_asset_is_tracked_by_git(path: str):
     """`.rebar/` is ignored with per-file negations (`.gitignore` `.rebar/prompts/*`), so a
     new rubric is invisible to git by DEFAULT — it exists locally, the criterion loads for
@@ -168,6 +171,9 @@ def test_every_overlay_asset_is_tracked_by_git(path: str):
     )
 
 
+@pytest.mark.allow_unharnessed_subprocess(
+    "greps the real committed src/rebar to prove the overlay id never shipped"
+)
 def test_criterion_id_is_absent_from_shipped_source():
     """The whole point of the overlay: other rebar clients' default criteria set is unchanged."""
     proc = subprocess.run(

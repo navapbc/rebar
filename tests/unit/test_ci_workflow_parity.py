@@ -1350,6 +1350,9 @@ def test_macos_default_suite_lane_passes_when_platform_compat_collects_nothing(
             env={
                 "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
                 "DEFAULT_SUITE_MARKS": marks,
+                # Pinned: this hand-built env drops the tier's inherited isolation
+                # root, and a child without it falls back to the real checkout.
+                "REBAR_ROOT": str(tmp_path),
             },
             capture_output=True,
             text=True,

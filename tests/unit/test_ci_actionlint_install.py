@@ -64,7 +64,13 @@ def test_actionlint_install_fails_fast_on_download_failure(tmp_path: Path) -> No
             "ACTIONLINT_VERSION=0.0.0-nonexistent-rebar-debug",
             f"LOCAL_BIN={local_bin}",
         ],
-        env={"PATH": _SANE_PATH, "HOME": os.environ.get("HOME", "/tmp")},
+        # REBAR_ROOT is pinned because this hand-built env drops the tier's inherited
+        # isolation root; without it the child falls back to the checkout.
+        env={
+            "PATH": _SANE_PATH,
+            "HOME": os.environ.get("HOME", "/tmp"),
+            "REBAR_ROOT": str(tmp_path),
+        },
         capture_output=True,
         text=True,
         timeout=180,

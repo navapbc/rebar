@@ -25,6 +25,11 @@ import pytest
 from rebar._commands._seam import CommandError
 from rebar._commands.transition import _parse_flags
 
+pytestmark = pytest.mark.allow_unharnessed_subprocess(
+    "the shared `_tracked_files` helper enumerates this checkout's git-tracked files\n"
+    "so anything newly committed is in scope"
+)
+
 # Assembled from parts so a tree-wide grep for the dead flag spelling stays clean.
 RETIRED = "--force" + "-close"
 

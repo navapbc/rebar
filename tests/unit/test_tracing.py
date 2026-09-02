@@ -79,7 +79,7 @@ def test_setup_tracing_swallows_a_configured_setup_failure(monkeypatch) -> None:
     assert tracing._CONFIGURED is False
 
 
-def test_importing_tracing_pulls_no_opentelemetry() -> None:
+def test_importing_tracing_pulls_no_opentelemetry(tmp_path) -> None:
     # `import rebar.llm.tracing` must stay dependency-free (opentelemetry/pydantic_ai are
     # imported INSIDE setup_tracing) — checked in a clean subprocess.
     code = (
@@ -91,7 +91,14 @@ def test_importing_tracing_pulls_no_opentelemetry() -> None:
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
-        env={"PYTHONPATH": "src", "PATH": __import__("os").environ.get("PATH", "")},
+        # REBAR_ROOT is pinned at tmp_path: this hand-built env drops the tier's
+        # inherited isolation root, so the child would otherwise resolve its root to
+        # the git toplevel of the inherited cwd — the real checkout.
+        env={
+            "PYTHONPATH": "src",
+            "PATH": __import__("os").environ.get("PATH", ""),
+            "REBAR_ROOT": str(tmp_path),
+        },
         check=False,
     )
     assert cp.returncode == 0, cp.stderr

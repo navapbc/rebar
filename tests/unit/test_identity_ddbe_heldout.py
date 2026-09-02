@@ -118,6 +118,8 @@ def test_resolve_returns_none_when_git_email_unset(
             "GIT_COMMITTER_NAME": "x",
             "GIT_COMMITTER_EMAIL": "x@x",
             "PATH": __import__("os").environ["PATH"],
+            # Pinned: a hand-built env drops the tier's inherited isolation root.
+            "REBAR_ROOT": str(repo),
         },
     )
     monkeypatch.setenv("REBAR_ROOT", str(repo))

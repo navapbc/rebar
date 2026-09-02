@@ -17,6 +17,10 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.allow_unharnessed_subprocess(
+    "the shared `_git` helper asks git about THIS checkout's committed .claude/settings.json"
+)
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SETTINGS = _REPO_ROOT / ".claude" / "settings.json"
 

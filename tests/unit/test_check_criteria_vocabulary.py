@@ -400,6 +400,9 @@ def test_long_matching_line_is_truncated(tmp_path: Path) -> None:
 
 
 # The committed inventory and all live migrations are validated through the real CLI.
+@pytest.mark.allow_unharnessed_subprocess(
+    "validates THIS checkout's committed criteria inventory by running the real script over it"
+)
 def test_current_repository_vocabulary_is_clean() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],

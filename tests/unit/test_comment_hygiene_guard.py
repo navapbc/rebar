@@ -265,6 +265,9 @@ def test_string_literals_are_not_scanned(tmp_path: Path) -> None:
 
 
 @pytest.mark.repo_policy
+@pytest.mark.allow_unharnessed_subprocess(
+    "runs the hygiene script over the real committed tree exactly as CI does"
+)
 def test_the_real_tree_is_clean() -> None:
     """AC: the guard passes the remediated tree with zero suppressions. Runs the
     script exactly as CI does."""
