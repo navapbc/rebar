@@ -379,8 +379,10 @@ speaks plain webhook JSON, not MCP JSON-RPC (ADR-0007). The flow on a
    `code_review_decision(diff_text, repo_root, ref) -> {decision, message,
    findings}`. The proven pipe implements it over `rebar.llm.review_code(...,
    source="local", ...)` (`source="local"` because the patchset's ref lives only in
-   the clone, not on origin) and maps findings to **PASS/BLOCK by a configured
-   blocking-severity threshold** (default `{critical, high}`). The signature is kept
+   the clone, not on origin) and maps findings to **PASS/BLOCK via the four-pass
+   gate's deterministic Pass-3 blocker** (per-criterion thresholds in
+   `criteria_routing.json`) — there is no separate configured blocking-severity
+   threshold; that knob was removed. The signature is kept
    deliberately small so a richer reviewer can be dropped in with **no receiver
    change**.
 4. The decision maps to the vote: **PASS → MAX (+1)** makes the change submittable;
