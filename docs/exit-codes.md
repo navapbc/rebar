@@ -3,8 +3,16 @@
 rebar's exit codes are **load-bearing for agents**: the parallel-agent workflow
 keys off them (a claim that loses a race is exit 10, not a crash; a missing
 ticket is exit 1, not 0-with-empty). This document is the single source of truth
-for what each code means and which code each subcommand emits. It is pinned by
-`tests/interfaces/lifecycle/test_exit_codes.py`, which fails if the codes drift.
+for what each code means and which code each subcommand emits.
+
+`tests/interfaces/lifecycle/test_exit_codes.py` pins it, and it is worth being exact
+about how much: that test exercises the load-bearing exit paths (0/1/2/10/11) against
+the live CLI, and — mirror F12 — cross-checks this file's per-command table against the
+route registry, so a route with no row here, or a row naming a command that no longer
+exists, fails the build. It does NOT verify the per-command exit values in the table
+below; those columns are hand-authored. Until 2026-09 this file claimed a stronger
+guarantee than any test made, and the table had drifted in both directions while
+carrying that claim.
 
 This contract is **frozen** as of the 2026-06-09 breaking-change window. Changes
 to an emitted code are contract changes and must be called out in release notes.
@@ -119,6 +127,7 @@ guarantee `2`).
 | `archive` | 0 | 1 | — | idempotent on an already-archived ticket (still 0) |
 | `bridge fsck` | 0 | — | — | audit; no ticket id |
 | `bridge-fsck` | 0 | — | — | compatibility alias for `bridge fsck`; preserves the same audit exit behavior |
+| `bridge-status` | 0 | — | — | compatibility alias for `bridge status`; no ticket id; reads the durable bridge status snapshot, and `--max-age` makes a stale snapshot a failure |
 | `bridge` | 0 | — | — | no ticket id; canonical `preview`/`sync` use 0/1/2 as documented above; `pause`/`resume` control scheduled reconciliation |
 | `check-ac` | 0 | 1 | — | **gate**: 0=has-AC, 1=missing-AC **or** not-found |
 | `claim` | 0 | 1 | 10 | 10 when the ticket is not open (already claimed) |
@@ -181,7 +190,6 @@ guarantee `2`).
 | `prompt` | 0 | — | — | no ticket id; `prompt eval <id>` validates a prompt's eval spec; error → 1; no subcommand → 1 |
 | `reconcile` | 0 | — | — | no ticket id; compatibility subprocess passthrough retaining reconciler codes 3/4/75 |
 | `remote-cert` | 0 | — | — | no ticket id; trusted op-cert gate service client; bad args → 2; error → 1 |
-| `review` | 0 | 1 | — | **DEPRECATED** shim forwarding to `review-plan` (with `--no-sign`); PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11 |
 | `review-code` | 0 | — | — | no ticket id; PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11 |
 | `review-plan` | 0 | 1 | — | PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11; `--status`: 0 = current, 12 = stale/absent; `--retry`: resumes the latest INDETERMINATE (same 0/1/2/11 dispositions), or exits 2 refusing an ineligible resume / a `--force`/`--status`/`--check` conflict |
 | `scan-spec` | 0 | — | — | no ticket id; `--spec-file` read error or LLMError → 1 |
