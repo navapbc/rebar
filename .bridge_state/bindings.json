@@ -2163,6 +2163,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:33Z"
     },
+    "0880-0afb-7fe3-48c9": {
+      "created_at": "2026-09-02T01:46:03Z",
+      "jira_id": "4591365",
+      "jira_key": "REB-4422",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:05Z"
+    },
     "088b-e4c1-050c-4516": {
       "baseline": {
         "assignee": {
@@ -5196,6 +5203,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-31T23:31:09Z"
     },
+    "15f2-f3d4-ffcd-4223": {
+      "created_at": "2026-09-02T01:46:05Z",
+      "jira_id": "4591366",
+      "jira_key": "REB-4423",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:08Z"
+    },
     "15f6-10d4-0014-4671": {
       "created_at": "2026-08-15T14:52:44Z",
       "jira_key": "REB-36",
@@ -7947,6 +7961,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:55Z"
     },
+    "21b3-0e7b-f287-44c8": {
+      "created_at": "2026-09-02T01:46:08Z",
+      "jira_id": "4591367",
+      "jira_key": "REB-4424",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:11Z"
+    },
     "21ca-cdb4-671c-460c": {
       "baseline": {
         "assignee": null,
@@ -10167,7 +10188,7 @@
         },
         "description": "## Summary\nThis parentless bug tracks the MCP blue-green autodeploy defect where two routine, documented non-error backoffs (port-exhausted/retire-cap and low-memory abort) were incorrectly recorded through `record_mcp_backoff_failure`, emitting `AUTODEPLOY_ERROR {reason: deploy_failed}` and inflating the general `rebar/host:deploy_errors` alarm.\n\n## Current origin/main state\nThe implementation fix described by this ticket has already landed on `origin/main` in commit `c63d3d9dd313ee3a3fc743b3b0519b5c0b9ddec5` (Gerrit Change-Id `I430f89fd67cfa6dfd49f59bc59a2744ea54ab9f9`, Gerrit change 2421, ticket `6ada-6015-8ac3-44f5`). This ticket remains open only because it is a duplicate/open tracking record for the same defect. Execution for this ticket is therefore: verify the landed behavior against the documented contract, attach the landed fix commit to this ticket so the close gate can trace it, record the `caused_by` relation to the introducing ticket `6964-40bb-46c9-48a7`, then close this bug as `plan_defect`. No additional code change is expected unless validation shows the landed fix is incomplete.\n\n## Documented contract\n`infra/scripts/observability.sh` documents that `AUTODEPLOY_MCP_RETIRE_CAP` and `AUTODEPLOY_MCP_MEM_ABORT` are each kept out of `AUTODEPLOY_ERROR` so routine retire-cap / memory-abort deferrals never inflate `deploy_errors`. Sustained cases are already covered by the dedicated `rebar-autodeploy-mcp-retire-cap` and `mcp_mem_abort` alarms.\n\n## Root cause / defect origin\nThe violating behavior was introduced by the MCP blue-green autodeploy work in commit `2a0a4b19f2ab` / ticket `6964-40bb-46c9-48a7`, which shipped both the documented observability contract and the original code path that emitted `deploy_failed` for routine backoffs. That is an internally inconsistent plan, so the close classification is `plan_defect`.\n\n## Landed fix to verify\n`infra/scripts/autodeploy.sh` now factors backoff-timer bookkeeping into `schedule_mcp_backoff`, keeps `record_mcp_backoff_failure` for genuine MCP deploy failures, and uses `record_mcp_routine_backoff` for the two routine paths. The routine variant schedules the same throttle/backoff file but does not call `err deploy_failed`.\n\n## Acceptance Criteria\n- [x] A routine port-exhausted / retire-cap backoff emits `AUTODEPLOY_MCP_RETIRE_CAP`, writes the MCP backoff throttle file, and emits no `AUTODEPLOY_ERROR` / `deploy_failed` marker.\n- [x] A routine low-memory abort emits `AUTODEPLOY_MCP_MEM_ABORT`, writes the MCP backoff throttle file, and emits no `AUTODEPLOY_ERROR` / `deploy_failed` marker.\n- [x] Genuine MCP deploy failures still emit `AUTODEPLOY_ERROR` with `reason=deploy_failed` and `component=mcp`, preserving the general deploy-failure alarm.\n- [x] The focused autodeploy MCP blue-green regression tests pass on the landed code, and `make lint` remains green.\n\n## Verification plan\n- Run `python -m pytest tests/scripts/test_autodeploy_mcp_bluegreen.py -q` from a fresh worktree on current `origin/main`.\n- Confirm defect-seeded mutation (switching the two routine sites back to `record_mcp_backoff_failure`) makes the routine retire-cap and mem-abort regression tests fail for the expected `AUTODEPLOY_ERROR/deploy_failed` emission.\n- Run `make lint` with the worktree `.venv` first on `PATH`.\n- Attach landed commit `c63d3d9dd313ee3a3fc743b3b0519b5c0b9ddec5`, link `caused_by` to `6964-40bb-46c9-48a7`, and close the ticket after verification.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Autodeploy MCP routine backoff (retire-cap port-exhausted / mem-abort) inflates deploy_errors, false-paging the general deploy alarm"
       },
       "created_at": "2026-09-01T01:22:22Z",
@@ -15515,7 +15536,7 @@
     "3cef-c948-68ba-40fd": {
       "baseline": {
         "assignee": null,
-        "description": "## Summary\n\nOn 2026-09-01 (~12:00\u201316:00 PT) the Gerrit `LLM-Review` bot on host `i-00880b2c7f13527c5` (`rebar-gerrit`) fail-closed every review: clones/materializations hit `No space left on device` on the 30 GiB root disk (reached 91\u201395% used), producing `VOTER_ERROR` / `coverage-gap (review-error)` vetoes. Change 2481 exhausted its retry budget to a fail-closed LLM-Review \u22121; 2479/2480/2482/2483 deferred. The host then wedged (SSM `ConnectionLost`, metrics feed stopped) because SSM/CloudWatch agents cannot spool to a full disk. Recovered by: EC2 reboot (cleared the wedge) + manual `docker builder prune -f` (no `--keep-storage`) + snapshot-store clear \u2192 95% \u2192 74%, bot healthy, reviews resumed, 2480 immediately re-reviewed +1.\n\nThis is a **defect escape**: the same fail-closed-on-full-disk class as closed 2731-4c53, 7a41-95f4, 3a52-2d79, 9bc0-1200, 28f9-535c, e2c5-f09b \u2014 all closed, yet it recurred.\n\n## Evidence (on-box `docker system df`, 2026-09-01 ~16:05 PT, pre-prune)\n\n- **Build Cache: 111 entries, 5.244 GB, 100% reclaimable** \u2190 the dominant consumer.\n- Images: 4, all ACTIVE, 2.802 GB, only 144 MB reclaimable \u2192 the 9bc0/2340 per-release image-retirement fix **is working** (no tagged-image pileup). Images were NOT the leak this time.\n- Containers 3.572 GB; Local Volumes 947 MB; snapshot store `/tmp/rebar-gate-snapshots` only **1.4 GB**.\n\n## Root cause \u2014 two confirmed structural gaps, neither about absolute disk size\n\n**(1) The automated pressure-prune cannot reclaim the build-cache floor.** `infra/scripts/autodeploy.sh:366 prune_docker_caches()` always runs `docker builder prune -f --keep-storage \"$BUILD_CACHE_KEEP\"` with `BUILD_CACHE_KEEP=5GB` (line 132) on **every** path \u2014 including the acute-pressure no-op-tick path (line 424). Today the cache was 5.244 GB, i.e. *at* the 5 GB keep floor, so the automated prune would have freed ~0. Recovery only worked because the manual prune omitted `--keep-storage`. This is the identical \"reclaim runs, reports success, frees nothing\" failure 9bc0 fixed for tagged images, now recurring for the build-cache floor. The `reclaim is not recovering the disk` marker (line 436) fires correctly but nothing escalates to a deeper reclaim. A 5 GB keep is 1/6 of a 30 GiB disk; combined with the active footprint (2.8 GB images + 3.57 GB containers + 0.95 GB volumes + OS + Gerrit data) the fixed baseline sits too close to full, and the snapshot janitor (which owns only the 1.4 GB snapshot store, and is enabled via `REBAR_GATE_FREE_WATERMARK_PCT=20`) mathematically cannot reach its 6 GB-free target because the deficit is held outside its pool.\n\n**(2) The review clone/materialize hot path has no near-full admission control.** `src/rebar/llm/gate_source.py` + `src/rebar/_snapshot/repo_snapshot.py` abort on stall/throughput but never check free disk before cloning. So under pressure the bot keeps starting clones that ENOSPC mid-flight and fail-close as infra vetoes, instead of deferring cleanly until space is reclaimed.\n\n## Decision needed (behavior change \u2014 escalated, do not implement without sign-off)\n\nTwo-part durable fix, grounded in prior art here and OSS practice:\n\n**A. Acute-pressure emergency reclaim tier.** Keep the 5 GB steady-state keep for warm-build speed, but when root-disk used-% crosses a hard critical threshold (e.g. \u226590%, above the 80% soft `DISK_PRESSURE_PCT`), escalate the pressure-prune to `docker builder prune -f` with keep\u21920 (and consider `docker image prune -af` guarded by the 9bc0 active-image protection). This mirrors kubelet's soft-vs-hard eviction thresholds and how CI runners (GitHub Actions, Buildkite, Zuul executors) aggressively GC BuildKit cache under disk pressure rather than retaining a fixed warm cache.\n\n**B. Near-full admission control / backpressure in the review clone path.** Before materializing a snapshot, if free disk is below a hard floor, DEFER the review (retryable, vote-less per ADR 0069) instead of cloning into ENOSPC. This is standard executor practice (Zuul/Nodepool disk reservations, GitHub Actions pre-job free-space checks) and is the \"prevent further filling when too close to full\" backpressure that is currently missing.\n\n**Recommendation: do both.** A alone still lets a review burst refill; B alone leaves the disk pinned. Explicitly NOT recommended: growing the EBS volume as the fix \u2014 the growth rate is workload-bound (~620 MiB/unique-tip review, 8386) and the watermark trigger is percentage-based, so a bigger disk only delays the identical wall. A temporary EBS bump is acceptable solely as a throwaway unwedge lever.\n\n## Acceptance criteria\n\n1. Under an induced acute-pressure condition (root \u2265 critical threshold) with a build cache at/above the steady-state keep, the automated reclaim frees the excess cache (measured bytes freed > 0) and returns the disk below the soft threshold \u2014 verified by test/stub, not just an invocation marker (the 9bc0 lesson: measure effect, not calls).\n2. When free disk is below the hard floor, the review path defers a new review (retryable, no vote posted) rather than starting a clone that ENOSPCs; verified by a unit/integration test simulating low free space.\n3. Portability: the reclaim/admission logic must not depend on a specific CI provider (project.portability) \u2014 the free-space check is in-process/operation-linked.\n4. No regression to warm-build steady-state behavior at normal disk levels.\n\n## Provenance\nDiscovered during the 2026-09-01 review-bot outage triage. Related closed: 9bc0-1200, 28f9-535c, e2c5-f09b, 2731-4c53, 3a52-2d79, 7a41-95f4.",
+        "description": "## Summary\n\nOn 2026-09-01 the Gerrit `LLM-Review` bot on `rebar-gerrit` fail-closed reviews because root disk reached 91-95%; review clones/materializations hit ENOSPC and surfaced as `coverage-gap (review-error)`. Manual recovery required `docker builder prune -f` without `--keep-storage`, proving the automated prune could not reclaim below its 5GB build-cache floor. Operator approved implementing both fixes A+B.\n\n## Root cause\n\n1. `infra/scripts/autodeploy.sh` always runs `docker builder prune -f --keep-storage \"$BUILD_CACHE_KEEP\"` (`BUILD_CACHE_KEEP=5GB`), even on acute pressure/no-op tick paths. At the incident cache size (5.244GB), automated prune freed ~0.\n2. The review hot path starts clones/materializations without checking free disk first. In particular, `src/rebar/review_bot/voter.py` clones into `tempfile.TemporaryDirectory(prefix=\"reviewbot-\")` on the root temp volume, while `repo_snapshot.py` materializes into the snapshot-store volume.\n\n## Approved implementation plan\n\n### A. Acute pressure reclaim tier\n\nKeep normal warm-cache behavior unchanged. Add `DISK_PRESSURE_HARD_PCT` default 90, above existing soft `DISK_PRESSURE_PCT=80`. When root used-% is at or above the hard threshold, `prune_docker_caches()` escalates BuildKit reclaim to `docker builder prune -f` with keep->0 (no `--keep-storage`), best-effort/non-fatal and `timeout 120` bounded like existing docker calls. Measure before/after root filesystem bytes and log bytes actually freed; success evidence is `bytes_freed > 0`, not invocation.\n\n### B. Low-disk admission control\n\nAdd a target-path free-space helper in `src/rebar/_snapshot/janitor.py` (`shutil.disk_usage(path)`) and `REBAR_GATE_MIN_FREE_GIB` default 2. This independent knob is a hard pre-clone admission floor; existing janitor watermarks remain cleanup targets.\n\nCheck the target volume before cloning/materializing:\n\n- In `src/rebar/review_bot/voter.py`, immediately before `TemporaryDirectory` / `gc.clone_change_ref`, measure `tempfile.gettempdir()`.\n- In `src/rebar/_snapshot/repo_snapshot.py` / `src/rebar/llm/gate_source.py`, measure the snapshot-store path before attested snapshot clone/materialize.\n\nBelow the floor, do not clone. For the Gerrit voter, synthesize a decision with `verdict=\"BLOCK\"`, `gap_reason=\"low-disk\"`, and a first-line message using the existing tag grammar: `[LLM-Review: BLOCK \u2014 coverage-gap (low-disk)] ...`. Define `_TAG_SUFFIXES[\"low-disk\"] = \"BLOCK \u2014 coverage-gap (low-disk)\"` and add `low-disk` to `adapter.RETRYABLE_GAP_REASONS`; keep `retrigger.py` parsing compatible.\n\nIn `_handle_retryable_gap`, add an explicit `low-disk` arm: under budget it defers vote-less exactly like existing ADR 0069 retryable gaps; at/over the low-disk budget it returns/logs a distinct no-vote exhausted-deferral result (`gap_reason=\"low-disk\"`, labels unchanged). It must skip `append_retries_exhausted_note`, skip fail-closed `LLM-Review -1`, and skip `VOTER_ERROR` for low-disk only. Existing exhaustion behavior for non-low-disk review errors/coverage gaps is unchanged. Document this special case in ADR 0069, ADR 0077, `docs/review-policy.md`, and `src/rebar/_guides/passing-code-review.md`.\n\n## Acceptance Criteria\n\n- [ ] Hard-pressure reclaim: with root used-% >= `DISK_PRESSURE_HARD_PCT` and enough reclaimable build-cache excess, automated reclaim uses emergency keep->0 builder prune, measures/logs `bytes_freed > 0`, and the test fixture returns below soft `DISK_PRESSURE_PCT`; proof in `tests/unit/test_autodeploy_prune.py` and/or `tests/scripts/test_autodeploy_disk_pressure.py`.\n- [ ] Warm-cache regression: below `DISK_PRESSURE_HARD_PCT`, `prune_docker_caches()` still uses `--keep-storage \"$BUILD_CACHE_KEEP\"`; proof in `tests/unit/test_autodeploy_prune.py`.\n- [ ] Review-bot low-disk admission: when `tempfile.gettempdir()` free space is below `REBAR_GATE_MIN_FREE_GIB`, `voter.py` does not create the clone and defers retryably/vote-less through ADR 0069; proof by focused voter test simulating low free space and asserting no clone/vote.\n- [ ] Exhausted low-disk budget: if low-disk retries are exhausted, labels remain unchanged/no `LLM-Review -1`; proof by focused voter test contrasting `gap_reason=\"low-disk\"` with ordinary `gap_reason=\"review-error\"` exhaustion.\n- [ ] Snapshot low-disk admission: when the snapshot-store volume is below `REBAR_GATE_MIN_FREE_GIB`, snapshot materialization aborts before clone with a retryable low-disk condition; proof around `repo_snapshot.py` / `gate_source.py`.\n- [ ] Distinct semantics: `low-disk` uses literal suffix `BLOCK \u2014 coverage-gap (low-disk)` and is distinct from genuine coverage/review errors; proof by tag/vocabulary and routing tests.\n- [ ] Portability: all reclaim/admission logic is in-process/operation-linked, with no CI-provider dependency.\n\n## Testing / Verification\n\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest tests/unit/test_autodeploy_prune.py tests/scripts/test_autodeploy_disk_pressure.py -q`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" pytest <focused low-disk review admission/voter tests> -q`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`\n\n## File impact\n\n`infra/scripts/autodeploy.sh`; `tests/unit/test_autodeploy_prune.py`; `tests/scripts/test_autodeploy_disk_pressure.py`; `src/rebar/_snapshot/janitor.py`; `src/rebar/_snapshot/repo_snapshot.py`; `src/rebar/llm/gate_source.py`; `src/rebar/review_bot/voter.py`; `src/rebar/review_bot/adapter.py`; `src/rebar/review_bot/retrigger.py`; `docs/review-policy.md`; `src/rebar/_guides/passing-code-review.md`; `docs/adr/0069-retryable-coverage-gap-bounded-deferral.md`; `docs/adr/0077-code-review-voter-four-pass-rewire.md`; focused tests.",
         "priority": "High",
         "status": "To Do",
         "summary": "Disk-pressure reclaim cannot reach the build-cache floor under acute pressure, and the review clone path has no near-full admission control \u2014 review-bot fail-closes again"
@@ -18790,6 +18811,13 @@
       "peer_parent": "REB-244",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:24Z"
+    },
+    "4ac6-9eb3-b0a5-408f": {
+      "created_at": "2026-09-02T01:46:13Z",
+      "jira_id": "4591368",
+      "jira_key": "REB-4425",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:16Z"
     },
     "4ace-472a-01a7-40bd": {
       "baseline": {
@@ -29130,9 +29158,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "Discovered during the Step 7 sibling sweep of 35ab-f0e0-3e4a-4b72 (fightable-nirvanic-kitten).\n\n## Site\n`ExpressionError(WorkflowError)` is defined at `src/rebar/llm/workflow/executor.py:251` and raised from workflow execute-time expression resolution (`interpreter.py` and `executor.py`) for wiring/state faults: input not set, no such step output, loop/map var out of scope, missing secret/env, or unresolvable `${{ }}` expression.\n\n## Symptom\n`error_code_for(ExpressionError(...))` currently reaches the broad `LLMError`/`WorkflowError` branch and returns `llm_unavailable`. That asserts a provider outage for a caller/state wiring fault and encourages retries that will not self-heal.\n\n## Operator decision\nLatest DECISION NEEDED comment (operator-approved 2026-09-01) supersedes the earlier `expression_unresolved` option for this ticket: reclassify `ExpressionError -> invalid_input`, matching prior bug 35ab (executor unknown-step -> invalid_input) and dbca (parse/lint -> invalid_input). Give `ExpressionError` an explicit `error_code = \"invalid_input\"` so the mapping is honest regardless of branch order. Preserve dbca AC3 by ensuring genuine execute-time LLM outages still map to `llm_unavailable` through the true outage type/wrapper path. Implement this with ce6b's umbrella narrowing as one coherent change.\n\n## Acceptance Criteria\n- [ ] `ExpressionError` has an explicit `error_code = \"invalid_input\"` and `error_code_for(ExpressionError(...))` returns `invalid_input`, verified by a focused unit/contract test.\n- [ ] A real workflow execute-surface expression-resolution failure returns `invalid_input`, not `llm_unavailable`, verified through the real workflow execution surface or the smallest existing production error conversion seam that exercises the same exception.\n- [ ] A genuine LLM outage inside an execute step still returns `llm_unavailable`, verified by a focused test covering the preserved dbca AC3 path.\n- [ ] The implementation lands in the same Gerrit change as ce6b and references both tickets.\n\n## Testing\nRun the focused workflow/error taxonomy tests added or updated for this ticket with `env PATH=\"$PWD/.venv/bin:$PATH\" pytest -q`, then run `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` and `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`. After commit, run `env PATH=\"$PWD/.venv/bin:$PATH\" rebar verify-commit-ticket HEAD` to verify ticket trailers.",
+        "description": "Discovered during the Step 7 sibling sweep of 35ab-f0e0-3e4a-4b72 (fightable-nirvanic-kitten).\n\n## Site\n`ExpressionError(WorkflowError)` is defined at `src/rebar/llm/workflow/executor.py:251` and raised from workflow execute-time expression resolution (`interpreter.py` and `executor.py`) for wiring/state faults: input not set, no such step output, loop/map var out of scope, missing secret/env, or unresolvable `${{ }}` expression.\n\n## Symptom\n`error_code_for(ExpressionError(...))` currently reaches the broad `LLMError`/`WorkflowError` branch and returns `llm_unavailable`. That asserts a provider outage for a caller/state wiring fault and encourages retries that will not self-heal.\n\n## Operator decision\nLatest DECISION NEEDED comment (operator-approved 2026-09-01) supersedes the earlier `expression_unresolved` option for this ticket: reclassify `ExpressionError -> invalid_input`, matching prior bug 35ab (executor unknown-step -> invalid_input) and dbca (parse/lint -> invalid_input). Give `ExpressionError` an explicit `error_code = \"invalid_input\"` so the mapping is honest regardless of branch order. Preserve dbca AC3 by ensuring genuine execute-time LLM outages still map to `llm_unavailable` through the true outage type/wrapper path. Implement this with ce6b's umbrella narrowing as one coherent change.\n\n## Acceptance Criteria\n- [x] `ExpressionError` has an explicit `error_code = \"invalid_input\"` and `error_code_for(ExpressionError(...))` returns `invalid_input`, verified by a focused unit/contract test.\n- [x] A real workflow execute-surface expression-resolution failure returns `invalid_input`, not `llm_unavailable`, verified through the real workflow execution surface or the smallest existing production error conversion seam that exercises the same exception.\n- [x] A genuine LLM outage inside an execute step still returns `llm_unavailable`, verified by a focused test covering the preserved dbca AC3 path.\n- [x] The implementation lands in the same Gerrit change as ce6b and references both tickets.\n\n## Testing\nRun the focused workflow/error taxonomy tests added or updated for this ticket with `env PATH=\"$PWD/.venv/bin:$PATH\" pytest -q`, then run `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` and `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`. After commit, run `env PATH=\"$PWD/.venv/bin:$PATH\" rebar verify-commit-ticket HEAD` to verify ticket trailers.\n\nFile-impact update after implementation: this ticket is closed by the combined Gerrit #2482 commit with ce6b, so its recorded impact includes the shared taxonomy files and held-out compatibility tests touched by that single coherent change, not only `ExpressionError` itself.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "ExpressionError (execute-time workflow wiring) also classifies as llm_unavailable \u2014 decide correct code"
       },
       "created_at": "2026-08-29T23:30:45Z",
@@ -30214,9 +30242,17 @@
       "updated_at": "2026-08-15T15:03:07Z"
     },
     "78f2-b104-e3c9-4b86": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe principal-engineer Janitor audit at snapshot `9a94ef9737fbdf070ae314bba6e797319aee2301` verified maintainability, oracle, documentation, compatibility, and dead-code findings that passed the fixed validity and impact floors and were approved by the maintainer. The audit itself changed no product code; this epic delivers the approved cleanup before further feature work consumes the recovered headroom.\n\nAuthoritative evidence and dispositions are in `.joe-janitor/report-2026-08-29.md` and audit ticket `literal-subaverage-dartfrog`.\n\n## Approach\n\nDeliver each approved remediation through a non-overlapping child whose plan owns its cited files and regression contracts. Structural extractions follow existing call-graph seams. Public removals state their replacement and breaking-change impact. Internal-only shim removal is gated by a prerequisite ADR and migrates every static, dynamic, string, test, and monkeypatch consumer before deletion. Reconciler compatibility removal is separately dependency-ordered so persisted state and live lock/exit contracts are migrated before old routes disappear.\n\n## Child Decomposition\n\n- Structural-headroom children own RP01, RP07, and RP13.\n- Behavioral-oracle and CI children own RP05, RP06, RP09, RP14, RP16, RP19, RP29, RP31, RP33, and RP36.\n- Adapter and documentation children own RP10, RP20, RP21, RP22, RP23, RP24, RP28, and RP35.\n- Public-deprecation and compatibility children own RP18, RP27, scheduled removals, config aliases, CLI aliases, the reconcile family, Python/MCP aliases, and MCP model re-exports.\n- The internal-shim container owns the prerequisite ADR and disjoint implementation shards, including SDC3.\n- Supplemental leaves own SDC1, SDC2, and SDC4.\n- RP02 and RP03 were already absorbed into completed `financial-stoneware-brant` work and are not duplicated here.\n\n## Acceptance Criteria\n\n- [ ] [RP01/S13] Fsck repair planning, policy, restoration, pause, and application are separated along existing call-graph seams while abort semantics remain covered.\n- [ ] [RP05/O02] The config-surface golden rejects every unregistered live schema key and canonical environment name.\n- [ ] [RP06/O14] A behavioral oracle proves an effectful workflow step is invoked once and serially when it raises.\n- [ ] [RP07/S04] Only the MCP startup-handshake cluster is extracted, with lifecycle ordering and compatibility seams unchanged.\n- [ ] [RP09/O12/O13] Tests parse the shipped Docker stage and prove the health command opens the configured socket and fails on a bad response without requiring Docker in the normal test path.\n- [ ] [RP10/A06] Jira Cloud and Data Center delegate link normalization to one pure Jira-family canonicalizer while transports and provider-neutral diffing remain separate.\n- [ ] [RP13/S11] Independent table-driven LLM configuration readers leave `LLMConfig.from_env` as the sole precedence facade.\n- [ ] [RP14/T07] Pinned deployed Semgrep and Gitleaks integrations run in a portable direct-binary parallel Verified lane.\n- [ ] [RP16/O11/O07/O10] Sidecar stores use conflict-safe read-merge-write and observational concurrency/durability proofs.\n- [ ] [RP18/A13] Caller-selected reviewer inputs are removed from CLI, Python, MCP, and generated contracts before any billable call.\n- [ ] [RP19/S05] Production mutation builders emit create/parent ordering metadata and planner/dispatcher tests prove the order.\n- [ ] [RP20/C01/C02/C04/D06] Reconciler rollout, arbitration, configuration, and rollback documentation matches verified runtime behavior.\n- [ ] [RP21/C11/C12] Canonical review/gate descriptions are corrected and the existing MCP reference regenerated.\n- [ ] [RP22/D01] Maintained CLI guidance no longer advertises the removed `review` route.\n- [ ] [RP23/D02] Ticket types and statuses are generated from the canonical schema with drift checking.\n- [ ] [RP24/D05] Bug guidance documents claim-time exemption followed by post-RCA plan review for complex remediation.\n- [ ] [RP27/A11] The expired `REBAR_HLC=0` rollback branch is removed while legacy-event reads and clock injection remain.\n- [ ] [RP28/A12] Residual maintained severity-threshold guidance is removed and no operational config surface remains.\n- [ ] [RP29/O01] API snapshots include normalized return annotations and detect return-only drift.\n- [ ] [RP31/T02] The AST-identical blame-autoderivation test duplicate is removed without losing distinct boundary coverage.\n- [ ] [RP33/S16] Every third-party action in the privileged reconciliation workflow is full-SHA pinned and covered by existing security checks.\n- [ ] [RP35/S15] Git-backed `module_size_trend` and `cap_change_events` metrics implement the structured unavailable contract.\n- [ ] [RP36/O09] Truthful-tally tests require exact nonempty success output and reject empty output.\n- [ ] Scheduled public deprecations are removed with custom OpenAI-compatible Chat endpoints preserved.\n- [ ] All eight approved environment/config aliases are removed and canonical replacements are documented.\n- [ ] Simple CLI aliases are removed in favor of their canonical `bridge`/identity commands.\n- [ ] The complete `reconcile` and `reconcile-check` family is migrated to canonical bridge functionality, including persisted-state handling, then removed.\n- [ ] Python/MCP operation aliases are removed with their canonical replacements and breaking-change records.\n- [ ] Private MCP model re-exports are removed without changing MCP schemas or wire payloads.\n- [ ] A merged ADR prohibits internal-only compatibility shims while preserving deliberate public, wire, event, and persisted-data contracts.\n- [ ] Every inventoried internal shim consumer is migrated to its canonical owner and the old name/path is absent.\n- [ ] [SDC1] Dead reconciler retry/result residue is removed without changing live drift, lock-loss, bridge-exit, store-guard, or persisted-state contracts.\n- [ ] [SDC2] Superseded LLM workflow helpers are removed after their behavioral tests move to live owners.\n- [ ] [SDC4] Dead Jira adapter helpers are removed while mapper/codec and raw-PUT contracts remain covered.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Janitor Cleanup 2026-08-29"
+      },
       "created_at": "2026-09-02T01:06:47Z",
       "jira_id": "4591364",
       "jira_key": "REB-4421",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-02T01:06:50Z"
     },
@@ -33794,6 +33830,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-24T19:40:51Z"
     },
+    "86c0-59ec-a28b-4f7c": {
+      "created_at": "2026-09-02T01:46:18Z",
+      "jira_id": "4591369",
+      "jira_key": "REB-4426",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:21Z"
+    },
     "86c8-4b91-5257-4cca": {
       "baseline": {
         "assignee": {
@@ -34078,6 +34121,13 @@
       "peer_parent": "REB-268",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:35Z"
+    },
+    "87cb-7121-a3b6-4606": {
+      "created_at": "2026-09-02T01:46:24Z",
+      "jira_id": "4591370",
+      "jira_key": "REB-4427",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:26Z"
     },
     "87d2-f6a8-477c-4bd5": {
       "baseline": {
@@ -35382,6 +35432,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T01:25:33Z"
     },
+    "8ce5-b870-601d-4715": {
+      "created_at": "2026-09-02T01:46:26Z",
+      "jira_id": "4591371",
+      "jira_key": "REB-4428",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:28Z"
+    },
     "8d01-5de0-5bd7-4ed0": {
       "baseline": {
         "assignee": {
@@ -36485,6 +36542,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-22T18:38:37Z"
+    },
+    "90e2-6d13-ecfb-4131": {
+      "created_at": "2026-09-02T01:46:29Z",
+      "jira_id": "4591372",
+      "jira_key": "REB-4429",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:31Z"
     },
     "9100-9ee3-7f83-4b86": {
       "baseline": {
@@ -39439,6 +39503,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-16T19:33:49Z"
     },
+    "9ca8-675e-4dfb-427d": {
+      "created_at": "2026-09-02T01:46:34Z",
+      "jira_id": "4591373",
+      "jira_key": "REB-4430",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:36Z"
+    },
     "9ccb-27ee-24dd-4944": {
       "baseline": {
         "assignee": null,
@@ -40401,6 +40472,13 @@
       "jira_key": "REB-1629",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:25Z"
+    },
+    "a07a-5eeb-1223-491c": {
+      "created_at": "2026-09-02T01:46:36Z",
+      "jira_id": "4591374",
+      "jira_key": "REB-4431",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:39Z"
     },
     "a092-fe0f-8f6a-4ed1": {
       "baseline": {
@@ -42808,6 +42886,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-31T23:33:39Z"
     },
+    "aa9e-3d35-fd3e-41ee": {
+      "created_at": "2026-09-02T01:46:42Z",
+      "jira_id": "4591375",
+      "jira_key": "REB-4432",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:45Z"
+    },
     "aaae-5d67-48d3-4024": {
       "baseline": {
         "assignee": null,
@@ -44671,6 +44756,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T15:43:31Z"
+    },
+    "b0ac-3c0f-3f64-4344": {
+      "created_at": "2026-09-02T01:46:47Z",
+      "jira_id": "4591376",
+      "jira_key": "REB-4433",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:49Z"
     },
     "b0ad-2f9a-c772-4376": {
       "baseline": {
@@ -51566,6 +51658,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:41Z"
     },
+    "cdf9-7623-2ecc-4ce6": {
+      "created_at": "2026-09-02T01:46:50Z",
+      "jira_id": "4591377",
+      "jira_key": "REB-4434",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:52Z"
+    },
     "ce02-47ed-6505-4925": {
       "baseline": {
         "assignee": {
@@ -51810,9 +51909,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "Spun from 73d8-4871-1b49-4047 (brainy-convulsant-unicorn) and 551b-1a30-ac2b-4127 (sanidine-cilium-eland) during the 2026-08-30 error-code decision pass.\n\n## Problem\n`error_code_for` (`src/rebar/_errors.py`) maps the broad `LLMError` family to `llm_unavailable`. That over-claims an AI-provider outage for non-outage faults: the bare `LLMError` base, concrete LLM/workflow subclasses that are not in the provider-unavailability subtree, and the editor missing-bundle failure that currently raises a bare `WorkflowError`. This is the residual of origin 8a31-e1c3-cf31-4239's blanket mapping and the systematic completion of epic 3405-c0b7-0436-4b46's descriptiveness intent.\n\n## Operator decision\nThe latest DECISION NEEDED comment approves narrowing `llm_unavailable` to true LLM availability failures while preserving dbca AC3's compatibility contract: a genuine outage surfaced through the bare `WorkflowError` execute-wrapper contract still reads as `llm_unavailable`. The implementation keeps `isinstance(exc, LLMUnavailableError) -> llm_unavailable`, intentionally including `LLMConfigError` / prompt / reviewer configuration subclasses because those classes inherit from `LLMUnavailableError` and model missing LLM dependencies, credentials, or configuration. The implementation removes the broad catch-all for all other `LLMError` instances.\n\nThe split between dbca AC3 and the editor missing-bundle case is type-based, not message-based. The bare `WorkflowError` base remains `llm_unavailable` as the legacy execute-outage wrapper contract. The editor missing-bundle raise at `src/rebar/llm/workflow/editor.py:475` will stop using bare `WorkflowError`; it will raise a dedicated `WorkflowAssetsUnavailableError(WorkflowError)` with `error_code = \"command_failed\"`. That delivers 551b's ruled behavior without message sniffing and without changing the dbca AC3 bare-base contract. Do not add `environment_unready`.\n\nTicket 73d8-4871-1b49-4047 is folded into this sweep by giving `ExpressionError` an explicit `error_code = \"invalid_input\"`, matching prior bug 35ab-f0e0-3e4a-4b72 (unknown-step -> invalid_input) and dbca-97ac-ad96-4d6d (parse/lint -> invalid_input).\n\n## Implementation scope\nTouch `src/rebar/_errors.py`, `src/rebar/llm/errors.py`, `src/rebar/llm/workflow/editor.py`, `src/rebar/llm/workflow/executor.py`, and tests. Enumerate every concrete subclass of `LLMError` across `src/rebar/llm/`, including `errors.py`, `findings.py`, `evals/eval.py`, `prompting/`, and `workflow/`, with Serena hierarchy/reference checks and a grep/string confirmation. Update the existing pinned contract tests that currently assert the blanket mapping: `tests/interfaces/contracts/test_error_code_taxonomy_contract.py`, `tests/interfaces/contracts/test_llmrunner_error_codes_f75f_heldout.py`, `tests/interfaces/contracts/test_workflow_error_codes_35ab.py`, and `tests/interfaces/contracts/test_workflow_error_codes_dbca.py`.\n\nIntended mapping: `LLMUnavailableError` and its availability/config subtree -> `llm_unavailable`; bare `WorkflowError` base -> `llm_unavailable` for the preserved dbca execute-outage wrapper contract; `WorkflowAssetsUnavailableError` -> `command_failed`; `ExpressionError` -> `invalid_input`; workflow caller/authoring errors already classified as `invalid_input` stay there; every remaining non-availability LLM/findings/eval/snapshot subclass without an explicit `error_code` -> `command_failed`; bare `LLMError` base -> `command_failed`.\n\n## Acceptance Criteria\n- [ ] `src/rebar/_errors.py` returns `llm_unavailable` for `LLMUnavailableError` / `LLMConfigError` availability errors and preserves bare `WorkflowError` base -> `llm_unavailable` for the dbca execute-outage compatibility contract; focused tests verify these mappings.\n- [ ] A dedicated editor missing-bundle exception raised from `src/rebar/llm/workflow/editor.py:475` maps to `command_failed`, not `llm_unavailable`, and no message sniffing is used.\n- [ ] The broad `LLMError` base and every non-availability `LLMError` subclass except the deliberately preserved bare `WorkflowError` base maps to an explicit `error_code` when present, otherwise `command_failed`; a parameterized taxonomy test covers the complete enumerated subclass set.\n- [ ] `ExpressionError` maps to `invalid_input` via an explicit `error_code`, verified by a focused test and by the exhaustive taxonomy test.\n- [ ] No `environment_unready` code is introduced; `KNOWN_ERROR_CODES` remains consistent with the intentional taxonomy.\n\n## Testing\nRun the focused updated contract tests with `env PATH=\"$PWD/.venv/bin:$PATH\" pytest -q tests/interfaces/contracts/test_error_code_taxonomy_contract.py tests/interfaces/contracts/test_llmrunner_error_codes_f75f_heldout.py tests/interfaces/contracts/test_workflow_error_codes_35ab.py tests/interfaces/contracts/test_workflow_error_codes_dbca.py`, then `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` and `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`. After committing, run `env PATH=\"$PWD/.venv/bin:$PATH\" rebar verify-commit-ticket HEAD`.",
+        "description": "Spun from 73d8-4871-1b49-4047 (brainy-convulsant-unicorn) and 551b-1a30-ac2b-4127 (sanidine-cilium-eland) during the 2026-08-30 error-code decision pass.\n\n## Problem\n`error_code_for` (`src/rebar/_errors.py`) maps the broad `LLMError` family to `llm_unavailable`. That over-claims an AI-provider outage for non-outage faults: the bare `LLMError` base, concrete LLM/workflow subclasses that are not in the provider-unavailability subtree, and the editor missing-bundle failure that currently raises a bare `WorkflowError`. This is the residual of origin 8a31-e1c3-cf31-4239's blanket mapping and the systematic completion of epic 3405-c0b7-0436-4b46's descriptiveness intent.\n\n## Operator decision\nThe latest DECISION NEEDED comment approves narrowing `llm_unavailable` to true LLM availability failures while preserving dbca AC3's compatibility contract: a genuine outage surfaced through the bare `WorkflowError` execute-wrapper contract still reads as `llm_unavailable`. The implementation keeps `isinstance(exc, LLMUnavailableError) -> llm_unavailable`, intentionally including `LLMConfigError` / prompt / reviewer configuration subclasses because those classes inherit from `LLMUnavailableError` and model missing LLM dependencies, credentials, or configuration. The implementation removes the broad catch-all for all other `LLMError` instances.\n\nThe split between dbca AC3 and the editor missing-bundle case is type-based, not message-based. The bare `WorkflowError` base remains `llm_unavailable` as the legacy execute-outage wrapper contract. The editor missing-bundle raise at `src/rebar/llm/workflow/editor.py:475` will stop using bare `WorkflowError`; it will raise a dedicated `WorkflowAssetsUnavailableError(WorkflowError)` with `error_code = \"command_failed\"`. That delivers 551b's ruled behavior without message sniffing and without changing the dbca AC3 bare-base contract. Do not add `environment_unready`.\n\nTicket 73d8-4871-1b49-4047 is folded into this sweep by giving `ExpressionError` an explicit `error_code = \"invalid_input\"`, matching prior bug 35ab-f0e0-3e4a-4b72 (unknown-step -> invalid_input) and dbca-97ac-ad96-4d6d (parse/lint -> invalid_input).\n\n## Implementation scope\nTouch `src/rebar/_errors.py`, `src/rebar/llm/errors.py`, `src/rebar/llm/workflow/editor.py`, `src/rebar/llm/workflow/executor.py`, and tests. Enumerate every concrete subclass of `LLMError` across `src/rebar/llm/`, including `errors.py`, `findings.py`, `evals/eval.py`, `prompting/`, and `workflow/`, with Serena hierarchy/reference checks and a grep/string confirmation. Update the existing pinned contract tests that currently assert the blanket mapping: `tests/interfaces/contracts/test_error_code_taxonomy_contract.py`, `tests/interfaces/contracts/test_llmrunner_error_codes_f75f_heldout.py`, `tests/interfaces/contracts/test_workflow_error_codes_35ab.py`, and `tests/interfaces/contracts/test_workflow_error_codes_dbca.py`.\n\nIntended mapping: `LLMUnavailableError` and its availability/config subtree -> `llm_unavailable`; bare `WorkflowError` base -> `llm_unavailable` for the preserved dbca execute-outage wrapper contract; `WorkflowAssetsUnavailableError` -> `command_failed`; `ExpressionError` -> `invalid_input`; workflow caller/authoring errors already classified as `invalid_input` stay there; every remaining non-availability LLM/findings/eval/snapshot subclass without an explicit `error_code` -> `command_failed`; bare `LLMError` base -> `command_failed`.\n\n## Acceptance Criteria\n- [x] `src/rebar/_errors.py` returns `llm_unavailable` for `LLMUnavailableError` / `LLMConfigError` availability errors and preserves bare `WorkflowError` base -> `llm_unavailable` for the dbca execute-outage compatibility contract; focused tests verify these mappings.\n- [x] A dedicated editor missing-bundle exception raised from `src/rebar/llm/workflow/editor.py:475` maps to `command_failed`, not `llm_unavailable`, and no message sniffing is used.\n- [x] The broad `LLMError` base and every non-availability `LLMError` subclass except the deliberately preserved bare `WorkflowError` base maps to an explicit `error_code` when present, otherwise `command_failed`; a parameterized taxonomy test covers the complete enumerated subclass set.\n- [x] `ExpressionError` maps to `invalid_input` via an explicit `error_code`, verified by a focused test and by the exhaustive taxonomy test.\n- [x] No `environment_unready` code is introduced; `KNOWN_ERROR_CODES` remains consistent with the intentional taxonomy.\n\n## Testing\nRun the focused updated contract tests with `env PATH=\"$PWD/.venv/bin:$PATH\" pytest -q tests/interfaces/contracts/test_error_code_taxonomy_contract.py tests/interfaces/contracts/test_llmrunner_error_codes_f75f_heldout.py tests/interfaces/contracts/test_workflow_error_codes_35ab.py tests/interfaces/contracts/test_workflow_error_codes_dbca.py`, then `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` and `env PATH=\"$PWD/.venv/bin:$PATH\" make typecheck`. After committing, run `env PATH=\"$PWD/.venv/bin:$PATH\" rebar verify-commit-ticket HEAD`.\n\nFile-impact update after implementation: this ticket is closed by the combined Gerrit #2482 commit, whose actual reviewed diff also exports the new dedicated workflow asset-unavailable exception from `src/rebar/llm/__init__.py`; that export is intentional so all LLM public error types remain reachable from the package facade.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Reserve llm_unavailable for true outages: narrow error_code_for branch 6 to LLMUnavailableError"
       },
       "created_at": "2026-08-30T17:29:10Z",
@@ -59992,6 +60091,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:48Z"
     },
+    "ec79-7afb-c6a8-4af9": {
+      "created_at": "2026-09-02T01:46:55Z",
+      "jira_id": "4591378",
+      "jira_key": "REB-4435",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:46:58Z"
+    },
     "ec89-224e-1ca5-47f8": {
       "baseline": {
         "assignee": {
@@ -63485,6 +63591,13 @@
       "peer_parent": "REB-560",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:56Z"
+    },
+    "f9b9-83ad-931c-4833": {
+      "created_at": "2026-09-02T01:47:00Z",
+      "jira_id": "4591379",
+      "jira_key": "REB-4436",
+      "state": "confirmed",
+      "updated_at": "2026-09-02T01:47:02Z"
     },
     "f9ce-7098-9f17-433e": {
       "created_at": "2026-08-15T15:15:57Z",
@@ -67156,7 +67269,12 @@
     "1788310156697709001": "__rebar_unknown_comment_id__",
     "1788310406289752001": "__rebar_unknown_comment_id__",
     "1788310406658277001": "__rebar_unknown_comment_id__",
-    "1788310490726324001": "__rebar_unknown_comment_id__"
+    "1788310490726324001": "__rebar_unknown_comment_id__",
+    "1788311422453715001": "__rebar_unknown_comment_id__",
+    "1788311578205257001": "__rebar_unknown_comment_id__",
+    "1788312076099055481": "__rebar_unknown_comment_id__",
+    "1788312151582247001": "__rebar_unknown_comment_id__",
+    "1788313359490450001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -69985,7 +70103,22 @@
     "REB-442": "70c7-8745-2be8-4e5c",
     "REB-4420": "3cef-c948-68ba-40fd",
     "REB-4421": "78f2-b104-e3c9-4b86",
+    "REB-4422": "0880-0afb-7fe3-48c9",
+    "REB-4423": "15f2-f3d4-ffcd-4223",
+    "REB-4424": "21b3-0e7b-f287-44c8",
+    "REB-4425": "4ac6-9eb3-b0a5-408f",
+    "REB-4426": "86c0-59ec-a28b-4f7c",
+    "REB-4427": "87cb-7121-a3b6-4606",
+    "REB-4428": "8ce5-b870-601d-4715",
+    "REB-4429": "90e2-6d13-ecfb-4131",
     "REB-443": "fa49-2687-4daf-4afc",
+    "REB-4430": "9ca8-675e-4dfb-427d",
+    "REB-4431": "a07a-5eeb-1223-491c",
+    "REB-4432": "aa9e-3d35-fd3e-41ee",
+    "REB-4433": "b0ac-3c0f-3f64-4344",
+    "REB-4434": "cdf9-7623-2ecc-4ce6",
+    "REB-4435": "ec79-7afb-c6a8-4af9",
+    "REB-4436": "f9b9-83ad-931c-4833",
     "REB-444": "1ba5-39de-2fc2-45f0",
     "REB-445": "30b3-b001-4ee2-43d2",
     "REB-446": "b7fa-6e96-3b8a-40f4",
