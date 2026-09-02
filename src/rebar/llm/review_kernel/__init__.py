@@ -6,7 +6,7 @@ severity/confidence); a SEPARATE verifier validates each finding via atomic,
 independent binary sub-questions; a DETERMINISTIC policy (not the model) decides
 severity and blocking; and an affirmative COACH maps the surviving advisories to a
 locked move registry. The value-bearing, divergence-dangerous passes are extracted
-HERE so every review surface (the plan-review gate; the future code-review gate,
+HERE so every review surface (the plan-review gate; the code-review gate,
 epic ``b744``) consumes ONE decision core and ONE binary vocabulary — the decision
 math and the verification contract cannot fork.
 

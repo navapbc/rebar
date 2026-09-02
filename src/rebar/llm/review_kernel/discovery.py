@@ -5,7 +5,7 @@ ordered *discovery units* (each unit = one LLM operation against a locked rubric
 produces trustworthy execution FACTS: every unit carries exactly one of six precise
 outcome kinds, usage is accounted exactly, and success is checkpointable and resumable.
 
-Both review gates (plan-review and the future code-review) consume this ONE kernel so the
+Both review gates (plan-review and code-review) consume this ONE kernel so the
 execution facts — which units succeeded, resumed, were skipped, shed, failed, or cancelled
 — cannot fork. A later failure never erases an earlier success; an empty result never
 masquerades as success.
