@@ -354,6 +354,7 @@ def test_three_tier_json_shape(tracker: Path):
         "batch_size",
         "batch",
         "skipped_overlap",
+        "skipped_blocked",
         "skipped_blocked_story",
     } <= set(d)
     assert {e["id"] for e in d["batch"]} == {"nb-task-1", "nb-task-2"}

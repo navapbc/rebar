@@ -105,6 +105,7 @@ class SkippedItem(TypedDict):
     conflict_file: NotRequired[str]
     conflict_with: NotRequired[str]
     blocked_story: NotRequired[str]
+    blocker: NotRequired[str]
 
 
 # --- public return shapes ---
@@ -346,6 +347,7 @@ class NextBatch(TypedDict):
     batch: NotRequired[list[BatchItem]]
     tasks: NotRequired[list[BatchItem]]
     skipped_overlap: NotRequired[list[SkippedItem]]
+    skipped_blocked: NotRequired[list[SkippedItem]]
     skipped_blocked_story: NotRequired[list[SkippedItem]]
     skipped_design_awaiting: NotRequired[list[SkippedItem]]
     skipped_manual_awaiting: NotRequired[list[SkippedItem]]

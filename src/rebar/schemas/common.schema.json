@@ -105,7 +105,8 @@
         "title": { "type": "string" },
         "conflict_file": { "type": "string" },
         "conflict_with": { "type": "string" },
-        "blocked_story": { "type": "string" }
+        "blocked_story": { "type": "string" },
+        "blocker": { "type": "string" }
       }
     },
     "error_envelope": {

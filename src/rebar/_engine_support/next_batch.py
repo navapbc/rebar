@@ -26,7 +26,28 @@ from typing import Any, cast
 from rebar._engine_support.output import error_envelope
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
+from rebar.graph._relations import build_blocked_by
 from rebar.reducer import is_terminal_status, reduce_all_tickets, reduce_ticket
+
+
+def _open_blockers_by_ticket(
+    ticket_states: dict[str, dict], ticket_status_map: dict[str, str]
+) -> dict[str, list[str]]:
+    """Return active blockers per blocked ticket using canonical edge direction."""
+    blocked_by = build_blocked_by(ticket_states)
+    open_blockers: dict[str, list[str]] = {}
+    for blocked_id, blocker_ids in blocked_by.items():
+        if ticket_status_map.get(blocked_id, "").lower() not in ("open", "in_progress"):
+            continue
+        live = [
+            blocker_id
+            for blocker_id in sorted(blocker_ids)
+            if not is_terminal_status(ticket_status_map.get(blocker_id, "closed"))
+        ]
+        if live:
+            open_blockers[blocked_id] = live
+    return open_blockers
+
 
 # Files that are shared-by-design and support concurrent additive edits.
 _OVERLAP_SAFE_FILES = {".test-index"}
@@ -73,6 +94,7 @@ class NextBatchResult:
         "candidates",
         "epic_id",
         "epic_title",
+        "skipped_blocked",
         "skipped_blocked_story",
         "skipped_design_awaiting",
         "skipped_in_progress",
@@ -86,6 +108,7 @@ class NextBatchResult:
     batch: list[_Candidate]
     candidates: list[_Candidate]
     skipped_overlap: list[tuple[str, str, str, str]]
+    skipped_blocked: list[tuple[str, str, str]]
     skipped_blocked_story: list[tuple[str, str, str]]
     skipped_design_awaiting: list[tuple[str, str, str]]
     skipped_manual_awaiting: list[tuple[str, str, str]]
@@ -167,21 +190,20 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
     # Derive ready (unblocked) tasks scoped to the epic's descendants.
     # Only "open-ish" statuses are candidates; `idea` is excluded by omission so an
     # undesigned idea is never dispatched into a parallel batch.
+    open_blockers_by_ticket = _open_blockers_by_ticket(state_by_id, ticket_status_map)
+    skipped_blocked = []
     ready_tasks = []
     for t in all_tickets:
         tid = t.get("ticket_id", "")
         status = t.get("status", "").lower()
         if status not in ("open", "in_progress"):
             continue
-        open_depends_on = [
-            d
-            for d in (t.get("deps") or [])
-            if d.get("relation") == "depends_on"
-            and not is_terminal_status(ticket_status_map.get(d.get("target_id", ""), "closed"))
-        ]
-        if open_depends_on:
-            continue
         if descendants and tid not in descendants:
+            continue
+        open_blockers = open_blockers_by_ticket.get(tid, [])
+        if open_blockers:
+            if tid not in parent_ids_with_children:
+                skipped_blocked.append((tid, t.get("title", "untitled"), open_blockers[0]))
             continue
         ready_tasks.append(
             {
@@ -217,19 +239,9 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             return pid
         return None
 
-    # Blocked-id set: active tickets carrying an open depends_on.
-    _blocked_ids: set[str] = set()
-    for t in all_tickets:
-        tid = t.get("ticket_id", "")
-        status = t.get("status", "").lower()
-        if status not in ("open", "in_progress"):
-            continue
-        if any(
-            d.get("relation") == "depends_on"
-            and not is_terminal_status(ticket_status_map.get(d.get("target_id", ""), "closed"))
-            for d in (t.get("deps") or [])
-        ):
-            _blocked_ids.add(tid)
+    # Blocked-id set: active tickets with open blockers, using canonical
+    # direction for both ``depends_on`` and inbound ``blocks`` edges.
+    _blocked_ids = set(open_blockers_by_ticket)
 
     # ── Build candidate list (skip stories, blocked/awaiting parents) ─────────
     skipped_blocked_story = []
@@ -308,6 +320,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
     result.batch = batch
     result.candidates = candidates
     result.skipped_overlap = skipped_overlap
+    result.skipped_blocked = skipped_blocked
     result.skipped_blocked_story = skipped_blocked_story
     result.skipped_design_awaiting = skipped_design_awaiting
     result.skipped_manual_awaiting = skipped_manual_awaiting
@@ -337,6 +350,10 @@ def to_json_dict(r: NextBatchResult) -> dict[str, Any]:
         "skipped_overlap": [
             {"id": tid, "title": title, "conflict_file": cf, "conflict_with": ct}
             for tid, title, cf, ct in r.skipped_overlap
+        ],
+        "skipped_blocked": [
+            {"id": tid, "title": title, "blocker": blocker}
+            for tid, title, blocker in r.skipped_blocked
         ],
         "skipped_blocked_story": [
             {"id": tid, "title": title, "blocked_story": sid}
@@ -369,6 +386,8 @@ def render_text(r: NextBatchResult) -> str:
         lines.append(f"TASK: {c.id}\tP{c.priority}\t{c.itype}\t{c.title}")
     for tid, _title, cf, ct in r.skipped_overlap:
         lines.append(f"SKIPPED_OVERLAP: {tid}\tdeferred (overlaps with {ct} on {cf})")
+    for tid, _title, blocker in r.skipped_blocked:
+        lines.append(f"SKIPPED_BLOCKED: {tid}\tdeferred (blocked by {blocker})")
     for tid, _title, sid in r.skipped_blocked_story:
         lines.append(f"SKIPPED_BLOCKED_STORY: {tid}\tdeferred (parent story {sid} is blocked)")
     for tid, _title, sid in r.skipped_design_awaiting:
