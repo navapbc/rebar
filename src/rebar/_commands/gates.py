@@ -28,6 +28,8 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import Any, cast
 
+from rebar.types import PLAN_REVIEW_EXEMPT_TYPES, PLAN_REVIEW_REVIEWED_TYPES
+
 __all__ = [
     "GateState",
     "close_plan_review_gate_check",
@@ -39,10 +41,11 @@ __all__ = [
     "plan_review_precheck",
 ]
 
-#: Ticket types exempt from the plan-review start-work gate. Single-sourced here so
-#: :func:`plan_review_precheck` and `claim --review`'s stage-1 sensing (story a114)
-#: cannot drift.
-_PLAN_REVIEW_EXEMPT_TYPES = ("bug", "session_log", "code_review", "identity")
+#: Ticket types exempt from the plan-review start-work gate. Re-exported from
+#: :mod:`rebar.types`, which owns the one declaration and derives its complement from
+#: ``TicketType`` (mirror F3). This comment previously claimed the tuple was
+#: "single-sourced here so ... cannot drift"; five other sites carried their own copy.
+_PLAN_REVIEW_EXEMPT_TYPES = PLAN_REVIEW_EXEMPT_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +215,7 @@ def close_plan_review_gate_check(
             "verdict": "disabled",
             "reason": "plan-review close gate is disabled",
         }
-    if ticket_state.get("ticket_type") not in ("task", "story", "epic"):
+    if ticket_state.get("ticket_type") not in PLAN_REVIEW_REVIEWED_TYPES:
         return {
             "ok": True,
             "gate_ran": True,
