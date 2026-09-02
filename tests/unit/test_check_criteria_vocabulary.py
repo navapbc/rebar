@@ -321,6 +321,9 @@ def test_make_lint_rejects_live_vocabulary_through_guard(tmp_path: Path) -> None
     # Bug e127-a3ad-895a-4a2f wired the CLI --output json JS-safe-integer gate into
     # `make lint` ahead of the guard under test, so it needs a stub here for the same reason.
     (scripts / "check_cli_json_js_safe.py").write_text("", encoding="utf-8")
+    # Story 8ce5-b870-601d-4715 wired the MCP<->library parity gate into `make lint`
+    # ahead of the guard under test, so it needs a stub here for the same reason.
+    (scripts / "check_mcp_library_parity.py").write_text("", encoding="utf-8")
     _write(tmp_path, "src/rebar/live.py", _legacy_heading())
 
     stub_bin = tmp_path / "bin"
@@ -400,6 +403,9 @@ def test_long_matching_line_is_truncated(tmp_path: Path) -> None:
 
 
 # The committed inventory and all live migrations are validated through the real CLI.
+@pytest.mark.allow_unharnessed_subprocess(
+    "validates THIS checkout's committed criteria inventory by running the real script over it"
+)
 def test_current_repository_vocabulary_is_clean() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
