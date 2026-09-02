@@ -530,7 +530,7 @@ def append_event(
     author_fallback: str = "Unknown",
     under_lock_check=None,
     allow_secret_pattern: str = "",
-) -> None:
+) -> int | None:
     """Compose an event and append it through the single locked write path.
 
     Builds the canonical event envelope (``{timestamp, uuid, event_type, env_id,
@@ -563,7 +563,7 @@ def append_event(
     from rebar._operation_config import compose_and_bind_operation_snapshot
 
     with compose_and_bind_operation_snapshot(repo_root=repo_root):
-        _append_event_body(
+        return _append_event_body(
             ticket_id,
             event_type,
             data,
@@ -585,7 +585,7 @@ def _append_event_body(
     author_fallback: str,
     under_lock_check,
     allow_secret_pattern: str,
-) -> None:
+) -> int | None:
     """The compose/finalize/commit body of :func:`append_event`, run under the bound
     operation snapshot (split out so the binding wraps it via ONE ``with`` block rather
     than re-indenting this whole body)."""
@@ -636,7 +636,7 @@ def _append_event_body(
     sink = _batch_sink.get()
     if sink is not None:
         sink.append((ticket_id, event))
-        return
+        return int(timestamp)
     try:
         if under_lock_check is None:
             _store_append.write_and_push(str(tracker), ticket_id, event)
@@ -644,6 +644,7 @@ def _append_event_body(
             _store_append.write_and_push(
                 str(tracker), ticket_id, event, under_lock_check=under_lock_check
             )
+        return int(timestamp)
     except (StoreError, RebaseGuard, LockTimeout, StoreIncompatibleError) as exc:
         if under_lock_check is not None and isinstance(exc, LockTimeout):
             raise

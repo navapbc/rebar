@@ -142,6 +142,18 @@ def _terminal_from_result(result: Any) -> tuple[str, Any]:
     return "passed", verdict
 
 
+def _plan_review_sidecar_fields(gate_type: str, result: Any) -> dict[str, Any]:
+    if gate_type != "plan_review" or not isinstance(result, dict):
+        return {}
+    out: dict[str, Any] = {}
+    if "sidecar_emitted" in result:
+        out["sidecar_emitted"] = bool(result.get("sidecar_emitted"))
+    reviewed_at = result.get("sidecar_reviewed_at")
+    if isinstance(reviewed_at, int) and not isinstance(reviewed_at, bool):
+        out["sidecar_reviewed_at"] = reviewed_at
+    return out
+
+
 def _spawn_gate_daemon(
     handle: GateJobHandle, gate_type: str, ticket_id: str, work: Callable[[], Any]
 ) -> None:
@@ -166,17 +178,17 @@ def _spawn_gate_daemon(
         except BaseException as exc:  # noqa: BLE001 — reflected in the run index, not raised
             error, verdict = exc, str(exc)
         finally:
-            rebar.llm.record_gate_run(
-                {
-                    "job_id": handle.job_id,
-                    "ticket_id": ticket_id,
-                    "gate_type": gate_type,
-                    "status": status,
-                    "verdict": verdict,
-                    "error": str(error) if error is not None else None,
-                    "finished_at": time.time(),
-                }
-            )
+            record = {
+                "job_id": handle.job_id,
+                "ticket_id": ticket_id,
+                "gate_type": gate_type,
+                "status": status,
+                "verdict": verdict,
+                "error": str(error) if error is not None else None,
+                "finished_at": time.time(),
+            }
+            record.update(_plan_review_sidecar_fields(gate_type, result))
+            rebar.llm.record_gate_run(record)
             handle.complete(result=result, error=error)
 
     threading.Thread(target=_bg, daemon=True).start()
@@ -253,9 +265,9 @@ def _register_gate_start_tools(mcp, ann, allow_llm, readonly) -> None:
         deadline can cut off with a ``-32001`` while the server keeps running), the
         caller gets a durable handle instead of a timeout, then POLLS —
         ``plan_review_status(ticket_id)`` for the durable attestation verdict, or
-        ``gate_status(job_id)`` for the run handle (running -> passed/failed). PREFER
-        this for a long review; the sync ``review_plan`` remains the dedup-protected
-        fallback.
+        ``gate_status(job_id)`` for the run handle (running -> passed/failed) plus
+        ``findings.readable`` for the REVIEW_RESULT sidecar receipt. PREFER this for a
+        long review; the sync ``review_plan`` remains the dedup-protected fallback.
 
         A duplicate ``review_plan_start`` for the same ticket+basis while a run is in
         flight ATTACHES to it — same ``job_id``, no second billable pass (bug d80d).
