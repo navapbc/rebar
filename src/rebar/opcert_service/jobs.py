@@ -29,13 +29,18 @@ from rebar._opcert_binding import bound_signer
 from rebar.opcert_service.config import OpcertServiceConfig
 from rebar.opcert_service.keyprov import OpcertSigner
 from rebar.opcert_service.workspace import Workspace, discard, prepare_workspace
+from rebar.signing import OPCERT_KINDS
 
 #: A gate op seam: ``(ticket_id, repo_root) -> result mapping``. `review_plan` and
 #: `verify_completion` both match it, and tests inject fakes with the same shape.
 GateFn = Callable[[str, str], dict]
 
 #: The only kinds a client may request (validated before enqueue).
-VALID_KINDS = ("completion-verifier", "plan-review")
+# Derived from the canonical signing.OPCERT_KINDS (mirror F2), as an ORDERED TUPLE:
+# this name is re-exported in opcert_service.__all__ and rendered into an API error
+# message, so substituting the frozenset itself would change a published type and make
+# that message non-deterministic. sorted() reproduces the order this list already had.
+VALID_KINDS = tuple(sorted(OPCERT_KINDS))
 
 #: The closed ``error.class`` enum, mapped from the raised exception type.
 ERR_LLM_UNAVAILABLE = "llm_unavailable"
