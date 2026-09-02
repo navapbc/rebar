@@ -29,3 +29,13 @@ These files are hand-authored. Their parity gates compare them with an identifie
 | `src/rebar/llm/reviewers/*.md` | the prompt BODY is authored freely, but the front-matter must be a FIXED POINT of `write_front_matter()` — hand-wrapped YAML that is semantically correct still fails | `pytest tests/unit/test_prompt_front_matter.py` | pytest (`test_built_in_prompt_round_trips_canonically`) |
 
 `tests/unit/test_generated_surface_markers.py` pins both tables to their source registries and verifies each generated marker.
+
+### Gate-internal manifests
+
+These are neither shipped documentation nor library surface: each is a fixture a drift gate compares live introspection against. They regenerate the same way, so they are listed here alongside the sibling generators, but they stay out of the two tables above (which catalog the shipped surfaces those tests pin).
+
+| File | Derived from | Regenerate with | Enforcing gate |
+|---|---|---|---|
+| `tests/unit/mcp_library_parity_manifest.json` | the live MCP tool registry (`register_read_tools` / `register_llm_tools` / `register_write_tools`) cross-referenced against the `rebar.__all__` library facade: per-tool correspondence (`exact` / `co_names` / `mcp_only`) plus normalized parameter sets | `python scripts/check_mcp_library_parity.py --update` | MCP/library parity gate (`make lint`) |
+
+The parity manifest is generated with one hand-authored part: an intentional MCP-vs-library difference is declared in that tool's `divergence` block and needs a non-empty `reason`. `--update` carries an existing declaration forward and writes only an empty-reason stub for a newly-diverging tool, so a fresh divergence keeps failing the gate until a human writes the justification. Category-level rules that apply to every tool (such as the `repo_root` parameter the MCP server resolves from its own environment rather than from the caller) live once under the manifest's `normalization` key, never as per-tool divergences.
