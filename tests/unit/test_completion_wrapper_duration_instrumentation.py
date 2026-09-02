@@ -507,7 +507,16 @@ def test_completion_dispatch_times_existing_work_and_preserves_consumption(
 
     def gate_doc(_name: str, _repo_root: str | None) -> dict[str, Any]:
         clock.advance_ms(3)
-        return {"name": "completion-verification"}
+        # The steps are declared (mirror F13): the dispatcher now validates the loaded doc's
+        # step ids, so a stub with none is not a faithful stand-in for the packaged gate —
+        # it is the exact shape the guard exists to reject. Derived from the required set so
+        # this stub cannot drift out of step with it.
+        from rebar.llm.workflow.completion_metrics import WORKFLOW_STEP_IDS
+
+        return {
+            "name": "completion-verification",
+            "steps": [{"id": step_id} for step_id in sorted(WORKFLOW_STEP_IDS)],
+        }
 
     def run_workflow(*_args: Any, **kwargs: Any) -> SimpleNamespace:
         recorder = kwargs["recorder"]
