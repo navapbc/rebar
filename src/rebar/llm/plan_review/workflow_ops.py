@@ -63,6 +63,11 @@ from .decide_ops import (  # noqa: E402,F401
 )
 
 _OUTPUT_SCHEMA = "plan_review_verdict"
+_BUG_TIER_BLOCKING_DET_CRITERIA = {"P1", "P4", "P10"}
+
+
+def _bug_tier_keeps_blocking(finding: dict[str, Any]) -> bool:
+    return bool(_BUG_TIER_BLOCKING_DET_CRITERIA.intersection(finding.get("criteria") or ()))
 
 
 @register_step(
@@ -112,9 +117,10 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     # BUG REVIEW TIER (epic 6982 / R4): a bug no longer short-circuits to a bare exempt-PASS.
     # It gets a LIGHT ADVISORY review — the DET floor + the necessity probe (see
     # registry.BUG_TIER_CRITERIA; the assemble step restricts a bug's included LLM criteria to
-    # it) — and every DET finding EXCEPT P4's description admission limit is downgraded to
-    # advisory, so an ordinarily sized bug always PASSes. run_llm=True so the restricted LLM tier
-    # runs. The CLI claim-time
+    # it). P1/P10 readiness-shape failures and P4's description admission limit remain
+    # authoritative DET blocks; the remaining DET findings are downgraded to advisory so a
+    # well-formed bug still gets the restricted LLM tier instead of a bare exempt PASS. The
+    # CLI claim-time
     # bug exemption (rebar._commands.gates) is unchanged — a bug still needs no signed attestation
     # to be claimed; this only makes an explicit review / gate run substantive instead of exempt.
     #
@@ -132,10 +138,12 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
         all_det_blocks = det_floor.det_blocking_findings(det_results)
         det_advisories = det_floor.det_advisory_findings(det_results)
         det_cov = det_floor.det_coverage(det_results)
-        # The light tier remains advisory except for P4's hard description admission limit.
-        # Preserve that one deterministic block and downgrade every other DET block as before.
-        det_blocks = [finding for finding in all_det_blocks if finding["criteria"] == ["P4"]]
-        downgraded = [finding for finding in all_det_blocks if finding["criteria"] != ["P4"]]
+        # The light tier may not discard the readiness floor: P1 and P10 are the exact
+        # acceptance/testing checks a signed plan-review attestation must make deterministic.
+        det_blocks = [finding for finding in all_det_blocks if _bug_tier_keeps_blocking(finding)]
+        downgraded = [
+            finding for finding in all_det_blocks if not _bug_tier_keeps_blocking(finding)
+        ]
         det_advisories = [*downgraded, *det_advisories]
         det_cov = {**det_cov, "bug_tier": True}
     else:

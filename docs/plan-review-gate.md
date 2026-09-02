@@ -533,10 +533,11 @@ no-auth), independently of the machine credentials (deploy keys/tokens) it confi
 Separately, **`session_log` / `code_review` / `identity` tickets are exempt** from the whole
 gate (a distinct exemption axis, not part of container/leaf scrutiny). A **bug is NOT
 exempt**: since the bug review tier (epic 6982/R4) it gets a light advisory review — the DET
-floor plus the restricted `BUG_TIER_CRITERIA` probe — whose findings are always downgraded to
-advisory, so a bug in that tier can be coached but never BLOCKED unless it escalates out of it:
-a bug whose declared blast radius names non-test paths is reviewed by the full blocking rubric
-instead (see R4(c) below). (A bug still needs no signed attestation
+floor plus the restricted `BUG_TIER_CRITERIA` probe. P1/P10 readiness-floor failures and P4
+description admission failures still BLOCK and short-circuit before the LLM tier; remaining DET
+findings are downgraded to advisory so a well-formed bug in that tier can be coached without the
+full rubric. A bug whose declared blast radius names non-test paths is reviewed by the full
+blocking rubric instead (see R4(c) below). (A bug still needs no signed attestation
 to be *claimed*; that CLI-side exemption is a separate axis and is unchanged.)
 Mechanical/test *leaves* suppress
 noisy criteria. Overlays fire from
@@ -1563,9 +1564,10 @@ bare exempt-PASS (`workflow_ops.plan_review_precheck` → `orchestrator._exempt_
 `llm_calls:0`), so a bug got no substantive review — verified on bug 5886, whose persisted
 `REVIEW_RESULT` was `{"runner":"exempt","verdict":"PASS","llm_calls":0}`. The bug tier instead
 runs a **light advisory review**: the DET floor + the `necessity` probe
-(`registry.BUG_TIER_CRITERIA = ("necessity",)`), and **never blocks a bug** not escalated out of
-the tier by (c) below: precheck downgrades every DET finding except P4's
-description admission limit to advisory, and the sole LLM criterion is advisory. The
+(`registry.BUG_TIER_CRITERIA = ("necessity",)`). The light tier is still subject to the
+deterministic readiness floor: P1 (missing `## Acceptance Criteria`), P10
+(verification-presence), and P4's description admission limit remain blocking and short-circuit
+before any LLM call. Other DET findings are advisory, and the sole LLM criterion is advisory. The
 restriction is centralised in the single routing seam (`orchestrator.route_criteria` returns only
 `BUG_TIER_CRITERIA` for a `bug`), so BOTH the assemble step and the batch-runner's project-criteria
 fan-in honor it — an activated blocking `project.*` criterion can never be fanned into a bug review
