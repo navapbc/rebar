@@ -538,6 +538,16 @@ advisory, so a bug in that tier can be coached but never BLOCKED unless it escal
 a bug whose declared blast radius names non-test paths is reviewed by the full blocking rubric
 instead (see R4(c) below). (A bug still needs no signed attestation
 to be *claimed*; that CLI-side exemption is a separate axis and is unchanged.)
+**The intended sequence**: claim a bug without plan review to perform root-cause
+analysis (RCA) first — the claim-time exemption exists exactly so RCA is not
+blocked on a review of work that doesn't exist yet. Once RCA yields an
+implementation plan and a recorded `file_impact` for a **complex** remediation (one
+whose blast radius names non-test paths), that plan escalates out of the light bug
+tier and must pass the full, blocking-capable LLM plan review (an explicit `rebar
+review-plan <bug>`) before implementation begins — see R4(c) below. A **simple**
+bug (blast radius stays test-only) may proceed through the light advisory tier
+without a blocking gate. Neither case implies every bug needs review before claim,
+nor that a complex bug's remediation stays exempt once its blast radius is known.
 Mechanical/test *leaves* suppress
 noisy criteria. Overlays fire from
 low-false-positive deterministic triggers where safe (T5a/T5d/T7/T12) and are
