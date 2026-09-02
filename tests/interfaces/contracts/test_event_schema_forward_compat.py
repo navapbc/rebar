@@ -12,8 +12,22 @@ introduced. "Tolerate" has two halves, both pinned here:
     particular ``compact`` must NOT absorb it into a SNAPSHOT and delete it, or an
     older clone's compaction would destroy a newer clone's data.
 
-Also pins that the schema declares an explicit SCHEMA_VERSION and that the set of
-event types the reducer handles matches the declared KNOWN_EVENT_TYPES.
+Also pins that the schema declares an explicit SCHEMA_VERSION, and — mirror F1 —
+that ``_version.KNOWN_EVENT_TYPES`` and the reducer's ``_replay._EVENT_HANDLERS``
+table stay EQUAL as sets. That parity was advertised here long before anything
+checked it: the only assertions were three memberships. It matters because the two
+sides fail asymmetrically. ``_replay.py:195`` gates on KNOWN_EVENT_TYPES and
+``_commands/compact_plan.py:131`` makes known types eligible for SNAPSHOT squash and
+file retirement, so a type that is KNOWN but has NO handler is folded into nothing
+and then deleted — silent permanent data loss. A handler with no known type is only
+dead code.
+
+The parity is asserted rather than generated: ``_version`` is a leaf module and
+``_replay`` imports FROM it, so deriving one from the other would invert a live
+import edge into a cycle. The runtime gate deliberately keeps consulting the broader
+KNOWN_EVENT_TYPES (see the comment at ``_replay.py:188-194``) so a downgraded clone
+can preserve-and-ignore what it cannot fold; only the possibility of the two sets
+DIFFERING is removed here.
 """
 
 from __future__ import annotations
@@ -166,3 +180,68 @@ def test_fsck_warns_on_unknown_newer_event_type(rebar_repo: Path) -> None:
     assert "newer than this rebar understands" in report
     # It is a WARN, not a corruption finding — fsck must still pass overall.
     assert "CORRUPT" not in report
+
+
+# ── mirror F1: KNOWN_EVENT_TYPES vs the reducer's dispatch table ──────────────
+
+
+def _event_type_parity_failure(known, handlers) -> str | None:
+    """Describe how the two event-type masters diverge, or ``None`` when they agree.
+
+    Split out from the assertion so the drift cases below can exercise the REPORT
+    itself: a parity check whose message does not name the offender sends a reader
+    back to diff two files by hand.
+    """
+    known_only = sorted(set(known) - set(handlers))
+    handler_only = sorted(set(handlers) - set(known))
+    parts = []
+    if known_only:
+        parts.append(
+            f"KNOWN_EVENT_TYPES with no handler {known_only} — these are folded into "
+            "nothing and then made eligible for SNAPSHOT squash + file retirement, "
+            "which is silent permanent data loss"
+        )
+    if handler_only:
+        parts.append(
+            f"_EVENT_HANDLERS not in KNOWN_EVENT_TYPES {handler_only} — dead handlers, "
+            "since the replay gate skips these events before dispatch"
+        )
+    return "; ".join(parts) or None
+
+
+def test_known_event_types_equals_the_reducer_dispatch_table() -> None:
+    """AC1. Imports both real objects; re-listing the members would defeat the point."""
+    from rebar.reducer._replay import _EVENT_HANDLERS
+
+    _version = _load_version_module()
+    failure = _event_type_parity_failure(_version.KNOWN_EVENT_TYPES, _EVENT_HANDLERS)
+    assert failure is None, failure
+
+
+def test_parity_reports_a_known_type_that_has_no_handler() -> None:
+    """AC2/AC3, the data-loss direction."""
+    failure = _event_type_parity_failure({"CREATE", "GHOST"}, {"CREATE": object()})
+    assert failure is not None
+    assert "GHOST" in failure
+    assert "no handler" in failure and "data loss" in failure
+
+
+def test_parity_reports_a_handler_with_no_known_type() -> None:
+    """AC2/AC3, the dead-code direction."""
+    failure = _event_type_parity_failure({"CREATE"}, {"CREATE": object(), "ORPHAN": object()})
+    assert failure is not None
+    assert "ORPHAN" in failure
+    assert "dead handler" in failure
+
+
+def test_parity_holds_against_the_real_objects_under_a_seeded_drift() -> None:
+    """AC2 with teeth: seed the divergence into a COPY of the real sets, so the check is
+    proven against production values rather than only against hand-built literals."""
+    from rebar.reducer._replay import _EVENT_HANDLERS
+
+    _version = _load_version_module()
+    known = set(_version.KNOWN_EVENT_TYPES)
+    assert _event_type_parity_failure(known, _EVENT_HANDLERS) is None
+    known.add("SEEDED_UNHANDLED")
+    failure = _event_type_parity_failure(known, _EVENT_HANDLERS)
+    assert failure is not None and "SEEDED_UNHANDLED" in failure
