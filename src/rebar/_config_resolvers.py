@@ -224,6 +224,22 @@ def resolve_janitor_tunables(
     }
 
 
+def resolve_gate_min_free_bytes(
+    default_gib: int = 2, root: str | os.PathLike[str] | None = None
+) -> int:
+    """Hard pre-clone admission floor in bytes: ``REBAR_GATE_MIN_FREE_GIB`` >
+    ``[snapshot].min_free_gib`` > default. Malformed/negative values fall back or clamp to zero
+    so a bad operator knob cannot make every gate crash before it can report the problem."""
+    defaults = {"min_free_gib": default_gib}
+    gib = _snapshot_int(
+        os.environ.get("REBAR_GATE_MIN_FREE_GIB"),
+        _snapshot_table(root),
+        "min_free_gib",
+        defaults,
+    )
+    return max(0, gib) * 1024 * 1024 * 1024
+
+
 # --------------------------------------------------------------------------- #
 # Below-seam CLI/command resolvers (RP-04 config-ownership cutover, ticket 9515).
 # These OWN the ambient env reads that previously sat BELOW the composition seam in

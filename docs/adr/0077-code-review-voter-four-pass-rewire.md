@@ -42,8 +42,9 @@ exception. The receiver's voter casts `llm_review_max_value` / `llm_review_block
 decision — unchanged. The distinction between an INFRA veto and a CODE veto lives in the vote
 **message**: its first line is a machine-parseable tag —
 `[LLM-Review: PASS]`, `[LLM-Review: BLOCK — finding]`, or
-`[LLM-Review: BLOCK — coverage-gap (<gate-disabled|llm-unavailable|scanner|review-error>)]`. The
-sub-reason is derived deterministically from `verdict.coverage`. A security-scanner MATCH
+`[LLM-Review: BLOCK — coverage-gap (<gate-disabled|llm-unavailable|scanner|review-error|low-disk>)]`. The
+sub-reason is derived deterministically from `verdict.coverage`; `coverage.low_disk` maps to
+`low-disk` and follows ADR 0069's retryable path with a terminal no-vote exhaustion. A security-scanner MATCH
 (`reason == 'detector-finding'`) is a real finding, NOT a coverage gap.
 
 ## Consequences

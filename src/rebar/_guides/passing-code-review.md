@@ -174,10 +174,12 @@ Read the `LLM-Review` tag — it tells you whose problem it is:
 - **`BLOCK — finding`** (with inline comments): a real issue in *your* code. Fix it, amend,
   re-push, and mark each inline comment **Done** (submit requires no unresolved comments).
 - **`BLOCK — coverage-gap (…)`** (gate-disabled / llm-unavailable / scanner / review-error /
-  indeterminate / merge-review): an **infrastructure veto, not your diff** — once the
+  low-disk / indeterminate / merge-review): an **infrastructure veto, not your diff** — once the
   infrastructure issue clears, comment **`rerun-llm-review`** on the change to re-trigger
   the review yourself (self-service; the bot refuses the trigger only when the standing
-  `-1` is a real finding). No code change and no re-push needed. The two triggers are
+  `-1` is a real finding). For `low-disk`, wait until the host has been remediated; retry-budget
+  exhaustion remains no-vote/labels-unchanged, so the missing `LLM-Review +1` blocks submit without
+  creating a false code veto. No code change and no re-push needed. The two triggers are
   parallel but deliberately share **no substring**: `recheck` re-runs CI (`Verified`),
   `rerun-llm-review` re-runs the LLM review (`LLM-Review`). The older LLM word embedded
   `recheck`, so CI's substring matcher fired on it too and cancelled in-flight runs; it was

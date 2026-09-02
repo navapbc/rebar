@@ -40,6 +40,10 @@ from rebar.review_bot.config import ReceiverConfig
 from rebar.review_bot.dedup import DedupStore
 from rebar.review_bot.finding_publish import post_review
 from rebar.review_bot.gerrit_client import GerritClient, GerritError
+from rebar.review_bot.low_disk import GAP_REASON as _LOW_DISK_GAP_REASON
+from rebar.review_bot.low_disk import decision as _low_disk_decision
+from rebar.review_bot.low_disk import exhausted_result as _low_disk_exhausted_result
+from rebar.review_bot.low_disk import review_clone_has_room as _review_clone_has_room
 from rebar.review_bot.voter_merge import (
     assemble_merge_diff as _assemble_merge_diff,
 )
@@ -361,6 +365,37 @@ async def _decision_for_clone(
     return decision, diff_text
 
 
+async def _decision_for_review_target(
+    gc: Any,
+    info: dict[str, Any],
+    *,
+    cfg: ReceiverConfig,
+    is_merge: bool,
+    parent_count: int,
+    commit_message: str,
+    runtime: LLMRuntime | None = None,
+) -> tuple[dict[str, Any], str]:
+    """Run the review setup after the pre-clone free-space admission check."""
+    if not _review_clone_has_room(cfg):
+        return _low_disk_decision(), ""
+    with tempfile.TemporaryDirectory(prefix="reviewbot-") as repo_root:
+        await asyncio.to_thread(
+            gc.clone_change_ref,
+            info["change_number"],
+            info["patchset_ref"],
+            repo_root,
+        )
+        return await _decision_for_clone(
+            gc,
+            repo_root,
+            info,
+            is_merge=is_merge,
+            parent_count=parent_count,
+            commit_message=commit_message,
+            runtime=runtime,
+        )
+
+
 def _guard_decision_auth(cfg: ReceiverConfig) -> dict[str, Any] | None:
     """AC3 fail-closed guard: the decision-bearing Gerrit auth MUST be present before any
     dedup/clone/provider work. Returns an error-status dict (and emits the VOTER_ERROR marker)
@@ -393,13 +428,9 @@ def _handle_retryable_gap(
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Handle a retryable coverage-gap decision (ticket 0347; ADR 0069).
 
-    Returns ``(decision, deferred_result)``. When the decision's ``gap_reason`` is retryable
-    and the per-revision attempt budget is NOT yet spent, the review is DEFERRED (cast NO vote,
-    so the vote-less change stays visible to the backfill reconciler) and ``deferred_result`` is
-    a ``{"status": "deferred", ...}`` dict the caller returns immediately. Otherwise
-    ``deferred_result`` is ``None``: either the gap is not retryable (vote as-is) or the budget
-    is spent (``decision`` is returned with the retries-exhausted note appended and the
-    escalation VOTER_ERROR fired, so the caller casts the fail-closed -1)."""
+    Returns ``(decision, deferred_result)``. Retryable gaps under budget return a
+    vote-less ``deferred`` result. Spent non-low-disk gaps escalate to the existing
+    fail-closed -1; spent low-disk gaps return a terminal no-vote deferral."""
     gap_reason = decision.get("gap_reason")
     if gap_reason not in adapter.RETRYABLE_GAP_REASONS:
         return decision, None
@@ -415,9 +446,6 @@ def _handle_retryable_gap(
         )
         attempts = 0
     if attempts < cfg.retryable_gap_max_attempts:
-        # Genuinely vote-less: nothing is posted to the change (a provisional comment would still
-        # leave it vote-less, but the deferral must stay invisible to Gerrit entirely — the
-        # reconciler pre-filters on "no LLM-Review vote").
         _emit(
             logging.WARNING,
             "REVIEW_RETRY_DEFERRED",
@@ -434,9 +462,21 @@ def _handle_retryable_gap(
             "gap_reason": gap_reason,
             "attempt": attempts,
         }
-    # Budget spent: cast the fail-closed -1 (message body gains the exhausted note; the
-    # first-line tag vocabulary is unchanged) and fire the VOTER_ERROR marker so the
-    # voter_errors alarm surface sees the escalation.
+    if gap_reason == _LOW_DISK_GAP_REASON:
+        _emit(
+            logging.ERROR,
+            "REVIEW_LOW_DISK_DEFERRED_EXHAUSTED",
+            change_id=change_id,
+            revision_id=revision,
+            attempt=attempts,
+            max_attempts=cfg.retryable_gap_max_attempts,
+        )
+        return decision, _low_disk_exhausted_result(
+            change_id=change_id,
+            revision=revision,
+            attempts=attempts,
+            max_attempts=cfg.retryable_gap_max_attempts,
+        )
     decision = adapter.append_retries_exhausted_note(decision, attempts)
     _voter_error(
         change_id=change_id,
@@ -507,8 +547,7 @@ async def _review_and_vote(
     force: bool = False,
     runtime: LLMRuntime | None = None,
 ) -> dict[str, Any]:
-    """The review itself. Call :func:`review_and_vote` instead — it maintains the
-    in-flight count the deploy loop reads."""
+    """Review a patchset; call review_and_vote so in-flight accounting is preserved."""
     cfg = config or ReceiverConfig.from_env()
     auth_error = _guard_decision_auth(cfg)
     if auth_error is not None:
@@ -537,11 +576,7 @@ async def _review_and_vote(
 
     lock = await _lock_for(key)
     async with lock:
-        # Dedup + existing-vote short-circuits are SKIPPED when force=True (a manual
-        # /rerun): forcing re-reviews even a change that already carries a vote (e.g.
-        # a stuck fail-closed -1), overwriting it with a fresh verdict. force still
-        # runs the full review + is still fail-closed — it can only request a fresh
-        # review, never force a PASS.
+        # Manual reruns skip existing-vote short-circuits but remain fail-closed.
         # Dedup short-circuit (local ledger first — cheap, no network).
         if not force and store.already_voted(change_id, revision):
             _emit(
@@ -612,28 +647,18 @@ async def _review_and_vote(
             decision = _merge_coverage_gap_decision(f"commit fetch failed: {exc}")
             is_merge = False
 
-        # Review: clone the ref, fetch the diff (merge vs non-merge path), run the adapter seam.
-        # Skipped entirely when a merge-path infra gap already decided the vote above.
+        # Clone/materialize then run the adapter seam unless merge setup already failed.
         if decision is None:
             try:
-                # Per-change clone workdir. TemporaryDirectory resolves to the system temp
-                # dir (tempfile.gettempdir(), typically /tmp) on the box's ROOT volume — not
-                # the /var/gerrit data volume — so a large series of clones adds to root-disk
-                # pressure, which the `rebar-root-disk-pressure` alarm watches (see the
-                # "Disk-full triage" section of infra/runbooks/review-bot-ops.md).
-                with tempfile.TemporaryDirectory(prefix="reviewbot-") as repo_root:
-                    await asyncio.to_thread(
-                        gc.clone_change_ref, info["change_number"], info["patchset_ref"], repo_root
-                    )
-                    decision, diff_text = await _decision_for_clone(
-                        gc,
-                        repo_root,
-                        info,
-                        is_merge=is_merge,
-                        parent_count=parent_count,
-                        commit_message=commit_message,
-                        runtime=runtime,
-                    )
+                decision, diff_text = await _decision_for_review_target(
+                    gc,
+                    info,
+                    cfg=cfg,
+                    is_merge=is_merge,
+                    parent_count=parent_count,
+                    commit_message=commit_message,
+                    runtime=runtime,
+                )
             except adapter.ReviewedTreeMismatch as exc:
                 # The cloned tree is provably NOT the revision this vote would attach to, so
                 # NO vote is honest here — not even a -1, which would certify that this

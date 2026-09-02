@@ -477,6 +477,18 @@ def sweep_tmp(root: Path | None = None) -> int:
     return removed
 
 
+def _snapshot_store_has_room(root: Path) -> bool:
+    from rebar._snapshot.janitor import has_min_free_space
+
+    return has_min_free_space(root)
+
+
+def _raise_snapshot_low_disk(root: Path) -> None:
+    from rebar._snapshot.janitor import SnapshotLowDiskError, volume_free_space
+
+    raise SnapshotLowDiskError(volume_free_space(root))
+
+
 def materialize(
     ref: str = DEFAULT_REF,
     *,
@@ -484,18 +496,12 @@ def materialize(
     repo_root: str | None = None,
     fetch: bool = True,
 ) -> SnapshotHandle:
-    """Materialize a code-reading read root for ``ref`` and return a :class:`SnapshotHandle`.
+    """Materialize a code-reading read root for ``ref`` and return a SnapshotHandle.
 
-    ``attested`` (default): resolve ``ref`` to an immutable SHA (fetching from origin
-    first when present) and materialize a faithful snapshot of the committed tree into the
-    content-addressed store, reusing an existing ``<root>/<sha>`` entry. The handle is
-    ``signable``.
-
-    ``local``: hand back the in-place checkout (``repo_root``) untouched — no fetch, no
-    materialization, dirty content allowed. The handle is never ``signable``.
-
-    Raises :class:`SnapshotFetchError` / :class:`SnapshotRefError` / :class:`SnapshotError`
-    on failure; attested mode fails closed (no snapshot, no handle)."""
+    Attested mode resolves to an immutable SHA and populates/reuses the content-addressed
+    store; local mode hands back the in-place checkout unsigned. Snapshot/ref/fetch errors
+    fail closed.
+    """
     if source_mode not in _SOURCE_MODES:
         raise SnapshotError(
             f"invalid source mode {source_mode!r}; expected one of {', '.join(_SOURCE_MODES)}"
@@ -510,17 +516,11 @@ def materialize(
             source=SOURCE_LOCAL,
         )
 
-    # blobless=False: this ref WILL be materialized, so its blobs must arrive with the commit
-    # in one RPC (see the module docstring's filtering policy).
     sha = resolve_ref(ref, repo_root, fetch=fetch, blobless=False)
     store = store_root()
     dest = entry_path(sha, store)
     if dest.is_dir():
-        # Cache hit — immutable by SHA. Read the caveats persisted at build time rather
-        # than re-walking the tree / re-running ls-tree on every hit; if the sidecar is
-        # missing (e.g. an entry built by an older binary), recompute once and persist.
-        # Reading from the sidecar also keeps submodule detection correct when THIS
-        # process's object DB lacks the SHA's objects (another process built the entry).
+        # Cache hit: immutable by SHA; read persisted caveats or recompute once.
         cached = _load_caveats(sha, store)
         if cached is None:
             lfs, subs = _detect_lfs_pointers(dest), _list_submodules(root_dir, sha)
@@ -531,20 +531,14 @@ def materialize(
             path=dest, sha=sha, source=SOURCE_ATTESTED, lfs_pointers=lfs, submodules=subs
         )
 
+    if not _snapshot_store_has_room(store):
+        _raise_snapshot_low_disk(store)
+
     tmp_parent = _tmp_root(store)
     build = tmp_parent / f"build-{sha[:12]}-{uuid.uuid4().hex}"
     try:
-        # Gated on "are blobs actually missing?", NOT on `fetch`: cache.acquire (the real
-        # entry point) resolves the ref itself and calls us with fetch=False.
         _ensure_blobs_present(root_dir, sha, "origin")
-        # Same write-amplification fix as the tickets entries (bug 8386, task 5b25):
-        # `--ref HEAD` moves this key per commit, so adjacent SHAs would each cost a whole
-        # fresh tree. Build from a hardlinked neighbouring entry when one exists, rewriting
-        # only the changed paths. Sharing does not weaken the attestation basis: the helper
-        # fails CLOSED (returns False) on any doubt — donor mismatch, symlink/gitlink in the
-        # tree, missing objects — and the entry it does build byte-matches the committed
-        # tree at `sha` (verified against `git ls-tree`), exactly like a full build. The
-        # code entry's tree sits at the entry ROOT, hence the empty prefix and subdir.
+        # Reuse a neighbouring entry when possible (bug 8386); falls back closed to a full build.
         if not materialize_via_donor(root_dir, sha, build, store=store, entry_prefix="", subdir=""):
             _materialize_tree(root_dir, sha, build)
         _fsync_dir(build)

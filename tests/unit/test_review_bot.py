@@ -2746,6 +2746,7 @@ def _gap_verdict(reason):
                 {"criterion": "sec", "reason": "fail-closed-abstain", "abstain_reasons": ["x"]}
             ]
         },
+        "low-disk": {"low_disk": True, "low_disk_free_bytes": 1024, "low_disk_min_bytes": 2048},
     }[reason]
     return {"verdict": "BLOCK", "blocking": [], "advisory": [], "coverage": coverage}
 
@@ -2783,7 +2784,9 @@ def test_dedup_attempt_budget_record_count_reset(tmp_path):
     assert store.attempt_count("c1", "r1") == 0  # DELETE: as if never attempted
 
 
-@pytest.mark.parametrize("reason", ["review-error", "llm-unavailable", "scanner", "gate-disabled"])
+@pytest.mark.parametrize(
+    "reason", ["review-error", "llm-unavailable", "scanner", "gate-disabled", "low-disk"]
+)
 def test_voter_defers_voteless_on_retryable_gap(monkeypatch, tmp_path, caplog, reason):
     """AC2: a retryable coverage gap casts NO vote, posts nothing, records one attempt in
     the budget ledger (NOT the voted ledger), and emits the REVIEW_RETRY_DEFERRED marker."""
@@ -2800,6 +2803,58 @@ def test_voter_defers_voteless_on_retryable_gap(monkeypatch, tmp_path, caplog, r
     assert store.already_voted("rebar~main~Iabc", "rev1") is False
     assert store.attempt_count("rebar~main~Iabc", "rev1") == 1
     assert "REVIEW_RETRY_DEFERRED" in caplog.text
+
+
+def test_adapter_low_disk_coverage_is_distinct_retryable_gap(monkeypatch, tmp_path):
+    _patch_gap(monkeypatch, "low-disk")
+
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
+
+    assert out["decision"] == "BLOCK"
+    assert out["coverage_gap"] is True
+    assert out["gap_reason"] == "low-disk"
+    assert out["message"].startswith("[LLM-Review: BLOCK — coverage-gap (low-disk)]")
+    assert "low-disk" in adapter.RETRYABLE_GAP_REASONS
+
+
+def test_low_disk_retry_budget_exhaustion_remains_voteless(monkeypatch, tmp_path, capsys):
+    _patch_gap(monkeypatch, "low-disk")
+    cfg = dataclasses.replace(_cfg(tmp_path), retryable_gap_max_attempts=1)
+    g = FakeGerrit()
+    store = DedupStore(str(tmp_path / "v.db"))
+
+    res = asyncio.run(voter.review_and_vote(_event(), config=cfg, gerrit=g, dedup=store))
+
+    assert res["status"] == "deferred-exhausted"
+    assert res["gap_reason"] == "low-disk"
+    assert g.votes == []
+    assert store.already_voted("rebar~main~Iabc", "rev1") is False
+    assert "VOTER_ERROR" not in capsys.readouterr().err
+
+
+def test_review_bot_low_disk_admission_defers_before_clone(monkeypatch, tmp_path):
+    _patch_review(monkeypatch, [])
+    cfg = _cfg(tmp_path)
+    store = DedupStore(str(tmp_path / "v.db"))
+
+    class CloneCountingGerrit(FakeGerrit):
+        def __init__(self):
+            super().__init__()
+            self.clone_calls = 0
+
+        def clone_change_ref(self, change_number, revision_ref, dest):
+            self.clone_calls += 1
+            raise AssertionError("clone must not start below the hard free-space floor")
+
+    g = CloneCountingGerrit()
+    monkeypatch.setattr(voter, "_review_clone_has_room", lambda _cfg: False, raising=False)
+
+    res = asyncio.run(voter.review_and_vote(_event(), config=cfg, gerrit=g, dedup=store))
+
+    assert res["status"] == "deferred"
+    assert res["gap_reason"] == "low-disk"
+    assert g.clone_calls == 0
+    assert g.votes == []
 
 
 def test_voter_indeterminate_is_terminal_and_votes(monkeypatch, tmp_path):

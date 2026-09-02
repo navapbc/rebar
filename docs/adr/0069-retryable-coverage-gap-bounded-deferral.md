@@ -27,10 +27,13 @@ vote-less yet perturb that filter.
 Deferral is **bounded**. Each attempt is counted per `(change_id, revision)` in the receiver's
 `review_attempts` ledger (`dedup.py`). While `attempts < retryable_gap_max_attempts`
 (`DEFAULT_RETRYABLE_GAP_MAX_ATTEMPTS`) the voter emits `REVIEW_RETRY_DEFERRED` and returns
-`deferred`. Once the budget is spent it **escalates**: it casts the fail-closed `−1` (the message
-gains an exhausted note; the first-line tag vocabulary is unchanged) and fires the `VOTER_ERROR`
-marker so the `voter_errors` alarm surface sees the escalation. A poison-pill candidate therefore
-cannot defer forever — it converges to a definite fail-closed vote.
+`deferred`. Once the budget is spent it **escalates** for review/gate failures: it casts the fail-closed `−1`
+(the message gains an exhausted note; the first-line tag vocabulary is unchanged) and fires the
+`VOTER_ERROR` marker so the `voter_errors` alarm surface sees the escalation. The `low-disk`
+admission sub-reason is the exception: it logs `REVIEW_LOW_DISK_DEFERRED_EXHAUSTED` and leaves
+labels unchanged, because a full root volume is an operator/host condition and must not become a
+false code veto. The change remains unsubmittable due to the missing `LLM-Review +1`; a new
+patchset or explicit `rerun-llm-review` after disk remediation retries it.
 
 The attempt budget is **shared** with the bb9b contributor re-trigger, whose explicit
 `reset_attempts` re-arms it, so a human re-push / `rerun-llm-review` gives a genuinely transient gap
@@ -56,6 +59,7 @@ hold-back is itself bounded so a permanently-failing candidate cannot pin the cu
 - **Fail closed immediately on any coverage gap.** Blocks mergeable changes on a transient blip;
   rejected in favor of bounded retry.
 - **Defer forever while the gap persists.** A poison-pill change would sit un-voted indefinitely;
-  rejected — the budget forces convergence to a fail-closed `−1`.
+  rejected for ordinary retryable gaps. `low-disk` is carved out to terminal no-vote because a
+  disk-full host is not evidence about the patch; the missing vote still blocks submit.
 - **Post a provisional comment on defer.** Perturbs the reconciler's "no vote" pre-filter and makes
   the deferral visible to Gerrit; rejected — deferral is silent.

@@ -137,6 +137,7 @@ BUILD_CACHE_KEEP="${BUILD_CACHE_KEEP:-5GB}"           # buildkit cache hard cap 
 # root-disk pressure alarm framing); PRESSURE_PRUNE_MIN_INTERVAL throttles how often the no-op
 # path may reclaim; PRESSURE_PRUNE_TS_FILE persists the last-reclaim timestamp across ticks.
 DISK_PRESSURE_PCT="${DISK_PRESSURE_PCT:-80}"
+DISK_PRESSURE_HARD_PCT="${DISK_PRESSURE_HARD_PCT:-90}"
 PRESSURE_PRUNE_MIN_INTERVAL="${PRESSURE_PRUNE_MIN_INTERVAL:-600}"
 PRESSURE_PRUNE_TS_FILE="${PRESSURE_PRUNE_TS_FILE:-$STATE_DIR/pressure-prune-ts}"
 # Persistent-pressure streak (bug 9bc0-1200-1451-44bb). The 2026-08-28 outage ran the reclaim
@@ -364,9 +365,16 @@ capture_bot_logs() {
 # after and the delta logged, because "disk pressure reclaim complete" was emitted
 # for ~11h on 2026-08-28 while freeing nothing. Effect is now observed, not inferred.
 prune_docker_caches() {
-  local before after
+  local before after pct hard
   before="$(root_disk_free_kb)"
-  if ! timeout 120 docker builder prune -f --keep-storage "$BUILD_CACHE_KEEP" >/dev/null 2>&1; then
+  pct="$(root_disk_pct)"; case "$pct" in ''|*[!0-9]*) pct=0 ;; esac
+  hard="$DISK_PRESSURE_HARD_PCT"; case "$hard" in ''|*[!0-9]*) hard=90 ;; esac
+  if [ "$pct" -ge "$hard" ]; then
+    log "prune_docker_caches: hard disk pressure (${pct}% >= ${hard}%): emergency builder prune without keep-storage"
+    if ! timeout 120 docker builder prune -f >/dev/null 2>&1; then
+      log "prune_docker_caches: builder prune failed (non-fatal)"
+    fi
+  elif ! timeout 120 docker builder prune -f --keep-storage "$BUILD_CACHE_KEEP" >/dev/null 2>&1; then
     log "prune_docker_caches: builder prune failed (non-fatal)"
   fi
   if ! timeout 120 docker image prune -f >/dev/null 2>&1; then

@@ -38,6 +38,7 @@ def _run_helpers(
     docker_exit: int,
     drive: str,
     free_kb: tuple[int, int] | None = (1000, 1000),
+    used_pct: int = 50,
 ) -> subprocess.CompletedProcess:
     """Source autodeploy.sh's function definitions (guarded from executing the
     deploy flow by an early no-op environment) and drive one helper."""
@@ -62,7 +63,15 @@ def _run_helpers(
         _write_stub(
             bindir,
             "df",
-            f'echo "Avail"\ncat "{avail}"\nprintf \'%s\' "{free_kb[1]}" > "{avail}"\nexit 0',
+            f"""
+            case "$*" in
+              *pcent*) echo "Use%"; printf ' {used_pct}%%\n'; exit 0 ;;
+            esac
+            echo "Avail"
+            cat "{avail}"
+            printf '%s' "{free_kb[1]}" > "{avail}"
+            exit 0
+            """,
         )
     # Extract the tunables block (everything above the single-flight lock — the
     # script's executable flow starts there) plus the helper functions under test
@@ -73,7 +82,10 @@ def _run_helpers(
     funcs = "\n".join(
         m.group(0)
         for m in re.finditer(
-            r"^(?:prune_docker_caches|record_backoff_failure|root_disk_free_kb)\(\) \{.*?^\}",
+            (
+                r"^(?:prune_docker_caches|record_backoff_failure|root_disk_free_kb|"
+                r"root_disk_pct)\(\) \{.*?^\}"
+            ),
             src,
             re.S | re.M,
         )
@@ -167,15 +179,52 @@ def test_an_unreadable_df_degrades_to_zero_rather_than_breaking_the_prune(tmp_pa
     assert "before=0kB after=0kB freed=0kB" in res.stdout, res.stdout
 
 
+def test_hard_pressure_prune_drops_build_cache_keep_and_measures_effect(tmp_path):
+    """At the hard pressure tier, the automated prune must be able to reclaim below the
+    steady-state warm-cache floor and must report measured bytes freed."""
+    res = _run_helpers(
+        tmp_path,
+        docker_exit=0,
+        drive="DISK_PRESSURE_HARD_PCT=90 prune_docker_caches",
+        free_kb=(1000, 6200),
+        used_pct=93,
+    )
+
+    assert res.returncode == 0, res.stderr
+    assert _calls(tmp_path) == [
+        "docker builder prune -f",
+        "docker image prune -f",
+    ]
+    assert "before=1000kB after=6200kB freed=5200kB" in res.stdout
+
+
+def test_normal_pressure_prune_keeps_warm_build_cache(tmp_path):
+    """Below the hard tier, the existing warm-cache cap remains the contract."""
+    res = _run_helpers(
+        tmp_path,
+        docker_exit=0,
+        drive="DISK_PRESSURE_HARD_PCT=90 prune_docker_caches",
+        used_pct=85,
+    )
+
+    assert res.returncode == 0, res.stderr
+    assert _calls(tmp_path) == [
+        "docker builder prune -f --keep-storage 5GB",
+        "docker image prune -f",
+    ]
+
+
 def test_no_uncapped_or_stray_prunes_in_script():
     src = SCRIPT.read_text()
     # comment-stripped code lines (trailing comments too — the tunable line
     # mentions the flag in its comment and must not count as an invocation).
     code = [ln.split("#")[0] for ln in src.splitlines()]
-    builder_prunes = [ln for ln in code if "docker builder prune" in ln]
-    assert builder_prunes, "the capped builder prune must exist"
-    assert all("--keep-storage" in ln for ln in builder_prunes)
+    builder_prunes = [ln.strip() for ln in code if "docker builder prune" in ln]
+    assert builder_prunes, "the builder prune must exist"
     assert all("timeout" in ln for ln in builder_prunes)  # wedged-daemon bound
+    assert any("--keep-storage" in ln for ln in builder_prunes), "normal prune keeps warm cache"
+    uncapped = [ln for ln in builder_prunes if "--keep-storage" not in ln]
+    assert uncapped == ["if ! timeout 120 docker builder prune -f >/dev/null 2>&1; then"]
     # exactly one image prune — the helper's; the old bare success-path one is gone. Counted on
     # the COMMENT-STRIPPED lines, like the builder-prune check above: prose explaining why a
     # blanket `docker image prune` cannot reclaim the tagged per-release images (bug 9bc0) names

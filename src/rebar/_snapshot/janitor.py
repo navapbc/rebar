@@ -84,6 +84,7 @@ DEFAULT_MAX_BYTES = 0  # store-size cap in bytes: 0 = off (opt-in)
 DEFAULT_MAX_ENTRIES = 2000
 DEFAULT_REVERIFY_SECONDS = 0  # periodic integrity reverify: 0 = off (opt-in)
 DEFAULT_INTERVAL_SECONDS = 300  # background pass cadence
+DEFAULT_MIN_FREE_GIB = 2  # hard pre-clone admission floor
 
 # FIXED internal hysteresis margin (like DEFAULT_GRACE_SECONDS / DEFAULT_INTERVAL_SECONDS this
 # is a constant of the algorithm, NOT an operator knob — it is deliberately absent from
@@ -103,6 +104,65 @@ RECLAIM_TARGET_MARGIN_PCT = 5
 # volume is already far more headroom than a CACHE may demand, so values above this are clamped
 # (never rejected — a janitor must not fail a gate over a tunable).
 MAX_FREE_WATERMARK_PCT = 50
+
+
+@dataclass(frozen=True)
+class VolumeFreeSpace:
+    """Free-space measurement for the exact target path that would receive writes."""
+
+    path: Path
+    free_bytes: int
+    total_bytes: int
+    min_free_bytes: int
+
+
+class SnapshotLowDiskError(RuntimeError):
+    """Raised before starting a snapshot/review clone when the target volume is too full."""
+
+    def __init__(self, space: VolumeFreeSpace) -> None:
+        self.space = space
+        super().__init__(
+            f"low disk on {space.path}: free={space.free_bytes} bytes, "
+            f"floor={space.min_free_bytes} bytes"
+        )
+
+
+def min_free_bytes(repo_root: str | os.PathLike[str] | None = None) -> int:
+    from rebar._config_resolvers import resolve_gate_min_free_bytes
+
+    return resolve_gate_min_free_bytes(DEFAULT_MIN_FREE_GIB, repo_root)
+
+
+def volume_free_space(
+    path: str | os.PathLike[str], *, repo_root: str | os.PathLike[str] | None = None
+) -> VolumeFreeSpace:
+    usage = shutil.disk_usage(os.fspath(path))
+    return VolumeFreeSpace(
+        path=Path(path),
+        free_bytes=int(usage.free),
+        total_bytes=int(usage.total),
+        min_free_bytes=min_free_bytes(repo_root),
+    )
+
+
+def has_min_free_space(
+    path: str | os.PathLike[str], *, repo_root: str | os.PathLike[str] | None = None
+) -> bool:
+    try:
+        return volume_free_space(path, repo_root=repo_root).free_bytes >= min_free_bytes(repo_root)
+    except OSError:
+        return True
+
+
+def ensure_min_free_space(
+    path: str | os.PathLike[str], *, repo_root: str | os.PathLike[str] | None = None
+) -> None:
+    try:
+        space = volume_free_space(path, repo_root=repo_root)
+    except OSError:
+        return
+    if space.free_bytes < space.min_free_bytes:
+        raise SnapshotLowDiskError(space)
 
 
 def _default_tunables() -> dict[str, int]:

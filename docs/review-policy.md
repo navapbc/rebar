@@ -48,6 +48,7 @@ The `LLM-Review` bot tags every vote so you can tell a *finding* (your code) fro
 | `[LLM-Review: BLOCK — coverage-gap (llm-unavailable)]` | Infra veto: the LLM backend was unavailable. | Not your code — comment `rerun-llm-review`, or re-push the same commit. |
 | `[LLM-Review: BLOCK — coverage-gap (scanner)]` | Infra veto: a scanner step failed. | Not your code — comment `rerun-llm-review` (or a maintainer re-triggers). |
 | `[LLM-Review: BLOCK — coverage-gap (review-error)]` | Infra veto: the review errored out. | Not your code — comment `rerun-llm-review` (or a maintainer re-triggers). |
+| `[LLM-Review: BLOCK — coverage-gap (low-disk)]` | Infra admission deferral: the review host was below `REBAR_GATE_MIN_FREE_GIB` before clone/materialization. | Not your code — after disk remediation, comment `rerun-llm-review` or push a new patchset. |
 | `[LLM-Review: BLOCK — coverage-gap (indeterminate)]` | Infra veto: the outcome could not be determined. | Not your code — comment `rerun-llm-review` (or a maintainer re-triggers). |
 | `[LLM-Review: BLOCK — coverage-gap (merge-review)]` | Infra veto **on a merge change** (epic feature-branch merge-back): the merge-change review could not run. | Not your code — comment `rerun-llm-review` to re-trigger the merge review. |
 | `… (merge-change, N integrated commit(s))` suffix | A merge change carrying N already-reviewed commits; the suffix annotates the merge path. | Informational; respond to the base tag as above. |
@@ -60,7 +61,7 @@ re-run CI on the same patchset.
 ### Retryable vs terminal coverage gaps (automatic recovery)
 
 Most coverage-gap `-1`s should be rare: a review that fails RETRYABLY — the sub-reasons
-`review-error`, `llm-unavailable`, `scanner`, and `gate-disabled` — casts **no vote at
+`review-error`, `llm-unavailable`, `scanner`, `gate-disabled`, and `low-disk` — casts **no vote at
 all**. The change stays vote-less (and therefore unsubmittable — submit requires
 `LLM-Review +1`), the backfill reconciler re-drives it automatically within its interval
 (`RECONCILE_INTERVAL_SECONDS`, default 300s), and each deferral is logged with the
@@ -68,7 +69,9 @@ greppable `REVIEW_RETRY_DEFERRED` marker. Only after the bounded per-revision re
 (`RETRYABLE_GAP_MAX_ATTEMPTS`, default 3) is exhausted does the bot cast the fail-closed
 `-1`, appending an "Automatic retries exhausted" note to the message body and emitting the
 `VOTER_ERROR` marker (the `rebar/host:voter_errors` alarm surface) so an operator sees the
-escalation.
+escalation. `low-disk` is special: exhausting its retry budget leaves labels unchanged and logs
+`REVIEW_LOW_DISK_DEFERRED_EXHAUSTED`, because host disk pressure is not a code finding; the change
+remains blocked by the missing `LLM-Review +1` until a new patchset or rerun after remediation.
 
 Two sub-reasons remain **terminal** (voted immediately): `indeterminate` — the review ran
 to completion and concluded coverage could not be established, which is a result, not an

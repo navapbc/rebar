@@ -69,6 +69,7 @@ _TAG_SUFFIXES: dict[str, str] = {
     "input-rejected": "BLOCK — coverage-gap (input-rejected)",
     "scanner": "BLOCK — coverage-gap (scanner)",
     "review-error": "BLOCK — coverage-gap (review-error)",
+    "low-disk": "BLOCK — coverage-gap (low-disk)",
     "indeterminate": "BLOCK — coverage-gap (indeterminate)",
 }
 
@@ -80,7 +81,9 @@ _TAG_SUFFIXES: dict[str, str] = {
 #: review RAN TO COMPLETION and concluded coverage could not be established — a result, not an
 #: interruption). The merge-path ``_merge_coverage_gap_decision`` (voter.py) deliberately
 #: carries no ``gap_reason`` and keeps its immediate fail-closed vote.
-RETRYABLE_GAP_REASONS = frozenset({"review-error", "llm-unavailable", "scanner", "gate-disabled"})
+RETRYABLE_GAP_REASONS = frozenset(
+    {"review-error", "llm-unavailable", "scanner", "gate-disabled", "low-disk"}
+)
 
 
 def _message_tag(
@@ -101,6 +104,8 @@ def _coverage_gap_reason(coverage: dict[str, Any]) -> str | None:
     fully established. Order: inert **disabled** gate (``enabled is False``), then an **LLM outage**
     (``llm_unavailable``), then a **fail-closed security scanner abstain**. A scanner MATCH
     (``reason == 'detector-finding'``) is a real finding, NOT a coverage gap."""
+    if coverage.get("low_disk"):
+        return "low-disk"
     if coverage.get("enabled") is False:
         return "gate-disabled"
     if coverage.get("llm_unavailable"):
@@ -184,6 +189,7 @@ def _summarize(reason: str, verdict: dict[str, Any]) -> str:
             "llm-unavailable": f"the review LLM was unavailable ({llm_err})",
             "input-rejected": "the review input was rejected (deterministic — oversized or "
             "policy-blocked; re-running the same input will be rejected identically)",
+            "low-disk": "the review host is below the hard free-space admission floor",
             "indeterminate": "the review returned INDETERMINATE with no blocking findings "
             "(could not establish coverage — not a code finding)",
         }.get(reason, "the code review could not run")
@@ -354,8 +360,27 @@ def code_review_decision(
                 runner=runner,  # forwarded composed runtime (None → ambient, unchanged)
             )
         )
-    except Exception as exc:  # noqa: BLE001 — ANY review failure is fail-closed
+    except Exception as exc:  # noqa: BLE001 — ANY review failure is fail-closed unless typed
+        from rebar._snapshot.janitor import SnapshotLowDiskError
+
         logger.warning("adapter: produce_code_review_verdict raised: %s", exc)
+        if isinstance(exc, SnapshotLowDiskError):
+            space = exc.space
+            return _block(
+                "low-disk",
+                {
+                    "verdict": "BLOCK",
+                    "blocking": [],
+                    "advisory": [],
+                    "coverage": {
+                        "low_disk": True,
+                        "low_disk_path": str(space.path),
+                        "low_disk_free_bytes": space.free_bytes,
+                        "low_disk_min_bytes": space.min_free_bytes,
+                    },
+                },
+                merge_commits=merge_commits,
+            )
         return _block("review-error", {}, merge_commits=merge_commits)
 
     if not isinstance(verdict, dict) or "verdict" not in verdict:
