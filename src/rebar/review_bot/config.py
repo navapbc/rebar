@@ -1,7 +1,7 @@
 """Receiver configuration — all knobs sourced from the environment (epic d251 / S4b).
 
 Nothing here is hardcoded into the decision logic: the verdict→label mapping
-(``LLM_REVIEW_MAX_VALUE`` / ``LLM_REVIEW_BLOCK_VALUE``), the blocking-severity set,
+(``LLM_REVIEW_MAX_VALUE`` / ``LLM_REVIEW_BLOCK_VALUE``),
 the Gerrit endpoint + bot credential, the dedup DB path, and the reconcile cadence
 are all read from environment variables. On the box those variables are populated
 from SSM by ``infra/scripts/fetch-secrets.sh`` and handed to the container via the
@@ -9,8 +9,10 @@ compose ``.env`` (ADR-0008), so this module never reaches for AWS itself.
 
 The ``LLM-Review`` value mapping (and the label range) is owned by d251's
 ``project.config`` (ADR-0013) and re-derived here as integers so b744-WS6 can change
-the *scoring* without touching the *casting*. The blocking-severity threshold is the
-one knob that maps ``review_code`` findings → PASS/BLOCK (see ``adapter.py``).
+the *scoring* without touching the *casting*. The PASS/BLOCK decision itself comes
+from the four-pass gate's deterministic Pass-3 blocker (via ``criteria_routing.json``
+per-criterion thresholds) — the once-vestigial blocking-severity threshold that used
+to live here has since been removed entirely (see ``adapter.py``).
 
 Importing this module must NOT require ``fastapi`` or the ``agents`` extra — it is
 plain stdlib so ``rebar.review_bot.config`` can be read by tests and the reconciler
