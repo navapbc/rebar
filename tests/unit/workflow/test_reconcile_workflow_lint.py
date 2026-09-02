@@ -157,17 +157,21 @@ def test_provider_shell_bodies_pass_pinned_shellcheck(
 
 
 def _redispatch_script() -> str:
-    """The opt-in continuous-loop re-dispatch step's shell, with Actions templating bound.
+    """The opt-in continuous-loop re-dispatch step's shell.
 
     Bug 8aed: this step is the LAST thing an already-converged pass runs, so its failure
     policy decides whether a transient re-dispatch problem reds an otherwise-good run.
+
+    Ticket 1c70 moved `${{ github.ref_name }}` out of the run body into a `REF_NAME`
+    env var (a zizmor template-injection fix), so the step's shell text now references
+    the shell variable `${REF_NAME}` directly — `_run_redispatch` supplies its value.
     """
     step = next(
         step
         for step in _steps(_GITHUB, "reconcile")
         if str(step.get("name", "")).startswith("Re-dispatch to sustain the continuous loop")
     )
-    return str(step["run"]).replace("${{ github.ref_name }}", "main")
+    return str(step["run"])
 
 
 def _run_redispatch(
@@ -198,7 +202,12 @@ def _run_redispatch(
         capture_output=True,
         text=True,
         check=False,
-        env={"PATH": f"{bin_dir}:/usr/bin:/bin", "MODE": "live", **(extra_env or {})},
+        env={
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "MODE": "live",
+            "REF_NAME": "main",
+            **(extra_env or {}),
+        },
     )
 
 

@@ -40,6 +40,18 @@ def _step(path: Path, job: str, name_fragment: str) -> dict:
     return matches[0]
 
 
+def _is_checkout_v7(uses: object) -> bool:
+    """True for either the bare tag or a full-SHA pin carrying a `# v7...` comment.
+
+    `reconcile-bridge.yml` pins `actions/checkout` to a full commit SHA (repo's
+    SHA-pin convention); the other workflows in this parametrization still use
+    the bare tag. Both are the same released version, so both are accepted here.
+    """
+    if uses == "actions/checkout@v7":
+        return True
+    return bool(re.fullmatch(r"actions/checkout@[0-9a-f]{40}", str(uses)))
+
+
 @pytest.mark.parametrize(
     ("path", "job", "expected_inputs"),
     [
@@ -56,7 +68,7 @@ def test_checkout_filter_and_preserves_inputs(
     path: Path, job: str, expected_inputs: dict[str, object]
 ) -> None:
     """Every all-history actions checkout is blobless without weakening prior inputs."""
-    checkout = next(step for step in _steps(path, job) if step.get("uses") == "actions/checkout@v7")
+    checkout = next(step for step in _steps(path, job) if _is_checkout_v7(step.get("uses")))
     inputs = checkout.get("with") or {}
     assert inputs.get("filter") == "blob:none"
     for key, expected in expected_inputs.items():

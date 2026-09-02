@@ -11,6 +11,8 @@ Static assertions over the workflow text + parsed YAML — no release run needed
 
 from __future__ import annotations
 
+import re as _re
+
 import yaml
 from _repo_root import REPO_ROOT
 
@@ -351,3 +353,89 @@ def test_13b4_release_workflow_comment_names_the_pypi_verifier() -> None:
         "release.yml's attestations comment must name `pypi-attestations verify pypi` as "
         "the consumer verifier"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Ticket 1c70: full-SHA + readable-version-comment pin contract, extended to
+#  the privileged reconciliation workflow (contents/actions-write + OIDC).
+#
+#  The ORIGINAL `test_all_uses_are_full_sha_pinned` above extracts refs with a
+#  whitespace-truncated token: `re.findall(r"uses:\s*(\S+)", text)`. That token
+#  ends at the ref (`owner/repo@<sha>`) and never looks past it, so it cannot
+#  see whether a readable version comment follows — a `uses:` line pinned to a
+#  bare 40-hex SHA with NO trailing `# vX.Y.Z` comment reads as "pinned" to that
+#  extractor. `_full_uses_pin_line` below matches the COMPLETE line instead.
+# ══════════════════════════════════════════════════════════════════════════════
+
+RECONCILE_BRIDGE = ROOT / ".github" / "workflows" / "reconcile-bridge.yml"
+
+_FULL_PIN_LINE_RE = _re.compile(r"uses:\s*(\S+)@([0-9a-f]{40})\s+#\s+(\S[^\n]*)$")
+
+
+def _external_uses_refs(text: str) -> list[str]:
+    """Every external (non-`./`) `uses:` ref token, whitespace-truncated (legacy extractor)."""
+    return [u for u in _re.findall(r"uses:\s*(\S+)", text) if not u.startswith("./")]
+
+
+def test_reconcile_bridge_every_external_uses_is_full_sha_pinned_with_comment() -> None:
+    """Every external `uses:` in reconcile-bridge.yml has a 40-hex SHA AND a readable
+    trailing version comment, verified against the COMPLETE line (not a truncated token)."""
+    text = RECONCILE_BRIDGE.read_text(encoding="utf-8")
+    refs = _external_uses_refs(text)
+    assert refs, "expected external `uses:` steps in reconcile-bridge.yml"
+    lines = [line for line in text.splitlines() if _re.search(r"uses:\s*\S+@", line)]
+    external_lines = [line for line in lines if not _re.search(r"uses:\s*\./", line)]
+    assert len(external_lines) == len(refs), (
+        "mismatch between external `uses:` refs and lines scanned for the full-line pin check"
+    )
+    for line in external_lines:
+        assert _FULL_PIN_LINE_RE.search(line), (
+            f"`{line.strip()}` is not pinned to a full 40-char commit SHA with a trailing "
+            f"readable version comment (`# vX.Y.Z`)"
+        )
+
+
+def test_reconcile_bridge_in_zizmor_workflows() -> None:
+    """`Makefile`'s `ZIZMOR_WORKFLOWS` unconditionally includes reconcile-bridge.yml, so
+    zizmor's generic action-security checks (persist-credentials, over-broad perms, OIDC)
+    cover this contents/actions-write + OIDC-capable workflow."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    match = _re.search(r"ZIZMOR_WORKFLOWS\s*:=(.*?)(?=\n[A-Z_]+\s*:?=)", makefile, _re.DOTALL)
+    assert match, "ZIZMOR_WORKFLOWS assignment not found in Makefile"
+    assert ".github/workflows/reconcile-bridge.yml" in match.group(1), (
+        "ZIZMOR_WORKFLOWS must unconditionally include reconcile-bridge.yml"
+    )
+
+
+# ── negative controls: prove the full-line regex (not the legacy token one) is what gates ──
+def test_pin_regex_rejects_a_mutable_tag() -> None:
+    line = "        uses: actions/checkout@v7\n"
+    assert _FULL_PIN_LINE_RE.search(line) is None, "a mutable tag ref must not match the pin"
+
+
+def test_pin_regex_rejects_a_bare_sha_with_no_comment() -> None:
+    line = "        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\n"
+    assert _FULL_PIN_LINE_RE.search(line) is None, (
+        "a full SHA with no trailing version comment must not match the pin"
+    )
+
+
+def test_pin_regex_rejects_sha_where_legacy_token_extractor_would_wrongly_pass() -> None:
+    """The historical gap this ticket closes: the legacy whitespace-token extractor
+    (`re.findall(r"uses:\\s*(\\S+)", text)`) truncates at the SHA and never inspects the
+    trailing comment, so `actions/checkout@<40-hex><no-comment>` reads as pinned to it —
+    even though this exact same line fails the full-line pin regex."""
+    line = "        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\n"
+    legacy_token = _re.findall(r"uses:\s*(\S+)", line)[0]
+    legacy_ref = legacy_token.split("@", 1)[1]
+    assert _re.fullmatch(r"[0-9a-f]{40}", legacy_ref), (
+        "sanity: the legacy extractor considers this line pinned"
+    )
+    assert _FULL_PIN_LINE_RE.search(line) is None, (
+        "the full-line regex must reject what the legacy token extractor would accept"
+    )
+
+
+def test_pin_regex_accepts_full_sha_with_readable_comment() -> None:
+    line = "        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0\n"
+    assert _FULL_PIN_LINE_RE.search(line) is not None
