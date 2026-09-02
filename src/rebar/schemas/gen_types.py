@@ -41,6 +41,38 @@ from typing import Any
 
 from rebar import schemas
 
+# --- hand-authored vocabularies derived from the generated enums ----------------
+# ``types.py`` is GENERATED, so a constant added to it by hand is erased by the next
+# regenerate — and the CI drift gate then fails the build on the resulting diff. A
+# declaration that must sit beside the ``Literal`` it derives from (so consumers can
+# import both from the same stdlib-only leaf module) is therefore authored HERE and
+# emitted into the generated file.
+#
+# Keyed by the ``common.schema.json`` def each block derives from: a block is emitted
+# only when that def is part of the generated enum set, so a block can never reference
+# a ``Literal`` that was not emitted.
+_DERIVED_VOCABULARIES: dict[str, str] = {
+    "ticket_type": """\
+#: Ticket types the plan-review gate does NOT review, and its complement (mirror F3).
+#:
+#: This one predicate had SIX masters — the start-work gate, the create-time file-impact
+#: nudge, the drift-refresh candidate path and the close gate each carried their own tuple,
+#: and three of them claimed to be single-sourced while nothing checked it. They are not
+#: four rules; they are four consumers of one question: does the plan-review gate review
+#: this type's plan? (Drift-refresh refreshes a plan-review ATTESTATION, which exists only
+#: for reviewed types, so it asks the same thing.)
+#:
+#: The complement is DERIVED, never listed, so the two cannot disagree — and because it is
+#: derived from ``TicketType`` itself, an eighth member added without a decision lands in
+#: neither set and fails the partition test instead of silently defaulting to one side.
+PLAN_REVIEW_EXEMPT_TYPES: frozenset[str] = frozenset(
+    {"bug", "session_log", "code_review", "identity"}
+)
+PLAN_REVIEW_REVIEWED_TYPES: frozenset[str] = frozenset(get_args(TicketType)) - (
+    PLAN_REVIEW_EXEMPT_TYPES
+)""",
+}
+
 # --- the schema-backed facade subset we generate TypedDicts for -----------------
 # Top-level OBJECT schemas → one TypedDict each (named by the schema ``title``).
 TOP_LEVEL_OBJECTS: list[str] = [
@@ -262,7 +294,16 @@ class _Generator:
             if d in rendered and "enum" not in self._common_defs[d]
         ]
 
-        return self._render(enum_aliases, def_blocks, object_blocks, alias_blocks)
+        # Hand-authored blocks that derive from an emitted enum (see the module header).
+        derived = [
+            _DERIVED_VOCABULARIES[d]
+            for d in self._common_defs
+            if d in rendered and d in _DERIVED_VOCABULARIES
+        ]
+        if derived:
+            self._used_typing.add("get_args")
+
+        return self._render(enum_aliases, def_blocks, object_blocks, alias_blocks, derived)
 
     def _render(
         self,
@@ -270,6 +311,7 @@ class _Generator:
         def_blocks: list[str],
         object_blocks: list[str],
         alias_blocks: list[str],
+        derived: list[str],
     ) -> str:
         typing_imports = ", ".join(sorted(self._used_typing))
         header = [
@@ -296,6 +338,11 @@ class _Generator:
         if enum_aliases:
             sections.append(
                 "# --- shared enums (common.schema.json) ---\n" + "\n".join(enum_aliases)
+            )
+        if derived:
+            sections.append(
+                "# --- vocabularies derived from those enums (authored in gen_types.py) ---\n"
+                + "\n\n".join(derived)
             )
         if def_blocks:
             sections.append(

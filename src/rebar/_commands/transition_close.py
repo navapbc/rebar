@@ -39,11 +39,12 @@ from rebar._commands.close_precheck import (  # noqa: F401 — re-exported compa
 )
 from rebar._commands.completion_bundle import verdict_manifest as _verdict_manifest
 from rebar.graph._unblock import batch_close_operations
+from rebar.types import PLAN_REVIEW_REVIEWED_TYPES
 
 logger = logging.getLogger(__name__)
 
 
-_PLAN_REVIEW_CLOSE_TYPES = frozenset({"task", "story", "epic"})
+_PLAN_REVIEW_CLOSE_TYPES = PLAN_REVIEW_REVIEWED_TYPES
 
 
 def _new_close_metrics() -> dict[str, int]:

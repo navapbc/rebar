@@ -15,7 +15,7 @@ are normal fields; optional keys are ``NotRequired[...]``.
 # NOTE: deliberately NO `from __future__ import annotations` — stringized
 # annotations hide `NotRequired` from TypedDict, breaking __required_keys__.
 # Every type here is defined before use and valid at runtime on Python >=3.11.
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict, get_args
 
 # --- shared enums (common.schema.json) ---
 TicketStatus = Literal["idea", "open", "in_progress", "blocked", "closed", "archived", "deleted"]
@@ -49,6 +49,27 @@ CompletionExpectation = Literal[
     "not_certifiable",
     "not_applicable",
 ]
+
+
+# --- vocabularies derived from those enums (authored in gen_types.py) ---
+#: Ticket types the plan-review gate does NOT review, and its complement (mirror F3).
+#:
+#: This one predicate had SIX masters — the start-work gate, the create-time file-impact
+#: nudge, the drift-refresh candidate path and the close gate each carried their own tuple,
+#: and three of them claimed to be single-sourced while nothing checked it. They are not
+#: four rules; they are four consumers of one question: does the plan-review gate review
+#: this type's plan? (Drift-refresh refreshes a plan-review ATTESTATION, which exists only
+#: for reviewed types, so it asks the same thing.)
+#:
+#: The complement is DERIVED, never listed, so the two cannot disagree — and because it is
+#: derived from ``TicketType`` itself, an eighth member added without a decision lands in
+#: neither set and fails the partition test instead of silently defaulting to one side.
+PLAN_REVIEW_EXEMPT_TYPES: frozenset[str] = frozenset(
+    {"bug", "session_log", "code_review", "identity"}
+)
+PLAN_REVIEW_REVIEWED_TYPES: frozenset[str] = frozenset(get_args(TicketType)) - (
+    PLAN_REVIEW_EXEMPT_TYPES
+)
 
 
 # --- shared objects (common.schema.json) ---
