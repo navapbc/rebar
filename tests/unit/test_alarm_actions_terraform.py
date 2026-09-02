@@ -8,7 +8,8 @@ condition a "silent-alarm gap".
 
 Two instances that both survived human review means the convention was not checkable, so this
 is the check: parse EVERY ``aws_cloudwatch_metric_alarm`` block under ``infra/terraform/`` and
-fail on any that does not assign ``alarm_actions``.
+fail on any that does not assign ``alarm_actions``. The same guard also asserts that
+host-published disk alarms treat missing data as breaching, so a dead publisher pages.
 
 An alarm that legitimately should not notify must say so with an explicit marker comment
 inside its block::
@@ -42,6 +43,9 @@ _ALARM_RE = re.compile(
 )
 _ACTIONS_ASSIGNMENT_RE = re.compile(r"^[ \t]*alarm_actions[ \t]*=", re.MULTILINE)
 _OK_ACTIONS_ASSIGNMENT_RE = re.compile(r"^[ \t]*ok_actions[ \t]*=", re.MULTILINE)
+_TREAT_MISSING_DATA_RE = re.compile(
+    r'^[ \t]*treat_missing_data[ \t]*=[ \t]*"(?P<value>[^"]+)"', re.MULTILINE
+)
 _OPT_OUT_RE = re.compile(r"#\s*rebar:allow-actionless-alarm:\s*\S+")
 
 
@@ -199,6 +203,35 @@ def test_every_alarm_declares_ok_actions() -> None:
         "CloudWatch alarm(s) declare no ok_actions, so a recovery is never announced and the "
         "alarm reads as permanently firing: " + ", ".join(offenders) + ". Add "
         "`ok_actions = [aws_sns_topic.alerts.arn]` alongside alarm_actions."
+    )
+
+
+def test_host_published_disk_alarms_treat_missing_data_as_breaching() -> None:
+    """A stopped host-published disk metric must page instead of clearing healthy."""
+    watched = {
+        ("monitoring.tf", "gerrit_data_disk_high"),
+        ("monitoring_autodeploy.tf", "root_disk_pressure"),
+    }
+    found: set[tuple[str, str]] = set()
+    offenders: list[str] = []
+
+    for file_name, label, raw, _masked in _alarm_blocks():
+        key = (file_name, label)
+        if key not in watched:
+            continue
+        found.add(key)
+        match = _TREAT_MISSING_DATA_RE.search(raw)
+        if match is None or match.group("value") != "breaching":
+            offenders.append(
+                f"{file_name}:{label} treats missing data as "
+                f"{match.group('value') if match else 'unset'}"
+            )
+
+    assert found == watched
+    assert not offenders, (
+        "Disk metrics are published by the host under disk pressure; if the host or "
+        "publisher dies, missing data must enter ALARM and invoke alarm_actions, not "
+        "clear as OK: " + ", ".join(offenders)
     )
 
 

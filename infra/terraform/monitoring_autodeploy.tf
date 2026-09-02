@@ -226,9 +226,9 @@ resource "aws_cloudwatch_metric_alarm" "root_disk_pressure" {
   threshold           = 85
   comparison_operator = "GreaterThanThreshold"
 
-  # A dead probe/host is caught by the S7 gate-down alarm (treat_missing_data =
-  # breaching there); duplicating that here would double-page on host loss.
-  treat_missing_data = "notBreaching"
+  # Missing data means the host-published disk probe stopped; page rather than
+  # letting a dying host clear its own disk-pressure alarm to OK.
+  treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]

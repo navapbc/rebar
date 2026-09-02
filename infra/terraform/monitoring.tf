@@ -232,9 +232,9 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_high" {
   threshold           = 85
   comparison_operator = "GreaterThanOrEqualToThreshold"
 
-  # Missing data = the probe/host is gone, which the S7 gate-down alarm already pages
-  # on (treat_missing_data = breaching there); don't double-page on host loss here.
-  treat_missing_data = "notBreaching"
+  # Missing data means the host-published disk probe stopped; page rather than
+  # letting a dying host clear its own data-volume alarm to OK.
+  treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
