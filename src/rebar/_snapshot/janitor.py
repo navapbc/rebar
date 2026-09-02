@@ -65,6 +65,7 @@ from pathlib import Path
 
 from rebar._snapshot import cache as _cache
 from rebar._snapshot.repo_snapshot import store_root, sweep_tmp
+from rebar._store.fsutil import atomic_write
 
 try:
     import fcntl
@@ -357,7 +358,11 @@ def reverify_entry(sha: str, root: Path | None = None) -> bool:
     except OSError:
         stored = ""
     if not stored:
-        digest_path.write_text(current)  # TOFU baseline (mtime = now)
+        # TOFU baseline (mtime = now). Published via a UNIQUE same-dir temp + os.replace: a
+        # plain write_text lets a concurrent reader observe a TRUNCATED integrity stamp and
+        # evict a healthy entry, and a target-derived temp would just move the race
+        # (ticket b0ac-3c0f-3f64-4344).
+        atomic_write(digest_path, current)
         return False
     if current != stored:
         _evict(root, entry)
