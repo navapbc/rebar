@@ -34,17 +34,18 @@ from rebar._commands.composer_edit import (
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
+from rebar.types import PLAN_REVIEW_EXEMPT_TYPES
 
 logger = logging.getLogger(__name__)
 
 _TYPES = ("bug", "epic", "story", "task", "session_log", "code_review", "identity")
 
-# Ticket types exempt from the plan-review file-impact-coverage gate (P9). Kept in
-# lockstep with the gate's own exemption at
-# rebar.llm.plan_review.orchestrator (bug/session_log short-circuit before P9). The
-# create-time warning below mirrors it so a freshly-created work ticket is nudged to
-# record file_impact early, before `review-plan` flags it.
-_FILE_IMPACT_EXEMPT_TYPES = ("bug", "session_log", "code_review", "identity")
+# Types exempt from the plan-review file-impact-coverage gate (P9); the create-time
+# warning mirrors it so a new work ticket records file_impact early. The SAME predicate
+# as the start-work exemption, hence the single declaration in rebar.types (mirror F3).
+# The old comment claimed lockstep with a "short-circuit before P9" in orchestrator.py;
+# that citation had drifted — the literal there is in the drift-refresh path.
+_FILE_IMPACT_EXEMPT_TYPES = PLAN_REVIEW_EXEMPT_TYPES
 
 _USAGE = (
     "Usage: ticket create <ticket_type> <title> [--parent <id>] [--priority <n>] "

@@ -33,6 +33,7 @@ from rebar.llm import criteria as _criteria
 from rebar.llm import review_kernel
 from rebar.llm.config import LLMConfig
 from rebar.llm.runner import Runner, get_runner
+from rebar.types import PLAN_REVIEW_EXEMPT_TYPES
 
 from . import registry
 from .det_floor import PlanContext
@@ -81,6 +82,7 @@ _shed_to_budget = sizing.shed_to_budget
 # assemble_context`, and the suite reaches these as `orchestrator.<name>`; re-importing keeps them
 # module-globals of THIS module so every existing reference and monkeypatch target resolves
 # unchanged.
+
 from .context_assembly import (  # noqa: E402,F401
     _assemble_cache,
     _assemble_cache_key,
@@ -557,7 +559,7 @@ def drift_refresh(
     finding reuse, so the (unenforced) code-blind criterion partition is not relied upon."""
     from . import attest
 
-    if ctx.ticket_type in ("bug", "session_log", "code_review", "identity"):
+    if ctx.ticket_type in PLAN_REVIEW_EXEMPT_TYPES:
         return None
     cand = attest.drift_refresh_candidate(ctx.ticket_id, repo_root=repo_root)
     if cand is None:
