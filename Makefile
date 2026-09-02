@@ -26,20 +26,25 @@ GIT_CLIFF_VERSION := 2.13.1
 # into a repo-local, git-ignored bin. Bump the pin + digest together (they are checked with
 # `sha256sum -c --strict`, so a wrong digest fails the install loudly).
 RELEASE_WORKFLOW := .github/workflows/release.yml
-# Zizmor audit scope (epic 5664 S1): the release workflow PLUS the Gerrit Verified-gate
-# vote-casting critical path — gerrit-verify.yaml (the workflow that casts the Verified vote)
-# and ALL five reusables it calls that check out code / build artifacts (_build-and-test.yml,
-# _mutation.yml, _optionality.yml, _artifact-probe.yml, _eval-discipline.yml). Widening beyond
-# release.yml closes the gap where the workflows that actually gate every change were unaudited
-# for pinning/credential-persistence/template-injection issues. Keep the set to the vote path
-# (not all workflows) so the audit surface stays proportional to risk.
+# Zizmor audit scope (epic 5664 S1; extended by ticket 1c70): the release workflow, the
+# Gerrit Verified-gate vote-casting critical path — gerrit-verify.yaml (the workflow that
+# casts the Verified vote) and ALL five reusables it calls that check out code / build
+# artifacts (_build-and-test.yml, _mutation.yml, _optionality.yml, _artifact-probe.yml,
+# _eval-discipline.yml) — PLUS reconcile-bridge.yml, the other privileged workflow in this
+# repo: it runs with contents/actions-write and OIDC capability, so it carries the same
+# action-security risk (pinning, credential-persistence, template-injection) as the vote
+# path even though it does not itself cast a gate vote. Widening beyond release.yml closes
+# the gap where the workflows that actually gate every change (or hold write/OIDC creds)
+# were unaudited. Keep the set to these credentialed workflows (not all workflows) so the
+# audit surface stays proportional to risk.
 ZIZMOR_WORKFLOWS := $(RELEASE_WORKFLOW) \
 	.github/workflows/gerrit-verify.yaml \
 	.github/workflows/_build-and-test.yml \
 	.github/workflows/_mutation.yml \
 	.github/workflows/_optionality.yml \
 	.github/workflows/_artifact-probe.yml \
-	.github/workflows/_eval-discipline.yml
+	.github/workflows/_eval-discipline.yml \
+	.github/workflows/reconcile-bridge.yml
 ACTIONLINT_VERSION := 1.7.12
 ACTIONLINT_SHA256_LINUX_AMD64 := 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 LOCAL_BIN := .tools/bin

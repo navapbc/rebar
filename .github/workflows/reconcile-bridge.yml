@@ -100,7 +100,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: true   # the mounted worktree reuses these creds to push
           filter: blob:none
@@ -165,7 +165,7 @@ jobs:
           git fetch origin '+refs/reconciler/*:refs/reconciler/*' || true
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -181,7 +181,7 @@ jobs:
 
       - name: Cache acli binary
         id: cache-acli
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.acli
           key: acli-${{ runner.os }}-${{ vars.ACLI_VERSION || 'unset' }}
@@ -292,14 +292,16 @@ jobs:
         if: failure()
         env:
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           {
             echo "## :rotating_light: Reconcile Bridge run FAILED"
             echo ""
-            echo "- **Workflow:** \`${{ github.workflow }}\`"
+            echo "- **Workflow:** \`$WORKFLOW_NAME\`"
             echo "- **Run:** $GH_RUN_URL"
             echo "- **Mode:** \`${MODE}\`"
-            echo "- **Triggered by:** \`${{ github.event_name }}\`"
+            echo "- **Triggered by:** \`$EVENT_NAME\`"
             echo ""
             echo "The Reconciler Heartbeat Canary will open a bug ticket if this stays stale."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -335,6 +337,7 @@ jobs:
         if: ${{ !cancelled() && vars.RECONCILE_CONTINUOUS == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           echo "RECONCILE_CONTINUOUS=true — re-dispatching to sustain the loop (mode=${MODE})."
@@ -364,7 +367,7 @@ jobs:
           # disabled-workflow phrase, so an unrelated 422 (and every auth/404/network/rate-limit
           # failure) still fails the step loudly.
           dispatch_rc=0
-          dispatch_out="$(gh workflow run reconcile-bridge.yml --ref "${{ github.ref_name }}" --field mode="${MODE}" 2>&1)" || dispatch_rc=$?
+          dispatch_out="$(gh workflow run reconcile-bridge.yml --ref "${REF_NAME}" --field mode="${MODE}" 2>&1)" || dispatch_rc=$?
           printf '%s\n' "${dispatch_out}"
           if [ "${dispatch_rc}" -eq 0 ]; then
             exit 0
@@ -394,7 +397,7 @@ jobs:
         # Canonical repo only — a fork has no role to assume and must not fail trying.
         if: ${{ always() && github.repository == 'navapbc/rebar' && vars.AWS_BRIDGE_METRICS_ROLE_ARN != '' }}
         continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: ${{ vars.AWS_BRIDGE_METRICS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_BRIDGE_METRICS_REGION }}
