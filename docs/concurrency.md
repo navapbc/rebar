@@ -1021,3 +1021,44 @@ identity. Publishing each environment's op-cert **public** key into the store, t
 identities already are, would be the further step of making the trusted-set restriction usable
 without an out-of-band pin file; that is a real trust-model change needing its own ADR, and is
 deliberately not what the warning above does.
+
+## Writing one file from concurrent writers: `fsutil.atomic_write`
+
+The staging convention above covers creating a *new* ticket. This covers the other half:
+two writers publishing the **same** target at the same time.
+
+`rebar._store.fsutil.atomic_write(path, data, …)` is the single house helper for that, and
+it is what any write to a shared target should use. It creates its temporary file with
+`mkstemp` **in the target's directory**, writes, `chmod`s, and publishes with `os.replace`
+— an atomic rename on one filesystem — removing the temp on any failure. A concurrent
+reader therefore sees either the old file or the new one, whole, never a torn prefix.
+
+The failure it exists to prevent is specific and was found in production more than once:
+
+> A write whose **temporary** filename is derived from the target — `f"{target}.tmp"`, or
+> from the pid — shares that pathname with every concurrent writer of the same target. The
+> first `os.replace` consumes the shared temp, the second raises `FileNotFoundError`, and a
+> best-effort `except OSError` swallows it. The losing writer is **silently dropped**: no
+> error, no log, no partial file, just an update that never happened.
+
+A pid-derived name is not a fix. It is unique across processes but **collides across
+threads in one process**, and the MCP server is threaded.
+
+Two rules follow:
+
+- **Never derive a temp name from the target, from its content hash, or from the pid.**
+  Let `mkstemp` name it.
+- **Best-effort callers keep their own `try/except` around the call.** `atomic_write`
+  raises the underlying `OSError` after removing its temp; a caller that treats the write
+  as advisory (the review-bot cursor, the op-cert public-key derivation) catches that
+  itself rather than asking the helper to swallow it.
+
+Writing with no temp at all has the same reader-visible defect in a quieter form: the
+target exists in a truncated state for the duration of the write, so a concurrent reader
+can act on a prefix. The snapshot janitor's integrity stamp and the completion bank's
+record both had this shape and both now route through the helper.
+
+An audit of every cache and temp-artifact write under `src/rebar` accompanies this
+convention in `fsutil`'s own module docstring, including its negative result: no
+module-level cache or `lru_cache` in the tree is root-unkeyed — they key on absolute path,
+repo root, or a stat token — so this class is confined to temp-file naming.

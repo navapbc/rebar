@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from rebar._store.fsutil import atomic_write
 from rebar.llm.completion import verify_step_floor
 from rebar.llm.errors import CompletionRecoveryError
 
@@ -504,8 +505,13 @@ class CriterionBank:
             # the finalizer cannot downgrade it. Absent on every same-run entry.
             entry["seeded"] = True
         try:
-            self._path(criterion_id).write_text(
-                json.dumps(entry, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+            # Unique same-dir temp (mkstemp) + os.replace: a plain write_text lets a
+            # concurrent reader observe a TRUNCATED banked verdict, and a target-derived
+            # temp would just move the race (ticket b0ac-3c0f-3f64-4344).
+            atomic_write(
+                self._path(criterion_id),
+                json.dumps(entry, ensure_ascii=False, sort_keys=True),
+                encoding="utf-8",
             )
         except OSError as exc:
             raise CompletionRecoveryError(

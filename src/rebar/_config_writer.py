@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from rebar._config_schema import ConfigError
+from rebar._store.fsutil import atomic_write
 
 
 def _emit_toml(data: dict) -> str:
@@ -276,9 +277,9 @@ def write_jira_config(
     text = _emit_toml(data)
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, target)
+        # Unique same-dir temp (mkstemp) + os.replace — a target-derived `rebar.toml.tmp`
+        # is shared by every concurrent writer, so one of them is silently lost.
+        atomic_write(target, text, encoding="utf-8")
     except OSError as exc:
         raise ConfigError(f"could not write config {target}: {exc}") from None
     return target
