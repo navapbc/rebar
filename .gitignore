@@ -108,7 +108,11 @@ infra/compose/mcp-static-tokens.json.*
 src/rebar/_build_info.py
 
 # d01e live-validation run artifacts (CI artifacts, not source)
-/reports/
+# Reports are local scratch by default, EXCEPT the committed stability reads:
+# git will not descend into an excluded directory, so the parent is /reports/*
+# and the tracked subtree is re-included by negation.
+/reports/*
+!/reports/stability/
 /leaked-artifacts.log
 
 # terraform plan artifacts (generated)
