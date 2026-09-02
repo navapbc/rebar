@@ -18,7 +18,8 @@ Two durability layers back a poll:
 
 * the **local index file** here — the fast handle poll (``running`` / ``passed`` /
   ``failed``), written by the daemon's ``finally`` so a settled run always records a
-  terminal status even on failure; and
+  terminal status even on failure, plus the per-run plan-review ``REVIEW_RESULT``
+  receipt when one was written; and
 * the gate's **own signed attestation** on the ticket (the git-durable event log),
   read back by :func:`rebar.llm.plan_review_status` for plan-review and
   :func:`verify_completion_status` for completion — the verdict that survives a full
@@ -47,6 +48,8 @@ _STALE_GRACE_SECONDS: float = 5.0
 
 _PLAN_REVIEW = "plan_review"
 _VERIFY_COMPLETION = "verify_completion"
+_TERMINAL_STATUSES = {"passed", "failed"}
+_REVIEW_RESULT = "REVIEW_RESULT"
 
 
 def _repo_root(repo_root: str | None) -> Path:
@@ -120,6 +123,113 @@ def _durable_verdict(
         return {"ok": False, "verdict": "unknown", "reason": f"durable read failed: {exc}"}
 
 
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _job_started_at_ns(rec: dict[str, Any]) -> int | None:
+    started_at_ns = _int_or_none(rec.get("started_at_ns"))
+    if started_at_ns is not None:
+        return started_at_ns
+    started_at = rec.get("started_at")
+    if isinstance(started_at, (int, float)) and not isinstance(started_at, bool):
+        return int(started_at * 1_000_000_000)
+    job_id = str(rec.get("job_id") or "")
+    prefix = job_id.split("-", 1)[0]
+    return _int_or_none(prefix)
+
+
+def _latest_review_result_timestamp(ticket_id: str, repo_root: str | None) -> int | None:
+    try:
+        from rebar.llm.plan_review import sidecar
+
+        return sidecar.latest_review_timestamp(ticket_id, repo_root=repo_root)
+    except Exception:
+        logger.warning(
+            "gate_runs: REVIEW_RESULT sidecar timestamp read failed for %s",
+            ticket_id,
+            exc_info=True,
+        )
+        return None
+
+
+def _has_review_result_timestamp(ticket_id: str, reviewed_at: int, repo_root: str | None) -> bool:
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_dir_name
+
+        tracker_path = _config.tracker_dir(repo_root)
+        tracker = str(tracker_path)
+        rid = resolve_ticket_dir_name(ticket_id, tracker)
+        ticket_dir = Path(tracker_path) / rid
+        prefix = f"{reviewed_at}-"
+        for f in ticket_dir.iterdir():
+            if (
+                f.name.startswith(".")
+                or not f.name.startswith(prefix)
+                or not f.name.endswith(f"-{_REVIEW_RESULT}.json")
+            ):
+                continue
+            event = json.loads(f.read_text(encoding="utf-8"))
+            payload = event.get("data") if isinstance(event, dict) else None
+            return isinstance(payload, dict) and payload.get("schema") in (
+                "plan_review_result_v1",
+                "plan_review_result_v2",
+            )
+        return False
+    except Exception:
+        logger.warning(
+            "gate_runs: REVIEW_RESULT sidecar existence read failed for %s",
+            ticket_id,
+            exc_info=True,
+        )
+        return False
+
+
+def _review_result_status(
+    rec: dict[str, Any], status: str, ticket_id: str, repo_root: str | None
+) -> dict[str, Any] | None:
+    if str(rec.get("gate_type") or "") != _PLAN_REVIEW:
+        return None
+    reviewed_at = _int_or_none(rec.get("sidecar_reviewed_at"))
+    latest = _latest_review_result_timestamp(ticket_id, repo_root)
+    out: dict[str, Any] = {
+        "sidecar_type": _REVIEW_RESULT,
+        "readable": False,
+        "reason": "",
+        "reviewed_at": reviewed_at,
+        "latest_reviewed_at": latest,
+    }
+    if status not in _TERMINAL_STATUSES:
+        out["reason"] = f"run-{status}"
+        return out
+    if rec.get("sidecar_emitted") is False:
+        out["reason"] = "sidecar-not-emitted"
+        return out
+    if reviewed_at is not None:
+        if _has_review_result_timestamp(ticket_id, reviewed_at, repo_root):
+            out["readable"] = True
+            out["reason"] = "current-review-result-sidecar"
+        else:
+            out["reason"] = "review-result-sidecar-missing"
+        return out
+    started_at = _job_started_at_ns(rec)
+    out["job_started_at"] = started_at
+    out["reason"] = "review-result-generation-unknown"
+    return out
+
+
 def _resolve_status(rec: dict[str, Any]) -> str:
     """Fold the index record + live registry into a poll status.
 
@@ -141,15 +251,18 @@ def _resolve_status(rec: dict[str, Any]) -> str:
 def gate_run_status(job_id: str, *, repo_root: str | None = None) -> dict[str, Any]:
     """Resolve a ``*_start`` handle to a poll record (no LLM, no execution).
 
-    Returns ``{job_id, status, ticket_id?, gate_type?, verdict?, error?, durable?}`` where
-    ``status`` is ``running`` / ``passed`` / ``failed`` / ``stale-running`` / ``attaching``
-    / ``unknown``. ``attaching`` means the job is in flight in the live registry but has no
+    Returns ``{job_id, status, ticket_id?, gate_type?, verdict?, error?, durable?,
+    findings?}`` where ``status`` is ``running`` / ``passed`` / ``failed`` /
+    ``stale-running`` / ``attaching`` / ``unknown``. ``attaching`` means the job is in
+    flight in the live registry but has no
     index record yet — a follower ``*_start`` shares the leader's ``job_id`` and writes no
     index entry, so a poll in the window before the leader's own ``running`` write lands
     would otherwise read a misleading ``unknown``; keep polling. For a plan-review or
     completion job it also attaches ``durable`` — the gate's own signed-attestation
     currency — so a caller can confirm the run's verdict actually persisted (the
-    moving-base-ref / passed-but-unsigned question)."""
+    moving-base-ref / passed-but-unsigned question). For plan-review jobs it attaches
+    ``findings`` with ``readable`` and the expected/latest ``REVIEW_RESULT`` timestamps, so
+    a poller never has to guess whether the latest sidecar belongs to this job."""
     rec = read_gate_run(job_id, repo_root=repo_root)
     if rec is None:
         # No index record. If the live registry still knows this job is in flight (a follower
@@ -175,6 +288,9 @@ def gate_run_status(job_id: str, *, repo_root: str | None = None) -> dict[str, A
         durable = _durable_verdict(gate_type, ticket_id, repo_root)
         if durable is not None:
             out["durable"] = durable
+        findings = _review_result_status(rec, status, ticket_id, repo_root)
+        if findings is not None:
+            out["findings"] = findings
     return out
 
 

@@ -12,6 +12,7 @@ tokens (the gate is a fake that blocks on a ``threading.Event``).
 
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import time
@@ -226,6 +227,144 @@ def test_gate_status_within_grace_window_still_reads_running(store):
         }
     )
     assert gate_runs.gate_run_status("fresh-job")["status"] == "running"
+
+
+def _review_result_event(finding_id: str) -> str:
+    return json.dumps(
+        {
+            "event_type": "REVIEW_RESULT",
+            "data": {
+                "schema": "plan_review_result_v2",
+                "findings": [{"id": finding_id, "finding": finding_id}],
+            },
+        }
+    )
+
+
+def _write_review_result(tracker: Path, ticket_id: str, reviewed_at: int, finding_id: str) -> None:
+    ticket_dir = tracker / ticket_id
+    ticket_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{reviewed_at}-00000000-0000-4000-8000-000000000000-REVIEW_RESULT.json"
+    (ticket_dir / filename).write_text(_review_result_event(finding_id), encoding="utf-8")
+
+
+def test_gate_status_marks_plan_review_findings_unreadable_until_current_sidecar_exists(store):
+    # A terminal run index can be observed before the REVIEW_RESULT sidecar for that run is
+    # readable. The poll response must expose that the findings are NOT readable yet, so a
+    # caller does not read the previous run's sidecar as if it belonged to this job.
+    tracker = store / ".tickets-tracker"
+    tid = rebar.create_ticket("bug", "plan review sidecar race")
+    job_started_at = time.time_ns()
+    old_reviewed_at = job_started_at - 100
+    current_reviewed_at = job_started_at + 100
+    _write_review_result(tracker, tid, old_reviewed_at, "old-finding")
+    gate_runs.record_gate_run(
+        {
+            "job_id": f"{job_started_at}-job",
+            "ticket_id": tid,
+            "gate_type": "plan_review",
+            "status": "passed",
+            "verdict": "BLOCK",
+            "sidecar_emitted": True,
+            "sidecar_reviewed_at": current_reviewed_at,
+            "finished_at": time.time(),
+        }
+    )
+
+    out = gate_runs.gate_run_status(f"{job_started_at}-job")
+    assert out["status"] == "passed"
+    assert out["verdict"] == "BLOCK"
+    assert out["findings"]["readable"] is False
+    assert out["findings"]["reason"] == "review-result-sidecar-missing"
+    assert out["findings"]["reviewed_at"] == current_reviewed_at
+    assert out["findings"]["latest_reviewed_at"] == old_reviewed_at
+
+    _write_review_result(tracker, tid, current_reviewed_at, "current-finding")
+    out = gate_runs.gate_run_status(f"{job_started_at}-job")
+    assert out["findings"]["readable"] is True
+    assert out["findings"]["reason"] == "current-review-result-sidecar"
+    assert out["findings"]["reviewed_at"] == current_reviewed_at
+
+
+def test_plan_review_daemon_records_the_current_sidecar_receipt(store):
+    from rebar._mcp_llm import _spawn_gate_daemon
+
+    tracker = store / ".tickets-tracker"
+    tid = rebar.create_ticket("bug", "daemon sidecar receipt")
+    reviewed_at = time.time_ns()
+    _write_review_result(tracker, tid, reviewed_at, "current-finding")
+    inflight.reset_registry()
+    handle = inflight.begin_gate_job("plan_review", tid, variant="source=attested")
+
+    _spawn_gate_daemon(
+        handle,
+        "plan_review",
+        tid,
+        lambda: {"verdict": "BLOCK", "ticket_id": tid, "sidecar_emitted": True},
+    )
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if gate_runs.gate_run_status(handle.job_id)["status"] == "passed":
+            break
+        time.sleep(0.02)
+
+    out = gate_runs.gate_run_status(handle.job_id)
+    assert out["status"] == "passed"
+    assert out["findings"]["readable"] is True
+    assert out["findings"]["reviewed_at"] == reviewed_at
+
+
+def test_poll_then_read_sequence_does_not_read_previous_plan_review_findings(store):
+    # This models the documented caller: poll gate_status, then read findings only when the
+    # poll says the current job's REVIEW_RESULT is readable. During the race window, the old
+    # sidecar is still newest/readable in the tracker, but it must not be consumed for this job.
+    from rebar.llm.plan_review import sidecar
+
+    tracker = store / ".tickets-tracker"
+    tid = rebar.create_ticket("bug", "poll then read race")
+    old_job_start = time.time_ns()
+    old_reviewed_at = old_job_start + 10
+    _write_review_result(tracker, tid, old_reviewed_at, "old-finding")
+    gate_runs.record_gate_run(
+        {
+            "job_id": f"{old_job_start}-old",
+            "ticket_id": tid,
+            "gate_type": "plan_review",
+            "status": "passed",
+            "verdict": "BLOCK",
+            "sidecar_emitted": True,
+            "sidecar_reviewed_at": old_reviewed_at,
+            "finished_at": time.time(),
+        }
+    )
+    new_job_start = old_job_start + 1_000
+    new_reviewed_at = new_job_start + 10
+    gate_runs.record_gate_run(
+        {
+            "job_id": f"{new_job_start}-new",
+            "ticket_id": tid,
+            "gate_type": "plan_review",
+            "status": "passed",
+            "verdict": "BLOCK",
+            "sidecar_emitted": True,
+            "sidecar_reviewed_at": new_reviewed_at,
+            "finished_at": time.time(),
+        }
+    )
+
+    def read_current_findings(job_id: str) -> list[str]:
+        status = gate_runs.gate_run_status(job_id)
+        if status["status"] not in {"passed", "failed"}:
+            return []
+        if not status["findings"]["readable"]:
+            return []
+        result = sidecar.latest_review_result(tid) or {}
+        return [str(f.get("id")) for f in result.get("findings", [])]
+
+    assert read_current_findings(f"{old_job_start}-old") == ["old-finding"]
+    assert read_current_findings(f"{new_job_start}-new") == []
+    _write_review_result(tracker, tid, new_reviewed_at, "new-finding")
+    assert read_current_findings(f"{new_job_start}-new") == ["new-finding"]
 
 
 def test_verify_completion_status_unsigned_without_an_attestation(store):
