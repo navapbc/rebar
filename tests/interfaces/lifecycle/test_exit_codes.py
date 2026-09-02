@@ -25,6 +25,7 @@ severity bucket, not the standard contract (and it takes NO ticket id).
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -240,3 +241,76 @@ def test_exit_11_documented() -> None:
     doc = _P(__file__).resolve().parents[3] / "docs" / "exit-codes.md"
     text = doc.read_text(encoding="utf-8")
     assert "`11`" in text and "block-but-retryable" in text.lower()
+
+
+# ── mirror F12: the per-command table vs the live route registry ─────────────
+
+
+def _documented_subcommands() -> list[str]:
+    """Every name in the doc's per-command table, in document order.
+
+    Parsed from the table rather than hand-listed — a hand-listed copy would be a
+    third master for the same fact, which is what this check exists to prevent.
+    """
+    from pathlib import Path as _P
+
+    doc = _P(__file__).resolve().parents[3] / "docs" / "exit-codes.md"
+    lines = doc.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("| Subcommand"))
+    names: list[str] = []
+    for line in lines[start + 2 :]:  # skip the header separator row
+        if not line.startswith("|"):
+            break
+        match = re.match(r"\|\s*`([^`]+)`\s*\|", line)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
+def _live_route_names() -> set[str]:
+    from rebar._cli._registry import ROUTES
+
+    return {route.name for route in ROUTES if not route.retired}
+
+
+def test_every_live_route_is_documented_and_every_doc_row_names_a_real_route() -> None:
+    """The per-command table and ``ROUTES`` are one fact with two masters (mirror F12).
+
+    Set difference, not a count: when this drift was found the two sides had equal-looking
+    totals while disagreeing about members, so a count comparison saw nothing.
+
+    The two sides are NOT the same vocabulary, and conflating them would be its own defect.
+    ``ROUTES`` holds TOP-LEVEL route names; the table documents user-facing INVOCATIONS,
+    which include a route's nested argparse subcommands (`bridge setup`, `bridge fsck`,
+    `bridge check-access` are all real and all dispatched inside the `bridge` route). So the
+    invariant is two-directional but asymmetric:
+
+      * every live route must be documented under some spelling, and
+      * every documented row must BEGIN with a live route name.
+
+    The second is deliberately weaker than "is invocable": proving that needs a subprocess
+    per row, and 80+ spawns do not belong in this tier. It still catches the failure that
+    actually occurs — a row for a command that was removed outright.
+    """
+    documented = _documented_subcommands()
+    assert documented, "parsed no rows from the per-command table — the parser has drifted"
+    live = _live_route_names()
+
+    undocumented = sorted(
+        name
+        for name in live
+        if name not in set(documented) and name.replace("-", " ", 1) not in set(documented)
+    )
+    orphaned = sorted({row for row in documented if row.split()[0] not in live})
+    assert not undocumented and not orphaned, (
+        "docs/exit-codes.md's per-command table has drifted from the live CLI. "
+        f"live routes with no doc row: {undocumented}; "
+        f"doc rows whose first token is not a live route: {orphaned}"
+    )
+
+
+def test_the_table_lists_each_subcommand_once() -> None:
+    """A duplicate row lets two rows disagree about the same command's codes."""
+    documented = _documented_subcommands()
+    duplicated = sorted({n for n in documented if documented.count(n) > 1})
+    assert not duplicated, f"duplicate rows in the per-command table: {duplicated}"
