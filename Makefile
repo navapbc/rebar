@@ -234,6 +234,19 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# tests/interfaces/facades/test_mcp_http_transport.py; running it here makes the local
 	@# verdict agree with CI instead of surfacing staleness only in the full suite (~0.55s).
 	python scripts/gen_env_registry.py --check
+	@# MCP-tool-surface vs library-facade parity gate (ticket 8ce5-b870-601d-4715,
+	@# cream-capitate-snake). The MCP tools are thin closures over the `rebar.__all__`
+	@# facade, but nothing cross-checked the two: a library function could gain, lose or
+	@# rename a parameter while its MCP tool kept the old shape and every gate stayed green
+	@# — gen_mcp_reference.py documents only what the registrars expose and never looks at
+	@# the library. This compares both live surfaces against the committed manifest
+	@# (tests/unit/mcp_library_parity_manifest.json) and fails on drift; an intentional
+	@# difference is declared IN the manifest with a non-empty `reason`, so justified
+	@# divergence passes and silent divergence does not. Regenerate with
+	@# `python scripts/check_mcp_library_parity.py --update`. Pure introspection of rebar's
+	@# own package + the `mcp` dependency — no CI provider required (project.portability),
+	@# and it FAILS rather than skips if the import is unavailable.
+	python scripts/check_mcp_library_parity.py
 	@# Comment-hygiene gate (ticket 2d9a-78c5): CI runs this as the `comment-hygiene gate`
 	@# step of _build-and-test.yml and via tests/unit/test_comment_hygiene_guard.py; running
 	@# it here makes the local verdict agree with CI instead of surfacing findings only in

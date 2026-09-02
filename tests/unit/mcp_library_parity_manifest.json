@@ -1,0 +1,917 @@
+{
+  "normalization": {
+    "library_only_params": [
+      "repo_root"
+    ]
+  },
+  "schema_version": 1,
+  "tools": {
+    "archive_ticket": {
+      "correspondence": "co_names",
+      "library_params": [
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "archive",
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "attach_commits": {
+      "correspondence": "exact",
+      "library_params": [
+        "commits",
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "attach_commits",
+      "mcp_params": [
+        "commits",
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "audit_trail": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "bridge_check_access": {
+      "correspondence": "exact",
+      "library_params": [],
+      "library_symbol": "bridge_check_access",
+      "mcp_params": [],
+      "registrar": "read"
+    },
+    "bridge_fsck": {
+      "correspondence": "exact",
+      "library_params": [
+        "repo_root"
+      ],
+      "library_symbol": "bridge_fsck",
+      "mcp_params": [],
+      "registrar": "read"
+    },
+    "bridge_pause": {
+      "correspondence": "exact",
+      "library_params": [
+        "reason",
+        "repo_root"
+      ],
+      "library_symbol": "bridge_pause",
+      "mcp_params": [
+        "reason"
+      ],
+      "registrar": "read"
+    },
+    "bridge_preview": {
+      "correspondence": "exact",
+      "library_params": [
+        "exclude",
+        "only",
+        "repo_root"
+      ],
+      "library_symbol": "bridge_preview",
+      "mcp_params": [
+        "exclude",
+        "only"
+      ],
+      "registrar": "read"
+    },
+    "bridge_projects_list": {
+      "correspondence": "exact",
+      "library_params": [
+        "repo_root"
+      ],
+      "library_symbol": "bridge_projects_list",
+      "mcp_params": [],
+      "registrar": "read"
+    },
+    "bridge_projects_remove": {
+      "correspondence": "exact",
+      "library_params": [
+        "key",
+        "repo_root"
+      ],
+      "library_symbol": "bridge_projects_remove",
+      "mcp_params": [
+        "key"
+      ],
+      "registrar": "write"
+    },
+    "bridge_projects_set": {
+      "correspondence": "exact",
+      "library_params": [
+        "key",
+        "repo_root",
+        "repos"
+      ],
+      "library_symbol": "bridge_projects_set",
+      "mcp_params": [
+        "key",
+        "repos"
+      ],
+      "registrar": "write"
+    },
+    "bridge_resume": {
+      "correspondence": "exact",
+      "library_params": [
+        "repo_root"
+      ],
+      "library_symbol": "bridge_resume",
+      "mcp_params": [],
+      "registrar": "read"
+    },
+    "bridge_run": {
+      "correspondence": "exact",
+      "library_params": [
+        "profile",
+        "repo_root"
+      ],
+      "library_symbol": "bridge_run",
+      "mcp_params": [
+        "profile"
+      ],
+      "registrar": "read"
+    },
+    "bridge_status": {
+      "correspondence": "exact",
+      "library_params": [
+        "max_age_seconds",
+        "repo_root",
+        "target_environment_id"
+      ],
+      "library_symbol": "bridge_status",
+      "mcp_params": [
+        "max_age_seconds",
+        "target_environment_id"
+      ],
+      "registrar": "read"
+    },
+    "bridge_sync": {
+      "correspondence": "exact",
+      "library_params": [
+        "exclude",
+        "max_changes",
+        "only",
+        "repo_root"
+      ],
+      "library_symbol": "bridge_sync",
+      "mcp_params": [
+        "exclude",
+        "max_changes",
+        "only"
+      ],
+      "registrar": "read"
+    },
+    "check_ac": {
+      "correspondence": "exact",
+      "library_params": [
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "check_ac",
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "claim_ticket": {
+      "correspondence": "co_names",
+      "library_params": [
+        "assignee",
+        "force",
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "claim",
+      "mcp_params": [
+        "assignee",
+        "force",
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "clarity_check": {
+      "correspondence": "exact",
+      "library_params": [
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "clarity_check",
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "comment_ticket": {
+      "correspondence": "co_names",
+      "library_params": [
+        "allow_secret_pattern",
+        "body",
+        "repo_root",
+        "source",
+        "ticket_id"
+      ],
+      "library_symbol": "comment",
+      "mcp_params": [
+        "body",
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "compact_ticket": {
+      "correspondence": "co_names",
+      "library_params": [
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "compact",
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "create_idea": {
+      "correspondence": "co_names",
+      "library_params": [
+        "_creation_channel",
+        "description",
+        "repo_root",
+        "return_alias",
+        "title"
+      ],
+      "library_symbol": "idea",
+      "mcp_params": [
+        "description",
+        "title"
+      ],
+      "registrar": "write"
+    },
+    "create_identity": {
+      "correspondence": "exact",
+      "divergence": {
+        "kind": "library_only_params",
+        "reason": "The tool pins the library's `return_alias=True` and `_creation_channel=\"mcp\"` at the call site (src/rebar/_mcp_writes.py), so neither is caller-settable: MCP always returns {id, alias} and always stamps the mcp creation channel. `tags` is not exposed on identity creation over MCP; tags are applied afterwards with the `tag_ticket` tool."
+      },
+      "library_params": [
+        "_creation_channel",
+        "email",
+        "keys",
+        "mappings",
+        "name",
+        "repo_root",
+        "return_alias",
+        "tags"
+      ],
+      "library_symbol": "create_identity",
+      "mcp_params": [
+        "email",
+        "keys",
+        "mappings",
+        "name"
+      ],
+      "registrar": "write"
+    },
+    "create_ticket": {
+      "correspondence": "exact",
+      "divergence": {
+        "kind": "library_only_params",
+        "reason": "The tool pins the library's `return_alias=True` and `_creation_channel=\"mcp\"` at the call site (src/rebar/_mcp_writes.py), so neither is caller-settable. `source` is the provenance dict used by importers/bridge paths, not part of the agent-facing tool surface."
+      },
+      "library_params": [
+        "_creation_channel",
+        "assignee",
+        "bridge_project",
+        "description",
+        "parent",
+        "priority",
+        "repo_root",
+        "repos",
+        "return_alias",
+        "source",
+        "tags",
+        "ticket_type",
+        "title"
+      ],
+      "library_symbol": "create_ticket",
+      "mcp_params": [
+        "assignee",
+        "bridge_project",
+        "description",
+        "parent",
+        "priority",
+        "repos",
+        "tags",
+        "ticket_type",
+        "title"
+      ],
+      "registrar": "write"
+    },
+    "declare_no_file_impact": {
+      "correspondence": "exact",
+      "library_params": [
+        "reason",
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "declare_no_file_impact",
+      "mcp_params": [
+        "reason",
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "edit_ticket": {
+      "correspondence": "exact",
+      "divergence": {
+        "kind": "enumerated_kwargs",
+        "reason": "The library is `edit_ticket(ticket_id, *, repo_root=None, **fields)` (src/rebar/_lib_mutations.py); a **fields passthrough cannot be expressed as a JSON tool schema, so the tool ENUMERATES the eleven editable fields and forwards them explicitly. The tool's own docstring documents this (src/rebar/_mcp_writes.py: \"Unlike the library edit_ticket (a **fields passthrough), this tool's signature is enumerated\"). The enumerated set is the divergence to watch: a new editable library field must be added here too."
+      },
+      "library_params": [
+        "fields",
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "edit_ticket",
+      "mcp_params": [
+        "add_tags",
+        "assignee",
+        "bridge_project",
+        "description",
+        "priority",
+        "remove_tags",
+        "repos",
+        "set_tags",
+        "ticket_id",
+        "ticket_type",
+        "title"
+      ],
+      "registrar": "write"
+    },
+    "explain_criterion": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "criterion_id"
+      ],
+      "registrar": "read"
+    },
+    "fsck": {
+      "correspondence": "exact",
+      "divergence": {
+        "kind": "library_only_params",
+        "reason": "The tool derives `report_only` from the server's own read-only gate (`rebar.fsck_report(recover=recover, report_only=_readonly())`) rather than accepting it from the caller, so a read-only server cannot be talked into the stale-lock write."
+      },
+      "library_params": [
+        "recover",
+        "repo_root",
+        "report_only"
+      ],
+      "library_symbol": "fsck",
+      "mcp_params": [
+        "recover"
+      ],
+      "registrar": "read"
+    },
+    "gate_status": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "job_id"
+      ],
+      "registrar": "read"
+    },
+    "get_file_impact": {
+      "correspondence": "exact",
+      "library_params": [
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "get_file_impact",
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "get_verify_commands": {
+      "correspondence": "exact",
+      "library_params": [
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "get_verify_commands",
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "get_workflow_result": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "run_id",
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "get_workflow_status": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "run_id",
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "grounding_info": {
+      "correspondence": "exact",
+      "library_params": [],
+      "library_symbol": "grounding_info",
+      "mcp_params": [],
+      "registrar": "read"
+    },
+    "link_tickets": {
+      "correspondence": "co_names",
+      "library_params": [
+        "force",
+        "id1",
+        "id2",
+        "relation",
+        "repo_root"
+      ],
+      "library_symbol": "link",
+      "mcp_params": [
+        "force",
+        "id1",
+        "id2",
+        "relation"
+      ],
+      "registrar": "write"
+    },
+    "list_tickets": {
+      "correspondence": "exact",
+      "library_params": [
+        "blocking_state",
+        "exclude_deleted",
+        "full",
+        "has_tag",
+        "include_archived",
+        "min_children",
+        "parent",
+        "priority",
+        "repo_root",
+        "sort",
+        "status",
+        "ticket_type",
+        "with_children_count",
+        "without_tag"
+      ],
+      "library_symbol": "list_tickets",
+      "mcp_params": [
+        "blocking_state",
+        "exclude_deleted",
+        "full",
+        "has_tag",
+        "include_archived",
+        "min_children",
+        "parent",
+        "priority",
+        "sort",
+        "status",
+        "ticket_type",
+        "with_children_count",
+        "without_tag"
+      ],
+      "registrar": "read"
+    },
+    "log_session": {
+      "correspondence": "co_names",
+      "library_params": [
+        "_creation_channel",
+        "discovered_from",
+        "entry",
+        "relates_to",
+        "repo_root",
+        "summary"
+      ],
+      "library_symbol": "append_session_log",
+      "mcp_params": [
+        "discovered_from",
+        "entry",
+        "relates_to",
+        "summary"
+      ],
+      "registrar": "write"
+    },
+    "next_batch": {
+      "correspondence": "exact",
+      "library_params": [
+        "epic_id",
+        "repo_root"
+      ],
+      "library_symbol": "next_batch",
+      "mcp_params": [
+        "epic_id"
+      ],
+      "registrar": "read"
+    },
+    "plan_review_status": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "quality_check": {
+      "correspondence": "exact",
+      "library_params": [
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "quality_check",
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "ready_tickets": {
+      "correspondence": "co_names",
+      "library_params": [
+        "repo_root",
+        "sort"
+      ],
+      "library_symbol": "ready",
+      "mcp_params": [
+        "full",
+        "sort"
+      ],
+      "registrar": "read"
+    },
+    "recent_session_logs": {
+      "correspondence": "exact",
+      "library_params": [
+        "limit",
+        "repo_root"
+      ],
+      "library_symbol": "recent_session_logs",
+      "mcp_params": [
+        "limit"
+      ],
+      "registrar": "read"
+    },
+    "reconcile": {
+      "correspondence": "exact",
+      "library_params": [
+        "mode",
+        "repo_root"
+      ],
+      "library_symbol": "reconcile",
+      "mcp_params": [
+        "mode"
+      ],
+      "registrar": "read"
+    },
+    "render_workflow": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "workflow"
+      ],
+      "registrar": "read"
+    },
+    "reopen_ticket": {
+      "correspondence": "co_names",
+      "library_params": [
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "reopen",
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "review_code": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "base",
+        "head",
+        "ref",
+        "reviewers",
+        "source"
+      ],
+      "registrar": "llm"
+    },
+    "review_plan": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "force",
+        "ref",
+        "source",
+        "ticket_id"
+      ],
+      "registrar": "llm"
+    },
+    "review_plan_start": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "force",
+        "ref",
+        "source",
+        "ticket_id"
+      ],
+      "registrar": "llm"
+    },
+    "run_workflow": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "dry_run",
+        "inputs",
+        "ref",
+        "source",
+        "ticket_id",
+        "workflow"
+      ],
+      "registrar": "write"
+    },
+    "scan_spec": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "batch_size",
+        "ref",
+        "source",
+        "spec_text"
+      ],
+      "registrar": "llm"
+    },
+    "search": {
+      "correspondence": "exact",
+      "divergence": {
+        "kind": "library_only_params",
+        "reason": "The tool always uses the projected row shape (library default `full=False`); `full` is not caller-settable because the projection is what keeps the response inside the MCP payload budget (bug 494b-2dd3-e9d3-4fb0)."
+      },
+      "library_params": [
+        "full",
+        "has_tag",
+        "include_archived",
+        "query",
+        "repo_root",
+        "sort",
+        "status",
+        "ticket_type"
+      ],
+      "library_symbol": "search",
+      "mcp_params": [
+        "has_tag",
+        "include_archived",
+        "query",
+        "sort",
+        "status",
+        "ticket_type"
+      ],
+      "registrar": "read"
+    },
+    "set_file_impact": {
+      "correspondence": "exact",
+      "library_params": [
+        "impact",
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "set_file_impact",
+      "mcp_params": [
+        "impact",
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "set_verify_commands": {
+      "correspondence": "exact",
+      "library_params": [
+        "commands",
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "set_verify_commands",
+      "mcp_params": [
+        "commands",
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "show_ticket": {
+      "correspondence": "exact",
+      "divergence": {
+        "kind": "library_only_params",
+        "reason": "The tool always passes `include_inbound=True` so the computed `inbound_deps` are part of every MCP ticket read; there is no reduced mode for a caller to select."
+      },
+      "library_params": [
+        "include_inbound",
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "show_ticket",
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "sign_manifest": {
+      "correspondence": "exact",
+      "library_params": [
+        "manifest",
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "sign_manifest",
+      "mcp_params": [
+        "manifest",
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "sign_review": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "llm"
+    },
+    "summary": {
+      "correspondence": "exact",
+      "library_params": [
+        "repo_root",
+        "ticket_ids"
+      ],
+      "library_symbol": "summary",
+      "mcp_params": [
+        "ticket_ids"
+      ],
+      "registrar": "read"
+    },
+    "tag_ticket": {
+      "correspondence": "co_names",
+      "library_params": [
+        "repo_root",
+        "tag",
+        "ticket_id"
+      ],
+      "library_symbol": "tag",
+      "mcp_params": [
+        "tag",
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "ticket_deps": {
+      "correspondence": "co_names",
+      "library_params": [
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "deps",
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "transition_ticket": {
+      "correspondence": "co_names",
+      "library_params": [
+        "caused_by",
+        "close_class",
+        "current_status",
+        "force",
+        "force_close",
+        "reason",
+        "ref",
+        "repo_root",
+        "target_status",
+        "ticket_id"
+      ],
+      "library_symbol": "transition",
+      "mcp_params": [
+        "caused_by",
+        "close_class",
+        "current_status",
+        "force",
+        "reason",
+        "ref",
+        "target_status",
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "unlink_tickets": {
+      "correspondence": "co_names",
+      "library_params": [
+        "id1",
+        "id2",
+        "relation",
+        "repo_root"
+      ],
+      "library_symbol": "unlink",
+      "mcp_params": [
+        "id1",
+        "id2",
+        "relation"
+      ],
+      "registrar": "write"
+    },
+    "untag_ticket": {
+      "correspondence": "co_names",
+      "library_params": [
+        "repo_root",
+        "tag",
+        "ticket_id"
+      ],
+      "library_symbol": "untag",
+      "mcp_params": [
+        "tag",
+        "ticket_id"
+      ],
+      "registrar": "write"
+    },
+    "validate": {
+      "correspondence": "exact",
+      "library_params": [
+        "repo_root"
+      ],
+      "library_symbol": "validate",
+      "mcp_params": [],
+      "registrar": "read"
+    },
+    "verify_completion": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "graph",
+        "ref",
+        "source",
+        "ticket_id"
+      ],
+      "registrar": "llm"
+    },
+    "verify_completion_start": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "graph",
+        "ref",
+        "source",
+        "ticket_id"
+      ],
+      "registrar": "llm"
+    },
+    "verify_completion_status": {
+      "correspondence": "mcp_only",
+      "library_params": [],
+      "library_symbol": null,
+      "mcp_params": [
+        "ticket_id"
+      ],
+      "registrar": "read"
+    },
+    "verify_signature": {
+      "correspondence": "exact",
+      "library_params": [
+        "kind",
+        "repo_root",
+        "ticket_id"
+      ],
+      "library_symbol": "verify_signature",
+      "mcp_params": [
+        "kind",
+        "ticket_id"
+      ],
+      "registrar": "read"
+    }
+  }
+}
