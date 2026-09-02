@@ -85,6 +85,10 @@ def test_apply_typed_routes_outbound_probe_to_its_leaf(applier):
         "src/rebar/_engine/rebar_reconciler/apply_outbound.py",
     ],
 )
+@pytest.mark.allow_unharnessed_subprocess(
+    "the sweep's definition-of-done is `ruff check --select ARG` over the real\n"
+    "committed source tree; a sandbox copy would assert nothing"
+)
 def test_cluster1_leaf_module_is_arg_clean(rel_path):
     """The two Cluster-1 leaf modules carry ZERO residual ARG violations.
 

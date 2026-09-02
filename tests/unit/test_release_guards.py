@@ -142,6 +142,9 @@ def _git(cwd: Path, *args: str) -> str:
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_CONFIG_SYSTEM": "/dev/null",
         "PATH": __import__("os").environ.get("PATH", ""),
+        # Pinned: a hand-built env drops the tier's inherited isolation root, and a
+        # child without it falls back to the git toplevel of its cwd.
+        "REBAR_ROOT": str(cwd),
     }
     return subprocess.run(
         ["git", *args], cwd=cwd, env=env, check=True, capture_output=True, text=True

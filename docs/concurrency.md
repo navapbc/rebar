@@ -1062,3 +1062,55 @@ An audit of every cache and temp-artifact write under `src/rebar` accompanies th
 convention in `fsutil`'s own module docstring, including its negative result: no
 module-level cache or `lru_cache` in the tree is root-unkeyed — they key on absolute path,
 repo root, or a stat token — so this class is confined to temp-file naming.
+
+## Test isolation under parallel workers: the subprocess guard
+
+`tests/conftest.py` gives every unit test an isolation root: a session-scoped sandbox repo
+plus an autouse fixture that sets `REBAR_ROOT` at it, per xdist worker. It reaches child
+processes **purely by environment inheritance**, and that is the whole subtlety — a test
+that builds its own `env=` mapping from scratch silently drops `REBAR_ROOT`, and the child
+falls back to the git toplevel of its cwd: the real checkout, which other workers are
+concurrently using.
+
+A collection-time guard now enforces it. The predicate lives in
+`tests/_subprocess_isolation.py` (not in the conftest) so it is testable without spawning
+pytest, mirroring the `_live_jira_confinement` split the same hook already uses.
+
+**What it accepts.** Detection is AST, with the callee resolved through each module's own
+import bindings — never a regex, because a naive `run(` pattern matches ~126 `asyncio.run`
+call sites in this tier alone. A spawn is fine when the root demonstrably comes from the
+harness: a `cwd=` naming `tmp_path` or a fixture parameter, a root passed positionally
+(`git -C str(repo)`, `git init str(tmp_path)`), an `env=` that forwards the ambient mapping
+(`os.environ`, `subprocess_env(...)`, or a `**`-spread of either), or a launch through
+`tests/_nested_pytest.run_nested_pytest`.
+
+Note the sharp edge on `env=`: a dict literal that **cherry-picks** one variable, such as
+`{"PATH": os.environ["PATH"]}`, does *not* forward the root. Only a `**`-spread of an
+ambient mapping or an explicit `REBAR_ROOT` key does.
+
+**What it fails.** A spawn rooted at the real checkout (`cwd=REPO_ROOT`, or `-C REPO_ROOT`),
+an `env=` dict literal carrying neither the ambient environment nor `REBAR_ROOT`, or an
+argv reaching for the operator's own `HOME`.
+
+**What it deliberately does not fail.** An `env=` bound outside the enclosing function
+cannot be resolved without a def-site trace, so it is reported as *undecidable* and never
+fails collection. This is a design decision, not an oversight: the tier has ~869 spawn
+sites of which the overwhelming majority are already correct, and a guard that fails
+everything it cannot prove safe would redden dozens of files on introduction — which is how
+a guard gets reverted rather than adopted.
+
+**The opt-out.** A test that genuinely needs the real checkout — the repo-policy and gate
+self-tests, whose assertion *is* the committed tree — carries:
+
+```python
+@pytest.mark.allow_unharnessed_subprocess("why this test must escape the harness")
+```
+
+The reason is mandatory and enforced by the guard itself: `--strict-markers` validates only
+the marker *name*, so a bare or blank-reason marker is rejected here, the same discipline
+`check_config_reads.py` applies to its own `# read-via:` markers. Opt-outs are greppable, so
+their growth is visible.
+
+**Why it raises `UsageError`.** From the xdist controller a `pytest.fail()` escapes as a
+20-line `INTERNALERROR>` traceback that buries the message under a stack the reader did not
+cause. A guard whose whole value is a clear message must not look like a crash.

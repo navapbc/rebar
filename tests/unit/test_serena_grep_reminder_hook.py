@@ -190,6 +190,9 @@ def test_settings_wires_the_hook_for_bash_without_losing_the_tool_search_setting
     )
 
 
+@pytest.mark.allow_unharnessed_subprocess(
+    "asks git whether THIS checkout tracks the hook script; that is the assertion"
+)
 def test_hook_script_is_tracked_and_executable_from_the_repo_root():
     """`.claude/` is ignored by default, so the script itself must live in tracked space."""
     proc = subprocess.run(

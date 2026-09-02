@@ -158,6 +158,9 @@ def test_module_size_lock_fails_closed_on_fetch_failure() -> None:
     assert "::warning::could not fetch main to verify the module-size limit lock" not in text
 
 
+@pytest.mark.allow_unharnessed_subprocess(
+    "drives the committed lock CLI from the checkout it locks"
+)
 def test_cli_lock_fails_closed_without_base_when_repo_unknown() -> None:
     """The CI path (no --base) FAILS CLOSED when GITHUB_REPOSITORY is unset — it cannot
     establish the base copy, so it must exit nonzero rather than pass. No network is

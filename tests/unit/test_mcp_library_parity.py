@@ -371,6 +371,10 @@ def test_update_is_idempotent():
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.allow_unharnessed_subprocess(
+    "runs the parity gate over the committed tree exactly as `make lint` does, in a\n"
+    "clean interpreter that deliberately escapes the tier's autouse monkeypatches"
+)
 def test_cli_check_exits_zero_on_the_committed_tree():
     """Run the gate exactly as `make lint` does.
 
