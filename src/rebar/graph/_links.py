@@ -13,6 +13,7 @@ from rebar.reducer._sort import prefix_ts as _prefix_ts
 from ._graph import check_cycle_at_level, check_would_create_cycle
 from ._hierarchy import resolve_hierarchy_link
 from ._loader import reduce_ticket
+from ._relations import _BLOCKING_RELATIONS
 from ._status import _get_ticket_status
 
 logger = logging.getLogger(__name__)
@@ -273,11 +274,12 @@ def add_dependency(
     level = (
         (resolved_source_state.get("ticket_type") or "").lower() if resolved_source_state else ""
     )
-    # Only the cycle-capable relations (blocks / depends_on) are subject to the
-    # per-level cycle guard; relates_to / duplicates / supersedes / discovered_from
-    # are non-blocking and never cycle-inducing (mirrors check_would_create_cycle).
+    # Only the cycle-capable relations are subject to the per-level cycle guard; every
+    # other relation is non-blocking and never cycle-inducing (mirrors
+    # check_would_create_cycle). The non-blocking set is deliberately not listed here —
+    # this comment used to name four of the five, having missed caused_by (mirror F4).
     if (
-        relation in ("blocks", "depends_on")
+        relation in _BLOCKING_RELATIONS
         and level
         and check_cycle_at_level(resolved_source, resolved_target, level, tracker_dir)
     ):
