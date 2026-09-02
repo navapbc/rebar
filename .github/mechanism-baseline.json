@@ -242,6 +242,7 @@
     "ci_gate::.github/workflows/external-integration.yml::Tear down the Langfuse stack": 1,
     "ci_gate::.github/workflows/external-integration.yml::Wait for Jira DC to become ready": 1,
     "ci_gate::.github/workflows/external-integration.yml::Wait for Langfuse to be ready": 1,
+    "ci_gate::.github/workflows/gerrit-verify.yaml::Cast Verified from the CI conclusion": 1,
     "ci_gate::.github/workflows/gerrit-verify.yaml::Classify the exact HEAD^..HEAD path set": 1,
     "ci_gate::.github/workflows/gerrit-verify.yaml::Configure git identity": 1,
     "ci_gate::.github/workflows/gerrit-verify.yaml::Deepen until the exact patchset parent is diffable": 1,
