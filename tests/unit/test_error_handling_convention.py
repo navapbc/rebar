@@ -97,6 +97,9 @@ def test_allowlisted_path_is_suppressed() -> None:
         assert "T201" not in _ruff_codes(t201_path), f"expected {t201_path} to suppress T201"
 
 
+@pytest.mark.allow_unharnessed_subprocess(
+    "lints the real shipped llm/plan_review package for BLE001/T201"
+)
 def test_exemplar_package_is_clean() -> None:
     """The real llm/plan_review/ package has no BLE001/T201 violations."""
     proc = subprocess.run(

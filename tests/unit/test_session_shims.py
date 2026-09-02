@@ -28,7 +28,14 @@ def _run_hook(script: Path, stdin: str, env_file: Path) -> subprocess.CompletedP
         input=stdin,
         capture_output=True,
         text=True,
-        env={"CLAUDE_ENV_FILE": str(env_file), "PATH": _os_path()},
+        # Minimal by design (the hook must work off CLAUDE_ENV_FILE alone), so REBAR_ROOT
+        # is pinned at the caller's tmp_path-owned directory: a hand-built env drops the
+        # tier's inherited isolation root and the child would resolve it to the checkout.
+        env={
+            "CLAUDE_ENV_FILE": str(env_file),
+            "PATH": _os_path(),
+            "REBAR_ROOT": str(env_file.parent),
+        },
         check=False,
     )
 
@@ -106,7 +113,8 @@ def test_claude_code_hook_noop_without_env_file(tmp_path) -> None:
         input='{"session_id":"abc"}',
         capture_output=True,
         text=True,
-        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+        # Pinned: a hand-built env drops the tier's inherited isolation root.
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "REBAR_ROOT": str(tmp_path)},
         check=False,  # no CLAUDE_ENV_FILE
     )
     assert r.returncode == 0

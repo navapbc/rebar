@@ -181,6 +181,14 @@ def pytest_configure(config: pytest.Config) -> None:
         "real_reconcile_loop: run the review-bot app's real reconcile loop instead "
         "of the module's test-safe default stub.",
     )
+    config.addinivalue_line(
+        "markers",
+        "allow_unharnessed_subprocess(reason): opt out of the unit-tier "
+        "subprocess-isolation guard for a test that must spawn a child rooted at the "
+        "real checkout or with a hand-built environment. A non-empty reason is "
+        "MANDATORY — `--strict-markers` validates the marker NAME only, so the reason "
+        "rule is enforced in tests/_subprocess_isolation.py.",
+    )
 
 
 _EXTERNAL_DIR = _REPO_ROOT / "tests" / "external"
@@ -277,6 +285,36 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     unconfined = _live_jira_confinement.unconfined_live_jira_reason(config, items)
     if unconfined is not None:
         raise pytest.UsageError(unconfined)
+
+    # (d) Hard-FAIL collection when a UNIT-tier test spawns a child that escapes the tier's
+    #     isolation root. `_default_rebar_root_to_sandbox` reaches children only by ENVIRONMENT
+    #     INHERITANCE, so a hand-built `env=` silently drops REBAR_ROOT and the child falls back
+    #     to the git toplevel of its cwd — the real checkout. Pure AST predicate in
+    #     tests/_subprocess_isolation.py so it is testable without spawning pytest.
+    #
+    #     UsageError for the same reason arm (c) uses it: from the xdist controller a
+    #     pytest.fail() escapes as a 20-line `INTERNALERROR>` traceback that buries the
+    #     message under a stack the reader did not cause. A guard whose whole value is a
+    #     clear message must not look like a crash.
+    import _subprocess_isolation
+
+    unharnessed = _subprocess_isolation.unharnessed_subprocess_reason(
+        [item for item in items if _in_unit_tier(item)]
+    )
+    if unharnessed is not None:
+        raise pytest.UsageError(unharnessed)
+
+
+# The tier whose isolation root the subprocess guard enforces.
+_UNIT_TIER = _REPO_ROOT / "tests" / "unit"
+
+
+def _in_unit_tier(item: pytest.Item) -> bool:
+    """Return True if *item* lives under tests/unit/."""
+    try:
+        return Path(item.fspath).resolve().is_relative_to(_UNIT_TIER)
+    except (AttributeError, OSError, ValueError):
+        return False
 
 
 # Directories whose tests are network-isolated by the socket guard.

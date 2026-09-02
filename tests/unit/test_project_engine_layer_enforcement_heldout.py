@@ -169,6 +169,9 @@ def test_eval_corpus_exists_with_fire_and_no_fire_cases():
         f".rebar/evals/plan-review-{MOVE_ID}.eval.yaml",
     ],
 )
+@pytest.mark.allow_unharnessed_subprocess(
+    "asks git whether THIS checkout tracks the overlay asset; that is the assertion"
+)
 def test_every_overlay_asset_is_tracked_by_git(path: str):
     proc = subprocess.run(
         ["git", "ls-files", "--error-unmatch", path],
@@ -180,6 +183,9 @@ def test_every_overlay_asset_is_tracked_by_git(path: str):
     assert proc.returncode == 0, f"{path} is not tracked by git ({proc.stderr.strip()})"
 
 
+@pytest.mark.allow_unharnessed_subprocess(
+    "greps the real committed src/rebar to prove the overlay id never shipped"
+)
 def test_criterion_id_is_absent_from_shipped_source():
     """The trigger machinery in src/rebar must stay GENERIC — the project id rides the
     overlay only."""
