@@ -409,12 +409,13 @@ try:
         # The durable handle for an async gate run started by review_plan_start /
         # verify_completion_start, returned by those tools and by the gate_status poll
         # (bug d80d Phase 2). extra=allow carries the poll-only fields (verdict / error /
-        # durable) a settled run adds. status is running / passed / failed /
+        # durable / findings) a settled run adds. status is running / passed / failed /
         # stale-running / attaching / unknown.
         job_id: str
         status: str
         ticket_id: str | None = None
         gate_type: str | None = None
+        findings: dict[str, Any] | None = None
 
     class GroundingBackendOut(_Out):
         # One backend entry of GroundingInfoOut.backends.

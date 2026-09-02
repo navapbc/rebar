@@ -154,6 +154,39 @@ def test_pass_reuse_stamps_replay_recency_anchor(
     assert anchor["reviewed_at"] == _TS_NS
 
 
+@pytest.mark.unit
+def test_reused_pass_and_block_verdicts_carry_sidecar_review_receipts(
+    monkeypatch: pytest.MonkeyPatch, _pass_reuse_ready
+) -> None:
+    """The async gate poller consumes this receipt to prove reused findings are readable.
+
+    ``all_review_results`` annotates each retained sidecar with the filename timestamp;
+    both reuse paths must copy that timestamp even though they do not emit a new sidecar.
+    """
+    monkeypatch.setattr(
+        reuse.sidecar, "all_review_results", lambda *_a, **_k: [_pass_sidecar(reviewed_at=_TS_NS)]
+    )
+    pass_out = reuse.idempotent_reuse("t-1", _ctx(), repo_root=None)
+
+    block_sidecar = {
+        "verdict": "BLOCK",
+        "ticket_type": "task",
+        "material_fingerprint": "fp-unchanged",
+        "verified_at_sha": _SHA,
+        "findings": [{"decision": "block", "finding": "x", "criteria": ["E2"]}],
+        "coaching": [],
+        "reviewed_at": _TS_NS,
+    }
+    monkeypatch.setattr(reuse.sidecar, "all_review_results", lambda *_a, **_k: [block_sidecar])
+    monkeypatch.setattr(reuse.sidecar, "review_code_sha", lambda *_a, **_k: _SHA)
+    block_out = reuse.verdict_reuse("t-1", _ctx(), repo_root=None)
+
+    assert [
+        (pass_out["verdict"], pass_out["sidecar_emitted"], pass_out["sidecar_reviewed_at"]),
+        (block_out["verdict"], block_out["sidecar_emitted"], block_out["sidecar_reviewed_at"]),
+    ] == [("PASS", False, _TS_NS), ("BLOCK", False, _TS_NS)]
+
+
 # ---------------------------------------------------------------------------
 # fail-open: a sidecar problem must never block a valid PASS reuse
 # ---------------------------------------------------------------------------

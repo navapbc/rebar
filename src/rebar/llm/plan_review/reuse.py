@@ -50,6 +50,13 @@ def _type_changed(stored_type: Any, ctx) -> bool:
     return bool(stored_type) and bool(current_type) and stored_type != current_type
 
 
+def _latest_reusable_review(ticket_id: str, *, repo_root) -> dict[str, Any]:
+    reviews = sidecar.all_review_results(ticket_id, repo_root=repo_root)
+    if reviews:
+        return reviews[0]
+    return sidecar.latest_review_result(ticket_id, repo_root=repo_root) or {}
+
+
 def _pass_replay(prior: dict[str, Any] | None, material: str | None) -> dict[str, Any]:
     """The stored PASS review's replayable content (task 167e), or the empty shape.
 
@@ -140,7 +147,7 @@ def idempotent_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None
     # fingerprint, the reviewed code SHA and the registry stamp, none of which move
     # when only the ticket's type changes. The stored type lives on the sidecar.
     try:
-        prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root) or {}
+        prior = _latest_reusable_review(ticket_id, repo_root=repo_root)
     except Exception:  # noqa: BLE001 — cannot read the sidecar → fail open, keep reusing
         prior = {}
     if _type_changed(prior.get("ticket_type"), ctx):
@@ -182,6 +189,7 @@ def idempotent_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None
         "runner": "reused",
         "model": None,
         "sidecar_emitted": False,
+        "sidecar_reviewed_at": prior.get("reviewed_at"),
     }
     logger.info(
         "plan review reused (ticket unchanged; attestation current) for %s "
@@ -215,7 +223,7 @@ def verdict_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None:
     from rebar.llm import findings
 
     try:
-        prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root)
+        prior = _latest_reusable_review(ticket_id, repo_root=repo_root)
         if not prior or prior.get("verdict") != "BLOCK":
             return None
         base_material = prior.get("material_fingerprint")
@@ -258,6 +266,7 @@ def verdict_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None:
         "runner": "reused",
         "model": None,
         "sidecar_emitted": False,
+        "sidecar_reviewed_at": prior.get("reviewed_at"),
     }
     logger.info(
         "plan review BLOCK reused (plan and code unchanged since the stored verdict) for %s "

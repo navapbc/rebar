@@ -51,9 +51,7 @@ IMPACT_MODEL_VERSION = "plan-v5"
 # reducer/compaction hot paths. That prune is the DEFAULT bound for an EXPLICIT operator
 # run — the write path never invokes it (see `prune`).
 #
-# Bound raised 10 -> 50 (story fde0): drift-refresh re-reviews on one ticket can exceed 10
-# rounds, so 10 dropped still-relevant history; 50 caps growth with headroom. SINGLE
-# definition of the cap — code_review.sidecar imports it (no second literal).
+# Bound raised 10 -> 50 (story fde0): drift-refresh can exceed 10 rounds; 50 has headroom.
 RETAIN_PER_TICKET = 50
 
 
@@ -70,10 +68,9 @@ def emit(
     retry_lineage: dict[str, Any] | None = None,
 ) -> bool:
     """Append a ``REVIEW_RESULT`` sidecar event from a plan-review verdict. Append-ONLY:
-    it never deletes a committed event, so independent clones always reconverge by union
-    (store invariant I1) — bounding growth is :func:`prune`, invoked explicitly by an
-    operator. Returns True on success, False on any failure (the sidecar is observability
-    — a failed emit must NEVER fail the review itself). Best-effort."""
+    it never deletes a committed event, so independent clones always reconverge by union.
+    Returns True on success, False on failure, and stamps ``sidecar_reviewed_at`` with the
+    written event timestamp when available. Best-effort."""
     from rebar import config as _config
     from rebar._commands._seam import (
         SecretScreenRefused,
@@ -94,7 +91,9 @@ def emit(
             source=source,
             retry_lineage=retry_lineage,
         )
-        append_event(verdict["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
+        verdict["sidecar_reviewed_at"] = append_event(
+            verdict["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root
+        )
     except SecretScreenRefused:
         warn_secret_screen_refused(str(verdict.get("ticket_id", "?")), EVENT_TYPE)
         return False
