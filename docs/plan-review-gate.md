@@ -1433,6 +1433,17 @@ from criteria that are wrong.)
   is unavailable (a missing key blocks the claim, consistent with the close gate);
   `--force` is the escape.
 
+## Gate liveness and supervisor stall budgets
+
+`review-plan`, `verify-completion`, and completion-gated closes routinely span
+multiple model/tool requests, so their total wall clock can exceed a common 600s
+supervisor "no output" budget. rebar emits lightweight keepalive log lines between
+LLM/tool/workflow calls at the default WARNING level to make multi-call progress
+visible, but a single very long request can still be silent until that request returns.
+The LLM `timeout` default (`DEFAULT_TIMEOUT_S = 600`) is per request, not a total gate
+runtime, and close can issue many requests; raise the supervising harness's no-output
+budget for gate commands rather than treating 600s as the whole-operation ceiling.
+
 ## The `REVIEW_RESULT` observability sidecar
 
 Every review emits a `REVIEW_RESULT` event (`sidecar.py`) capturing per-finding

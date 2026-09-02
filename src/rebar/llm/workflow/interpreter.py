@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from rebar.llm import usage_log
+from rebar.llm.keepalive import emit_keepalive
 
 from .executor import (
     _ENV_RE,
@@ -505,8 +506,12 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
             # its execution, so the usage log can attribute each LLM call to the declaration
             # that chose its model (b690). A scripted step declares no model and simply binds
             # None. Dropped on exit by the contextmanager.
+            emit_keepalive("workflow-step-start", operation=sid, started_at=_t_step)
             with usage_log.step_identity(sid, step.get("model")):
-                result = _dispatch(ctx, rc.registry, rc.runner)
+                try:
+                    result = _dispatch(ctx, rc.registry, rc.runner)
+                finally:
+                    emit_keepalive("workflow-step-complete", operation=sid, started_at=_t_step)
         except Exception as exc:  # noqa: BLE001 — a step failure is data, not a crash: captured as a failed StepResult (error in-band), the workflow continues
             result = StepResult(outputs={}, status="failed", error=str(exc))
         # Per-step wall-clock (toy-kink-ire): drives the workflow plan-review gate's

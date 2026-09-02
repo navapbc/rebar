@@ -24,10 +24,12 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any
 
 from rebar.llm import usage_log
 from rebar.llm.config import infer_provider
+from rebar.llm.keepalive import emit_keepalive
 from rebar.llm.runaway_guard import ToolCallLedger, runaway_guard_toolsets
 
 if TYPE_CHECKING:
@@ -48,6 +50,14 @@ _MEMO_NUDGE_L2 = (
     "\n\n[Warning: this exact query has been repeated multiple times. "
     "You already have this result. Stop repeating it and produce your final answer now.]"
 )
+
+
+async def _call_with_keepalive(name: str, call: Awaitable[Any]) -> Any:
+    emit_keepalive("tool-call-start", operation=name)
+    try:
+        return await call
+    finally:
+        emit_keepalive("tool-call-complete", operation=name)
 
 
 def _read_window_cap() -> int:
@@ -91,6 +101,10 @@ def _slice_cached_read(
     return "\n".join(selected) or "(empty range)"
 
 
+def _read_cache_serves(entry: dict, line_end: int) -> bool:
+    return bool(entry["complete"] or (line_end and line_end <= entry["max"]))
+
+
 TOOL_STEP_STEERING_NOTICE = (
     "Tool results are no longer being provided: the evidence-gathering budget for this "
     "run is exhausted. Do not call any more tools. Produce your final answer now, using "
@@ -115,7 +129,9 @@ def _steering_toolsets(tools: list, toolsets: list, limit: int) -> list:
         async def call_tool(self, name, tool_args, ctx, tool):
             if ctx.run_step > self.limit:
                 return TOOL_STEP_STEERING_NOTICE
-            return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+            return await _call_with_keepalive(
+                name, self.wrapped.call_tool(name, tool_args, ctx, tool)
+            )
 
     all_toolsets = [FunctionToolset(tools), *toolsets]
     return [_SteeringToolset(wrapped=ts, limit=limit) for ts in all_toolsets]
@@ -176,6 +192,9 @@ def _memo_toolsets(tools: list, toolsets: list, *, ledger: ToolCallLedger) -> li
     @dataclass
     class _MemoNudgeToolset(WrapperToolset):
         async def call_tool(self, name, tool_args, ctx, tool):
+            return await _call_with_keepalive(name, self._call_tool(name, tool_args, ctx, tool))
+
+        async def _call_tool(self, name, tool_args, ctx, tool):
             if name not in MEMO_ALLOWLIST:
                 ledger.record_executed(usage_log.tool_call_signature(name, tool_args))
                 return await self.wrapped.call_tool(name, tool_args, ctx, tool)
@@ -212,11 +231,6 @@ def _memo_toolsets(tools: list, toolsets: list, *, ledger: ToolCallLedger) -> li
                 return await self.wrapped.call_tool(name, tool_args, ctx, tool)
             cap = _read_window_cap()
 
-            def _servable(entry: dict) -> bool:
-                # A COMPLETE whole-file cache serves any range; a truncated one only serves a
-                # request whose explicit end is within the cached window.
-                return entry["complete"] or bool(le and le <= entry["max"])
-
             async with _lock_for(f"read_file::{path}"):
                 entry = read_cache.get(path)
                 if entry is None:
@@ -237,14 +251,14 @@ def _memo_toolsets(tools: list, toolsets: list, *, ledger: ToolCallLedger) -> li
                     entry = {"lines": wlines, "max": cached_max, "complete": cached_max < cap}
                     read_cache[path] = entry
                     read_counts[path] = 0
-                    if _servable(entry):
+                    if _read_cache_serves(entry, le):
                         return _slice_cached_read(entry["lines"], entry["max"], ls, le, cap)
                     # Truncated file, request past the cached window → exact-range read, uncached.
                     return await self.wrapped.call_tool(name, tool_args, ctx, tool)
                 # Repeat read of a cached path (any range): serve with the graduated nudge.
                 read_counts[path] = read_counts[path] + 1
                 nudge = _MEMO_NUDGE_L1 if read_counts[path] == 1 else _MEMO_NUDGE_L2
-                if _servable(entry):
+                if _read_cache_serves(entry, le):
                     return _slice_cached_read(entry["lines"], entry["max"], ls, le, cap) + nudge
                 ledger.record_executed(usage_log.tool_call_signature(name, tool_args))
                 return await self.wrapped.call_tool(name, tool_args, ctx, tool) + nudge
