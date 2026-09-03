@@ -23,7 +23,7 @@ its friendly install message before any tool is registered.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 try:
     from pydantic import BaseModel, ConfigDict, model_serializer
@@ -42,6 +42,28 @@ try:
         def _serialize_only_set_fields(self, handler):
             data = handler(self)
             for name in type(self).model_fields:
+                if name not in self.model_fields_set:
+                    data.pop(name, None)
+            return data
+
+    class _OmitUnsetOut(_Out):
+        """Drop the named fields from the serialized dump when they were never set.
+
+        Bug 3a02: a schema property whose canonical type admits NO null — a bare
+        ``string``, an enum ``$ref``, or ``const: true`` — has ABSENCE as its only
+        "unset" signal.  Declaring such a property is what makes it visible in the
+        published ``outputSchema``, but a declared field with a ``None`` default would
+        put an explicit ``null`` on the wire, and that null makes the payload violate
+        the very schema the declaration mirrors.  Listing it here keeps the declaration
+        and restores absence as the unset form, so the emitted bytes are unchanged.
+        """
+
+        _omit_when_unset: ClassVar[tuple[str, ...]] = ()
+
+        @model_serializer(mode="wrap")
+        def _drop_unset_nullless_fields(self, handler):
+            data = handler(self)
+            for name in type(self)._omit_when_unset:
                 if name not in self.model_fields_set:
                     data.pop(name, None)
             return data
@@ -98,7 +120,7 @@ try:
             return _inline_schema_refs({**target, **siblings}, defs)
         return {key: _inline_schema_refs(value, defs) for key, value in node.items()}
 
-    class TicketStateOut(_Out):
+    class TicketStateOut(_OmitUnsetOut):
         ticket_id: str
         ticket_type: str
         title: str
@@ -130,6 +152,53 @@ try:
         # Present (non-null) only when the ticket's live claim is held by a
         # DIFFERENT session than the acting one; advisory, never a gate.
         cross_session_warning: str | None = None
+        # Bug 3a02: the remaining canonical `ticket_state.schema.json` properties, now
+        # DECLARED rather than riding as undeclared `extra="allow"` pass-throughs. The
+        # reducer already emits every one of them, so this documents the published
+        # outputSchema without changing what goes on the wire. All are optional and
+        # default to null/empty — absence is meaningful (an unset provenance or close
+        # field must never be reported as a fabricated value).
+        author: str | None = None
+        env_id: str | None = None
+        bridge_project: str | None = None
+        repos: list[str] = []
+        verify_commands: list[dict] = []
+        bridge_alerts: list = []
+        reverts: list = []
+        attestations: dict = {}
+        preconditions_summary: dict = {}
+        # Nanosecond epoch stamps. Declared `int | str` (never bare `int`) because
+        # rebar._mcp_errors.js_safe_result rewrites a JS-unsafe integer as its exact
+        # decimal string (bug 6fe7) and FastMCP re-validates the result against this
+        # model — an `int`-only annotation would coerce it back to a lossy bare number.
+        created_at: int | str | None = None
+        updated_at: int | str | None = None
+        last_reopened_at: int | str | None = None
+        # Import provenance (P1.2): present only on tickets created by `rebar import`.
+        source_id: str | None = None
+        source_created_at: int | str | None = None
+        source_author: str | None = None
+        source_env: str | None = None
+        # Which public ingress recorded the genesis CREATE, and whether that was
+        # inferred for a legacy CREATE rather than stamped at genesis.
+        creation_channel: str | None = None
+        creation_channel_inferred: Literal[True] | None = None
+        detected_by: str | None = None
+        # Close disposition — present only on a closed ticket that recorded one.
+        close_class: str | None = None
+        close_reason: str | None = None
+        force_close_reason: str | None = None
+        completion_expectation: str | None = None
+        #: Canonical ticket_state properties whose type admits no null — see _OmitUnsetOut.
+        _omit_when_unset: ClassVar[tuple[str, ...]] = (
+            "creation_channel",
+            "creation_channel_inferred",
+            "detected_by",
+            "close_class",
+            "close_reason",
+            "force_close_reason",
+            "completion_expectation",
+        )
 
         @classmethod
         def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -162,8 +231,29 @@ try:
         children: list[str] = []
         ready_to_work: bool
 
-    class NextBatchOut(_Out):
+    class NextBatchOut(_OmitUnsetOut):
+        # Bug 3a02: the conflict-aware batch payload, declared. `next_batch_state`
+        # (the library/MCP path) ALWAYS emits every field below, so the defaults are
+        # documentation rather than fill-in. `tasks` is deliberately undeclared — see
+        # PERMISSIVE_OMISSIONS in rebar/schemas/check_mcp_models.py.
         epic_id: str
+        epic_title: str | None = None
+        batch_size: int | None = None
+        available_pool: int | None = None
+        batch: list[dict] = []
+        skipped_overlap: list[dict] = []
+        skipped_blocked: list[dict] = []
+        skipped_blocked_story: list[dict] = []
+        skipped_design_awaiting: list[dict] = []
+        skipped_manual_awaiting: list[dict] = []
+        skipped_in_progress: list[dict] = []
+        skipped_needs_planning: list[dict] = []
+        #: Integer/string properties the schema declares non-nullable — see _OmitUnsetOut.
+        _omit_when_unset: ClassVar[tuple[str, ...]] = (
+            "epic_title",
+            "batch_size",
+            "available_pool",
+        )
 
     class ClarityResultOut(_Out):
         score: int
@@ -249,10 +339,28 @@ try:
         assignee: str | None = None
         push_status: PushStatusOut | None = None
 
-    class GateResultOut(_Out):
+    class GateResultOut(_OmitUnsetOut):
+        # Shared by check_ac and quality_check. Bug 3a02 declares the gate-specific
+        # metrics the canonical gate_result schema defines: check_ac emits
+        # `criteria_count`, quality_check emits the other four, and each tool has
+        # always put its own metrics on the wire as undeclared extras.
         verdict: str
         reason: str
         passed: bool | None = None
+        criteria_count: int | None = None
+        line_count: int | None = None
+        keyword_count: int | None = None
+        ac_items: int | None = None
+        file_impact: int | None = None
+        #: The schema types these as `integer`; the metrics the OTHER gate emits must stay
+        #: ABSENT rather than become null — see _OmitUnsetOut.
+        _omit_when_unset: ClassVar[tuple[str, ...]] = (
+            "criteria_count",
+            "line_count",
+            "keyword_count",
+            "ac_items",
+            "file_impact",
+        )
 
     class BridgeFsckOut(_Out):
         unknown_event_types: list[str]

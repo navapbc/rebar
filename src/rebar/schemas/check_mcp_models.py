@@ -36,11 +36,14 @@ MODEL_SCHEMAS: dict[str, str] = {
     "WorkflowRunOut": "workflow_run",
 }
 
-# Schema properties a model DELIBERATELY omits (permissive models serving multiple
-# call shapes).  Only WorkflowRunOut needs omissions: it is a single extra="allow"
-# model for both get_workflow_status and get_workflow_result; the six call-specific
-# fields are intentionally undeclared.
+# Schema properties a model DELIBERATELY omits, each with its reason.  A canonical
+# schema is shared by every surface that emits the payload (CLI, library, MCP), so a
+# property one surface never produces is a real, permanent omission on this one — not
+# drift.  Declaring it anyway would put a permanently-null key on the MCP wire, which
+# reads as "this ticket has no title" rather than "this call shape does not carry it".
 PERMISSIVE_OMISSIONS: dict[str, set[str]] = {
+    # One extra="allow" model serves both get_workflow_status and get_workflow_result;
+    # these six are the fields specific to one call or the other.
     "WorkflowRunOut": {
         "steps",
         "outputs",
@@ -49,68 +52,16 @@ PERMISSIVE_OMISSIONS: dict[str, set[str]] = {
         "error",
         "truncated",
     },
-}
-
-
-#: Known-missing declarations, baselined so this gate is green at rest while any NEW
-#: omission fails — the ratchet shape check_complexity_baseline.py and
-#: check_mechanism_delta.py already use.
-#:
-#: These four models were invisible to the gate until its registry became derived, and
-#: they are ALREADY DRIFTED: 41 canonical schema properties they do not declare. Closing
-#: those gaps changes the MCP tools' published `outputSchema`, i.e. the wire contract
-#: clients read, so it is deliberately NOT bundled into this gate change. Tracked in
-#: ticket 3a02-66ea-9229-470c (lowly-lawrencium-ovenbird); delete each entry as it lands.
-BASELINED_OMISSIONS: dict[str, set[str]] = {
-    "CreateResultOut": {
-        "title",
-    },
-    "GateResultOut": {
-        "ac_items",
-        "criteria_count",
-        "file_impact",
-        "keyword_count",
-        "line_count",
-    },
-    "NextBatchOut": {
-        "available_pool",
-        "batch",
-        "batch_size",
-        "epic_title",
-        "skipped_blocked",
-        "skipped_blocked_story",
-        "skipped_design_awaiting",
-        "skipped_in_progress",
-        "skipped_manual_awaiting",
-        "skipped_needs_planning",
-        "skipped_overlap",
-        "tasks",
-    },
-    "TicketStateOut": {
-        "attestations",
-        "author",
-        "bridge_alerts",
-        "bridge_project",
-        "close_class",
-        "close_reason",
-        "completion_expectation",
-        "created_at",
-        "creation_channel",
-        "creation_channel_inferred",
-        "detected_by",
-        "env_id",
-        "force_close_reason",
-        "last_reopened_at",
-        "preconditions_summary",
-        "repos",
-        "reverts",
-        "source_author",
-        "source_created_at",
-        "source_env",
-        "source_id",
-        "updated_at",
-        "verify_commands",
-    },
+    # `title` is emitted only by the CLI's `create --output json`.  The library's
+    # create_ticket(return_alias=True) — which every MCP create tool returns — yields
+    # {id, alias, description_warning, duplicate_warning} and never a title, and the
+    # caller supplied the title as the tool argument.
+    "CreateResultOut": {"title"},
+    # `tasks` belongs to the CLI-only `next-batch --limit=0` reduced variant
+    # ({epic_id, batch_size: 0, tasks: []}).  The library/MCP path
+    # (_engine_support.next_batch.next_batch_state -> to_json_dict) emits `batch`
+    # and never `tasks`.
+    "NextBatchOut": {"tasks"},
 }
 
 
@@ -191,7 +142,6 @@ def find_drift() -> dict[str, list[str]]:
         schema_props = list(schema.get("properties", {}).keys())
         model_field_names = list(cls.model_fields.keys())
         permissive = PERMISSIVE_OMISSIONS.get(model_name, set())
-        permissive = permissive | BASELINED_OMISSIONS.get(model_name, set())
         missing = missing_declarations(model_field_names, schema_props, permissive)
         if missing:
             result[model_name] = missing
