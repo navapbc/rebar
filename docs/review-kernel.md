@@ -188,7 +188,7 @@ criteria→units→outcomes through ONE shared spine. The ownership after the cu
 |---|---|---|
 | **Effective review policy** (which criteria run, routing, posture, project LLM/DET, provenance) | `CriteriaSnapshot` (RP-06 S1) | `rebar.llm.criteria.snapshot` — the ONE compiled authority; gates read policy off it, never re-reading ambient `.rebar/criteria_routing.json` / the packaged index. `registry.effective_routing → overlay.effective_routing` is the sanctioned reader chain; a direct `overlay._load_overlay` / `criteria_routing.json` read in a gate is prohibited. |
 | **Discovery execution** (dependency ordering, the six outcome kinds, exact usage, checkpoint reuse, shedding, cancellation, systemic vs local abort) | `review_kernel.discovery.execute_stage` (RP-06 S2) | The SINGLE scheduler. No second discovery scheduler may exist outside the kernel — a `graphlib` topological schedule over `DiscoveryUnitPlan`/`DiscoveryStagePlan` belongs here only. |
-| **The projection** (criteria→`DiscoveryStagePlan`/`DiscoveryUnitPlan`) | each gate | plan-review: `plan_review/sizing.py`; code-review: `code_review/batch_runner.py`. Each builds units FROM the snapshot and hands them to `execute_stage`. |
+| **The projection** (criteria→`DiscoveryStagePlan`/`DiscoveryUnitPlan`) | each gate | plan-review: `plan_review/checkpoints.py`; code-review: `code_review/batch_runner.py`. Each builds units FROM the snapshot and hands them to `execute_stage`. |
 | **The verdict** (Pass-2/3/4 decision math) | RP-01 — the shared four-pass kernel | `review_kernel.verify`/`decide`/`coach` (above). Discovery produces execution FACTS; it never decides a gate verdict. |
 
 **The approved-delta allowlist.** The cutover deliberately changes behavior in exactly six

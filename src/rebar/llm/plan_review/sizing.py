@@ -1,44 +1,57 @@
-"""Size-handling, budget cap, model escalation, and chunk checkpointing (child ca03).
+"""Size-handling and model escalation for the plan-review gate (child ca03).
 
 Extracted from the orchestrator (call-graph seam: the "fit the review into a budget +
 context window" cluster). Owns:
 
-* the model-by-window escalation ladder + :func:`largest_window_tokens` (P8 budget);
-* :func:`centrality` (blast-radius at plan time) + :func:`plan_budget_cap`;
+* the model-by-window escalation ladder + :func:`largest_window_tokens` (P8 budget) and
+  :func:`models_at_or_above` / :func:`escalation_rungs`;
+* the prompt-budget PACKERS that resolve their window through this module's
+  :func:`largest_window_tokens` — :func:`verify_request_chunks`,
+  :func:`pack_prerequisite_bins`, :func:`pack_prerequisite_verifier_bins`;
+* :func:`usage_record` (one per COMPLETED call) and :func:`is_context_limit_error`;
 * :func:`pass1_with_ladder` — the runtime size ladder (batch → one-criterion-per-call
-  → escalate model → too-big failure finding; content never chunked);
-* :func:`shed_to_budget` — cap-hit shedding of the lowest-priority AGENT/overlay
-  criteria first (→ INDETERMINATE);
-* :func:`checkpoint_identity` / :func:`load_checkpoint` / :func:`save_checkpoint` —
-  envelope-based chunk-atomic checkpointing (over the shared
-  :mod:`rebar.llm.review_kernel` discovery kernel) so an interrupted/restarted review
-  RESUMES completed Pass-1 chunks instead of re-paying for them. The identity digest
-  binds the ticket MATERIAL fingerprint, the chunk's criterion set (prompt id), the
-  model/mode, the injected extra-context, and the policy/code/topology refs, so any of
-  those moving invalidates the cache; only a reusable SUCCESS envelope seeds reuse.
+  → escalate model → too-big failure finding; content never chunked).
+
+Two clusters that already formed their own call-graph seams live in siblings and are
+RE-EXPORTED here so every historical ``sizing.<name>`` call site is unchanged:
+
+* :mod:`.budget` — the cost model, :func:`centrality` / :func:`plan_budget_cap`, the
+  container bin-packer, and :func:`shed_to_budget`;
+* :mod:`.checkpoints` — :func:`checkpoint_identity` / :func:`load_checkpoint` /
+  :func:`save_checkpoint`, the envelope-based chunk-atomic checkpointing that lets an
+  interrupted/restarted review RESUME completed Pass-1 chunks.
 """
 
 from __future__ import annotations
 
-import hashlib
-import tempfile
 from dataclasses import dataclass, replace
-from pathlib import Path
 from typing import Any
 
 from rebar.llm import failure
 from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.model_classes import MODEL_WINDOW_LADDER as MODEL_LADDER
-from rebar.llm.review_kernel import (
-    CheckpointEnvelope,
-    DiscoveryStagePlan,
-    DiscoveryUnitPlan,
-)
 from rebar.llm.runner import Runner
 
-from . import det_floor, passes, registry
-from .det_floor import PlanContext
+from . import det_floor, passes
+from .budget import (
+    COST_AGENT_USD,
+    COST_SINGLE_TURN_USD,
+    DEFAULT_BUDGET_CAP_USD,
+    centrality,
+    container_budget,
+    pack_container_bins,
+    plan_budget_cap,
+    shed_to_budget,
+)
+from .checkpoints import (  # noqa: F401 — private re-exports: `pass1` and the tests reach them as `sizing.<name>`
+    _checkpoint_dir,
+    _discovery_unit_plan,
+    _unit_id,
+    checkpoint_identity,
+    load_checkpoint,
+    save_checkpoint,
+)
 
 
 @dataclass(frozen=True)
@@ -59,80 +72,9 @@ class PrerequisiteVerificationBlock:
     rendered_text: str
 
 
-def _child_tokens(child: dict[str, Any]) -> int:
-    """Estimated tokens for one WHOLE child (title + description) — the unit the
-    container bin-packer sums (a child is NEVER chunked; ca03)."""
-    return det_floor.est_tokens(f"{child.get('title', '')}\n{child.get('description', '')}")
-
-
-def container_budget(largest_window_tokens: int) -> int:
-    """The per-call token budget the container bin-packer fits (parent + all packed
-    children) under — the SAME P8 window budget used elsewhere (model window × headroom
-    − output reserve)."""
-    return int(largest_window_tokens * det_floor.P8_HEADROOM) - det_floor.P8_OUTPUT_RESERVE_TOKENS
-
-
-def pack_container_bins(
-    children: list[dict[str, Any]], parent_tokens: int, budget: int
-) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
-    """Greedily bin-pack WHOLE children for the container fan-out (story 1762).
-
-    Each bin is ONE merged container call: ``parent_tokens + Σ(child tokens in the bin)``
-    must stay ≤ ``budget`` (so the parent + every packed child fit the window together,
-    each WHOLE — never chunked, ca03). Returns ``(bins, oversized)`` where ``bins`` is a
-    list of child-lists (small children packed together; a large parent+child pairing
-    keeps its own single-child bin), and ``oversized`` is the children whose
-    ``parent + that child ALONE`` already exceeds ``budget`` — the single-child fallback
-    that becomes the existing 'too big → reduce the ticket' failure finding."""
-    bins: list[list[dict[str, Any]]] = []
-    oversized: list[dict[str, Any]] = []
-    cur: list[dict[str, Any]] = []
-    cur_tokens = parent_tokens
-    for child in children:
-        ct = _child_tokens(child)
-        if parent_tokens + ct > budget:
-            oversized.append(child)  # too big even alone → single-child too-big finding
-            continue
-        if cur and cur_tokens + ct > budget:
-            bins.append(cur)
-            cur, cur_tokens = [], parent_tokens
-        cur.append(child)
-        cur_tokens += ct
-    if cur:
-        bins.append(cur)
-    return bins, oversized
-
-
 # Model-by-window escalation ladder (estimated tokens → the smallest model whose
 # window fits; escalate up on a context-limit signal). The table now lives in
 # model_classes.py (bug 8eb3) and is re-exported above under its historical name.
-
-# Per-plan BUDGET CAP tiers (experiment-grounded; config-overridable via
-# REBAR_PLAN_REVIEW_BUDGET). DET ~free, single-turn ~$0.006 cached, AGENT ~$0.12 (≈85×).
-COST_SINGLE_TURN_USD = 0.006
-COST_AGENT_USD = 0.12
-DEFAULT_BUDGET_CAP_USD = 2.0
-
-
-def centrality(state: dict[str, Any], children: list[dict[str, Any]]) -> float:
-    """Blast-radius signal ∈ [0,1] computed at plan time from the ticket graph: how
-    many tickets DEPEND ON this one (incoming blocks / depends_on) + how many children
-    it has. A central, high-fan-in plan earns more scrutiny + budget. Saturating
-    (≈1.0 by ~10 dependents)."""
-    deps = state.get("deps", []) or []
-    dependents = sum(1 for d in deps if d.get("relation") in ("blocks", "depends_on"))
-    blast = dependents + len(children)
-    return round(min(1.0, blast / 10.0), 3)
-
-
-def plan_budget_cap(ctx: PlanContext) -> float:
-    """The per-plan budget cap in USD: a base cap scaled by centrality (a central plan
-    earns up to 2× scrutiny), overridable by ``REBAR_PLAN_REVIEW_BUDGET`` (the base,
-    before centrality scaling)."""
-    from rebar import config as _config
-
-    base = _config.resolve_plan_review_budget(DEFAULT_BUDGET_CAP_USD)
-    return round(base * (1.0 + ctx.centrality), 4)
 
 
 def largest_window_tokens(model: str | None) -> int:
@@ -580,201 +522,6 @@ def pass1_with_ladder(
                 }
             )
     return out, calls
-
-
-def shed_to_budget(
-    ctx: PlanContext,
-    chunks: list,
-    agent: list[dict],
-    container: list[dict],
-    coverage: dict[str, Any],
-    cap_override: float | None = None,
-) -> tuple[list[dict], list[dict], list[dict]]:
-    """Shed the lowest-priority AGENT/overlay criteria first when projected spend
-    exceeds the per-plan budget cap. Returns (kept_agent, kept_container, shed).
-
-    CONTAINER CRITERIA (G3/G4) ARE NEVER SHED (story ba7e). Shedding a container
-    criterion marks it INDETERMINATE — i.e. it DROPS child-coverage/consistency on
-    exactly the large, central epics where those cross-child audits matter most, the
-    fidelity regression the epic AC forbids. So the budget cap bounds ONLY the
-    sheddable single-turn + AGENT/overlay spend; the container fan-out is a FIXED cost
-    floor recorded for observability but never traded away. (This is the correct fix —
-    correcting the COST MODEL — rather than inverting the centrality scaling of the cap,
-    which would have shed G3/G4 first.) Within the sheddable set we still shed overlays
-    (T*) before the core code-grounding set.
-
-    ``cap_override`` is the caller's explicit per-plan cap in USD, used VERBATIM — it is NOT
-    centrality-scaled. That is the whole point of the seam: ``REBAR_PLAN_REVIEW_BUDGET`` is read
-    by :func:`plan_budget_cap` as the BASE and then scaled by centrality, so it can never express
-    "this run costs at most $X". Selection is on ``is None``, not falsiness, so an explicit
-    ``0.0`` is a real cap ("shed everything sheddable") rather than a request for the computed
-    one."""
-    cap = plan_budget_cap(ctx) if cap_override is None else float(cap_override)
-
-    def project_sheddable(ag: list[dict]) -> float:
-        """Projected SHEDDABLE spend (the single-turn chunks + AGENT/overlay criteria)
-        — the only spend the cap governs. The container fan-out is excluded: it is never
-        shed, so including it would only force over-aggressive shedding of agent criteria
-        for a cost we always pay regardless."""
-        return round(len(chunks) * COST_SINGLE_TURN_USD + len(ag) * COST_AGENT_USD, 4)
-
-    projected_initial = project_sheddable(agent)
-    agent = list(agent)
-    container = list(container)  # never shed — returned unchanged
-    shed: list[dict] = []
-    overlay_agent = [c for c in agent if registry.is_overlay(c["id"])]
-    core_agent = [c for c in agent if not registry.is_overlay(c["id"])]
-    shed_queue = [("agent", c) for c in overlay_agent] + [("agent", c) for c in core_agent]
-    while project_sheddable(agent) > cap and shed_queue:
-        _kind, c = shed_queue.pop(0)
-        c = {**c, "_tier": "AGENT"}
-        shed.append(c)
-        agent = [x for x in agent if x["id"] != c["id"]]
-    # The container fan-out is a fixed floor, never shed — recorded so the cap's "bounds
-    # only overlay/agent spend" posture, and the unavoidable container cost, are both
-    # observable. Story 98c6 MERGED all container criteria into ONE call per child (not 2N);
-    # story 1762 then BIN-PACKS small children, so the real floor is the number of PACKED
-    # BINS (< N when children pack), computed with the same packer the fan-out uses.
-    if container and ctx.children:
-        bins, _oversized = pack_container_bins(
-            ctx.children,
-            det_floor.est_tokens(ctx.plan_text),
-            container_budget(ctx.largest_window_tokens),
-        )
-        container_calls = len(bins)
-    else:
-        container_calls = 0
-    container_floor_usd = round(container_calls * COST_AGENT_USD, 4)
-    coverage["budget"] = {
-        "cap_usd": cap,
-        # Which cap governed this run: an explicit caller override, or the centrality-scaled
-        # computed one. `centrality` below is still recorded either way, but it did NOT scale
-        # an overridden cap — so without this the two are indistinguishable in the journal.
-        "cap_source": "computed" if cap_override is None else "override",
-        "centrality": ctx.centrality,
-        "projected_usd_initial": projected_initial,
-        "projected_usd_final": project_sheddable(agent),
-        "container_floor_usd": container_floor_usd,
-        "container_never_shed": True,
-        "shed": [c["id"] for c in shed],
-    }
-    return agent, container, shed
-
-
-# ── chunk-atomic checkpointing (resume completed Pass-1 chunks) ──────────────────
-def _checkpoint_dir(ctx: PlanContext) -> Path | None:
-    """The git-ignored per-ticket checkpoint cache dir (``.rebar/cache/plan-review/``),
-    or None when there is no repo root to anchor it."""
-    if not ctx.repo_root:
-        return None
-    return Path(ctx.repo_root) / ".rebar" / "cache" / "plan-review" / ctx.ticket_id
-
-
-# The single registered discovery contract for a Pass-1 finder unit.
-_CHECKPOINT_CONTRACT_ID = "plan_review_findings"
-
-
-def _unit_id(chunk: list[dict], agentic: bool) -> str:
-    """The stable unit id for a chunk: tier prefix + sorted criterion ids."""
-    return ("agent:" if agentic else "single:") + ",".join(sorted(c["id"] for c in chunk))
-
-
-def _discovery_unit_plan(
-    *,
-    chunk: list[dict],
-    model: str | None,
-    agentic: bool,
-    extra_context: str = "",
-    policy_digest: str = "",
-) -> DiscoveryUnitPlan:
-    """Build the frozen typed unit plan for one Pass-1 finder chunk. The ``prompt_id``
-    is derived from the criterion ids so the identity changes with the criterion set;
-    the ``context_digest`` binds the injected store-derived extra context."""
-    ids = sorted(c["id"] for c in chunk)
-    context_digest = (
-        hashlib.sha256(extra_context.encode("utf-8")).hexdigest() if extra_context else ""
-    )
-    return DiscoveryUnitPlan(
-        unit_id=_unit_id(chunk, agentic),
-        prompt_id="plan-review:" + ",".join(ids),
-        contract_id=_CHECKPOINT_CONTRACT_ID,
-        model=str(model),
-        mode="agent" if agentic else "single",
-        context_digest=context_digest,
-        policy_digest=policy_digest,
-    )
-
-
-def checkpoint_identity(
-    *,
-    material: str,
-    chunk: list[dict],
-    model: str | None,
-    agentic: bool,
-    extra_context: str = "",
-    policy_digest: str = "",
-    code_ref: str = "",
-    topology_digest: str = "",
-) -> str:
-    """The deterministic identity digest for a Pass-1 chunk's checkpoint, over the
-    shared kernel's :meth:`CheckpointEnvelope.identity_digest`. Any of the material,
-    criterion set, model/mode, injected extra-context, or policy/code/topology refs
-    moving changes the digest (so the stored checkpoint is invalidated)."""
-    unit = _discovery_unit_plan(
-        chunk=chunk,
-        model=model,
-        agentic=agentic,
-        extra_context=extra_context,
-        policy_digest=policy_digest,
-    )
-    stage = DiscoveryStagePlan(
-        units=(unit,),
-        material=material,
-        code_ref=code_ref,
-        topology_digest=topology_digest,
-    )
-    return CheckpointEnvelope.identity_digest(unit_plan=unit, stage_plan=stage)
-
-
-def load_checkpoint(ctx: PlanContext, digest: str) -> CheckpointEnvelope | None:
-    """Return the reusable-SUCCESS checkpoint envelope stored at ``digest`` (resume),
-    else None. Best-effort: any read/parse error, corrupt JSON, legacy namespace, a
-    digest mismatch, or a non-reusable kind ⇒ None (re-run the chunk)."""
-    d = _checkpoint_dir(ctx)
-    if d is None:
-        return None
-    try:
-        path = d / f"{digest}.json"
-        if path.is_file():
-            env = CheckpointEnvelope.from_json(path.read_text(encoding="utf-8"))
-            if env is not None and env.digest == digest and env.is_reusable_success():
-                return env
-    except Exception:  # noqa: BLE001 — checkpoint read is a best-effort resume optimization; any failure ⇒ no cached result (recompute)
-        return None
-    return None
-
-
-def save_checkpoint(ctx: PlanContext, envelope: CheckpointEnvelope) -> bool:
-    """Persist an envelope ATOMICALLY (tmp + rename) at its own digest so a restarted
-    review resumes it. Best-effort: any write error → False (the review still
-    proceeds). Callers only ever save successes; ``load_checkpoint`` is what refuses a
-    non-reusable envelope on the way back out."""
-    d = _checkpoint_dir(ctx)
-    if d is None:
-        return False
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=d, prefix=f".tmp-{envelope.digest}-", suffix=".tmp")
-        try:
-            with open(fd, "w", encoding="utf-8") as handle:
-                handle.write(envelope.to_json())
-            Path(tmp).replace(d / f"{envelope.digest}.json")
-        except Exception:
-            Path(tmp).unlink(missing_ok=True)
-            raise
-        return True
-    except Exception:  # noqa: BLE001 — checkpoint write is a best-effort resume optimization; any failure ⇒ not cached (the review still proceeds)
-        return False
 
 
 __all__ = [
