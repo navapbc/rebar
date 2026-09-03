@@ -18,6 +18,7 @@ assert that exact subset is still guarded — no loss of coverage, no manual loc
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import subprocess
 import sys
@@ -142,6 +143,107 @@ def test_check_trips_when_a_signature_changes(monkeypatch):
     monkeypatch.setattr(gen, "_load_baseline", lambda: baseline)
     assert gen.main(["--check"]) == 1
     assert "~ CHANGED  rebar.signing.sign_manifest" in gen.diff_surface(baseline, _drifted())
+
+
+def test_callable_descriptor_includes_normalized_return_annotation():
+    class Widget:
+        pass
+
+    def no_annotation(value: int):
+        return value
+
+    def none_annotation(value: int) -> None:
+        return None
+
+    def string_annotation(value: int) -> Widget:
+        return value
+
+    def live_annotation(value: int):
+        return Path(str(value))
+
+    live_annotation.__annotations__["return"] = Path
+
+    assert gen._describe(no_annotation) == {
+        "kind": "callable",
+        "params": [
+            ["value", "POSITIONAL_OR_KEYWORD", "<none>"],
+        ],
+        "return": None,
+    }
+    assert gen._describe(none_annotation)["return"] == "None"
+    assert gen._describe(string_annotation)["return"] == "Widget"
+    assert gen._describe(live_annotation)["return"] == inspect.formatannotation(
+        inspect.signature(live_annotation).return_annotation
+    )
+
+
+def test_captured_class_methods_include_normalized_return_annotations():
+    class Widget:
+        pass
+
+    class Example:
+        def method(self, value: int) -> Widget:
+            return value
+
+    Example.__module__ = "rebar.synthetic"
+    Example.method.__module__ = "rebar.synthetic"
+
+    assert gen._describe_class(Example)["methods"]["method"] == {
+        "params": [
+            ["self", "POSITIONAL_OR_KEYWORD", "<none>"],
+            ["value", "POSITIONAL_OR_KEYWORD", "<none>"],
+        ],
+        "return": "Widget",
+    }
+
+
+def test_return_only_drift_is_detected_for_top_level_callable(monkeypatch):
+    baseline = {
+        "rebar": {
+            "sample": {
+                "kind": "callable",
+                "params": [["value", "POSITIONAL_OR_KEYWORD", "<none>"]],
+                "return": "OldReturn",
+            }
+        }
+    }
+
+    def _drifted():
+        surface = json.loads(json.dumps(baseline))
+        surface["rebar"]["sample"]["return"] = "NewReturn"
+        return surface
+
+    monkeypatch.setattr(gen, "build_surface", _drifted)
+    monkeypatch.setattr(gen, "_load_baseline", lambda: baseline)
+    assert gen.main(["--check"]) == 1
+    assert "~ CHANGED  rebar.sample" in gen.diff_surface(baseline, _drifted())
+
+
+def test_return_only_drift_is_detected_for_captured_class_method(monkeypatch):
+    baseline = {
+        "rebar": {
+            "Example": {
+                "kind": "class",
+                "bases": [],
+                "methods": {
+                    "method": {
+                        "params": [["self", "POSITIONAL_OR_KEYWORD", "<none>"]],
+                        "return": "OldReturn",
+                    }
+                },
+            }
+        }
+    }
+
+    def _drifted():
+        surface = json.loads(json.dumps(baseline))
+        surface["rebar"]["Example"]["methods"]["method"]["return"] = "NewReturn"
+        return surface
+
+    monkeypatch.setattr(gen, "build_surface", _drifted)
+    monkeypatch.setattr(gen, "_load_baseline", lambda: baseline)
+    assert gen.main(["--check"]) == 1
+    assert "~ CHANGED  rebar.Example" in gen.diff_surface(baseline, _drifted())
 
 
 def test_no_drift_reported_against_self():
