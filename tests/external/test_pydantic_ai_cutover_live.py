@@ -84,7 +84,6 @@ def test_pydantic_review_code_opus(rebar_repo: Path) -> None:
     result = llm.review_code(
         diff_text=diff,
         changed_files=["app.py"],
-        reviewers=["code-quality"],
         repo_root=str(rebar_repo),
         config=_cfg(rebar_repo, _class_model("frontier")),
     )
@@ -108,7 +107,6 @@ def test_pydantic_review_code(rebar_repo: Path) -> None:
     result = llm.review_code(
         diff_text=diff,
         changed_files=["auth.py"],
-        reviewers=["code-quality"],
         repo_root=str(rebar_repo),
         config=_cfg(rebar_repo, _class_model("standard")),
     )

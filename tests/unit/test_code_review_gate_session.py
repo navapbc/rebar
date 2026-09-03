@@ -635,11 +635,23 @@ def test_review_code_cli_mints_uuid_when_no_session(monkeypatch):
     _llm_commands._review_code(["-o", "json"])
     sid = captured.get("session_id")
     assert isinstance(sid, str) and len(sid) == 32 and all(c in "0123456789abcdef" for c in sid)
+    assert "reviewers" not in captured
     # explicit session var → passed through
     captured.clear()
     monkeypatch.setattr("rebar._commands.session_id.resolve_session_id", lambda: "my-session")
     _llm_commands._review_code(["-o", "json"])
     assert captured.get("session_id") == "my-session"
+    assert "reviewers" not in captured
+
+
+def test_review_code_cli_rejects_removed_reviewer_flag(capsys) -> None:
+    from rebar._cli import _llm_commands
+
+    with pytest.raises(SystemExit) as excinfo:
+        _llm_commands._review_code(["--reviewer", "code-quality"])
+
+    assert excinfo.value.code == 2
+    assert "unrecognized arguments: --reviewer code-quality" in capsys.readouterr().err
 
 
 def _boom(*a, **k):

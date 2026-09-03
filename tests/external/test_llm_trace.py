@@ -158,7 +158,6 @@ def test_live_review_exports_langfuse_trace(rebar_repo: Path) -> None:
     result = llm.review_code(
         diff_text=diff,
         changed_files=["app.py"],
-        reviewers=["code-quality"],
         target_ticket=epic,
         repo_root=str(rebar_repo),
         config=cfg,

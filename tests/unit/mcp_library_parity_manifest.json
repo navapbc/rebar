@@ -628,7 +628,6 @@
         "base",
         "head",
         "ref",
-        "reviewers",
         "source"
       ],
       "registrar": "llm"

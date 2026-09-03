@@ -91,7 +91,7 @@ PRESENT_FRAGMENTS: dict[str, tuple[str, ...]] = {
     "verify-completion": ("Run `rebar verify-completion --check` to confirm",),
     "sign-review": ("Use it to recover a signature",),
     "review-plan": ("find, verify, decide, then coach",),
-    "review-code": ("repeatable (default: deterministic",),
+    "review-code": ("review this unified-diff file instead of a git range",),
     "scan-spec": ("repeatable (default: all open epics)",),
     "explain": ("For example",),
     "verify-identity": ("This is the authorship merge-gate",),

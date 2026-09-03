@@ -368,11 +368,10 @@ def register_llm_tools(mcp, ctx) -> None:
     def review_code(
         base: str = "HEAD~1",
         head: str = "HEAD",
-        reviewers: list[str] | None = None,
         ref: str | None = None,
         source: str | None = None,
     ) -> dict:
-        """Run a multi-reviewer LLM code review of a git range (base..head) ->
+        """Run the gate-backed LLM code review of a git range (base..head) ->
         an aggregated review_result dict (findings carry agreement + reviewers).
 
         ``source=attested`` (default) reads file context from a snapshot pinned at ``ref``
@@ -393,9 +392,7 @@ def register_llm_tools(mcp, ctx) -> None:
         import rebar.llm
 
         try:
-            return rebar.llm.review_code(
-                base=base, head=head, reviewers=reviewers, ref=ref, source=source
-            )
+            return rebar.llm.review_code(base=base, head=head, ref=ref, source=source)
         except rebar.llm.LLMError as exc:
             return _structured_llm_failure(exc)
 

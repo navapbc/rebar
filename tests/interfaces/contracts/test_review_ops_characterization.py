@@ -56,11 +56,10 @@ def test_review_ticket_graph_target_kind(rebar_repo: Path) -> None:
 def test_review_code_contract(rebar_repo: Path) -> None:
     r = str(rebar_repo)
     diff = "--- a/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+print(1)\n"
-    result = rebar.llm.review_code(
-        diff_text=diff, reviewers=["code-quality"], runner=FakeRunner([]), repo_root=r
-    )
+    result = rebar.llm.review_code(diff_text=diff, runner=FakeRunner([]), repo_root=r)
     assert _REQUIRED_KEYS <= set(result)
     assert "findings" in result and isinstance(result["findings"], list)
+    assert isinstance(result["reviewers"], list)
 
 
 def test_scan_epics_for_spec_contract(rebar_repo: Path) -> None:
