@@ -48,7 +48,24 @@ logger = logging.getLogger(__name__)
 
 ENVELOPE_VERSION: int = 1
 
-_SOURCE_KINDS = frozenset({"default", "user", "project", "env", "cli"})
+
+@functools.cache
+def _source_kinds() -> frozenset[str]:
+    """The provenance source-kind vocabulary, DERIVED from :data:`rebar.config.LAYER_ORDER`.
+
+    The import is DEFERRED (and the result cached) because a module-scope
+    ``from rebar.config import LAYER_ORDER`` would close an import cycle: ``rebar.config``
+    imports :data:`ENVELOPE_VERSION`, :class:`OperationSnapshot` and :func:`active_snapshot`
+    FROM this module, so this module is the leaf and must not import ``rebar.config`` while
+    ``rebar.config`` is still executing. This is the same deferred-import pattern
+    :func:`compose_operation_snapshot` already uses for this same cycle.
+
+    ``LAYER_ORDER`` is a tuple because precedence is ordered, but the sole consumer here
+    (:meth:`OperationSnapshot.build`) uses this purely as a membership test, so the
+    order-losing conversion to a ``frozenset`` costs nothing."""
+    from rebar.config import LAYER_ORDER
+
+    return frozenset(LAYER_ORDER)
 
 
 def _freeze(mapping: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Mapping[str, Any]]:
@@ -125,7 +142,7 @@ class OperationSnapshot:
                 _validate_jsonish(value, path=f"{sect}.{key}")
         for sect, keys in sources.items():
             for key, label in keys.items():
-                if label not in _SOURCE_KINDS:
+                if label not in _source_kinds():
                     raise ValueError(f"unknown source kind at {sect}.{key}: {label!r}")
         return cls(
             envelope_version=envelope_version,
