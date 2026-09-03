@@ -2466,3 +2466,101 @@ def test_entrypoint_source_change_rebuilds_the_mcp_image(mcp_box: dict[str, obje
     assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
         f"the materialized include must now point at the rebuilt container's port\n{ctx}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# the live-backend guard is UNCONDITIONAL, not running-only (bug 9ea3)         #
+# --------------------------------------------------------------------------- #
+
+
+def test_exited_live_backend_is_not_reaped(mcp_box: dict[str, object]) -> None:
+    """RED-first (bug 9ea3): the live backend must be skipped by the retire sweep NO MATTER
+    what state its container is in.
+
+    `mcp_retire_sweep` skips `$live` only inside its `Running=true` branch, so a container that
+    IS the live backend but is momentarily exited/restarting falls through to the reap branch
+    and is `docker rm`'d — while `$MCP_UPSTREAM_FILE` still names its port. That converts a
+    TRANSIENT crash of the serving container (which `--restart always` would otherwise recover)
+    into a PERMANENT 502: the backend is deleted out from under a still-pointing upstream and
+    nothing recreates it. Exactly the 2026-09-02 state — the include named 8093 while
+    `rebar-mcp-…-8093` was `Exited (137)`.
+
+    The superseded exited container in the same fixture is the ANTI-VACUITY control: a sweep
+    that reaped nothing at all would satisfy the regression assertion for the wrong reason.
+    """
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    # The LIVE backend (the include points here) has crashed and is currently exited.
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"], "rebar-mcp-live-8093", 8093, state="exited"
+    )
+    # A genuinely SUPERSEDED backend, also exited — this one is the sweep's actual job.
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"], "rebar-mcp-old-8092", 8092, state="exited"
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8093;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "rm rebar-mcp-old-8092")
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, f"a no-op tick is a normal outcome\n{ctx}"
+    assert any(c == "rm rebar-mcp-old-8092" for c in cmds), (
+        f"anti-vacuity: a SUPERSEDED exited container must still be reaped — otherwise a sweep "
+        f"that reaps nothing would pass the guard assertion below for the wrong reason\n{ctx}"
+    )
+    assert not any("rebar-mcp-live-8093" in c for c in cmds if c.startswith(("rm ", "rm-f "))), (
+        f"the LIVE backend must NOT be reaped while the nginx include still names its port, "
+        f"even though its container is EXITED — deleting it turns a transient crash into a "
+        f"permanent 502 (bug 9ea3)\n{ctx}"
+    )
+
+
+def test_exited_live_backend_signals_that_the_serving_backend_is_down(
+    mcp_box: dict[str, object],
+) -> None:
+    """An exited container on the LIVE port is a real fault — /mcp is 502ing right now — so the
+    sweep must SIGNAL it on the existing observability path rather than skip it in silence.
+    `err` (AUTODEPLOY_ERROR) is that path: it is already counted into the deploy_errors metric
+    and alarmed, so no new marker token, offset file, or CloudWatch wiring is introduced."""
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(  # type: ignore[arg-type]
+        mcp_box["dstate"], "rebar-mcp-live-8093", 8093, state="exited"
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8093;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
+    markers = _markers(result, "AUTODEPLOY_ERROR")
+
+    assert result.returncode == 0, f"a no-op tick is a normal outcome\n{ctx}"
+    assert any("mcp-live-backend-down" in m for m in markers), (
+        f"the live backend being EXITED must emit a countable AUTODEPLOY_ERROR marker — a "
+        f"silently skipped live port leaves /mcp 502ing with nothing to see\n{ctx}"
+    )
+
+
+def test_running_live_backend_is_still_not_reaped_or_stopped(mcp_box: dict[str, object]) -> None:
+    """The pre-existing behaviour the fix must preserve: a RUNNING live backend is neither
+    stopped nor reaped, while a running superseded one is asked to drain."""
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(mcp_box["dstate"], "rebar-mcp-live-8093", 8093)  # type: ignore[arg-type]
+    _seed_container(mcp_box["dstate"], "rebar-mcp-old-8092", 8092)  # type: ignore[arg-type]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8093;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+    cmds = _commands_eventually(mcp_box, "stop rebar-mcp-old-8092")
+    ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0, f"a no-op tick is a normal outcome\n{ctx}"
+    assert any(c == "stop rebar-mcp-old-8092" for c in cmds), (
+        f"a RUNNING superseded backend must still be asked to drain gracefully\n{ctx}"
+    )
+    assert not any("rebar-mcp-live-8093" in c for c in cmds), (
+        f"a RUNNING live backend must be neither stopped nor reaped\n{ctx}"
+    )
+    assert not _markers(result, "AUTODEPLOY_ERROR"), (
+        f"a healthy RUNNING live backend must emit no error marker\n{ctx}"
+    )

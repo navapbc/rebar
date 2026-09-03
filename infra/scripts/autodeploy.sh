@@ -699,19 +699,37 @@ mcp_retire_graceful() {
 # freeing its blue/green port. Over MCP_RELEASES_CAP managed containers (too many draining /
 # holding ports) emit AUTODEPLOY_MCP_RETIRE_CAP instead of forcing a kill. Safe on the no-op tick.
 mcp_retire_sweep() {
-  local live live_img n p img count
+  local live live_img n p img count running
   live="$(mcp_live_port)"
   live_img="$(mcp_image_on_port "$live")"
   while read -r n; do
     [ -n "$n" ] || continue
     p="$(mcp_port_of "$n")"
-    if [ "$(docker inspect -f '{{.State.Running}}' "$n" 2>/dev/null)" = "true" ]; then
+    running=false
+    [ "$(docker inspect -f '{{.State.Running}}' "$n" 2>/dev/null)" = "true" ] && running=true
+    # The live-backend guard is UNCONDITIONAL — it is hoisted ABOVE the running/exited branch
+    # so it cannot be state-dependent (bug 9ea3). It sat only in the running arm, so a
+    # container that WAS the live backend but had crashed fell through to the reap arm below
+    # and was `docker rm`'d while $MCP_UPSTREAM_FILE still named its port: `--restart always`
+    # then had nothing left to restart, so a TRANSIENT exit became a PERMANENT 502 (the
+    # 2026-09-02 state — the include named 8093 with rebar-mcp-…-8093 `Exited (137)`). Do NOT
+    # re-add a copy of this test into the else arm; a duplicated guard is the same defect
+    # waiting to drift. RELEASES_KEEP is exactly this retention.
+    if [ -n "$live" ] && [ "$p" = "$live" ]; then
+      # Skipping it is correct but must not be SILENT: the backend nginx points at is DOWN
+      # right now, so /mcp is 502ing. Signalled through `err` (AUTODEPLOY_ERROR) — the marker
+      # path observability.sh already counts and alarms — rather than a new token, which would
+      # need its own offset file and CloudWatch wiring to be visible at all.
+      [ "$running" = true ] || err mcp-live-backend-down \
+        "live mcp backend $n on port $p is NOT running; /mcp is failing. Retained (never reaped: nginx still points here); awaiting restart/redeploy"
+      continue
+    fi
+    if [ "$running" = true ]; then
       # Never STOP a running container we cannot prove is not the live backend. If the live
       # port is UNKNOWN (upstream include missing/unreadable) fail SAFE: leave every running
       # container alone rather than risk stopping the one still serving /mcp (bug 7b4a). An
       # already-exited container is safe to reap regardless (it serves nothing).
       [ -z "$live" ] && continue
-      [ "$p" = "$live" ] && continue                    # keep the live backend (RELEASES_KEEP)
       mcp_retire_graceful "$n"
     else
       # Read the image reference BEFORE the rm — it is unreadable once the container is gone,
