@@ -237,8 +237,11 @@ class OutboundDiffConfig:
     6452, per ADR 0107 §"Disposition of the 23/14/11-parameter producer seams").
 
     Collapses what used to be five trailing optional parameters into one object
-    (the 9-positional-param smell). Every field is optional; the orchestrator
-    substitutes the documented defaults for any left unset.
+    (the 9-positional-param smell). The live caller-set surface is NINE fields:
+    ``excluded_statuses``, ``local_label_intent``, ``client``, ``pass_id``,
+    ``prev_snapshot``, ``conflict_sink``, ``dropped_field_sink``,
+    ``projects_mapping``, and ``repo_root``. Every field is optional; the
+    orchestrator substitutes the documented defaults for any left unset.
 
     ADR 0107 explicitly REJECTS wrapping the builders' loose parameters in a
     *new* generic context/options object — "it would just rename the same
@@ -267,6 +270,16 @@ class OutboundDiffConfig:
         prev_snapshot: The previous pass's Jira snapshot, consulted by the inbound
             directionality guard (suppress an outbound field-update when it is a
             Jira-side edit local has not touched since the last sync).
+        conflict_sink: Optional ``[(jira_key, field), ...]`` sink populated when
+            both sides edited the same arbitrated field differently.
+        dropped_field_sink: Optional ``[(jira_key, field), ...]`` sink populated
+            when a mapped diff is later excluded by the outbound allowlist.
+        projects_mapping: Optional projects store mapping used to resolve the
+            effective target project for each outbound create / per-project gate.
+        repo_root: Optional repository root used when reading per-project
+            mapping overlays from config. Direct `mapping=` / `repo_root=`
+            keyword arguments override those two config-carried values when both
+            are supplied to :func:`compute_outbound_mutations`.
         links: The injected ``SupportsLinks`` capability (ticket eefd), read by the
             update builder's link diff.
         effective_cache: The pass-scoped memo for the per-project effective-map
@@ -388,15 +401,21 @@ def compute_outbound_mutations(
         jira_snapshot: Dict of {jira_key: {fields...}} from the fetcher.
         binding_store: A BindingStore instance providing get_jira_key(local_id),
             is_bound(local_id).
-        config: Optional :class:`OutboundDiffConfig` carrying the five optional
+        config: Optional :class:`OutboundDiffConfig` carrying the nine external
             inputs (excluded_statuses, local_label_intent, client, pass_id,
-            prev_snapshot). None → all defaults (see OutboundDiffConfig). The
-            former trailing ``absent_alive_fields`` out-param is GONE — its
-            value is the second element of the return tuple instead.
+            prev_snapshot, conflict_sink, dropped_field_sink,
+            projects_mapping, repo_root). None → all defaults (see
+            OutboundDiffConfig). The former trailing ``absent_alive_fields``
+            out-param is GONE — its value is the second element of the return
+            tuple instead.
         outbound_mapper: The injected Backend-port ``OutboundMapper`` (ticket 4af8);
             ``None`` resolves the configured backend's mapper via ``select_backend``.
         links: The injected ``SupportsLinks`` capability (ticket eefd); ``None``
             resolves the configured backend (a backend IS-A ``SupportsLinks``).
+        mapping: Optional direct projects mapping override. When supplied, it
+            wins over ``config.projects_mapping``.
+        repo_root: Optional direct repository-root override. When supplied, it
+            wins over ``config.repo_root``.
 
     Returns:
         A ``(mutations, absent_alive_fields)`` tuple:

@@ -1,8 +1,8 @@
-"""Provider-neutral mapping-config core (epic ravenous-dirt-widgeon / bfe7, S1).
+"""Provider-neutral mapping-config core used by the live reconciler.
 
-The walking-skeleton foundation every other mapping child stands on. Today the
-reconciler's rebar<->target mappings live as hardcoded literals; before any axis
-becomes config-driven this module ships the *core alone*:
+The reconciler's per-project overlays and built-in defaults both flow through
+this loader/validator. It owns the provider-neutral config section shape and the
+merge/validation rules every backend shares:
 
 * a reserved ``[tool.rebar.mapping]`` / ``[mapping]`` config section (recognised by the
   core parser, read raw via :func:`rebar.config.read_reserved_section`);
@@ -15,11 +15,13 @@ becomes config-driven this module ships the *core alone*:
 * a :class:`Capability` descriptor recording which mapping AXES the target's vocabulary
   actually has.
 
-NO axis is wired into the reconciler here -- later stories (S2-S5) do that, and the
-concrete adapter injects the target's built-in default layer. This module stays
-strictly PROVIDER-NEUTRAL: it imports nothing from any vendor adapter and contains no
-vendor value literal anywhere. Illustrative values in docstrings are neutral
-placeholders (``"<status-a>"``, ``"VALUE"``), never real target vocabulary.
+Every mapping axis the live reconciler exposes still enters through this module;
+the concrete adapter injects the target's built-in default layer and
+capabilities, but the merge and validation rules stay strictly
+PROVIDER-NEUTRAL. This module imports nothing from any vendor adapter and
+contains no vendor value literal anywhere. Illustrative values in docstrings are
+neutral placeholders (``"<status-a>"``, ``"VALUE"``), never real target
+vocabulary.
 
 Structure of a ``[mapping]`` section (raw, as returned by ``read_reserved_section``)::
 

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Outbound leaf appliers: translate local mutations into Jira writes.
 
-The five (outbound, *) leaf handlers dispatched from the typed registry, plus the
-HEAD-drift subject helpers the batch loop uses to distinguish benign external
-writers from competing reconciler writes. Each leaf calls _direction_guard, runs
-its Jira side-effects through batch_dispatch._call_with_retry, and returns an
+The create / update / delete / probe / conflict outbound leaf handlers
+dispatched from the typed registry, plus the HEAD-drift subject helpers the
+batch loop uses to distinguish benign external writers from competing
+reconciler writes. The create leaf dispatches exactly one production route: the
+default coordinated write-ahead composition or, under the rollback selector,
+the legacy create+delete path. Every leaf calls _direction_guard, runs its Jira
+side-effects through batch_dispatch._call_with_retry, and returns an
 ApplyResult.
 
 Imports downward only (apply_base, batch_dispatch); never imports applier.
@@ -78,12 +81,11 @@ def _get_commit_subject(repo_root, commit_sha: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Per-leaf stub handlers.
+# Per-leaf handlers.
 #
 # Each leaf:
 #   1. Calls _direction_guard() with its own declared direction (defense-in-depth).
-#   2. Performs the leaf-specific side effect (currently stubbed — real ACLI
-#      wiring lands in a follow-on task).
+#   2. Performs the leaf-specific side effect through the live batch/transport seams.
 #   3. Returns an ApplyResult.
 # ---------------------------------------------------------------------------
 
