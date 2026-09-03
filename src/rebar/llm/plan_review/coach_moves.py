@@ -11,9 +11,8 @@ module-size seam). :mod:`.passes` re-imports and re-exports every name here, so 
 ``passes.<name>`` and ``orchestrator.<name>`` call sites keep resolving unchanged.
 
 Leaf module: it depends only on the shared review kernel — never back on ``passes`` — so the
-extraction introduces no import cycle. (:func:`rebar.llm.plan_review.passes.pass4_coach` STAYS
-in ``passes`` because it builds a ``RunRequest`` through that module's ``_resolve_system`` /
-``PASS_COACH`` internals; relocating it here would create a circular import.)
+extraction introduces no import cycle. The workflow gate owns the live structured coach call;
+this module stays pure data + deterministic helpers.
 """
 
 from __future__ import annotations

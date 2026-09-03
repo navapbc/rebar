@@ -556,38 +556,5 @@ def summarize_for_isf(
 # The Pass-4 move registry + loader (`MOVE_REGISTRY` / `load_move_registry`) live in the leaf
 # sibling `coach_moves.py` and are re-exported at the top of this module. The Pass-4 coach
 # MECHANISM (listing/render/validator/applicability) lives in the shared review kernel (epic
-# vivid-gang-day WS3), also re-exported at the top of this module.
-
-
-def pass4_coach(
-    runner: Runner,
-    cfg: LLMConfig,
-    *,
-    plan: str,
-    surviving: list[dict[str, Any]],
-    move_registry: dict[str, dict[str, Any]],
-    blocking: list[dict[str, Any]] | None = None,
-) -> list[dict[str, Any]]:
-    """Map each coachable finding to a move + prose rendered DETERMINISTICALLY from the move's
-    locked template via the shared kernel coach; the LLM only picks the move + a bounded,
-    validated subject. Triggers = the criteria the coachable findings carry. NOTE (8086): the
-    live path is the workflow ops; this bespoke entry is unit-test-only, widened identically."""
-    from rebar.llm import review_kernel
-
-    blocking = blocking or []
-    triggers = {c for f in blocking + surviving for c in f.get("criteria", []) or []}
-
-    def _pick(instructions: str, _applicable: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-        req = RunRequest.for_structured(
-            system_prompt=_resolve_system(PASS_COACH, plan, cfg),
-            instructions=instructions,
-            config=_max_output_cfg(cfg),  # model-max output budget (bug 30a2)
-            reviewers=["plan-coach"],
-            output_schema="plan_review_coach",
-            bounds=RunRequest.INHERIT_POLICY,
-        )
-        return runner.run(req).get("notes", []) or []
-
-    return review_kernel.coach(
-        surviving, move_registry, pick=_pick, active_triggers=triggers, blocking=blocking
-    )
+# vivid-gang-day WS3), also re-exported at the top of this module; the workflow gate owns the
+# live structured coach request wiring.

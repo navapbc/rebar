@@ -321,10 +321,6 @@ _UNFOLLOWABLE: dict[str, str] = {
         "before calling, and escalation replaces it per attempt — measured on Bedrock in the "
         "ticket's config B"
     ),
-    "llm/plan_review/passes.py::pass4_coach": (
-        "the coach cfg is bound by `_verifier_cfg` in the plan-review entry point, through a "
-        "call chain this analysis does not follow — measured on Bedrock in config B"
-    ),
     "llm/plan_review/prerequisites.py::run_focused_finder": (
         "per-call `call_cfg` from the size ladder; story b690 made it effective and the ticket "
         "measured `plan-review-prerequisite-verifier` on Bedrock"
@@ -611,7 +607,6 @@ _EXPECTED_RUN_REQUEST_SITES = [
     ("llm/plan_review/passes.py::pass1_container", "_max_output_cfg(cfg)", "bound"),
     ("llm/plan_review/passes.py::pass1_isf", "_max_output_cfg(cfg)", "bound"),
     ("llm/plan_review/passes.py::summarize_for_isf", "_max_output_cfg(cfg)", "bound"),
-    ("llm/plan_review/passes.py::pass4_coach", "_max_output_cfg(cfg)", "unresolved"),
     ("llm/plan_review/prerequisites.py::run_focused_finder", "call_cfg", "unresolved"),
     ("llm/plan_review/xcheck.py::_assess_contradictions", "vcfg", "bound"),
     ("llm/plan_review/xcheck.py::_assess_comment_trail", "vcfg", "bound"),
@@ -645,7 +640,7 @@ def test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work(
 
     sites = _run_request_sites()
 
-    assert len(_EXPECTED_RUN_REQUEST_SITES) == 27
+    assert len(_EXPECTED_RUN_REQUEST_SITES) == 26
     assert all(expr for _, expr, _ in _EXPECTED_RUN_REQUEST_SITES)
     assert sites == _EXPECTED_RUN_REQUEST_SITES
     assert len(module_walks) >= 400, "the oracle did not exercise the real source corpus"

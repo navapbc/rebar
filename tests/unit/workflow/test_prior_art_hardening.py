@@ -18,10 +18,12 @@ Pure stdlib + a real git snapshot of HEAD; no network/model.
 from __future__ import annotations
 
 import tarfile
+from types import SimpleNamespace
 
 import pytest
 
 from rebar.llm.workflow import executor as ex
+from rebar.llm.workflow import interpreter as interp
 from rebar.llm.workflow import lint as L
 from rebar.llm.workflow import schema as S
 from rebar.llm.workflow import snapshot as SNAP
@@ -60,9 +62,21 @@ def test_wrapped_if_is_accepted_by_lint() -> None:
 def test_guard_fails_closed_on_bare_string() -> None:
     # Defense in depth: even if internals are driven past the lint, a bare guard
     # skips (fail-closed) rather than the old silently-truthy behavior.
-    state = ex.RunState(inputs={}, outputs={}, statuses={})
-    assert ex._guard_passes({"if": "steps.a.outputs.ok"}, state, {}) is False
-    assert ex._guard_passes({}, state, {}) is True  # no guard -> runs
+    rc = interp._RunCtx(
+        run_id="r",
+        doc={},
+        registry={},
+        runner=SimpleNamespace(),
+        rec=SimpleNamespace(),
+        secrets={},
+        inputs={},
+        target_ticket=None,
+        repo_root=None,
+        outputs={},
+        statuses={},
+    )
+    assert interp._guard_scoped({"if": "steps.a.outputs.ok"}, rc, ("steps.",), {}) is False
+    assert interp._guard_scoped({}, rc, ("steps.",), {}) is True  # no guard -> runs
 
 
 # ── #3 secrets in `if:` ─────────────────────────────────────────────────────────
