@@ -113,23 +113,13 @@ _STABLE_SHA = "deadbeef" * 5  # 40-char stable HEAD for drift guard
 
 
 def _make_fake_concurrency() -> types.ModuleType:
-    """Return a _concurrency stub with a stable HEAD and a no-op rebase_retry."""
-
-    class _FakeResult:
-        ok = True
-        event = None
-        value = None
+    """Return a _concurrency stub with a stable HEAD."""
 
     def _fake_snapshot_head(_repo_root) -> str:
         return _STABLE_SHA
 
-    def _fake_rebase_retry(_repo_root, write_fn, **_kwargs):
-        write_fn()
-        return _FakeResult()
-
     mod = types.ModuleType("_concurrency_e2e_stub")
     mod.snapshot_head = _fake_snapshot_head  # type: ignore[attr-defined]
-    mod.rebase_retry = _fake_rebase_retry  # type: ignore[attr-defined]
     return mod
 
 

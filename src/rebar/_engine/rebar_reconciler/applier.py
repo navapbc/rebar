@@ -526,10 +526,10 @@ def _apply_batch(
     Raises:
         HeadDriftError:   When the tickets-branch HEAD changes between mutations,
                           indicating a concurrent write by another process.
-        RescheduleError:  When rebase_retry exhausts all write attempts
-                          (kind='reject_and_reschedule').  A health event JSON is
-                          emitted to stderr before the raise.  No retry-counter
-                          file is written to disk; the next pass starts fresh.
+        RescheduleError:  When the write path signals reschedule. A health event
+                          JSON is emitted to stderr before the raise. No
+                          retry-counter file is written to disk; the next pass
+                          starts fresh.
     """
     if repo_root is None:
         from rebar.config import reconciler_repo_root as _owned_repo_root

@@ -168,19 +168,8 @@ def _make_fake_acli_module(state: _FakeJiraState) -> _FakeClient:
 def _make_ok_concurrency() -> types.ModuleType:
     """Pass-through concurrency stub (no git commits; deterministic)."""
 
-    class _Result:
-        ok = True
-        event = None
-        value = None
-
     mod = types.ModuleType("_concurrency")
     mod.snapshot_head = lambda repo_root: "aabbccdd" * 5  # type: ignore[attr-defined]
-
-    def _rebase_retry(repo_root, write_fn, *, max_attempts=3):
-        write_fn()
-        return _Result()
-
-    mod.rebase_retry = _rebase_retry  # type: ignore[attr-defined]
     return mod
 
 
