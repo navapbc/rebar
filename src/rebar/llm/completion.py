@@ -356,18 +356,24 @@ def verify_completion(
         ticket_read_mode = "lazy_pinned"
     if lazy_requested:
         _record_elapsed(phase_metrics, "verifier_ticket_view_setup_ms", phase_started_ns)
+    from rebar.llm.peak_rss import gate_peak_rss
+
     try:
-        return _run_completion_at_handle(
-            ticket_id,
-            graph=graph,
-            repo_root=repo_root,
-            config=config,
-            runner=runner,
-            phase_metrics=phase_metrics,
-            handle=handle,
-            ticket_view=ticket_view,
-            ticket_read_mode=ticket_read_mode,
-        )
+        # Measurement only (bug 9ea3): emits the GATE_PEAK_RSS marker on completion,
+        # including on the raising paths. Wrapping HERE covers both the MCP daemon and
+        # the CLI, which both reach the gate through this function.
+        with gate_peak_rss("verify_completion", ticket_id):
+            return _run_completion_at_handle(
+                ticket_id,
+                graph=graph,
+                repo_root=repo_root,
+                config=config,
+                runner=runner,
+                phase_metrics=phase_metrics,
+                handle=handle,
+                ticket_view=ticket_view,
+                ticket_read_mode=ticket_read_mode,
+            )
     finally:
         if owns_ticket_view and ticket_view is not None:
             ticket_view.close()

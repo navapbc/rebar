@@ -10,6 +10,10 @@
 #      the materialized `upstream rebar_mcp` include) -> rebar/host:mcp_healthy, a 1/0
 #      heartbeat published on every tick (bug 9ea3-7d07-ea55-4496; alarm in monitoring_9ea3.tf).
 #   2. Gerrit data-volume disk-used-percent -> rebar/host:disk_used_percent (S2 alarm).
+#   2c. Host memory (mem_available_percent / mem_used_percent / mem_probe_ok) and
+#       per-container resident set (container_memory_rss_bytes, `container` dimension, plus
+#       the container_stats_ok census heartbeat) -> rebar/host (bug 9ea3; measurement only,
+#       no alarm yet).
 #   3. Gerrit->GitHub replication failures (replication_log) -> rebar/host:replication_errors (S5 alarm).
 #   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
 #   4c. review-bot merge-change failures (MERGE_CHANGE_ERROR) -> rebar/host:review_bot_merge_change_errors (epic 88ab/S2 alarm).
@@ -143,6 +147,125 @@ if [ -n "$root_pct" ]; then
     --metric-name root_disk_used_percent --unit Percent --value "$root_pct" 2>/dev/null || true
   logger -t rebar-health "disk / used_percent=${root_pct}"
 fi
+
+# --- 2c. HOST MEMORY + per-container RSS (bug 9ea3-7d07-ea55-4496) ----------
+# MEMORY WAS ENTIRELY UNMETERED ON THIS BOX. The mcp container was OOM-killed ~3
+# minutes into a plan-review gate run (docker inspect: OOMKilled=true, Exit=137) on a
+# t4g.large (8 GiB) it shares with Gerrit — which alone reserves ~3 GiB by config
+# (gerrit.config heapLimit + container_heap_limit) — the review-bot, and opcert. NO
+# container declares a memory limit (docker-compose.yml has neither `mem_limit` nor
+# `deploy.resources.limits`), and this probe published disk and health but not one
+# byte of memory. The only memory check anywhere was autodeploy.sh's MCP_MEM_MIN_MB
+# (default 1024), an UNDERIVED fail-open deploy-time floor.
+#
+# So the box was sized, and its deploy floor set, on a guess. This section exists to
+# replace that guess with data. It is DELIBERATELY MEASUREMENT-ONLY: no alarm watches
+# these metrics yet and no limit is derived from them here, because any threshold
+# chosen today would be another guess. Measure first, choose limits later.
+#
+# HEARTBEAT, NOT AN EVENT (ticket bff5-9163-cddd-4158). The host gauges publish on
+# EVERY tick, including the paths where the read fails, so their ABSENCE means the
+# probe/timer/host is dead rather than "memory was fine". A failed read publishes the
+# PESSIMISTIC value in each metric's own direction (0% available / 100% used), the same
+# convention §5's mirror_out_of_sync uses when its comparison cannot be made — and
+# `mem_probe_ok` is published alongside precisely so a synthesised pessimistic reading is
+# never mistaken for a measured one. A future alarm must gate on `mem_probe_ok`, and any
+# ANALYSIS of this data must drop the ticks where it is 0.
+#
+# DIMENSIONS. The host gauges are DIMENSIONLESS, following root_disk_used_percent (§2b)
+# and the GerritReachable convention: every rebar/host alarm in monitoring*.tf declares
+# no dimensions, and CloudWatch keys a metric by namespace+name+dimensions, so a
+# dimension added on only one side silently unmatches. The per-container gauge instead
+# follows the OTHER local precedent — disk_used_percent's `mount` dimension (§2) — and
+# publishes ONE metric name carrying a `container` dimension rather than a metric name
+# per service. That is what the question needs: "which resident set grew" is a
+# comparison ACROSS containers, which a dimension makes a single graph/`Sum by container`
+# query, whereas per-service metric names would need this probe (and every consumer)
+# edited each time compose gains or renames a service. InstanceId rides along exactly as
+# it does on disk_used_percent.
+
+# Host memory. `free -k` reports KiB; column 7 of the Mem: row is `available` (what a new
+# allocation can actually get, accounting for reclaimable page cache) which is the number
+# an OOM-kill is about — NOT `free` (column 4), which reads alarmingly low on any healthy
+# box with a warm cache. Very old procps has no `available` column, so fall back to
+# free+buff/cache there. A missing/failed `free` leaves both empty and takes the
+# pessimistic branch below.
+mem_avail_pct=""
+mem_used_pct=""
+mem_stats=$(free -k 2>/dev/null | awk '/^Mem:/ {
+  total = $2
+  if (total <= 0) exit
+  avail = (NF >= 7) ? $7 : $4 + $6
+  printf "%d %d", (avail * 100) / total, ((total - avail) * 100) / total
+  exit
+}') || true
+case "$mem_stats" in
+  *[0-9]" "[0-9]*)
+    mem_avail_pct=${mem_stats%% *}
+    mem_used_pct=${mem_stats##* }
+    ;;
+esac
+mem_probe_ok=1
+if [ -z "$mem_avail_pct" ] || [ -z "$mem_used_pct" ]; then
+  # Publish rather than fall silent, in each gauge's pessimistic direction, and say so.
+  mem_probe_ok=0
+  mem_avail_pct=0
+  mem_used_pct=100
+  logger -t rebar-health "memory probe FAILED (free unavailable or unparseable); published pessimistic mem_available_percent=0 mem_used_percent=100 with mem_probe_ok=0"
+fi
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name mem_available_percent --unit Percent --value "$mem_avail_pct" 2>/dev/null || true
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name mem_used_percent --unit Percent --value "$mem_used_pct" 2>/dev/null || true
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name mem_probe_ok --unit Count --value "$mem_probe_ok" 2>/dev/null || true
+[ "$mem_probe_ok" -eq 1 ] && logger -t rebar-health \
+  "memory available_percent=${mem_avail_pct} used_percent=${mem_used_pct}"
+
+# Per-container resident set. BOUNDED TWICE, because `docker stats` is the one call here
+# that can WEDGE THE 5-MINUTE TIMER: it streams by default, and on a loaded or
+# memory-pressured box (exactly the condition this metric exists to catch) it can block on
+# the daemon indefinitely. `--no-stream` makes it a single sample instead of a stream, and
+# `timeout 15` caps the wall clock regardless — the same `timeout N docker …` idiom
+# autodeploy.sh already uses for `docker compose logs` and the prune calls, which is the
+# established precedent for bounding docker on this host. If `timeout` itself is missing,
+# the command simply fails and the ok-gauge below reports 0; it can never hang.
+#
+# MemUsage is human-formatted ("1.234GiB / 7.664GiB"), so the awk below converts the used
+# side to bytes. Docker emits binary units (B/KiB/MiB/GiB/TiB); the decimal spellings are
+# accepted too so a docker version that prints them is not silently dropped.
+container_stats_ok=0
+container_rss=$(timeout 15 docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' 2>/dev/null | awk '
+  {
+    value = $2
+    unit = value
+    gsub(/[0-9.]/, "", unit)
+    mult = 1
+    if (unit == "KiB" || unit == "kB" || unit == "KB") mult = 1024
+    else if (unit == "MiB" || unit == "MB") mult = 1048576
+    else if (unit == "GiB" || unit == "GB") mult = 1073741824
+    else if (unit == "TiB" || unit == "TB") mult = 1099511627776
+    else if (unit != "B" && unit != "") next
+    printf "%s %.0f\n", $1, (value + 0) * mult
+  }') || true
+while read -r cname cbytes; do
+  [ -n "$cname" ] || continue
+  container_stats_ok=1
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name container_memory_rss_bytes --unit Bytes --value "$cbytes" \
+    --dimensions InstanceId="$IID",container="$cname" 2>/dev/null || true
+  logger -t rebar-health "container ${cname} memory_rss_bytes=${cbytes}"
+done <<EOF
+$container_rss
+EOF
+# The census's own heartbeat: WITHOUT it, "docker stats timed out / the daemon is wedged"
+# and "every container is stopped" are the same observation (no per-container datapoints
+# at all), and the per-container gauge cannot carry a heartbeat of its own because its
+# dimension set is only knowable from a census that succeeded.
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name container_stats_ok --unit Count --value "$container_stats_ok" 2>/dev/null || true
+[ "$container_stats_ok" -eq 0 ] && logger -t rebar-health \
+  "container memory census produced no rows (docker stats failed, timed out, or no containers are running)"
 
 # --- 3. Gerrit->GitHub replication failures (S5) ---------------------------
 # Watch the replication plugin's log for failure signatures and publish the COUNT
