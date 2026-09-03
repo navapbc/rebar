@@ -1,0 +1,366 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: E5
+  expect: finding
+  id: plan-review-E5-fire-0
+  input: '## Context
+
+    Contract removal is complete only when the entire planner/coordinator/adapter
+    path passes portable end-to-end scenarios and the architecture, operator behavior,
+    future adapter obligations, and rollback are durable.
+
+
+    ## Outcome
+
+    Run credential-free verified-fake Cloud/DC passes over the complete taxonomy,
+    finalize ADR 0103 and architecture/operator docs, and prove no removed production
+    path is reachable.
+
+
+    ## Plan
+
+    1. Build end-to-end fake Cloud/DC passes covering mixed success, transient recovery,
+    long-delay deferral, permanent ticket failure, auth/provider stop, fuse open/reset,
+    label-first create, restart, partial outcome, and delivery failure.
+
+    2. Run the route census and runtime poison checks with the end-to-end suite. Keep
+    bounded live probes optional operator evidence rather than a portable gate.
+
+    3. Finalize ADR 0103 with retry ownership, failure taxonomy, fuse, containment,
+    intentional deltas, expand/contract cutover, and rollback.
+
+    4. Document planner -> coordinator -> adapter dependency direction, versioned
+    output, operations guidance, and future adapter atomic-operation/retry obligations.
+
+    5. Verify rollback re-observes remote state and never deletes successful Jira
+    work.
+
+
+    ## Testing
+
+    The interface suite uses no external credentials and runs in every supported local/CI
+    environment. ADR/doc index and route-census tests are mandatory.
+
+
+    ## Acceptance Criteria
+
+    - [ ] Portable fake Cloud/DC suites cover every named outcome, fuse, create, restart,
+    partial, and delivery scenario.
+
+    - [ ] End-to-end tests require no external credential or CI-provider-specific
+    trigger.
+
+    - [ ] Route census and poison tests find no reachable removed fallback.
+
+    - [ ] ADR 0103 records ownership, taxonomy, fuse, containment, intentional deltas,
+    cutover, and no-delete rollback.
+
+    - [ ] Architecture/operator docs define versioned outcomes and future adapter
+    obligations.
+
+    - [ ] ADR numbering, documentation index, and architecture links pass.
+
+
+    ## Out of scope
+
+    Optional live probes do not gate completion.'
+- corpus: rebar
+  criterion: E5
+  expect: finding
+  id: plan-review-E5-fire-2
+  input: "## Context / Problem\nThe store's event log grows without bound, so a periodic\
+    \ compaction pass must run on its own without anyone remembering to invoke it.\n\
+    \n## Approach\nAdd `.github/workflows/compact-store.yml`, a GitHub Actions workflow\
+    \ on a daily `schedule:` cron that checks out the tickets branch and runs `rebar\
+    \ compact`. The workflow is the trigger: nothing else invokes compaction.\n\n\
+    ## Scope\n- `.github/workflows/compact-store.yml` \u2014 the new scheduled workflow.\n\
+    - `src/rebar/_store/compact.py` \u2014 the `rebar compact` entry point the workflow\
+    \ calls.\n\n## Testing\n- Happy path: a unit test asserts the workflow's `schedule:`\
+    \ cron is daily and its job runs `rebar compact`.\n- Edge: a test asserts compaction\
+    \ on an already-compact store is a no-op.\n\n## Acceptance Criteria\n- [ ] `.github/workflows/compact-store.yml`\
+    \ exists with a daily cron and runs `rebar compact`.\n- [ ] Compaction runs unattended\
+    \ once a day, verified by the workflow's run history."
+- corpus: rebar
+  criterion: E5
+  expect: pass
+  id: plan-review-E5-no_fire-0
+  input: "## Context / Problem\nEvery **attested-source** LLM gate operation fails\
+    \ on the LIVE MCP server\n(`https://rebar.solutions.navateam.com/mcp`, container\
+    \ `compose-mcp-1`, image\n`compose-mcp:9499312eb7b05dc3d75d39c23ab74a5b4afc26b5`).\n\
+    \nObserved 2026-08-27 against the live endpoint:\n\n```\nreview_plan       {\"\
+    ticket_id\": \"ruby-griffinish-goitered\"}\n  -> Error executing tool review_plan:\
+    \ cannot resolve ref 'origin/main' to a commit in '.'.\nreview_plan       {\"\
+    ticket_id\": \"...\", \"ref\": \"HEAD\"}\n  -> Error executing tool review_plan:\
+    \ cannot resolve ref 'HEAD' to a commit in '.'.\nverify_completion {\"ticket_id\"\
+    : \"...\"}\n  -> Error executing tool verify_completion: cannot resolve ref 'origin/main'\
+    \ to a commit in '.'.\nreview_plan       {\"ticket_id\": \"...\", \"source\":\
+    \ \"local\"}   -> RUNS (P1/P2/P3 emitted)\n```\n\n## Mechanism\nThe container's\
+    \ repo root has **no git metadata at all**. Verified in-container:\n\n```\n$ docker\
+    \ exec compose-mcp-1 sh -c 'pwd; ls -d /app/.git; git -C /app rev-parse origin/main'\n\
+    /app\nls: cannot access '/app/.git': No such file or directory\nfatal: not a git\
+    \ repository (or any of the parent directories): .git\n```\n\n`docker inspect`\
+    \ confirms `WorkingDir=/app`, `Cmd=[\"rebar-mcp\"]`, and the env carries\n`REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets`\
+    \ but **no `REBAR_ROOT`** \u2014 so the repo root\nresolves to the cwd `/app`,\
+    \ which is a plain source copy, not a work tree. The image ships\n`/app/.deployed_ref`\
+    \ (`d4a0a2a44 (feat/gerrit-ci-verified-gate)`) as a text marker instead of a\n\
+    real clone. `source=attested` pins a snapshot at `ref` against that root's object\
+    \ DB, so ref\nresolution fails before any LLM call.\n\nThe tracker itself is unaffected:\
+    \ it is an out-of-tree clone reached via `REBAR_TRACKER_DIR`,\nso all non-git\
+    \ tools (create/show/search/list/comment/edit/link/claim/transition) work.\n\n\
+    ## Impact\n`attested` is the DEFAULT source for both gate ops, and a `local`-source\
+    \ verdict is never\nsigned. So **no plan-review or completion attestation can\
+    \ be earned through the live MCP\nserver**, and consequently no `task`/`story`/`epic`\
+    \ can be closed through it while\n`verify.require_plan_review_for_close` is on\
+    \ \u2014 the only remaining path is `--force`, which\nagents are prohibited from\
+    \ using. Reproduced live: probe task `ruby-griffinish-goitered`\n(`c67b-ece5-707e-460e`)\
+    \ is stuck `in_progress` with\n`plan-review close gate: unsigned: no certified\
+    \ plan-review attestation`, and the prescribed\nremedy (`review-plan`) is the\
+    \ very operation that cannot run.\n\n## Reproduction\n1. Call `review_plan` on\
+    \ any claimable ticket through the live MCP endpoint with default args.\n2. Observe\
+    \ `cannot resolve ref 'origin/main' to a commit in '.'`.\n3. Repeat with `source:\
+    \ \"local\"` and observe it runs.\n\n## Fix\n\nProvision a real repository for\
+    \ the gate ops to resolve against, and point the repo root at it.\n\n**Why not\
+    \ the obvious alternatives.** Shipping `.git` in the image (removing the\n`.dockerignore:5`\
+    \ exclusion) bloats every layer and pins a main that goes stale the moment the\n\
+    image is built \u2014 the gates need a ref that tracks main, not a frozen one.\
+    \ Re-using the tickets\nclone at `REBAR_TRACKER_DIR` is tempting since `MCP_TICKETS_URL`\
+    \ is the SAME repository, but it\nconflates the code root with the tracker: two\
+    \ different lifetimes, two different refspecs, and\na reader can no longer tell\
+    \ which one a failure came from.\n\n**Shape.** `provision_store` gains a sibling\
+    \ that clones the CODE side into\n`/var/gerrit/site/mcp-code` \u2014 `--filter=blob:none\
+    \ --single-branch --branch main`, so it is a\nblobless clone that fetches objects\
+    \ on demand rather than materializing the history \u2014 and\n`REBAR_ROOT` is\
+    \ set to it (compose env + `mcp_run_new`, which must stay in parity). That root\n\
+    carries `rebar.toml`, so config resolution moves from the source copy at `/app`\
+    \ to a real\ncheckout, which is strictly better: the two agree today, and a real\
+    \ root is what the config\nseam expects.\n\n**Ordering.** Like the tickets clone\
+    \ this is backgrounded, so it cannot block `exec` past the\nreadiness deadline.\
+    \ Until it converges the gates fail exactly as they do today \u2014 no worse.\n\
+    \n**Enforcement is OUT OF SCOPE** (operator ruling, 2026-08-27). This change makes\
+    \ the attested\ngates work; it does NOT add a deploy-time check that refuses to\
+    \ promote a container whose code\nroot failed to resolve. A failed code clone\
+    \ therefore degrades to today's behaviour \u2014 the\ngates error \u2014 rather\
+    \ than blocking the deploy. That is a deliberate boundary, not an oversight:\n\
+    gating promotion on a backgrounded clone is what produced the rollback loop in\n\
+    `unfit-beneficial-whimbrel`, and re-introducing it here would trade one outage\
+    \ shape for\nanother.\n\n## Acceptance Criteria\n- [x] AC1: `review_plan` with\
+    \ default arguments against the deployed MCP server returns a plan-review verdict\
+    \ (PASS/BLOCK/INDETERMINATE) rather than a ref-resolution error.\n- [x] AC2: `verify_completion`\
+    \ with default arguments likewise returns a completion verdict.\n- [x] AC3: A\
+    \ PASS from AC1 persists a signed plan-review attestation.\n      OPERATOR DECISION\
+    \ 2026-08-28: `foreign_key` is ACCEPTED as sufficient; `certified` is\n      NOT\
+    \ required. Observed: the AC1 run returned `attestation.signed: true`, so the\n\
+    \      attestation IS produced and persisted; `plan_review_status(b928-3ab6-5985-417b)`\n\
+    \      through the deployed server then returns `verdict: foreign_key` because\
+    \ that\n      environment holds no op-cert public key and so cannot certify its\
+    \ own signature.\n      The original wording demanded `certified`; that is waived\
+    \ here. The missing public\n      key remains tracked separately (`dire-expectable-terr\u2026\
+    `, see Scope boundaries).\n- [x] AC4: The deployed container exposes a git object\
+    \ DB for the repo root reachable by the gate ops (a real clone at the repo root,\
+    \ or an explicit `REBAR_ROOT` pointing at one), verified by `git -C <root> rev-parse\
+    \ origin/main` succeeding inside the container.\n\n## Definition of Done\n- [x]\
+    \ DD1: AC1-AC3 demonstrated against a deployed MCP server.\n\n## Scope boundaries\
+    \ (operator rulings, 2026-08-27)\n\n- **Enforcement is out of scope.** No deploy-time\
+    \ refusal; see the Fix section.\n- **A shared op-cert is acceptable.** The server\
+    \ signing under the box's existing opcert\n  environment (ADR 0104 \xA73, Option\
+    \ A) is the accepted design. The separate observation that\n  the environment\
+    \ holds no public key, so `verify_signature` returns `foreign_key`, is tracked\n\
+    \  as `dire-expectable-terrapin` and is NOT in scope here.\n\n- [x] **LIVE VALIDATION\
+    \ \u2014 REQUIRED TO CLOSE.** `review_plan` called through the deployed endpoint\
+    \ returns a VERDICT rather than `cannot resolve ref ... in '.'`, and an attestation\
+    \ is persisted.\n      OPERATOR DECISION 2026-08-28: `scan_spec` is DROPPED from\
+    \ this criterion, and a\n      persisted-but-`foreign_key` attestation is accepted\
+    \ in place of a certified one.\n      Evidence recorded in the LIVE VALIDATION\
+    \ comment on this ticket: `review_plan`\n      and `verify_completion` both returned\
+    \ real verdicts (PASS) through\n      `https://rebar.solutions.navateam.com/mcp`\
+    \ against container\n      `rebar-mcp-2dbdcc8abe2c-8093`, with `attestation.signed:\
+    \ true`.\n      Evidence must be OBSERVED against the deployed server at\n   \
+    \   `https://rebar.solutions.navateam.com/mcp` and recorded in a ticket comment\
+    \ naming\n      the tool(s) called, the arguments, and the actual response. A\
+    \ passing local test is\n      NOT sufficient, and neither is a merged change:\
+    \ the container must have redeployed\n      and served the call. This exists because\
+    \ a fix here was previously reported complete\n      on the strength of a merge\
+    \ while the deployed behaviour was still broken."
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: '## Context
+
+    Contract removal is complete only when the entire planner/coordinator/adapter
+    path passes portable end-to-end scenarios and the architecture, operator behavior,
+    future adapter obligations, and rollback are durable.
+
+
+    ## Outcome
+
+    Run credential-free verified-fake Cloud/DC passes over the complete taxonomy,
+    finalize ADR 0103 and architecture/operator docs, and prove no removed production
+    path is reachable.
+
+
+    ## Plan
+
+    1. Build end-to-end fake Cloud/DC passes covering mixed success, transient recovery,
+    long-delay deferral, permanent ticket failure, auth/provider stop, fuse open/reset,
+    label-first create, restart, partial outcome, and delivery failure.
+
+    2. Run the route census and runtime poison checks with the end-to-end suite. Keep
+    bounded live probes optional operator evidence rather than a portable gate.
+
+    3. Finalize ADR 0103 with retry ownership, failure taxonomy, fuse, containment,
+    intentional deltas, expand/contract cutover, and rollback.
+
+    4. Document planner -> coordinator -> adapter dependency direction, versioned
+    output, operations guidance, and future adapter atomic-operation/retry obligations.
+
+    5. Verify rollback re-observes remote state and never deletes successful Jira
+    work.
+
+
+    ## Testing
+
+    The interface suite uses no external credentials and runs in every supported local/CI
+    environment. ADR/doc index and route-census tests are mandatory.
+
+
+    ## Acceptance Criteria
+
+    - [ ] Portable fake Cloud/DC suites cover every named outcome, fuse, create, restart,
+    partial, and delivery scenario.
+
+    - [ ] End-to-end tests require no external credential or CI-provider-specific
+    trigger.
+
+    - [ ] Route census and poison tests find no reachable removed fallback.
+
+    - [ ] ADR 0103 records ownership, taxonomy, fuse, containment, intentional deltas,
+    cutover, and no-delete rollback.
+
+    - [ ] Architecture/operator docs define versioned outcomes and future adapter
+    obligations.
+
+    - [ ] ADR numbering, documentation index, and architecture links pass.
+
+
+    ## Out of scope
+
+    Optional live probes do not gate completion.'
+  label: finding
+- input: "## Context / Problem\nThe store's event log grows without bound, so a periodic\
+    \ compaction pass must run on its own without anyone remembering to invoke it.\n\
+    \n## Approach\nAdd `.github/workflows/compact-store.yml`, a GitHub Actions workflow\
+    \ on a daily `schedule:` cron that checks out the tickets branch and runs `rebar\
+    \ compact`. The workflow is the trigger: nothing else invokes compaction.\n\n\
+    ## Scope\n- `.github/workflows/compact-store.yml` \u2014 the new scheduled workflow.\n\
+    - `src/rebar/_store/compact.py` \u2014 the `rebar compact` entry point the workflow\
+    \ calls.\n\n## Testing\n- Happy path: a unit test asserts the workflow's `schedule:`\
+    \ cron is daily and its job runs `rebar compact`.\n- Edge: a test asserts compaction\
+    \ on an already-compact store is a no-op.\n\n## Acceptance Criteria\n- [ ] `.github/workflows/compact-store.yml`\
+    \ exists with a daily cron and runs `rebar compact`.\n- [ ] Compaction runs unattended\
+    \ once a day, verified by the workflow's run history."
+  label: finding
+- input: "## Context / Problem\nEvery **attested-source** LLM gate operation fails\
+    \ on the LIVE MCP server\n(`https://rebar.solutions.navateam.com/mcp`, container\
+    \ `compose-mcp-1`, image\n`compose-mcp:9499312eb7b05dc3d75d39c23ab74a5b4afc26b5`).\n\
+    \nObserved 2026-08-27 against the live endpoint:\n\n```\nreview_plan       {\"\
+    ticket_id\": \"ruby-griffinish-goitered\"}\n  -> Error executing tool review_plan:\
+    \ cannot resolve ref 'origin/main' to a commit in '.'.\nreview_plan       {\"\
+    ticket_id\": \"...\", \"ref\": \"HEAD\"}\n  -> Error executing tool review_plan:\
+    \ cannot resolve ref 'HEAD' to a commit in '.'.\nverify_completion {\"ticket_id\"\
+    : \"...\"}\n  -> Error executing tool verify_completion: cannot resolve ref 'origin/main'\
+    \ to a commit in '.'.\nreview_plan       {\"ticket_id\": \"...\", \"source\":\
+    \ \"local\"}   -> RUNS (P1/P2/P3 emitted)\n```\n\n## Mechanism\nThe container's\
+    \ repo root has **no git metadata at all**. Verified in-container:\n\n```\n$ docker\
+    \ exec compose-mcp-1 sh -c 'pwd; ls -d /app/.git; git -C /app rev-parse origin/main'\n\
+    /app\nls: cannot access '/app/.git': No such file or directory\nfatal: not a git\
+    \ repository (or any of the parent directories): .git\n```\n\n`docker inspect`\
+    \ confirms `WorkingDir=/app`, `Cmd=[\"rebar-mcp\"]`, and the env carries\n`REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets`\
+    \ but **no `REBAR_ROOT`** \u2014 so the repo root\nresolves to the cwd `/app`,\
+    \ which is a plain source copy, not a work tree. The image ships\n`/app/.deployed_ref`\
+    \ (`d4a0a2a44 (feat/gerrit-ci-verified-gate)`) as a text marker instead of a\n\
+    real clone. `source=attested` pins a snapshot at `ref` against that root's object\
+    \ DB, so ref\nresolution fails before any LLM call.\n\nThe tracker itself is unaffected:\
+    \ it is an out-of-tree clone reached via `REBAR_TRACKER_DIR`,\nso all non-git\
+    \ tools (create/show/search/list/comment/edit/link/claim/transition) work.\n\n\
+    ## Impact\n`attested` is the DEFAULT source for both gate ops, and a `local`-source\
+    \ verdict is never\nsigned. So **no plan-review or completion attestation can\
+    \ be earned through the live MCP\nserver**, and consequently no `task`/`story`/`epic`\
+    \ can be closed through it while\n`verify.require_plan_review_for_close` is on\
+    \ \u2014 the only remaining path is `--force`, which\nagents are prohibited from\
+    \ using. Reproduced live: probe task `ruby-griffinish-goitered`\n(`c67b-ece5-707e-460e`)\
+    \ is stuck `in_progress` with\n`plan-review close gate: unsigned: no certified\
+    \ plan-review attestation`, and the prescribed\nremedy (`review-plan`) is the\
+    \ very operation that cannot run.\n\n## Reproduction\n1. Call `review_plan` on\
+    \ any claimable ticket through the live MCP endpoint with default args.\n2. Observe\
+    \ `cannot resolve ref 'origin/main' to a commit in '.'`.\n3. Repeat with `source:\
+    \ \"local\"` and observe it runs.\n\n## Fix\n\nProvision a real repository for\
+    \ the gate ops to resolve against, and point the repo root at it.\n\n**Why not\
+    \ the obvious alternatives.** Shipping `.git` in the image (removing the\n`.dockerignore:5`\
+    \ exclusion) bloats every layer and pins a main that goes stale the moment the\n\
+    image is built \u2014 the gates need a ref that tracks main, not a frozen one.\
+    \ Re-using the tickets\nclone at `REBAR_TRACKER_DIR` is tempting since `MCP_TICKETS_URL`\
+    \ is the SAME repository, but it\nconflates the code root with the tracker: two\
+    \ different lifetimes, two different refspecs, and\na reader can no longer tell\
+    \ which one a failure came from.\n\n**Shape.** `provision_store` gains a sibling\
+    \ that clones the CODE side into\n`/var/gerrit/site/mcp-code` \u2014 `--filter=blob:none\
+    \ --single-branch --branch main`, so it is a\nblobless clone that fetches objects\
+    \ on demand rather than materializing the history \u2014 and\n`REBAR_ROOT` is\
+    \ set to it (compose env + `mcp_run_new`, which must stay in parity). That root\n\
+    carries `rebar.toml`, so config resolution moves from the source copy at `/app`\
+    \ to a real\ncheckout, which is strictly better: the two agree today, and a real\
+    \ root is what the config\nseam expects.\n\n**Ordering.** Like the tickets clone\
+    \ this is backgrounded, so it cannot block `exec` past the\nreadiness deadline.\
+    \ Until it converges the gates fail exactly as they do today \u2014 no worse.\n\
+    \n**Enforcement is OUT OF SCOPE** (operator ruling, 2026-08-27). This change makes\
+    \ the attested\ngates work; it does NOT add a deploy-time check that refuses to\
+    \ promote a container whose code\nroot failed to resolve. A failed code clone\
+    \ therefore degrades to today's behaviour \u2014 the\ngates error \u2014 rather\
+    \ than blocking the deploy. That is a deliberate boundary, not an oversight:\n\
+    gating promotion on a backgrounded clone is what produced the rollback loop in\n\
+    `unfit-beneficial-whimbrel`, and re-introducing it here would trade one outage\
+    \ shape for\nanother.\n\n## Acceptance Criteria\n- [x] AC1: `review_plan` with\
+    \ default arguments against the deployed MCP server returns a plan-review verdict\
+    \ (PASS/BLOCK/INDETERMINATE) rather than a ref-resolution error.\n- [x] AC2: `verify_completion`\
+    \ with default arguments likewise returns a completion verdict.\n- [x] AC3: A\
+    \ PASS from AC1 persists a signed plan-review attestation.\n      OPERATOR DECISION\
+    \ 2026-08-28: `foreign_key` is ACCEPTED as sufficient; `certified` is\n      NOT\
+    \ required. Observed: the AC1 run returned `attestation.signed: true`, so the\n\
+    \      attestation IS produced and persisted; `plan_review_status(b928-3ab6-5985-417b)`\n\
+    \      through the deployed server then returns `verdict: foreign_key` because\
+    \ that\n      environment holds no op-cert public key and so cannot certify its\
+    \ own signature.\n      The original wording demanded `certified`; that is waived\
+    \ here. The missing public\n      key remains tracked separately (`dire-expectable-terr\u2026\
+    `, see Scope boundaries).\n- [x] AC4: The deployed container exposes a git object\
+    \ DB for the repo root reachable by the gate ops (a real clone at the repo root,\
+    \ or an explicit `REBAR_ROOT` pointing at one), verified by `git -C <root> rev-parse\
+    \ origin/main` succeeding inside the container.\n\n## Definition of Done\n- [x]\
+    \ DD1: AC1-AC3 demonstrated against a deployed MCP server.\n\n## Scope boundaries\
+    \ (operator rulings, 2026-08-27)\n\n- **Enforcement is out of scope.** No deploy-time\
+    \ refusal; see the Fix section.\n- **A shared op-cert is acceptable.** The server\
+    \ signing under the box's existing opcert\n  environment (ADR 0104 \xA73, Option\
+    \ A) is the accepted design. The separate observation that\n  the environment\
+    \ holds no public key, so `verify_signature` returns `foreign_key`, is tracked\n\
+    \  as `dire-expectable-terrapin` and is NOT in scope here.\n\n- [x] **LIVE VALIDATION\
+    \ \u2014 REQUIRED TO CLOSE.** `review_plan` called through the deployed endpoint\
+    \ returns a VERDICT rather than `cannot resolve ref ... in '.'`, and an attestation\
+    \ is persisted.\n      OPERATOR DECISION 2026-08-28: `scan_spec` is DROPPED from\
+    \ this criterion, and a\n      persisted-but-`foreign_key` attestation is accepted\
+    \ in place of a certified one.\n      Evidence recorded in the LIVE VALIDATION\
+    \ comment on this ticket: `review_plan`\n      and `verify_completion` both returned\
+    \ real verdicts (PASS) through\n      `https://rebar.solutions.navateam.com/mcp`\
+    \ against container\n      `rebar-mcp-2dbdcc8abe2c-8093`, with `attestation.signed:\
+    \ true`.\n      Evidence must be OBSERVED against the deployed server at\n   \
+    \   `https://rebar.solutions.navateam.com/mcp` and recorded in a ticket comment\
+    \ naming\n      the tool(s) called, the arguments, and the actual response. A\
+    \ passing local test is\n      NOT sufficient, and neither is a merged change:\
+    \ the container must have redeployed\n      and served the call. This exists because\
+    \ a fix here was previously reported complete\n      on the strength of a merge\
+    \ while the deployed behaviour was still broken."
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-E5
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

@@ -1,0 +1,848 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: T5d
+  expect: finding
+  id: plan-review-T5d-fire-0
+  input: '## Context / Problem
+
+    The workflow editor currently presents authored YAML/BPMN configuration without
+    a trustworthy view of the effective criteria policy derived from built-ins plus
+    project overlays. RP-06 adds an immutable derived policy and an explicit project
+    applicability rule; exposing derived state as if it were editable topology would
+    create a second policy authority and make misconfiguration difficult to diagnose.
+
+
+    ## Approach
+
+    Extend the workflow-editor server to obtain the S1 `CriteriaSnapshot` for the
+    selected repository and expose a narrow, read-only Effective Policy view. Keep
+    Authored Workflow as the only editable YAML/BPMN topology. The effective view
+    shows snapshot digest/source, criterion id, gate, execution tier, effective posture/threshold,
+    applicability summary, enabled/disabled state, and a concise derived reason. It
+    never serializes edits back into workflow or project routing.
+
+
+    At authoring/save validation, a new `project.*` code-review LLM criterion must
+    have a non-empty list of non-empty repository-relative `applies_to` globs. The
+    editor rejects an empty/missing selector with the exact `["**"]` repository-wide
+    remedy. Built-in entries, project DET criteria, and plan-review criteria retain
+    their distinct trigger authoring controls and are not forced through this field.
+
+
+    Keep stored execution trace and per-call debugging detail out of the editor response.
+    The Effective Policy panel is configuration provenance, not a review-result/status
+    viewer. Repository or validation errors fail the save or mark the effective view
+    unavailable with a located, actionable message; they do not silently display packaged
+    defaults as effective policy.
+
+
+    ## Rationale and Compatibility
+
+    A read-only projection makes the centralized pattern visible while preserving
+    one authored source of topology. Older workflow files remain readable. The UI
+    and server add fields without rewriting saved YAML/BPMN, and rollback removes
+    the panel/endpoint while leaving authored artifacts unchanged.
+
+
+    ## Testing
+
+    Use server contract tests with real overlay/snapshot compilation and focused editor
+    DOM/state tests. The oracle is the serialized authored document remaining byte-equivalent
+    while the read-only view changes with project policy. Negative controls cover
+    built-in empty trigger semantics, project DET, and plan review. Error fixtures
+    prove unavailable policy is explicit and save validation is fail-loud.
+
+
+    ## Acceptance Criteria
+
+    - [ ] The editor renders distinct Authored Workflow and read-only Effective Policy
+    sections, and no action in the effective section mutates or serializes YAML/BPMN.
+
+    - [ ] Effective Policy data comes from the repository-bound `CriteriaSnapshot`
+    and displays digest/source plus concise criterion gate, tier, posture, applicability,
+    and enabled/disabled provenance.
+
+    - [ ] Creating or saving a project code-review LLM criterion with missing, empty,
+    non-list, or blank globs is refused with the criterion location and `use ["**"]
+    for repository-wide` remedy.
+
+    - [ ] Built-in secondary triggers, project DET selector controls, and plan-review
+    `applies_at`/`trigger` authoring remain valid negative controls and are not subjected
+    to the project-LLM glob rule.
+
+    - [ ] A snapshot load/validation failure marks Effective Policy unavailable with
+    an actionable located error and never substitutes packaged defaults or permits
+    an invalid save.
+
+    - [ ] Server and editor tests prove policy changes update only the derived view
+    while authored workflow round-trips byte-equivalently.
+
+    - [ ] Editor payloads contain no per-unit discovery trace, raw prompt/context
+    body, provider response, or secret.'
+- corpus: rebar
+  criterion: T5d
+  expect: finding
+  id: plan-review-T5d-fire-1
+  input: '## Context / Problem
+
+    The workflow editor currently presents authored YAML/BPMN configuration without
+    a trustworthy view of the effective criteria policy derived from built-ins plus
+    project overlays. RP-06 adds an immutable derived policy and an explicit project
+    applicability rule; exposing derived state as if it were editable topology would
+    create a second policy authority and make misconfiguration difficult to diagnose.
+
+
+    ## Approach
+
+    Extend the workflow-editor server to obtain the S1 `CriteriaSnapshot` for the
+    selected repository and expose a narrow, read-only Effective Policy view. Keep
+    Authored Workflow as the only editable YAML/BPMN topology. The effective view
+    shows snapshot digest/source, criterion id, gate, execution tier, effective posture/threshold,
+    applicability summary, enabled/disabled state, and a concise derived reason. It
+    never serializes edits back into workflow or project routing.
+
+
+    At authoring/save validation, a new `project.*` code-review LLM criterion must
+    have a non-empty list of non-empty repository-relative `applies_to` globs. The
+    editor rejects an empty/missing selector with the exact `["**"]` repository-wide
+    remedy. Built-in entries, project DET criteria, and plan-review criteria retain
+    their distinct trigger authoring controls and are not forced through this field.
+
+
+    Keep stored execution trace and per-call debugging detail out of the editor response.
+    The Effective Policy panel is configuration provenance, not a review-result/status
+    viewer. Repository or validation errors fail the save or mark the effective view
+    unavailable with a located, actionable message; they do not silently display packaged
+    defaults as effective policy.
+
+
+    ## Rationale and Compatibility
+
+    A read-only projection makes the centralized pattern visible while preserving
+    one authored source of topology. Older workflow files remain readable. The UI
+    and server add fields without rewriting saved YAML/BPMN, and rollback removes
+    the panel/endpoint while leaving authored artifacts unchanged.
+
+
+    ## Testing
+
+    Use server contract tests with real overlay/snapshot compilation and focused editor
+    DOM/state tests. The oracle is the serialized authored document remaining byte-equivalent
+    while the read-only view changes with project policy. Negative controls cover
+    built-in empty trigger semantics, project DET, and plan review. Error fixtures
+    prove unavailable policy is explicit and save validation is fail-loud.
+
+
+    ## Acceptance Criteria
+
+    - [x] The editor renders distinct Authored Workflow and read-only Effective Policy
+    sections, and no action in the effective section mutates or serializes YAML/BPMN.
+
+    - [x] Effective Policy data comes from the repository-bound `CriteriaSnapshot`
+    and displays digest/source plus concise criterion gate, tier, posture, applicability,
+    and enabled/disabled provenance.
+
+    - [x] Creating or saving a project code-review LLM criterion with missing, empty,
+    non-list, or blank globs is refused with the criterion location and `use ["**"]
+    for repository-wide` remedy.
+
+    - [x] Built-in secondary triggers, project DET selector controls, and plan-review
+    `applies_at`/`trigger` authoring remain valid negative controls and are not subjected
+    to the project-LLM glob rule.
+
+    - [x] A snapshot load/validation failure marks Effective Policy unavailable with
+    an actionable located error and never substitutes packaged defaults or permits
+    an invalid save.
+
+    - [x] Server and editor tests prove policy changes update only the derived view
+    while authored workflow round-trips byte-equivalently.
+
+    - [x] Editor payloads contain no per-unit discovery trace, raw prompt/context
+    body, provider response, or secret.'
+- corpus: rebar
+  criterion: T5d
+  expect: finding
+  id: plan-review-T5d-fire-2
+  input: "## Why\n\nEpic 3156 required a **visual-editor UX** for authoring project\
+    \ criteria (story 6e31). That UX is\nBROKEN for the primary case \u2014 authoring\
+    \ a NET-NEW criterion \u2014 so the deliverable's user experience\nfails a round\
+    \ trip:\n\n- A project criterion MUST be `project.<name>`-prefixed (the overlay\
+    \ namespace that guarantees a\n  project criterion can never rebind a built-in\
+    \ \u2014 ef7e/ADR 0015).\n- Its rubric is a prompt stored at `.rebar/prompts/plan-review-<id>.md`,\
+    \ and `get_prompt` /\n  `create_prompt` derive that filename from the criterion\
+    \ id as `plan-review-<id>`.\n- But `prompt_library._validate_id` \u2192 `prompt_authoring._valid_id`\
+    \ enforces `[A-Za-z0-9][A-Za-z0-9-]*`\n  \u2014 **no `.`** (a filename-safety\
+    \ rule: a `.` would let an id masquerade as a `<id>.<variant>.md`\n  overlay and\
+    \ enables traversal). So `plan-review-project.foo` is rejected at author time,\
+    \ AND\n  `.rebar/prompts/` would mis-read a dotted stem as a variant overlay.\n\
+    \nNet effect: the editor can RE-TUNE a built-in (id `F1`) but CANNOT author a\
+    \ net-new `project.<name>`\ncriterion end-to-end \u2014 the exact thing project-supplied\
+    \ criteria exist for. 6e31 currently\nvalidate-then-rollback-rejects the attempt\
+    \ with a clean 400, so it never persists a broken overlay,\nbut the UX still dead-ends.\
+    \ This must be remediated for the editor UX to actually work.\n\n## What \u2014\
+    \ decouple the logical id from the physical filename (the Semgrep/npm/Python pattern)\n\
+    \nPopular, actively-maintained tools NEVER force a namespaced logical id to also\
+    \ be a raw filename;\nthey decouple via ONE deterministic mapping:\n- **Semgrep**:\
+    \ the dotted rule `id` is a metadata field, decoupled from the file name.\n- **npm**:\
+    \ `@scope/name` \u2192 a deterministic path `node_modules/@scope/name/`.\n- **Python**:\
+    \ `a.b.c` \u2192 `a/b/c.py` (dots \u2192 path separators).\n\nApply the same here.\
+    \ The criterion id stays `project.<name>` (dotted) EVERYWHERE it matters\n(overlay\
+    \ key, `activate`, routing, no-rebind collision check, the `.`\u2192`_` workflow-output-key\n\
+    sanitization). Only the RUBRIC's physical storage is decoupled, via a SINGLE canonical\
+    \ function:\n\n- Add `criterion_prompt_id(criterion_id) -> str` (one source of\
+    \ truth): a built-in `<id>` \u2192\n  `plan-review-<id>` (unchanged); a `project.<name>`\
+    \ \u2192 `plan-review-project-<name>` (`.`\u2192`-`), a\n  filesystem-safe, `_valid_id`-valid\
+    \ prompt id. Injective because a project name is constrained to\n  a DOT-FREE\
+    \ charset (exactly one namespace dot) \u2014 validate this in `_validate_routing_entry`\
+    \ /\n  the namespace check so `project.a-b` and any dotted variant can never collide.\n\
+    - Route BOTH sides through it so they can never diverge:\n  - descriptor resolution:\
+    \ `criteria.model.build_descriptor` / `plan_review.registry` resolve a\n    project\
+    \ criterion's rubric via `get_prompt(criterion_prompt_id(cid), repo_root=...)`\
+    \ (not the\n    raw `plan-review-<cid>`);\n  - editor authoring: `criterion_preview.author_criterion_overlay`\
+    \ writes the rubric via\n    `create_prompt(criterion_prompt_id(cid), ...)` (now\
+    \ a valid id \u2192 passes `_valid_id`), then the\n    atomic overlay routing+activate\
+    \ write keyed by the dotted `project.<name>` id.\n- `enumerate_library` / `_user_prompt_ids`:\
+    \ a `plan-review-project-<name>.md` stem has no `.`, so it\n  is enumerated normally\
+    \ (no variant-overlay mis-read). No change needed beyond using the sanitized\n\
+    \  filename.\n\n## Scope\n\n- Files: `src/rebar/llm/criteria/model.py` (or a small\
+    \ shared `ids.py`) \u2014 `criterion_prompt_id`;\n  `src/rebar/llm/plan_review/registry.py`\
+    \ + `src/rebar/llm/criteria/model.py` (descriptor rubric\n  resolution); `src/rebar/llm/workflow/criterion_preview.py`\
+    \ (authoring writes via the mapping);\n  `src/rebar/llm/criteria/overlay.py` or\
+    \ `_validate_routing_entry` (constrain project name to\n  dot-free); the editor\
+    \ UI (`editor_assets/src/rebarProvider.jsx`) so the authoring form derives +\n\
+    \  shows the resulting criterion id.\n- **No back-compat burden (just-shipped\
+    \ feature):** project criteria shipped in ef7e days ago with\n  no external data/users,\
+    \ so backward compatibility is NOT a requirement \u2014 the sanitized form is\n\
+    \  simply THE form. One clean code path (no dotted-`get_prompt` fallback). The\
+    \ ef7e/overlay TEST\n  FIXTURES that hand-place a dotted `plan-review-project.no_print.md`\
+    \ are just rewritten to the\n  sanitized `project.no-print` \u2192 `plan-review-project-no-print.md`\
+    \ \u2014 a free edit, not a migration.\n  Built-in prompt-id resolution is unchanged\
+    \ only because there is no reason to touch it, not for\n  compat.\n- **Project-name\
+    \ charset (RESOLVED):** a project criterion name follows the SAME rule as any\
+    \ prompt\n  id \u2014 `[A-Za-z0-9][A-Za-z0-9-]*` (alnum + dash; NO dots, NO underscores)\
+    \ \u2014 with exactly ONE\n  namespace dot in the full id (`project.<name>`).\
+    \ This makes `criterion_prompt_id` a total,\n  injective, filesystem-safe map\
+    \ (`.`\u2192`-` on the single namespace dot). A name containing `.` or\n  `_`\
+    \ (or otherwise not matching the charset) is a LOCATED error at overlay load.\n\
+    \n## Acceptance Criteria\n\n- [ ] A single canonical `criterion_prompt_id(criterion_id)`\
+    \ maps `project.<name>` \u2192\n      `plan-review-project-<name>` (filesystem-safe,\
+    \ passes `_valid_id`) and a built-in `<id>` \u2192\n      `plan-review-<id>` (unchanged);\
+    \ it is the ONLY id\u2192prompt-filename derivation, used by BOTH\n      descriptor\
+    \ resolution and editor authoring.\n- [ ] A net-new `project.<name>` criterion\
+    \ can be authored end-to-end via the editor\n      (`create_prompt` no longer\
+    \ rejects it) AND then loaded/run by the gate (`load_criteria`\n      resolves\
+    \ its rubric) \u2014 a test proves the full author\u2192activate\u2192load\u2192\
+    run round trip.\n- [ ] Project names are constrained to a dot-free charset (one\
+    \ namespace dot) so the id\u2192prompt-id\n      map is injective; a name with\
+    \ a `.` is a located error.\n- [ ] `criterion_prompt_id` is total + injective:\
+    \ a built-in `<id>` \u2192 `plan-review-<id>` and a\n      `project.<name>` \u2192\
+    \ ONLY `plan-review-project-<name>` (no dotted fallback); a dotted/underscored\n\
+    \      project name is a located error. (Back-compat is not a requirement \u2014\
+    \ one clean path.)\n- [ ] The editor authoring form surfaces the resulting criterion\
+    \ id (`project.<name>`) so the user\n      sees what will be created; a net-new\
+    \ author no longer dead-ends at a 400.\n\n\n## The dotted criterion id flows through\
+    \ explicitly (remediation, run 2)\n\nThe mapping `criterion_prompt_id` is ONE-WAY\
+    \ (`project.foo` \u2192 `plan-review-project-foo`); it is NOT\nreversible (a name\
+    \ may contain dashes, so `plan-review-project-foo-bar` can't be un-split to a\
+    \ unique\ndotted id). Therefore the DOTTED criterion id (`project.foo`) is the\
+    \ primary key and must be carried\nexplicitly \u2014 never reverse-derived from\
+    \ the sanitized prompt id:\n- The editor authoring form has an explicit **criterion-id\
+    \ field** whose value IS the dotted id\n  (`project.<name>`); the `/library/create`\
+    \ POST body carries BOTH `id` = the dotted criterion id AND\n  the `routing` object.\
+    \ (Today `_library_create` strips `plan-review-` off the prompt id to recover\n\
+    \  `cid` \u2014 that path only works for built-ins; for a project criterion the\
+    \ dotted id comes from the\n  form field, not from un-stripping.)\n- `author_criterion_overlay(criterion_id,\
+    \ routing, *, repo_root)` takes the DOTTED `criterion_id` as\n  its primary argument.\
+    \ It computes `prompt_id = criterion_prompt_id(criterion_id)` for the\n  `create_prompt(prompt_id,\
+    \ rubric)` write, and keys the overlay `plan_review[criterion_id]` +\n  `activate`\
+    \ entries by the DOTTED id. So the sanitized prompt filename is derived once,\
+    \ forward-only;\n  the dotted id is authoritative for the overlay + activation.\n\
+    - `write_criterion_overlay(repo_root, criterion_id, routing)` likewise keys by\
+    \ the dotted id.\n\n## Acceptance Criteria (remediation addition, run 2)\n\n-\
+    \ [ ] The dotted criterion id (`project.<name>`) is passed EXPLICITLY through\
+    \ authoring (the editor\n      form's id field \u2192 `/library/create` body \u2192\
+    \ `author_criterion_overlay(criterion_id=...)`), never\n      reverse-derived\
+    \ from the sanitized prompt id; the overlay entry + `activate` are keyed by the\n\
+    \      dotted id while the rubric is written at `criterion_prompt_id(criterion_id)`.\n"
+- corpus: rebar
+  criterion: T5d
+  expect: finding
+  id: plan-review-T5d-fire-3
+  input: "## Why\n\n\"Surface the same tools we use\" includes visual authoring. The\
+    \ existing editor already enumerates\ncriteria (`prompt_library.enumerate_library`,\
+    \ packaged + `.rebar/prompts/`), authors criterion\nprompts (`create_prompt(kind=criterion)`\
+    \ via the `/library/create` route), and edits routing in\nworkflow YAML \u2014\
+    \ so authoring is incremental. The one genuinely net-new piece is a **live\nmust-fire/must-not-fire\
+    \ preview**: the editor has NO prompt-execution endpoint today (its `POST`\nset\
+    \ is `/save`, `/prompt/save`, `/validate`, `/library/create`). This is a structurally\n\
+    independent deliverable (its own endpoint + spike).\n\n## What\n\n- Extend the\
+    \ editor to author a project criterion end-to-end: prompt + a **routing-fields\
+    \ form**\n  (exec, applies_at/applies_to, block_threshold, default_posture/blocking_enabled,\
+    \ fail_mode) that\n  writes the `.rebar/` overlay + activation, reusing `create_prompt`/`update_prompt`.\n\
+    - New **`POST /criterion/preview`** endpoint (synchronous): `{criterion_id | inline(prompt+routing),\n\
+    \  fixture}` \u2192 `{verdict: \"fire\"|\"no-fire\", finding?: <findings.py shape>,\
+    \ rationale: str}`,\n  reusing the story `#3` per-criterion eval runner behind\
+    \ the `agents` extra + credentials, with a\n  **configurable timeout (default\
+    \ 60s)**.\n- **Spike gate (resolve before committing UI):** define the pass/fail\
+    \ \u2014 if a single sync preview\n  does not return within the timeout on the\
+    \ reference model, fall back to an **async job+poll**\n  shape (define the job\
+    \ id + poll endpoint) rather than blocking the editor's `ThreadingHTTPServer`\n\
+    \  handler. Do not leave the sync-vs-async decision unspecified.\n\n## Scope\n\
+    \n- Files: `src/rebar/llm/workflow/editor.py` (routes), `editor_assets/` (form\
+    \ + preview UI),\n  `prompt_library.py` (authoring reuse).\n- Depends on story\
+    \ `#1` (overlay/activation to author into) and story `#3` (the runner the preview\n\
+    \  reuses).\n- Reuse: `enumerate_library`, `create_prompt`/`update_prompt`, the\
+    \ `/library/create` route.\n\n## Acceptance Criteria\n\n- [ ] The editor authors\
+    \ a project criterion: prompt + routing-fields form writing the `.rebar/`\n  \
+    \    overlay + `activate` list (reusing `create_prompt`/`update_prompt`).\n- [\
+    \ ] `POST /criterion/preview` runs a live must-fire/must-not-fire preview with\
+    \ the defined\n      request/response contract, configurable timeout (default\
+    \ 60s), reusing the eval runner.\n- [ ] The spike gate is resolved: a defined\
+    \ pass/fail threshold and a concrete async job+poll\n      fallback if sync execution\
+    \ is infeasible in the editor's HTTP handler.\n- [ ] Authoring + preview work\
+    \ for both an LLM criterion and a DET invariant.\n\n\n## Preview dispatch, entry\
+    \ point & atomic authoring (remediation, run 1)\n\n### Preview entry point \u2014\
+    \ reuse the LANDED runners (clears the reuse-claim blocker)\nBoth halves now exist\
+    \ on `main`:\n- **LLM criterion** (`exec: 1-TURN`/`AGENT`): the preview runs it\
+    \ as its Pass-1 finder over the\n  fixture text via `eval_solver.run_case(prompt_id,\
+    \ {\"input\": <fixture>}, runner=\u2026, repo_root=\u2026)`\n  (the criterion\
+    \ arm added in story 55b8, which wraps `passes.pass1_chunk`). Fire \u21D4 non-empty\n\
+    \  `findings`.\n- **DET invariant** (`exec: DET`): the preview resolves the criterion's\
+    \ `detector` selector and runs\n  the grounding scan the way `plan_review/det_invariants._run_one`\
+    \ does (story 7f0d) \u2014 a match \u21D2\n  fire, an abstain \u21D2 reported\
+    \ per `fail_mode`. (The preview scans the fixture content, not a ticket\n  `file_impact`,\
+    \ since it is an isolated must-fire/must-not-fire probe.)\n\n### `POST /criterion/preview`\
+    \ dispatch (clears the LLM-vs-DET dispatch blocker)\nThe endpoint reads the criterion's\
+    \ `exec` DIRECTLY from its routing/descriptor (NOT `exec_tier`,\nwhich has no\
+    \ DET arm \u2014 per 7f0d): `exec == \"DET\"` \u2192 the DET path above; else\
+    \ \u2192 the LLM path. Request\n`{criterion_id | inline(prompt+routing), fixture:{input,\
+    \ expect?}}` \u2192 response `{verdict:\n\"fire\"|\"no-fire\", finding?: <findings.py\
+    \ finding shape>, rationale}`. A criterion that needs a\ngraph/log (container/ISF)\
+    \ \u2192 a clear 4xx (not runnable as an inline preview). Synchronous with a\n\
+    configurable timeout (default 60s); the spike-gate fallback (async job+poll) applies\
+    \ only if a\nsingle sync preview exceeds the timeout on the reference model.\n\
+    \n### Atomic dual-write for routing-fields authoring (clears G6 atomic blocker)\n\
+    Authoring a project criterion touches TWO files: `.rebar/prompts/<id>.md` (the\
+    \ rubric, via\n`create_prompt` \u2014 already atomic) and the `.rebar/criteria_routing.json`\
+    \ overlay routing entry.\nCoordination: the criterion is only ACTIVE when it is\
+    \ in BOTH the routing map AND the `activate`\nlist (ef7e semantics). The write\
+    \ order is prompt-first, then a single atomic JSON overlay write\n(temp-file +\
+    \ `os.replace`, mirroring `prompt_authoring._atomic_write`). If the overlay write\
+    \ fails,\nthe orphaned `.rebar/prompts/<id>.md` is harmless (a prompt with no\
+    \ active routing never runs). The\noverlay write itself is atomic (no half-written\
+    \ JSON), and adding the id to `activate` is part of the\nSAME overlay write \u2014\
+    \ so activation is all-or-nothing. No partial-active state is reachable.\n\n##\
+    \ Acceptance Criteria (remediation additions)\n\n- [ ] `POST /criterion/preview`\
+    \ dispatches on `exec` read directly (DET \u2192 grounding scan; LLM \u2192\n\
+    \      `eval_solver.run_case` criterion arm) and returns `{verdict, finding?,\
+    \ rationale}` for BOTH an\n      LLM criterion and a DET invariant; container/ISF\
+    \ \u2192 a clear 4xx.\n- [ ] Routing-fields authoring writes the prompt then a\
+    \ single ATOMIC overlay write (temp+replace);\n      a failed overlay write leaves\
+    \ no active criterion (activation requires the `activate` entry,\n      written\
+    \ atomically with the routing entry).\n"
+- corpus: rebar
+  criterion: T5d
+  expect: pass
+  id: plan-review-T5d-no_fire-0
+  input: '## Context
+
+
+    The project has audience guidance distributed across AGENTS.md, CONTRIBUTING.md,
+    docs/README.md, and individual documents. It lacks one current-state policy that
+    distinguishes durable records, maintained documentation, shipped help, comments,
+    generated artifacts, and protected evidence. The audit ticket minimum-rainy-fawn
+    approved F01 and rejected broad prose cleanup and general prose validation.
+
+
+    ## Current enforcement and history
+
+
+    Ticket forworn-zanyish-narwhale added generated markers, two contributor tables
+    in docs/README.md, and tests/unit/test_generated_surface_markers.py after repeated
+    changes edited derived outputs instead of their sources. The test owns the GENERATED
+    and GATED_HAND_AUTHORED collections and parses the tables from docs/README.md.
+    CONTRIBUTING.md points to the existing landing-page anchor. This change preserves
+    both collections, every catalog row, and all marker checks. It relocates the catalog
+    so the landing page can remain a navigation surface.
+
+
+    ## Plan
+
+
+    Add docs/documentation-policy.md as the current policy for tickets, ADRs, internal
+    documentation, external documentation, shipped help, comments, generated artifacts,
+    and protected evidence. Define the audience, purpose, lifecycle, canonical source,
+    use of citations, correction method, exclusions, and examples for each category.
+    Include the approved punctuation, paragraph-shape, diction, and formal-voice rules
+    for new or edited maintained text. State that ticket events remain append-only
+    and that ADR decision substance is preserved through annotations, errata, supersession,
+    or replacement ADRs.
+
+
+    Add docs/generated-artifacts.md as the contributor inventory. Move the existing
+    generated and parity-gated tables from docs/README.md without changing their rows.
+    Update the existing marker test to parse the new inventory while preserving GENERATED
+    and GATED_HAND_AUTHORED. Replace the old CONTRIBUTING.md anchor and add concise
+    policy pointers in AGENTS.md, CONTRIBUTING.md, and docs/README.md.
+
+
+    ## Exclusions
+
+
+    - No edits to generated outputs, ADR decision substance, ticket events, historical
+    evidence, protected evidence, or commit history.
+
+    - No repository-wide prose rewrite.
+
+    - No prose or comment validator.
+
+    - No F05 ownership descriptor, generated catalog generator, or new ADR.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] docs/documentation-policy.md defines all eight documentation categories
+    and gives each category an audience, purpose, lifecycle, canonical source, citation
+    rule, correction method, exclusions, and at least one example.
+
+    - [ ] The policy states the approved punctuation, paragraph-shape, diction, and
+    formal-voice rules for new or edited maintained text.
+
+    - [ ] The policy requires append-only ticket correction and substance-preserving
+    ADR correction through annotations, errata, supersession, or a replacement ADR.
+
+    - [ ] docs/generated-artifacts.md contains the same generated and parity-gated
+    table row sets that docs/README.md contained before this change.
+
+    - [ ] tests/unit/test_generated_surface_markers.py retains the existing GENERATED
+    and GATED_HAND_AUTHORED values and passes while reading docs/generated-artifacts.md.
+
+    - [ ] AGENTS.md, CONTRIBUTING.md, and docs/README.md each link to docs/documentation-policy.md.
+
+    - [ ] CONTRIBUTING.md links to docs/generated-artifacts.md and no longer points
+    to the removed docs/README.md generated-artifacts anchor.
+
+    - [ ] The targeted marker test, make lint, make typecheck, and the project test
+    gate pass.'
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: '## Context / Problem
+
+    The workflow editor currently presents authored YAML/BPMN configuration without
+    a trustworthy view of the effective criteria policy derived from built-ins plus
+    project overlays. RP-06 adds an immutable derived policy and an explicit project
+    applicability rule; exposing derived state as if it were editable topology would
+    create a second policy authority and make misconfiguration difficult to diagnose.
+
+
+    ## Approach
+
+    Extend the workflow-editor server to obtain the S1 `CriteriaSnapshot` for the
+    selected repository and expose a narrow, read-only Effective Policy view. Keep
+    Authored Workflow as the only editable YAML/BPMN topology. The effective view
+    shows snapshot digest/source, criterion id, gate, execution tier, effective posture/threshold,
+    applicability summary, enabled/disabled state, and a concise derived reason. It
+    never serializes edits back into workflow or project routing.
+
+
+    At authoring/save validation, a new `project.*` code-review LLM criterion must
+    have a non-empty list of non-empty repository-relative `applies_to` globs. The
+    editor rejects an empty/missing selector with the exact `["**"]` repository-wide
+    remedy. Built-in entries, project DET criteria, and plan-review criteria retain
+    their distinct trigger authoring controls and are not forced through this field.
+
+
+    Keep stored execution trace and per-call debugging detail out of the editor response.
+    The Effective Policy panel is configuration provenance, not a review-result/status
+    viewer. Repository or validation errors fail the save or mark the effective view
+    unavailable with a located, actionable message; they do not silently display packaged
+    defaults as effective policy.
+
+
+    ## Rationale and Compatibility
+
+    A read-only projection makes the centralized pattern visible while preserving
+    one authored source of topology. Older workflow files remain readable. The UI
+    and server add fields without rewriting saved YAML/BPMN, and rollback removes
+    the panel/endpoint while leaving authored artifacts unchanged.
+
+
+    ## Testing
+
+    Use server contract tests with real overlay/snapshot compilation and focused editor
+    DOM/state tests. The oracle is the serialized authored document remaining byte-equivalent
+    while the read-only view changes with project policy. Negative controls cover
+    built-in empty trigger semantics, project DET, and plan review. Error fixtures
+    prove unavailable policy is explicit and save validation is fail-loud.
+
+
+    ## Acceptance Criteria
+
+    - [ ] The editor renders distinct Authored Workflow and read-only Effective Policy
+    sections, and no action in the effective section mutates or serializes YAML/BPMN.
+
+    - [ ] Effective Policy data comes from the repository-bound `CriteriaSnapshot`
+    and displays digest/source plus concise criterion gate, tier, posture, applicability,
+    and enabled/disabled provenance.
+
+    - [ ] Creating or saving a project code-review LLM criterion with missing, empty,
+    non-list, or blank globs is refused with the criterion location and `use ["**"]
+    for repository-wide` remedy.
+
+    - [ ] Built-in secondary triggers, project DET selector controls, and plan-review
+    `applies_at`/`trigger` authoring remain valid negative controls and are not subjected
+    to the project-LLM glob rule.
+
+    - [ ] A snapshot load/validation failure marks Effective Policy unavailable with
+    an actionable located error and never substitutes packaged defaults or permits
+    an invalid save.
+
+    - [ ] Server and editor tests prove policy changes update only the derived view
+    while authored workflow round-trips byte-equivalently.
+
+    - [ ] Editor payloads contain no per-unit discovery trace, raw prompt/context
+    body, provider response, or secret.'
+  label: finding
+- input: '## Context / Problem
+
+    The workflow editor currently presents authored YAML/BPMN configuration without
+    a trustworthy view of the effective criteria policy derived from built-ins plus
+    project overlays. RP-06 adds an immutable derived policy and an explicit project
+    applicability rule; exposing derived state as if it were editable topology would
+    create a second policy authority and make misconfiguration difficult to diagnose.
+
+
+    ## Approach
+
+    Extend the workflow-editor server to obtain the S1 `CriteriaSnapshot` for the
+    selected repository and expose a narrow, read-only Effective Policy view. Keep
+    Authored Workflow as the only editable YAML/BPMN topology. The effective view
+    shows snapshot digest/source, criterion id, gate, execution tier, effective posture/threshold,
+    applicability summary, enabled/disabled state, and a concise derived reason. It
+    never serializes edits back into workflow or project routing.
+
+
+    At authoring/save validation, a new `project.*` code-review LLM criterion must
+    have a non-empty list of non-empty repository-relative `applies_to` globs. The
+    editor rejects an empty/missing selector with the exact `["**"]` repository-wide
+    remedy. Built-in entries, project DET criteria, and plan-review criteria retain
+    their distinct trigger authoring controls and are not forced through this field.
+
+
+    Keep stored execution trace and per-call debugging detail out of the editor response.
+    The Effective Policy panel is configuration provenance, not a review-result/status
+    viewer. Repository or validation errors fail the save or mark the effective view
+    unavailable with a located, actionable message; they do not silently display packaged
+    defaults as effective policy.
+
+
+    ## Rationale and Compatibility
+
+    A read-only projection makes the centralized pattern visible while preserving
+    one authored source of topology. Older workflow files remain readable. The UI
+    and server add fields without rewriting saved YAML/BPMN, and rollback removes
+    the panel/endpoint while leaving authored artifacts unchanged.
+
+
+    ## Testing
+
+    Use server contract tests with real overlay/snapshot compilation and focused editor
+    DOM/state tests. The oracle is the serialized authored document remaining byte-equivalent
+    while the read-only view changes with project policy. Negative controls cover
+    built-in empty trigger semantics, project DET, and plan review. Error fixtures
+    prove unavailable policy is explicit and save validation is fail-loud.
+
+
+    ## Acceptance Criteria
+
+    - [x] The editor renders distinct Authored Workflow and read-only Effective Policy
+    sections, and no action in the effective section mutates or serializes YAML/BPMN.
+
+    - [x] Effective Policy data comes from the repository-bound `CriteriaSnapshot`
+    and displays digest/source plus concise criterion gate, tier, posture, applicability,
+    and enabled/disabled provenance.
+
+    - [x] Creating or saving a project code-review LLM criterion with missing, empty,
+    non-list, or blank globs is refused with the criterion location and `use ["**"]
+    for repository-wide` remedy.
+
+    - [x] Built-in secondary triggers, project DET selector controls, and plan-review
+    `applies_at`/`trigger` authoring remain valid negative controls and are not subjected
+    to the project-LLM glob rule.
+
+    - [x] A snapshot load/validation failure marks Effective Policy unavailable with
+    an actionable located error and never substitutes packaged defaults or permits
+    an invalid save.
+
+    - [x] Server and editor tests prove policy changes update only the derived view
+    while authored workflow round-trips byte-equivalently.
+
+    - [x] Editor payloads contain no per-unit discovery trace, raw prompt/context
+    body, provider response, or secret.'
+  label: finding
+- input: "## Why\n\nEpic 3156 required a **visual-editor UX** for authoring project\
+    \ criteria (story 6e31). That UX is\nBROKEN for the primary case \u2014 authoring\
+    \ a NET-NEW criterion \u2014 so the deliverable's user experience\nfails a round\
+    \ trip:\n\n- A project criterion MUST be `project.<name>`-prefixed (the overlay\
+    \ namespace that guarantees a\n  project criterion can never rebind a built-in\
+    \ \u2014 ef7e/ADR 0015).\n- Its rubric is a prompt stored at `.rebar/prompts/plan-review-<id>.md`,\
+    \ and `get_prompt` /\n  `create_prompt` derive that filename from the criterion\
+    \ id as `plan-review-<id>`.\n- But `prompt_library._validate_id` \u2192 `prompt_authoring._valid_id`\
+    \ enforces `[A-Za-z0-9][A-Za-z0-9-]*`\n  \u2014 **no `.`** (a filename-safety\
+    \ rule: a `.` would let an id masquerade as a `<id>.<variant>.md`\n  overlay and\
+    \ enables traversal). So `plan-review-project.foo` is rejected at author time,\
+    \ AND\n  `.rebar/prompts/` would mis-read a dotted stem as a variant overlay.\n\
+    \nNet effect: the editor can RE-TUNE a built-in (id `F1`) but CANNOT author a\
+    \ net-new `project.<name>`\ncriterion end-to-end \u2014 the exact thing project-supplied\
+    \ criteria exist for. 6e31 currently\nvalidate-then-rollback-rejects the attempt\
+    \ with a clean 400, so it never persists a broken overlay,\nbut the UX still dead-ends.\
+    \ This must be remediated for the editor UX to actually work.\n\n## What \u2014\
+    \ decouple the logical id from the physical filename (the Semgrep/npm/Python pattern)\n\
+    \nPopular, actively-maintained tools NEVER force a namespaced logical id to also\
+    \ be a raw filename;\nthey decouple via ONE deterministic mapping:\n- **Semgrep**:\
+    \ the dotted rule `id` is a metadata field, decoupled from the file name.\n- **npm**:\
+    \ `@scope/name` \u2192 a deterministic path `node_modules/@scope/name/`.\n- **Python**:\
+    \ `a.b.c` \u2192 `a/b/c.py` (dots \u2192 path separators).\n\nApply the same here.\
+    \ The criterion id stays `project.<name>` (dotted) EVERYWHERE it matters\n(overlay\
+    \ key, `activate`, routing, no-rebind collision check, the `.`\u2192`_` workflow-output-key\n\
+    sanitization). Only the RUBRIC's physical storage is decoupled, via a SINGLE canonical\
+    \ function:\n\n- Add `criterion_prompt_id(criterion_id) -> str` (one source of\
+    \ truth): a built-in `<id>` \u2192\n  `plan-review-<id>` (unchanged); a `project.<name>`\
+    \ \u2192 `plan-review-project-<name>` (`.`\u2192`-`), a\n  filesystem-safe, `_valid_id`-valid\
+    \ prompt id. Injective because a project name is constrained to\n  a DOT-FREE\
+    \ charset (exactly one namespace dot) \u2014 validate this in `_validate_routing_entry`\
+    \ /\n  the namespace check so `project.a-b` and any dotted variant can never collide.\n\
+    - Route BOTH sides through it so they can never diverge:\n  - descriptor resolution:\
+    \ `criteria.model.build_descriptor` / `plan_review.registry` resolve a\n    project\
+    \ criterion's rubric via `get_prompt(criterion_prompt_id(cid), repo_root=...)`\
+    \ (not the\n    raw `plan-review-<cid>`);\n  - editor authoring: `criterion_preview.author_criterion_overlay`\
+    \ writes the rubric via\n    `create_prompt(criterion_prompt_id(cid), ...)` (now\
+    \ a valid id \u2192 passes `_valid_id`), then the\n    atomic overlay routing+activate\
+    \ write keyed by the dotted `project.<name>` id.\n- `enumerate_library` / `_user_prompt_ids`:\
+    \ a `plan-review-project-<name>.md` stem has no `.`, so it\n  is enumerated normally\
+    \ (no variant-overlay mis-read). No change needed beyond using the sanitized\n\
+    \  filename.\n\n## Scope\n\n- Files: `src/rebar/llm/criteria/model.py` (or a small\
+    \ shared `ids.py`) \u2014 `criterion_prompt_id`;\n  `src/rebar/llm/plan_review/registry.py`\
+    \ + `src/rebar/llm/criteria/model.py` (descriptor rubric\n  resolution); `src/rebar/llm/workflow/criterion_preview.py`\
+    \ (authoring writes via the mapping);\n  `src/rebar/llm/criteria/overlay.py` or\
+    \ `_validate_routing_entry` (constrain project name to\n  dot-free); the editor\
+    \ UI (`editor_assets/src/rebarProvider.jsx`) so the authoring form derives +\n\
+    \  shows the resulting criterion id.\n- **No back-compat burden (just-shipped\
+    \ feature):** project criteria shipped in ef7e days ago with\n  no external data/users,\
+    \ so backward compatibility is NOT a requirement \u2014 the sanitized form is\n\
+    \  simply THE form. One clean code path (no dotted-`get_prompt` fallback). The\
+    \ ef7e/overlay TEST\n  FIXTURES that hand-place a dotted `plan-review-project.no_print.md`\
+    \ are just rewritten to the\n  sanitized `project.no-print` \u2192 `plan-review-project-no-print.md`\
+    \ \u2014 a free edit, not a migration.\n  Built-in prompt-id resolution is unchanged\
+    \ only because there is no reason to touch it, not for\n  compat.\n- **Project-name\
+    \ charset (RESOLVED):** a project criterion name follows the SAME rule as any\
+    \ prompt\n  id \u2014 `[A-Za-z0-9][A-Za-z0-9-]*` (alnum + dash; NO dots, NO underscores)\
+    \ \u2014 with exactly ONE\n  namespace dot in the full id (`project.<name>`).\
+    \ This makes `criterion_prompt_id` a total,\n  injective, filesystem-safe map\
+    \ (`.`\u2192`-` on the single namespace dot). A name containing `.` or\n  `_`\
+    \ (or otherwise not matching the charset) is a LOCATED error at overlay load.\n\
+    \n## Acceptance Criteria\n\n- [ ] A single canonical `criterion_prompt_id(criterion_id)`\
+    \ maps `project.<name>` \u2192\n      `plan-review-project-<name>` (filesystem-safe,\
+    \ passes `_valid_id`) and a built-in `<id>` \u2192\n      `plan-review-<id>` (unchanged);\
+    \ it is the ONLY id\u2192prompt-filename derivation, used by BOTH\n      descriptor\
+    \ resolution and editor authoring.\n- [ ] A net-new `project.<name>` criterion\
+    \ can be authored end-to-end via the editor\n      (`create_prompt` no longer\
+    \ rejects it) AND then loaded/run by the gate (`load_criteria`\n      resolves\
+    \ its rubric) \u2014 a test proves the full author\u2192activate\u2192load\u2192\
+    run round trip.\n- [ ] Project names are constrained to a dot-free charset (one\
+    \ namespace dot) so the id\u2192prompt-id\n      map is injective; a name with\
+    \ a `.` is a located error.\n- [ ] `criterion_prompt_id` is total + injective:\
+    \ a built-in `<id>` \u2192 `plan-review-<id>` and a\n      `project.<name>` \u2192\
+    \ ONLY `plan-review-project-<name>` (no dotted fallback); a dotted/underscored\n\
+    \      project name is a located error. (Back-compat is not a requirement \u2014\
+    \ one clean path.)\n- [ ] The editor authoring form surfaces the resulting criterion\
+    \ id (`project.<name>`) so the user\n      sees what will be created; a net-new\
+    \ author no longer dead-ends at a 400.\n\n\n## The dotted criterion id flows through\
+    \ explicitly (remediation, run 2)\n\nThe mapping `criterion_prompt_id` is ONE-WAY\
+    \ (`project.foo` \u2192 `plan-review-project-foo`); it is NOT\nreversible (a name\
+    \ may contain dashes, so `plan-review-project-foo-bar` can't be un-split to a\
+    \ unique\ndotted id). Therefore the DOTTED criterion id (`project.foo`) is the\
+    \ primary key and must be carried\nexplicitly \u2014 never reverse-derived from\
+    \ the sanitized prompt id:\n- The editor authoring form has an explicit **criterion-id\
+    \ field** whose value IS the dotted id\n  (`project.<name>`); the `/library/create`\
+    \ POST body carries BOTH `id` = the dotted criterion id AND\n  the `routing` object.\
+    \ (Today `_library_create` strips `plan-review-` off the prompt id to recover\n\
+    \  `cid` \u2014 that path only works for built-ins; for a project criterion the\
+    \ dotted id comes from the\n  form field, not from un-stripping.)\n- `author_criterion_overlay(criterion_id,\
+    \ routing, *, repo_root)` takes the DOTTED `criterion_id` as\n  its primary argument.\
+    \ It computes `prompt_id = criterion_prompt_id(criterion_id)` for the\n  `create_prompt(prompt_id,\
+    \ rubric)` write, and keys the overlay `plan_review[criterion_id]` +\n  `activate`\
+    \ entries by the DOTTED id. So the sanitized prompt filename is derived once,\
+    \ forward-only;\n  the dotted id is authoritative for the overlay + activation.\n\
+    - `write_criterion_overlay(repo_root, criterion_id, routing)` likewise keys by\
+    \ the dotted id.\n\n## Acceptance Criteria (remediation addition, run 2)\n\n-\
+    \ [ ] The dotted criterion id (`project.<name>`) is passed EXPLICITLY through\
+    \ authoring (the editor\n      form's id field \u2192 `/library/create` body \u2192\
+    \ `author_criterion_overlay(criterion_id=...)`), never\n      reverse-derived\
+    \ from the sanitized prompt id; the overlay entry + `activate` are keyed by the\n\
+    \      dotted id while the rubric is written at `criterion_prompt_id(criterion_id)`.\n"
+  label: finding
+- input: "## Why\n\n\"Surface the same tools we use\" includes visual authoring. The\
+    \ existing editor already enumerates\ncriteria (`prompt_library.enumerate_library`,\
+    \ packaged + `.rebar/prompts/`), authors criterion\nprompts (`create_prompt(kind=criterion)`\
+    \ via the `/library/create` route), and edits routing in\nworkflow YAML \u2014\
+    \ so authoring is incremental. The one genuinely net-new piece is a **live\nmust-fire/must-not-fire\
+    \ preview**: the editor has NO prompt-execution endpoint today (its `POST`\nset\
+    \ is `/save`, `/prompt/save`, `/validate`, `/library/create`). This is a structurally\n\
+    independent deliverable (its own endpoint + spike).\n\n## What\n\n- Extend the\
+    \ editor to author a project criterion end-to-end: prompt + a **routing-fields\
+    \ form**\n  (exec, applies_at/applies_to, block_threshold, default_posture/blocking_enabled,\
+    \ fail_mode) that\n  writes the `.rebar/` overlay + activation, reusing `create_prompt`/`update_prompt`.\n\
+    - New **`POST /criterion/preview`** endpoint (synchronous): `{criterion_id | inline(prompt+routing),\n\
+    \  fixture}` \u2192 `{verdict: \"fire\"|\"no-fire\", finding?: <findings.py shape>,\
+    \ rationale: str}`,\n  reusing the story `#3` per-criterion eval runner behind\
+    \ the `agents` extra + credentials, with a\n  **configurable timeout (default\
+    \ 60s)**.\n- **Spike gate (resolve before committing UI):** define the pass/fail\
+    \ \u2014 if a single sync preview\n  does not return within the timeout on the\
+    \ reference model, fall back to an **async job+poll**\n  shape (define the job\
+    \ id + poll endpoint) rather than blocking the editor's `ThreadingHTTPServer`\n\
+    \  handler. Do not leave the sync-vs-async decision unspecified.\n\n## Scope\n\
+    \n- Files: `src/rebar/llm/workflow/editor.py` (routes), `editor_assets/` (form\
+    \ + preview UI),\n  `prompt_library.py` (authoring reuse).\n- Depends on story\
+    \ `#1` (overlay/activation to author into) and story `#3` (the runner the preview\n\
+    \  reuses).\n- Reuse: `enumerate_library`, `create_prompt`/`update_prompt`, the\
+    \ `/library/create` route.\n\n## Acceptance Criteria\n\n- [ ] The editor authors\
+    \ a project criterion: prompt + routing-fields form writing the `.rebar/`\n  \
+    \    overlay + `activate` list (reusing `create_prompt`/`update_prompt`).\n- [\
+    \ ] `POST /criterion/preview` runs a live must-fire/must-not-fire preview with\
+    \ the defined\n      request/response contract, configurable timeout (default\
+    \ 60s), reusing the eval runner.\n- [ ] The spike gate is resolved: a defined\
+    \ pass/fail threshold and a concrete async job+poll\n      fallback if sync execution\
+    \ is infeasible in the editor's HTTP handler.\n- [ ] Authoring + preview work\
+    \ for both an LLM criterion and a DET invariant.\n\n\n## Preview dispatch, entry\
+    \ point & atomic authoring (remediation, run 1)\n\n### Preview entry point \u2014\
+    \ reuse the LANDED runners (clears the reuse-claim blocker)\nBoth halves now exist\
+    \ on `main`:\n- **LLM criterion** (`exec: 1-TURN`/`AGENT`): the preview runs it\
+    \ as its Pass-1 finder over the\n  fixture text via `eval_solver.run_case(prompt_id,\
+    \ {\"input\": <fixture>}, runner=\u2026, repo_root=\u2026)`\n  (the criterion\
+    \ arm added in story 55b8, which wraps `passes.pass1_chunk`). Fire \u21D4 non-empty\n\
+    \  `findings`.\n- **DET invariant** (`exec: DET`): the preview resolves the criterion's\
+    \ `detector` selector and runs\n  the grounding scan the way `plan_review/det_invariants._run_one`\
+    \ does (story 7f0d) \u2014 a match \u21D2\n  fire, an abstain \u21D2 reported\
+    \ per `fail_mode`. (The preview scans the fixture content, not a ticket\n  `file_impact`,\
+    \ since it is an isolated must-fire/must-not-fire probe.)\n\n### `POST /criterion/preview`\
+    \ dispatch (clears the LLM-vs-DET dispatch blocker)\nThe endpoint reads the criterion's\
+    \ `exec` DIRECTLY from its routing/descriptor (NOT `exec_tier`,\nwhich has no\
+    \ DET arm \u2014 per 7f0d): `exec == \"DET\"` \u2192 the DET path above; else\
+    \ \u2192 the LLM path. Request\n`{criterion_id | inline(prompt+routing), fixture:{input,\
+    \ expect?}}` \u2192 response `{verdict:\n\"fire\"|\"no-fire\", finding?: <findings.py\
+    \ finding shape>, rationale}`. A criterion that needs a\ngraph/log (container/ISF)\
+    \ \u2192 a clear 4xx (not runnable as an inline preview). Synchronous with a\n\
+    configurable timeout (default 60s); the spike-gate fallback (async job+poll) applies\
+    \ only if a\nsingle sync preview exceeds the timeout on the reference model.\n\
+    \n### Atomic dual-write for routing-fields authoring (clears G6 atomic blocker)\n\
+    Authoring a project criterion touches TWO files: `.rebar/prompts/<id>.md` (the\
+    \ rubric, via\n`create_prompt` \u2014 already atomic) and the `.rebar/criteria_routing.json`\
+    \ overlay routing entry.\nCoordination: the criterion is only ACTIVE when it is\
+    \ in BOTH the routing map AND the `activate`\nlist (ef7e semantics). The write\
+    \ order is prompt-first, then a single atomic JSON overlay write\n(temp-file +\
+    \ `os.replace`, mirroring `prompt_authoring._atomic_write`). If the overlay write\
+    \ fails,\nthe orphaned `.rebar/prompts/<id>.md` is harmless (a prompt with no\
+    \ active routing never runs). The\noverlay write itself is atomic (no half-written\
+    \ JSON), and adding the id to `activate` is part of the\nSAME overlay write \u2014\
+    \ so activation is all-or-nothing. No partial-active state is reachable.\n\n##\
+    \ Acceptance Criteria (remediation additions)\n\n- [ ] `POST /criterion/preview`\
+    \ dispatches on `exec` read directly (DET \u2192 grounding scan; LLM \u2192\n\
+    \      `eval_solver.run_case` criterion arm) and returns `{verdict, finding?,\
+    \ rationale}` for BOTH an\n      LLM criterion and a DET invariant; container/ISF\
+    \ \u2192 a clear 4xx.\n- [ ] Routing-fields authoring writes the prompt then a\
+    \ single ATOMIC overlay write (temp+replace);\n      a failed overlay write leaves\
+    \ no active criterion (activation requires the `activate` entry,\n      written\
+    \ atomically with the routing entry).\n"
+  label: finding
+- input: '## Context
+
+
+    The project has audience guidance distributed across AGENTS.md, CONTRIBUTING.md,
+    docs/README.md, and individual documents. It lacks one current-state policy that
+    distinguishes durable records, maintained documentation, shipped help, comments,
+    generated artifacts, and protected evidence. The audit ticket minimum-rainy-fawn
+    approved F01 and rejected broad prose cleanup and general prose validation.
+
+
+    ## Current enforcement and history
+
+
+    Ticket forworn-zanyish-narwhale added generated markers, two contributor tables
+    in docs/README.md, and tests/unit/test_generated_surface_markers.py after repeated
+    changes edited derived outputs instead of their sources. The test owns the GENERATED
+    and GATED_HAND_AUTHORED collections and parses the tables from docs/README.md.
+    CONTRIBUTING.md points to the existing landing-page anchor. This change preserves
+    both collections, every catalog row, and all marker checks. It relocates the catalog
+    so the landing page can remain a navigation surface.
+
+
+    ## Plan
+
+
+    Add docs/documentation-policy.md as the current policy for tickets, ADRs, internal
+    documentation, external documentation, shipped help, comments, generated artifacts,
+    and protected evidence. Define the audience, purpose, lifecycle, canonical source,
+    use of citations, correction method, exclusions, and examples for each category.
+    Include the approved punctuation, paragraph-shape, diction, and formal-voice rules
+    for new or edited maintained text. State that ticket events remain append-only
+    and that ADR decision substance is preserved through annotations, errata, supersession,
+    or replacement ADRs.
+
+
+    Add docs/generated-artifacts.md as the contributor inventory. Move the existing
+    generated and parity-gated tables from docs/README.md without changing their rows.
+    Update the existing marker test to parse the new inventory while preserving GENERATED
+    and GATED_HAND_AUTHORED. Replace the old CONTRIBUTING.md anchor and add concise
+    policy pointers in AGENTS.md, CONTRIBUTING.md, and docs/README.md.
+
+
+    ## Exclusions
+
+
+    - No edits to generated outputs, ADR decision substance, ticket events, historical
+    evidence, protected evidence, or commit history.
+
+    - No repository-wide prose rewrite.
+
+    - No prose or comment validator.
+
+    - No F05 ownership descriptor, generated catalog generator, or new ADR.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] docs/documentation-policy.md defines all eight documentation categories
+    and gives each category an audience, purpose, lifecycle, canonical source, citation
+    rule, correction method, exclusions, and at least one example.
+
+    - [ ] The policy states the approved punctuation, paragraph-shape, diction, and
+    formal-voice rules for new or edited maintained text.
+
+    - [ ] The policy requires append-only ticket correction and substance-preserving
+    ADR correction through annotations, errata, supersession, or a replacement ADR.
+
+    - [ ] docs/generated-artifacts.md contains the same generated and parity-gated
+    table row sets that docs/README.md contained before this change.
+
+    - [ ] tests/unit/test_generated_surface_markers.py retains the existing GENERATED
+    and GATED_HAND_AUTHORED values and passes while reading docs/generated-artifacts.md.
+
+    - [ ] AGENTS.md, CONTRIBUTING.md, and docs/README.md each link to docs/documentation-policy.md.
+
+    - [ ] CONTRIBUTING.md links to docs/generated-artifacts.md and no longer points
+    to the removed docs/README.md generated-artifacts anchor.
+
+    - [ ] The targeted marker test, make lint, make typecheck, and the project test
+    gate pass.'
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-T5d
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

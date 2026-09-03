@@ -1,0 +1,914 @@
+coverage_threshold: 1.0
+dataset:
+- children:
+  - 471c-f71f-342c-45ed
+  - 4bd8-a2bb-813b-427e
+  - 4c80-edd3-20f1-4dff
+  - 53ab-bdf6-de1c-4bb1
+  - 5d19-52e0-7c26-47fb
+  - 7a95-b393-e571-4dfb
+  - 860f-8886-a17b-48f1
+  - 98df-3528-9b1f-405a
+  - e59d-c078-724d-46e5
+  - efd4-847d-f7ad-47bc
+  - f1d6-cfcc-a9c6-416d
+  - fb2e-2aa1-9e0f-457a
+  corpus: rebar
+  criterion: F1
+  expect: finding
+  id: plan-review-F1-fire-0
+  input: "## Context / Problem\n\nEvery change to the plan-review gate \u2014 a Pass-1\
+    \ criterion prompt, a Pass-2 impact/validity question, a Pass-3 formula or threshold\
+    \ \u2014 lands on a handful of live dogfood reviews. No standing instrument answers\
+    \ \"did this change make the gate better or worse?\" before it ships; the prior\
+    \ calibration epic (`pastoral-aquatic-viper`, 6982) rejected live A/B batches\
+    \ on cost and parked the human gold set. The work is scattered across six epics\
+    \ and several orphan stories (`jira-reb-529`, `jira-reb-1589`, `fort-wisp-wren`,\
+    \ `spin-cub-usher`, `ridiculous-expert-mouse`, `auspicious-torrid-curlew`). This\
+    \ epic unifies them behind one harness.\n\nThe instrument already mostly exists\
+    \ as data. The live rebar store holds ~4,300 `plan_review_result_v2` sidecars\
+    \ on ~1,280 tickets (2026-06-27 \u2192 now; ~2,000 older ones pruned from the\
+    \ tree but recoverable from `origin/tickets` history) and `~/legacy-modernization-navigator`\
+    \ holds 74 more. Each v2 sidecar retains the raw Pass-1 findings (prose + evidence\
+    \ + scenarios + criteria), the complete Pass-2 answer vector (graded binaries\
+    \ + severity attributes), and the Pass-3 outputs (validity, impact, priority,\
+    \ the exact `block_threshold`, decision). The reviewed plan text is not stored\
+    \ but is reconstructable from ticket `EDIT`/`SNAPSHOT` history and verifiable\
+    \ byte-exactly against the stored `material_fingerprint`. The store also carries\
+    \ free outcome labels: 2,483 revise\u2192re-review pairs (finding survival via\
+    \ `norm_id`), 208 verdict flips on byte-identical material (the reviewer-noise\
+    \ floor), 84 `plan_defect` bug closes, 89 `caused_by` links, 199 plan-PASS\u2192\
+    completion-FAIL tickets, 18 reopens.\n\n## Approach\n\nThree eval tiers, ordered\
+    \ by cost, each measuring one pass in isolation while holding the others fixed:\n\
+    \n- **Tier 0 \u2014 Pass-3 replay (zero LLM).** Re-run `review_kernel.decide.pass3_decide`\
+    \ (and the post-verdict floors) over the whole corpus with a candidate formula/threshold/routing\
+    \ overlay; diff against stored decisions. Generalises `docs/calibration/plan_v5_rescore.py`\
+    \ and `docs/experiments/calibrate_plan_review_thresholds.py`. Runs on every proposal,\
+    \ unlimited.\n- **Tier 1 \u2014 Pass-2 replay (Sonnet, ~$0.5/review uncached).**\
+    \ Re-run the verifier with candidate questions/prompt on the *stored* Pass-1 findings\
+    \ plus reconstructed plan text via the `verify_findings(run_chunk=\u2026)` seam;\
+    \ score per-question agreement against stored answers, then feed Tier 0.\n- **Tier\
+    \ 2 \u2014 Pass-1 replay (Opus, ~$3.4/review uncached, plus a Tier-1 run on the\
+    \ new findings).** Re-run finders with candidate criteria on a fixed stratified\
+    \ sample (~20 tickets); compare finding sets by `norm_id`/criterion; single-criterion\
+    \ mode (~$0.17/call) for per-criterion edits.\n\nNon-negotiable invariants, enforced\
+    \ by the harness rather than by convention:\n\n1. **Hard budget.** A committed\
+    \ ledger tracks every eval call priced via `genai-prices`; every run pre-flights\
+    \ a cost estimate and refuses to start if projected spend would exceed the remaining\
+    \ allocation. Epic-wide cap is **$200** total with a $30 reserve; commissioning\
+    \ spend is planned at \u2264$120 (one Tier-1 reproduction run to measure verifier\
+    \ noise, one Tier-2 baseline sample). Per-proposal costs are published.\n2. **Model\
+    \ parity.** Every LLM re-run uses the exact production model class for that pass\
+    \ (frontier Opus for Pass 1, standard Sonnet for Pass 2) through **Bedrock only**,\
+    \ on a homogeneous provider chain (the mixed Bedrock+Anthropic fallback silently\
+    \ disables prompt caching and roughly doubles cost). The harness records the per-pass\
+    \ model id in every result, refuses to diff runs whose per-pass model ids differ,\
+    \ and refuses to start when the configured model differs from the corpus baseline's\
+    \ `provider_provenance.ran_model`. Substituting a cheaper model to save budget\
+    \ is forbidden: it confounds the measurement.\n3. **Offline first.** Tier 0 and\
+    \ all label joins are pure functions of the frozen corpus; no proposal may be\
+    \ assessed on a live-only signal. Consistent with ADR 0054 (the field corpus is\
+    \ the instrument) and with 6982's rejection of live A/B.\n4. **Noise-aware acceptance.**\
+    \ A change is reported as regressing/improving only when its label-proxy deltas\
+    \ exceed the noise band measured from identical-material flips and the Tier-1\
+    \ reproduction run; otherwise \"indistinguishable\".\n\n## Scope\n\nNew package\
+    \ `src/rebar/llm/evals/plan_replay/` (corpus, labels, tier runners, ledger, report)\
+    \ with a `python -m rebar.llm.evals.plan_replay` entry; frozen corpus manifest\
+    \ + ledger + reports under `docs/experiments/plan-review-gate/replay/`; an ADR\
+    \ and a contributor guide section; fixes to `usage_log` ticket attribution. No\
+    \ CI provider dependency \u2014 everything runs locally.\n\n## Acceptance Criteria\n\
+    \n- [ ] A frozen, versioned replay corpus exists covering both stores (tree +\
+    \ git-recovered sidecars), with at-review plan text reconstructed and fingerprint-verified\
+    \ for \u226595% of v2 sidecars; verified by the corpus manifest's coverage counts.\n\
+    - [ ] Outcome labels and a reviewer-noise floor are computed from the corpus with\
+    \ no LLM calls and joined to every review/finding; verified by a labels report\
+    \ listing counts per label source.\n- [ ] A Pass-3 change (formula, threshold,\
+    \ routing overlay) can be assessed over the entire corpus with zero LLM calls,\
+    \ producing a diff report (verdict flips, per-criterion deltas, label-proxy precision/recall,\
+    \ friction rate); verified by replaying current code against itself with zero\
+    \ diffs and replaying a known historical threshold change reproducing its documented\
+    \ effect.\n- [ ] A Pass-2 change can be assessed on a stratified sample using\
+    \ stored Pass-1 findings, with per-question agreement vs stored answers and downstream\
+    \ Tier-0 metrics; verified by a reproduction run (unchanged questions) whose agreement\
+    \ establishes the noise floor.\n- [ ] A Pass-1 change can be assessed on a fixed\
+    \ stratified sample with finding-set comparison by `norm_id`/criterion and downstream\
+    \ Tier-1/Tier-0 metrics; verified by one baseline sample run.\n- [ ] Every LLM\
+    \ eval call is priced and written to a committed ledger; a run whose pre-flight\
+    \ estimate exceeds remaining allocation is refused; total ledger spend at epic\
+    \ close is \u2264 $200; verified by the ledger file and a test of the refusal\
+    \ path.\n- [ ] Every eval result records the per-pass model id; the harness refuses\
+    \ to diff results with differing model ids and refuses to run a pass on a model\
+    \ other than its production class via Bedrock; verified by unit tests and by the\
+    \ ledger showing only Bedrock Opus/Sonnet ids.\n- [ ] Prompt caching is confirmed\
+    \ active for eval runs (cache_read_tokens > 0 on the second call of a run); verified\
+    \ from the usage log.\n- [ ] A contributor-facing protocol (ADR + docs) states\
+    \ which tier a proposal needs, the required report artifact, and the noise-band\
+    \ acceptance rule; verified by the docs landing and being referenced from `docs/plan-review-gate.md`.\n\
+    \n## Child decomposition\n\nCorpus builder (criterion 1) \u2192 outcome labels\
+    \ + noise floor (2) \u2192 Tier-0 harness (3) \u2192 Tier-1 harness (4) \u2192\
+    \ Tier-2 harness (5) \u2192 budget ledger + model-parity guard + homogeneous Bedrock\
+    \ chain (6, 7, 8; includes the usage-log ticket-attribution bug) \u2192 change\
+    \ protocol ADR + docs (9). Folded-in existing work: `ridiculous-expert-mouse`\
+    \ (per-criterion fixture eval, a Tier-2 single-criterion consumer), `auspicious-torrid-curlew`\
+    \ (deterministic-floor candidates mined via Tier-0 replay), `brutal-idiocratic-rodent`\
+    \ (optional human-adjudicated gold subset, deferred enrichment). `jira-reb-529`\
+    \ is superseded: its recorded-LLM-response mocking is infeasible because prompts/responses\
+    \ are never persisted; the sidecar-replay tiers deliver its intent. `jira-reb-1589`\
+    \ and `fort-wisp-wren` are consumers that depend on this harness; `spin-cub-usher`\
+    \ and `yip-gem-teak` are related but out of scope.\n\n## Non-goals\n\nChanging\
+    \ any production criterion, question, or threshold (this epic builds the instrument);\
+    \ a full human-adjudicated gold set; live A/B in the production gate."
+- corpus: rebar
+  criterion: F1
+  expect: finding
+  id: plan-review-F1-fire-1
+  input: "## Context / Problem\nDiscovery (`examples/agent-skills/rebar-janitor/phases/discovery.md`)\
+    \ covers tests only as\nsmelly/missing tests (#7 `:51-52`; an `rg` count of files\
+    \ with <2 assertions,\n`references/patterns.md:116-118`) and change-detector/duplication/dead-path\
+    \ health (#11 `:119-132`).\nNeither asks: **can this assertion fail when the contract\
+    \ is violated?** No concern covers oracle\nstrength or contract-coverage gaps\
+    \ (a documented promise no test fails on). And\n`phases/verification.md:115` anchors\
+    \ `prod_impact = none` at \"docs/test-only\", so a weak-test\nfinding sits below\
+    \ the impact floor and is dropped however critical the contract it fails to guard.\n\
+    Six weak-oracle bugs escaped 7-21 Aug 2026 (e.g. `0e1d-c698-c38d-4c3e`,\n`9bb7-4430-1202-4d93`);\
+    \ no pre-bug janitor run would have surfaced any.\n\nThe rubric naming these classes\
+    \ ALREADY exists at `src/rebar/llm/reviewers/code-review-tests.md`\n(`fail-open\
+    \ oracle` `:56-70`, `unrealistic fault injection` `:45-49`, ten false-positive\
+    \ guards\n`:71-106`) but runs **only on a diff**, never on the resting tree: the\
+    \ gap is reach, not vocabulary.\nApproved 2026-08-21. Testing philosophy: behavioural/contractual,\
+    \ not coverage.\n\n## Approach\nAdd concern **#12 \"Oracle strength and contract\
+    \ coverage\"** to `phases/discovery.md`, sharded by\ntest-tree region as #11 is\
+    \ (`:131-132`) and cross-referenced from #11.\n\n- **Brief.** Per test, name the\
+    \ contract under test (docstring, ADR, `--help` text, schema\n  statement) and\
+    \ the oracle (its assertion set). Finding = the oracle cannot fail on a violation\
+    \ of\n  that contract, proven by a concrete `escape_input` (a state the oracle\
+    \ accepts but the contract\n  forbids). Same proof shape for contract-coverage\
+    \ gaps.\n- **Cite `code-review-tests.md`; never restate it** \u2014 where it exists\
+    \ (a rebar checkout) it is the\n  single source of truth. **Portable fallback\
+    \ (required \u2014 janitor also runs on repos lacking it):**\n  `references/patterns.md`\
+    \ carries a portable core: the oracle-strength question, the `escape_input`\n\
+    \  requirement, the false-positive floor.\n- **Already covered; #12 must NOT re-declare\
+    \ as new:** absent-string / empty-capture assertions with\n  no producer-liveness\
+    \ check -> `fail-open oracle` `:56-70`; a race test whose primary\n  synchronization\
+    \ is a timing sleep -> `:49`; every do-not-flag guard -> (ii)-(x) `:71-106`.\n\
+    - **Do not flag:** apply guards (ii)-(x) (`code-review-tests.md:71-106`) by reference\
+    \ \u2014 mocks at\n  external boundaries, exact-value asserts on pure functions,\
+    \ output greps with established producer\n  liveness, Rule-5 structural greps,\
+    \ strict `xfail` with a named removal condition, secondary\n  settling sleeps,\
+    \ bare \"no test for X\" with no violating input.\n- **Additional instances**\
+    \ (verified absent from the rubric), named by #12: a fixture mutating\n  state\
+    \ it did not create; an equivalence test whose two sides use different hardening\
+    \ helpers; an\n  oracle encoding a policy preference the contract does not state.\n\
+    - **Evidence shape.** New schema fields: `contract` (quote + `path:line`), `oracle`\
+    \ (quote +\n  `path:line`), `escape_input`, `antipattern_id` (from `code-review-tests.md`\
+    \ where one applies,\n  else the portable-core id), `scope` (sibling-site count).\
+    \ `discovery.md:152` \u2014 the schema handed\n  to every discovery subagent \u2014\
+    \ hardcodes \"eleven concerns\" -> \"twelve\".\n- **Verification.** Amend `phases/verification.md:115`\
+    \ so a test-only finding takes `prod_impact`\n  from the **production contract\
+    \ it fails to guard**, not from the file being under `tests/`.\n  `harm_reachable`\
+    \ needs a tree-state demonstration (run against a deliberately broken stub, or\n\
+    \  reason the `escape_input` through the assertion); else the existing reclassification\
+    \ at\n  `verification.md:49-50` applies \u2014 `HARDENING`, not `DEFECT`.\n- **Feedback\
+    \ loop.** A #12 finding whose class the diff rubric lacks becomes a Phase-5 ticket\n\
+    \  adding it to `code-review-tests.md`.\n- **Frontmatter constraint.** `SKILL.md`'s\
+    \ `description` enumerates the concerns and is **980 chars\n  against the 1024\
+    \ cap** (`scripts/check_skill_frontmatter.py`) \u2014 an oracle-strength mention\
+    \ must\n  fit the 44 chars of headroom or displace wording.\n\n## Scope\nUnder\
+    \ `examples/agent-skills/rebar-janitor/`: `phases/discovery.md` (#12, the #11\
+    \ cross-reference,\nschema fields, \"eleven\"->\"twelve\" at `:152`); `phases/verification.md`\
+    \ (`prod_impact` anchor `:115`);\n`references/patterns.md` (portable core + #12\
+    \ query); `SKILL.md` (frontmatter `description`, only if\nit still fits under\
+    \ 1024 chars).\n\nNot in scope: no `docs/` page documents the janitor concern\
+    \ list (verified by\n`grep -rln \"janitor\" docs/`). `tests/unit/test_check_skill_frontmatter.py`\
+    \ (the real skill-lint\ntest; `tests/unit/test_skill_frontmatter.py` does not\
+    \ exist) needs no edit \u2014 it tests the script,\nnot skill bodies. `tests/unit/test_skill_shared_sync.py:16-17`\
+    \ excludes rebar-janitor, so no\nshared-copy sync applies.\n\n## Testing\nDocumentation-only;\
+    \ no production code path changes. `check_skill_frontmatter.py` validates\nonly\
+    \ `**/SKILL.md` frontmatter, so it covers the `description` edit and nothing else;\
+    \ the phase- and\nreference-file edits are proven by the greps below. `make lint`\
+    \ passes.\n\n## Acceptance Criteria\nCommands run from the repo root after `J=examples/agent-skills/rebar-janitor`.\n\
+    - [ ] `discovery.md` carries #12 with its title: `grep -qE '^12\\. \\*\\*Oracle\
+    \ strength and contract coverage\\*\\*' $J/phases/discovery.md` exits 0 (no `12.`\
+    \ line exists today).\n- [ ] #12 requires an escape input and is sharded like\
+    \ #11: `awk '/^12\\. \\*\\*Oracle strength/,/^### Temporal decay pass/' $J/phases/discovery.md\
+    \ | grep -qi \"escape_input\"` and the same range `| grep -qi \"shard\"` both\
+    \ exit 0.\n- [ ] #12 cites the diff rubric rather than duplicating it: `awk '/^12\\\
+    . \\*\\*Oracle strength/,/^### Temporal decay pass/' $J/phases/discovery.md |\
+    \ grep -q \"code-review-tests.md\"` exits 0, and the same range contains no re-declaration\
+    \ of the covered classes \u2014 `| grep -ciE \"fail-open oracle|strict xfail|settling\"\
+    ` returns `0` (they are cited by reference only).\n- [ ] The portable fallback\
+    \ exists in the skill tree: `grep -qi \"oracle\" $J/references/patterns.md` exits\
+    \ 0.\n- [ ] The output schema gained the #12 fields: `for f in contract oracle\
+    \ escape_input antipattern_id scope; do grep -q \"^- \\`$f\\`\" $J/phases/discovery.md\
+    \ || { echo \"MISSING $f\"; exit 1; }; done` exits 0.\n- [ ] The concern count\
+    \ is consistent: `grep -c \"which of the eleven concerns above\" $J/phases/discovery.md`\
+    \ returns `0` and `grep -q \"which of the twelve concerns above\" $J/phases/discovery.md`\
+    \ exits 0.\n- [ ] #11 cross-references #12: `awk '/^11\\. \\*\\*Test-suite health/,/^###\
+    \ Temporal decay pass/' $J/phases/discovery.md | grep -q \"#12\"` exits 0.\n-\
+    \ [ ] `verification.md` no longer anchors `prod_impact` at \"docs/test-only\"\
+    \ unconditionally: `grep -n \"none = docs/test-only\" $J/phases/verification.md`\
+    \ returns a line that also names the guarded production contract, or returns nothing\
+    \ and `grep -qi \"guarded production contract\" $J/phases/verification.md` exits\
+    \ 0.\n- [ ] `verification.md` requires a tree-state demonstration before a #12\
+    \ finding can be `DEFECT`: `grep -qi \"tree-state demonstration\" $J/phases/verification.md`\
+    \ exits 0.\n- [ ] Frontmatter still lints: `python scripts/check_skill_frontmatter.py`\
+    \ exits 0 and reports `PASS: 4 SKILL.md file(s)`.\n- [ ] No collateral edits:\
+    \ `git diff --name-only origin/main` lists only files named in Scope.\n- [ ] Gates\
+    \ pass: `pytest tests/unit/test_check_skill_frontmatter.py tests/unit/test_skill_shared_sync.py\
+    \ -q` and `make lint` exit 0.\n- [ ] [operator-attested] Dry run on `git checkout\
+    \ 6fb4d801c9^` (`obvious-saline-gerbil` pre-fix tree) reports the fail-open absent-string\
+    \ oracle with a concrete `escape_input`; transcript posted as a comment. Non-gating:\
+    \ stochastic output, recorded for calibration."
+- children:
+  - 471c-f71f-342c-45ed
+  - 4bd8-a2bb-813b-427e
+  - 4c80-edd3-20f1-4dff
+  - 53ab-bdf6-de1c-4bb1
+  - 5d19-52e0-7c26-47fb
+  - 7a95-b393-e571-4dfb
+  - 860f-8886-a17b-48f1
+  - 98df-3528-9b1f-405a
+  - e59d-c078-724d-46e5
+  - efd4-847d-f7ad-47bc
+  - f1d6-cfcc-a9c6-416d
+  - fb2e-2aa1-9e0f-457a
+  corpus: rebar
+  criterion: F1
+  expect: finding
+  id: plan-review-F1-fire-2
+  input: "## Context / Problem\n\nEvery change to the plan-review gate \u2014 a Pass-1\
+    \ criterion prompt, a Pass-2 impact/validity question, a Pass-3 formula or threshold\
+    \ \u2014 lands on a handful of live dogfood reviews. No standing instrument answers\
+    \ \"did this change make the gate better or worse?\" before it ships; the prior\
+    \ calibration epic (`pastoral-aquatic-viper`, 6982) rejected live A/B batches\
+    \ on cost and parked the human gold set. The work is scattered across six epics\
+    \ and several orphan stories (`jira-reb-529`, `jira-reb-1589`, `fort-wisp-wren`,\
+    \ `spin-cub-usher`, `ridiculous-expert-mouse`, `auspicious-torrid-curlew`). This\
+    \ epic unifies them behind one harness.\n\nThe instrument already mostly exists\
+    \ as data. The live rebar store holds ~4,300 `plan_review_result_v2` sidecars\
+    \ on ~1,280 tickets (2026-06-27 \u2192 now; ~2,000 older ones pruned from the\
+    \ tree but recoverable from `origin/tickets` history) and `~/legacy-modernization-navigator`\
+    \ holds 74 more. Each v2 sidecar retains the raw Pass-1 findings (prose + evidence\
+    \ + scenarios + criteria), the complete Pass-2 answer vector (graded binaries\
+    \ + severity attributes), and the Pass-3 outputs (validity, impact, priority,\
+    \ the exact `block_threshold`, decision). The reviewed plan text is not stored\
+    \ but is reconstructable from ticket `EDIT`/`SNAPSHOT` history and verifiable\
+    \ byte-exactly against the stored `material_fingerprint`. The store also carries\
+    \ free outcome labels: 2,483 revise\u2192re-review pairs (finding survival via\
+    \ `norm_id`), 208 verdict flips on byte-identical material (the reviewer-noise\
+    \ floor), 84 `plan_defect` bug closes, 89 `caused_by` links, 199 plan-PASS\u2192\
+    completion-FAIL tickets, 18 reopens.\n\n## Approach\n\nThree eval tiers, ordered\
+    \ by cost, each measuring one pass in isolation while holding the others fixed:\n\
+    \n- **Tier 0 \u2014 Pass-3 replay (zero LLM).** Re-run `review_kernel.decide.pass3_decide`\
+    \ (and the post-verdict floors) over the whole corpus with a candidate formula/threshold/routing\
+    \ overlay; diff against stored decisions. Generalises `docs/calibration/plan_v5_rescore.py`\
+    \ and `docs/experiments/calibrate_plan_review_thresholds.py`. Runs on every proposal,\
+    \ unlimited.\n- **Tier 1 \u2014 Pass-2 replay (Sonnet, ~$0.5/review uncached).**\
+    \ Re-run the verifier with candidate questions/prompt on the *stored* Pass-1 findings\
+    \ plus reconstructed plan text via the `verify_findings(run_chunk=\u2026)` seam;\
+    \ score per-question agreement against stored answers, then feed Tier 0.\n- **Tier\
+    \ 2 \u2014 Pass-1 replay (Opus, ~$3.4/review uncached, plus a Tier-1 run on the\
+    \ new findings).** Re-run finders with candidate criteria on a fixed stratified\
+    \ sample (~20 tickets); compare finding sets by `norm_id`/criterion; single-criterion\
+    \ mode (~$0.17/call) for per-criterion edits.\n\nNon-negotiable invariants, enforced\
+    \ by the harness rather than by convention:\n\n1. **Hard budget.** A committed\
+    \ ledger tracks every eval call priced via `genai-prices`; every run pre-flights\
+    \ a cost estimate and refuses to start if projected spend would exceed the remaining\
+    \ allocation. Epic-wide cap is **$200** total with a $30 reserve; commissioning\
+    \ spend is planned at \u2264$120 (one Tier-1 reproduction run to measure verifier\
+    \ noise, one Tier-2 baseline sample). Per-proposal costs are published.\n2. **Model\
+    \ parity.** Every LLM re-run uses the exact production model class for that pass\
+    \ (frontier Opus for Pass 1, standard Sonnet for Pass 2) through **Bedrock only**,\
+    \ on a homogeneous provider chain (the mixed Bedrock+Anthropic fallback silently\
+    \ disables prompt caching and roughly doubles cost). The harness records the per-pass\
+    \ model id in every result, refuses to diff runs whose per-pass model ids differ,\
+    \ and refuses to start when the configured model differs from the corpus baseline's\
+    \ `provider_provenance.ran_model`. Substituting a cheaper model to save budget\
+    \ is forbidden: it confounds the measurement.\n3. **Offline first.** Tier 0 and\
+    \ all label joins are pure functions of the frozen corpus; no proposal may be\
+    \ assessed on a live-only signal. Consistent with ADR 0054 (the field corpus is\
+    \ the instrument) and with 6982's rejection of live A/B.\n4. **Noise-aware acceptance.**\
+    \ A change is reported as regressing/improving only when its label-proxy deltas\
+    \ exceed the noise band measured from identical-material flips and the Tier-1\
+    \ reproduction run; otherwise \"indistinguishable\".\n\n## Scope\n\nNew package\
+    \ `src/rebar/llm/evals/plan_replay/` (corpus, labels, tier runners, ledger, report)\
+    \ with a `python -m rebar.llm.evals.plan_replay` entry; frozen corpus manifest\
+    \ + ledger + reports under `docs/experiments/plan-review-gate/replay/`; an ADR\
+    \ and a contributor guide section; fixes to `usage_log` ticket attribution. No\
+    \ CI provider dependency \u2014 everything runs locally.\n\n## Acceptance Criteria\n\
+    \n- [ ] A frozen, versioned replay corpus exists covering both stores (tree +\
+    \ git-recovered sidecars), with at-review plan text reconstructed and fingerprint-verified\
+    \ for \u226595% of v2 sidecars; verified by the corpus manifest's coverage counts.\n\
+    - [ ] Outcome labels and a reviewer-noise floor are computed from the corpus with\
+    \ no LLM calls and joined to every review/finding; verified by a labels report\
+    \ listing counts per label source.\n- [ ] A Pass-3 change (formula, threshold,\
+    \ routing overlay) can be assessed over the entire corpus with zero LLM calls,\
+    \ producing a diff report (verdict flips, per-criterion deltas, label-proxy precision/recall,\
+    \ friction rate); verified by replaying current code against itself with zero\
+    \ diffs and replaying a known historical threshold change reproducing its documented\
+    \ effect.\n- [ ] A Pass-2 change can be assessed on a stratified sample using\
+    \ stored Pass-1 findings, with per-question agreement vs stored answers and downstream\
+    \ Tier-0 metrics; verified by a reproduction run (unchanged questions) whose agreement\
+    \ establishes the noise floor.\n- [ ] A Pass-1 change can be assessed on a fixed\
+    \ stratified sample with finding-set comparison by `norm_id`/criterion and downstream\
+    \ Tier-1/Tier-0 metrics; verified by one baseline sample run.\n- [ ] Every LLM\
+    \ eval call is priced and written to a committed ledger; a run whose pre-flight\
+    \ estimate exceeds remaining allocation is refused; total ledger spend at epic\
+    \ close is \u2264 $200; verified by the ledger file and a test of the refusal\
+    \ path.\n- [ ] Every eval result records the per-pass model id; the harness refuses\
+    \ to diff results with differing model ids and refuses to run a pass on a model\
+    \ other than its production class via Bedrock; verified by unit tests and by the\
+    \ ledger showing only Bedrock Opus/Sonnet ids.\n- [ ] Prompt caching is confirmed\
+    \ active for eval runs (cache_read_tokens > 0 on the second call of a run); verified\
+    \ from the usage log.\n- [ ] A contributor-facing protocol (ADR + docs) states\
+    \ which tier a proposal needs, the required report artifact, and the noise-band\
+    \ acceptance rule; verified by the docs landing and being referenced from `docs/plan-review-gate.md`.\n\
+    \n## Child decomposition\n\nCorpus builder (criterion 1) \u2192 outcome labels\
+    \ + noise floor (2) \u2192 Tier-0 harness (3) \u2192 Tier-1 harness (4) \u2192\
+    \ Tier-2 harness (5) \u2192 budget ledger + model-parity guard + homogeneous Bedrock\
+    \ chain (6, 7, 8; includes the usage-log ticket-attribution bug) \u2192 change\
+    \ protocol ADR + docs (9). Folded-in existing work: `ridiculous-expert-mouse`\
+    \ (per-criterion fixture eval, a Tier-2 single-criterion consumer), `auspicious-torrid-curlew`\
+    \ (deterministic-floor candidates mined via Tier-0 replay), `brutal-idiocratic-rodent`\
+    \ (optional human-adjudicated gold subset, deferred enrichment). `jira-reb-529`\
+    \ is superseded: its recorded-LLM-response mocking is infeasible because prompts/responses\
+    \ are never persisted; the sidecar-replay tiers deliver its intent. `jira-reb-1589`\
+    \ and `fort-wisp-wren` are consumers that depend on this harness; `spin-cub-usher`\
+    \ and `yip-gem-teak` are related but out of scope.\n\n## Non-goals\n\nChanging\
+    \ any production criterion, question, or threshold (this epic builds the instrument);\
+    \ a full human-adjudicated gold set; live A/B in the production gate."
+- corpus: rebar
+  criterion: F1
+  expect: finding
+  id: plan-review-F1-fire-3
+  input: '## Context / Problem
+
+
+    `docs/plan-review-gate.md:795` makes a blanket claim-denial statement, contradicting
+    the bug exemption in `src/rebar/_commands/gates.py:45` and the guide''s own exception
+    at lines 474 and 1477. The approved clarification is sequence-sensitive.
+
+
+    ## Approach
+
+
+    Correct the maintained guide directly. State that a bug may be claimed without
+    plan review to perform root-cause analysis; after RCA, a complex bug with an implementation
+    plan and file impact must receive LLM plan review before remediation begins. Preserve
+    behavioral code/tests as authority.
+
+
+    ## Scope
+
+
+    - `docs/plan-review-gate.md`
+
+    - `src/rebar/_commands/gates.py` and `tests/unit/test_bug_review_tier.py` as behavior
+    evidence/checks
+
+
+    ## Testing
+
+
+    Run focused bug-review tier tests and add/update a documentation assertion that
+    distinguishes claim-time exemption from implementation-time review.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] The guide says bugs are exempt from plan review at claim time so RCA can
+    establish remediation shape.
+
+    - [ ] The guide says complex bugs require plan review after RCA, once implementation
+    plan and file impact exist, before implementation.
+
+    - [ ] The guide does not imply every bug needs review before claim or that complex
+    bug remediation is permanently exempt.
+
+    - [ ] Focused bug-review tier tests and the documentation check pass.'
+- corpus: rebar
+  criterion: F1
+  expect: pass
+  id: plan-review-F1-no_fire-0
+  input: '## Context
+
+
+    The project has audience guidance distributed across AGENTS.md, CONTRIBUTING.md,
+    docs/README.md, and individual documents. It lacks one current-state policy that
+    distinguishes durable records, maintained documentation, shipped help, comments,
+    generated artifacts, and protected evidence. The audit ticket minimum-rainy-fawn
+    approved F01 and rejected broad prose cleanup and general prose validation.
+
+
+    ## Current enforcement and history
+
+
+    Ticket forworn-zanyish-narwhale added generated markers, two contributor tables
+    in docs/README.md, and tests/unit/test_generated_surface_markers.py after repeated
+    changes edited derived outputs instead of their sources. The test owns the GENERATED
+    and GATED_HAND_AUTHORED collections and parses the tables from docs/README.md.
+    CONTRIBUTING.md points to the existing landing-page anchor. This change preserves
+    both collections, every catalog row, and all marker checks. It relocates the catalog
+    so the landing page can remain a navigation surface.
+
+
+    ## Plan
+
+
+    Add docs/documentation-policy.md as the current policy for tickets, ADRs, internal
+    documentation, external documentation, shipped help, comments, generated artifacts,
+    and protected evidence. Define the audience, purpose, lifecycle, canonical source,
+    use of citations, correction method, exclusions, and examples for each category.
+    Include the approved punctuation, paragraph-shape, diction, and formal-voice rules
+    for new or edited maintained text. State that ticket events remain append-only
+    and that ADR decision substance is preserved through annotations, errata, supersession,
+    or replacement ADRs.
+
+
+    Add docs/generated-artifacts.md as the contributor inventory. Move the existing
+    generated and parity-gated tables from docs/README.md without changing their rows.
+    Update the existing marker test to parse the new inventory while preserving GENERATED
+    and GATED_HAND_AUTHORED. Replace the old CONTRIBUTING.md anchor and add concise
+    policy pointers in AGENTS.md, CONTRIBUTING.md, and docs/README.md.
+
+
+    ## Exclusions
+
+
+    - No edits to generated outputs, ADR decision substance, ticket events, historical
+    evidence, protected evidence, or commit history.
+
+    - No repository-wide prose rewrite.
+
+    - No prose or comment validator.
+
+    - No F05 ownership descriptor, generated catalog generator, or new ADR.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] docs/documentation-policy.md defines all eight documentation categories
+    and gives each category an audience, purpose, lifecycle, canonical source, citation
+    rule, correction method, exclusions, and at least one example.
+
+    - [ ] The policy states the approved punctuation, paragraph-shape, diction, and
+    formal-voice rules for new or edited maintained text.
+
+    - [ ] The policy requires append-only ticket correction and substance-preserving
+    ADR correction through annotations, errata, supersession, or a replacement ADR.
+
+    - [ ] docs/generated-artifacts.md contains the same generated and parity-gated
+    table row sets that docs/README.md contained before this change.
+
+    - [ ] tests/unit/test_generated_surface_markers.py retains the existing GENERATED
+    and GATED_HAND_AUTHORED values and passes while reading docs/generated-artifacts.md.
+
+    - [ ] AGENTS.md, CONTRIBUTING.md, and docs/README.md each link to docs/documentation-policy.md.
+
+    - [ ] CONTRIBUTING.md links to docs/generated-artifacts.md and no longer points
+    to the removed docs/README.md generated-artifacts anchor.
+
+    - [ ] The targeted marker test, make lint, make typecheck, and the project test
+    gate pass.'
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: "## Context / Problem\n\nEvery change to the plan-review gate \u2014 a Pass-1\
+    \ criterion prompt, a Pass-2 impact/validity question, a Pass-3 formula or threshold\
+    \ \u2014 lands on a handful of live dogfood reviews. No standing instrument answers\
+    \ \"did this change make the gate better or worse?\" before it ships; the prior\
+    \ calibration epic (`pastoral-aquatic-viper`, 6982) rejected live A/B batches\
+    \ on cost and parked the human gold set. The work is scattered across six epics\
+    \ and several orphan stories (`jira-reb-529`, `jira-reb-1589`, `fort-wisp-wren`,\
+    \ `spin-cub-usher`, `ridiculous-expert-mouse`, `auspicious-torrid-curlew`). This\
+    \ epic unifies them behind one harness.\n\nThe instrument already mostly exists\
+    \ as data. The live rebar store holds ~4,300 `plan_review_result_v2` sidecars\
+    \ on ~1,280 tickets (2026-06-27 \u2192 now; ~2,000 older ones pruned from the\
+    \ tree but recoverable from `origin/tickets` history) and `~/legacy-modernization-navigator`\
+    \ holds 74 more. Each v2 sidecar retains the raw Pass-1 findings (prose + evidence\
+    \ + scenarios + criteria), the complete Pass-2 answer vector (graded binaries\
+    \ + severity attributes), and the Pass-3 outputs (validity, impact, priority,\
+    \ the exact `block_threshold`, decision). The reviewed plan text is not stored\
+    \ but is reconstructable from ticket `EDIT`/`SNAPSHOT` history and verifiable\
+    \ byte-exactly against the stored `material_fingerprint`. The store also carries\
+    \ free outcome labels: 2,483 revise\u2192re-review pairs (finding survival via\
+    \ `norm_id`), 208 verdict flips on byte-identical material (the reviewer-noise\
+    \ floor), 84 `plan_defect` bug closes, 89 `caused_by` links, 199 plan-PASS\u2192\
+    completion-FAIL tickets, 18 reopens.\n\n## Approach\n\nThree eval tiers, ordered\
+    \ by cost, each measuring one pass in isolation while holding the others fixed:\n\
+    \n- **Tier 0 \u2014 Pass-3 replay (zero LLM).** Re-run `review_kernel.decide.pass3_decide`\
+    \ (and the post-verdict floors) over the whole corpus with a candidate formula/threshold/routing\
+    \ overlay; diff against stored decisions. Generalises `docs/calibration/plan_v5_rescore.py`\
+    \ and `docs/experiments/calibrate_plan_review_thresholds.py`. Runs on every proposal,\
+    \ unlimited.\n- **Tier 1 \u2014 Pass-2 replay (Sonnet, ~$0.5/review uncached).**\
+    \ Re-run the verifier with candidate questions/prompt on the *stored* Pass-1 findings\
+    \ plus reconstructed plan text via the `verify_findings(run_chunk=\u2026)` seam;\
+    \ score per-question agreement against stored answers, then feed Tier 0.\n- **Tier\
+    \ 2 \u2014 Pass-1 replay (Opus, ~$3.4/review uncached, plus a Tier-1 run on the\
+    \ new findings).** Re-run finders with candidate criteria on a fixed stratified\
+    \ sample (~20 tickets); compare finding sets by `norm_id`/criterion; single-criterion\
+    \ mode (~$0.17/call) for per-criterion edits.\n\nNon-negotiable invariants, enforced\
+    \ by the harness rather than by convention:\n\n1. **Hard budget.** A committed\
+    \ ledger tracks every eval call priced via `genai-prices`; every run pre-flights\
+    \ a cost estimate and refuses to start if projected spend would exceed the remaining\
+    \ allocation. Epic-wide cap is **$200** total with a $30 reserve; commissioning\
+    \ spend is planned at \u2264$120 (one Tier-1 reproduction run to measure verifier\
+    \ noise, one Tier-2 baseline sample). Per-proposal costs are published.\n2. **Model\
+    \ parity.** Every LLM re-run uses the exact production model class for that pass\
+    \ (frontier Opus for Pass 1, standard Sonnet for Pass 2) through **Bedrock only**,\
+    \ on a homogeneous provider chain (the mixed Bedrock+Anthropic fallback silently\
+    \ disables prompt caching and roughly doubles cost). The harness records the per-pass\
+    \ model id in every result, refuses to diff runs whose per-pass model ids differ,\
+    \ and refuses to start when the configured model differs from the corpus baseline's\
+    \ `provider_provenance.ran_model`. Substituting a cheaper model to save budget\
+    \ is forbidden: it confounds the measurement.\n3. **Offline first.** Tier 0 and\
+    \ all label joins are pure functions of the frozen corpus; no proposal may be\
+    \ assessed on a live-only signal. Consistent with ADR 0054 (the field corpus is\
+    \ the instrument) and with 6982's rejection of live A/B.\n4. **Noise-aware acceptance.**\
+    \ A change is reported as regressing/improving only when its label-proxy deltas\
+    \ exceed the noise band measured from identical-material flips and the Tier-1\
+    \ reproduction run; otherwise \"indistinguishable\".\n\n## Scope\n\nNew package\
+    \ `src/rebar/llm/evals/plan_replay/` (corpus, labels, tier runners, ledger, report)\
+    \ with a `python -m rebar.llm.evals.plan_replay` entry; frozen corpus manifest\
+    \ + ledger + reports under `docs/experiments/plan-review-gate/replay/`; an ADR\
+    \ and a contributor guide section; fixes to `usage_log` ticket attribution. No\
+    \ CI provider dependency \u2014 everything runs locally.\n\n## Acceptance Criteria\n\
+    \n- [ ] A frozen, versioned replay corpus exists covering both stores (tree +\
+    \ git-recovered sidecars), with at-review plan text reconstructed and fingerprint-verified\
+    \ for \u226595% of v2 sidecars; verified by the corpus manifest's coverage counts.\n\
+    - [ ] Outcome labels and a reviewer-noise floor are computed from the corpus with\
+    \ no LLM calls and joined to every review/finding; verified by a labels report\
+    \ listing counts per label source.\n- [ ] A Pass-3 change (formula, threshold,\
+    \ routing overlay) can be assessed over the entire corpus with zero LLM calls,\
+    \ producing a diff report (verdict flips, per-criterion deltas, label-proxy precision/recall,\
+    \ friction rate); verified by replaying current code against itself with zero\
+    \ diffs and replaying a known historical threshold change reproducing its documented\
+    \ effect.\n- [ ] A Pass-2 change can be assessed on a stratified sample using\
+    \ stored Pass-1 findings, with per-question agreement vs stored answers and downstream\
+    \ Tier-0 metrics; verified by a reproduction run (unchanged questions) whose agreement\
+    \ establishes the noise floor.\n- [ ] A Pass-1 change can be assessed on a fixed\
+    \ stratified sample with finding-set comparison by `norm_id`/criterion and downstream\
+    \ Tier-1/Tier-0 metrics; verified by one baseline sample run.\n- [ ] Every LLM\
+    \ eval call is priced and written to a committed ledger; a run whose pre-flight\
+    \ estimate exceeds remaining allocation is refused; total ledger spend at epic\
+    \ close is \u2264 $200; verified by the ledger file and a test of the refusal\
+    \ path.\n- [ ] Every eval result records the per-pass model id; the harness refuses\
+    \ to diff results with differing model ids and refuses to run a pass on a model\
+    \ other than its production class via Bedrock; verified by unit tests and by the\
+    \ ledger showing only Bedrock Opus/Sonnet ids.\n- [ ] Prompt caching is confirmed\
+    \ active for eval runs (cache_read_tokens > 0 on the second call of a run); verified\
+    \ from the usage log.\n- [ ] A contributor-facing protocol (ADR + docs) states\
+    \ which tier a proposal needs, the required report artifact, and the noise-band\
+    \ acceptance rule; verified by the docs landing and being referenced from `docs/plan-review-gate.md`.\n\
+    \n## Child decomposition\n\nCorpus builder (criterion 1) \u2192 outcome labels\
+    \ + noise floor (2) \u2192 Tier-0 harness (3) \u2192 Tier-1 harness (4) \u2192\
+    \ Tier-2 harness (5) \u2192 budget ledger + model-parity guard + homogeneous Bedrock\
+    \ chain (6, 7, 8; includes the usage-log ticket-attribution bug) \u2192 change\
+    \ protocol ADR + docs (9). Folded-in existing work: `ridiculous-expert-mouse`\
+    \ (per-criterion fixture eval, a Tier-2 single-criterion consumer), `auspicious-torrid-curlew`\
+    \ (deterministic-floor candidates mined via Tier-0 replay), `brutal-idiocratic-rodent`\
+    \ (optional human-adjudicated gold subset, deferred enrichment). `jira-reb-529`\
+    \ is superseded: its recorded-LLM-response mocking is infeasible because prompts/responses\
+    \ are never persisted; the sidecar-replay tiers deliver its intent. `jira-reb-1589`\
+    \ and `fort-wisp-wren` are consumers that depend on this harness; `spin-cub-usher`\
+    \ and `yip-gem-teak` are related but out of scope.\n\n## Non-goals\n\nChanging\
+    \ any production criterion, question, or threshold (this epic builds the instrument);\
+    \ a full human-adjudicated gold set; live A/B in the production gate."
+  label: finding
+- input: "## Context / Problem\nDiscovery (`examples/agent-skills/rebar-janitor/phases/discovery.md`)\
+    \ covers tests only as\nsmelly/missing tests (#7 `:51-52`; an `rg` count of files\
+    \ with <2 assertions,\n`references/patterns.md:116-118`) and change-detector/duplication/dead-path\
+    \ health (#11 `:119-132`).\nNeither asks: **can this assertion fail when the contract\
+    \ is violated?** No concern covers oracle\nstrength or contract-coverage gaps\
+    \ (a documented promise no test fails on). And\n`phases/verification.md:115` anchors\
+    \ `prod_impact = none` at \"docs/test-only\", so a weak-test\nfinding sits below\
+    \ the impact floor and is dropped however critical the contract it fails to guard.\n\
+    Six weak-oracle bugs escaped 7-21 Aug 2026 (e.g. `0e1d-c698-c38d-4c3e`,\n`9bb7-4430-1202-4d93`);\
+    \ no pre-bug janitor run would have surfaced any.\n\nThe rubric naming these classes\
+    \ ALREADY exists at `src/rebar/llm/reviewers/code-review-tests.md`\n(`fail-open\
+    \ oracle` `:56-70`, `unrealistic fault injection` `:45-49`, ten false-positive\
+    \ guards\n`:71-106`) but runs **only on a diff**, never on the resting tree: the\
+    \ gap is reach, not vocabulary.\nApproved 2026-08-21. Testing philosophy: behavioural/contractual,\
+    \ not coverage.\n\n## Approach\nAdd concern **#12 \"Oracle strength and contract\
+    \ coverage\"** to `phases/discovery.md`, sharded by\ntest-tree region as #11 is\
+    \ (`:131-132`) and cross-referenced from #11.\n\n- **Brief.** Per test, name the\
+    \ contract under test (docstring, ADR, `--help` text, schema\n  statement) and\
+    \ the oracle (its assertion set). Finding = the oracle cannot fail on a violation\
+    \ of\n  that contract, proven by a concrete `escape_input` (a state the oracle\
+    \ accepts but the contract\n  forbids). Same proof shape for contract-coverage\
+    \ gaps.\n- **Cite `code-review-tests.md`; never restate it** \u2014 where it exists\
+    \ (a rebar checkout) it is the\n  single source of truth. **Portable fallback\
+    \ (required \u2014 janitor also runs on repos lacking it):**\n  `references/patterns.md`\
+    \ carries a portable core: the oracle-strength question, the `escape_input`\n\
+    \  requirement, the false-positive floor.\n- **Already covered; #12 must NOT re-declare\
+    \ as new:** absent-string / empty-capture assertions with\n  no producer-liveness\
+    \ check -> `fail-open oracle` `:56-70`; a race test whose primary\n  synchronization\
+    \ is a timing sleep -> `:49`; every do-not-flag guard -> (ii)-(x) `:71-106`.\n\
+    - **Do not flag:** apply guards (ii)-(x) (`code-review-tests.md:71-106`) by reference\
+    \ \u2014 mocks at\n  external boundaries, exact-value asserts on pure functions,\
+    \ output greps with established producer\n  liveness, Rule-5 structural greps,\
+    \ strict `xfail` with a named removal condition, secondary\n  settling sleeps,\
+    \ bare \"no test for X\" with no violating input.\n- **Additional instances**\
+    \ (verified absent from the rubric), named by #12: a fixture mutating\n  state\
+    \ it did not create; an equivalence test whose two sides use different hardening\
+    \ helpers; an\n  oracle encoding a policy preference the contract does not state.\n\
+    - **Evidence shape.** New schema fields: `contract` (quote + `path:line`), `oracle`\
+    \ (quote +\n  `path:line`), `escape_input`, `antipattern_id` (from `code-review-tests.md`\
+    \ where one applies,\n  else the portable-core id), `scope` (sibling-site count).\
+    \ `discovery.md:152` \u2014 the schema handed\n  to every discovery subagent \u2014\
+    \ hardcodes \"eleven concerns\" -> \"twelve\".\n- **Verification.** Amend `phases/verification.md:115`\
+    \ so a test-only finding takes `prod_impact`\n  from the **production contract\
+    \ it fails to guard**, not from the file being under `tests/`.\n  `harm_reachable`\
+    \ needs a tree-state demonstration (run against a deliberately broken stub, or\n\
+    \  reason the `escape_input` through the assertion); else the existing reclassification\
+    \ at\n  `verification.md:49-50` applies \u2014 `HARDENING`, not `DEFECT`.\n- **Feedback\
+    \ loop.** A #12 finding whose class the diff rubric lacks becomes a Phase-5 ticket\n\
+    \  adding it to `code-review-tests.md`.\n- **Frontmatter constraint.** `SKILL.md`'s\
+    \ `description` enumerates the concerns and is **980 chars\n  against the 1024\
+    \ cap** (`scripts/check_skill_frontmatter.py`) \u2014 an oracle-strength mention\
+    \ must\n  fit the 44 chars of headroom or displace wording.\n\n## Scope\nUnder\
+    \ `examples/agent-skills/rebar-janitor/`: `phases/discovery.md` (#12, the #11\
+    \ cross-reference,\nschema fields, \"eleven\"->\"twelve\" at `:152`); `phases/verification.md`\
+    \ (`prod_impact` anchor `:115`);\n`references/patterns.md` (portable core + #12\
+    \ query); `SKILL.md` (frontmatter `description`, only if\nit still fits under\
+    \ 1024 chars).\n\nNot in scope: no `docs/` page documents the janitor concern\
+    \ list (verified by\n`grep -rln \"janitor\" docs/`). `tests/unit/test_check_skill_frontmatter.py`\
+    \ (the real skill-lint\ntest; `tests/unit/test_skill_frontmatter.py` does not\
+    \ exist) needs no edit \u2014 it tests the script,\nnot skill bodies. `tests/unit/test_skill_shared_sync.py:16-17`\
+    \ excludes rebar-janitor, so no\nshared-copy sync applies.\n\n## Testing\nDocumentation-only;\
+    \ no production code path changes. `check_skill_frontmatter.py` validates\nonly\
+    \ `**/SKILL.md` frontmatter, so it covers the `description` edit and nothing else;\
+    \ the phase- and\nreference-file edits are proven by the greps below. `make lint`\
+    \ passes.\n\n## Acceptance Criteria\nCommands run from the repo root after `J=examples/agent-skills/rebar-janitor`.\n\
+    - [ ] `discovery.md` carries #12 with its title: `grep -qE '^12\\. \\*\\*Oracle\
+    \ strength and contract coverage\\*\\*' $J/phases/discovery.md` exits 0 (no `12.`\
+    \ line exists today).\n- [ ] #12 requires an escape input and is sharded like\
+    \ #11: `awk '/^12\\. \\*\\*Oracle strength/,/^### Temporal decay pass/' $J/phases/discovery.md\
+    \ | grep -qi \"escape_input\"` and the same range `| grep -qi \"shard\"` both\
+    \ exit 0.\n- [ ] #12 cites the diff rubric rather than duplicating it: `awk '/^12\\\
+    . \\*\\*Oracle strength/,/^### Temporal decay pass/' $J/phases/discovery.md |\
+    \ grep -q \"code-review-tests.md\"` exits 0, and the same range contains no re-declaration\
+    \ of the covered classes \u2014 `| grep -ciE \"fail-open oracle|strict xfail|settling\"\
+    ` returns `0` (they are cited by reference only).\n- [ ] The portable fallback\
+    \ exists in the skill tree: `grep -qi \"oracle\" $J/references/patterns.md` exits\
+    \ 0.\n- [ ] The output schema gained the #12 fields: `for f in contract oracle\
+    \ escape_input antipattern_id scope; do grep -q \"^- \\`$f\\`\" $J/phases/discovery.md\
+    \ || { echo \"MISSING $f\"; exit 1; }; done` exits 0.\n- [ ] The concern count\
+    \ is consistent: `grep -c \"which of the eleven concerns above\" $J/phases/discovery.md`\
+    \ returns `0` and `grep -q \"which of the twelve concerns above\" $J/phases/discovery.md`\
+    \ exits 0.\n- [ ] #11 cross-references #12: `awk '/^11\\. \\*\\*Test-suite health/,/^###\
+    \ Temporal decay pass/' $J/phases/discovery.md | grep -q \"#12\"` exits 0.\n-\
+    \ [ ] `verification.md` no longer anchors `prod_impact` at \"docs/test-only\"\
+    \ unconditionally: `grep -n \"none = docs/test-only\" $J/phases/verification.md`\
+    \ returns a line that also names the guarded production contract, or returns nothing\
+    \ and `grep -qi \"guarded production contract\" $J/phases/verification.md` exits\
+    \ 0.\n- [ ] `verification.md` requires a tree-state demonstration before a #12\
+    \ finding can be `DEFECT`: `grep -qi \"tree-state demonstration\" $J/phases/verification.md`\
+    \ exits 0.\n- [ ] Frontmatter still lints: `python scripts/check_skill_frontmatter.py`\
+    \ exits 0 and reports `PASS: 4 SKILL.md file(s)`.\n- [ ] No collateral edits:\
+    \ `git diff --name-only origin/main` lists only files named in Scope.\n- [ ] Gates\
+    \ pass: `pytest tests/unit/test_check_skill_frontmatter.py tests/unit/test_skill_shared_sync.py\
+    \ -q` and `make lint` exit 0.\n- [ ] [operator-attested] Dry run on `git checkout\
+    \ 6fb4d801c9^` (`obvious-saline-gerbil` pre-fix tree) reports the fail-open absent-string\
+    \ oracle with a concrete `escape_input`; transcript posted as a comment. Non-gating:\
+    \ stochastic output, recorded for calibration."
+  label: finding
+- input: "## Context / Problem\n\nEvery change to the plan-review gate \u2014 a Pass-1\
+    \ criterion prompt, a Pass-2 impact/validity question, a Pass-3 formula or threshold\
+    \ \u2014 lands on a handful of live dogfood reviews. No standing instrument answers\
+    \ \"did this change make the gate better or worse?\" before it ships; the prior\
+    \ calibration epic (`pastoral-aquatic-viper`, 6982) rejected live A/B batches\
+    \ on cost and parked the human gold set. The work is scattered across six epics\
+    \ and several orphan stories (`jira-reb-529`, `jira-reb-1589`, `fort-wisp-wren`,\
+    \ `spin-cub-usher`, `ridiculous-expert-mouse`, `auspicious-torrid-curlew`). This\
+    \ epic unifies them behind one harness.\n\nThe instrument already mostly exists\
+    \ as data. The live rebar store holds ~4,300 `plan_review_result_v2` sidecars\
+    \ on ~1,280 tickets (2026-06-27 \u2192 now; ~2,000 older ones pruned from the\
+    \ tree but recoverable from `origin/tickets` history) and `~/legacy-modernization-navigator`\
+    \ holds 74 more. Each v2 sidecar retains the raw Pass-1 findings (prose + evidence\
+    \ + scenarios + criteria), the complete Pass-2 answer vector (graded binaries\
+    \ + severity attributes), and the Pass-3 outputs (validity, impact, priority,\
+    \ the exact `block_threshold`, decision). The reviewed plan text is not stored\
+    \ but is reconstructable from ticket `EDIT`/`SNAPSHOT` history and verifiable\
+    \ byte-exactly against the stored `material_fingerprint`. The store also carries\
+    \ free outcome labels: 2,483 revise\u2192re-review pairs (finding survival via\
+    \ `norm_id`), 208 verdict flips on byte-identical material (the reviewer-noise\
+    \ floor), 84 `plan_defect` bug closes, 89 `caused_by` links, 199 plan-PASS\u2192\
+    completion-FAIL tickets, 18 reopens.\n\n## Approach\n\nThree eval tiers, ordered\
+    \ by cost, each measuring one pass in isolation while holding the others fixed:\n\
+    \n- **Tier 0 \u2014 Pass-3 replay (zero LLM).** Re-run `review_kernel.decide.pass3_decide`\
+    \ (and the post-verdict floors) over the whole corpus with a candidate formula/threshold/routing\
+    \ overlay; diff against stored decisions. Generalises `docs/calibration/plan_v5_rescore.py`\
+    \ and `docs/experiments/calibrate_plan_review_thresholds.py`. Runs on every proposal,\
+    \ unlimited.\n- **Tier 1 \u2014 Pass-2 replay (Sonnet, ~$0.5/review uncached).**\
+    \ Re-run the verifier with candidate questions/prompt on the *stored* Pass-1 findings\
+    \ plus reconstructed plan text via the `verify_findings(run_chunk=\u2026)` seam;\
+    \ score per-question agreement against stored answers, then feed Tier 0.\n- **Tier\
+    \ 2 \u2014 Pass-1 replay (Opus, ~$3.4/review uncached, plus a Tier-1 run on the\
+    \ new findings).** Re-run finders with candidate criteria on a fixed stratified\
+    \ sample (~20 tickets); compare finding sets by `norm_id`/criterion; single-criterion\
+    \ mode (~$0.17/call) for per-criterion edits.\n\nNon-negotiable invariants, enforced\
+    \ by the harness rather than by convention:\n\n1. **Hard budget.** A committed\
+    \ ledger tracks every eval call priced via `genai-prices`; every run pre-flights\
+    \ a cost estimate and refuses to start if projected spend would exceed the remaining\
+    \ allocation. Epic-wide cap is **$200** total with a $30 reserve; commissioning\
+    \ spend is planned at \u2264$120 (one Tier-1 reproduction run to measure verifier\
+    \ noise, one Tier-2 baseline sample). Per-proposal costs are published.\n2. **Model\
+    \ parity.** Every LLM re-run uses the exact production model class for that pass\
+    \ (frontier Opus for Pass 1, standard Sonnet for Pass 2) through **Bedrock only**,\
+    \ on a homogeneous provider chain (the mixed Bedrock+Anthropic fallback silently\
+    \ disables prompt caching and roughly doubles cost). The harness records the per-pass\
+    \ model id in every result, refuses to diff runs whose per-pass model ids differ,\
+    \ and refuses to start when the configured model differs from the corpus baseline's\
+    \ `provider_provenance.ran_model`. Substituting a cheaper model to save budget\
+    \ is forbidden: it confounds the measurement.\n3. **Offline first.** Tier 0 and\
+    \ all label joins are pure functions of the frozen corpus; no proposal may be\
+    \ assessed on a live-only signal. Consistent with ADR 0054 (the field corpus is\
+    \ the instrument) and with 6982's rejection of live A/B.\n4. **Noise-aware acceptance.**\
+    \ A change is reported as regressing/improving only when its label-proxy deltas\
+    \ exceed the noise band measured from identical-material flips and the Tier-1\
+    \ reproduction run; otherwise \"indistinguishable\".\n\n## Scope\n\nNew package\
+    \ `src/rebar/llm/evals/plan_replay/` (corpus, labels, tier runners, ledger, report)\
+    \ with a `python -m rebar.llm.evals.plan_replay` entry; frozen corpus manifest\
+    \ + ledger + reports under `docs/experiments/plan-review-gate/replay/`; an ADR\
+    \ and a contributor guide section; fixes to `usage_log` ticket attribution. No\
+    \ CI provider dependency \u2014 everything runs locally.\n\n## Acceptance Criteria\n\
+    \n- [ ] A frozen, versioned replay corpus exists covering both stores (tree +\
+    \ git-recovered sidecars), with at-review plan text reconstructed and fingerprint-verified\
+    \ for \u226595% of v2 sidecars; verified by the corpus manifest's coverage counts.\n\
+    - [ ] Outcome labels and a reviewer-noise floor are computed from the corpus with\
+    \ no LLM calls and joined to every review/finding; verified by a labels report\
+    \ listing counts per label source.\n- [ ] A Pass-3 change (formula, threshold,\
+    \ routing overlay) can be assessed over the entire corpus with zero LLM calls,\
+    \ producing a diff report (verdict flips, per-criterion deltas, label-proxy precision/recall,\
+    \ friction rate); verified by replaying current code against itself with zero\
+    \ diffs and replaying a known historical threshold change reproducing its documented\
+    \ effect.\n- [ ] A Pass-2 change can be assessed on a stratified sample using\
+    \ stored Pass-1 findings, with per-question agreement vs stored answers and downstream\
+    \ Tier-0 metrics; verified by a reproduction run (unchanged questions) whose agreement\
+    \ establishes the noise floor.\n- [ ] A Pass-1 change can be assessed on a fixed\
+    \ stratified sample with finding-set comparison by `norm_id`/criterion and downstream\
+    \ Tier-1/Tier-0 metrics; verified by one baseline sample run.\n- [ ] Every LLM\
+    \ eval call is priced and written to a committed ledger; a run whose pre-flight\
+    \ estimate exceeds remaining allocation is refused; total ledger spend at epic\
+    \ close is \u2264 $200; verified by the ledger file and a test of the refusal\
+    \ path.\n- [ ] Every eval result records the per-pass model id; the harness refuses\
+    \ to diff results with differing model ids and refuses to run a pass on a model\
+    \ other than its production class via Bedrock; verified by unit tests and by the\
+    \ ledger showing only Bedrock Opus/Sonnet ids.\n- [ ] Prompt caching is confirmed\
+    \ active for eval runs (cache_read_tokens > 0 on the second call of a run); verified\
+    \ from the usage log.\n- [ ] A contributor-facing protocol (ADR + docs) states\
+    \ which tier a proposal needs, the required report artifact, and the noise-band\
+    \ acceptance rule; verified by the docs landing and being referenced from `docs/plan-review-gate.md`.\n\
+    \n## Child decomposition\n\nCorpus builder (criterion 1) \u2192 outcome labels\
+    \ + noise floor (2) \u2192 Tier-0 harness (3) \u2192 Tier-1 harness (4) \u2192\
+    \ Tier-2 harness (5) \u2192 budget ledger + model-parity guard + homogeneous Bedrock\
+    \ chain (6, 7, 8; includes the usage-log ticket-attribution bug) \u2192 change\
+    \ protocol ADR + docs (9). Folded-in existing work: `ridiculous-expert-mouse`\
+    \ (per-criterion fixture eval, a Tier-2 single-criterion consumer), `auspicious-torrid-curlew`\
+    \ (deterministic-floor candidates mined via Tier-0 replay), `brutal-idiocratic-rodent`\
+    \ (optional human-adjudicated gold subset, deferred enrichment). `jira-reb-529`\
+    \ is superseded: its recorded-LLM-response mocking is infeasible because prompts/responses\
+    \ are never persisted; the sidecar-replay tiers deliver its intent. `jira-reb-1589`\
+    \ and `fort-wisp-wren` are consumers that depend on this harness; `spin-cub-usher`\
+    \ and `yip-gem-teak` are related but out of scope.\n\n## Non-goals\n\nChanging\
+    \ any production criterion, question, or threshold (this epic builds the instrument);\
+    \ a full human-adjudicated gold set; live A/B in the production gate."
+  label: finding
+- input: '## Context / Problem
+
+
+    `docs/plan-review-gate.md:795` makes a blanket claim-denial statement, contradicting
+    the bug exemption in `src/rebar/_commands/gates.py:45` and the guide''s own exception
+    at lines 474 and 1477. The approved clarification is sequence-sensitive.
+
+
+    ## Approach
+
+
+    Correct the maintained guide directly. State that a bug may be claimed without
+    plan review to perform root-cause analysis; after RCA, a complex bug with an implementation
+    plan and file impact must receive LLM plan review before remediation begins. Preserve
+    behavioral code/tests as authority.
+
+
+    ## Scope
+
+
+    - `docs/plan-review-gate.md`
+
+    - `src/rebar/_commands/gates.py` and `tests/unit/test_bug_review_tier.py` as behavior
+    evidence/checks
+
+
+    ## Testing
+
+
+    Run focused bug-review tier tests and add/update a documentation assertion that
+    distinguishes claim-time exemption from implementation-time review.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] The guide says bugs are exempt from plan review at claim time so RCA can
+    establish remediation shape.
+
+    - [ ] The guide says complex bugs require plan review after RCA, once implementation
+    plan and file impact exist, before implementation.
+
+    - [ ] The guide does not imply every bug needs review before claim or that complex
+    bug remediation is permanently exempt.
+
+    - [ ] Focused bug-review tier tests and the documentation check pass.'
+  label: finding
+- input: '## Context
+
+
+    The project has audience guidance distributed across AGENTS.md, CONTRIBUTING.md,
+    docs/README.md, and individual documents. It lacks one current-state policy that
+    distinguishes durable records, maintained documentation, shipped help, comments,
+    generated artifacts, and protected evidence. The audit ticket minimum-rainy-fawn
+    approved F01 and rejected broad prose cleanup and general prose validation.
+
+
+    ## Current enforcement and history
+
+
+    Ticket forworn-zanyish-narwhale added generated markers, two contributor tables
+    in docs/README.md, and tests/unit/test_generated_surface_markers.py after repeated
+    changes edited derived outputs instead of their sources. The test owns the GENERATED
+    and GATED_HAND_AUTHORED collections and parses the tables from docs/README.md.
+    CONTRIBUTING.md points to the existing landing-page anchor. This change preserves
+    both collections, every catalog row, and all marker checks. It relocates the catalog
+    so the landing page can remain a navigation surface.
+
+
+    ## Plan
+
+
+    Add docs/documentation-policy.md as the current policy for tickets, ADRs, internal
+    documentation, external documentation, shipped help, comments, generated artifacts,
+    and protected evidence. Define the audience, purpose, lifecycle, canonical source,
+    use of citations, correction method, exclusions, and examples for each category.
+    Include the approved punctuation, paragraph-shape, diction, and formal-voice rules
+    for new or edited maintained text. State that ticket events remain append-only
+    and that ADR decision substance is preserved through annotations, errata, supersession,
+    or replacement ADRs.
+
+
+    Add docs/generated-artifacts.md as the contributor inventory. Move the existing
+    generated and parity-gated tables from docs/README.md without changing their rows.
+    Update the existing marker test to parse the new inventory while preserving GENERATED
+    and GATED_HAND_AUTHORED. Replace the old CONTRIBUTING.md anchor and add concise
+    policy pointers in AGENTS.md, CONTRIBUTING.md, and docs/README.md.
+
+
+    ## Exclusions
+
+
+    - No edits to generated outputs, ADR decision substance, ticket events, historical
+    evidence, protected evidence, or commit history.
+
+    - No repository-wide prose rewrite.
+
+    - No prose or comment validator.
+
+    - No F05 ownership descriptor, generated catalog generator, or new ADR.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] docs/documentation-policy.md defines all eight documentation categories
+    and gives each category an audience, purpose, lifecycle, canonical source, citation
+    rule, correction method, exclusions, and at least one example.
+
+    - [ ] The policy states the approved punctuation, paragraph-shape, diction, and
+    formal-voice rules for new or edited maintained text.
+
+    - [ ] The policy requires append-only ticket correction and substance-preserving
+    ADR correction through annotations, errata, supersession, or a replacement ADR.
+
+    - [ ] docs/generated-artifacts.md contains the same generated and parity-gated
+    table row sets that docs/README.md contained before this change.
+
+    - [ ] tests/unit/test_generated_surface_markers.py retains the existing GENERATED
+    and GATED_HAND_AUTHORED values and passes while reading docs/generated-artifacts.md.
+
+    - [ ] AGENTS.md, CONTRIBUTING.md, and docs/README.md each link to docs/documentation-policy.md.
+
+    - [ ] CONTRIBUTING.md links to docs/generated-artifacts.md and no longer points
+    to the removed docs/README.md generated-artifacts anchor.
+
+    - [ ] The targeted marker test, make lint, make typecheck, and the project test
+    gate pass.'
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-F1
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic
