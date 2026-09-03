@@ -527,36 +527,10 @@ class JiraDataCenterBackend:
         return self.transport.get_issuelinks_map(project_key)
 
     def map_remote_links(self, remote_fields: dict[str, Any]) -> list[tuple[str | None, str, str]]:
-        """Canonicalize DC ``issuelinks`` into ``(relation, remote_key,
-        opaque_vendor_type)`` entries — identical shape/logic to Cloud's
-        ``JiraBackend.map_remote_links`` (the link vocabulary is Jira-family
-        general, REST v2 and v3 carry the same ``issuelinks`` shape)."""
-        from rebar_reconciler.link_direction import resolve_inbound_link
+        """Delegate Jira-family ``issuelinks`` canonicalization to the core helper."""
+        from rebar_reconciler.link_direction import canonicalize_jira_issue_links
 
-        seen: set[tuple[str, str]] = set()
-        out: list[tuple[str | None, str, str]] = []
-        for link in remote_fields.get("issuelinks") or []:
-            if not isinstance(link, dict):
-                continue
-            link_type = link.get("type") or {}
-            type_name = link_type.get("name") if isinstance(link_type, dict) else None
-            if not type_name:
-                continue
-            other_key, relation = resolve_inbound_link(link)
-            if other_key is None:
-                for side_key in ("inwardIssue", "outwardIssue"):
-                    side = link.get(side_key)
-                    if isinstance(side, dict) and side.get("key"):
-                        other_key = side["key"]
-                        break
-            if not other_key:
-                continue
-            dedup_key = (type_name, other_key)
-            if dedup_key in seen:
-                continue
-            seen.add(dedup_key)
-            out.append((relation, other_key, type_name))
-        return out
+        return canonicalize_jira_issue_links(remote_fields)
 
     def link_payload_for_relation(self, relation: str) -> tuple[str, bool] | None:
         return RELATION_TO_JIRA_LINK.get(relation)

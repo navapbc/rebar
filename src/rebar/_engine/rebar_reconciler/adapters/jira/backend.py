@@ -317,44 +317,10 @@ class JiraBackend:
         return self.transport.get_issuelinks_map(project_key)
 
     def map_remote_links(self, remote_fields: dict[str, Any]) -> list[tuple[str | None, str, str]]:
-        """Canonicalize a Jira issue's ``issuelinks`` into ``(relation, remote_key,
-        opaque_vendor_type)`` entries (ticket eefd; absorbs the former
-        ``outbound_links._existing_jira_links`` INCLUDING its direction-agnostic
-        dedup — one entry per distinct ``(vendor_type, remote_key)`` regardless of
-        which side of the link carries that key). Direction (inward vs outward) is
-        resolved via the shared ``resolve_inbound_link`` so this stays consistent
-        with the inbound ADD path and the outbound REMOVE path (bug 4b59). An
-        unmapped vendor link type still yields an entry, with ``relation=None``, so
-        core never removes a link it cannot canonicalize."""
-        from rebar_reconciler.link_direction import resolve_inbound_link
+        """Delegate Jira-family ``issuelinks`` canonicalization to the core helper."""
+        from rebar_reconciler.link_direction import canonicalize_jira_issue_links
 
-        seen: set[tuple[str, str]] = set()
-        out: list[tuple[str | None, str, str]] = []
-        for link in remote_fields.get("issuelinks") or []:
-            if not isinstance(link, dict):
-                continue
-            link_type = link.get("type") or {}
-            type_name = link_type.get("name") if isinstance(link_type, dict) else None
-            if not type_name:
-                continue
-            other_key, relation = resolve_inbound_link(link)
-            if other_key is None:
-                # resolve_inbound_link only returns (None, ...) for an unmapped type or a
-                # malformed entry with neither side keyed; fall back to a direction-agnostic
-                # key scan so an unmapped vendor type is still surfaced (relation=None).
-                for side_key in ("inwardIssue", "outwardIssue"):
-                    side = link.get(side_key)
-                    if isinstance(side, dict) and side.get("key"):
-                        other_key = side["key"]
-                        break
-            if not other_key:
-                continue
-            dedup_key = (type_name, other_key)
-            if dedup_key in seen:
-                continue
-            seen.add(dedup_key)
-            out.append((relation, other_key, type_name))
-        return out
+        return canonicalize_jira_issue_links(remote_fields)
 
     def link_payload_for_relation(self, relation: str) -> tuple[str, bool] | None:
         """``(Jira link type, swap_endpoints)`` for a canonical relation, or ``None``
