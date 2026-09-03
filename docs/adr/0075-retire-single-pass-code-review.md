@@ -19,9 +19,9 @@ of which silently lacks verification/decision rigor.
 ## Decision
 
 **Retire the single-pass route; `review_code` becomes the gate-backed shim.** The public
-surface is preserved unchanged — the `rebar.llm.review_code(...)` callable, the MCP
-`review_code` tool, and the `rebar review-code` CLI keep their names, signatures, and
-`review_result` return shape. What changes is the IMPLEMENTATION behind that surface:
+surface keeps its name and `review_result` return shape — the `rebar.llm.review_code(...)`
+callable, the MCP `review_code` tool, and the `rebar review-code` CLI still name the same
+operation — while the IMPLEMENTATION behind that surface changes:
 
 - `single_pass.py` (the moved `code_review.py`) is **deleted**. Its `_review_code_inner` /
   `select_code_reviewers` / `_changed_from_diff` / `_compose_context` are gone (the diff-read

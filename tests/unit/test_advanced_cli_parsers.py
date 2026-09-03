@@ -213,6 +213,18 @@ def test_review_plan_factory_builds_prog_bound_parser() -> None:
     assert parser.prog == "rebar review-plan"
 
 
+def test_review_code_factory_rejects_removed_reviewer_flag() -> None:
+    """`rebar review-code` no longer accepts caller-selected reviewers."""
+
+    build = _resolve("rebar._cli._parsers.advanced.llm:build_review_code")
+    parser = build(prog="rebar review-code")
+
+    with pytest.raises(ParseError) as excinfo:
+        parser.parse_args(["--reviewer", "code-quality"])
+
+    assert "unrecognized arguments" in str(excinfo.value)
+
+
 # --- AC3: parser construction imports no heavy optional runtime -----------
 
 

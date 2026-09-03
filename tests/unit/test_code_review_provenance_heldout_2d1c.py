@@ -82,6 +82,11 @@ def test_absent_ref_leaves_head_alone(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cap["request"].head == "my-head"
 
 
+def test_reviewers_input_is_rejected_on_the_library_surface() -> None:
+    with pytest.raises(TypeError, match="reviewers"):
+        shim.review_code(diff_text="d", reviewers=["code-quality"])
+
+
 # ── the returned contract is complete on EVERY path ─────────────────────────
 
 
