@@ -21,7 +21,7 @@ build against rebar without guessing which parts are load-bearing.
 |---|---|---|
 | **CLI command names & options** | Stable in practice; the golden-path commands (`init`, `create`, `claim`, `transition`, `ready`, `list`, `search`, `show`) are settled. | Post-1.0: no removal/rename without a deprecation window. New flags are additive. `rebar --help` + the per-command help are authoritative. |
 | **`--output json` schemas** | **Strongest contract.** The canonical [JSON Schemas](../src/rebar/schemas/) back every structured output and are the same schemas advertised to MCP clients as `outputSchema`s. | Backward-compatible evolution only: new **optional** keys may be added; required keys are not removed or retyped. Outputs are open (`additionalProperties: true`) so adding a key never breaks a reader. A pre-1.0 break to this rule is possible but is never a silent exception: it must be recorded as **BREAKING** in [docs/release-notes.md](release-notes.md) and the [CHANGELOG](../CHANGELOG.md), stating the keys, the surfaces, and what a consumer must do — see the nanosecond-timestamp `signed_at` retype for the worked example. See [docs/output-schemas.md](output-schemas.md). |
-| **Python `rebar.*` facade** | Documented **stable subset**: the public functions re-exported from `rebar` (`rebar.__all__`) and the return `TypedDict`s in [`rebar.types`](../src/rebar/types.py). The exception surface `RebarError` / `ConcurrencyError` is stable. | `_`-prefixed names (`rebar._*`) are private and may change at any time. Return types track the JSON-schema contract above (a drift-gate keeps them in sync). |
+| **Python `rebar.*` facade** | Documented **stable subset**: the public functions re-exported from `rebar` (`rebar.__all__`) and the return `TypedDict`s in [`rebar.types`](../src/rebar/types.py). The exception surface `RebarError` / `ConcurrencyError` is stable. | `_`-prefixed names (`rebar._*`) are private and may change at any time. Private names do not get internal-only compatibility shims after a move; see [ADR 0111](adr/0111-no-internal-only-compatibility-shims.md). Return types track the JSON-schema contract above (a drift-gate keeps them in sync). |
 | **MCP tool names & input/output schemas** | Stable **subset** — the documented tool set in [mcp-reference.md](mcp-reference.md) and their typed `outputSchema`s. | Deprecations mirror the CLI. Output schemas share the same `--output json` schemas, so the backward-compatible rule above applies. |
 | **Event schema (the on-disk/wire format)** | **Strong contract.** The `tickets`-branch event log is a forward-compatible append-only format. `SCHEMA_VERSION` (in `rebar/reducer/_version.py`) gates it; unknown event types are **preserved-and-ignored** by older clients so mixed-version fleets converge. | New event types are additive; older binaries ignore them (and `fsck` WARNs when the store holds newer types). NDJSON export carries its own `EXPORT_SCHEMA_VERSION` (in `rebar/_io/export_ndjson.py`). See [docs/event-schema.md](event-schema.md). |
 | **Config keys (`rebar.toml`, env vars)** | Stable keys; renamed keys keep a **deprecated alias**. | Aliases are documented with a removal window — an alias survives **at least one minor release** after its replacement ships before it can be removed (e.g. `REBAR_SYNC_PULL` ← deprecated alias `REBAR_NO_SYNC`). Scheduled aliases were dropped at the pre-1.0 breaking window (DE7): `REBAR_PUSH`, `TICKETS_TRACKER_DIR`, `REBAR_MCP_ALLOW_RECONCILE_LIVE`, and `verify.require_verdict_for_close` are no longer honored — use the canonical names. An unknown key is ignored with a typo warning, never a hard error. |
@@ -40,8 +40,20 @@ part of the public contract and may change without notice. Read the store throug
 the `rebar` CLI / library, not by parsing files directly (the on-disk form is
 deliberately not human-readable).
 
+## Internal-only compatibility shims
+
+Private names also do not carry a private-to-private compatibility promise inside
+this repository. After a private symbol or module moves, the new location is the
+only canonical binding: source imports, tests, string lookups, dynamic imports,
+and module-qualified monkeypatch targets must migrate atomically, and the old
+private binding must be deleted. A forwarding wrapper, re-export, or deprecated
+alias is valid only when it protects a separately documented public/operator,
+wire-schema, event-reader, or persisted-data compatibility contract. See
+[ADR 0111](adr/0111-no-internal-only-compatibility-shims.md).
+
 ## Related
 
 - [docs/output-schemas.md](output-schemas.md) — the per-command `--output json` contract.
 - [docs/event-schema.md](event-schema.md) — the event wire format and `SCHEMA_VERSION`.
+- [ADR 0111](adr/0111-no-internal-only-compatibility-shims.md) — no internal-only compatibility shims after private moves.
 - [`rebar.types`](../src/rebar/types.py) — the generated Python return types.

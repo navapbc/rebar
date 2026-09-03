@@ -451,6 +451,28 @@ runs a **non-blocking near-cap leading indicator**: it emits a `::warning::` for
 own `find | wc -l` rather than defining the rule twice. The hard cap tells you *after* a file is
 already over; this surfaces the next split *before* a contributor is blocked by it.
 
+### Current policy: no internal-only compatibility shims
+
+Internal-only compatibility shims are prohibited for future private moves.
+
+[ADR 0111](adr/0111-no-internal-only-compatibility-shims.md) is the governing policy for future
+private symbol and private module moves. After a private binding moves, rebar keeps exactly one
+canonical binding: source imports, tests, string lookups, dynamic imports, and module-qualified
+monkeypatch targets must all migrate atomically, and the old private binding is deleted in the
+same slice. Do not add a forwarding wrapper, re-export, or deprecated alias solely to preserve an
+old private path.
+
+The valid exceptions are the compatibility-bearing surfaces named in
+[api-stability.md](api-stability.md): public `rebar.*` facades, CLI/operator deprecation surfaces,
+config-key aliases, MCP wire schemas, JSON output schemas, event readers, and persisted-data
+migrations. Those adapters are justified by public/operator/wire/data contracts; internal tests or
+private imports are not such a contract.
+
+The split notes below are historical implementation records. Where they mention internal
+re-exports or shims retained for a past split, read them as pre-policy history unless the note is
+protecting one of the public/wire/data exceptions above. They are not future guidance for private
+refactors.
+
 
 `src/rebar/__init__.py` was **split** along its concern seams (ticket S3 / 4532),
 **reversing** the earlier "KEEP as one surface" decision: the ~50 public wrapper
