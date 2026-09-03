@@ -11,7 +11,7 @@
     },
     "instructions": {
       "type": "string",
-      "description": "The Pass-4 coach instructions: the same move-registry + coachable-findings listing the bespoke pass4_coach builds."
+      "description": "The Pass-4 coach instructions: the same move-registry + coachable-findings listing consumed by the live workflow coach step."
     },
     "findings": {
       "type": "array",

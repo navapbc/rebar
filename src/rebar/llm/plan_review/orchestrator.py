@@ -82,7 +82,12 @@ _shed_to_budget = sizing.shed_to_budget
 # assemble_context`, and the suite reaches these as `orchestrator.<name>`; re-importing keeps them
 # module-globals of THIS module so every existing reference and monkeypatch target resolves
 # unchanged.
+#
+# The Pass-4 move registry + loader live in the pure-data `coach_moves` seam; re-exported here
+# for the historical ``orchestrator.MOVE_REGISTRY`` / ``orchestrator.load_move_registry`` call
+# sites (module-size seam, child 75a9).
 
+from .coach_moves import MOVE_REGISTRY, load_move_registry  # noqa: E402,F401
 from .context_assembly import (  # noqa: E402,F401
     _assemble_cache,
     _assemble_cache_key,
@@ -90,11 +95,6 @@ from .context_assembly import (  # noqa: E402,F401
     assemble_context,
     assemble_context_cache,
 )
-
-# The Pass-4 move registry + loader live with their consumer (pass4_coach) in
-# :mod:`.passes`; re-exported here for the historical ``orchestrator.MOVE_REGISTRY`` /
-# ``orchestrator.load_move_registry`` call sites (module-size seam, child 75a9).
-from .passes import MOVE_REGISTRY, load_move_registry  # noqa: E402,F401
 
 
 # ── delivered-children manifest (completion-aware container plan-review, epic 66ac / 94fd) ──────

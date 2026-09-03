@@ -708,27 +708,26 @@ def test_t8_routing_keeps_llm_structured_output_plans(plan: str) -> None:
 
 
 # ── Pass-4 subject validator (C1 enforcement) ─────────────────────────────────
-def test_pass4_coach_maps_findings_and_renders_deterministically() -> None:
-    from rebar.llm.runner import FakeRunner
+def test_review_kernel_coach_maps_findings_and_renders_deterministically() -> None:
+    import importlib
 
+    kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
     moves = orchestrator.MOVE_REGISTRY
-    fr = FakeRunner(
-        structured={
-            "notes": [
-                {"move_id": "1", "subject": "the retry/timeout policy", "finding_refs": ["f1"]},
-                # invalid subject (imperative) → dropped (C1 fallback)
-                {"move_id": "5", "subject": "Add a cache", "finding_refs": ["f2"]},
-                # unknown move id → dropped
-                {"move_id": "99", "subject": "the thing", "finding_refs": ["f3"]},
-            ]
-        }
-    )
-    notes = passes.pass4_coach(
-        fr, _fake_cfg(), plan="p", surviving=[{"id": "f1", "finding": "x"}], move_registry=moves
+    notes = kcoach.coach(
+        [{"id": "f1", "finding": "x"}],
+        moves,
+        pick=lambda _instructions, _applicable: [
+            {"move_id": "1", "subject": "the retry/timeout policy", "finding_refs": ["f1"]},
+            # invalid subject (imperative) → dropped (C1 fallback)
+            {"move_id": "5", "subject": "Add a cache", "finding_refs": ["f2"]},
+            # unknown move id → dropped
+            {"move_id": "99", "subject": "the thing", "finding_refs": ["f3"]},
+        ],
     )
     assert len(notes) == 1  # only the valid move+subject survives
     n = notes[0]
     assert n["move_id"] == "1" and n["finding_refs"] == ["f1"]
+    assert n["decision"] == "advisory"
     # Prose rendered DETERMINISTICALLY from the locked template (the LLM didn't author it).
     assert n["coaching"] == moves["1"]["template"].format(subject="the retry/timeout policy")
 
@@ -826,25 +825,20 @@ def test_out_of_loop_proof_move_is_scoped_to_t15() -> None:
 
 
 def test_t15_finding_can_select_and_render_out_of_loop_proof() -> None:
-    from rebar.llm.runner import FakeRunner
+    import importlib
 
-    runner = FakeRunner(
-        structured={
-            "notes": [
-                {
-                    "move_id": "16",
-                    "subject": "the service startup path",
-                    "finding_refs": ["t15-finding"],
-                }
-            ]
-        }
-    )
-    notes = passes.pass4_coach(
-        runner,
-        _fake_cfg(),
-        plan="p",
-        surviving=[{"id": "t15-finding", "finding": "x", "criteria": ["T15"]}],
-        move_registry=orchestrator.MOVE_REGISTRY,
+    kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
+    notes = kcoach.coach(
+        [{"id": "t15-finding", "finding": "x", "criteria": ["T15"]}],
+        orchestrator.MOVE_REGISTRY,
+        pick=lambda _instructions, _applicable: [
+            {
+                "move_id": "16",
+                "subject": "the service startup path",
+                "finding_refs": ["t15-finding"],
+            }
+        ],
+        active_triggers=["T15"],
     )
     assert notes == [
         {
@@ -860,26 +854,21 @@ def test_t15_finding_can_select_and_render_out_of_loop_proof() -> None:
 
 @pytest.mark.parametrize("criteria", [[], ["E6"], ["T14"]])
 def test_non_t15_finding_cannot_select_out_of_loop_proof(criteria: list[str]) -> None:
-    from rebar.llm.runner import FakeRunner
+    import importlib
 
+    kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
     assert orchestrator.MOVE_REGISTRY["16"]["applies_when"] == ["T15"]
-    runner = FakeRunner(
-        structured={
-            "notes": [
-                {
-                    "move_id": "16",
-                    "subject": "the service startup path",
-                    "finding_refs": ["other-finding"],
-                }
-            ]
-        }
-    )
-    notes = passes.pass4_coach(
-        runner,
-        _fake_cfg(),
-        plan="p",
-        surviving=[{"id": "other-finding", "finding": "x", "criteria": criteria}],
-        move_registry=orchestrator.MOVE_REGISTRY,
+    notes = kcoach.coach(
+        [{"id": "other-finding", "finding": "x", "criteria": criteria}],
+        orchestrator.MOVE_REGISTRY,
+        pick=lambda _instructions, _applicable: [
+            {
+                "move_id": "16",
+                "subject": "the service startup path",
+                "finding_refs": ["other-finding"],
+            }
+        ],
+        active_triggers=criteria,
     )
     assert notes == []
 

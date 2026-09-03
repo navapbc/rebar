@@ -388,9 +388,9 @@ def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     description=(
         "Emit the {{plan}} text + the Pass-4 coach INSTRUCTIONS for the coach_notes prompt step "
         "on the LIVE path: `plan` = assemble_context(ticket_id).plan_text and `instructions` = "
-        "the SAME move-registry + surviving-findings listing the bespoke pass4_coach builds "
-        "(passes.coach_instructions) over the surviving advisory findings. Reuses passes.coach_"
-        "instructions + passes.load_move_registry so the format never diverges from bespoke."
+        "the SAME move-registry + coachable-findings listing that the workflow coach consumes "
+        "(passes.coach_instructions) over the blocking+surviving findings. Reuses passes.coach_"
+        "instructions + passes.load_move_registry so the format never diverges from the live path."
     ),
 )
 def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:

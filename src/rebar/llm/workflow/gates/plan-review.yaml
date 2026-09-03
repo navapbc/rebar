@@ -242,7 +242,7 @@ steps:
         # Pass-4 coach is gated on there being a coachable finding — blocking OR surviving
         # advisory (story 8086: blocking findings get coaching too). A clean PASS with zero
         # findings takes the else arm — coach renders with notes:[] and makes NO coach
-        # LLM call, matching the bespoke pass4_coach early-return (WS4 crimp-polar-jag).
+        # LLM call, matching the live workflow contract (WS4 crimp-polar-jag).
         - id: coach_gate
           needs:
           - coach_inputs
@@ -363,7 +363,7 @@ steps:
         # Pass-4 coach is gated on there being a coachable finding — blocking OR surviving
         # advisory (story 8086: blocking findings get coaching too). A clean PASS with zero
         # findings takes the else arm — coach renders with notes:[] and makes NO coach
-        # LLM call, matching the bespoke pass4_coach early-return (WS4 crimp-polar-jag).
+        # LLM call, matching the live workflow contract (WS4 crimp-polar-jag).
         - id: coach_gate
           needs:
           - coach_inputs

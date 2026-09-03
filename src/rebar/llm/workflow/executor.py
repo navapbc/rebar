@@ -334,26 +334,6 @@ def _terminal_step(doc: Mapping[str, Any]) -> str | None:
     return sinks[-1] if sinks else None
 
 
-def _guard_passes(step: Mapping[str, Any], state: RunState, secrets: Mapping[str, str]) -> bool:
-    guard = step.get("if")
-    if not guard:
-        return True
-    # A bare `if:` value with no `${{ … }}` is NOT an expression — under naive
-    # substitution it resolves to the literal string and is silently truthy
-    # (the GHA `if: steps.a.outputs.ok` footgun). The linter rejects this so a
-    # well-formed workflow never reaches here with one; if internals are driven
-    # directly past the lint, fail closed (skip) rather than always-run.
-    if isinstance(guard, str) and "${{" not in guard:
-        return False
-    try:
-        val = resolve_value(guard, state, secrets)
-    except ExpressionError:
-        return False
-    if isinstance(val, str):
-        return val.strip().lower() not in ("", "false", "0", "no")
-    return bool(val)
-
-
 # ── The v2 worklist interpreter ───────────────────────────────────────────────
 # The recursive frame walk (branch/loop/map + the frame-scoped resolver + _RunCtx)
 # lives in :mod:`rebar.llm.workflow.interpreter` (scanned by the same Burr tripwire).
