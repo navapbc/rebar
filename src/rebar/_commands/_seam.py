@@ -18,6 +18,7 @@ import logging
 import os
 import re as _re
 import subprocess
+import sys
 import uuid as _uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -94,6 +95,20 @@ class SecretScreenRefused(CommandError):
     (ticket 4802) catch this first to surface the blocked audit record LOUDLY instead of
     swallowing it as a transient error, then still return best-effort ``False``.
     """
+
+
+def _warn_stderr(message: str | None) -> None:
+    """Print an advisory ``Warning:`` line to stderr, or nothing when there is none.
+
+    Shared by the composer CREATE surface (``composer.create_cli``), the EDIT surface
+    (``composer_edit.edit_cli``) and ``idea.idea_cli`` — it lives on the seam rather than
+    in either composer module so both reach it without an import cycle, and it is the one
+    place the CLI's advisory-warning prefix is spelled. The branch lives here rather than
+    at the call sites because those sit at their locked complexity ceiling
+    (``.github/complexity-baseline.json``).
+    """
+    if message:
+        print(f"Warning: {message}", file=sys.stderr)
 
 
 def warn_secret_screen_refused(ticket_id: str, record_label: str) -> None:
