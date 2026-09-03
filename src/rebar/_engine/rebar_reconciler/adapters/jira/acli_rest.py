@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import re
 import sys
 import time
 import urllib.error
@@ -23,6 +25,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+
+from rebar_reconciler.adapters.jira.acli_subprocess import AssigneeNotFoundError
 
 
 @dataclass(frozen=True)
@@ -46,7 +50,9 @@ ONE_ATTEMPT_NO_SLEEP = _OneAttemptNoSleep()
 
 
 class AcliRestMixin:
-    """REST transport helpers + issue-property accessors for AcliClient."""
+    """REST transport helpers, issue-property accessors, and the direct-REST
+    issue operations (transition, assignee validate/unassign, reparent,
+    myself, point-read) for AcliClient."""
 
     # Credential attributes set in ``AcliClient.__init__`` (acli.py); declared
     # here type-only so mypy sees the surface this transport mixin depends on.
@@ -338,3 +344,242 @@ class AcliRestMixin:
         )
         with self._rest_urlopen_with_retry(req, timeout=10) as resp:
             resp.read()
+
+    # --- Direct-REST issue operations (relocated from acli.py) ---
+    #
+    # These deliberately BYPASS the ACLI binary and speak Jira REST v3, either
+    # because ACLI cannot express the operation (``--parent`` reparenting,
+    # null-accountId unassign) or because it exits 0 on failure (the Gap 5
+    # "lying-success" bug), leaving HTTP status codes as the only reliable
+    # failure signal. They ride the ``_direct_rest_*`` /
+    # ``_rest_urlopen_with_retry`` helpers above and sit beside the REST
+    # issue-property / user-search accessors they are siblings of; bodies are
+    # unchanged from the pre-split ``acli.py``.
+
+    def get_issue_by_rest(self, jira_key: str, *, retry_policy: Any = None) -> dict[str, Any]:
+        """Get a Jira issue via direct REST GET (immediately consistent).
+
+        Unlike get_issue (which uses ACLI's JQL search internally), this
+        hits GET /rest/api/3/issue/{key} which reads from the primary store
+        and is not subject to Jira Cloud's search index lag.
+
+        ``retry_policy`` (default ``None`` = legacy 3-attempt policy) threads to
+        :meth:`_direct_rest_get`; only the summary-recovery call site passes the
+        optional ``ONE_ATTEMPT_NO_SLEEP`` (REB-3115 S1 T2).
+        """
+        path = f"/rest/api/3/issue/{jira_key}"
+        return self._direct_rest_get(path, retry_policy=retry_policy)
+
+    def get_myself(self) -> dict[str, Any]:
+        """Return the authenticated user's Jira profile via GET /rest/api/2/myself.
+
+        Used to retrieve the service account's profile timezone, which Jira Cloud
+        uses when interpreting unqualified JQL datetime strings. Cached per instance.
+        """
+        if hasattr(self, "_myself_cache"):
+            return self._myself_cache
+        url = f"{self.jira_url.rstrip('/')}/rest/api/2/myself"
+        creds = base64.b64encode(f"{self.user}:{self.api_token}".encode()).decode()
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Basic {creds}", "Accept": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                self._myself_cache: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logging.warning("get_myself: failed to fetch /rest/api/2/myself: %s", exc)
+            # missing keys gracefully (defaulting to UTC), and caching prevents a
+            # second network failure on the same run from the verify+fetch double-call.
+            self._myself_cache = {}
+        return self._myself_cache
+
+    def transition_issue_by_name(self, jira_key: str, target_status: str) -> None:
+        """Transition a Jira issue to *target_status* via REST.
+
+        Bug 85a1 (Gap 8): replaces the previous ACLI-based ``transition_issue``
+        which silently exited 0 on bogus transitions (Gap 5). Uses direct
+        REST so HTTP status codes reliably surface failure:
+
+          1. GET /rest/api/3/issue/{key}/transitions to list available
+          2. Match *target_status* (case-insensitive) against each
+             transition's ``name`` first, then ``to.name``. Workflows that
+             use "Move to <state>" transition names with a distinct
+             target-state name are handled by the ``to.name`` fallback.
+          3. POST /rest/api/3/issue/{key}/transitions with
+             ``{"transition": {"id": "<id>"}}``.
+
+        Raises a ``RuntimeError`` (with available transition names listed)
+        when no transition reaches *target_status* — the workflow does not
+        allow it from the current state. Raises ``urllib.error.HTTPError``
+        on non-2xx response from the POST.
+
+        Per-issue lookup, not cached: transitions are issue-state-specific
+        (depend on current status + workflow + caller permissions). Caching
+        by project+issuetype produces incorrect hits for an issue mid-
+        workflow.
+        """
+        transitions_resp = self._direct_rest_get(f"/rest/api/3/issue/{jira_key}/transitions")
+        transitions = (
+            transitions_resp.get("transitions", []) if isinstance(transitions_resp, dict) else []
+        )
+        target_lower = target_status.strip().lower()
+        match_id = None
+        for t in transitions:
+            if not isinstance(t, dict):
+                continue
+            name = (t.get("name") or "").strip().lower()
+            to_name = ((t.get("to") or {}).get("name") or "").strip().lower()
+            if target_lower in (name, to_name):
+                match_id = t.get("id")
+                if match_id:
+                    break
+        if not match_id:
+            available = [
+                f"{t.get('name')!r}->{(t.get('to') or {}).get('name')!r}"
+                for t in transitions
+                if isinstance(t, dict)
+            ]
+            raise RuntimeError(
+                f"transition_issue_by_name: no transition reaches "
+                f"{target_status!r} on {jira_key}. Available: "
+                f"{available if available else '[none]'}"
+            )
+        self._direct_rest_post_raw(
+            f"/rest/api/3/issue/{jira_key}/transitions",
+            {"transition": {"id": str(match_id)}},
+        )
+
+    def validate_assignee_exists(
+        self,
+        assignee: str,
+        *,
+        issue_key: str | None = None,
+        project_key: str | None = None,
+    ) -> str:
+        """Validate *assignee* resolves to an assignable user; return accountId.
+
+        Mirrors the client-side pre-validation pattern from
+        ``transition_issue_by_name`` (Gap 8). GETs
+        ``/rest/api/3/user/assignable/search?query=<assignee>&issueKey=<key>``
+        (or ``&project=<project>`` when called from a CREATE path with no
+        issue key yet), then returns the matched ``accountId``. Callers should
+        forward this resolved accountId to ACLI rather than the raw input to
+        eliminate display-name/email ambiguity at the API boundary.
+
+        Requires an EXACT identity match (emailAddress / accountId / displayName).
+        Jira's assignable/search does substring/relevance matching, so a local
+        assignee that is not a Jira user (e.g. an agent identity like
+        ``"loop-agent"``) can fuzzily match an unrelated account (``"Jira Triage
+        Agent"``). Returning that first result would MIS-ASSIGN the ticket, so a
+        non-exact result is treated as no match (bug 9b94 follow-up) — the caller
+        then leaves the issue unassigned rather than guessing.
+
+        Raises ``AssigneeNotFoundError`` when no user EXACTLY matches. Raises
+        ``ValueError`` when neither scope arg is supplied.
+        """
+        if not (issue_key or project_key):
+            raise ValueError("validate_assignee_exists: issue_key or project_key required")
+        query_part = f"query={urllib.parse.quote(assignee)}"
+        scope_part = (
+            f"issueKey={urllib.parse.quote(issue_key)}"
+            if issue_key
+            else f"project={urllib.parse.quote(project_key or '')}"
+        )
+        path = f"/rest/api/3/user/assignable/search?{query_part}&{scope_part}"
+        users = self._direct_rest_get(path)
+        if not isinstance(users, list) or not users:
+            scope_label = f"issue={issue_key!r}" if issue_key else f"project={project_key!r}"
+            raise AssigneeNotFoundError(
+                f"validate_assignee_exists: no assignable user matches "
+                f"{assignee!r} for {scope_label}"
+            )
+        # 1) EXACT match on emailAddress / accountId / displayName.
+        for u in users:
+            if not isinstance(u, dict):
+                continue
+            if assignee in (
+                u.get("emailAddress"),
+                u.get("accountId"),
+                u.get("displayName"),
+            ):
+                acct = u.get("accountId")
+                if acct:
+                    return acct
+
+        # 2) NORMALIZED match (bug 9b94): a local assignee is often a case/separator
+        # variant of a real identity — "joe-oakhart" for "Joe Oakhart". Compare the
+        # normalized (lowercased, alphanumerics-only) assignee against each user's
+        # normalized displayName / email local-part / accountId, and accept ONLY a
+        # UNIQUE match. This resolves clear variants while still rejecting BOTH
+        # coincidental substring matches ("loop-agent" !-> "jiratriageagent") and
+        # ambiguous partials ("joe" -> 3 Joes, no unique full-identity match).
+        def _norm(s: str | None) -> str:
+            return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+        target = _norm(assignee)
+        if target:
+            matched: set[str] = set()
+            for u in users:
+                if not isinstance(u, dict):
+                    continue
+                acct = u.get("accountId")
+                if not acct:
+                    continue
+                candidates = {
+                    _norm(u.get("displayName")),
+                    _norm((u.get("emailAddress") or "").split("@")[0]),
+                    _norm(acct),
+                }
+                candidates.discard("")
+                if target in candidates:
+                    matched.add(acct)
+            if len(matched) == 1:
+                return next(iter(matched))
+        raise AssigneeNotFoundError(
+            f"validate_assignee_exists: no exact or unique-normalized match for {assignee!r} "
+            f"({len(users)} non-exact assignable-search result(s) ignored)"
+        )
+
+    def unassign_issue(self, jira_key: str) -> None:
+        """Explicitly unassign a Jira issue via REST v3 PUT.
+
+        Uses direct REST v3 (not ACLI binary) because the /assignee endpoint
+        requires body {"accountId": null} at root level — the issue-property
+        write shape is rejected here. Empirically verified: direct REST PUT is
+        the de-facto pattern used by pycontribs/jira and atlassian-python-api
+        for null-accountId unassign.
+        """
+        path = f"/rest/api/3/issue/{jira_key}/assignee"
+        url = f"{self.jira_url.rstrip('/')}{path}"
+        creds = base64.b64encode(f"{self.user}:{self.api_token}".encode()).decode()
+        body = json.dumps({"accountId": None}, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method="PUT",
+            headers={
+                "Authorization": f"Basic {creds}",
+                "Content-Type": "application/json",
+            },
+        )
+        with self._rest_urlopen_with_retry(req, timeout=10) as resp:
+            resp.read()
+
+    def set_parent(self, jira_key: str, parent_key: str | None) -> None:
+        """Set or clear the parent of a Jira issue via REST PUT.
+
+        ACLI edit does NOT support --parent reparenting (verified live — ticket
+        8b25-ae7a-efc3-47f6).  Uses direct REST:
+        PUT /rest/api/3/issue/{key} {"fields":{"parent":{"key":"..."}}}
+
+        When ``parent_key`` is None or empty, clears the parent by passing
+        ``{"fields": {"parent": None}}``.
+
+        Probe-validated: returns 204 on success.
+        """
+        if parent_key:
+            body: Any = {"fields": {"parent": {"key": parent_key}}}
+        else:
+            body = {"fields": {"parent": None}}
+        self._direct_rest_put_raw(f"/rest/api/3/issue/{jira_key}", body)
