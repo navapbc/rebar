@@ -1,0 +1,244 @@
+"""Happy-path oracle for the plan-review fixture ADMISSION runner (ticket 67aa).
+
+Pins the CORE observable contract of ``rebar.llm.evals.fixture_admission.run_admission``:
+given a labeled candidate manifest that is BALANCED for a criterion, where every candidate's
+``review_event_uuid`` resolves to a verified sidecar row carrying the at-review material, the
+runner REHYDRATES each case's finder input from that row's ``description`` (NOT the emitter's
+model-free provenance descriptor), runs the criterion's Pass-1 finder over the rehydrated
+material across ``epochs`` runs, and — when a case's majority verdict REPRODUCES its predicted
+direction — admits the criterion by writing exactly one ``.eval.yaml`` whose dataset carries
+the runnable rehydrated material and which passes the REAL ``validate_eval_spec(strict=True)``.
+
+The edge cases (drift on non-reproduction / unrecoverable material, budget ceiling + actual
+cap halt, no-shadowing skip, unbalanced/mid-raise atomicity, crash-consistent resume, transient
+retry) live in the HELD-OUT suite and are validated by the orchestrator — they are NOT here.
+
+The helpers below (``candidate``/``sidecar_row``/``write_manifest_file``/``ScriptedSolver``/
+``stub_genai_prices``/``case_id``) are the shared test scaffolding and describe the runner's
+injectable seams; the held-out suite imports them.
+"""
+
+from __future__ import annotations
+
+import sys
+import types
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+
+from rebar.llm.criteria.ids import criterion_prompt_id
+from rebar.llm.evals.eval import validate_eval_spec
+from rebar.llm.evals.fixture_admission import CaseOutcome, run_admission
+from rebar.llm.evals.fixture_selection import write_manifest
+
+pytestmark = pytest.mark.unit
+
+CHEAP = "criteria-eval-cheap"
+
+
+# ── shared scaffolding (the runner's injectable seams) ────────────────────────────────
+def candidate(
+    criterion: str,
+    direction: str,
+    rank: int,
+    review_event_uuid: str,
+    *,
+    norm_id: str | None = None,
+    tier: str = "advisory",
+    signals: list[str] | None = None,
+) -> dict[str, Any]:
+    """A ``candidate`` manifest row in the selector's emitted shape (ticket 549b)."""
+    return {
+        "kind": "candidate",
+        "criterion": criterion,
+        "direction": direction,
+        "norm_id": norm_id
+        if norm_id is not None
+        else (f"n-{rank}" if direction == "fire" else None),
+        "tier": tier,
+        "rank": rank,
+        "signals": sorted(signals or ["reproduction_consensus"]),
+        "escaped_defect": False,
+        "abs_margin": None,
+        "review_event_uuid": review_event_uuid,
+    }
+
+
+def sidecar_row(
+    review_event_uuid: str,
+    *,
+    ticket_id: str,
+    description: str,
+    children: list[dict] | None = None,
+    verified: bool = True,
+) -> dict[str, Any]:
+    """A verified plan-review sidecar corpus row (``corpus.py:_build_sidecar_row`` shape):
+    the at-review material keyed by ``review_event_uuid`` that the runner rehydrates from."""
+    return {
+        "review_event_uuid": review_event_uuid,
+        "ticket_id": ticket_id,
+        "description": description,
+        "children": children or [],
+        "ticket_type": "task",
+        "file_impact": [],
+        "verified": verified,
+    }
+
+
+def write_manifest_file(rows: list[dict[str, Any]], tmp_path: Path) -> Path:
+    path = tmp_path / "manifest.jsonl"
+    write_manifest(rows, path)
+    return path
+
+
+def case_id(criterion: str, direction: str, rank: int) -> str:
+    """The dataset case id the runner mints — identical to the emitter's convention."""
+    return f"{criterion_prompt_id(criterion)}-{direction}-{rank}"
+
+
+def usage_row(model: str = "bedrock:m", input_tokens: int = 1000, output_tokens: int = 500) -> dict:
+    return {
+        "model": model,
+        "provider": "bedrock",
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "timestamp": "2026-07-30T00:00:00+00:00",
+    }
+
+
+class ScriptedSolver:
+    """A model-free solver seam. ``script`` maps a dataset case id to the per-epoch fired
+    booleans consumed one-per-call; ``raises`` maps a case id to an exception raised on every
+    call. Records every ``(prompt_id, case)`` it receives for input/no-call assertions."""
+
+    def __init__(
+        self,
+        script: dict[str, list[bool]] | None = None,
+        *,
+        raises: dict[str, BaseException] | None = None,
+        row: dict | None = None,
+    ) -> None:
+        self.script = {k: list(v) for k, v in (script or {}).items()}
+        self.raises = dict(raises or {})
+        self.row = row or usage_row()
+        self.calls: list[tuple[str, dict]] = []
+
+    def __call__(self, prompt_id: str, case: dict) -> CaseOutcome:
+        self.calls.append((prompt_id, dict(case)))
+        cid = case["id"]
+        if cid in self.raises:
+            raise self.raises[cid]
+        fired = self.script[cid].pop(0)
+        return CaseOutcome(fired=fired, usage_rows=[dict(self.row)])
+
+    def case_ids(self) -> list[str]:
+        return [case["id"] for _pid, case in self.calls]
+
+    def inputs_for(self, cid: str) -> list[str]:
+        return [case.get("input") for _pid, case in self.calls if case["id"] == cid]
+
+
+def stub_genai_prices(monkeypatch: pytest.MonkeyPatch, usd_per_row: float) -> None:
+    """Install a fake ``genai_prices`` returning a fixed price per row, so ``ledger.finalize``
+    prices deterministically offline (mirrors ``test_plan_replay_ledger`` pattern)."""
+    stub = types.ModuleType("genai_prices")
+
+    class Usage:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class _Price:
+        def __init__(self, total_price: float) -> None:
+            self.total_price = total_price
+
+    def calc_price(
+        usage: Any, model_ref: Any, provider_id: Any = None, genai_request_timestamp: Any = None
+    ) -> _Price:
+        return _Price(usd_per_row)
+
+    stub.Usage = Usage
+    stub.calc_price = calc_price
+    monkeypatch.setitem(sys.modules, "genai_prices", stub)
+
+
+def admission_paths(tmp_path: Path) -> dict[str, Path]:
+    return {
+        "out_dir": tmp_path / "evals",
+        "drift_path": tmp_path / "drift-report.md",
+        "ledger_path": tmp_path / "ledger.jsonl",
+    }
+
+
+# ── happy path ────────────────────────────────────────────────────────────────────────
+def test_reproducing_criterion_admits_spec_over_rehydrated_material(tmp_path, monkeypatch):
+    """A balanced criterion whose candidates each resolve to a verified sidecar row: the
+    runner rehydrates the finder input from each row's ``description`` (not the descriptor),
+    and with both cases reproducing their predicted direction across a 2-of-3 majority, admits
+    exactly one strict-valid spec whose dataset carries the rehydrated material."""
+    stub_genai_prices(monkeypatch, usd_per_row=0.01)
+    crit = "project.alpha"
+    fire_plan = "PLAN whose material must fire the criterion — rehydrated from history."
+    pass_plan = "PLAN whose material must stay silent — a clean, well-formed decomposition."
+    rows = [
+        candidate(crit, "fire", 0, "uuid-fire"),
+        candidate(crit, "no_fire", 0, "uuid-pass"),
+    ]
+    manifest = write_manifest_file(rows, tmp_path)
+    material = {
+        "uuid-fire": sidecar_row("uuid-fire", ticket_id="t-fire", description=fire_plan),
+        "uuid-pass": sidecar_row("uuid-pass", ticket_id="t-pass", description=pass_plan),
+    }
+    solver = ScriptedSolver(
+        {
+            case_id(crit, "fire", 0): [
+                True,
+                True,
+                False,
+            ],  # majority fire → reproduces (expect finding)
+            case_id(crit, "no_fire", 0): [
+                False,
+                False,
+                True,
+            ],  # majority silent → reproduces (expect pass)
+        }
+    )
+    p = admission_paths(tmp_path)
+
+    summary = run_admission(
+        manifest,
+        material_index=material,
+        solver=solver,
+        out_dir=p["out_dir"],
+        drift_path=p["drift_path"],
+        ledger_path=p["ledger_path"],
+        cap_usd=250.0,
+        reserve_usd=0.0,
+        epochs=3,
+        packaged_ids=frozenset(),
+        tier_for=lambda _c: CHEAP,
+    )
+
+    assert summary.admitted == [crit]
+    assert summary.withheld == []
+    assert not summary.drift
+
+    spec_path = p["out_dir"] / f"{criterion_prompt_id(crit)}.eval.yaml"
+    assert spec_path.exists()
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    assert validate_eval_spec(spec, strict=True) == []
+    assert (
+        spec["epochs"] == 3 and spec["gate"] == "at_least(2)" and spec["coverage_threshold"] == 1.0
+    )
+
+    # The finder ran on the REHYDRATED description, never the emitter's provenance descriptor.
+    assert solver.inputs_for(case_id(crit, "fire", 0)) == [fire_plan, fire_plan, fire_plan]
+    inputs = {case["input"] for case in spec["dataset"]}
+    assert inputs == {fire_plan, pass_plan}
+    labels = {case["expect"] for case in spec["dataset"]}
+    assert labels == {"finding", "pass"}
+    # gold_set is 1:1 with the reproduced dataset over the runnable material.
+    assert {g["input"] for g in spec["gold_set"]} == {fire_plan, pass_plan}
