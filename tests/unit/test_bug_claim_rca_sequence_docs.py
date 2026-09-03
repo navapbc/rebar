@@ -67,9 +67,31 @@ def test_guide_distinguishes_simple_from_complex_bug_disposition():
 
 
 def test_claim_time_exemption_type_registry_includes_bug():
-    """The CLI claim-time exemption (`_PLAN_REVIEW_EXEMPT_TYPES`) DOES include
-    'bug' -- this is the structural mechanism behind the claim-without-review-for-
-    RCA sequence documented above. The RCA-sequence doc change is doc-only and
-    does not touch this registry."""
-    gates_src = (REPO_ROOT / "src" / "rebar" / "_commands" / "gates.py").read_text(encoding="utf-8")
-    assert '_PLAN_REVIEW_EXEMPT_TYPES = ("bug"' in gates_src
+    """The CLI claim-time exemption DOES include 'bug' -- the structural mechanism
+    behind the claim-without-review-for-RCA sequence documented above.
+
+    Asserted as a VALUE, not as source text. This previously matched the literal
+    `_PLAN_REVIEW_EXEMPT_TYPES = ("bug"` inside `gates.py`, which broke the moment the
+    constant was consolidated into `rebar.types` (mirror F3) even though the exemption
+    itself was unchanged -- a change-detector failing a behaviour-preserving refactor
+    (bug 5550-603c-8059-49ab). Reading the value is also strictly stronger: it catches a
+    change to WHICH types are exempt, which a substring match on one spelling would miss.
+    """
+    from rebar._commands.gates import _PLAN_REVIEW_EXEMPT_TYPES
+
+    assert "bug" in _PLAN_REVIEW_EXEMPT_TYPES
+
+
+def test_the_exemption_is_a_partition_not_a_blanket():
+    """'bug' is exempt while a reviewed type is not — the complement, so the assertion
+    above cannot pass by the set having grown to cover everything.
+
+    Deliberately NOT routed through `_plan_review_gate_applies`: that predicate consults
+    `gate_enabled`, so a bug would read as "not required" whenever the gate is simply
+    switched off, and the test would pass for a reason unrelated to the exemption.
+    """
+    from rebar._commands.gates import _PLAN_REVIEW_EXEMPT_TYPES
+
+    assert "bug" in _PLAN_REVIEW_EXEMPT_TYPES
+    assert "story" not in _PLAN_REVIEW_EXEMPT_TYPES
+    assert "task" not in _PLAN_REVIEW_EXEMPT_TYPES
