@@ -37,6 +37,7 @@ This is an offline text-contract test on the committed IaC, following
 from __future__ import annotations
 
 import re
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -410,3 +411,69 @@ def test_quoted_attr_ignores_commented_assignments() -> None:
         "}\n"
     )
     assert _quoted_attr(raw, _mask_noncode(raw), "namespace") == "rebar/host"
+
+
+# AWS rejects an alarm whose description exceeds 1024 characters, but it does so at
+# APPLY time against the live API — `terraform validate` and the HCL-shape guards above
+# both pass, and so does CI, which never plans against AWS. Change 2565 landed an alarm
+# with a description of 1236 raw / 1180 after `<<-` dedent -- over the cap either way,
+# so unappliable. It reached main through LLM-Review and a green Verified vote, and
+# surfaced only when an operator ran `terraform plan` (bug 9ea3-7d07-ea55-4496).
+_AWS_ALARM_DESCRIPTION_MAX = 1024
+
+_HEREDOC_DESCRIPTION_RE = re.compile(
+    r"alarm_description\s*=\s*<<(?P<squash>-?)(?P<tag>\w+)\n(?P<body>.*?)\n\s*(?P=tag)",
+    re.DOTALL,
+)
+
+#: The QUOTED form is not hypothetical — monitoring.tf uses it three times
+#: (the two EC2 status-check alarms and gerrit_data_disk_high). A guard that
+#: matched only the heredoc form would silently skip exactly those.
+_QUOTED_DESCRIPTION_RE = re.compile(r'alarm_description\s*=\s*"(?P<body>(?:[^"\\]|\\.)*)"')
+
+
+def _rendered_description(match: re.Match[str]) -> str:
+    """The string terraform actually sends to AWS.
+
+    ``<<-`` strips the common leading indentation, so measuring the RAW heredoc body
+    over-counts by the indent on every line. Verified against the live alarm
+    ``rebar-bedrock-invoke-client-errors``: 1037 raw, 981 dedented, and AWS reports 982.
+    Counting raw would have failed this valid alarm.
+    """
+    body = match.group("body")
+    return textwrap.dedent(body) if match.group("squash") else body
+
+
+def test_alarm_descriptions_fit_the_aws_limit() -> None:
+    """Every heredoc alarm_description stays under AWS's 1024-character cap.
+
+    Without this, an over-long description is only caught by a live `terraform plan`,
+    i.e. after the change has already merged.
+    """
+    too_long: list[str] = []
+    measured = 0
+    for file_name, label, raw, _masked in _alarm_blocks():
+        heredoc = _HEREDOC_DESCRIPTION_RE.search(raw)
+        quoted = _QUOTED_DESCRIPTION_RE.search(raw)
+        if heredoc is not None:
+            rendered = _rendered_description(heredoc)
+        elif quoted is not None:
+            rendered = quoted.group("body")
+        else:
+            continue
+        measured += 1
+        if len(rendered) > _AWS_ALARM_DESCRIPTION_MAX:
+            too_long.append(f"{file_name}:{label} description is {len(rendered)} chars")
+
+    assert not too_long, (
+        "alarm_description exceeds AWS's 1024-character limit, so `terraform apply` "
+        "will REJECT these alarms: " + ", ".join(sorted(too_long))
+    )
+    # Anti-vacuity floor: if the regexes stop matching (an HCL reformat, a regex
+    # slip), every block would `continue` and this test would pass having checked
+    # nothing — which is how the defect it guards against reached main in the first
+    # place. The tree has 15 heredoc and 3 quoted descriptions today.
+    assert measured >= 15, (
+        f"only {measured} alarm_description values were measured; the regexes have "
+        "stopped matching and this guard is passing vacuously"
+    )
