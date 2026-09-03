@@ -415,6 +415,13 @@ This behavior is **always on** (story d6bd): the per-binding baseline is uncondi
 dual-written and consumed as the arbitration ancestor. There is no configuration knob to
 change it.
 
+The five inbound-mirrored fields suppress an outbound write only when the local value still
+equals the stored baseline. The baseline gates only the **direction-suppression** decision:
+if the local value changed, a local edit still wins and is written outbound. If Jira changed
+against a different local value, a Jira-side conflict still stays in the conflict path.
+Non-arbitrated fields still keep their local behavior, and an incomplete or missing baseline
+still falls back to local-wins warm-up behavior.
+
 ### The one-pass cold-start warm-up window
 
 Baselines populate **lazily**: a binding first gets a baseline on the first always-on

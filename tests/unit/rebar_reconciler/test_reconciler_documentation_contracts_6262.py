@@ -84,3 +84,16 @@ def test_operator_docs_name_rollback_values_defaults_and_consumer_specific_effec
     env_vars = _text(ENV_VARS)
     assert "`REBAR_RECONCILER_CREATE_ROUTE`" in env_vars
     assert "`REBAR_RECONCILER_WRITE_FACADE`" in env_vars
+
+
+def test_operator_docs_explain_baseline_arbitration_write_conditions() -> None:
+    guide_flat = _squash_ws(_text(JIRA_SYNC_SETUP)).lower()
+    for phrase in (
+        "the five inbound-mirrored fields suppress an outbound write only when the local "
+        "value still equals the stored baseline",
+        "a local edit still wins and is written outbound",
+        "a jira-side conflict still stays in the conflict path",
+        "non-arbitrated fields still keep their local behavior",
+        "an incomplete or missing baseline still falls back to local-wins warm-up behavior",
+    ):
+        assert phrase in guide_flat
