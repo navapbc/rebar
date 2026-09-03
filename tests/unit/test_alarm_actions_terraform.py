@@ -37,6 +37,7 @@ This is an offline text-contract test on the committed IaC, following
 from __future__ import annotations
 
 import re
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -410,3 +411,50 @@ def test_quoted_attr_ignores_commented_assignments() -> None:
         "}\n"
     )
     assert _quoted_attr(raw, _mask_noncode(raw), "namespace") == "rebar/host"
+
+
+# AWS rejects an alarm whose description exceeds 1024 characters, but it does so at
+# APPLY time against the live API — `terraform validate` and the HCL-shape guards above
+# both pass, and so does CI, which never plans against AWS. Change 2565 landed an alarm
+# with a 1236-character description that was therefore unappliable: the defect reached
+# main through LLM-Review and a green Verified vote, and only surfaced when an operator
+# ran `terraform plan`. This guard closes that gap in the tree (bug 9ea3-7d07-ea55-4496).
+_AWS_ALARM_DESCRIPTION_MAX = 1024
+
+_DESCRIPTION_RE = re.compile(
+    r"alarm_description\s*=\s*<<(?P<squash>-?)(?P<tag>\w+)\n(?P<body>.*?)\n\s*(?P=tag)",
+    re.DOTALL,
+)
+
+
+def _rendered_description(match: re.Match[str]) -> str:
+    """The string terraform actually sends to AWS.
+
+    ``<<-`` strips the common leading indentation, so measuring the RAW heredoc body
+    over-counts by the indent on every line. Verified against the live alarm
+    ``rebar-bedrock-invoke-client-errors``: 1037 raw, 981 dedented, and AWS reports 982.
+    Counting raw would have failed this valid alarm.
+    """
+    body = match.group("body")
+    return textwrap.dedent(body) if match.group("squash") else body
+
+
+def test_alarm_descriptions_fit_the_aws_limit() -> None:
+    """Every heredoc alarm_description stays under AWS's 1024-character cap.
+
+    Without this, an over-long description is only caught by a live `terraform plan`,
+    i.e. after the change has already merged.
+    """
+    too_long: list[str] = []
+    for file_name, label, raw, _masked in _alarm_blocks():
+        match = _DESCRIPTION_RE.search(raw)
+        if match is None:
+            continue
+        length = len(_rendered_description(match))
+        if length > _AWS_ALARM_DESCRIPTION_MAX:
+            too_long.append(f"{file_name}:{label} description is {length} chars")
+
+    assert not too_long, (
+        "alarm_description exceeds AWS's 1024-character limit, so `terraform apply` "
+        "will REJECT these alarms: " + ", ".join(sorted(too_long))
+    )

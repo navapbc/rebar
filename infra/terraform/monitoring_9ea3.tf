@@ -36,21 +36,20 @@
 
 resource "aws_cloudwatch_metric_alarm" "mcp_serving_path_down" {
   alarm_name        = "rebar-mcp-serving-path-down"
+  # NOTE: AWS caps alarm_description at 1024 characters and rejects longer ones at
+  # apply time, so keep this terse and put procedure in the runbook. See the guard
+  # test_alarm_descriptions_fit_the_aws_limit in tests/unit/test_alarm_actions_terraform.py.
   alarm_description = <<-EOT
     The rebar MCP serving path is not answering as the MCP application. The host probe
-    (observability.sh section 1b) GETs https://rebar.solutions.navateam.com/mcp through
-    nginx and publishes rebar/host:mcp_healthy = 1 only when the response is the app's own
-    401 auth challenge; it published 0, meaning the request did not reach a live mcp
-    backend. MOST LIKELY CAUSE: the mcp container died (bug 9ea3 was an OOM-kill,
-    OOMKilled=true / Exit=137) while nginx's single-server `upstream rebar_mcp` kept
-    pointing at it, so every /mcp request 502s while nginx itself stays healthy.
-    REMEDIATION: on the box, `docker ps -a | grep rebar-mcp` and `docker inspect` the most
-    recent one for OOMKilled/ExitCode; `cat /etc/nginx/mcp-upstream.conf` for the port the
-    edge is currently bound to; `curl -sS -o /dev/null -w '%%{http_code}' http://127.0.0.1:<that
-    port>/health` to see whether that backend exists at all. Recovery is to bring an mcp
-    container up on the bound port (`journalctl -u rebar-autodeploy` for the last deploy) or
-    re-materialize the upstream at a live one and `nginx -s reload`. Gate runs (review-plan /
-    verify-completion) driven through the MCP server fail while this is breaching.
+    (observability.sh section 1b) GETs /mcp through nginx and publishes
+    rebar/host:mcp_healthy = 1 only when the response is the app's own 401 auth
+    challenge; it published 0, so the request did not reach a live mcp backend.
+    LIKELY CAUSE: the mcp container died (bug 9ea3 was an OOM-kill, Exit=137) while
+    nginx's single-server `upstream rebar_mcp` kept pointing at it, so /mcp 502s while
+    nginx itself stays healthy. TRIAGE: `docker ps -a | grep rebar-mcp` and
+    `docker inspect` the newest for OOMKilled/ExitCode; `cat /etc/nginx/mcp-upstream.conf`
+    for the bound port. Full recovery procedure: infra/runbooks/gerrit-host-wedged-ssm-lost.md.
+    Gate runs driven through MCP fail while this is breaching.
   EOT
 
   namespace   = "rebar/host"
