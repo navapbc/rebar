@@ -4,6 +4,7 @@ Pins the observable byte contract of the shared argparse customization:
 
 * one factory helper builds a parser bound to a deterministic ``prog``,
 * help width is fixed and independent of the terminal (COLUMNS),
+* help/usage bytes are plain text — never ANSI-colorized (py3.14 default),
 * help is UTF-8, LF-only, and ends in exactly one trailing newline, and
 * the same parser object renders identical help bytes on repeat calls.
 
@@ -191,3 +192,40 @@ def test_composed_alias_parses_identically_to_canonical() -> None:
     alias = _parser.compose(define, prog="rebar alias")
     argv = ["--flag", "v", "pos"]
     assert vars(canonical.parse_args(argv)) == vars(alias.parse_args(argv))
+
+
+def test_help_and_usage_are_never_colorized(monkeypatch) -> None:
+    """Rendered help/usage carry no ANSI escapes, even when color is forced on.
+
+    CPython 3.14 colorizes argparse help, usage and error output by default
+    (``ArgumentParser.color=True``), whenever ``_colorize.can_colorize()`` is true —
+    a TTY, or ``FORCE_COLOR`` in the environment. rebar's help is machine-checked
+    bytes (committed ``help/*.txt`` artifacts, usage wrapped on rendered LENGTH), so
+    :class:`~rebar._cli._parser.RebarArgumentParser` pins ``color`` off. Forcing the
+    environment on proves the pin, not the ambient terminal, is what disables it.
+    Inert before 3.14, where argparse has no color plumbing at all.
+    """
+
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    parser = _parser.build_argument_parser(prog="rebar demo", description="A demo.")
+    _add_demo_options(parser)
+
+    assert parser.color is False
+    assert "\x1b" not in parser.format_usage()
+    assert "\x1b" not in parser.format_help()
+
+
+def test_subparsers_inherit_the_uncolored_pin(monkeypatch) -> None:
+    """A nested subparser is a ``RebarArgumentParser`` too, so it is uncolored as well."""
+
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    parser = _parser.build_argument_parser(prog="rebar demo")
+    child = parser.add_subparsers(dest="command").add_parser("sub", help="a subcommand")
+    child.add_argument("--flag", help="a flag")
+
+    assert child.color is False
+    assert "\x1b" not in child.format_help()

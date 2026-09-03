@@ -129,7 +129,37 @@ class RebarArgumentParser(argparse.ArgumentParser):
     normally calls ``error()`` → ``exit(2)``; here ``error()`` raises
     :class:`ParseError` so a library call never terminates the interpreter. A
     successful parse is unaffected and returns a normal namespace.
+
+    Help and usage are rendered UNCOLORED on every Python version — see
+    :meth:`__init__`.
     """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Build the parser and pin help/usage rendering to plain text.
+
+        CPython 3.14 (gh-130645) colorizes argparse help, usage and error output by
+        DEFAULT: :class:`argparse.HelpFormatter` grew ``color=True`` and
+        ``ArgumentParser._get_formatter`` pushes ``self.color`` into it, so whenever
+        ``_colorize.can_colorize()`` is true (a TTY, or ``FORCE_COLOR`` in the
+        environment) every rendered line is wrapped in ANSI SGR escapes.
+
+        That breaks rebar's determinism contract in three separate ways, all of which
+        are the SAME defect and all of which are fixed here rather than at each
+        observation point:
+
+        * the committed ``help/*.txt`` artifacts are byte-checked by
+          ``gen_cli_help.py --check``, so colorized help makes every command stale;
+        * :meth:`RebarHelpFormatter._format_usage` wraps on rendered line LENGTH, and
+          escape sequences inflate that length, so the usage block wraps differently;
+        * escape sequences contain digits (``\x1b[1;34m``), so text scanned for
+          content — e.g. help that must not leak numeric exit codes — sees them.
+
+        rebar's CLI output is machine-checked bytes, not decoration, so the parser
+        opts out unconditionally. ``self.color`` does not exist before 3.14, where
+        assigning it is inert.
+        """
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self.color = False
 
     def error(self, message: str) -> None:  # type: ignore[override]
         raise ParseError(message, prog=self.prog, usage=self.format_usage())
