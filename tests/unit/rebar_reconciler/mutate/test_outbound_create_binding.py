@@ -48,11 +48,14 @@ def outbound_differ_mod() -> ModuleType:
 
 
 class StubBindingStore:
+    def __init__(self, bindings: dict[str, str | None] | None = None):
+        self._bindings = bindings or {}
+
     def get_jira_key(self, local_id: str):
-        return None
+        return self._bindings.get(local_id)
 
     def is_bound(self, local_id: str) -> bool:
-        return False
+        return self.get_jira_key(local_id) is not None
 
 
 def test_outbound_create_batch_dict_has_local_id_end_to_end(
@@ -186,3 +189,60 @@ def test_cap_sort_prioritizes_outbound_creates(applier_mod, mutation_mod):
     assert key_create < key_inbound, (
         f"Outbound create {key_create} should sort before inbound {key_inbound}"
     )
+
+
+def test_outbound_create_with_unbound_parent_emits_local_prerequisite(outbound_differ_mod):
+    tickets = [
+        {
+            "ticket_id": "parent-1",
+            "title": "Parent",
+            "description": "Test",
+            "status": "open",
+            "priority": 2,
+            "ticket_type": "epic",
+            "assignee": "",
+            "tags": [],
+            "comments": [],
+        },
+        {
+            "ticket_id": "child-1",
+            "title": "Child",
+            "description": "Test",
+            "status": "open",
+            "priority": 2,
+            "ticket_type": "task",
+            "assignee": "",
+            "parent_id": "parent-1",
+            "tags": [],
+            "comments": [],
+        },
+    ]
+
+    mutations, _ = outbound_differ_mod.compute_outbound_mutations(tickets, {}, StubBindingStore())
+
+    child = next(m for m in mutations if m.local_id == "child-1")
+    assert child.requires_create == ("parent-1",)
+
+
+def test_outbound_create_with_bound_parent_emits_no_create_prerequisite(outbound_differ_mod):
+    tickets = [
+        {
+            "ticket_id": "child-2",
+            "title": "Child",
+            "description": "Test",
+            "status": "open",
+            "priority": 2,
+            "ticket_type": "task",
+            "assignee": "",
+            "parent_id": "parent-2",
+            "tags": [],
+            "comments": [],
+        },
+    ]
+
+    mutations, _ = outbound_differ_mod.compute_outbound_mutations(
+        tickets, {}, StubBindingStore({"parent-2": "DIG-2"})
+    )
+
+    child = next(m for m in mutations if m.local_id == "child-2")
+    assert child.requires_create == ()

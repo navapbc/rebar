@@ -228,6 +228,7 @@ class OutboundMutation:
     comments: list[dict[str, Any]] = dataclass_field(default_factory=list)
     labels: list[dict[str, Any]] = dataclass_field(default_factory=list)
     links: list[dict[str, Any]] = dataclass_field(default_factory=list)
+    requires_create: tuple[str, ...] = ()
 
 
 @dataclass

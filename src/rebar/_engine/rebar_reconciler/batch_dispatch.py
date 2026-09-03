@@ -21,10 +21,11 @@ from __future__ import annotations
 import importlib.util
 import sys
 import urllib.error
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ._backend import TicketTransport
@@ -77,7 +78,9 @@ __all__ = [
     "make_coordinator_dispatch",
     "make_guarded_execute",
     "map_cutover_report",
+    "merge_pass_tallies",
     "reroute_migrated_plans",
+    "reroute_ordered_create_plans",
     "route_for",
     "run_migrated_reroute",
     "update_one",
@@ -420,6 +423,180 @@ def build_pass_tally(report) -> dict:
         "degraded": bool(report.degraded),
         "buckets": dict(tallies),
     }
+
+
+def merge_pass_tallies(*tallies: dict | None) -> dict | None:
+    """Combine ``build_pass_tally``-shaped blocks, ignoring ``None`` inputs."""
+    present = [t for t in tallies if t is not None]
+    if not present:
+        return None
+    merged: dict[str, Any] = {
+        "applied_count": 0,
+        "failed_count": 0,
+        "deferred_count": 0,
+        "skipped_count": 0,
+        "recovered_count": 0,
+        "degraded": False,
+        "buckets": {
+            bucket: 0 for bucket in ("applied", "recovered", "deferred", "failed", "skipped")
+        },
+    }
+    for tally in present:
+        for key in (
+            "applied_count",
+            "failed_count",
+            "deferred_count",
+            "skipped_count",
+            "recovered_count",
+        ):
+            merged[key] += int(tally.get(key, 0))
+        merged["degraded"] = merged["degraded"] or bool(tally.get("degraded"))
+        for bucket, count in dict(tally.get("buckets", {})).items():
+            merged["buckets"][bucket] = merged["buckets"].get(bucket, 0) + int(count)
+    return merged
+
+
+def _ordered_create_plans(ticket_plans) -> list:
+    """Return homogeneous outbound-create plans in dependency/topological order."""
+    create_plans = [
+        plan
+        for plan in (ticket_plans or [])
+        if plan.mutations
+        and all(
+            getattr(m.direction, "value", None) == "outbound"
+            and getattr(m.action, "value", None) == "create"
+            for m in plan.mutations
+        )
+    ]
+    if len(create_plans) < 2:
+        return create_plans
+    plan_by_id = {plan.identity: plan for plan in create_plans}
+    dependents: dict[str, set[str]] = {identity: set() for identity in plan_by_id}
+    indegree = {identity: 0 for identity in plan_by_id}
+    for plan in create_plans:
+        for dep in getattr(plan, "dependencies", ()):
+            if dep not in plan_by_id:
+                continue
+            dependents[dep].add(plan.identity)
+            indegree[plan.identity] += 1
+    queue = deque(sorted(identity for identity, degree in indegree.items() if degree == 0))
+    ordered: list = []
+    seen: set[str] = set()
+    while queue:
+        identity = queue.popleft()
+        if identity in seen:
+            continue
+        seen.add(identity)
+        ordered.append(plan_by_id[identity])
+        for dependent in sorted(dependents[identity]):
+            indegree[dependent] -= 1
+            if indegree[dependent] == 0:
+                queue.append(dependent)
+    if len(ordered) == len(create_plans):
+        return ordered
+    for identity in sorted(plan_by_id):
+        if identity not in seen:
+            ordered.append(plan_by_id[identity])
+    return ordered
+
+
+def _make_deferred_create_outcome(batch: dict, reason: str) -> dict:
+    outcome = dict(batch)
+    outcome["result"] = None
+    outcome["confirmed"] = False
+    outcome["dependents_released"] = False
+    outcome["known_key"] = None
+    outcome["defer_reason"] = reason
+    return outcome
+
+
+def _create_dependency_satisfied(
+    dep: str, released: Mapping[str, bool], ctx, create_ids: set[str]
+) -> bool:
+    if released.get(dep):
+        return True
+    if dep in create_ids:
+        return False
+    store = getattr(ctx, "binding_store", None)
+    return bool(store is not None and getattr(store, "get_jira_key", lambda _id: None)(dep))
+
+
+def reroute_ordered_create_plans(*, ticket_plans, mutations, ctx, outcomes_sink):
+    """Schedule homogeneous outbound CREATE plans by dependency before the legacy loop.
+
+    The planner can describe create prerequisites in local-id space, but the legacy batch
+    loop still dispatches flat create dicts in input order. This helper consumes only the
+    create plans, dispatches those whose prerequisites are already bound or released by an
+    earlier confirmed create, defers blocked children without a vendor call, appends each
+    observable outcome to ``outcomes_sink``, and removes every consumed create from the
+    following legacy loop.
+    """
+    create_plans = _ordered_create_plans(ticket_plans)
+    if not create_plans:
+        return None, mutations
+    batches = {
+        batch.get("key"): batch
+        for batch in mutations
+        if batch.get("action") == "create" and isinstance(batch.get("key"), str)
+    }
+    create_ids = {plan.identity for plan in create_plans}
+    tally: dict[str, Any] = {
+        "applied_count": 0,
+        "failed_count": 0,
+        "deferred_count": 0,
+        "skipped_count": 0,
+        "recovered_count": 0,
+        "degraded": False,
+        "buckets": {"applied": 0, "recovered": 0, "deferred": 0, "failed": 0, "skipped": 0},
+    }
+    released: dict[str, bool] = {}
+    for plan in create_plans:
+        batch = batches.get(plan.identity)
+        if batch is None:
+            continue
+        disposition = getattr(getattr(plan, "disposition", None), "value", None)
+        defer_reason = getattr(getattr(plan, "defer_reason", None), "value", None)
+        if disposition != "mutate":
+            bucket = "skipped" if disposition == "noop" else "deferred"
+            tally[f"{bucket}_count"] += 1
+            tally["buckets"][bucket] += 1
+            tally["degraded"] = tally["degraded"] or bucket == "deferred"
+            outcomes_sink.append(_make_deferred_create_outcome(batch, defer_reason or "deferred"))
+            released[plan.identity] = False
+            continue
+        if any(
+            not _create_dependency_satisfied(dep, released, ctx, create_ids)
+            for dep in getattr(plan, "dependencies", ())
+        ):
+            tally["deferred_count"] += 1
+            tally["buckets"]["deferred"] += 1
+            tally["degraded"] = True
+            outcomes_sink.append(_make_deferred_create_outcome(batch, "dependency_deferred"))
+            released[plan.identity] = False
+            continue
+        result = _dispatch_with_backstop(batch, ctx)
+        outcomes_sink.append(result.outcome)
+        if result.outcome.get("error"):
+            tally["failed_count"] += 1
+            tally["buckets"]["failed"] += 1
+            tally["degraded"] = True
+            released[plan.identity] = False
+            continue
+        if result.outcome.get("dependents_released"):
+            tally["applied_count"] += 1
+            tally["buckets"]["applied"] += 1
+            released[plan.identity] = True
+            continue
+        tally["deferred_count"] += 1
+        tally["buckets"]["deferred"] += 1
+        tally["degraded"] = True
+        released[plan.identity] = False
+    remaining = [
+        batch
+        for batch in mutations
+        if not (batch.get("action") == "create" and batch.get("key") in create_ids)
+    ]
+    return tally, remaining
 
 
 # ── LIVE cutover wiring: guarded execute + coordinator dispatch (RP-03 S3 T3) ────

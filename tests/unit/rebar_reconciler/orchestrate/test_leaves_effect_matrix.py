@@ -191,7 +191,10 @@ def _drive_outbound_create(handler, applier, mut_mod, repo_root, monkeypatch):
     assert lclient.create_issue.call_count == 1
     assert lclient.create_issue.call_args.args == ({"summary": "Login page", "key_hint": "PROJ-1"},)
     lclient.delete_issue.assert_not_called()
-    assert lresult.payload == {}
+    assert lresult.payload["coordinated"] is False
+    assert lresult.payload["known_key"] == "PROJ-1"
+    assert lresult.payload["confirmed"] is True
+    assert lresult.payload["dependents_released"] is True
 
     # Legacy error path: create raises -> rollback delete_issue(key_hint) -> reraise.
     legacy_err_client = MagicMock()

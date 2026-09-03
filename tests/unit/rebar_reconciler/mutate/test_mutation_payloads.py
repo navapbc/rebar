@@ -32,6 +32,20 @@ def test_outbound_create_round_trips_legacy_shape():
     assert typed.as_legacy_dict() == legacy
 
 
+def test_outbound_create_round_trips_prerequisite_metadata():
+    legacy = {
+        "title": "Child Issue",
+        "comments": [],
+        "labels": [],
+        "local_id": "child-1",
+        "requires_create": ["parent-1"],
+    }
+    typed = mp.build_typed_payload("outbound", "create", legacy)
+    assert isinstance(typed, mp.OutboundCreatePayload)
+    assert typed.requires_create == ("parent-1",)
+    assert typed.as_legacy_dict() == legacy
+
+
 def test_outbound_create_open_ended_fields_allow_arbitrary_keys():
     typed = mp.build_typed_payload("outbound", "create", {"any_vendor_field": 1})
     assert typed.as_legacy_dict() == {"any_vendor_field": 1, "comments": [], "labels": []}
