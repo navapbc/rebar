@@ -75,6 +75,110 @@ def test_defaults(tmp_path: Path) -> None:
     assert o.model_provider is None and o.base_url is None and o.mcp_servers == {}
 
 
+def test_from_env_uses_grouped_reader_assemblers(tmp_path: Path, monkeypatch) -> None:
+    from rebar.llm import config as llm_config
+
+    def _cli_overrides(section: str) -> dict:
+        return {"source": "cli"} if section == "llm" else {}
+
+    project = _proj(tmp_path)
+    cfg.reset_config_cache()
+    cfg.set_cli_overrides(None)
+    monkeypatch.setattr(llm_config, "_read_llm_file_table", lambda repo_root: {"source": "table"})
+    monkeypatch.setattr(cfg, "cli_overrides_for", _cli_overrides)
+    monkeypatch.setattr(llm_config, "resolve_headers", lambda table, cli, env_json, env: {})
+    monkeypatch.setattr(llm_config, "current_code_root", lambda: None)
+    monkeypatch.setattr(llm_config, "current_tickets_root", lambda: "/tmp/tickets-root")
+    monkeypatch.setattr(
+        llm_config.LangfuseConfig,
+        "from_env",
+        classmethod(lambda cls: cls(public_key="pk", secret_key="sk", host="https://lf")),
+    )
+
+    seen: dict[str, tuple[dict, dict]] = {}
+
+    def _core(table: dict, cli: dict, *, bedrock_region_name, bedrock_region_source) -> dict:
+        seen["core"] = (table, cli)
+        assert bedrock_region_name is None
+        assert bedrock_region_source is None
+        return {
+            "model": "helper-model",
+            "model_provider": "helper-provider",
+            "base_url": "https://helper-base",
+            "parse_failure_artifact_dir": "/tmp/helper-artifacts",
+            "bedrock_region_name": "us-test-1",
+            "bedrock_region_source": "helper",
+        }
+
+    def _limits(table: dict, cli: dict) -> dict:
+        seen["limits"] = (table, cli)
+        return {
+            "max_tokens": 1234,
+            "max_iterations": 12,
+            "timeout_s": 34,
+            "temperature": 0.25,
+            "llm_retry_max_attempts": 5,
+            "llm_retry_max_wait_s": 45,
+            "llm_tool_timeout_s": 67,
+        }
+
+    def _overlap(table: dict, cli: dict) -> dict:
+        seen["overlap"] = (table, cli)
+        return {
+            "overlap_propositions_min": 7,
+            "overlap_propositions_max": 8,
+            "overlap_k": 9,
+            "overlap_max_doc_freq": 0.4,
+            "overlap_min_should_match": 0.3,
+            "overlap_soak_min": 10,
+            "overlap_lease_ttl_min": 11,
+            "overlap_reenrich_debounce_min": 12,
+            "overlap_conf_threshold": 0.8,
+            "overlap_surface_cap": 13,
+            "overlap_drain": "always",
+            "overlap_drain_batch": 14,
+            "overlap_drain_gate_budget_ms": 15,
+        }
+
+    monkeypatch.setattr(llm_config, "_read_llm_core_settings", _core, raising=False)
+    monkeypatch.setattr(llm_config, "_read_llm_limit_settings", _limits, raising=False)
+    monkeypatch.setattr(llm_config, "_read_llm_overlap_settings", _overlap, raising=False)
+
+    resolved = llm_config.LLMConfig.from_env(repo_root=project)
+
+    assert seen == {
+        "core": ({"source": "table"}, {"source": "cli"}),
+        "limits": ({"source": "table"}, {"source": "cli"}),
+        "overlap": ({"source": "table"}, {"source": "cli"}),
+    }
+    assert resolved.model == "helper-model"
+    assert resolved.model_provider == "helper-provider"
+    assert resolved.base_url == "https://helper-base"
+    assert resolved.parse_failure_artifact_dir == "/tmp/helper-artifacts"
+    assert resolved.bedrock_region_name == "us-test-1"
+    assert resolved.bedrock_region_source == "helper"
+    assert (resolved.max_tokens, resolved.max_iterations, resolved.timeout_s) == (1234, 12, 34)
+    assert resolved.temperature == 0.25
+    assert resolved.llm_retry_max_attempts == 5
+    assert resolved.llm_retry_max_wait_s == 45
+    assert resolved.llm_tool_timeout_s == 67
+    assert resolved.tickets_path == "/tmp/tickets-root"
+    assert resolved.langfuse.host == "https://lf"
+    assert resolved.overlap_propositions_min == 7
+    assert resolved.overlap_propositions_max == 8
+    assert resolved.overlap_k == 9
+    assert resolved.overlap_max_doc_freq == 0.4
+    assert resolved.overlap_min_should_match == 0.3
+    assert resolved.overlap_soak_min == 10
+    assert resolved.overlap_lease_ttl_min == 11
+    assert resolved.overlap_reenrich_debounce_min == 12
+    assert resolved.overlap_conf_threshold == 0.8
+    assert resolved.overlap_surface_cap == 13
+    assert resolved.overlap_drain == "always"
+    assert resolved.overlap_drain_batch == 14
+    assert resolved.overlap_drain_gate_budget_ms == 15
+
+
 # ── config-file locations are consumed ────────────────────────────────────────
 def test_pyproject(tmp_path: Path) -> None:
     p = _proj(tmp_path)
