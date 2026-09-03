@@ -173,7 +173,13 @@ def _repair_plan(ticket_dir: str, _ticket_id: str) -> dict:
     if not snaps:
         return plan
     latest_snap = snaps[-1]
+    event_files = _collect_active_event_files(ticket_dir, latest_snap)
+    all_sources = _populate_repair_plan(plan, ticket_dir, snaps, event_files)
+    _classify_repair_orphans(plan, event_files, latest_snap, all_sources)
+    return plan
 
+
+def _collect_active_event_files(ticket_dir: str, latest_snap: str) -> dict[str, tuple[str, str]]:
     # uuid -> (filename, event_type) for active events. Older SNAPSHOT files ARE
     # included (only the horizon `latest_snap` is excluded): a re-compaction folds a
     # prior snapshot INTO the newer one's source_event_uuids, so a still-present older
@@ -192,7 +198,15 @@ def _repair_plan(ticket_dir: str, _ticket_id: str) -> dict:
         if len(type_split) < 2:
             continue
         event_files[type_split[0]] = (name, type_split[1])
+    return event_files
 
+
+def _populate_repair_plan(
+    plan: dict[str, list],
+    ticket_dir: str,
+    snaps: list[str],
+    event_files: dict[str, tuple[str, str]],
+) -> set[str]:
     all_sources: set[str] = set()
     for snap in snaps:
         try:
@@ -207,18 +221,31 @@ def _repair_plan(ticket_dir: str, _ticket_id: str) -> dict:
         for u in sources:
             if u in event_files and event_files[u][0] not in plan["retire"]:
                 plan["retire"].append(event_files[u][0])
+    return all_sources
 
+
+def _append_orphan_plan_entry(
+    plan: dict[str, list],
+    name: str,
+    etype: str,
+) -> None:
+    bucket = "auto_orphans" if etype in _AUTO_RECOVER_ORPHAN_TYPES else "triage_orphans"
+    plan[bucket].append((name, etype))
+
+
+def _classify_repair_orphans(
+    plan: dict[str, list],
+    event_files: dict[str, tuple[str, str]],
+    latest_snap: str,
+    all_sources: set[str],
+) -> None:
     for file_uuid, (name, etype) in event_files.items():
         if etype not in KNOWN_EVENT_TYPES or name in plan["retire"]:
             continue
         if name.endswith("-SNAPSHOT.json"):
             continue  # snapshots are never orphan-classified (symmetry with _check_snapshot)
         if name < latest_snap and file_uuid not in all_sources:
-            if etype in _AUTO_RECOVER_ORPHAN_TYPES:
-                plan["auto_orphans"].append((name, etype))
-            else:  # HUMAN-TRIAGE (order-sensitive) — surfaced, never auto-rebuilt.
-                plan["triage_orphans"].append((name, etype))
-    return plan
+            _append_orphan_plan_entry(plan, name, etype)
 
 
 def _repair_ticket(
@@ -326,6 +353,183 @@ def _reconciler_in_flight(repo_root=None) -> bool:
         return True  # indeterminate lock state → fail-closed (do not repair)
 
 
+def _append_mixed_fault_refusals(lines: list[str], flagged: list[tuple[str, dict]]) -> bool:
+    mixed = False
+    for tid, plan in flagged:
+        kinds: list[str] = []
+        if plan["retire"]:
+            kinds.append("SNAPSHOT_INCONSISTENT")
+        if plan["auto_orphans"] or plan["triage_orphans"]:
+            kinds.append("ORPHAN_EVENT")
+        if kinds:
+            lines.append(f"REFUSE {tid}: {', '.join(kinds)}")
+            mixed = True
+    return mixed
+
+
+def _select_flagged_tickets(
+    tracker: str,
+    *,
+    include_archived: bool,
+    only: str | None,
+) -> list[tuple[str, dict]]:
+    flagged: list[tuple[str, dict]] = []
+    for tid in _ticket_dirs(tracker, include_archived=include_archived):
+        plan = _repair_plan(os.path.join(tracker, tid), tid)
+        if only == "stale-channel":
+            if plan["stale_channel"]:
+                flagged.append((tid, plan))
+            continue
+        if plan["retire"] or plan["auto_orphans"] or plan["triage_orphans"]:
+            flagged.append((tid, plan))
+    return flagged
+
+
+def _render_dry_run(
+    lines: list[str],
+    flagged: list[tuple[str, dict]],
+    *,
+    total: int,
+    only: str | None,
+) -> tuple[list[str], int]:
+    for tid, plan in flagged:
+        if only == "stale-channel":
+            lines.append(f"DRY-RUN {tid}: stale_channel={len(plan['stale_channel'])}")
+            continue
+        lines.append(
+            f"DRY-RUN {tid}: retire={len(plan['retire'])} "
+            f"rebuild={len(plan['auto_orphans'])} triage={len(plan['triage_orphans'])}"
+        )
+    triage = sum(len(p["triage_orphans"]) for _, p in flagged)
+    lines.append(
+        f"a3-remediation DRY-RUN: {len(flagged)}/{total} ticket(s) would be repaired "
+        "— 0 file writes, 0 commits"
+    )
+    return lines, triage
+
+
+def _pause_or_error(
+    tracker: str,
+    *,
+    limit: int | None,
+    repo_root,
+    only: str | None,
+) -> tuple[list[str], int] | None:
+    try:
+        with owned_repair_pause("fsck", repo_root, in_flight_probe=_reconciler_in_flight):
+            return _repair_run(
+                tracker,
+                dry_run=False,
+                limit=limit,
+                repo_root=repo_root,
+                only=only,
+                _pause_owned=True,
+            )
+    except RepairPauseError as exc:
+        return [exc.legacy_report_line or exc.message], -1
+
+
+def _prepare_marker_dir(tracker: str, lines: list[str], pre_oid: str) -> str:
+    lines.append(f"a3-remediation: pre-tag pre-a3-remediation @ {pre_oid[:12]}")
+
+    # Markers live under the resolved git dir (never the committed tree, so `git add`
+    # never picks them up) — .git may be a worktree pointer FILE, not a directory.
+    git_dir = _resolve_tracker_git_dir(tracker)
+    marker_dir = os.path.join(git_dir or tracker, "a3-repaired")
+    try:
+        os.makedirs(marker_dir, exist_ok=True)
+    except OSError:
+        return ""
+    return marker_dir
+
+
+def _mark_ticket_repaired(marker_dir: str, tid: str) -> None:
+    if not marker_dir:
+        return
+    try:
+        open(os.path.join(marker_dir, tid), "w").close()
+    except OSError:
+        pass
+
+
+def _commit_repair_batch(tracker: str, lines: list[str], batch_number: int) -> bool:
+    add = _git(tracker, "add", "-A")  # raw-git-ok: store-maintenance batch staging
+    if add.returncode != 0:
+        lines.append("ABORT: git add failed")
+        return False
+    if _git(tracker, "diff", "--cached", "--quiet").returncode == 0:
+        return True
+    commit = _git(
+        tracker,
+        *_AUTOMAINT_OFF,
+        "commit",
+        "--no-verify",
+        "-m",
+        f"a3-remediation: batch {batch_number}",
+    )  # raw-git-ok: store-maintenance batch commit
+    if commit.returncode != 0:
+        lines.append("ABORT: commit failed while holding batch")
+        return False
+    if not _has_remote(tracker):
+        return True
+    push = _git_push(tracker, "push", "origin", "HEAD:tickets")
+    if push.returncode == 0:
+        return True
+    lines.append(f"ABORT: push failed for batch {batch_number}: {push.stderr.strip()}")
+    return False
+
+
+def _run_live_repair_batches(
+    tracker: str,
+    lines: list[str],
+    flagged: list[tuple[str, dict]],
+    *,
+    marker_dir: str,
+    only: str | None,
+) -> bool:
+    lines.append("a3-remediation: reconciler paused")
+    batch = 200
+    for i, (tid, _plan) in enumerate(flagged):
+        disp = _repair_ticket(
+            tracker,
+            tid,
+            os.path.join(tracker, tid),
+            dry_run=False,
+            repair_stale_channel=only == "stale-channel",
+            no_commit=True,
+        )
+        if disp.get("error"):
+            lines.append(f"SKIP {tid}: {disp['error']}")
+        else:
+            _mark_ticket_repaired(marker_dir, tid)
+        if (i + 1) % batch == 0 or i == len(flagged) - 1:
+            if not _commit_repair_batch(tracker, lines, i // batch + 1):
+                return False
+    lines.append("a3-remediation: reconciler re-enabled")
+    return True
+
+
+def _count_remaining_stale_channel(tracker: str, *, include_archived: bool) -> int:
+    return sum(
+        1
+        for tid in _ticket_dirs(tracker, include_archived=include_archived)
+        if _repair_plan(os.path.join(tracker, tid), tid)["stale_channel"]
+    )
+
+
+def _count_remaining_repairable(tracker: str, *, include_archived: bool) -> tuple[int, int]:
+    remaining = sum(
+        1
+        for tid in _ticket_dirs(tracker, include_archived=include_archived)
+        if (p := _repair_plan(os.path.join(tracker, tid), tid))["retire"] or p["auto_orphans"]
+    )
+    triage = sum(
+        len(_repair_plan(os.path.join(tracker, tid), tid)["triage_orphans"])
+        for tid in _ticket_dirs(tracker, include_archived=include_archived)
+    )
+    return remaining, triage
+
+
 # raw-git-ok: store-maintenance command, seam-internal
 def _repair_run(
     tracker: str,
@@ -347,26 +551,9 @@ def _repair_run(
     Returns (report_lines, unresolved_fault_count).
     """
     lines: list[str] = []
-    flagged: list[tuple[str, dict]] = []
-    for tid in _ticket_dirs(tracker, include_archived=include_archived):
-        plan = _repair_plan(os.path.join(tracker, tid), tid)
-        if only == "stale-channel":
-            if plan["stale_channel"]:
-                flagged.append((tid, plan))
-        elif plan["retire"] or plan["auto_orphans"] or plan["triage_orphans"]:
-            flagged.append((tid, plan))
+    flagged = _select_flagged_tickets(tracker, include_archived=include_archived, only=only)
     if only == "stale-channel":
-        mixed = False
-        for tid, plan in flagged:
-            kinds: list[str] = []
-            if plan["retire"]:
-                kinds.append("SNAPSHOT_INCONSISTENT")
-            if plan["auto_orphans"] or plan["triage_orphans"]:
-                kinds.append("ORPHAN_EVENT")
-            if kinds:
-                lines.append(f"REFUSE {tid}: {', '.join(kinds)}")
-                mixed = True
-        if mixed:
+        if _append_mixed_fault_refusals(lines, flagged):
             lines.append("ABORT: stale-channel repair refuses mixed faults before mutation")
             return lines, -1
     total = len(flagged)
@@ -377,113 +564,29 @@ def _repair_run(
         return lines, 0
 
     if dry_run:
-        for tid, plan in flagged:
-            if only == "stale-channel":
-                lines.append(f"DRY-RUN {tid}: stale_channel={len(plan['stale_channel'])}")
-            else:
-                lines.append(
-                    f"DRY-RUN {tid}: retire={len(plan['retire'])} "
-                    f"rebuild={len(plan['auto_orphans'])} triage={len(plan['triage_orphans'])}"
-                )
-        triage = sum(len(p["triage_orphans"]) for _, p in flagged)
-        lines.append(
-            f"a3-remediation DRY-RUN: {len(flagged)}/{total} ticket(s) would be repaired "
-            "— 0 file writes, 0 commits"
-        )
-        return lines, triage
+        return _render_dry_run(lines, flagged, total=total, only=only)
 
     if not _pause_owned:
-        try:
-            with owned_repair_pause("fsck", repo_root, in_flight_probe=_reconciler_in_flight):
-                return _repair_run(
-                    tracker,
-                    dry_run=False,
-                    limit=limit,
-                    repo_root=repo_root,
-                    only=only,
-                    _pause_owned=True,
-                )
-        except RepairPauseError as exc:
-            return [exc.legacy_report_line or exc.message], -1
+        paused = _pause_or_error(tracker, limit=limit, repo_root=repo_root, only=only)
+        if paused is not None:
+            return paused
 
     # ── LIVE run ──
     pre_oid = _git(tracker, "rev-parse", "HEAD").stdout.strip()
     _git(tracker, "tag", "-f", "pre-a3-remediation", pre_oid)
-    lines.append(f"a3-remediation: pre-tag pre-a3-remediation @ {pre_oid[:12]}")
-
-    # Markers live under the resolved git dir (never the committed tree, so `git add`
-    # never picks them up) — .git may be a worktree pointer FILE, not a directory.
-    git_dir = _resolve_tracker_git_dir(tracker)
-    marker_dir = os.path.join(git_dir or tracker, "a3-repaired")
-    try:
-        os.makedirs(marker_dir, exist_ok=True)
-    except OSError:
-        marker_dir = ""
-
-    lines.append("a3-remediation: reconciler paused")
-    batch = 200
-    for i, (tid, _plan) in enumerate(flagged):
-        disp = _repair_ticket(
-            tracker,
-            tid,
-            os.path.join(tracker, tid),
-            dry_run=False,
-            repair_stale_channel=only == "stale-channel",
-            no_commit=True,
-        )
-        if disp.get("error"):
-            lines.append(f"SKIP {tid}: {disp['error']}")  # per-ticket failure: log + skip
-        elif marker_dir:
-            try:
-                open(os.path.join(marker_dir, tid), "w").close()
-            except OSError:
-                pass
-        if (i + 1) % batch == 0 or i == len(flagged) - 1:
-            add = _git(tracker, "add", "-A")
-            if add.returncode != 0:
-                lines.append("ABORT: git add failed")
-                return lines, -1
-            if _git(tracker, "diff", "--cached", "--quiet").returncode != 0:
-                n = i // batch + 1
-                commit = _git(
-                    tracker,
-                    *_AUTOMAINT_OFF,
-                    "commit",
-                    "--no-verify",
-                    "-m",
-                    f"a3-remediation: batch {n}",
-                )
-                if commit.returncode != 0:
-                    lines.append("ABORT: commit failed while holding batch")
-                    return lines, -1
-                if _has_remote(tracker):
-                    push = _git_push(tracker, "push", "origin", "HEAD:tickets")
-                    if push.returncode != 0:
-                        lines.append(f"ABORT: push failed for batch {n}: {push.stderr.strip()}")
-                        return lines, -1
-    lines.append("a3-remediation: reconciler re-enabled")
+    marker_dir = _prepare_marker_dir(tracker, lines, pre_oid)
+    if not _run_live_repair_batches(tracker, lines, flagged, marker_dir=marker_dir, only=only):
+        return lines, -1
 
     if only == "stale-channel":
-        remaining = sum(
-            1
-            for tid in _ticket_dirs(tracker, include_archived=include_archived)
-            if _repair_plan(os.path.join(tracker, tid), tid)["stale_channel"]
-        )
+        remaining = _count_remaining_stale_channel(tracker, include_archived=include_archived)
         lines.append(
             f"a3-remediation: {len(flagged)} ticket(s) processed; "
             f"{remaining} stale-channel fault(s) remain"
         )
         return lines, remaining
 
-    remaining = sum(
-        1
-        for tid in _ticket_dirs(tracker, include_archived=include_archived)
-        if (p := _repair_plan(os.path.join(tracker, tid), tid))["retire"] or p["auto_orphans"]
-    )
-    triage = sum(
-        len(_repair_plan(os.path.join(tracker, tid), tid)["triage_orphans"])
-        for tid in _ticket_dirs(tracker, include_archived=include_archived)
-    )
+    remaining, triage = _count_remaining_repairable(tracker, include_archived=include_archived)
     lines.append(
         f"a3-remediation: {len(flagged)} ticket(s) processed; {remaining} auto-fault(s) remain, "
         f"{triage} orphan(s) await human triage"
