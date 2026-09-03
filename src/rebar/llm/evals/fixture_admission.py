@@ -278,7 +278,13 @@ def _rehydrate_candidate(
     }
     children = material.get("children")
     if children:
-        case["children"] = children
+        # The sidecar corpus stores a review's child list as bare ticket-id STRINGS
+        # (`corpus._child_ids`), but the container eval path (`pass1_container`,
+        # `build_sibling_roster`) consumes `{ticket_id, ...}` DICTS — the same shape
+        # `corpus._build_context` builds for the production fingerprint. Normalize here so a
+        # container criterion (G3/G4/decomp-shape) rehydrates into a runnable case instead of
+        # crashing the finder on the first agent-tier case.
+        case["children"] = [c if isinstance(c, dict) else {"ticket_id": c} for c in children]
     ticket_id = material.get("ticket_id")
     return _RehydratedCase(
         case=case,

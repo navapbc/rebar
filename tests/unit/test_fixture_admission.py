@@ -242,3 +242,70 @@ def test_reproducing_criterion_admits_spec_over_rehydrated_material(tmp_path, mo
     assert labels == {"finding", "pass"}
     # gold_set is 1:1 with the reproduced dataset over the runnable material.
     assert {g["input"] for g in spec["gold_set"]} == {fire_plan, pass_plan}
+
+
+# ── container-criterion child shape (regression: bare-string corpus children) ───────────
+def test_container_criterion_rehydrates_children_as_dicts(tmp_path, monkeypatch):
+    """A container criterion (G3/G4/decomp-shape) is scored over a (parent, children, roster)
+    decomposition, so the eval case the runner hands the solver must carry ``children`` as a
+    list of ``{ticket_id, ...}`` DICTS — the shape ``pass1_container`` and ``build_sibling_roster``
+    consume. But the sidecar corpus stores a review's child list as bare ticket-id STRINGS
+    (``corpus._build_sidecar_row`` -> ``_child_ids``). The runner must NORMALIZE those strings to
+    dicts on rehydration, or the real container solver raises
+    ``AttributeError: 'str' object has no attribute 'get'`` on the very first agent-tier
+    container case (observed live during the 67aa AC10 admission run)."""
+    from rebar.llm.plan_review.pass1 import build_sibling_roster
+
+    stub_genai_prices(monkeypatch, usd_per_row=0.01)
+    crit = "G3"
+    rows = [
+        candidate(crit, "fire", 0, "uuid-fire"),
+        candidate(crit, "no_fire", 0, "uuid-pass"),
+    ]
+    manifest = write_manifest_file(rows, tmp_path)
+    material = {
+        # BARE STRINGS — the real corpus shape (`_child_ids` returns `list[str]`).
+        "uuid-fire": sidecar_row(
+            "uuid-fire",
+            ticket_id="t-fire",
+            description="parent plan A",
+            children=["child-a", "child-b"],
+        ),
+        "uuid-pass": sidecar_row(
+            "uuid-pass",
+            ticket_id="t-pass",
+            description="parent plan B",
+            children=["child-c"],
+        ),
+    }
+    solver = ScriptedSolver(
+        {
+            case_id(crit, "fire", 0): [True, True, False],
+            case_id(crit, "no_fire", 0): [False, False, True],
+        }
+    )
+    p = admission_paths(tmp_path)
+    run_admission(
+        manifest,
+        material_index=material,
+        solver=solver,
+        out_dir=p["out_dir"],
+        drift_path=p["drift_path"],
+        ledger_path=p["ledger_path"],
+        cap_usd=250.0,
+        reserve_usd=0.0,
+        epochs=3,
+        packaged_ids=frozenset(),
+        tier_for=lambda _c: CHEAP,
+    )
+
+    fire_case = next(case for _pid, case in solver.calls if case["id"] == case_id(crit, "fire", 0))
+    # The exact production consumer must ingest the rehydrated children without raising.
+    roster = build_sibling_roster(fire_case["children"])
+    assert "child-a" in roster and "child-b" in roster
+    # And the normalized shape is the eval-case contract: {ticket_id, ...} dicts.
+    assert fire_case["children"] == [{"ticket_id": "child-a"}, {"ticket_id": "child-b"}]
+    pass_case = next(
+        case for _pid, case in solver.calls if case["id"] == case_id(crit, "no_fire", 0)
+    )
+    assert pass_case["children"] == [{"ticket_id": "child-c"}]
