@@ -36,6 +36,7 @@ from typing import Any
 from rebar.llm import step_failures as step_failure_sink
 from rebar.llm.workflow.executor import StepContext, StepResult, register_step
 from rebar.llm.workflow.plan_review_recovery import CRITERIA_CONFIG_FAILURE_KIND
+from rebar.types import PLAN_REVIEW_BARE_EXEMPT_TYPES, PLAN_REVIEW_BUG_TIER_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,11 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     }
 
     # session_log / code_review / identity short-circuit to a bare exempt PASS (no review runs).
-    if pctx.ticket_type in ("session_log", "code_review", "identity"):
+    # The membership is DERIVED in rebar.types (mirror F3-b, ticket 90cb-fe23-266e-41ac) as the
+    # claim-gate exemption MINUS the types that take a review tier — never re-spelled here, so a
+    # renamed TicketType member cannot silently switch this short-circuit off. A bug is exempt
+    # from the CLAIM gate but NOT from review; it takes the light advisory tier below.
+    if pctx.ticket_type in PLAN_REVIEW_BARE_EXEMPT_TYPES:
         return {
             **base,
             "run_llm": False,
@@ -130,10 +135,11 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     # short-circuit applies exactly as for a non-bug ticket) and route_criteria, keyed on
     # the same orchestrator.bug_blast_radius_escalates predicate, routes the FULL criteria
     # set. Coverage records the escalation (bug_tier: False + bug_blast_escalated: True).
-    escalated_bug = pctx.ticket_type == "bug" and orchestrator.bug_blast_radius_escalates(
+    bug_tier = pctx.ticket_type in PLAN_REVIEW_BUG_TIER_TYPES
+    escalated_bug = bug_tier and orchestrator.bug_blast_radius_escalates(
         pctx.state.get("file_impact")
     )
-    if pctx.ticket_type == "bug" and not escalated_bug:
+    if bug_tier and not escalated_bug:
         det_results = det_floor.run_det_floor(pctx)
         all_det_blocks = det_floor.det_blocking_findings(det_results)
         det_advisories = det_floor.det_advisory_findings(det_results)
