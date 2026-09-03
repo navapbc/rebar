@@ -41,15 +41,27 @@ resource "aws_cloudwatch_metric_alarm" "replication_errors" {
   metric_name = "replication_errors"
   statistic   = "Sum"
 
-  # 5-minute periods; alarm on a single period with any failure lines.
+  # 5-minute periods, 2 breaching datapoints inside a 3-period window. The window is
+  # wider than one period because treat_missing_data is "breaching" below: a single
+  # jittered probe interval is a breaching datapoint (~22 of 24 periods present is the
+  # observed norm), so a 1-period latch would page on ordinary timer jitter.
   period              = 300
-  evaluation_periods  = 1
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # No replication failures published in a period is the healthy steady state and
-  # should NOT alarm, so missing data is treated as not-breaching.
-  treat_missing_data = "notBreaching"
+  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). observability.sh §3
+  # publishes replication_errors on EVERY 5-minute run: the per-interval delta when
+  # $REPL_LOG exists (a healthy period publishes 0), and a 0 heartbeat when it does not — an
+  # absent replication log is a rebuilt host or an unmounted site volume, not a replication
+  # failure, and §5's mirror_out_of_sync is what measures replication having actually stopped.
+  # So the metric is continuously present and missing data means the PROBE, its timer, or the
+  # host is dead, which is exactly when this alarm must page.
+  # The rationale this replaces — "no failures published in a period is the healthy steady
+  # state" — described a probe that stays silent when healthy. This one publishes 0.
+  # tests/scripts/test_observability_mirror_sync_bff5.py holds §3 and §5 to that.
+  treat_missing_data = "breaching"
 
   # Notify the shared alerts topic on BOTH edges (ticket 9baf). Like S4b's voter_errors, this
   # alarm declared neither and so notified nobody. A non-fast-forward rejection means GitHub

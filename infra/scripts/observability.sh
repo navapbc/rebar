@@ -142,6 +142,20 @@ if [ -f "$REPL_LOG" ]; then
     echo "$total" > "$REPL_OFFSET_FILE"
   fi
   [ "$new" -gt 0 ] && logger -t rebar-health "replication failures (new this interval)=${new}"
+else
+  # NO LOG = STILL A HEARTBEAT (ticket bff5-9163-cddd-4158). monitoring_s5.tf treats missing
+  # replication_errors data as BREACHING on the ground that this section publishes every
+  # interval, so the section has to actually do that. The log is absent on a rebuilt host, on a
+  # site volume that has not mounted yet, and before Gerrit's replication plugin has ever
+  # written — none of which is a replication FAILURE, and all of which would otherwise page
+  # this alarm continuously with no failure to point at.
+  # Publishing 0 does NOT hide "replication stopped": that outcome is GitHub `main` falling
+  # behind Gerrit `main`, which is exactly what §5's mirror_out_of_sync (monitoring_ws7.tf)
+  # measures directly, and dead-publisher detection is unaffected because the datapoint is
+  # still emitted every run. The journald line below is the diagnostic for the absence itself.
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name replication_errors --unit Count --value 0 2>/dev/null || true
+  logger -t rebar-health "replication log ${REPL_LOG} absent; published replication_errors=0 heartbeat"
 fi
 
 # --- 4. review-bot LLM-Review voter failures (S4b) -------------------------
@@ -414,8 +428,16 @@ fi
 # `main` SHAs differ, else 0. Both reads are ANONYMOUS (Gerrit public REST + a public
 # `git ls-remote`), so no credentials are needed on the box. Transient lag (~15s after a
 # submit) is absorbed by the alarm's multi-period evaluation window (monitoring_ws7.tf),
-# not here. On a fetch failure we publish NOTHING (the alarm treats missing data as
-# healthy) rather than risk a false alarm from a blip.
+# not here.
+#
+# ON A FETCH FAILURE WE PUBLISH 1 — the alarm's breaching value (ticket bff5-9163-cddd-4158).
+# This section used to publish NOTHING there, which was a FAIL-OPEN: a live, healthy host whose
+# Gerrit REST read or `git ls-remote` breaks would mute the alarm indefinitely while GitHub
+# `main` silently drifted, and the alarm's own treat_missing_data read that silence as health.
+# Publishing 0 would not fix it either — 0 means "in sync", which is precisely the claim a
+# failed comparison cannot make. So an unmakeable comparison reports the unsafe value, and the
+# alarm's 2-of-3 five-minute window (monitoring_ws7.tf) absorbs an isolated fetch blip: it takes
+# two breaching datapoints inside 15 minutes to page, which a one-off curl timeout cannot reach.
 GERRIT_BASE_URL="${GERRIT_BASE_URL:-https://rebar.solutions.navateam.com}"
 GITHUB_REPO_URL="${GITHUB_REPO_URL:-https://github.com/navapbc/rebar}"
 gerrit_sha=$(curl -fsS --max-time 10 "${GERRIT_BASE_URL}/projects/rebar/branches/main" 2>/dev/null \
@@ -423,13 +445,17 @@ gerrit_sha=$(curl -fsS --max-time 10 "${GERRIT_BASE_URL}/projects/rebar/branches
 github_sha=$(git ls-remote "${GITHUB_REPO_URL}" refs/heads/main 2>/dev/null | awk '{print $1}')
 if [ -n "$gerrit_sha" ] && [ -n "$github_sha" ]; then
   if [ "$gerrit_sha" = "$github_sha" ]; then oos=0; else oos=1; fi
-  # Dimensionless to match the alarm in monitoring_ws7.tf.
-  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-    --metric-name mirror_out_of_sync --unit Count --value "$oos" 2>/dev/null || true
-  [ "$oos" -gt 0 ] && logger -t rebar-health "mirror out-of-sync: gerrit=${gerrit_sha} github=${github_sha}"
 else
-  logger -t rebar-health "mirror sync check skipped (fetch failed: gerrit='${gerrit_sha}' github='${github_sha}')"
+  # Could not compare. Report the breaching value rather than staying silent (see above).
+  oos=1
+  logger -t rebar-health "mirror sync check failed, publishing mirror_out_of_sync=1 (gerrit='${gerrit_sha}' github='${github_sha}')"
 fi
+# Dimensionless to match the alarm in monitoring_ws7.tf. Published on EVERY run, including the
+# failed-comparison path, so the metric is continuously present and its absence means the probe
+# itself is dead — which is what the alarm's treat_missing_data = "breaching" now catches.
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name mirror_out_of_sync --unit Count --value "$oos" 2>/dev/null || true
+[ "$oos" -gt 0 ] && logger -t rebar-health "mirror out-of-sync: gerrit=${gerrit_sha} github=${github_sha}"
 
 # Always exit success on a completed probe run. Without this, the script's exit
 # status is that of its last statement — and every metric section ends in a

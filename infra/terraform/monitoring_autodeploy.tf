@@ -52,7 +52,12 @@ resource "aws_cloudwatch_metric_alarm" "deploy_errors" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  treat_missing_data = "notBreaching"
+  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
+  # publishes deploy_errors' per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
+  # period publishes 0 — the metric is continuously present. Missing data therefore means the
+  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
+  # The 2-of-4 window above already absorbs the jitter this setting introduces.
+  treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
@@ -105,9 +110,12 @@ resource "aws_cloudwatch_metric_alarm" "deploy_errors" {
 #   Unit       = Count  (per-period count of new AUTODEPLOY_REVIEW_INTERRUPT journal lines
 #                        matching that reason)
 #
-# Both alarms keep the pre-split 900s / 1-datapoint / Sum > 0 / notBreaching cadence, so the
-# aggregate sensitivity is unchanged by the split. Making `bound-exceeded` less trigger-happy is
-# deliberately NOT bundled in here — that is a call to make with the DEPLOY_DEFER_MAX disposition.
+# Both alarms kept the pre-split 900s / 1-datapoint / Sum > 0 cadence, so the split itself did
+# not change aggregate sensitivity. Ticket bff5-9163-cddd-4158 then moved both to 2-of-4 with
+# treat_missing_data = "breaching": these counters publish 0 on the healthy path, so silence is a
+# dead probe rather than calm, and a 1-datapoint latch on "breaching" would page on one absent
+# period. Making `bound-exceeded` less trigger-happy on the SIGNAL side is still deliberately NOT
+# bundled in here — that is a call to make with the DEPLOY_DEFER_MAX disposition.
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "review_interrupts_bound_exceeded" {
@@ -131,14 +139,22 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_bound_exceeded" {
   statistic   = "Sum"
 
   # Cadence matches the deferral bound (autodeploy.sh DEPLOY_DEFER_MAX=2400s): a bound-exceeded
-  # interrupt cannot recur faster than one per episode, so a single 900s period > 0 latches.
+  # interrupt cannot recur faster than one per episode. The pre-bff5 shape latched on a SINGLE
+  # 900s period; with treat_missing_data = "breaching" below, a 1-datapoint latch would also page
+  # on one absent period, so the window is 2 breaching datapoints out of 4. A real interrupt loop
+  # recurs on the next deploy and a genuinely dead probe stays absent, so either reaches the
+  # second datapoint — the cost is detection at ~30 min instead of ~15.
   period              = 900
-  evaluation_periods  = 1
-  datapoints_to_alarm = 1
+  evaluation_periods  = 4
+  datapoints_to_alarm = 2
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  treat_missing_data = "notBreaching"
+  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
+  # publishes review_interrupts_bound_exceeded's per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
+  # period publishes 0 — the metric is continuously present. Missing data therefore means the
+  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
+  treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
@@ -169,14 +185,21 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_signal_unavailable" {
   metric_name = "review_interrupts_signal_unavailable"
   statistic   = "Sum"
 
-  # One datapoint keeps the "deploys are running blind" case from waiting an hour to surface.
+  # This case must surface fast, hence the tight 2-of-4 window rather than a slower one. It
+  # cannot be the pre-bff5 1-of-1 latch any more: with treat_missing_data = "breaching" below a
+  # single absent period would page, and absent periods are ordinary timer jitter. The failure
+  # this alarm watches recurs on EVERY deploy while broken, so it reaches 2 datapoints quickly.
   period              = 900
-  evaluation_periods  = 1
-  datapoints_to_alarm = 1
+  evaluation_periods  = 4
+  datapoints_to_alarm = 2
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  treat_missing_data = "notBreaching"
+  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
+  # publishes review_interrupts_signal_unavailable's per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
+  # period publishes 0 — the metric is continuously present. Missing data therefore means the
+  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
+  treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
