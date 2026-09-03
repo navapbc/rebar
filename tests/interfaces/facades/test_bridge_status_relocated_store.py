@@ -153,6 +153,47 @@ def test_bridge_status_resolves_the_last_pass_detail_file_in_a_relocated_store(
     assert status["detail"]["process_exit_code"] == 0
 
 
+def test_bridge_status_surfaces_reconcile_check_summary_from_configured_store(
+    rebar_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _relocate(rebar_repo, tmp_path / "outside" / "mcp-tickets")
+    monkeypatch.setenv("REBAR_TRACKER_DIR", str(store))
+    local_id = (store / ".env-id").read_text().strip()
+    _plant_last_pass(rebar_repo, f"local:{local_id}")
+
+    detail_dir = store / ".bridge_state"
+    detail_dir.mkdir(parents=True, exist_ok=True)
+    (detail_dir / "reconcile-check.json").write_text(
+        json.dumps(
+            {
+                "total_bindings": 6,
+                "checked": 5,
+                "in_sync": 4,
+                "discrepancies": [{"jira_key": "REB-1", "local_id": "loc-1", "field": "title"}],
+                "orphaned_bindings": ["loc-gone"],
+                "orphaned_jira": ["REB-9", "REB-10"],
+                "unbound_local": 3,
+                "unbound_jira": 7,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = rebar.bridge_status(repo_root=str(rebar_repo))
+
+    assert status["reconcile_diagnostics"] == {
+        "report_path": str(detail_dir / "reconcile-check.json"),
+        "total_bindings": 6,
+        "checked": 5,
+        "in_sync": 4,
+        "discrepancy_count": 1,
+        "orphaned_binding_count": 1,
+        "orphaned_jira_count": 2,
+        "unbound_local": 3,
+        "unbound_jira": 7,
+    }
+
+
 def test_bridge_status_still_works_in_the_default_in_tree_layout(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
