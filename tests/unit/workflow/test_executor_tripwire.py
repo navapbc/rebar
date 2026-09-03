@@ -91,3 +91,89 @@ def test_map_fanout_is_the_sole_concurrency_module() -> None:
     assert not _imports_a_banned_concurrency_lib(_interp)
     # And the deliberate exception is documented (concept present, not an exact phrase).
     assert "rationale" in Path(_fanout.__file__).read_text(encoding="utf-8").lower()
+
+
+def _wf(steps):
+    return {"schema_version": "2", "name": "tripwire", "steps": steps}
+
+
+def test_executor_observes_raising_effectful_step_once_and_stops_downstream() -> None:
+    calls: list[str] = []
+
+    def fail_once(ctx):
+        calls.append(f"fail:{ctx.step_id}")
+        raise RuntimeError("boom")
+
+    def should_not_run(ctx):
+        calls.append(f"after:{ctx.step_id}")
+        return {"ok": True}
+
+    res = _executor.run_workflow(
+        _wf(
+            [
+                {"id": "fail", "uses": "fail_once"},
+                {"id": "after", "uses": "should_not_run", "needs": ["fail"]},
+            ]
+        ),
+        run_id="r",
+        scripted_registry={"fail_once": fail_once, "should_not_run": should_not_run},
+    )
+
+    assert res.status == "failed"
+    assert res.error is not None
+    assert "boom" in res.error
+    assert calls == ["fail:fail"]
+    assert "after" not in res.outputs
+    assert "after" not in res.steps
+
+
+def test_executor_runs_successful_effectful_steps_once_each_in_declared_order() -> None:
+    calls: list[str] = []
+
+    def first(ctx):
+        calls.append(f"first:{ctx.step_id}")
+        return {"value": "ok"}
+
+    def second(ctx):
+        calls.append(f"second:{ctx.step_id}")
+        return {"seen": ctx.inputs["value"]}
+
+    res = _executor.run_workflow(
+        _wf(
+            [
+                {"id": "first", "uses": "first"},
+                {
+                    "id": "second",
+                    "uses": "second",
+                    "needs": ["first"],
+                    "with": {"value": "${{ steps.first.outputs.value }}"},
+                },
+            ]
+        ),
+        run_id="r",
+        scripted_registry={"first": first, "second": second},
+    )
+
+    assert res.status == "succeeded"
+    assert calls == ["first:first", "second:second"]
+    assert res.outputs["second"]["seen"] == "ok"
+    assert res.terminal_step == "second"
+    assert res.terminal_output == {"seen": "ok"}
+
+
+def test_executor_never_retries_a_failing_effectful_step() -> None:
+    attempts = 0
+
+    def fail_once(ctx):
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("boom")
+
+    res = _executor.run_workflow(
+        _wf([{"id": "fail", "uses": "fail_once"}]),
+        run_id="r",
+        scripted_registry={"fail_once": fail_once},
+    )
+
+    assert res.status == "failed"
+    assert attempts == 1
