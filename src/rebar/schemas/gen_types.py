@@ -77,6 +77,26 @@ PLAN_REVIEW_EXEMPT_TYPES: frozenset[str] = frozenset(
 )
 PLAN_REVIEW_REVIEWED_TYPES: frozenset[str] = frozenset(get_args(TicketType)) - (
     PLAN_REVIEW_EXEMPT_TYPES
+)
+
+#: Which review TIER each gate-exempt type takes (mirror F3-b).
+#:
+#: ``PLAN_REVIEW_EXEMPT_TYPES`` answers "does this type need a signed attestation to be
+#: claimed?". The plan-review workflow's precheck asks a DIFFERENT question of the types
+#: that need none: which skip review ENTIRELY — a bare exempt PASS, no LLM pass ever runs —
+#: and which still get a substantive one? Since epic 6982/R4 a bug takes a LIGHT ADVISORY
+#: tier (the DET floor plus the `necessity` probe), so it is exempt from the CLAIM gate
+#: without being exempt from REVIEW. Collapsing the two questions back together would
+#: silently delete that tier.
+#:
+#: The bare-exempt set is therefore the exemption MINUS the tiered types, DERIVED rather
+#: than re-listed: the workflow's short-circuit cannot drift away from the claim-gate
+#: exemption, and every member is a ``TicketType`` member by construction of the set it is
+#: subtracted from. Exact membership is pinned by test, so a type added to either set
+#: forces a deliberate decision about its tier instead of defaulting to no review at all.
+PLAN_REVIEW_BUG_TIER_TYPES: frozenset[str] = frozenset({"bug"})
+PLAN_REVIEW_BARE_EXEMPT_TYPES: frozenset[str] = (
+    PLAN_REVIEW_EXEMPT_TYPES - PLAN_REVIEW_BUG_TIER_TYPES
 )""",
 }
 
