@@ -87,7 +87,12 @@ WORKDIR /app
 # fetches no SSM parameters and holds no AWS key material of its own. It DOES now carry
 # boto3 (via the bedrock extra above) and DOES call AWS, but only bedrock:InvokeModel,
 # authenticated from the ambient instance-role credential chain — rebar manages no key.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# The tag MUST equal [tool.uv] required-version in pyproject.toml: uv reads that key itself
+# and refuses to run on a mismatch. `:latest` here was a time bomb — it fired the moment
+# upstream published 0.12.9 against the 0.12.7 pin and took every image build down
+# [rebar:febd-6b13-1976-43be]. scripts/check_uv_pin.py (run by `make lint`) fails the build
+# if this tag ever drifts from pyproject.toml, so the two cannot silently diverge.
+COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv
 COPY . /app
 RUN uv sync --locked --no-dev --extra agents --extra mcp --extra bedrock
 ENV PATH="/app/.venv/bin:$PATH"

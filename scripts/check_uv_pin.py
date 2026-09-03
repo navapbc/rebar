@@ -18,6 +18,20 @@ ways it can be defeated:
    the manifest fetch.
 6. **Weakened local action** — the committed action must exist, avoid manifest endpoints, and
    carry the exact checksums for every supported runner asset.
+7. **Ignored by the container builds** — a Dockerfile that pulls uv from a tag this gate
+   cannot read as the exact pin installs whatever upstream published most recently, which uv
+   then rejects against ``required-version``. That covers a FLOATING tag
+   (``ghcr.io/astral-sh/uv:latest``, or no tag at all), a build-ARG template
+   (``uv:${UV_VERSION}``) that resolves only at build time, and a bare ``@sha256:`` digest —
+   immutable, but OPAQUE: it never says which uv version it holds, and agreement with
+   ``required-version``, not immutability, is the property under test, so for uv a digest is
+   accepted only alongside a matching tag. This is the shape that took production down
+   [rebar:febd-6b13-1976-43be]: CI honoured the pin while all three images did not, so every
+   build died with "Required uv version ``==0.12.7`` does not match the running version
+   ``0.12.9``" the moment ``:latest`` moved — a time bomb armed by an upstream release, with
+   no change to this repository. The images must therefore name the EXACT
+   ``required-version`` as their tag, and no Dockerfile may resolve any image from
+   ``:latest``.
 
 Stdlib + PyYAML only, with no CI provider required: it runs from ``make lint`` on a developer
 laptop exactly as it runs in CI, which is the portability contract every gate here holds to.
@@ -48,6 +62,22 @@ LOCAL_SETUP_UV_ACTION_FILE = Path(".github/actions/setup-uv/action.yml")
 #: both of which are ordered ahead of ``WorkspaceVersionResolver`` in the upstream action.
 OVERRIDING_INPUTS = ("version", "version-file")
 FORBIDDEN_ACTION_TEXT = ("raw.githubusercontent.com", "Fetching manifest data")
+
+#: The uv distribution image the container builds copy the binary out of. Its tag is the
+#: image-side half of the single source and must equal [tool.uv] required-version exactly.
+UV_IMAGE_REPOSITORY = "ghcr.io/astral-sh/uv"
+
+#: Image references in a Dockerfile: the `FROM <ref>` base and the `COPY --from=<ref>` source.
+#: BOTH alternatives skip leading flags. `FROM --platform=$BUILDPLATFORM python:latest` names
+#: an image exactly as `FROM python:latest` does; matching only the first token after FROM
+#: captured the flag instead of the reference and let the floating tag through unchecked.
+DOCKERFILE_IMAGE_PATTERN = re.compile(
+    r"^\s*(?:FROM\s+(?:--\S+\s+)*(?P<from>\S+)|COPY\s+(?:--\S+\s+)*--from=(?P<copy>\S+))",
+    re.IGNORECASE,
+)
+
+#: A build ARG / environment interpolation anywhere in an image reference: `$TAG`, `${TAG}`.
+TEMPLATED_REFERENCE_PATTERN = re.compile(r"\$\{?[A-Za-z_]")
 POWERSHELL_SCOPED_VARIABLE_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*):")
 POWERSHELL_SCOPES = frozenset(
     {
@@ -331,6 +361,155 @@ def check_local_action(root: Path) -> list[Finding]:
     return findings
 
 
+def _required_version(root: Path) -> str | None:
+    """Return the bare ``X.Y.Z`` from ``[tool.uv] required-version``, or None if unusable.
+
+    ``check_pyproject`` already reports a missing or inexact pin, so this returns None
+    silently rather than double-reporting the same defect from a second checker.
+    """
+    pyproject = root / "pyproject.toml"
+    if not pyproject.is_file():
+        return None
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:  # pragma: no cover - check_pyproject reports this
+        return None
+    required = data.get("tool", {}).get("uv", {}).get("required-version")
+    if not isinstance(required, str) or not _is_exact_specifier(required):
+        return None
+    return required.strip()[2:].strip()
+
+
+def _split_reference(reference: str) -> tuple[str, str | None, str | None]:
+    """Split a registry reference into ``(repository, tag, digest)``.
+
+    Tag and digest are INDEPENDENT coordinates, not alternatives: ``img:1.2.3@sha256:...``
+    carries both, ``img@sha256:...`` only a digest, ``img:1.2.3`` only a tag. A port in the
+    registry host (``host:5000/img``) is not a tag, which is why only the final path segment
+    is inspected for one.
+    """
+    remainder, _, digest = reference.partition("@")
+    final_segment = remainder.rsplit("/", 1)[-1]
+    name, colon, tag = final_segment.partition(":")
+    if colon and name and tag:
+        return remainder[: len(remainder) - len(tag) - 1], tag, digest or None
+    return remainder, None, digest or None
+
+
+def _is_registry_reference(reference: str) -> bool:
+    """Distinguish a registry image from a local build stage in ``COPY --from=``.
+
+    ``COPY --from=builder`` and ``COPY --from=0`` name earlier stages of the same build;
+    they resolve locally and cannot float. Only a reference carrying a registry separator
+    (``/``, ``:`` or ``@``) reaches out to a registry.
+
+    A build ARG is NOT excluded here. ``COPY --from=$BUILDER`` carries no separator and is
+    already excluded as a stage name, while ``ghcr.io/astral-sh/uv:${UV_VERSION}`` does carry
+    one and must reach the uv check rather than being silently skipped; whether an
+    unresolvable template is a finding is decided per image in ``_check_dockerfile_reference``.
+    """
+    return any(character in reference for character in "/:@")
+
+
+def _dockerfiles(root: Path) -> list[Path]:
+    skipped = {".git", ".venv", "node_modules", "__pycache__"}
+    return sorted(
+        path
+        for path in root.glob("**/Dockerfile*")
+        if path.is_file() and not skipped.intersection(path.relative_to(root).parts)
+    )
+
+
+def _check_uv_reference(
+    location: str, reference: str, tag: str | None, digest: str | None, version: str | None
+) -> Finding | None:
+    """Assert the uv image names the EXACT ``[tool.uv] required-version`` as its tag.
+
+    uv is held to a stricter rule than every other image because this gate exists to prove
+    the two halves of ONE pin agree. A digest is immutable but OPAQUE: it does not say which
+    uv version it holds, so ``ghcr.io/astral-sh/uv@sha256:...`` cannot be read against
+    ``required-version`` at all. Immutability is not the property under test here, agreement
+    is, so for uv a digest is accepted only ALONGSIDE a matching tag
+    (``uv:0.12.7@sha256:...``); every other image may still pin by bare digest.
+    """
+    pin = version or "X.Y.Z"
+    if tag is None:
+        suffix = f"@{digest}" if digest else ""
+        return Finding(
+            location,
+            f"'{reference}' pins uv by digest alone. A digest is immutable but OPAQUE — it "
+            "does not say which uv version it holds, so it cannot be checked against "
+            "[tool.uv] required-version, which is the agreement this gate exists to prove. "
+            f"Keep the digest and name the version too: {UV_IMAGE_REPOSITORY}:{pin}{suffix}",
+        )
+    if version is not None and tag != version:
+        return Finding(
+            location,
+            f"installs uv {tag}, but [tool.uv] required-version pins {version}. uv reads "
+            "that key itself and refuses to run on a mismatch, so every build here fails. "
+            f"Use {UV_IMAGE_REPOSITORY}:{version}",
+        )
+    return None
+
+
+def _check_dockerfile_reference(
+    location: str, reference: str, version: str | None
+) -> Finding | None:
+    """Assert one image reference is exactly pinned, and uv-pinned to ``version``.
+
+    A tag templated from a build ARG (``uv:${UV_VERSION}``) resolves only at build time, so
+    this gate cannot read it. For the uv image that is a FAILURE — an unprovable pin is not a
+    pin, and an ARG defaulting to a floating tag is exactly the escape that took production
+    down. For every other image the template is left alone: choosing base-image versions is
+    not what this gate single-sources.
+    """
+    repository, tag, digest = _split_reference(reference)
+    is_uv = repository == UV_IMAGE_REPOSITORY
+    if TEMPLATED_REFERENCE_PATTERN.search(reference):
+        if not is_uv:
+            return None
+        return Finding(
+            location,
+            f"'{reference}' templates the uv reference from a build ARG, so this gate cannot "
+            "prove it matches [tool.uv] required-version — and an ARG that defaults to a "
+            "floating tag is the same outage with an extra hop. Name the exact version: "
+            f"{UV_IMAGE_REPOSITORY}:{version or 'X.Y.Z'}",
+        )
+    if tag is None and digest is None:
+        return Finding(
+            location,
+            f"'{reference}' names no tag, so it resolves to :latest. Pin an exact tag",
+        )
+    if tag == "latest":
+        return Finding(
+            location,
+            f"'{reference}' resolves from the FLOATING :latest tag, so the image changes "
+            "when upstream publishes, with no change to this repository. Pin an exact tag",
+        )
+    if not is_uv:
+        return None
+    return _check_uv_reference(location, reference, tag, digest, version)
+
+
+def check_dockerfiles(root: Path) -> list[Finding]:
+    """Assert every Dockerfile image is exactly pinned, and uv matches ``required-version``."""
+    version = _required_version(root)
+    findings: list[Finding] = []
+    for path in _dockerfiles(root):
+        relative = path.relative_to(root)
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            match = DOCKERFILE_IMAGE_PATTERN.match(line)
+            if match is None:
+                continue
+            reference = match.group("from") or match.group("copy")
+            if not _is_registry_reference(reference):
+                continue
+            finding = _check_dockerfile_reference(f"{relative}:{number}", reference, version)
+            if finding is not None:
+                findings.append(finding)
+    return findings
+
+
 def check_repo(root: Path) -> list[Finding]:
     """Run all uv-pin assertions against ``root``."""
     return (
@@ -338,6 +517,7 @@ def check_repo(root: Path) -> list[Finding]:
         + check_no_root_uv_toml(root)
         + check_local_action(root)
         + check_workflows(root)
+        + check_dockerfiles(root)
     )
 
 
@@ -355,7 +535,10 @@ def main(argv: list[str] | None = None) -> int:
         f"\ncheck_uv_pin: {len(findings)} finding(s). uv must be pinned exactly ONCE, as "
         '[tool.uv] required-version = "==X.Y.Z" in pyproject.toml, and every workflow must '
         f"install it through {LOCAL_SETUP_UV_ACTION} without version overrides or manifest "
-        "fetches.",
+        f"fetches. Every Dockerfile must name {UV_IMAGE_REPOSITORY} with that same exact "
+        "version as its TAG (a digest may accompany the tag but never replace it, and a "
+        "build-ARG template is not a provable pin), and no Dockerfile may resolve any image "
+        "from a floating :latest tag.",
         file=sys.stderr,
     )
     return 1

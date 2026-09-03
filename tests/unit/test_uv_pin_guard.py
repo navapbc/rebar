@@ -9,14 +9,35 @@ so the gate and the tree it governs cannot drift apart silently.
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
+import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE = REPO_ROOT / "scripts" / "check_uv_pin.py"
+
+#: The one Dockerfile every skew test mutates, and the line its uv reference sits on. Skew
+#: assertions bind to this exact `path:line` so they name the offender rather than matching
+#: the always-emitted trailer summary, which mentions every failure mode by construction.
+SVC_DOCKERFILE = Path("infra") / "compose" / "Dockerfile.svc"
+UV_LINE = 3
+DIGEST = "sha256:" + "0" * 64
+
+
+def _gate_module() -> ModuleType:
+    """Import the gate by path (``scripts/`` is not an importable package)."""
+    spec = importlib.util.spec_from_file_location("check_uv_pin", GATE)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
 
 PYPROJECT_PINNED = """\
 [project]
@@ -89,6 +110,14 @@ runs:
 """
 
 
+DOCKERFILE_CLEAN = """\
+FROM python:3.12-slim
+
+COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv
+RUN uv sync --locked
+"""
+
+
 def _run(root: Path) -> subprocess.CompletedProcess[str]:
     """Invoke the checker as a subprocess against ``root``, exactly as ``make lint`` does."""
     return subprocess.run(
@@ -109,6 +138,9 @@ def tree(tmp_path: Path) -> Path:
     action = tmp_path / ".github" / "actions" / "setup-uv"
     action.mkdir(parents=True)
     (action / "action.yml").write_text(ACTION_CLEAN, encoding="utf-8")
+    compose = tmp_path / "infra" / "compose"
+    compose.mkdir(parents=True)
+    (compose / "Dockerfile.svc").write_text(DOCKERFILE_CLEAN, encoding="utf-8")
     return tmp_path
 
 
@@ -286,3 +318,223 @@ def test_make_lint_invokes_the_gate() -> None:
     """
     body = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     assert "python scripts/check_uv_pin.py" in body
+
+
+def test_real_repository_dockerfiles_do_not_float_the_uv_tag() -> None:
+    """AC1/AC3 -- no container build may resolve uv from a moving upstream tag.
+
+    ``:latest`` moved to 0.12.9 while ``[tool.uv] required-version`` stayed at 0.12.7, and
+    ``uv sync`` reads that key itself: every image build died with "Required uv version
+    `==0.12.7` does not match the running version `0.12.9`". The defect is a TIME BOMB by
+    construction -- it fires when upstream publishes, with no change to this repository -- so
+    the tree itself, not only a fixture, must be asserted free of floating toolchain tags.
+    """
+    offenders = [
+        f"{path}:{number}"
+        for path in _gate_module()._dockerfiles(REPO_ROOT)
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if ":latest" in line and line.lstrip().startswith(("FROM", "COPY --from="))
+    ]
+    assert not offenders, f"floating :latest toolchain tags: {offenders}"
+
+
+def test_real_repository_dockerfiles_match_the_pyproject_pin() -> None:
+    """AC2 -- the images must install the uv that ``pyproject.toml`` requires."""
+    required = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    version = required["tool"]["uv"]["required-version"].removeprefix("==")
+    for path in sorted(REPO_ROOT.glob("infra/compose/Dockerfile.*")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "astral-sh/uv" not in line:
+                continue
+            assert f"astral-sh/uv:{version}" in line, f"{path.name}: {line.strip()}"
+
+
+def test_dockerfile_floating_uv_tag_is_rejected(tree: Path) -> None:
+    """The exact production defect: ``uv:latest`` against an exact ``required-version``."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", "uv:latest"), encoding="utf-8")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert (
+        f"{SVC_DOCKERFILE}:{UV_LINE}: 'ghcr.io/astral-sh/uv:latest' resolves from the "
+        "FLOATING :latest tag"
+    ) in result.stderr
+
+
+def test_dockerfile_uv_tag_skewed_from_pyproject_is_rejected(tree: Path) -> None:
+    """A pinned-but-WRONG tag is the same outage with a slower fuse."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", "uv:0.12.9"), encoding="utf-8")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert "0.12.9" in result.stderr
+    assert "0.12.7" in result.stderr
+
+
+def test_dockerfile_untagged_uv_reference_is_rejected(tree: Path) -> None:
+    """An omitted tag IS ``:latest`` -- the identical failure, spelled differently."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", "uv"), encoding="utf-8")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert (f"{SVC_DOCKERFILE}:{UV_LINE}: 'ghcr.io/astral-sh/uv' names no tag") in result.stderr
+
+
+def test_dockerfile_floating_base_image_is_rejected(tree: Path) -> None:
+    """AC3 generalises beyond uv: no Dockerfile may pull ANY image from ``:latest``."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        DOCKERFILE_CLEAN.replace("python:3.12-slim", "python:latest"), encoding="utf-8"
+    )
+    result = _run(tree)
+    assert result.returncode == 1
+    assert "python:latest" in result.stderr
+
+
+def test_dockerfile_named_build_stage_reference_is_allowed(tree: Path) -> None:
+    """``COPY --from=builder`` names a local stage, not a registry image -- never a finding."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        "FROM python:3.12-slim AS builder\n"
+        "FROM python:3.12-slim\n"
+        "COPY --from=builder /app /app\n"
+        "COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv\n",
+        encoding="utf-8",
+    )
+    result = _run(tree)
+    assert result.returncode == 0, result.stderr
+
+
+def test_dockerfile_uv_digest_without_a_tag_is_rejected(tree: Path) -> None:
+    """A digest is immutable but OPAQUE, so for uv it is not a pin this gate can read.
+
+    This is the honest reading of what the gate is FOR. It does not exist to make the image
+    reproducible -- a digest already does that -- it exists to prove the image half and the
+    ``[tool.uv] required-version`` half of ONE pin agree. ``uv@sha256:...`` says nothing about
+    which uv version it holds, so it cannot be checked against ``required-version`` at all,
+    and accepting it would silently reopen the exact skew that took production down.
+    """
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", f"uv@{DIGEST}"), encoding="utf-8")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert f"{SVC_DOCKERFILE}:{UV_LINE}: " in result.stderr
+    assert "pins uv by digest alone" in result.stderr
+    assert f"ghcr.io/astral-sh/uv:0.12.7@{DIGEST}" in result.stderr
+
+
+def test_dockerfile_uv_tag_with_matching_digest_is_allowed(tree: Path) -> None:
+    """A digest ALONGSIDE the exact tag is the strongest form, so it must stay allowed.
+
+    Tag and digest are independent coordinates: the tag carries the version this gate checks,
+    the digest carries immutability. Requiring the tag must not punish also pinning the bytes.
+    """
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        DOCKERFILE_CLEAN.replace("uv:0.12.7", f"uv:0.12.7@{DIGEST}"), encoding="utf-8"
+    )
+    result = _run(tree)
+    assert result.returncode == 0, result.stderr
+
+
+def test_dockerfile_uv_skewed_tag_with_digest_is_still_rejected(tree: Path) -> None:
+    """A digest does not launder a tag that disagrees with ``required-version``."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        DOCKERFILE_CLEAN.replace("uv:0.12.7", f"uv:0.12.9@{DIGEST}"), encoding="utf-8"
+    )
+    result = _run(tree)
+    assert result.returncode == 1
+    assert f"{SVC_DOCKERFILE}:{UV_LINE}: installs uv 0.12.9" in result.stderr
+
+
+def test_dockerfile_non_uv_digest_without_a_tag_is_allowed(tree: Path) -> None:
+    """For any OTHER image a bare digest is an exact pin, and the real tree relies on it.
+
+    ``tests/external/live_jira_dc/Dockerfile`` pins its base image by digest alone; the uv
+    rule is deliberately narrower than "every image needs a tag".
+    """
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        DOCKERFILE_CLEAN.replace("python:3.12-slim", f"python@{DIGEST}"), encoding="utf-8"
+    )
+    result = _run(tree)
+    assert result.returncode == 0, result.stderr
+
+
+def test_dockerfile_platform_flag_does_not_hide_a_floating_tag(tree: Path) -> None:
+    """``FROM --platform=...`` names an image exactly as a bare ``FROM`` does.
+
+    Matching only the first token after ``FROM`` captured the FLAG, so the reference behind it
+    was never inspected and any floating tag walked straight through the gate.
+    """
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        DOCKERFILE_CLEAN.replace(
+            "FROM python:3.12-slim", "FROM --platform=$BUILDPLATFORM python:latest"
+        ),
+        encoding="utf-8",
+    )
+    result = _run(tree)
+    assert result.returncode == 1
+    assert f"{SVC_DOCKERFILE}:1: 'python:latest' resolves from the FLOATING" in result.stderr
+
+
+def test_dockerfile_platform_flag_on_a_pinned_image_is_allowed(tree: Path) -> None:
+    """Skipping the flag must find the reference, not merely fail on flagged lines."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        DOCKERFILE_CLEAN.replace(
+            "FROM python:3.12-slim", "FROM --platform=$BUILDPLATFORM python:3.12-slim"
+        ),
+        encoding="utf-8",
+    )
+    result = _run(tree)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("template", ["${UV_VERSION}", "$UV_VERSION"])
+def test_dockerfile_arg_templated_uv_tag_is_rejected(tree: Path, template: str) -> None:
+    """An ARG-templated uv tag is UNPROVABLE, so it must fail rather than be skipped.
+
+    ``ARG UV_VERSION=latest`` + ``COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION}`` is the
+    production outage with one extra hop: the tag resolves only at build time, so the gate
+    cannot show it equals ``required-version``. Treating it as "not a registry reference" --
+    which is what the braced form used to do -- deleted the check entirely.
+    """
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", f"uv:{template}"), encoding="utf-8")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert f"{SVC_DOCKERFILE}:{UV_LINE}: " in result.stderr
+    assert "templates the uv reference from a build ARG" in result.stderr
+
+
+def test_dockerfile_arg_templated_non_uv_tag_is_allowed(tree: Path) -> None:
+    """A templated BASE-image tag is left alone: this gate single-sources uv, not Python.
+
+    Failing every ``$TAG`` would be a base-image policy change, far wider than the pin this
+    gate owns; the uv image is the one whose version this repository already asserts.
+    """
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        DOCKERFILE_CLEAN.replace("python:3.12-slim", "python:$PY_TAG"), encoding="utf-8"
+    )
+    result = _run(tree)
+    assert result.returncode == 0, result.stderr
+
+
+def test_dockerfile_templated_build_stage_reference_is_allowed(tree: Path) -> None:
+    """``COPY --from=$BUILDER`` still names a local stage, not a registry image."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        "ARG BUILDER=builder\n"
+        "FROM python:3.12-slim AS builder\n"
+        "FROM python:3.12-slim\n"
+        "COPY --from=$BUILDER /app /app\n"
+        "COPY --from=${BUILDER} /app /app2\n"
+        "COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv\n",
+        encoding="utf-8",
+    )
+    result = _run(tree)
+    assert result.returncode == 0, result.stderr
