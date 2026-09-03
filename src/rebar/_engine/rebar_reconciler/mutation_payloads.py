@@ -52,6 +52,14 @@ def _as_tuple_of_mappings(value: Any) -> tuple[Mapping[str, Any], ...]:
     return tuple(dict(item) for item in value)
 
 
+def _as_tuple_of_strings(value: Any) -> tuple[str, ...]:
+    if not value:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(str(item) for item in value if isinstance(item, str))
+
+
 class _PayloadMapping(Mapping[str, Any]):
     """Shared ``Mapping`` projection for every payload dataclass below.
 
@@ -98,6 +106,7 @@ class OutboundCreatePayload(_PayloadMapping):
     comments: tuple[Mapping[str, Any], ...] = ()
     labels: tuple[Mapping[str, Any], ...] = ()
     links: tuple[Mapping[str, Any], ...] = ()
+    requires_create: tuple[str, ...] = ()
     local_id: str | None = None
     key_hint: str | None = None
 
@@ -111,6 +120,8 @@ class OutboundCreatePayload(_PayloadMapping):
         out["labels"] = [dict(entry) for entry in self.labels]
         if self.links:
             out["links"] = [dict(entry) for entry in self.links]
+        if self.requires_create:
+            out["requires_create"] = list(self.requires_create)
         if self.local_id is not None:
             out["local_id"] = self.local_id
         if self.key_hint is not None:
@@ -123,6 +134,7 @@ class OutboundCreatePayload(_PayloadMapping):
         comments = _as_tuple_of_mappings(remainder.pop("comments", None))
         labels = _as_tuple_of_mappings(remainder.pop("labels", None))
         links = _as_tuple_of_mappings(remainder.pop("links", None))
+        requires_create = _as_tuple_of_strings(remainder.pop("requires_create", None))
         local_id = remainder.pop("local_id", None)
         key_hint = remainder.pop("key_hint", None)
         # Everything else is the vendor create field spread — intentionally
@@ -132,6 +144,7 @@ class OutboundCreatePayload(_PayloadMapping):
             comments=comments,
             labels=labels,
             links=links,
+            requires_create=requires_create,
             local_id=local_id,
             key_hint=key_hint,
         )

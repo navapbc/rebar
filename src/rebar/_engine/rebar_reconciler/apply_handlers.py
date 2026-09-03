@@ -124,6 +124,33 @@ class HandlerResult:
     soft_failed: bool = False
 
 
+class _CoordinatedCreateCoreAdapter:
+    """Callable adapter that exposes the last coordinated create outcome."""
+
+    def __init__(self, coordinated, *, ctx: BatchApplyContext, mutation: dict) -> None:
+        self._coordinated = coordinated
+        self._ctx = ctx
+        self._mutation = mutation
+        self.last_outcome: Any | None = None
+
+    def __call__(self, local_id, ticket_data, *, client: TicketTransport, binding_store, repo_root):
+        self.last_outcome = None
+
+        def _capture(outcome) -> None:
+            self.last_outcome = outcome
+
+        return self._coordinated(
+            local_id,
+            ticket_data,
+            client=client,
+            binding_store=binding_store,
+            repo_root=repo_root,
+            deferred_creates=self._ctx.deferred_creates,
+            mutation=self._mutation,
+            capture_outcome=_capture,
+        )
+
+
 def _soft_fail_stale_binding_404(
     mutation: dict, exc: urllib.error.HTTPError, action: str
 ) -> HandlerResult:
@@ -171,19 +198,37 @@ def _select_create_core(mutation: dict, ctx: BatchApplyContext):
     if create_route_mod.create_route() == create_route_mod.LEGACY_ROUTE:
         return None
     coordinated = create_route_mod._coordinated_create_core
+    return _CoordinatedCreateCoreAdapter(coordinated, ctx=ctx, mutation=mutation)
 
-    def _core(local_id, ticket_data, *, client: TicketTransport, binding_store, repo_root):
-        return coordinated(
-            local_id,
-            ticket_data,
-            client=client,
-            binding_store=binding_store,
-            repo_root=repo_root,
-            deferred_creates=ctx.deferred_creates,
-            mutation=mutation,
-        )
 
-    return _core
+def _decorate_create_completion(outcome: dict, result, mutation: dict, ctx, create_core) -> None:
+    """Surface create-route completion metadata on the batch outcome.
+
+    The create scheduler needs the same confirmed/dependents_released signal the typed
+    create leaf already returns, without re-running the route or peeking into transport
+    internals. Prelude defers and dedup hits happen before the selected core runs, so
+    they are derived here from the observable handler result instead.
+    """
+    captured = getattr(create_core, "last_outcome", None) if create_core is not None else None
+    if captured is not None:
+        outcome["confirmed"] = captured.confirmed
+        outcome["dependents_released"] = captured.dependents_released
+        outcome["known_key"] = captured.known_key
+        return
+    if isinstance(result, dict) and result.get("status") == "dedup-create-skipped":
+        outcome["confirmed"] = True
+        outcome["dependents_released"] = True
+        outcome["known_key"] = result.get("key")
+        return
+    if result is None and mutation in ctx.deferred_creates:
+        outcome["confirmed"] = False
+        outcome["dependents_released"] = False
+        outcome["known_key"] = None
+        return
+    known_key = result.get("key") if isinstance(result, dict) else None
+    outcome["confirmed"] = bool(known_key)
+    outcome["dependents_released"] = bool(known_key)
+    outcome["known_key"] = known_key
 
 
 def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
@@ -222,6 +267,7 @@ def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     if result is not None and result.get("status") != "dedup-create-skipped":
         ctx.rest_calls += 1
     outcome["result"] = result
+    _decorate_create_completion(outcome, result, mutation, ctx, create_core)
     # Surface swallowed comment failures. NON-fatal by default — the issue create
     # above genuinely succeeded — so we record them in a dedicated field rather than
     # overwriting outcome["error"], mirroring the update-path soft-fail style.

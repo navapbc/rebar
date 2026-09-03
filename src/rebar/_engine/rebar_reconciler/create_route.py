@@ -404,6 +404,7 @@ def _coordinated_create_core(
     repo_root=None,
     deferred_creates=None,
     mutation=None,
+    capture_outcome=None,
 ) -> dict | None:
     """The coordinated create->contain MIDDLE core, adapted to ``create_one``'s contract.
 
@@ -431,6 +432,8 @@ def _coordinated_create_core(
     outcome, capture = _run_coordinated_create(
         local_id, ticket_data, client=client, binding_store=binding_store
     )
+    if capture_outcome is not None:
+        capture_outcome(outcome)
     if capture.persist_error is not None:
         raise capture.persist_error
     if outcome.confirmed:

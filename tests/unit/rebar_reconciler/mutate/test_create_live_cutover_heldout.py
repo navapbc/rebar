@@ -21,6 +21,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import types
 import urllib.error
 from pathlib import Path
 
@@ -342,6 +343,49 @@ def _read_manifest(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
+def _typed_create(applier, local_id: str, *, summary: str, requires_create=()):
+    mut_mod = applier._load_mutation_module()
+    payload = {
+        "summary": summary,
+        "issuetype": {"name": "Task"},
+        "local_id": local_id,
+    }
+    if requires_create:
+        payload["requires_create"] = list(requires_create)
+    return mut_mod.Mutation(
+        direction=mut_mod.MutationDirection.outbound,
+        action=mut_mod.MutationAction.create,
+        target=local_id,
+        payload=payload,
+        provenance={"source": "test"},
+    )
+
+
+def _create_plan(identity: str, mutation, *, dependencies=()):
+    return types.SimpleNamespace(
+        identity=identity,
+        mutations=(mutation,),
+        disposition=types.SimpleNamespace(value="mutate"),
+        dependencies=tuple(dependencies),
+        defer_reason=None,
+    )
+
+
+class _SequencedCreateClient(_FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.created_titles: list[str] = []
+        self._seq = 0
+
+    def create_issue(self, fields):
+        self.creates += 1
+        self.created_titles.append(fields.get("title", ""))
+        if self.create_exc is not None:
+            raise self.create_exc
+        self._seq += 1
+        return {"key": f"DIG-{self._seq}", "id": f"{1000 + self._seq}"}
+
+
 @pytest.mark.parametrize("route", [None, "legacy"])
 def test_applier_apply_live_batch_create_one_issue_one_binding(tmp_path, monkeypatch, route):
     """The true production entry point: ``applier.apply([create_dict], ...)`` issues EXACTLY
@@ -369,3 +413,63 @@ def test_applier_apply_live_batch_create_one_issue_one_binding(tmp_path, monkeyp
     (outcome,) = manifest["mutations"]
     assert outcome["result"]["key"] == "DIG-1"
     assert outcome.get("error") is None
+
+
+def test_applier_apply_orders_parent_before_child_create_dependency(tmp_path, monkeypatch):
+    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
+    applier = _load_applier("applier_create_ordering")
+    client = _SequencedCreateClient()
+    monkeypatch.setattr(applier, "_load_acli", lambda: client)
+    _init_git_repo(tmp_path)
+    store = BindingStore(tmp_path / ".tickets-tracker")
+
+    parent = _typed_create(applier, "z-parent", summary="Parent")
+    child = _typed_create(applier, "a-child", summary="Child", requires_create=("z-parent",))
+    plans = [
+        _create_plan("a-child", child, dependencies=("z-parent",)),
+        _create_plan("z-parent", parent),
+    ]
+
+    manifest_path = applier.apply(
+        [child, parent],
+        "pass-create-order",
+        repo_root=tmp_path,
+        binding_store=store,
+        ticket_plans=plans,
+    )
+
+    assert client.created_titles == ["Parent", "Child"]
+    manifest = _read_manifest(manifest_path)
+    assert [m["local_id"] for m in manifest["mutations"]] == ["z-parent", "a-child"]
+    assert client.creates == 2
+
+
+def test_applier_apply_defers_unknown_parent_create_dependency_without_vendor_call(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("REBAR_RECONCILER_CREATE_ROUTE", raising=False)
+    applier = _load_applier("applier_create_unknown_parent")
+    client = _SequencedCreateClient()
+    monkeypatch.setattr(applier, "_load_acli", lambda: client)
+    _init_git_repo(tmp_path)
+    store = BindingStore(tmp_path / ".tickets-tracker")
+
+    child = _typed_create(
+        applier, "child-missing", summary="Child", requires_create=("parent-missing",)
+    )
+    plans = [_create_plan("child-missing", child, dependencies=("parent-missing",))]
+
+    manifest_path = applier.apply(
+        [child],
+        "pass-create-missing-parent",
+        repo_root=tmp_path,
+        binding_store=store,
+        ticket_plans=plans,
+    )
+
+    assert client.creates == 0
+    manifest = _read_manifest(manifest_path)
+    (outcome,) = manifest["mutations"]
+    assert outcome["local_id"] == "child-missing"
+    assert outcome["result"] is None
+    assert outcome["defer_reason"] == "dependency_deferred"

@@ -45,6 +45,22 @@ from rebar_reconciler.outbound_labels import (
 from rebar_reconciler.outbound_links import _diff_links
 
 
+def _create_prerequisites(ticket, binding_store) -> tuple[str, ...]:
+    """Return the local-id prerequisites an outbound CREATE depends on.
+
+    A child create depends on its parent's CREATE only when the local ticket declares
+    ``parent_id`` and that parent is not yet bound in Jira. The prerequisite identity
+    stays in the local-id namespace the planner and create scheduler already share;
+    this path never invents a Jira key for an unbound parent.
+    """
+    parent_id = ticket.get("parent_id")
+    if not isinstance(parent_id, str) or not parent_id:
+        return ()
+    if _best_effort(binding_store, "get_jira_key", parent_id):
+        return ()
+    return (parent_id,)
+
+
 def _compute_outbound_create_mutation(
     mutations,
     ticket,
@@ -161,6 +177,7 @@ def _compute_outbound_create_mutation(
         if canonical is None:
             return
         create_fields[_BRIDGE_TARGET_PROJECT_KEY] = canonical
+    requires_create = _create_prerequisites(ticket, binding_store)
     mutations.append(
         OutboundMutation(
             local_id=local_id,
@@ -177,6 +194,7 @@ def _compute_outbound_create_mutation(
                 + annotation_mutations
             ),
             links=[],  # links resolved after all creates
+            requires_create=requires_create,
         )
     )
 

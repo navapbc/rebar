@@ -134,7 +134,7 @@ def _apply_outbound_create_legacy(mutation, client: TicketTransport) -> ApplyRes
     """
     payload = dict(mutation.payload)
     try:
-        _call_with_retry(client.create_issue, payload)
+        result = _call_with_retry(client.create_issue, payload)
     except Exception:
         # Rollback path: if a Jira issue was (likely) created before the failure
         # surfaced, delete it via the same retry helper so transient delete
@@ -148,7 +148,21 @@ def _apply_outbound_create_legacy(mutation, client: TicketTransport) -> ApplyRes
             # create exception propagates to the caller unchanged.
             pass
         raise
-    return ApplyResult(mutation.direction, mutation.action, {})
+    known_key = (
+        result.get("key")
+        if isinstance(result, dict)
+        else payload.get("key_hint") or mutation.target
+    )
+    return ApplyResult(
+        mutation.direction,
+        mutation.action,
+        {
+            "coordinated": False,
+            "known_key": known_key,
+            "confirmed": True,
+            "dependents_released": True,
+        },
+    )
 
 
 # Allowlist of fields that can be pushed outbound via update_issue. Other

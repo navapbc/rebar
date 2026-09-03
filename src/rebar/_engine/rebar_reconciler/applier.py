@@ -139,7 +139,9 @@ from rebar_reconciler.batch_dispatch import (  # noqa: E402
     _mutation_to_batch_dict,
     create_one,
     delete_one,
+    merge_pass_tallies,
     reroute_migrated_plans,
+    reroute_ordered_create_plans,
     update_one,
 )
 
@@ -609,8 +611,15 @@ def _apply_batch(
     # record — one mutation at a time (per-mutation step extracted: _apply_one).
     head_pin_cell = [concurrency.snapshot_head(repo_root)]
     # LIVE cutover (RP-03 S3 T3): reroute migrated non-create plans inside the drift try.
+    create_tally = None
     cutover_tally = None
     try:
+        create_tally, mutations = reroute_ordered_create_plans(
+            ticket_plans=ticket_plans,
+            mutations=mutations,
+            ctx=ctx,
+            outcomes_sink=mutations_with_outcomes,
+        )
         cutover_tally, mutations = reroute_migrated_plans(
             ticket_plans=ticket_plans,
             mutations=mutations,
@@ -653,8 +662,9 @@ def _apply_batch(
         "mutations": mutations_with_outcomes,
         "events": ctx.events_list,
     }
-    if cutover_tally is not None:
-        manifest["cutover_tally"] = cutover_tally
+    combined_tally = merge_pass_tallies(create_tally, cutover_tally)
+    if combined_tally is not None:
+        manifest["cutover_tally"] = combined_tally
 
     snapshots_dir = repo_root / "bridge_state" / "snapshots"
     snapshots_dir.mkdir(parents=True, exist_ok=True)

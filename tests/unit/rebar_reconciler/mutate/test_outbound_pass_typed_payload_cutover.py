@@ -60,6 +60,7 @@ def test_outbound_create_mutation_carries_a_typed_payload(
         fields={"summary": "New issue", "issuetype": "Task"},
         comments=[{"body": "hello"}],
         labels=[{"action": "add", "label": "x"}],
+        requires_create=("parent-1",),
     )
     monkeypatch.setattr(
         outbound_differ_mod,
@@ -83,6 +84,7 @@ def test_outbound_create_mutation_carries_a_typed_payload(
     assert payload.comments == ({"body": "hello"},)
     assert payload.labels == ({"action": "add", "label": "x"},)
     assert payload.local_id == "local-1"
+    assert payload.requires_create == ("parent-1",)
 
 
 def test_outbound_update_mutation_carries_a_typed_payload(
@@ -188,3 +190,35 @@ def test_typed_create_payload_round_trips_through_mutation_to_batch_dict(
         "summary": "New issue",
         "fields": "not-a-bookkeeping-collision",
     }
+
+
+def test_typed_create_prerequisites_stay_out_of_vendor_fields(
+    run_differs_outbound, tmp_path, monkeypatch
+):
+    run_fn, outbound_differ_mod, local_label_intent_mod = run_differs_outbound
+    from rebar_reconciler import batch_dispatch
+
+    create_om = outbound_differ_mod.OutboundMutation(
+        local_id="local-5",
+        jira_key=None,
+        action="create",
+        fields={"summary": "Child issue"},
+        comments=[],
+        labels=[],
+        requires_create=("parent-5",),
+    )
+    monkeypatch.setattr(
+        outbound_differ_mod,
+        "compute_outbound_mutations",
+        lambda *a, **k: ([create_om], {}),
+    )
+    ctx = _make_ctx(tmp_path, outbound_differ_mod, local_label_intent_mod)
+    backend = types.SimpleNamespace(transport=object(), outbound=object(), inbound=object())
+    mutations: list = []
+    run_fn(ctx, mutations, backend)
+
+    payload = mutations[0].payload
+    assert payload.requires_create == ("parent-5",)
+
+    batch_dict = batch_dispatch._mutation_to_batch_dict(mutations[0])
+    assert "requires_create" not in batch_dict["fields"]

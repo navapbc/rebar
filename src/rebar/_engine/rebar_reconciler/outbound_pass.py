@@ -264,6 +264,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
                     fields=om.fields,
                     comments=tuple(om.comments),
                     labels=tuple(om.labels),
+                    requires_create=tuple(getattr(om, "requires_create", ())),
                     local_id=om.local_id,
                 ),
                 provenance={"source": "outbound_differ", "local_id": om.local_id},
