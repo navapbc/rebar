@@ -444,6 +444,19 @@ be re-applied if they land inside the window.
 - **Pause sync:** disable *Reconcile Bridge* in the Actions UI (or delete its
   `schedule:` trigger). The canary will then alert on staleness — pause it too if the
   pause is intentional, or close its alert ticket manually.
+- **Code-path rollback toggles:** two environment variables control distinct
+  consumers and should not be conflated:
+  - `REBAR_RECONCILER_CREATE_ROUTE` selects only the outbound CREATE consumer.
+    Default (unset) and the truthy values `coordinator` / `1` / `true` / `on` /
+    `yes` keep the coordinated write-ahead path, which never deletes a created
+    issue on a post-create failure. The rollback values `legacy` / `0` /
+    `false` / `off` / `no` restore the legacy create+delete rollback path for
+    CREATE only.
+  - `REBAR_RECONCILER_WRITE_FACADE` controls the composed apply runtime.
+    Default (unset) and truthy values keep the composed apply runtime's
+    transport threading. The falsey values `0` / `false` / `off` / `no`
+    restore the legacy ambient apply path; they do not change which create
+    route runs.
 - **Safe re-validate:** before re-enabling `live`, dispatch with
   `mode = reconcile-check` then `dry-run`.
 - **Bad push:** the `tickets` branch is ordinary git history — an erroneous reconciler
