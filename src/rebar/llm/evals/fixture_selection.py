@@ -332,6 +332,20 @@ def select_candidates(
     then escaped-defect priority, then descending ``abs_margin`` with ``None`` last, then
     ascending ``review_event_uuid``); ``rank`` is the 0-based position within the direction.
     """
+    # Boundary normalization (ticket 57c4-4834-2a7a-4a05): drop findings with no ``norm_id``
+    # before any norm-keyed consumer sees them. Sidecar events committed before ``norm_id`` was
+    # added to the ``_slim`` projection reconstruct findings that lack the key; a finding with no
+    # ``norm_id`` has no cross-review identity, so it cannot participate in fire grouping,
+    # author-response survival, or churn. Filtering once here covers every subscript site
+    # (``_fire_rows`` and, via ``_author_response_norm_ids``, ``classify_finding_survival``/churn)
+    # and both public entry points.
+    reviews = [
+        {
+            **review,
+            "findings": [f for f in review.get("findings", []) if f.get("norm_id") is not None],
+        }
+        for review in reviews
+    ]
     rows: list[dict[str, Any]] = []
     unreliable = unreliable or {}
     for criterion_id in criteria_ids:

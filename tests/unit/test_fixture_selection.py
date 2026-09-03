@@ -86,6 +86,85 @@ def test_fully_corroborated_fire_candidate_is_blocking_with_all_signals():
     assert c["rank"] == 0
 
 
+def _norm_less_finding(*, criteria: list[str]) -> dict[str, Any]:
+    """A historical slimmed finding that names a criterion but carries NO ``norm_id`` key at
+    all — the shape (from sidecar events predating the ``norm_id`` field) that crashed
+    real-corpus selection (ticket 57c4-4834-2a7a-4a05)."""
+    return {
+        "criteria": list(criteria),
+        "cohort": None,
+        "decision_margin": 0.20,
+        "decision": "block",
+    }
+
+
+def _reviews_with_norm_less() -> list[dict[str, Any]]:
+    """``_fully_corroborated_reviews`` with a norm_id-less finding (naming the same criterion)
+    added to every review — so the norm-less finding is routed through BOTH the ``_fire_rows``
+    grouping AND the ``_author_response_norm_ids`` -> ``classify_finding_survival`` survival path
+    (the u-a2/u-b1 differing-material pair)."""
+    nl = lambda: _norm_less_finding(criteria=["project.alpha"])  # noqa: E731
+    return [
+        review(
+            "u-a1",
+            1001,
+            "A",
+            [finding("n1", criteria=["project.alpha"], decision_margin=0.20), nl()],
+        ),
+        review(
+            "u-a2",
+            1002,
+            "A",
+            [finding("n1", criteria=["project.alpha"], decision_margin=0.20), nl()],
+        ),
+        review("u-b1", 1003, "B", [nl()]),
+    ]
+
+
+def test_norm_less_findings_do_not_crash_selection():
+    """A criterion-naming finding with no ``norm_id`` key no longer aborts selection through
+    either norm-keyed path; the norm-bearing candidate is still produced (57c4 AC1)."""
+    rows = select_candidates(
+        _reviews_with_norm_less(),
+        criteria_ids=["project.alpha"],
+        rubric_history=lambda c: 1000,
+    )
+    cands = [r for r in rows if r["kind"] == "candidate"]
+    assert [c["norm_id"] for c in cands] == ["n1"]
+
+
+def test_norm_less_finding_contributes_no_candidate_and_does_not_perturb():
+    """The norm-less finding yields NO candidate and leaves the norm-bearing rows byte-identical
+    to the baseline where it is absent (57c4 AC2)."""
+    with_nl = select_candidates(
+        _reviews_with_norm_less(),
+        criteria_ids=["project.alpha"],
+        rubric_history=lambda c: 1000,
+    )
+    without_nl = select_candidates(
+        _fully_corroborated_reviews(),
+        criteria_ids=["project.alpha"],
+        rubric_history=lambda c: 1000,
+    )
+    assert with_nl == without_nl
+
+
+def test_norm_less_selection_is_deterministic():
+    """Two runs over the same norm-less-bearing eligible set return byte-identical rows
+    (57c4 AC4)."""
+    first = select_candidates(
+        _reviews_with_norm_less(),
+        criteria_ids=["project.alpha"],
+        rubric_history=lambda c: 1000,
+    )
+    second = select_candidates(
+        _reviews_with_norm_less(),
+        criteria_ids=["project.alpha"],
+        rubric_history=lambda c: 1000,
+    )
+    assert first == second
+
+
 def test_write_manifest_emits_sorted_key_jsonl(tmp_path):
     rows = select_candidates(
         _fully_corroborated_reviews(),
