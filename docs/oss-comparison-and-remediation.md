@@ -107,8 +107,8 @@ inside the reconciler, not as native rebar fields):
 | **Comment threading / reactions / edit** | flat append only | git-bug, Fossil | Low |
 | **Custom fields / templates** | fixed schema | Redmine, Fossil | Low (gates enforce a template instead) |
 
-Native model for reference — types: `task|story|bug|epic`; statuses:
-`open|in_progress|blocked|closed|archived|deleted`; priority `0–4`; six
+Native model for reference — types: `task|story|bug|epic|session_log|code_review|identity`; statuses:
+`idea|open|in_progress|blocked|closed|archived|deleted`; priority `0–4`; seven
 relations; fields `title, description, priority, assignee, parent_id, tags,
 comments, deps, file_impact`. Full event history *is* the audit log (a genuine
 strength), so "no audit log" is **not** a gap.
