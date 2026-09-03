@@ -6,6 +6,9 @@
 # CloudWatch metrics + journald log lines:
 #   1. Health probe of Gerrit + the review-bot (/review/health) -> journald +
 #      rebar/host:{gerrit_healthy,reviewbot_healthy} (S2).
+#   1b. Health probe of the rebar MCP SERVING PATH (https://<domain>/mcp through nginx and
+#      the materialized `upstream rebar_mcp` include) -> rebar/host:mcp_healthy, a 1/0
+#      heartbeat published on every tick (bug 9ea3-7d07-ea55-4496; alarm in monitoring_9ea3.tf).
 #   2. Gerrit data-volume disk-used-percent -> rebar/host:disk_used_percent (S2 alarm).
 #   3. Gerrit->GitHub replication failures (replication_log) -> rebar/host:replication_errors (S5 alarm).
 #   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
@@ -67,6 +70,57 @@ aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
 # treat_missing_data=breaching turns that gap into an ALARM (host-down backstop).
 aws cloudwatch put-metric-data --region "$REGION" --namespace "Rebar/Gate" \
   --metric-name GerritReachable --unit Count --value "$gerrit_ok" 2>/dev/null || true
+
+# --- 1b. rebar MCP serving-path health (bug 9ea3-7d07-ea55-4496) -----------
+# WHAT THIS WATCHES, AND WHY IT IS THE EDGE AND NOT THE CONTAINER. On 2026-09-02 the
+# mcp container was OOM-killed mid-gate (docker inspect: OOMKilled=true, Exit=137).
+# nginx stayed up and healthy, but `upstream rebar_mcp` is a SINGLE materialized
+# `server 127.0.0.1:<port>;` line with no failover, so it kept pointing at the dead
+# container and every /mcp request 502'd for ~12 hours until a HUMAN reported it.
+# Nothing on the box could see that: gerrit_healthy and reviewbot_healthy were both 1,
+# and the only mcp metrics that existed (mcp_retire_cap, mcp_mem_abort, §4f) are
+# DEPLOY-PATH markers — they read 0 throughout, because a kernel OOM-kill of an
+# already-deployed container is not a deploy event.
+#
+# So this probes the SERVING PATH — the exact URL a client uses, through TLS, through
+# nginx, through the materialized upstream include — rather than the container's own
+# /health on the loopback port. The loopback probe would answer the narrower question
+# "does an mcp container exist somewhere", which is not the question the outage asked:
+# the outage was a BINDING failure between a healthy edge and a dead backend, and only
+# an end-to-end request crosses that binding. (autodeploy.sh §5b does probe the
+# loopback /health, deliberately — it is gating a CANDIDATE container before the flip,
+# which is a different question with a different right answer.)
+#
+# 401 IS THE HEALTHY CODE — "2xx == healthy" WOULD BE WRONG HERE. /mcp requires a
+# bearer PAT (docs/mcp-auth.md), so an unauthenticated GET from this probe is answered
+# 401 by the app's own auth middleware. That makes 401 an unambiguous liveness proof:
+# nginx never synthesises a 401 for this location (it has no auth_basic and no
+# auth_request), so the code can only have come from the mcp application itself,
+# reached through the live upstream. Every other outcome is unhealthy, and the
+# outage's signature is among them: 502/503/504 (nginx has no live backend), 000
+# (TLS/DNS/timeout — curl also prints 000 and exits non-zero, which the `|| echo 000`
+# turns into a non-401 string either way), and 404 (the upstream/location binding was
+# lost and the request fell through to Gerrit). We deliberately do NOT widen the
+# healthy set to "any non-5xx": a 200 here would mean the auth middleware is NOT
+# running, which is itself worth paging for.
+#
+# HEARTBEAT, NOT AN EVENT (ticket bff5-9163-cddd-4158): a value is published on EVERY
+# tick, including the unhealthy and probe-failed paths, so the metric is continuously
+# present and its ABSENCE means the probe/timer/host is dead — which is what the
+# alarm's treat_missing_data = "breaching" (monitoring_9ea3.tf) then catches. Publishing
+# nothing on the bad path would leave the alarm with no datapoint to evaluate and is the
+# exact fail-open bff5 removed.
+#
+# DIMENSIONLESS on both sides, unlike gerrit_healthy/reviewbot_healthy above: the alarm
+# in monitoring_9ea3.tf declares no dimensions, and CloudWatch keys a metric by
+# namespace+name+dimensions, so a dimension on one side only silently unmatches.
+mcp_code=$(curl -sS -o /dev/null -w '%{http_code}' "https://${DOMAIN}/mcp" --max-time 10 2>/dev/null || echo 000)
+mcp_ok=0; [ "$mcp_code" = "401" ] && mcp_ok=1
+logger -t rebar-health "mcp=/mcp:${mcp_code} mcp_healthy=${mcp_ok}"
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name mcp_healthy --unit Count --value "$mcp_ok" 2>/dev/null || true
+[ "$mcp_ok" -eq 0 ] && logger -t rebar-health \
+  "mcp serving path UNHEALTHY: https://${DOMAIN}/mcp returned '${mcp_code}' (expected 401); check the live rebar-mcp container and the materialized /etc/nginx/mcp-upstream.conf"
 
 # --- 2. Disk usage of the Gerrit data volume -------------------------------
 used_pct=$(df --output=pcent "$DATA_MOUNT" 2>/dev/null | tail -1 | tr -dc '0-9')
