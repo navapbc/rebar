@@ -38,6 +38,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import inspect
 import json
@@ -106,6 +107,26 @@ def _params(func: Any) -> list[list[str]] | None:
     return out
 
 
+def _return_annotation(func: Any) -> str | None:
+    """Normalized return annotation for a callable, or ``None`` when unavailable/empty."""
+    try:
+        sig = inspect.signature(func)
+    except (TypeError, ValueError):
+        return None
+    annotation = sig.return_annotation
+    if annotation is inspect.Signature.empty:
+        return None
+    if isinstance(annotation, str):
+        try:
+            literal = ast.literal_eval(annotation)
+        except (ValueError, SyntaxError):
+            return annotation
+        if isinstance(literal, str):
+            return literal
+        return annotation
+    return inspect.formatannotation(annotation)
+
+
 def _owned_class(obj: Any) -> bool:
     """True when ``obj`` (a class or function) is defined in the rebar package."""
     module = getattr(obj, "__module__", "") or ""
@@ -139,9 +160,10 @@ def _describe_class(obj: type) -> dict[str, Any]:
             func = getattr(member, "__func__", member)
             if not _owned_class(func):
                 continue
-            params = _params(member)
-            if params is not None:
-                methods[name] = params
+            methods[name] = {
+                "params": _params(member),
+                "return": _return_annotation(member),
+            }
     desc["methods"] = methods
     return desc
 
@@ -151,7 +173,7 @@ def _describe(obj: Any) -> dict[str, Any]:
     if inspect.isclass(obj):
         return _describe_class(obj)
     if inspect.isroutine(obj) or (callable(obj) and not isinstance(obj, _PINNED_VALUE_TYPES)):
-        return {"kind": "callable", "params": _params(obj)}
+        return {"kind": "callable", "params": _params(obj), "return": _return_annotation(obj)}
     if isinstance(obj, _PINNED_VALUE_TYPES):
         return {"kind": "value", "type": type(obj).__name__, "value": _value_repr(obj)}
     return {"kind": "value", "type": type(obj).__name__, "value": None}

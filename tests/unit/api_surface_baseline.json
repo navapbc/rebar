@@ -6,28 +6,31 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "message",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "returncode",
+              "KEYWORD_ONLY",
+              "1"
+            ],
+            [
+              "stderr",
+              "KEYWORD_ONLY",
+              "''"
+            ]
           ],
-          [
-            "message",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "returncode",
-            "KEYWORD_ONLY",
-            "1"
-          ],
-          [
-            "stderr",
-            "KEYWORD_ONLY",
-            "''"
-          ]
-        ]
+          "return": null
+        }
       }
     },
     "ConfigError": {
@@ -75,28 +78,31 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "message",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "returncode",
+              "KEYWORD_ONLY",
+              "1"
+            ],
+            [
+              "stderr",
+              "KEYWORD_ONLY",
+              "''"
+            ]
           ],
-          [
-            "message",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "returncode",
-            "KEYWORD_ONLY",
-            "1"
-          ],
-          [
-            "stderr",
-            "KEYWORD_ONLY",
-            "''"
-          ]
-        ]
+          "return": null
+        }
       }
     },
     "__version__": {
@@ -127,7 +133,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "append_session_log": {
       "kind": "callable",
@@ -162,7 +169,8 @@
           "KEYWORD_ONLY",
           "'python'"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "apply_ticket_filters": {
       "kind": "callable",
@@ -202,7 +210,8 @@
           "KEYWORD_ONLY",
           "''"
         ]
-      ]
+      ],
+      "return": "list"
     },
     "archive": {
       "kind": "callable",
@@ -217,7 +226,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "attach_commits": {
       "kind": "callable",
@@ -237,11 +247,13 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "bridge_check_access": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "BridgeAccessCheck"
     },
     "bridge_fsck": {
       "kind": "callable",
@@ -251,7 +263,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "BridgeFsck"
     },
     "bridge_pause": {
       "kind": "callable",
@@ -266,7 +279,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "BridgeControl"
     },
     "bridge_preview": {
       "kind": "callable",
@@ -286,7 +300,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "BridgeRun"
     },
     "bridge_projects_list": {
       "kind": "callable",
@@ -296,7 +311,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "bridge_projects_remove": {
       "kind": "callable",
@@ -311,7 +327,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "bridge_projects_set": {
       "kind": "callable",
@@ -331,7 +348,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "bridge_resume": {
       "kind": "callable",
@@ -341,7 +359,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "BridgeControl"
     },
     "bridge_run": {
       "kind": "callable",
@@ -356,7 +375,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "BridgeRun"
     },
     "bridge_status": {
       "kind": "callable",
@@ -376,7 +396,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "BridgeStatus"
     },
     "bridge_sync": {
       "kind": "callable",
@@ -401,7 +422,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "BridgeRun"
     },
     "check_ac": {
       "kind": "callable",
@@ -416,7 +438,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "GateResult"
     },
     "claim": {
       "kind": "callable",
@@ -441,7 +464,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "ClaimResult"
     },
     "clarity_check": {
       "kind": "callable",
@@ -456,7 +480,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "ClarityResult"
     },
     "comment": {
       "kind": "callable",
@@ -486,7 +511,8 @@
           "KEYWORD_ONLY",
           "''"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "compact": {
       "kind": "callable",
@@ -501,7 +527,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "config": {
       "kind": "value",
@@ -551,7 +578,8 @@
           "KEYWORD_ONLY",
           "'python'"
         ]
-      ]
+      ],
+      "return": "str | CreateResult"
     },
     "create_ticket": {
       "kind": "callable",
@@ -621,7 +649,8 @@
           "KEYWORD_ONLY",
           "'python'"
         ]
-      ]
+      ],
+      "return": "str | CreateResult"
     },
     "declare_no_file_impact": {
       "kind": "callable",
@@ -641,7 +670,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "deps": {
       "kind": "callable",
@@ -656,7 +686,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "DepsGraph"
     },
     "edit_ticket": {
       "kind": "callable",
@@ -676,11 +707,13 @@
           "VAR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "str | None"
     },
     "engine_dir": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "Path"
     },
     "ensure_identity_for": {
       "kind": "callable",
@@ -710,7 +743,8 @@
           "KEYWORD_ONLY",
           "'python'"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "error_code_for": {
       "kind": "callable",
@@ -720,7 +754,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "export_tickets": {
       "kind": "callable",
@@ -770,7 +805,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "find_inbound_relationships": {
       "kind": "callable",
@@ -785,7 +821,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "fsck": {
       "kind": "callable",
@@ -805,7 +842,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "fsck_report": {
       "kind": "callable",
@@ -825,7 +863,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "get_file_impact": {
       "kind": "callable",
@@ -840,7 +879,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "list[FileImpactEntry]"
     },
     "get_file_impact_scope": {
       "kind": "callable",
@@ -855,7 +895,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict[str, object]"
     },
     "get_verify_commands": {
       "kind": "callable",
@@ -870,11 +911,13 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "list[VerifyCommandEntry]"
     },
     "grounding_info": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "GroundingInfo"
     },
     "idea": {
       "kind": "callable",
@@ -904,7 +947,8 @@
           "KEYWORD_ONLY",
           "'python'"
         ]
-      ]
+      ],
+      "return": "str | CreateResult"
     },
     "identity_email": {
       "kind": "callable",
@@ -919,7 +963,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "str | None"
     },
     "import_tickets": {
       "kind": "callable",
@@ -939,7 +984,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "init_repo": {
       "kind": "callable",
@@ -954,7 +1000,8 @@
           "KEYWORD_ONLY",
           "False"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "is_placeholder": {
       "kind": "callable",
@@ -969,7 +1016,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "bool"
     },
     "jira_account_id": {
       "kind": "callable",
@@ -984,7 +1032,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "str | None"
     },
     "link": {
       "kind": "callable",
@@ -1014,7 +1063,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict | None"
     },
     "list_tickets": {
       "kind": "callable",
@@ -1089,7 +1139,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "list[TicketState]"
     },
     "next_batch": {
       "kind": "callable",
@@ -1104,7 +1155,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "NextBatch"
     },
     "push_status": {
       "kind": "callable",
@@ -1114,7 +1166,8 @@
           "POSITIONAL_OR_KEYWORD",
           "None"
         ]
-      ]
+      ],
+      "return": "dict[str, Any]"
     },
     "quality_check": {
       "kind": "callable",
@@ -1129,7 +1182,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "GateResult"
     },
     "ready": {
       "kind": "callable",
@@ -1144,7 +1198,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "list[TicketState]"
     },
     "recent_session_logs": {
       "kind": "callable",
@@ -1159,7 +1214,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "list[TicketState]"
     },
     "reconcile": {
       "kind": "callable",
@@ -1174,7 +1230,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "reduce_all_tickets": {
       "kind": "callable",
@@ -1199,7 +1256,8 @@
           "KEYWORD_ONLY",
           "False"
         ]
-      ]
+      ],
+      "return": "list[dict]"
     },
     "reduce_ticket": {
       "kind": "callable",
@@ -1219,7 +1277,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict | None"
     },
     "reopen": {
       "kind": "callable",
@@ -1234,7 +1293,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "TransitionResult"
     },
     "resolve_current_identity": {
       "kind": "callable",
@@ -1244,7 +1304,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "str | None"
     },
     "resolve_mapping": {
       "kind": "callable",
@@ -1264,7 +1325,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "str | None"
     },
     "revoke_identity_key": {
       "kind": "callable",
@@ -1289,7 +1351,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "search": {
       "kind": "callable",
@@ -1334,7 +1397,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "list[SearchResult] | list[TicketState]"
     },
     "set_file_impact": {
       "kind": "callable",
@@ -1354,7 +1418,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "set_verify_commands": {
       "kind": "callable",
@@ -1374,7 +1439,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "show_ticket": {
       "kind": "callable",
@@ -1394,7 +1460,8 @@
           "KEYWORD_ONLY",
           "False"
         ]
-      ]
+      ],
+      "return": "TicketState"
     },
     "sign_manifest": {
       "kind": "callable",
@@ -1414,7 +1481,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "SignResult"
     },
     "start_session_log": {
       "kind": "callable",
@@ -1444,7 +1512,8 @@
           "KEYWORD_ONLY",
           "'python'"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "summary": {
       "kind": "callable",
@@ -1459,7 +1528,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "list[dict[str, Any]]"
     },
     "tag": {
       "kind": "callable",
@@ -1479,7 +1549,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "to_llm": {
       "kind": "callable",
@@ -1489,7 +1560,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "transition": {
       "kind": "callable",
@@ -1544,7 +1616,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "TransitionResult"
     },
     "unlink": {
       "kind": "callable",
@@ -1569,7 +1642,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "untag": {
       "kind": "callable",
@@ -1589,7 +1663,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "use_identity": {
       "kind": "callable",
@@ -1604,7 +1679,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "validate": {
       "kind": "callable",
@@ -1614,7 +1690,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "ValidateReport"
     },
     "verify_signature": {
       "kind": "callable",
@@ -1634,13 +1711,15 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "VerifySignatureResult"
     }
   },
   "rebar.llm.contracts": {
     "completion_verdict_response_model": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "type"
     },
     "default_outputs": {
       "kind": "callable",
@@ -1650,19 +1729,23 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "epic_bug_screen_verdict_response_model": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "type"
     },
     "overlap_verdict_batch_response_model": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "type"
     },
     "overlap_verdict_response_model": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "type"
     },
     "register_contract": {
       "kind": "callable",
@@ -1677,7 +1760,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "response_model_for": {
       "kind": "callable",
@@ -1687,11 +1771,13 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "type"
     },
     "ticket_digest_response_model": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "type"
     }
   },
   "rebar.llm.findings": {
@@ -1770,11 +1856,13 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "citation_model": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "type[Any]"
     },
     "finalize_findings": {
       "kind": "callable",
@@ -1829,7 +1917,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "finalize_outcome": {
       "kind": "callable",
@@ -1889,15 +1978,18 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "finding_model": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "type[Any]"
     },
     "findings_response_model": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "type[Any]"
     },
     "normalize_finding": {
       "kind": "callable",
@@ -1912,7 +2004,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "resolve_citations": {
       "kind": "callable",
@@ -1927,7 +2020,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "validate_result": {
       "kind": "callable",
@@ -1937,7 +2031,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "validate_structured": {
       "kind": "callable",
@@ -1952,7 +2047,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "dict"
     }
   },
   "rebar.llm.prompting.prompts": {
@@ -2007,7 +2103,8 @@
           "POSITIONAL_OR_KEYWORD",
           "None"
         ]
-      ]
+      ],
+      "return": "dict[str, object]"
     },
     "build_prompt_index": {
       "kind": "callable",
@@ -2017,7 +2114,8 @@
           "POSITIONAL_OR_KEYWORD",
           "None"
         ]
-      ]
+      ],
+      "return": "dict[str, dict]"
     },
     "canonical_prompt_text": {
       "kind": "callable",
@@ -2037,7 +2135,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "check_prompt_parity": {
       "kind": "callable",
@@ -2057,7 +2156,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "list[str]"
     },
     "get_prompt": {
       "kind": "callable",
@@ -2072,11 +2172,13 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "Prompt"
     },
     "load_catalog": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "dict[str, Reviewer]"
     },
     "load_prompt": {
       "kind": "callable",
@@ -2101,7 +2203,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "tuple[str, dict]"
     },
     "prompt_input_schema": {
       "kind": "callable",
@@ -2121,7 +2224,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "prompt_override_drift": {
       "kind": "callable",
@@ -2131,7 +2235,8 @@
           "POSITIONAL_OR_KEYWORD",
           "None"
         ]
-      ]
+      ],
+      "return": "list[str]"
     },
     "prompt_ref_exists": {
       "kind": "callable",
@@ -2146,7 +2251,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "bool"
     },
     "regenerate_prompt_index": {
       "kind": "callable",
@@ -2156,7 +2262,8 @@
           "POSITIONAL_OR_KEYWORD",
           "None"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "resolve_prompt": {
       "kind": "callable",
@@ -2186,7 +2293,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "tuple[str, dict]"
     },
     "resolve_prompt_cached": {
       "kind": "callable",
@@ -2221,7 +2329,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "tuple[str, str, dict]"
     },
     "select_reviewers": {
       "kind": "callable",
@@ -2236,7 +2345,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "list[str]"
     }
   },
   "rebar.llm.runner": {
@@ -2246,47 +2356,56 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "findings",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "summary",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "structured",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ]
           ],
-          [
-            "findings",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
+          "return": null
+        },
+        "preflight": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "summary",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
+          "return": "None"
+        },
+        "run": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "req",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "structured",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ]
-        ],
-        "preflight": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "run": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "req",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "dict"
+        }
       }
     },
     "PydanticAIRunner": {
@@ -2295,47 +2414,56 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "config",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "model_override",
+              "KEYWORD_ONLY",
+              "None"
+            ],
+            [
+              "runtime",
+              "KEYWORD_ONLY",
+              "None"
+            ]
           ],
-          [
-            "config",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": null
+        },
+        "preflight": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "model_override",
-            "KEYWORD_ONLY",
-            "None"
+          "return": "None"
+        },
+        "run": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "req",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "runtime",
-            "KEYWORD_ONLY",
-            "None"
-          ]
-        ],
-        "preflight": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "run": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "req",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "dict"
+        }
       }
     },
     "RunRequest": {
@@ -2366,115 +2494,121 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "system_prompt",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "instructions",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "config",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "reviewers",
+              "POSITIONAL_OR_KEYWORD",
+              "<factory>"
+            ],
+            [
+              "target",
+              "POSITIONAL_OR_KEYWORD",
+              "<factory>"
+            ],
+            [
+              "langfuse_prompt",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "output_schema",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "mode",
+              "POSITIONAL_OR_KEYWORD",
+              "'findings'"
+            ],
+            [
+              "execution_mode",
+              "POSITIONAL_OR_KEYWORD",
+              "'agentic'"
+            ],
+            [
+              "extra_tools",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "thinking",
+              "POSITIONAL_OR_KEYWORD",
+              "False"
+            ],
+            [
+              "iteration_limit",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "output_token_limit",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "structured_retry_limit",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "transport_attempt_limit",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "request_timeout_limit_s",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "tool_step_limit",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "web",
+              "POSITIONAL_OR_KEYWORD",
+              "False"
+            ],
+            [
+              "cache_prefix",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ]
           ],
-          [
-            "system_prompt",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "None"
+        },
+        "effective_cache_prefix": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "instructions",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "config",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "reviewers",
-            "POSITIONAL_OR_KEYWORD",
-            "<factory>"
-          ],
-          [
-            "target",
-            "POSITIONAL_OR_KEYWORD",
-            "<factory>"
-          ],
-          [
-            "langfuse_prompt",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "output_schema",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "mode",
-            "POSITIONAL_OR_KEYWORD",
-            "'findings'"
-          ],
-          [
-            "execution_mode",
-            "POSITIONAL_OR_KEYWORD",
-            "'agentic'"
-          ],
-          [
-            "extra_tools",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "thinking",
-            "POSITIONAL_OR_KEYWORD",
-            "False"
-          ],
-          [
-            "iteration_limit",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "output_token_limit",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "structured_retry_limit",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "transport_attempt_limit",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "request_timeout_limit_s",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "tool_step_limit",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "web",
-            "POSITIONAL_OR_KEYWORD",
-            "False"
-          ],
-          [
-            "cache_prefix",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ]
-        ],
-        "effective_cache_prefix": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "str | None"
+        }
       }
     },
     "Runner": {
@@ -2483,25 +2617,31 @@
       ],
       "kind": "class",
       "methods": {
-        "preflight": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "run": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "preflight": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "req",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "None"
+        },
+        "run": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "req",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
+          ],
+          "return": "dict"
+        }
       }
     },
     "get_runner": {
@@ -2522,7 +2662,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "Runner"
     }
   },
   "rebar.llm.workflow.executor": {
@@ -2532,18 +2673,21 @@
       ],
       "kind": "class",
       "methods": {
-        "run": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "run": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "ctx",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "ctx",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "StepResult"
+        }
       }
     },
     "BatchRunRequest": {
@@ -2564,63 +2708,66 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "finder",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "criteria",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "usd_budget",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "model_ladder",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "workflow",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "target_ticket",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "repo_root",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "run_id",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "step_id",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "with_inputs",
+              "POSITIONAL_OR_KEYWORD",
+              "<factory>"
+            ]
           ],
-          [
-            "finder",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "criteria",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "usd_budget",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "model_ladder",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "workflow",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "target_ticket",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "repo_root",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "run_id",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "step_id",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "with_inputs",
-            "POSITIONAL_OR_KEYWORD",
-            "<factory>"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "BatchRunResult": {
@@ -2632,18 +2779,21 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "outputs",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "outputs",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "BatchRunner": {
@@ -2652,23 +2802,26 @@
       ],
       "kind": "class",
       "methods": {
-        "run": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "run": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "req",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "agent_runner",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ]
           ],
-          [
-            "req",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "agent_runner",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ]
-        ]
+          "return": "BatchRunResult"
+        }
       }
     },
     "DefaultBatchRunner": {
@@ -2677,35 +2830,41 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "max_batch_size",
+              "POSITIONAL_OR_KEYWORD",
+              "4"
+            ]
           ],
-          [
-            "max_batch_size",
-            "POSITIONAL_OR_KEYWORD",
-            "4"
-          ]
-        ],
-        "run": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "None"
+        },
+        "run": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "req",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "agent_runner",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ]
           ],
-          [
-            "req",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "agent_runner",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ]
-        ]
+          "return": "BatchRunResult"
+        }
       }
     },
     "ExpressionError": {
@@ -2721,18 +2880,21 @@
       ],
       "kind": "class",
       "methods": {
-        "run": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "run": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "ctx",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "ctx",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "StepResult"
+        }
       }
     },
     "MemoryRecorder": {
@@ -2741,66 +2903,81 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "completed_step": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "run_id",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "None"
+        },
+        "completed_step": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "run_id",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "frame_key",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "frame_key",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "run_finished": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "dict[str, Any] | None"
+        },
+        "run_finished": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "record",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "record",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "run_started": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "None"
+        },
+        "run_started": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "record",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "record",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "step_recorded": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "None"
+        },
+        "step_recorded": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "record",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "record",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "RunRecorder": {
@@ -2809,59 +2986,71 @@
       ],
       "kind": "class",
       "methods": {
-        "completed_step": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "completed_step": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "run_id",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "frame_key",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "run_id",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "dict[str, Any] | None"
+        },
+        "run_finished": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "record",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "frame_key",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "run_finished": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "None"
+        },
+        "run_started": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "record",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "record",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "run_started": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "None"
+        },
+        "step_recorded": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "record",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "record",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "step_recorded": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "record",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "RunResult": {
@@ -2880,53 +3069,56 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "run_id",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "workflow_name",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "status",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "outputs",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "terminal_step",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "terminal_output",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "error",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "steps",
+              "POSITIONAL_OR_KEYWORD",
+              "<factory>"
+            ]
           ],
-          [
-            "run_id",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "workflow_name",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "status",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "outputs",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "terminal_step",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "terminal_output",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "error",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "steps",
-            "POSITIONAL_OR_KEYWORD",
-            "<factory>"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "RunState": {
@@ -2940,45 +3132,51 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "inputs",
+              "POSITIONAL_OR_KEYWORD",
+              "<factory>"
+            ],
+            [
+              "outputs",
+              "POSITIONAL_OR_KEYWORD",
+              "<factory>"
+            ],
+            [
+              "statuses",
+              "POSITIONAL_OR_KEYWORD",
+              "<factory>"
+            ]
           ],
-          [
-            "inputs",
-            "POSITIONAL_OR_KEYWORD",
-            "<factory>"
+          "return": "None"
+        },
+        "with_step": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "step_id",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "result",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "outputs",
-            "POSITIONAL_OR_KEYWORD",
-            "<factory>"
-          ],
-          [
-            "statuses",
-            "POSITIONAL_OR_KEYWORD",
-            "<factory>"
-          ]
-        ],
-        "with_step": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "step_id",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "result",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "RunState"
+        }
       }
     },
     "SNAPSHOT_DIR_NAME": {
@@ -3009,7 +3207,8 @@
           "VAR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": null
     },
     "StepContext": {
       "bases": [
@@ -3030,68 +3229,71 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "run_id",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "step_id",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "kind",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "step",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "inputs",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "workflow",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "target_ticket",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "repo_root",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "frame_key",
+              "POSITIONAL_OR_KEYWORD",
+              "''"
+            ],
+            [
+              "iteration",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "captured",
+              "POSITIONAL_OR_KEYWORD",
+              "<factory>"
+            ]
           ],
-          [
-            "run_id",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "step_id",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "kind",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "step",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "inputs",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "workflow",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "target_ticket",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "repo_root",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "frame_key",
-            "POSITIONAL_OR_KEYWORD",
-            "''"
-          ],
-          [
-            "iteration",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "captured",
-            "POSITIONAL_OR_KEYWORD",
-            "<factory>"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "StepContract": {
@@ -3105,28 +3307,31 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "input_schema",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "output_schema",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ],
+            [
+              "description",
+              "POSITIONAL_OR_KEYWORD",
+              "''"
+            ]
           ],
-          [
-            "input_schema",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "output_schema",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ],
-          [
-            "description",
-            "POSITIONAL_OR_KEYWORD",
-            "''"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "StepResult": {
@@ -3140,28 +3345,31 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "outputs",
+              "POSITIONAL_OR_KEYWORD",
+              "<factory>"
+            ],
+            [
+              "status",
+              "POSITIONAL_OR_KEYWORD",
+              "'succeeded'"
+            ],
+            [
+              "error",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ]
           ],
-          [
-            "outputs",
-            "POSITIONAL_OR_KEYWORD",
-            "<factory>"
-          ],
-          [
-            "status",
-            "POSITIONAL_OR_KEYWORD",
-            "'succeeded'"
-          ],
-          [
-            "error",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "TicketEventRecorder": {
@@ -3170,76 +3378,91 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "target_ticket",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "repo_root",
+              "POSITIONAL_OR_KEYWORD",
+              "None"
+            ]
           ],
-          [
-            "target_ticket",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "None"
+        },
+        "completed_step": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "run_id",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "frame_key",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "repo_root",
-            "POSITIONAL_OR_KEYWORD",
-            "None"
-          ]
-        ],
-        "completed_step": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "dict[str, Any] | None"
+        },
+        "run_finished": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "record",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "run_id",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "None"
+        },
+        "run_started": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "record",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "frame_key",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "run_finished": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+          "return": "None"
+        },
+        "step_recorded": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "record",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ]
           ],
-          [
-            "record",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "run_started": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "record",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ],
-        "step_recorded": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "record",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "contract_for": {
@@ -3250,11 +3473,13 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "StepContract | None"
     },
     "new_run_id": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "str"
     },
     "register_step": {
       "kind": "callable",
@@ -3279,7 +3504,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "Callable[[ScriptedStep], ScriptedStep]"
     },
     "resolve_value": {
       "kind": "callable",
@@ -3299,7 +3525,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "Any"
     },
     "run_workflow": {
       "kind": "callable",
@@ -3354,7 +3581,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "RunResult"
     },
     "shallow_contract_check": {
       "kind": "callable",
@@ -3369,7 +3597,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "snapshot_root": {
       "kind": "callable",
@@ -3379,7 +3608,8 @@
           "POSITIONAL_OR_KEYWORD",
           "None"
         ]
-      ]
+      ],
+      "return": "Path"
     },
     "static_order": {
       "kind": "callable",
@@ -3389,7 +3619,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "list[str]"
     },
     "sweep_orphan_snapshots": {
       "kind": "callable",
@@ -3404,7 +3635,8 @@
           "KEYWORD_ONLY",
           "86400"
         ]
-      ]
+      ],
+      "return": "list[str]"
     }
   },
   "rebar.signing": {
@@ -3427,23 +3659,26 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "message",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "returncode",
+              "POSITIONAL_OR_KEYWORD",
+              "1"
+            ]
           ],
-          [
-            "message",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "returncode",
-            "POSITIONAL_OR_KEYWORD",
-            "1"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "PAYLOAD_VERSION": {
@@ -3462,23 +3697,26 @@
       ],
       "kind": "class",
       "methods": {
-        "__init__": [
-          [
-            "self",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
+        "__init__": {
+          "params": [
+            [
+              "self",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "message",
+              "POSITIONAL_OR_KEYWORD",
+              "<none>"
+            ],
+            [
+              "returncode",
+              "POSITIONAL_OR_KEYWORD",
+              "1"
+            ]
           ],
-          [
-            "message",
-            "POSITIONAL_OR_KEYWORD",
-            "<none>"
-          ],
-          [
-            "returncode",
-            "POSITIONAL_OR_KEYWORD",
-            "1"
-          ]
-        ]
+          "return": "None"
+        }
       }
     },
     "VERIFIED_AT_SHA_PREFIX": {
@@ -3493,7 +3731,8 @@
     },
     "_baked_commit_sha": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "str | None"
     },
     "_canonical_payload": {
       "kind": "callable",
@@ -3508,7 +3747,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "bytes"
     },
     "_gate_commit_sha": {
       "kind": "callable",
@@ -3518,11 +3758,13 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "str | None"
     },
     "_gate_source_dir": {
       "kind": "callable",
-      "params": []
+      "params": [],
+      "return": "str"
     },
     "_generate_key_file": {
       "kind": "callable",
@@ -3532,7 +3774,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "None"
     },
     "_hmac_opcert_not_certified": {
       "kind": "callable",
@@ -3547,7 +3790,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "compute_signature": {
       "kind": "callable",
@@ -3567,7 +3811,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "ensure_opcert_key": {
       "kind": "callable",
@@ -3587,7 +3832,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "gate_code_version": {
       "kind": "callable",
@@ -3597,7 +3843,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "head_sha": {
       "kind": "callable",
@@ -3607,7 +3854,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "key_fingerprint": {
       "kind": "callable",
@@ -3617,7 +3865,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "most_recent_attestation": {
       "kind": "callable",
@@ -3627,7 +3876,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": null
     },
     "opcert_principal": {
       "kind": "callable",
@@ -3642,7 +3892,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "parse_manifest": {
       "kind": "callable",
@@ -3652,7 +3903,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "list[str]"
     },
     "rebar_version_from_manifest": {
       "kind": "callable",
@@ -3662,7 +3914,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "str | None"
     },
     "rebar_version_step": {
       "kind": "callable",
@@ -3672,7 +3925,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "sign_manifest": {
       "kind": "callable",
@@ -3702,7 +3956,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "sign_opcert_manifest": {
       "kind": "callable",
@@ -3742,7 +3997,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "signing_key": {
       "kind": "callable",
@@ -3757,7 +4013,8 @@
           "KEYWORD_ONLY",
           "True"
         ]
-      ]
+      ],
+      "return": "bytes"
     },
     "verified_at_sha_from_manifest": {
       "kind": "callable",
@@ -3767,7 +4024,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "str | None"
     },
     "verified_at_sha_step": {
       "kind": "callable",
@@ -3777,7 +4035,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "str"
     },
     "verified_at_sha_subject": {
       "kind": "callable",
@@ -3797,7 +4056,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "verify_attestation_record": {
       "kind": "callable",
@@ -3827,7 +4087,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "verify_attestations": {
       "kind": "callable",
@@ -3842,7 +4103,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "verify_record": {
       "kind": "callable",
@@ -3862,7 +4124,8 @@
           "POSITIONAL_OR_KEYWORD",
           "<none>"
         ]
-      ]
+      ],
+      "return": "dict"
     },
     "verify_signature": {
       "kind": "callable",
@@ -3882,7 +4145,8 @@
           "KEYWORD_ONLY",
           "None"
         ]
-      ]
+      ],
+      "return": "dict"
     }
   }
 }
