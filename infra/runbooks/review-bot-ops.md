@@ -542,6 +542,30 @@ curl -s localhost:8000/health    # (or /review/health via nginx) → {"status":"
 Then `/rerun` any changes whose `LLM-Review` fail-closed during the outage (see "Manually
 re-run a review" above) — the janitor keeps the store bounded thereafter, and the
 `rebar-root-disk-pressure` alarm clears once `df` drops back under 85%.
+## Disk full — `/var/gerrit` DATA volume (task 3e92)
+
+**Different volume, different runbook.** Every other disk section on this page is about the
+**root** volume (`vol-0270fcf13709cf472`, `/`) — docker storage, build cache, the gate
+snapshot store, per-change clone workdirs. The Gerrit **data** volume
+(`vol-06fa2e77a9dd97527`, `/var/gerrit`) holds the git repositories, `All-Projects`, the
+review DB, and the on-box MCP store, and it fills for entirely different reasons. Naming the
+wrong volume in a recovery command is how a headroom problem becomes an outage.
+
+**Symptom.** `rebar-gerrit-data-disk-high` (`rebar/host:disk_used_percent`, mount
+`/var/gerrit`, ≥ 85%) pages, or `rebar-gerrit-data-disk-debris`
+(`rebar/host:data_disk_debris_bytes` ≥ 1 GiB) pages — the second means the volume is holding
+something that is not Gerrit's `site/` tree at all, which on 2026-08-26 was ~11G of one-off
+investigation dumps under `/var/gerrit/rebar-quiet-window-evidence/`.
+
+**Procedure — diagnosis, the non-`site/` reclaim, and the evidence-location policy that keeps
+it from recurring:** [`gerrit-data-volume-reclaim.md`](gerrit-data-volume-reclaim.md).
+
+**One rule worth repeating here, because this is the page people open first:** investigation,
+probe, and profiling output must never be written under `/var/gerrit`. Stream it back off the
+box, or stage it under `/var/tmp/rebar-evidence/<ticket>-<stamp>/` with a `trap`-based delete
+at spawn. That policy is advisory; what enforces anything is `observability.sh` §2c, which
+*detects* such debris and pages on it — it cannot prevent the write.
+
 ## Disk-full triage (root-volume exhaustion — bug 7a41)
 
 **Symptom.** The box's ROOT filesystem fills up. Because the docker image/build-cache store
