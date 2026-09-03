@@ -1,0 +1,737 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: COH
+  expect: finding
+  id: plan-review-COH-fire-1
+  input: '## Context and confirmed RCA
+
+
+    Gerrit Verify run 31874837464 completed in 29m11s with macOS at 27m38s. The macOS
+    default suite spent 20.88s in test_hook_falls_back_to_git_when_env_unset, 16.38s
+    setting up build-provenance artifacts, 10.69s rebuilding from sdist, plus 8.98s
+    in one blank-env build. Ubuntu repeats these builds in three Python cells. Local
+    profiling showed the fallback exports the entire 3,019-file / 42.4MB checkout
+    although hatch_build.py only resolves one SHA plus writes src/rebar/_build_info.py:
+    git add costs 1.37-1.53s; python -m build costs 3.85-4.32s of a 6.04-6.38s test.
+    A same-hook minimal package preserved the exact fallback SHA while reducing initial
+    paired totals from 6.30/9.26s to 2.66/5.43s.
+
+
+    The exact -n 3 --dist worksteal selector proved that built_artifacts initializes
+    separately on three workers: each consumer paid 6.60-6.74s setup, launching three
+    full builds. This is a bounded contributor, not the cause of multi-minute host
+    variation.
+
+
+    Live run logs also prove a correctness prerequisite. The artifact job received
+    GERRIT_PATCHSET_REVISION=9aecb53e then checked out that revision, but built with
+    GITHUB_SHA=7d908fbb from trusted main. Its probes accepted any non-null COMMIT.
+    Exact source identity is required by ducal-statuelike-ladybird.
+
+
+    ## Ticket and OSS research
+
+
+    No prior rejection exists. ducal-statuelike-ladybird requires real sdist/wheel
+    plus exact provenance behavior. square-tragic-llama explicitly accepted a self-contained
+    minimal Git fixture while retaining the exact fallback SHA plus shallow-source
+    control. despotic-dorsal-greatdane approved immutable artifact reuse but stopped
+    at per-worker scope. cryptic-damp-panda identified repeated package builds as
+    coverage-neutral residual work.
+
+
+    Four popular active projects use this placement: pytest 68308aa has one Ubuntu
+    package job before its broad matrix; pip f399c371 has dedicated packaging jobs
+    outside Unix/Python tests; Poetry 92b74dc has one Ubuntu build/install smoke job
+    outside its OS/Python matrix; Pydantic 02c5c975 has a dedicated Ubuntu distribution
+    build outside its broad matrix. This is 4/4 consensus for one full-package integration
+    job plus lighter behavioral probes in the broad matrix. Rebar remains stricter
+    by retaining real isolated PEP 517 sdist-to-wheel execution through the production
+    hook in every cell.
+
+
+    ## Plan
+
+
+    1. Freeze RED workflow plus build-hook contracts. The workflow oracle rejects
+    GITHUB_SHA as artifact provenance, requires git rev-parse --short HEAD after the
+    final checkout, then requires exact equality from installed wheel plus sdist.
+    Build-hook oracles retain env SHA, preserved sdist SHA, git fallback SHA, blank-env
+    failure.
+
+    2. Create one shared fixture around the checkout current hatch_build.py plus src/rebar/_build_info.py
+    boundary. It supersedes _clean_tree in test_build_provenance.py plus _self_contained_checkout
+    in test_attestation_signing.py at every build-semantics call site. The shallow-source
+    control drives this same fixture from a shallow source. No third checkout materializer
+    survives.
+
+    3. The fixture creates a tiny temporary Hatch package, initializes Git, then commits
+    only that tiny tree. It keeps default PEP 517 isolation. It never mocks Hatchling,
+    Git, archive creation, or wheel inspection.
+
+    4. Convert repeated semantics tests in test_attestation_signing.py plus test_build_provenance.py
+    to that fixture. Retain every named assertion, the no-git helper branch, the direct
+    full-Rebar WheelBuilder package-content test, plus the shallow-source control.
+
+    5. Keep the existing full-Rebar replay in the shared _artifact-probe.yml workflow.
+    This workflow serves both test.yml branch-head checkout plus gerrit-verify.yaml
+    patchset checkout. In both lanes, compute REBAR_EXPECTED_COMMIT with git rev-parse
+    --short HEAD after the applicable final checkout. Build with that short value.
+    Assert exact equality for installed wheel plus install-from-sdist. Preserve every
+    import, CLI, schema, packaging, plus vote-gating probe.
+
+    6. Seed the exact wrong-SHA defect plus one precedence defect. Require the respective
+    oracle to return RED before restoration. Compare focused serial plus exact-xdist
+    timings. Timing remains evidence only.
+
+    7. Run focused tests, workflow consumers, make lint, typecheck, plus full default/integration
+    selectors. Push the necessary implementation immediately through Gerrit without
+    a control-only run. Record hosted macOS plus Ubuntu durations from that treatment.
+
+
+    ## Test contract card
+
+
+    authoritative_contract: ducal-statuelike-ladybird requires real sdist-to-wheel
+    provenance, exact env/git fallback behavior, blank-env failure, sdist preservation,
+    plus exact source identity; both workflow consumers require artifact-probe to
+    build their final checkout.
+
+    trigger_preconditions: each matrix cell runs the real production hook through
+    isolated PEP 517 on the minimal package; artifact-probe has completed its branch-head
+    or patchset checkout.
+
+    production_path: hatch_build.py resolves then writes COMMIT during sdist plus
+    wheel builds; artifact-probe builds then installs full distributions.
+
+    test_tier: minimal real-build probes across every current OS/Python cell plus
+    one full-project artifact integration job per workflow lane.
+
+    observable_postcondition: existing semantics remain; full artifacts equal the
+    short SHA of their final checkout.
+
+    negative_control: wrong nonempty SHA fails; blank env fails; no-git/no-bake remains
+    None; shallow source remains supported.
+
+    collateral_invariants: no selector, assertion, isolation mode, worker, platform,
+    Python cell, coverage, mutation, probe, runner, or vote dependency is removed.
+
+    ci_gate: focused serial/xdist tests, workflow contracts, make lint, make typecheck,
+    Gerrit Verified, LLM-Review.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] Every current OS/Python cell executes a real isolated sdist-to-wheel build
+    through production hatch_build.py on the minimal fixture package.
+
+    - [ ] The env-override probe requires the exact supplied SHA.
+
+    - [ ] The install-from-sdist probe requires the exact preserved SHA.
+
+    - [ ] The git-fallback probe requires the exact committed fixture SHA.
+
+    - [ ] The blank-env probe requires a nonzero real-build exit.
+
+    - [ ] The shared fixture replaces both prior full-tree materializers at build-semantics
+    call sites.
+
+    - [ ] Hook-semantics fixtures never archive the full Rebar checkout.
+
+    - [ ] Both artifact workflow lanes derive the short expected SHA after their final
+    checkout.
+
+    - [ ] The installed full-Rebar wheel must equal the expected short SHA.
+
+    - [ ] The installed full-Rebar sdist must equal the expected short SHA.
+
+    - [ ] A wrong nonempty full-artifact SHA fails the workflow oracle.
+
+    - [ ] The direct full-Rebar WheelBuilder content test remains enabled.
+
+    - [ ] The shallow-source negative control remains enabled.
+
+    - [ ] The OS/Python matrix remains unchanged.
+
+    - [ ] The pytest selectors, xdist workers, coverage gate, plus mutation gate remain
+    unchanged.
+
+    - [ ] The artifact import, CLI, schema, plus vote-gating probes remain unchanged.
+
+    - [ ] A precedence mutation returns the build-hook oracle to RED.
+
+    - [ ] Focused serial plus exact-xdist evidence shows lower elapsed runner work.
+
+    - [ ] The first hosted treatment records macOS plus all Ubuntu job/test durations.
+
+    - [ ] Gerrit records LLM-Review +1 before merge.
+
+    - [ ] Gerrit records Verified +1 before merge.
+
+    - [ ] Gerrit records zero unresolved comments before merge.'
+- children:
+  - 471c-f71f-342c-45ed
+  - 4bd8-a2bb-813b-427e
+  - 4c80-edd3-20f1-4dff
+  - 53ab-bdf6-de1c-4bb1
+  - 5d19-52e0-7c26-47fb
+  - 7a95-b393-e571-4dfb
+  - 860f-8886-a17b-48f1
+  - 98df-3528-9b1f-405a
+  - e59d-c078-724d-46e5
+  - efd4-847d-f7ad-47bc
+  - f1d6-cfcc-a9c6-416d
+  - fb2e-2aa1-9e0f-457a
+  corpus: rebar
+  criterion: COH
+  expect: finding
+  id: plan-review-COH-fire-3
+  input: "## Context / Problem\n\nEvery change to the plan-review gate \u2014 a Pass-1\
+    \ criterion prompt, a Pass-2 impact/validity question, a Pass-3 formula or threshold\
+    \ \u2014 lands on a handful of live dogfood reviews. No standing instrument answers\
+    \ \"did this change make the gate better or worse?\" before it ships; the prior\
+    \ calibration epic (`pastoral-aquatic-viper`, 6982) rejected live A/B batches\
+    \ on cost and parked the human gold set. The work is scattered across six epics\
+    \ and several orphan stories (`jira-reb-529`, `jira-reb-1589`, `fort-wisp-wren`,\
+    \ `spin-cub-usher`, `ridiculous-expert-mouse`, `auspicious-torrid-curlew`). This\
+    \ epic unifies them behind one harness.\n\nThe instrument already mostly exists\
+    \ as data. The live rebar store holds ~4,300 `plan_review_result_v2` sidecars\
+    \ on ~1,280 tickets (2026-06-27 \u2192 now; ~2,000 older ones pruned from the\
+    \ tree but recoverable from `origin/tickets` history) and `~/legacy-modernization-navigator`\
+    \ holds 74 more. Each v2 sidecar retains the raw Pass-1 findings (prose + evidence\
+    \ + scenarios + criteria), the complete Pass-2 answer vector (graded binaries\
+    \ + severity attributes), and the Pass-3 outputs (validity, impact, priority,\
+    \ the exact `block_threshold`, decision). The reviewed plan text is not stored\
+    \ but is reconstructable from ticket `EDIT`/`SNAPSHOT` history and verifiable\
+    \ byte-exactly against the stored `material_fingerprint`. The store also carries\
+    \ free outcome labels: 2,483 revise\u2192re-review pairs (finding survival via\
+    \ `norm_id`), 208 verdict flips on byte-identical material (the reviewer-noise\
+    \ floor), 84 `plan_defect` bug closes, 89 `caused_by` links, 199 plan-PASS\u2192\
+    completion-FAIL tickets, 18 reopens.\n\n## Approach\n\nThree eval tiers, ordered\
+    \ by cost, each measuring one pass in isolation while holding the others fixed:\n\
+    \n- **Tier 0 \u2014 Pass-3 replay (zero LLM).** Re-run `review_kernel.decide.pass3_decide`\
+    \ (and the post-verdict floors) over the whole corpus with a candidate formula/threshold/routing\
+    \ overlay; diff against stored decisions. Generalises `docs/calibration/plan_v5_rescore.py`\
+    \ and `docs/experiments/calibrate_plan_review_thresholds.py`. Runs on every proposal,\
+    \ unlimited.\n- **Tier 1 \u2014 Pass-2 replay (Sonnet, ~$0.5/review uncached).**\
+    \ Re-run the verifier with candidate questions/prompt on the *stored* Pass-1 findings\
+    \ plus reconstructed plan text via the `verify_findings(run_chunk=\u2026)` seam;\
+    \ score per-question agreement against stored answers, then feed Tier 0.\n- **Tier\
+    \ 2 \u2014 Pass-1 replay (Opus, ~$3.4/review uncached, plus a Tier-1 run on the\
+    \ new findings).** Re-run finders with candidate criteria on a fixed stratified\
+    \ sample (~20 tickets); compare finding sets by `norm_id`/criterion; single-criterion\
+    \ mode (~$0.17/call) for per-criterion edits.\n\nNon-negotiable invariants, enforced\
+    \ by the harness rather than by convention:\n\n1. **Hard budget.** A committed\
+    \ ledger tracks every eval call priced via `genai-prices`; every run pre-flights\
+    \ a cost estimate and refuses to start if projected spend would exceed the remaining\
+    \ allocation. Epic-wide cap is **$200** total with a $30 reserve; commissioning\
+    \ spend is planned at \u2264$120 (one Tier-1 reproduction run to measure verifier\
+    \ noise, one Tier-2 baseline sample). Per-proposal costs are published.\n2. **Model\
+    \ parity.** Every LLM re-run uses the exact production model class for that pass\
+    \ (frontier Opus for Pass 1, standard Sonnet for Pass 2) through **Bedrock only**,\
+    \ on a homogeneous provider chain (the mixed Bedrock+Anthropic fallback silently\
+    \ disables prompt caching and roughly doubles cost). The harness records the per-pass\
+    \ model id in every result, refuses to diff runs whose per-pass model ids differ,\
+    \ and refuses to start when the configured model differs from the corpus baseline's\
+    \ `provider_provenance.ran_model`. Substituting a cheaper model to save budget\
+    \ is forbidden: it confounds the measurement.\n3. **Offline first.** Tier 0 and\
+    \ all label joins are pure functions of the frozen corpus; no proposal may be\
+    \ assessed on a live-only signal. Consistent with ADR 0054 (the field corpus is\
+    \ the instrument) and with 6982's rejection of live A/B.\n4. **Noise-aware acceptance.**\
+    \ A change is reported as regressing/improving only when its label-proxy deltas\
+    \ exceed the noise band measured from identical-material flips and the Tier-1\
+    \ reproduction run; otherwise \"indistinguishable\".\n\n## Scope\n\nNew package\
+    \ `src/rebar/llm/evals/plan_replay/` (corpus, labels, tier runners, ledger, report)\
+    \ with a `python -m rebar.llm.evals.plan_replay` entry; frozen corpus manifest\
+    \ + ledger + reports under `docs/experiments/plan-review-gate/replay/`; an ADR\
+    \ and a contributor guide section; fixes to `usage_log` ticket attribution. No\
+    \ CI provider dependency \u2014 everything runs locally.\n\n## Acceptance Criteria\n\
+    \n- [ ] A frozen, versioned replay corpus exists covering both stores (tree +\
+    \ git-recovered sidecars), with at-review plan text reconstructed and fingerprint-verified\
+    \ for \u226595% of v2 sidecars; verified by the corpus manifest's coverage counts.\n\
+    - [ ] Outcome labels and a reviewer-noise floor are computed from the corpus with\
+    \ no LLM calls and joined to every review/finding; verified by a labels report\
+    \ listing counts per label source.\n- [ ] A Pass-3 change (formula, threshold,\
+    \ routing overlay) can be assessed over the entire corpus with zero LLM calls,\
+    \ producing a diff report (verdict flips, per-criterion deltas, label-proxy precision/recall,\
+    \ friction rate); verified by replaying current code against itself with zero\
+    \ diffs and replaying a known historical threshold change reproducing its documented\
+    \ effect.\n- [ ] A Pass-2 change can be assessed on a stratified sample using\
+    \ stored Pass-1 findings, with per-question agreement vs stored answers and downstream\
+    \ Tier-0 metrics; verified by a reproduction run (unchanged questions) whose agreement\
+    \ establishes the noise floor.\n- [ ] A Pass-1 change can be assessed on a fixed\
+    \ stratified sample with finding-set comparison by `norm_id`/criterion and downstream\
+    \ Tier-1/Tier-0 metrics; verified by one baseline sample run.\n- [ ] Every LLM\
+    \ eval call is priced and written to a committed ledger; a run whose pre-flight\
+    \ estimate exceeds remaining allocation is refused; total ledger spend at epic\
+    \ close is \u2264 $200; verified by the ledger file and a test of the refusal\
+    \ path.\n- [ ] Every eval result records the per-pass model id; the harness refuses\
+    \ to diff results with differing model ids and refuses to run a pass on a model\
+    \ other than its production class via Bedrock; verified by unit tests and by the\
+    \ ledger showing only Bedrock Opus/Sonnet ids.\n- [ ] Prompt caching is confirmed\
+    \ active for eval runs (cache_read_tokens > 0 on the second call of a run); verified\
+    \ from the usage log.\n- [ ] A contributor-facing protocol (ADR + docs) states\
+    \ which tier a proposal needs, the required report artifact, and the noise-band\
+    \ acceptance rule; verified by the docs landing and being referenced from `docs/plan-review-gate.md`.\n\
+    \n## Child decomposition\n\nCorpus builder (criterion 1) \u2192 outcome labels\
+    \ + noise floor (2) \u2192 Tier-0 harness (3) \u2192 Tier-1 harness (4) \u2192\
+    \ Tier-2 harness (5) \u2192 budget ledger + model-parity guard + homogeneous Bedrock\
+    \ chain (6, 7, 8; includes the usage-log ticket-attribution bug) \u2192 change\
+    \ protocol ADR + docs (9). Folded-in existing work: `ridiculous-expert-mouse`\
+    \ (per-criterion fixture eval, a Tier-2 single-criterion consumer), `auspicious-torrid-curlew`\
+    \ (deterministic-floor candidates mined via Tier-0 replay), `brutal-idiocratic-rodent`\
+    \ (optional human-adjudicated gold subset, deferred enrichment). `jira-reb-529`\
+    \ is superseded: its recorded-LLM-response mocking is infeasible because prompts/responses\
+    \ are never persisted; the sidecar-replay tiers deliver its intent. `jira-reb-1589`\
+    \ and `fort-wisp-wren` are consumers that depend on this harness; `spin-cub-usher`\
+    \ and `yip-gem-teak` are related but out of scope.\n\n## Non-goals\n\nChanging\
+    \ any production criterion, question, or threshold (this epic builds the instrument);\
+    \ a full human-adjudicated gold set; live A/B in the production gate."
+- corpus: rebar
+  criterion: COH
+  expect: pass
+  id: plan-review-COH-no_fire-0
+  input: '## Context
+
+
+    The project has audience guidance distributed across AGENTS.md, CONTRIBUTING.md,
+    docs/README.md, and individual documents. It lacks one current-state policy that
+    distinguishes durable records, maintained documentation, shipped help, comments,
+    generated artifacts, and protected evidence. The audit ticket minimum-rainy-fawn
+    approved F01 and rejected broad prose cleanup and general prose validation.
+
+
+    ## Current enforcement and history
+
+
+    Ticket forworn-zanyish-narwhale added generated markers, two contributor tables
+    in docs/README.md, and tests/unit/test_generated_surface_markers.py after repeated
+    changes edited derived outputs instead of their sources. The test owns the GENERATED
+    and GATED_HAND_AUTHORED collections and parses the tables from docs/README.md.
+    CONTRIBUTING.md points to the existing landing-page anchor. This change preserves
+    both collections, every catalog row, and all marker checks. It relocates the catalog
+    so the landing page can remain a navigation surface.
+
+
+    ## Plan
+
+
+    Add docs/documentation-policy.md as the current policy for tickets, ADRs, internal
+    documentation, external documentation, shipped help, comments, generated artifacts,
+    and protected evidence. Define the audience, purpose, lifecycle, canonical source,
+    use of citations, correction method, exclusions, and examples for each category.
+    Include the approved punctuation, paragraph-shape, diction, and formal-voice rules
+    for new or edited maintained text. State that ticket events remain append-only
+    and that ADR decision substance is preserved through annotations, errata, supersession,
+    or replacement ADRs.
+
+
+    Add docs/generated-artifacts.md as the contributor inventory. Move the existing
+    generated and parity-gated tables from docs/README.md without changing their rows.
+    Update the existing marker test to parse the new inventory while preserving GENERATED
+    and GATED_HAND_AUTHORED. Replace the old CONTRIBUTING.md anchor and add concise
+    policy pointers in AGENTS.md, CONTRIBUTING.md, and docs/README.md.
+
+
+    ## Exclusions
+
+
+    - No edits to generated outputs, ADR decision substance, ticket events, historical
+    evidence, protected evidence, or commit history.
+
+    - No repository-wide prose rewrite.
+
+    - No prose or comment validator.
+
+    - No F05 ownership descriptor, generated catalog generator, or new ADR.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] docs/documentation-policy.md defines all eight documentation categories
+    and gives each category an audience, purpose, lifecycle, canonical source, citation
+    rule, correction method, exclusions, and at least one example.
+
+    - [ ] The policy states the approved punctuation, paragraph-shape, diction, and
+    formal-voice rules for new or edited maintained text.
+
+    - [ ] The policy requires append-only ticket correction and substance-preserving
+    ADR correction through annotations, errata, supersession, or a replacement ADR.
+
+    - [ ] docs/generated-artifacts.md contains the same generated and parity-gated
+    table row sets that docs/README.md contained before this change.
+
+    - [ ] tests/unit/test_generated_surface_markers.py retains the existing GENERATED
+    and GATED_HAND_AUTHORED values and passes while reading docs/generated-artifacts.md.
+
+    - [ ] AGENTS.md, CONTRIBUTING.md, and docs/README.md each link to docs/documentation-policy.md.
+
+    - [ ] CONTRIBUTING.md links to docs/generated-artifacts.md and no longer points
+    to the removed docs/README.md generated-artifacts anchor.
+
+    - [ ] The targeted marker test, make lint, make typecheck, and the project test
+    gate pass.'
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: '## Context and confirmed RCA
+
+
+    Gerrit Verify run 31874837464 completed in 29m11s with macOS at 27m38s. The macOS
+    default suite spent 20.88s in test_hook_falls_back_to_git_when_env_unset, 16.38s
+    setting up build-provenance artifacts, 10.69s rebuilding from sdist, plus 8.98s
+    in one blank-env build. Ubuntu repeats these builds in three Python cells. Local
+    profiling showed the fallback exports the entire 3,019-file / 42.4MB checkout
+    although hatch_build.py only resolves one SHA plus writes src/rebar/_build_info.py:
+    git add costs 1.37-1.53s; python -m build costs 3.85-4.32s of a 6.04-6.38s test.
+    A same-hook minimal package preserved the exact fallback SHA while reducing initial
+    paired totals from 6.30/9.26s to 2.66/5.43s.
+
+
+    The exact -n 3 --dist worksteal selector proved that built_artifacts initializes
+    separately on three workers: each consumer paid 6.60-6.74s setup, launching three
+    full builds. This is a bounded contributor, not the cause of multi-minute host
+    variation.
+
+
+    Live run logs also prove a correctness prerequisite. The artifact job received
+    GERRIT_PATCHSET_REVISION=9aecb53e then checked out that revision, but built with
+    GITHUB_SHA=7d908fbb from trusted main. Its probes accepted any non-null COMMIT.
+    Exact source identity is required by ducal-statuelike-ladybird.
+
+
+    ## Ticket and OSS research
+
+
+    No prior rejection exists. ducal-statuelike-ladybird requires real sdist/wheel
+    plus exact provenance behavior. square-tragic-llama explicitly accepted a self-contained
+    minimal Git fixture while retaining the exact fallback SHA plus shallow-source
+    control. despotic-dorsal-greatdane approved immutable artifact reuse but stopped
+    at per-worker scope. cryptic-damp-panda identified repeated package builds as
+    coverage-neutral residual work.
+
+
+    Four popular active projects use this placement: pytest 68308aa has one Ubuntu
+    package job before its broad matrix; pip f399c371 has dedicated packaging jobs
+    outside Unix/Python tests; Poetry 92b74dc has one Ubuntu build/install smoke job
+    outside its OS/Python matrix; Pydantic 02c5c975 has a dedicated Ubuntu distribution
+    build outside its broad matrix. This is 4/4 consensus for one full-package integration
+    job plus lighter behavioral probes in the broad matrix. Rebar remains stricter
+    by retaining real isolated PEP 517 sdist-to-wheel execution through the production
+    hook in every cell.
+
+
+    ## Plan
+
+
+    1. Freeze RED workflow plus build-hook contracts. The workflow oracle rejects
+    GITHUB_SHA as artifact provenance, requires git rev-parse --short HEAD after the
+    final checkout, then requires exact equality from installed wheel plus sdist.
+    Build-hook oracles retain env SHA, preserved sdist SHA, git fallback SHA, blank-env
+    failure.
+
+    2. Create one shared fixture around the checkout current hatch_build.py plus src/rebar/_build_info.py
+    boundary. It supersedes _clean_tree in test_build_provenance.py plus _self_contained_checkout
+    in test_attestation_signing.py at every build-semantics call site. The shallow-source
+    control drives this same fixture from a shallow source. No third checkout materializer
+    survives.
+
+    3. The fixture creates a tiny temporary Hatch package, initializes Git, then commits
+    only that tiny tree. It keeps default PEP 517 isolation. It never mocks Hatchling,
+    Git, archive creation, or wheel inspection.
+
+    4. Convert repeated semantics tests in test_attestation_signing.py plus test_build_provenance.py
+    to that fixture. Retain every named assertion, the no-git helper branch, the direct
+    full-Rebar WheelBuilder package-content test, plus the shallow-source control.
+
+    5. Keep the existing full-Rebar replay in the shared _artifact-probe.yml workflow.
+    This workflow serves both test.yml branch-head checkout plus gerrit-verify.yaml
+    patchset checkout. In both lanes, compute REBAR_EXPECTED_COMMIT with git rev-parse
+    --short HEAD after the applicable final checkout. Build with that short value.
+    Assert exact equality for installed wheel plus install-from-sdist. Preserve every
+    import, CLI, schema, packaging, plus vote-gating probe.
+
+    6. Seed the exact wrong-SHA defect plus one precedence defect. Require the respective
+    oracle to return RED before restoration. Compare focused serial plus exact-xdist
+    timings. Timing remains evidence only.
+
+    7. Run focused tests, workflow consumers, make lint, typecheck, plus full default/integration
+    selectors. Push the necessary implementation immediately through Gerrit without
+    a control-only run. Record hosted macOS plus Ubuntu durations from that treatment.
+
+
+    ## Test contract card
+
+
+    authoritative_contract: ducal-statuelike-ladybird requires real sdist-to-wheel
+    provenance, exact env/git fallback behavior, blank-env failure, sdist preservation,
+    plus exact source identity; both workflow consumers require artifact-probe to
+    build their final checkout.
+
+    trigger_preconditions: each matrix cell runs the real production hook through
+    isolated PEP 517 on the minimal package; artifact-probe has completed its branch-head
+    or patchset checkout.
+
+    production_path: hatch_build.py resolves then writes COMMIT during sdist plus
+    wheel builds; artifact-probe builds then installs full distributions.
+
+    test_tier: minimal real-build probes across every current OS/Python cell plus
+    one full-project artifact integration job per workflow lane.
+
+    observable_postcondition: existing semantics remain; full artifacts equal the
+    short SHA of their final checkout.
+
+    negative_control: wrong nonempty SHA fails; blank env fails; no-git/no-bake remains
+    None; shallow source remains supported.
+
+    collateral_invariants: no selector, assertion, isolation mode, worker, platform,
+    Python cell, coverage, mutation, probe, runner, or vote dependency is removed.
+
+    ci_gate: focused serial/xdist tests, workflow contracts, make lint, make typecheck,
+    Gerrit Verified, LLM-Review.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] Every current OS/Python cell executes a real isolated sdist-to-wheel build
+    through production hatch_build.py on the minimal fixture package.
+
+    - [ ] The env-override probe requires the exact supplied SHA.
+
+    - [ ] The install-from-sdist probe requires the exact preserved SHA.
+
+    - [ ] The git-fallback probe requires the exact committed fixture SHA.
+
+    - [ ] The blank-env probe requires a nonzero real-build exit.
+
+    - [ ] The shared fixture replaces both prior full-tree materializers at build-semantics
+    call sites.
+
+    - [ ] Hook-semantics fixtures never archive the full Rebar checkout.
+
+    - [ ] Both artifact workflow lanes derive the short expected SHA after their final
+    checkout.
+
+    - [ ] The installed full-Rebar wheel must equal the expected short SHA.
+
+    - [ ] The installed full-Rebar sdist must equal the expected short SHA.
+
+    - [ ] A wrong nonempty full-artifact SHA fails the workflow oracle.
+
+    - [ ] The direct full-Rebar WheelBuilder content test remains enabled.
+
+    - [ ] The shallow-source negative control remains enabled.
+
+    - [ ] The OS/Python matrix remains unchanged.
+
+    - [ ] The pytest selectors, xdist workers, coverage gate, plus mutation gate remain
+    unchanged.
+
+    - [ ] The artifact import, CLI, schema, plus vote-gating probes remain unchanged.
+
+    - [ ] A precedence mutation returns the build-hook oracle to RED.
+
+    - [ ] Focused serial plus exact-xdist evidence shows lower elapsed runner work.
+
+    - [ ] The first hosted treatment records macOS plus all Ubuntu job/test durations.
+
+    - [ ] Gerrit records LLM-Review +1 before merge.
+
+    - [ ] Gerrit records Verified +1 before merge.
+
+    - [ ] Gerrit records zero unresolved comments before merge.'
+  label: finding
+- input: "## Context / Problem\n\nEvery change to the plan-review gate \u2014 a Pass-1\
+    \ criterion prompt, a Pass-2 impact/validity question, a Pass-3 formula or threshold\
+    \ \u2014 lands on a handful of live dogfood reviews. No standing instrument answers\
+    \ \"did this change make the gate better or worse?\" before it ships; the prior\
+    \ calibration epic (`pastoral-aquatic-viper`, 6982) rejected live A/B batches\
+    \ on cost and parked the human gold set. The work is scattered across six epics\
+    \ and several orphan stories (`jira-reb-529`, `jira-reb-1589`, `fort-wisp-wren`,\
+    \ `spin-cub-usher`, `ridiculous-expert-mouse`, `auspicious-torrid-curlew`). This\
+    \ epic unifies them behind one harness.\n\nThe instrument already mostly exists\
+    \ as data. The live rebar store holds ~4,300 `plan_review_result_v2` sidecars\
+    \ on ~1,280 tickets (2026-06-27 \u2192 now; ~2,000 older ones pruned from the\
+    \ tree but recoverable from `origin/tickets` history) and `~/legacy-modernization-navigator`\
+    \ holds 74 more. Each v2 sidecar retains the raw Pass-1 findings (prose + evidence\
+    \ + scenarios + criteria), the complete Pass-2 answer vector (graded binaries\
+    \ + severity attributes), and the Pass-3 outputs (validity, impact, priority,\
+    \ the exact `block_threshold`, decision). The reviewed plan text is not stored\
+    \ but is reconstructable from ticket `EDIT`/`SNAPSHOT` history and verifiable\
+    \ byte-exactly against the stored `material_fingerprint`. The store also carries\
+    \ free outcome labels: 2,483 revise\u2192re-review pairs (finding survival via\
+    \ `norm_id`), 208 verdict flips on byte-identical material (the reviewer-noise\
+    \ floor), 84 `plan_defect` bug closes, 89 `caused_by` links, 199 plan-PASS\u2192\
+    completion-FAIL tickets, 18 reopens.\n\n## Approach\n\nThree eval tiers, ordered\
+    \ by cost, each measuring one pass in isolation while holding the others fixed:\n\
+    \n- **Tier 0 \u2014 Pass-3 replay (zero LLM).** Re-run `review_kernel.decide.pass3_decide`\
+    \ (and the post-verdict floors) over the whole corpus with a candidate formula/threshold/routing\
+    \ overlay; diff against stored decisions. Generalises `docs/calibration/plan_v5_rescore.py`\
+    \ and `docs/experiments/calibrate_plan_review_thresholds.py`. Runs on every proposal,\
+    \ unlimited.\n- **Tier 1 \u2014 Pass-2 replay (Sonnet, ~$0.5/review uncached).**\
+    \ Re-run the verifier with candidate questions/prompt on the *stored* Pass-1 findings\
+    \ plus reconstructed plan text via the `verify_findings(run_chunk=\u2026)` seam;\
+    \ score per-question agreement against stored answers, then feed Tier 0.\n- **Tier\
+    \ 2 \u2014 Pass-1 replay (Opus, ~$3.4/review uncached, plus a Tier-1 run on the\
+    \ new findings).** Re-run finders with candidate criteria on a fixed stratified\
+    \ sample (~20 tickets); compare finding sets by `norm_id`/criterion; single-criterion\
+    \ mode (~$0.17/call) for per-criterion edits.\n\nNon-negotiable invariants, enforced\
+    \ by the harness rather than by convention:\n\n1. **Hard budget.** A committed\
+    \ ledger tracks every eval call priced via `genai-prices`; every run pre-flights\
+    \ a cost estimate and refuses to start if projected spend would exceed the remaining\
+    \ allocation. Epic-wide cap is **$200** total with a $30 reserve; commissioning\
+    \ spend is planned at \u2264$120 (one Tier-1 reproduction run to measure verifier\
+    \ noise, one Tier-2 baseline sample). Per-proposal costs are published.\n2. **Model\
+    \ parity.** Every LLM re-run uses the exact production model class for that pass\
+    \ (frontier Opus for Pass 1, standard Sonnet for Pass 2) through **Bedrock only**,\
+    \ on a homogeneous provider chain (the mixed Bedrock+Anthropic fallback silently\
+    \ disables prompt caching and roughly doubles cost). The harness records the per-pass\
+    \ model id in every result, refuses to diff runs whose per-pass model ids differ,\
+    \ and refuses to start when the configured model differs from the corpus baseline's\
+    \ `provider_provenance.ran_model`. Substituting a cheaper model to save budget\
+    \ is forbidden: it confounds the measurement.\n3. **Offline first.** Tier 0 and\
+    \ all label joins are pure functions of the frozen corpus; no proposal may be\
+    \ assessed on a live-only signal. Consistent with ADR 0054 (the field corpus is\
+    \ the instrument) and with 6982's rejection of live A/B.\n4. **Noise-aware acceptance.**\
+    \ A change is reported as regressing/improving only when its label-proxy deltas\
+    \ exceed the noise band measured from identical-material flips and the Tier-1\
+    \ reproduction run; otherwise \"indistinguishable\".\n\n## Scope\n\nNew package\
+    \ `src/rebar/llm/evals/plan_replay/` (corpus, labels, tier runners, ledger, report)\
+    \ with a `python -m rebar.llm.evals.plan_replay` entry; frozen corpus manifest\
+    \ + ledger + reports under `docs/experiments/plan-review-gate/replay/`; an ADR\
+    \ and a contributor guide section; fixes to `usage_log` ticket attribution. No\
+    \ CI provider dependency \u2014 everything runs locally.\n\n## Acceptance Criteria\n\
+    \n- [ ] A frozen, versioned replay corpus exists covering both stores (tree +\
+    \ git-recovered sidecars), with at-review plan text reconstructed and fingerprint-verified\
+    \ for \u226595% of v2 sidecars; verified by the corpus manifest's coverage counts.\n\
+    - [ ] Outcome labels and a reviewer-noise floor are computed from the corpus with\
+    \ no LLM calls and joined to every review/finding; verified by a labels report\
+    \ listing counts per label source.\n- [ ] A Pass-3 change (formula, threshold,\
+    \ routing overlay) can be assessed over the entire corpus with zero LLM calls,\
+    \ producing a diff report (verdict flips, per-criterion deltas, label-proxy precision/recall,\
+    \ friction rate); verified by replaying current code against itself with zero\
+    \ diffs and replaying a known historical threshold change reproducing its documented\
+    \ effect.\n- [ ] A Pass-2 change can be assessed on a stratified sample using\
+    \ stored Pass-1 findings, with per-question agreement vs stored answers and downstream\
+    \ Tier-0 metrics; verified by a reproduction run (unchanged questions) whose agreement\
+    \ establishes the noise floor.\n- [ ] A Pass-1 change can be assessed on a fixed\
+    \ stratified sample with finding-set comparison by `norm_id`/criterion and downstream\
+    \ Tier-1/Tier-0 metrics; verified by one baseline sample run.\n- [ ] Every LLM\
+    \ eval call is priced and written to a committed ledger; a run whose pre-flight\
+    \ estimate exceeds remaining allocation is refused; total ledger spend at epic\
+    \ close is \u2264 $200; verified by the ledger file and a test of the refusal\
+    \ path.\n- [ ] Every eval result records the per-pass model id; the harness refuses\
+    \ to diff results with differing model ids and refuses to run a pass on a model\
+    \ other than its production class via Bedrock; verified by unit tests and by the\
+    \ ledger showing only Bedrock Opus/Sonnet ids.\n- [ ] Prompt caching is confirmed\
+    \ active for eval runs (cache_read_tokens > 0 on the second call of a run); verified\
+    \ from the usage log.\n- [ ] A contributor-facing protocol (ADR + docs) states\
+    \ which tier a proposal needs, the required report artifact, and the noise-band\
+    \ acceptance rule; verified by the docs landing and being referenced from `docs/plan-review-gate.md`.\n\
+    \n## Child decomposition\n\nCorpus builder (criterion 1) \u2192 outcome labels\
+    \ + noise floor (2) \u2192 Tier-0 harness (3) \u2192 Tier-1 harness (4) \u2192\
+    \ Tier-2 harness (5) \u2192 budget ledger + model-parity guard + homogeneous Bedrock\
+    \ chain (6, 7, 8; includes the usage-log ticket-attribution bug) \u2192 change\
+    \ protocol ADR + docs (9). Folded-in existing work: `ridiculous-expert-mouse`\
+    \ (per-criterion fixture eval, a Tier-2 single-criterion consumer), `auspicious-torrid-curlew`\
+    \ (deterministic-floor candidates mined via Tier-0 replay), `brutal-idiocratic-rodent`\
+    \ (optional human-adjudicated gold subset, deferred enrichment). `jira-reb-529`\
+    \ is superseded: its recorded-LLM-response mocking is infeasible because prompts/responses\
+    \ are never persisted; the sidecar-replay tiers deliver its intent. `jira-reb-1589`\
+    \ and `fort-wisp-wren` are consumers that depend on this harness; `spin-cub-usher`\
+    \ and `yip-gem-teak` are related but out of scope.\n\n## Non-goals\n\nChanging\
+    \ any production criterion, question, or threshold (this epic builds the instrument);\
+    \ a full human-adjudicated gold set; live A/B in the production gate."
+  label: finding
+- input: '## Context
+
+
+    The project has audience guidance distributed across AGENTS.md, CONTRIBUTING.md,
+    docs/README.md, and individual documents. It lacks one current-state policy that
+    distinguishes durable records, maintained documentation, shipped help, comments,
+    generated artifacts, and protected evidence. The audit ticket minimum-rainy-fawn
+    approved F01 and rejected broad prose cleanup and general prose validation.
+
+
+    ## Current enforcement and history
+
+
+    Ticket forworn-zanyish-narwhale added generated markers, two contributor tables
+    in docs/README.md, and tests/unit/test_generated_surface_markers.py after repeated
+    changes edited derived outputs instead of their sources. The test owns the GENERATED
+    and GATED_HAND_AUTHORED collections and parses the tables from docs/README.md.
+    CONTRIBUTING.md points to the existing landing-page anchor. This change preserves
+    both collections, every catalog row, and all marker checks. It relocates the catalog
+    so the landing page can remain a navigation surface.
+
+
+    ## Plan
+
+
+    Add docs/documentation-policy.md as the current policy for tickets, ADRs, internal
+    documentation, external documentation, shipped help, comments, generated artifacts,
+    and protected evidence. Define the audience, purpose, lifecycle, canonical source,
+    use of citations, correction method, exclusions, and examples for each category.
+    Include the approved punctuation, paragraph-shape, diction, and formal-voice rules
+    for new or edited maintained text. State that ticket events remain append-only
+    and that ADR decision substance is preserved through annotations, errata, supersession,
+    or replacement ADRs.
+
+
+    Add docs/generated-artifacts.md as the contributor inventory. Move the existing
+    generated and parity-gated tables from docs/README.md without changing their rows.
+    Update the existing marker test to parse the new inventory while preserving GENERATED
+    and GATED_HAND_AUTHORED. Replace the old CONTRIBUTING.md anchor and add concise
+    policy pointers in AGENTS.md, CONTRIBUTING.md, and docs/README.md.
+
+
+    ## Exclusions
+
+
+    - No edits to generated outputs, ADR decision substance, ticket events, historical
+    evidence, protected evidence, or commit history.
+
+    - No repository-wide prose rewrite.
+
+    - No prose or comment validator.
+
+    - No F05 ownership descriptor, generated catalog generator, or new ADR.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] docs/documentation-policy.md defines all eight documentation categories
+    and gives each category an audience, purpose, lifecycle, canonical source, citation
+    rule, correction method, exclusions, and at least one example.
+
+    - [ ] The policy states the approved punctuation, paragraph-shape, diction, and
+    formal-voice rules for new or edited maintained text.
+
+    - [ ] The policy requires append-only ticket correction and substance-preserving
+    ADR correction through annotations, errata, supersession, or a replacement ADR.
+
+    - [ ] docs/generated-artifacts.md contains the same generated and parity-gated
+    table row sets that docs/README.md contained before this change.
+
+    - [ ] tests/unit/test_generated_surface_markers.py retains the existing GENERATED
+    and GATED_HAND_AUTHORED values and passes while reading docs/generated-artifacts.md.
+
+    - [ ] AGENTS.md, CONTRIBUTING.md, and docs/README.md each link to docs/documentation-policy.md.
+
+    - [ ] CONTRIBUTING.md links to docs/generated-artifacts.md and no longer points
+    to the removed docs/README.md generated-artifacts anchor.
+
+    - [ ] The targeted marker test, make lint, make typecheck, and the project test
+    gate pass.'
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-COH
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

@@ -1,0 +1,1018 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: E6
+  expect: finding
+  id: plan-review-E6-fire-0
+  input: '## Context / Problem
+
+
+    `review_plan_start(ticket)` returns a `job_id`; callers poll `gate_status(job_id)`
+    and then read retained `REVIEW_RESULT` findings. The bug is that a terminal plan-review
+    poll (`status:"passed"`, `verdict:"BLOCK"`) did not prove that the readable `REVIEW_RESULT`
+    belonged to that same run. A caller reading "latest findings" could silently consume
+    a prior run''s findings.
+
+
+    Observed 2026-09-01 on ticket `549b-9cc5-940e-46c3`: job `1788326596882647223-94573cf0d90d404e87c74855306c16f2`
+    reported terminal BLOCK while the newest readable sidecar was prior-run file `1788325963941841589-...-REVIEW_RESULT.json`;
+    the current sidecar `1788327281362056852-...-REVIEW_RESULT.json` appeared later.
+
+
+    ## Root cause / actual layer
+
+
+    `review_plan()` already calls `sidecar.emit()` before `_spawn_gate_daemon()` records
+    the terminal `.rebar/gate_runs/<job_id>` entry. The defect is not a simple in-process
+    order inversion; it is missing per-run sidecar identity:
+
+
+    - `sidecar.emit()` was best-effort and returned only a bool.
+
+    - `_spawn_gate_daemon()` discarded sidecar outcome/identity when writing the terminal
+    run index.
+
+    - `gate_run_status()` reported terminal status plus attestation currency only.
+    For BLOCK, the attestation is unsigned by definition, so `durable` cannot prove
+    findings readiness.
+
+    - `sidecar.latest_review_result(ticket)` is newest-by-ticket, not job-scoped.
+
+
+    Thus a terminal run without an exact sidecar receipt cannot distinguish current
+    findings from stale latest findings, an unreadable tracker view, a legacy index,
+    or permanent sidecar failure.
+
+
+    ## Fix plan
+
+
+    Add an exact receipt while preserving existing contracts.
+
+
+    1. `_commands._seam.append_event()` returns the event-envelope timestamp as an
+    additive receipt; existing callers may ignore it.
+
+    2. `plan_review.sidecar.emit()` still returns bool, and also stamps `verdict["sidecar_reviewed_at"]`
+    with the timestamp returned by `append_event()`.
+
+    3. `plan_review.__init__` keeps `verdict["sidecar_emitted"]` boolean semantics
+    unchanged while carrying that stamped receipt on the verdict.
+
+    4. Reuse short-circuits that return current stored findings (`reuse.idempotent_reuse`
+    and `reuse.verdict_reuse`) set `sidecar_reviewed_at` from the reused sidecar''s
+    filename timestamp while keeping `sidecar_emitted=false` because they did not
+    write a new sidecar. Drift refresh/cancellation remain no-new-findings paths.
+
+    5. `_mcp_llm._spawn_gate_daemon()` copies `sidecar_emitted` and any exact `sidecar_reviewed_at`
+    from the completed review result into the terminal run index.
+
+    6. `gate_status(job_id)` adds `findings` for plan-review jobs: `sidecar_type`,
+    `readable`, `reason`, `reviewed_at`, `latest_reviewed_at`, and legacy diagnostic
+    `job_started_at`.
+
+    7. `findings.readable=true` only when a file with the exact `sidecar_reviewed_at`
+    prefix exists and parses as a supported `plan_review_result_v1/v2` payload. It
+    never infers freshness from newest timestamp or job start time.
+
+
+    Disposition: no `findings` block is attached when the job is `unknown` because
+    there is no indexed ticket/gate type. For indexed plan-review jobs, `findings.sidecar_type`
+    is always `REVIEW_RESULT`. `current-review-result-sidecar` is readable. `sidecar-not-emitted`
+    is a new record with `sidecar_emitted=false` and no receipt; `review-result-generation-unknown`
+    is a legacy terminal record with no receipt fields; `run-failed` is a terminal
+    gate failure with no review result; `run-stale-running` is a crashed-leader unavailable
+    state. `review-result-sidecar-missing` covers absent, unreadable, corrupt, or
+    unsupported exact-prefix files; callers may keep polling only under their normal
+    bounded wait policy and must not read latest findings while false. `run-running`
+    and `run-attaching` mean keep polling.
+
+
+    ## Scope / file impact
+
+
+    - `src/rebar/_commands/_seam.py`: additive timestamp return from `append_event()`.
+
+    - `src/rebar/llm/plan_review/sidecar.py`: stamp `sidecar_reviewed_at` while preserving
+    bool return; reuse reads exact payload timestamps from existing `all_review_results()`.
+
+    - `src/rebar/llm/plan_review/__init__.py`: verified call site; bool `sidecar_emitted`
+    remains unchanged.
+
+    - `src/rebar/llm/plan_review/reuse.py`: carry reused current sidecar receipts
+    on no-new-sidecar paths.
+
+    - `src/rebar/_mcp_llm.py`: store the exact completed-review receipt in the terminal
+    async run index.
+
+    - `src/rebar/llm/gate_runs.py`: compute the plan-review `findings` readability
+    block.
+
+    - `src/rebar/_mcp_reads.py`, `src/rebar/_mcp_models.py`, `src/rebar/schemas/plan_review_verdict.schema.json`:
+    document/model additive fields.
+
+    - `tests/unit/test_mcp_gate_async.py` and `tests/interfaces/store/test_sidecar_reader.py`:
+    regression and receipt tests.
+
+    - `AGENTS.md`, `docs/plan-review-gate.md`, `docs/mcp-reference.md`: document waiting
+    for `findings.readable` before reading findings.
+
+
+    ## Acceptance Criteria
+
+
+    - [x] Seed an old `REVIEW_RESULT`, record a terminal newer run with expected `sidecar_reviewed_at`,
+    omit that sidecar, and assert `gate_status` is terminal with `findings.readable=false`,
+    `reason="review-result-sidecar-missing"`.
+
+    - [x] Write the expected current sidecar and assert the same job reports `findings.readable=true`
+    with `reason="current-review-result-sidecar"`.
+
+    - [x] Drive two successive runs and assert poll-then-read returns no findings
+    for the newer job until that job''s exact sidecar is readable.
+
+    - [x] Assert terminal `sidecar_emitted=false` without a receipt reports `findings.readable=false`
+    and `reason="sidecar-not-emitted"`.
+
+    - [x] Assert terminal `sidecar_emitted=false` with a reused `sidecar_reviewed_at`
+    reports `findings.readable=true` for that exact sidecar.
+
+    - [x] Assert exact-prefix corrupt or unsupported sidecar files report `findings.readable=false`
+    with `reason="review-result-sidecar-missing"`.
+
+    - [x] Assert `findings.latest_reviewed_at` reflects the newest-by-ticket sidecar
+    timestamp for diagnostics only and is not used to infer readability.
+
+    - [x] Assert an unknown job has no `findings` block.
+
+    - [x] Assert `findings.sidecar_type` is `REVIEW_RESULT`.
+
+    - [x] Assert the daemon records the exact receipt returned by `review_plan()`
+    even when a newer same-ticket sidecar is already readable.
+
+    - [x] Assert legacy terminal records without a receipt report `findings.readable=false`,
+    `reason="review-result-generation-unknown"`, with `job_started_at` diagnostic
+    only.
+
+    - [x] Assert non-terminal plan-review runs report `findings.readable=false`, `reason="run-<status>"`,
+    and `reviewed_at=null`.
+
+    - [x] Assert terminal failed plan-review runs without a review result report `findings.readable=false`
+    and `reason="run-failed"`.
+
+    - [x] [non-codebase] Validate with targeted pytest, MCP schema coverage, `make
+    lint`, `make typecheck`, and `make test`.
+
+
+    ## Non-goals
+
+
+    - Changing verdict computation or whether a BLOCK is a completed (`passed`) gate
+    run.
+
+    - Making `REVIEW_RESULT` sidecars required for the verdict; they remain best-effort
+    observability.
+
+    - Changing `plan_review_status` or signed-attestation currency.'
+- corpus: rebar
+  criterion: E6
+  expect: finding
+  id: plan-review-E6-fire-1
+  input: "## Context / Problem\nThe \"O_EXCL-create a lock file, write a v2 owner\
+    \ stamp, reclaim once if stale\" loop exists **three**\ntimes, not twice:\n\n\
+    - `llm/enrich_drain.py:98-170` `_acquire_advisory_lock` (73) / `:173-178` `_release_advisory_lock`\n\
+    - `_commands/compact_trigger.py:119-160` `_acquire_trigger_lock` (42) / `:163-173`\
+    \ `release_trigger_lock`\n- `_snapshot/gc_trigger.py:109-145` `_acquire_worker_lock`\
+    \ (37) / `:148-158` `release_worker_lock`\n\nEach opens `os.open(path, os.O_CREAT\
+    \ | os.O_EXCL | os.O_WRONLY, 0o644)` inside `for attempt in\nrange(2)`, adjudicates\
+    \ with `rebar._store.lock_owner.stamped_file_is_stale(path)`, unlinks and\nretries\
+    \ once on a stale verdict, then writes `lock_owner._owner_stamp()`. The copy spread\
+    \ the\nunresolved-path defect (`nuclear-calm-heron` = `da68-fc7c-068c-4c53`, closed)\
+    \ and was called a third\ndialect by `knavish-stimulated-bluebottle` (`aadc-9af6-0e67-4e2a`,\
+    \ closed). Dependency\n`6f18-05de-beaf-42be` (closed) landed: all three derive\
+    \ paths from `StorePaths`/`_gc_dir`; no `_rebar_dir` helper remains.\n\n### The\
+    \ copies are NOT identical\n1. **Same:** the ceiling (all call `stamped_file_is_stale(path)`\
+    \ bare; sole ceiling\n   `_MKDIR_LOCK_STALE_CEILING_S = 3600`, `lock_owner.py:46`)\
+    \ and the retry cap `range(2)`.\n2. **Release semantics \u2014 the one real behaviour\
+    \ delta; FIX it, do not propagate it.**\n   `_release_advisory_lock` (`enrich_drain.py:174-178`)\
+    \ wraps `os.close(fd)` and `os.unlink(...)` in\n   ONE `try`, so an `OSError`\
+    \ from `close` SKIPS the unlink and leaks the lock until the ceiling. `release_trigger_lock`\
+    \ (`compact_trigger.py:164-173`) and `release_worker_lock`\n   (`gc_trigger.py:149-158`)\
+    \ use TWO independent `try` blocks, so the unlink always runs. **The\n   shared\
+    \ implementation MUST use the two-block form** \u2014 a deliberate, tested change\
+    \ to the drain.\n3. **Stamp bytes.** Drain appends `\"\\n\"` (`enrich_drain.py:165`),\
+    \ the others do not\n   (`compact_trigger.py:156`, `gc_trigger.py:142`) \u2014\
+    \ invisible, both readers `.read().strip()`\n   (`lock_owner.py:349-350`, `doctor_locks.py:279-280`).\
+    \ Adopt no-newline.\n4. **Logging.** Drain names the holder via `_describe_drain_lock_holder`\n\
+    \   (`enrich_drain.py:129-134`, helper `:74-95`) and warns on a failed stamp (`:167-169`);\
+    \ the others\n   log bare (`compact_trigger.py:147`, `gc_trigger.py:132`) and\
+    \ swallow the stamp failure. The\n   drain's holder phrasing is pinned to `doctor`'s\
+    \ wording by\n   `test_enrich_drain.py:585::test_drain_and_doctor_describe_a_holderless_lock_identically`\
+    \ and\n   **must survive**. Adopt the drain's stamp-failure WARNING everywhere\
+    \ (logging superset).\n\n## Approach\nExtract `src/rebar/_store/stamped_lock.py`\
+    \ beside `lock_owner.py`, which stays the staleness\nauthority (the new module\
+    \ has no staleness logic of its own):\n- `stamped_file_lock(path, *, label, describe_holder=None)\
+    \ -> int | None` \u2014 O_EXCL create, stamp\n  write, single stale-reclaim, reclaim\
+    \ WARNING (drain passes `_describe_drain_lock_holder`, the\n  other two `None`),\
+    \ stamp-failure WARNING, and the ACCEPTED RACE comment moved verbatim from\n \
+    \ `enrich_drain.py:135-163` (operator decision 2026-08-16 \u2014 a ruling that\
+    \ must not be dropped).\n- `release_stamped_lock(path, fd) -> None` \u2014 the\
+    \ **two-independent-`try`** close+unlink.\n\n**Directory creation stays with the\
+    \ callers** \u2014 the mechanisms differ: drain and compaction\n`os.makedirs(StorePaths(tracker).rebar_dir,\
+    \ exist_ok=True)` returning `None` on `OSError`\n(`enrich_drain.py:118-122`, `compact_trigger.py:135-139`);\
+    \ GC uses `_gc_dir`'s\n`mkdir(parents=True, exist_ok=True)` (`gc_trigger.py:65-69,122-125`).\
+    \ The helper takes a resolved\n`path: str | os.PathLike[str]` (GC passes `Path`).\n\
+    \n**Guard anchor: `os.O_CREAT` \u2227 `stamped_file_is_stale`, NOT `O_EXCL`.**\
+    \ A bare `O_EXCL` scan\nover-matches 7 legitimate lines (`_signing_hmac.py:100,104`,\
+    \ `_store/fsutil.py:13`,\n`opcert_service/keyprov.py:122`, `llm/code_review/registry.py:385`,\
+    \ `doctor_locks.py:49,249`), and\n`O_EXCL` \u2227 `stamped_file_is_stale` still\
+    \ matches `doctor_locks.py` \u2014 the diagnostic READER (real\ncall `:304`, opens\
+    \ WITHOUT `O_CREAT` at `:119`).\n\n## Guard construction\nFollow the guard-test\
+    \ construction rule in the parent epic `airborne-wellloved-kingfisher`: owner\n\
+    module exempt, match the constituent conjunction or AST shape named in Approach\
+    \ (or the definition\ncount where no distinctive atom exists), `# <construct>-ok:\
+    \ <reason>` escape marker, and behaviour\npinned only by the named existing tests.\n\
+    \n## Constraints\n- `compact_trigger._acquire_trigger_lock` and `release_trigger_lock`\
+    \ are monkeypatched **by name as\n  module attributes** at `tests/unit/test_lock_holder_labelling.py:134-135`\
+    \ with **no\n  `raising=False`** \u2014 both must stay module-level attributes\
+    \ of `rebar._commands.compact_trigger`\n  or that test errors. They and `gc_trigger.release_worker_lock`\
+    \ are PUBLIC; no renames. All six\n  are called directly by the three worker test\
+    \ modules.\n- `doctor_locks` reads these stamps (`:101-103`, `_existence_report`\
+    \ `:248-317`, `scan_locks`\n  `:320-370`): stamp bytes must stay `.strip()`-equivalent.\n\
+    - `compact_trigger.maybe_compact:302-306` acquires then immediately releases as\
+    \ a **detection\n  probe**, not exclusion \u2014 the helper must stay cheap and\
+    \ side-effect-free beyond the file. Other\n  call sites: `drain` `:328`/`:376`;\
+    \ `run_sweep` `:223`/`:265`.\n\n## Scope\n`src/rebar/_store/stamped_lock.py` (new),\
+    \ `src/rebar/llm/enrich_drain.py`,\n`src/rebar/_commands/compact_trigger.py`,\
+    \ `src/rebar/_snapshot/gc_trigger.py`,\n`tests/unit/store/test_stamped_lock.py`\
+    \ (new).\n\n## Testing\nNew tests: acquire / second refused / release / re-acquire;\
+    \ a stale stamp\n(`monkeypatch.setattr(lock_owner, \"_pid_alive\", lambda _pid:\
+    \ False)`) reclaimed exactly once, third\ncollision `None`, live stamp never reclaimed;\
+    \ stamp parity; release-on-close-failure; the drain's\nholder WARNING. The pinning\
+    \ suites named in the Acceptance Criteria are green today (80 passed).\n\n## Acceptance\
+    \ Criteria\n- [ ] No `src/rebar` module outside `stamped_lock.py` performs the\
+    \ acquire; checked by\n  `.venv/bin/python -m pytest tests/unit/store/test_stamped_lock.py\
+    \ -q` and by\n  `grep -rlF \"os.O_CREAT\" src/rebar --include=\"*.py\" | xargs\
+    \ grep -lF \"stamped_file_is_stale\" | grep -v \"^src/rebar/_store/stamped_lock.py$\"\
+    `\n  printing nothing. Today it prints exactly the three files listed above.\n\
+    - [ ] The unrelated `O_EXCL` uses survive; checked by\n  `grep -c \"O_EXCL\" src/rebar/opcert_service/keyprov.py\
+    \ src/rebar/llm/code_review/registry.py src/rebar/_signing_hmac.py src/rebar/_store/fsutil.py\
+    \ src/rebar/_commands/doctor_locks.py`\n  still totalling its current 7 matches.\n\
+    - [ ] The six lock functions still exist as module attributes with unchanged signatures;\
+    \ checked by\n  `.venv/bin/python -m pytest tests/unit/test_lock_holder_labelling.py\
+    \ tests/unit/test_enrich_drain.py tests/unit/test_compact_trigger.py tests/unit/test_lock_age_ceiling.py\
+    \ tests/unit/test_snapshot_gc_trigger.py -q`, which also pins concurrent refusal\
+    \ and single reclaim for all three workers.\n- [ ] The shared stamp is `.strip()`-equal\
+    \ to `lock_owner._owner_stamp()` and\n  `doctor_locks._existence_report` resolves\
+    \ a holder from a lock made through it; checked by\n  `tests/unit/store/test_stamped_lock.py`\
+    \ (absent today, so that pytest errors now).\n- [ ] Releasing a lock whose `os.close`\
+    \ raises still unlinks the file \u2014 the two-`try` form fixing\n  `enrich_drain.py:174-178`;\
+    \ checked by\n  `tests/unit/store/test_stamped_lock.py::test_release_unlinks_even_when_close_fails`.\n\
+    - [ ] The drain's reclaim WARNING still names the holder; checked by `.venv/bin/python\
+    \ -m pytest\n  \"tests/unit/test_enrich_drain.py::test_drain_and_doctor_describe_a_holderless_lock_identically\"\
+    `.\n- [ ] Net non-test LOC is negative; checked by\n  `git show --numstat HEAD\
+    \ -- src/rebar | awk '{a+=$1; d+=$2} END {print a-d}'` printing < 0."
+- corpus: rebar
+  criterion: E6
+  expect: finding
+  id: plan-review-E6-fire-2
+  input: '## Context / Problem
+
+
+    `docs/plan-review-gate.md:795` makes a blanket claim-denial statement, contradicting
+    the bug exemption in `src/rebar/_commands/gates.py:45` and the guide''s own exception
+    at lines 474 and 1477. The approved clarification is sequence-sensitive.
+
+
+    ## Approach
+
+
+    Correct the maintained guide directly. State that a bug may be claimed without
+    plan review to perform root-cause analysis; after RCA, a complex bug with an implementation
+    plan and file impact must receive LLM plan review before remediation begins. Preserve
+    behavioral code/tests as authority.
+
+
+    ## Scope
+
+
+    - `docs/plan-review-gate.md`
+
+    - `src/rebar/_commands/gates.py` and `tests/unit/test_bug_review_tier.py` as behavior
+    evidence/checks
+
+
+    ## Testing
+
+
+    Run focused bug-review tier tests and add/update a documentation assertion that
+    distinguishes claim-time exemption from implementation-time review.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] The guide says bugs are exempt from plan review at claim time so RCA can
+    establish remediation shape.
+
+    - [ ] The guide says complex bugs require plan review after RCA, once implementation
+    plan and file impact exist, before implementation.
+
+    - [ ] The guide does not imply every bug needs review before claim or that complex
+    bug remediation is permanently exempt.
+
+    - [ ] Focused bug-review tier tests and the documentation check pass.'
+- corpus: rebar
+  criterion: E6
+  expect: finding
+  id: plan-review-E6-fire-3
+  input: "## Surface\nAWS CloudWatch, us-east-1, acct 896586841071, host `rebar-gerrit`\
+    \ (rebar-autodeploy.service). Three correlated autodeploy alarms flapped 2026-08-29\u2192\
+    30: `deploy_errors` \xD711, `mcp_retire_cap` \xD711, `review_interrupts_signal_unavailable`\
+    \ \xD72. Deploy path is fail-safe (no outage) but releases were not landing cleanly\
+    \ and in-flight reviews may have been killed blind. Full RCA + evidence is in\
+    \ this ticket's RCA comment.\n\n## Root cause (proven \u2014 detail in the RCA\
+    \ comment)\n**Mechanism 1 (deploy_errors \xD711 + mcp-retire-cap \xD711, one event).**\
+    \ `src/rebar/_mcp_health.py` sets uvicorn `timeout_graceful_shutdown=int(grace_seconds)`\
+    \ (line 743) with `grace_seconds` defaulting to the 1200s certified-op drain budget\
+    \ `DEFAULT_SHUTDOWN_GRACE_SECONDS` (line 51), and `make_sigterm_handler` sets\
+    \ `server.should_exit=True` **before** draining the in-flight gauge. Streamable-HTTP\
+    \ clients hold long-lived streams, so uvicorn's graceful shutdown waits the full\
+    \ 1200s for idle held-open streams even at 0 in-flight. With only two blue-green\
+    \ ports (8092/8093) a retiring container pins a port ~20 min \u2192 the next mcp\
+    \ deploy hits `port-exhausted` \u2192 `deploy_failed` + backoff. A landing burst\
+    \ (14 mcp + 142 bot redeploys in-window) drove it 11\xD7.\n\n**Mechanism 3 (signal-unavailable\
+    \ \xD72).** In `infra/scripts/autodeploy.sh` the drain gate reads the bot `/health`\
+    \ `in_flight`; on an unreadable signal `bot_in_flight_reviews()` returns `-1`\
+    \ and the gate **fails open** \u2014 recreates the bot with no drain check, emitting\
+    \ `AUTODEPLOY_REVIEW_INTERRUPT signal-unavailable`. It cannot tell a bot that\
+    \ is **mid-redeploy** (unreachable only because it is being recreated / still\
+    \ starting) from one genuinely **wedged**; the blind recreate can kill the very\
+    \ startup it should wait for.\n\n## Approach\nTwo independent, bounded, reversible\
+    \ fixes; each with its own RED\u2192GREEN test.\n\n**Fix 1 \u2014 decouple uvicorn\
+    \ graceful-shutdown from the certified-op grace (`_mcp_health.py`).**\n- Add a\
+    \ short constant `DEFAULT_UVICORN_GRACEFUL_SECONDS` and use it for `uvicorn.Config(timeout_graceful_shutdown=...)`,\
+    \ decoupled from `grace_seconds` (which stays the op-drain budget); thread it\
+    \ as a defaulted `uvicorn_graceful_seconds` param on `run_http_with_grace` for\
+    \ testability.\n- Reorder `make_sigterm_handler._on_sigterm` to drain the gauge\
+    \ FIRST (existing `drain_then_exit`, bounded by `grace_seconds`) and set `server.should_exit=True`\
+    \ only AFTER the gauge hits 0. A real in-flight op's streaming response then completes\
+    \ normally; once the gauge is 0, uvicorn's short backstop sweeps idle held-open\
+    \ streams in seconds instead of the full 1200s.\n- Close NEW intake at SIGTERM\
+    \ so the fast-drain-at-0 cannot be re-pinned by a landing burst: add a `draining`\
+    \ flag to `InFlightGauge` (`begin_draining()`), and have the certified-op wrapper\
+    \ REFUSE a new certified op (raise `MCPRetiringError`, never incrementing) once\
+    \ draining. `_on_sigterm` calls `begin_draining()` FIRST (immediate intake-stop),\
+    \ before the drain loop; a certified request arriving mid-drain is rejected so\
+    \ the client retries the live (green) container and the gauge can actually reach\
+    \ 0. This replaces uvicorn's `should_exit`-first intake-stop (which we cannot\
+    \ keep, since a short `timeout_graceful_shutdown` would then force-close a real\
+    \ in-flight op) with an explicit refusal that does not truncate in-flight work.\
+    \ Ops already counted still drain to completion.\n- Invariant preserved: >0 in-flight\
+    \ \u21D2 full `grace_seconds` drain (never cut a real op short); 0 in-flight \u21D2\
+    \ fast drain; new intake refused during drain \u21D2 a burst cannot extend the\
+    \ window or re-pin the port. The op bound is enforced by the gauge poll, never\
+    \ uvicorn's short backstop.\n\n**Fix 3 \u2014 distinguish \"bot mid-redeploy\"\
+    \ from \"bot wedged\" (`autodeploy.sh`).**\n- Add best-effort `bot_unreachable_disposition()`\
+    \ that inspects the bot container's docker state/health \u2192 `redeploying` (status\
+    \ `restarting`/`created`/`removing`/`paused`, or docker health `starting`) vs\
+    \ `wedged` (running-but-unreachable, `unhealthy`, no container, or any inspect\
+    \ error \u2192 default `wedged`).\n- In the drain gate's `inflight < 0` branch,\
+    \ when `redeploying`, DEFER (retry next tick) with a countable `AUTODEPLOY_DEFERRED\
+    \ bot-redeploying` marker, bounded by the existing `DEPLOY_DEFER_MAX` episode;\
+    \ on bound-exhaustion or `wedged`, fall through to the existing fail-open recreate\
+    \ + `signal-unavailable`. Maps the single unknown `-1` onto its own disposition\
+    \ instead of a blind fail-open (mirrors the 1c0d disposition-contract intent).\n\
+    - Invariant preserved: a wedged/down bot still fails open and deploys (recovery\
+    \ path); the mid-redeploy defer is bounded so it cannot live-lock the gate; any\
+    \ docker error defaults to `wedged` (== pre-fix behavior).\n\n## Scope\n- `src/rebar/_mcp_health.py`\
+    \ \u2014 Fix 1 only. No change to `DEFAULT_SHUTDOWN_GRACE_SECONDS` (stays 1200),\
+    \ the gauge, or `drain_then_exit`.\n- `infra/scripts/autodeploy.sh` \u2014 Fix\
+    \ 3 only. No change to the `inflight > 0` busy-defer path, the port pool, or `MCP_RELEASES_CAP`.\n\
+    - Tests otherwise. **Deferred / out of scope:** raising `MCP_RELEASES_CAP` / expanding\
+    \ the port pool (Option 2); any nginx/compose capacity change; the separate concurrent\
+    \ disk bug e4f3.\n\n## Testing\n- Fix 1 (`tests/interfaces/facades/test_mcp_http_transport.py`):\
+    \ `make_sigterm_handler` does NOT set `should_exit` while the gauge is >0 and\
+    \ flips it only after the gauge drains to 0 (fast-drain + >0-in-flight preservation\
+    \ guard); `run_http_with_grace` configures `timeout_graceful_shutdown` to `DEFAULT_UVICORN_GRACEFUL_SECONDS`,\
+    \ decoupled from and less than the 1200s grace; and a new certified op during\
+    \ draining is refused (`MCPRetiringError`) without incrementing the gauge (intake-stop).\
+    \ Existing bound/exit tests still pass.\n- Fix 3 (`tests/scripts/test_autodeploy_review_drain.py`,\
+    \ real-bash stub harness): mid-redeploy bot (unreachable `/health` + docker `starting`)\
+    \ is DEFERRED (no `compose build/up`, `AUTODEPLOY_DEFERRED bot-redeploying` emitted,\
+    \ no `signal-unavailable`, deployed-sha unchanged, rc 0); wedged bot (unreachable\
+    \ + docker `running`) still fails open (`compose build` runs, `signal-unavailable`\
+    \ counted); the mid-redeploy defer is bounded (pre-aged episode past `DEPLOY_DEFER_MAX`\
+    \ falls through to fail-open).\n- `make lint` + `make typecheck` + the two targeted\
+    \ test modules; mutation check with teeth on the changed logic.\n\n## Acceptance\
+    \ Criteria\n- [ ] A retiring MCP container with 0 in-flight certified ops shuts\
+    \ down within the short `DEFAULT_UVICORN_GRACEFUL_SECONDS` backstop (not the 1200s\
+    \ op grace), proven by a test asserting `timeout_graceful_shutdown == DEFAULT_UVICORN_GRACEFUL_SECONDS`\
+    \ and `< DEFAULT_SHUTDOWN_GRACE_SECONDS`.\n- [ ] A retiring MCP container with\
+    \ >0 in-flight certified ops still receives the full `grace_seconds` drain and\
+    \ is never cut short, proven by a test asserting `should_exit` stays False until\
+    \ the gauge reaches 0.\n- [ ] A NEW certified op arriving after SIGTERM (during\
+    \ the drain window) is REFUSED (`MCPRetiringError`) and does not increment the\
+    \ gauge, while an already-in-flight op is unaffected \u2014 so a landing burst\
+    \ cannot re-pin the retiring port for the full grace. Proven by a gauge-level\
+    \ test and a handler-level test (the handler reports `draining` and refuses a\
+    \ new op while still draining a >0 gauge).\n- [ ] An unreadable `/health` caused\
+    \ by a mid-redeploy bot yields a DEFER with a countable `AUTODEPLOY_DEFERRED bot-redeploying`\
+    \ marker and no `compose build/up`, asserted by the bash harness.\n- [ ] A genuinely\
+    \ wedged/down bot (or an exhausted mid-redeploy defer bound) still fails open,\
+    \ runs `compose build`, and emits the countable `AUTODEPLOY_REVIEW_INTERRUPT signal-unavailable`\
+    \ marker, asserted by the bash harness.\n- [ ] No capacity change is made: `MCP_RELEASES_CAP`\
+    \ and the blue-green port set are unchanged; both fixes are in-process/host-local\
+    \ with no CI-provider dependency.\n- [ ] `make lint`, `make typecheck`, and the\
+    \ two targeted test modules pass; each mechanism has an independent RED\u2192\
+    GREEN test."
+- corpus: rebar
+  criterion: E6
+  expect: pass
+  id: plan-review-E6-no_fire-0
+  input: '## Context
+
+
+    The project has audience guidance distributed across AGENTS.md, CONTRIBUTING.md,
+    docs/README.md, and individual documents. It lacks one current-state policy that
+    distinguishes durable records, maintained documentation, shipped help, comments,
+    generated artifacts, and protected evidence. The audit ticket minimum-rainy-fawn
+    approved F01 and rejected broad prose cleanup and general prose validation.
+
+
+    ## Current enforcement and history
+
+
+    Ticket forworn-zanyish-narwhale added generated markers, two contributor tables
+    in docs/README.md, and tests/unit/test_generated_surface_markers.py after repeated
+    changes edited derived outputs instead of their sources. The test owns the GENERATED
+    and GATED_HAND_AUTHORED collections and parses the tables from docs/README.md.
+    CONTRIBUTING.md points to the existing landing-page anchor. This change preserves
+    both collections, every catalog row, and all marker checks. It relocates the catalog
+    so the landing page can remain a navigation surface.
+
+
+    ## Plan
+
+
+    Add docs/documentation-policy.md as the current policy for tickets, ADRs, internal
+    documentation, external documentation, shipped help, comments, generated artifacts,
+    and protected evidence. Define the audience, purpose, lifecycle, canonical source,
+    use of citations, correction method, exclusions, and examples for each category.
+    Include the approved punctuation, paragraph-shape, diction, and formal-voice rules
+    for new or edited maintained text. State that ticket events remain append-only
+    and that ADR decision substance is preserved through annotations, errata, supersession,
+    or replacement ADRs.
+
+
+    Add docs/generated-artifacts.md as the contributor inventory. Move the existing
+    generated and parity-gated tables from docs/README.md without changing their rows.
+    Update the existing marker test to parse the new inventory while preserving GENERATED
+    and GATED_HAND_AUTHORED. Replace the old CONTRIBUTING.md anchor and add concise
+    policy pointers in AGENTS.md, CONTRIBUTING.md, and docs/README.md.
+
+
+    ## Exclusions
+
+
+    - No edits to generated outputs, ADR decision substance, ticket events, historical
+    evidence, protected evidence, or commit history.
+
+    - No repository-wide prose rewrite.
+
+    - No prose or comment validator.
+
+    - No F05 ownership descriptor, generated catalog generator, or new ADR.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] docs/documentation-policy.md defines all eight documentation categories
+    and gives each category an audience, purpose, lifecycle, canonical source, citation
+    rule, correction method, exclusions, and at least one example.
+
+    - [ ] The policy states the approved punctuation, paragraph-shape, diction, and
+    formal-voice rules for new or edited maintained text.
+
+    - [ ] The policy requires append-only ticket correction and substance-preserving
+    ADR correction through annotations, errata, supersession, or a replacement ADR.
+
+    - [ ] docs/generated-artifacts.md contains the same generated and parity-gated
+    table row sets that docs/README.md contained before this change.
+
+    - [ ] tests/unit/test_generated_surface_markers.py retains the existing GENERATED
+    and GATED_HAND_AUTHORED values and passes while reading docs/generated-artifacts.md.
+
+    - [ ] AGENTS.md, CONTRIBUTING.md, and docs/README.md each link to docs/documentation-policy.md.
+
+    - [ ] CONTRIBUTING.md links to docs/generated-artifacts.md and no longer points
+    to the removed docs/README.md generated-artifacts anchor.
+
+    - [ ] The targeted marker test, make lint, make typecheck, and the project test
+    gate pass.'
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: '## Context / Problem
+
+
+    `review_plan_start(ticket)` returns a `job_id`; callers poll `gate_status(job_id)`
+    and then read retained `REVIEW_RESULT` findings. The bug is that a terminal plan-review
+    poll (`status:"passed"`, `verdict:"BLOCK"`) did not prove that the readable `REVIEW_RESULT`
+    belonged to that same run. A caller reading "latest findings" could silently consume
+    a prior run''s findings.
+
+
+    Observed 2026-09-01 on ticket `549b-9cc5-940e-46c3`: job `1788326596882647223-94573cf0d90d404e87c74855306c16f2`
+    reported terminal BLOCK while the newest readable sidecar was prior-run file `1788325963941841589-...-REVIEW_RESULT.json`;
+    the current sidecar `1788327281362056852-...-REVIEW_RESULT.json` appeared later.
+
+
+    ## Root cause / actual layer
+
+
+    `review_plan()` already calls `sidecar.emit()` before `_spawn_gate_daemon()` records
+    the terminal `.rebar/gate_runs/<job_id>` entry. The defect is not a simple in-process
+    order inversion; it is missing per-run sidecar identity:
+
+
+    - `sidecar.emit()` was best-effort and returned only a bool.
+
+    - `_spawn_gate_daemon()` discarded sidecar outcome/identity when writing the terminal
+    run index.
+
+    - `gate_run_status()` reported terminal status plus attestation currency only.
+    For BLOCK, the attestation is unsigned by definition, so `durable` cannot prove
+    findings readiness.
+
+    - `sidecar.latest_review_result(ticket)` is newest-by-ticket, not job-scoped.
+
+
+    Thus a terminal run without an exact sidecar receipt cannot distinguish current
+    findings from stale latest findings, an unreadable tracker view, a legacy index,
+    or permanent sidecar failure.
+
+
+    ## Fix plan
+
+
+    Add an exact receipt while preserving existing contracts.
+
+
+    1. `_commands._seam.append_event()` returns the event-envelope timestamp as an
+    additive receipt; existing callers may ignore it.
+
+    2. `plan_review.sidecar.emit()` still returns bool, and also stamps `verdict["sidecar_reviewed_at"]`
+    with the timestamp returned by `append_event()`.
+
+    3. `plan_review.__init__` keeps `verdict["sidecar_emitted"]` boolean semantics
+    unchanged while carrying that stamped receipt on the verdict.
+
+    4. Reuse short-circuits that return current stored findings (`reuse.idempotent_reuse`
+    and `reuse.verdict_reuse`) set `sidecar_reviewed_at` from the reused sidecar''s
+    filename timestamp while keeping `sidecar_emitted=false` because they did not
+    write a new sidecar. Drift refresh/cancellation remain no-new-findings paths.
+
+    5. `_mcp_llm._spawn_gate_daemon()` copies `sidecar_emitted` and any exact `sidecar_reviewed_at`
+    from the completed review result into the terminal run index.
+
+    6. `gate_status(job_id)` adds `findings` for plan-review jobs: `sidecar_type`,
+    `readable`, `reason`, `reviewed_at`, `latest_reviewed_at`, and legacy diagnostic
+    `job_started_at`.
+
+    7. `findings.readable=true` only when a file with the exact `sidecar_reviewed_at`
+    prefix exists and parses as a supported `plan_review_result_v1/v2` payload. It
+    never infers freshness from newest timestamp or job start time.
+
+
+    Disposition: no `findings` block is attached when the job is `unknown` because
+    there is no indexed ticket/gate type. For indexed plan-review jobs, `findings.sidecar_type`
+    is always `REVIEW_RESULT`. `current-review-result-sidecar` is readable. `sidecar-not-emitted`
+    is a new record with `sidecar_emitted=false` and no receipt; `review-result-generation-unknown`
+    is a legacy terminal record with no receipt fields; `run-failed` is a terminal
+    gate failure with no review result; `run-stale-running` is a crashed-leader unavailable
+    state. `review-result-sidecar-missing` covers absent, unreadable, corrupt, or
+    unsupported exact-prefix files; callers may keep polling only under their normal
+    bounded wait policy and must not read latest findings while false. `run-running`
+    and `run-attaching` mean keep polling.
+
+
+    ## Scope / file impact
+
+
+    - `src/rebar/_commands/_seam.py`: additive timestamp return from `append_event()`.
+
+    - `src/rebar/llm/plan_review/sidecar.py`: stamp `sidecar_reviewed_at` while preserving
+    bool return; reuse reads exact payload timestamps from existing `all_review_results()`.
+
+    - `src/rebar/llm/plan_review/__init__.py`: verified call site; bool `sidecar_emitted`
+    remains unchanged.
+
+    - `src/rebar/llm/plan_review/reuse.py`: carry reused current sidecar receipts
+    on no-new-sidecar paths.
+
+    - `src/rebar/_mcp_llm.py`: store the exact completed-review receipt in the terminal
+    async run index.
+
+    - `src/rebar/llm/gate_runs.py`: compute the plan-review `findings` readability
+    block.
+
+    - `src/rebar/_mcp_reads.py`, `src/rebar/_mcp_models.py`, `src/rebar/schemas/plan_review_verdict.schema.json`:
+    document/model additive fields.
+
+    - `tests/unit/test_mcp_gate_async.py` and `tests/interfaces/store/test_sidecar_reader.py`:
+    regression and receipt tests.
+
+    - `AGENTS.md`, `docs/plan-review-gate.md`, `docs/mcp-reference.md`: document waiting
+    for `findings.readable` before reading findings.
+
+
+    ## Acceptance Criteria
+
+
+    - [x] Seed an old `REVIEW_RESULT`, record a terminal newer run with expected `sidecar_reviewed_at`,
+    omit that sidecar, and assert `gate_status` is terminal with `findings.readable=false`,
+    `reason="review-result-sidecar-missing"`.
+
+    - [x] Write the expected current sidecar and assert the same job reports `findings.readable=true`
+    with `reason="current-review-result-sidecar"`.
+
+    - [x] Drive two successive runs and assert poll-then-read returns no findings
+    for the newer job until that job''s exact sidecar is readable.
+
+    - [x] Assert terminal `sidecar_emitted=false` without a receipt reports `findings.readable=false`
+    and `reason="sidecar-not-emitted"`.
+
+    - [x] Assert terminal `sidecar_emitted=false` with a reused `sidecar_reviewed_at`
+    reports `findings.readable=true` for that exact sidecar.
+
+    - [x] Assert exact-prefix corrupt or unsupported sidecar files report `findings.readable=false`
+    with `reason="review-result-sidecar-missing"`.
+
+    - [x] Assert `findings.latest_reviewed_at` reflects the newest-by-ticket sidecar
+    timestamp for diagnostics only and is not used to infer readability.
+
+    - [x] Assert an unknown job has no `findings` block.
+
+    - [x] Assert `findings.sidecar_type` is `REVIEW_RESULT`.
+
+    - [x] Assert the daemon records the exact receipt returned by `review_plan()`
+    even when a newer same-ticket sidecar is already readable.
+
+    - [x] Assert legacy terminal records without a receipt report `findings.readable=false`,
+    `reason="review-result-generation-unknown"`, with `job_started_at` diagnostic
+    only.
+
+    - [x] Assert non-terminal plan-review runs report `findings.readable=false`, `reason="run-<status>"`,
+    and `reviewed_at=null`.
+
+    - [x] Assert terminal failed plan-review runs without a review result report `findings.readable=false`
+    and `reason="run-failed"`.
+
+    - [x] [non-codebase] Validate with targeted pytest, MCP schema coverage, `make
+    lint`, `make typecheck`, and `make test`.
+
+
+    ## Non-goals
+
+
+    - Changing verdict computation or whether a BLOCK is a completed (`passed`) gate
+    run.
+
+    - Making `REVIEW_RESULT` sidecars required for the verdict; they remain best-effort
+    observability.
+
+    - Changing `plan_review_status` or signed-attestation currency.'
+  label: finding
+- input: "## Context / Problem\nThe \"O_EXCL-create a lock file, write a v2 owner\
+    \ stamp, reclaim once if stale\" loop exists **three**\ntimes, not twice:\n\n\
+    - `llm/enrich_drain.py:98-170` `_acquire_advisory_lock` (73) / `:173-178` `_release_advisory_lock`\n\
+    - `_commands/compact_trigger.py:119-160` `_acquire_trigger_lock` (42) / `:163-173`\
+    \ `release_trigger_lock`\n- `_snapshot/gc_trigger.py:109-145` `_acquire_worker_lock`\
+    \ (37) / `:148-158` `release_worker_lock`\n\nEach opens `os.open(path, os.O_CREAT\
+    \ | os.O_EXCL | os.O_WRONLY, 0o644)` inside `for attempt in\nrange(2)`, adjudicates\
+    \ with `rebar._store.lock_owner.stamped_file_is_stale(path)`, unlinks and\nretries\
+    \ once on a stale verdict, then writes `lock_owner._owner_stamp()`. The copy spread\
+    \ the\nunresolved-path defect (`nuclear-calm-heron` = `da68-fc7c-068c-4c53`, closed)\
+    \ and was called a third\ndialect by `knavish-stimulated-bluebottle` (`aadc-9af6-0e67-4e2a`,\
+    \ closed). Dependency\n`6f18-05de-beaf-42be` (closed) landed: all three derive\
+    \ paths from `StorePaths`/`_gc_dir`; no `_rebar_dir` helper remains.\n\n### The\
+    \ copies are NOT identical\n1. **Same:** the ceiling (all call `stamped_file_is_stale(path)`\
+    \ bare; sole ceiling\n   `_MKDIR_LOCK_STALE_CEILING_S = 3600`, `lock_owner.py:46`)\
+    \ and the retry cap `range(2)`.\n2. **Release semantics \u2014 the one real behaviour\
+    \ delta; FIX it, do not propagate it.**\n   `_release_advisory_lock` (`enrich_drain.py:174-178`)\
+    \ wraps `os.close(fd)` and `os.unlink(...)` in\n   ONE `try`, so an `OSError`\
+    \ from `close` SKIPS the unlink and leaks the lock until the ceiling. `release_trigger_lock`\
+    \ (`compact_trigger.py:164-173`) and `release_worker_lock`\n   (`gc_trigger.py:149-158`)\
+    \ use TWO independent `try` blocks, so the unlink always runs. **The\n   shared\
+    \ implementation MUST use the two-block form** \u2014 a deliberate, tested change\
+    \ to the drain.\n3. **Stamp bytes.** Drain appends `\"\\n\"` (`enrich_drain.py:165`),\
+    \ the others do not\n   (`compact_trigger.py:156`, `gc_trigger.py:142`) \u2014\
+    \ invisible, both readers `.read().strip()`\n   (`lock_owner.py:349-350`, `doctor_locks.py:279-280`).\
+    \ Adopt no-newline.\n4. **Logging.** Drain names the holder via `_describe_drain_lock_holder`\n\
+    \   (`enrich_drain.py:129-134`, helper `:74-95`) and warns on a failed stamp (`:167-169`);\
+    \ the others\n   log bare (`compact_trigger.py:147`, `gc_trigger.py:132`) and\
+    \ swallow the stamp failure. The\n   drain's holder phrasing is pinned to `doctor`'s\
+    \ wording by\n   `test_enrich_drain.py:585::test_drain_and_doctor_describe_a_holderless_lock_identically`\
+    \ and\n   **must survive**. Adopt the drain's stamp-failure WARNING everywhere\
+    \ (logging superset).\n\n## Approach\nExtract `src/rebar/_store/stamped_lock.py`\
+    \ beside `lock_owner.py`, which stays the staleness\nauthority (the new module\
+    \ has no staleness logic of its own):\n- `stamped_file_lock(path, *, label, describe_holder=None)\
+    \ -> int | None` \u2014 O_EXCL create, stamp\n  write, single stale-reclaim, reclaim\
+    \ WARNING (drain passes `_describe_drain_lock_holder`, the\n  other two `None`),\
+    \ stamp-failure WARNING, and the ACCEPTED RACE comment moved verbatim from\n \
+    \ `enrich_drain.py:135-163` (operator decision 2026-08-16 \u2014 a ruling that\
+    \ must not be dropped).\n- `release_stamped_lock(path, fd) -> None` \u2014 the\
+    \ **two-independent-`try`** close+unlink.\n\n**Directory creation stays with the\
+    \ callers** \u2014 the mechanisms differ: drain and compaction\n`os.makedirs(StorePaths(tracker).rebar_dir,\
+    \ exist_ok=True)` returning `None` on `OSError`\n(`enrich_drain.py:118-122`, `compact_trigger.py:135-139`);\
+    \ GC uses `_gc_dir`'s\n`mkdir(parents=True, exist_ok=True)` (`gc_trigger.py:65-69,122-125`).\
+    \ The helper takes a resolved\n`path: str | os.PathLike[str]` (GC passes `Path`).\n\
+    \n**Guard anchor: `os.O_CREAT` \u2227 `stamped_file_is_stale`, NOT `O_EXCL`.**\
+    \ A bare `O_EXCL` scan\nover-matches 7 legitimate lines (`_signing_hmac.py:100,104`,\
+    \ `_store/fsutil.py:13`,\n`opcert_service/keyprov.py:122`, `llm/code_review/registry.py:385`,\
+    \ `doctor_locks.py:49,249`), and\n`O_EXCL` \u2227 `stamped_file_is_stale` still\
+    \ matches `doctor_locks.py` \u2014 the diagnostic READER (real\ncall `:304`, opens\
+    \ WITHOUT `O_CREAT` at `:119`).\n\n## Guard construction\nFollow the guard-test\
+    \ construction rule in the parent epic `airborne-wellloved-kingfisher`: owner\n\
+    module exempt, match the constituent conjunction or AST shape named in Approach\
+    \ (or the definition\ncount where no distinctive atom exists), `# <construct>-ok:\
+    \ <reason>` escape marker, and behaviour\npinned only by the named existing tests.\n\
+    \n## Constraints\n- `compact_trigger._acquire_trigger_lock` and `release_trigger_lock`\
+    \ are monkeypatched **by name as\n  module attributes** at `tests/unit/test_lock_holder_labelling.py:134-135`\
+    \ with **no\n  `raising=False`** \u2014 both must stay module-level attributes\
+    \ of `rebar._commands.compact_trigger`\n  or that test errors. They and `gc_trigger.release_worker_lock`\
+    \ are PUBLIC; no renames. All six\n  are called directly by the three worker test\
+    \ modules.\n- `doctor_locks` reads these stamps (`:101-103`, `_existence_report`\
+    \ `:248-317`, `scan_locks`\n  `:320-370`): stamp bytes must stay `.strip()`-equivalent.\n\
+    - `compact_trigger.maybe_compact:302-306` acquires then immediately releases as\
+    \ a **detection\n  probe**, not exclusion \u2014 the helper must stay cheap and\
+    \ side-effect-free beyond the file. Other\n  call sites: `drain` `:328`/`:376`;\
+    \ `run_sweep` `:223`/`:265`.\n\n## Scope\n`src/rebar/_store/stamped_lock.py` (new),\
+    \ `src/rebar/llm/enrich_drain.py`,\n`src/rebar/_commands/compact_trigger.py`,\
+    \ `src/rebar/_snapshot/gc_trigger.py`,\n`tests/unit/store/test_stamped_lock.py`\
+    \ (new).\n\n## Testing\nNew tests: acquire / second refused / release / re-acquire;\
+    \ a stale stamp\n(`monkeypatch.setattr(lock_owner, \"_pid_alive\", lambda _pid:\
+    \ False)`) reclaimed exactly once, third\ncollision `None`, live stamp never reclaimed;\
+    \ stamp parity; release-on-close-failure; the drain's\nholder WARNING. The pinning\
+    \ suites named in the Acceptance Criteria are green today (80 passed).\n\n## Acceptance\
+    \ Criteria\n- [ ] No `src/rebar` module outside `stamped_lock.py` performs the\
+    \ acquire; checked by\n  `.venv/bin/python -m pytest tests/unit/store/test_stamped_lock.py\
+    \ -q` and by\n  `grep -rlF \"os.O_CREAT\" src/rebar --include=\"*.py\" | xargs\
+    \ grep -lF \"stamped_file_is_stale\" | grep -v \"^src/rebar/_store/stamped_lock.py$\"\
+    `\n  printing nothing. Today it prints exactly the three files listed above.\n\
+    - [ ] The unrelated `O_EXCL` uses survive; checked by\n  `grep -c \"O_EXCL\" src/rebar/opcert_service/keyprov.py\
+    \ src/rebar/llm/code_review/registry.py src/rebar/_signing_hmac.py src/rebar/_store/fsutil.py\
+    \ src/rebar/_commands/doctor_locks.py`\n  still totalling its current 7 matches.\n\
+    - [ ] The six lock functions still exist as module attributes with unchanged signatures;\
+    \ checked by\n  `.venv/bin/python -m pytest tests/unit/test_lock_holder_labelling.py\
+    \ tests/unit/test_enrich_drain.py tests/unit/test_compact_trigger.py tests/unit/test_lock_age_ceiling.py\
+    \ tests/unit/test_snapshot_gc_trigger.py -q`, which also pins concurrent refusal\
+    \ and single reclaim for all three workers.\n- [ ] The shared stamp is `.strip()`-equal\
+    \ to `lock_owner._owner_stamp()` and\n  `doctor_locks._existence_report` resolves\
+    \ a holder from a lock made through it; checked by\n  `tests/unit/store/test_stamped_lock.py`\
+    \ (absent today, so that pytest errors now).\n- [ ] Releasing a lock whose `os.close`\
+    \ raises still unlinks the file \u2014 the two-`try` form fixing\n  `enrich_drain.py:174-178`;\
+    \ checked by\n  `tests/unit/store/test_stamped_lock.py::test_release_unlinks_even_when_close_fails`.\n\
+    - [ ] The drain's reclaim WARNING still names the holder; checked by `.venv/bin/python\
+    \ -m pytest\n  \"tests/unit/test_enrich_drain.py::test_drain_and_doctor_describe_a_holderless_lock_identically\"\
+    `.\n- [ ] Net non-test LOC is negative; checked by\n  `git show --numstat HEAD\
+    \ -- src/rebar | awk '{a+=$1; d+=$2} END {print a-d}'` printing < 0."
+  label: finding
+- input: '## Context / Problem
+
+
+    `docs/plan-review-gate.md:795` makes a blanket claim-denial statement, contradicting
+    the bug exemption in `src/rebar/_commands/gates.py:45` and the guide''s own exception
+    at lines 474 and 1477. The approved clarification is sequence-sensitive.
+
+
+    ## Approach
+
+
+    Correct the maintained guide directly. State that a bug may be claimed without
+    plan review to perform root-cause analysis; after RCA, a complex bug with an implementation
+    plan and file impact must receive LLM plan review before remediation begins. Preserve
+    behavioral code/tests as authority.
+
+
+    ## Scope
+
+
+    - `docs/plan-review-gate.md`
+
+    - `src/rebar/_commands/gates.py` and `tests/unit/test_bug_review_tier.py` as behavior
+    evidence/checks
+
+
+    ## Testing
+
+
+    Run focused bug-review tier tests and add/update a documentation assertion that
+    distinguishes claim-time exemption from implementation-time review.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] The guide says bugs are exempt from plan review at claim time so RCA can
+    establish remediation shape.
+
+    - [ ] The guide says complex bugs require plan review after RCA, once implementation
+    plan and file impact exist, before implementation.
+
+    - [ ] The guide does not imply every bug needs review before claim or that complex
+    bug remediation is permanently exempt.
+
+    - [ ] Focused bug-review tier tests and the documentation check pass.'
+  label: finding
+- input: "## Surface\nAWS CloudWatch, us-east-1, acct 896586841071, host `rebar-gerrit`\
+    \ (rebar-autodeploy.service). Three correlated autodeploy alarms flapped 2026-08-29\u2192\
+    30: `deploy_errors` \xD711, `mcp_retire_cap` \xD711, `review_interrupts_signal_unavailable`\
+    \ \xD72. Deploy path is fail-safe (no outage) but releases were not landing cleanly\
+    \ and in-flight reviews may have been killed blind. Full RCA + evidence is in\
+    \ this ticket's RCA comment.\n\n## Root cause (proven \u2014 detail in the RCA\
+    \ comment)\n**Mechanism 1 (deploy_errors \xD711 + mcp-retire-cap \xD711, one event).**\
+    \ `src/rebar/_mcp_health.py` sets uvicorn `timeout_graceful_shutdown=int(grace_seconds)`\
+    \ (line 743) with `grace_seconds` defaulting to the 1200s certified-op drain budget\
+    \ `DEFAULT_SHUTDOWN_GRACE_SECONDS` (line 51), and `make_sigterm_handler` sets\
+    \ `server.should_exit=True` **before** draining the in-flight gauge. Streamable-HTTP\
+    \ clients hold long-lived streams, so uvicorn's graceful shutdown waits the full\
+    \ 1200s for idle held-open streams even at 0 in-flight. With only two blue-green\
+    \ ports (8092/8093) a retiring container pins a port ~20 min \u2192 the next mcp\
+    \ deploy hits `port-exhausted` \u2192 `deploy_failed` + backoff. A landing burst\
+    \ (14 mcp + 142 bot redeploys in-window) drove it 11\xD7.\n\n**Mechanism 3 (signal-unavailable\
+    \ \xD72).** In `infra/scripts/autodeploy.sh` the drain gate reads the bot `/health`\
+    \ `in_flight`; on an unreadable signal `bot_in_flight_reviews()` returns `-1`\
+    \ and the gate **fails open** \u2014 recreates the bot with no drain check, emitting\
+    \ `AUTODEPLOY_REVIEW_INTERRUPT signal-unavailable`. It cannot tell a bot that\
+    \ is **mid-redeploy** (unreachable only because it is being recreated / still\
+    \ starting) from one genuinely **wedged**; the blind recreate can kill the very\
+    \ startup it should wait for.\n\n## Approach\nTwo independent, bounded, reversible\
+    \ fixes; each with its own RED\u2192GREEN test.\n\n**Fix 1 \u2014 decouple uvicorn\
+    \ graceful-shutdown from the certified-op grace (`_mcp_health.py`).**\n- Add a\
+    \ short constant `DEFAULT_UVICORN_GRACEFUL_SECONDS` and use it for `uvicorn.Config(timeout_graceful_shutdown=...)`,\
+    \ decoupled from `grace_seconds` (which stays the op-drain budget); thread it\
+    \ as a defaulted `uvicorn_graceful_seconds` param on `run_http_with_grace` for\
+    \ testability.\n- Reorder `make_sigterm_handler._on_sigterm` to drain the gauge\
+    \ FIRST (existing `drain_then_exit`, bounded by `grace_seconds`) and set `server.should_exit=True`\
+    \ only AFTER the gauge hits 0. A real in-flight op's streaming response then completes\
+    \ normally; once the gauge is 0, uvicorn's short backstop sweeps idle held-open\
+    \ streams in seconds instead of the full 1200s.\n- Close NEW intake at SIGTERM\
+    \ so the fast-drain-at-0 cannot be re-pinned by a landing burst: add a `draining`\
+    \ flag to `InFlightGauge` (`begin_draining()`), and have the certified-op wrapper\
+    \ REFUSE a new certified op (raise `MCPRetiringError`, never incrementing) once\
+    \ draining. `_on_sigterm` calls `begin_draining()` FIRST (immediate intake-stop),\
+    \ before the drain loop; a certified request arriving mid-drain is rejected so\
+    \ the client retries the live (green) container and the gauge can actually reach\
+    \ 0. This replaces uvicorn's `should_exit`-first intake-stop (which we cannot\
+    \ keep, since a short `timeout_graceful_shutdown` would then force-close a real\
+    \ in-flight op) with an explicit refusal that does not truncate in-flight work.\
+    \ Ops already counted still drain to completion.\n- Invariant preserved: >0 in-flight\
+    \ \u21D2 full `grace_seconds` drain (never cut a real op short); 0 in-flight \u21D2\
+    \ fast drain; new intake refused during drain \u21D2 a burst cannot extend the\
+    \ window or re-pin the port. The op bound is enforced by the gauge poll, never\
+    \ uvicorn's short backstop.\n\n**Fix 3 \u2014 distinguish \"bot mid-redeploy\"\
+    \ from \"bot wedged\" (`autodeploy.sh`).**\n- Add best-effort `bot_unreachable_disposition()`\
+    \ that inspects the bot container's docker state/health \u2192 `redeploying` (status\
+    \ `restarting`/`created`/`removing`/`paused`, or docker health `starting`) vs\
+    \ `wedged` (running-but-unreachable, `unhealthy`, no container, or any inspect\
+    \ error \u2192 default `wedged`).\n- In the drain gate's `inflight < 0` branch,\
+    \ when `redeploying`, DEFER (retry next tick) with a countable `AUTODEPLOY_DEFERRED\
+    \ bot-redeploying` marker, bounded by the existing `DEPLOY_DEFER_MAX` episode;\
+    \ on bound-exhaustion or `wedged`, fall through to the existing fail-open recreate\
+    \ + `signal-unavailable`. Maps the single unknown `-1` onto its own disposition\
+    \ instead of a blind fail-open (mirrors the 1c0d disposition-contract intent).\n\
+    - Invariant preserved: a wedged/down bot still fails open and deploys (recovery\
+    \ path); the mid-redeploy defer is bounded so it cannot live-lock the gate; any\
+    \ docker error defaults to `wedged` (== pre-fix behavior).\n\n## Scope\n- `src/rebar/_mcp_health.py`\
+    \ \u2014 Fix 1 only. No change to `DEFAULT_SHUTDOWN_GRACE_SECONDS` (stays 1200),\
+    \ the gauge, or `drain_then_exit`.\n- `infra/scripts/autodeploy.sh` \u2014 Fix\
+    \ 3 only. No change to the `inflight > 0` busy-defer path, the port pool, or `MCP_RELEASES_CAP`.\n\
+    - Tests otherwise. **Deferred / out of scope:** raising `MCP_RELEASES_CAP` / expanding\
+    \ the port pool (Option 2); any nginx/compose capacity change; the separate concurrent\
+    \ disk bug e4f3.\n\n## Testing\n- Fix 1 (`tests/interfaces/facades/test_mcp_http_transport.py`):\
+    \ `make_sigterm_handler` does NOT set `should_exit` while the gauge is >0 and\
+    \ flips it only after the gauge drains to 0 (fast-drain + >0-in-flight preservation\
+    \ guard); `run_http_with_grace` configures `timeout_graceful_shutdown` to `DEFAULT_UVICORN_GRACEFUL_SECONDS`,\
+    \ decoupled from and less than the 1200s grace; and a new certified op during\
+    \ draining is refused (`MCPRetiringError`) without incrementing the gauge (intake-stop).\
+    \ Existing bound/exit tests still pass.\n- Fix 3 (`tests/scripts/test_autodeploy_review_drain.py`,\
+    \ real-bash stub harness): mid-redeploy bot (unreachable `/health` + docker `starting`)\
+    \ is DEFERRED (no `compose build/up`, `AUTODEPLOY_DEFERRED bot-redeploying` emitted,\
+    \ no `signal-unavailable`, deployed-sha unchanged, rc 0); wedged bot (unreachable\
+    \ + docker `running`) still fails open (`compose build` runs, `signal-unavailable`\
+    \ counted); the mid-redeploy defer is bounded (pre-aged episode past `DEPLOY_DEFER_MAX`\
+    \ falls through to fail-open).\n- `make lint` + `make typecheck` + the two targeted\
+    \ test modules; mutation check with teeth on the changed logic.\n\n## Acceptance\
+    \ Criteria\n- [ ] A retiring MCP container with 0 in-flight certified ops shuts\
+    \ down within the short `DEFAULT_UVICORN_GRACEFUL_SECONDS` backstop (not the 1200s\
+    \ op grace), proven by a test asserting `timeout_graceful_shutdown == DEFAULT_UVICORN_GRACEFUL_SECONDS`\
+    \ and `< DEFAULT_SHUTDOWN_GRACE_SECONDS`.\n- [ ] A retiring MCP container with\
+    \ >0 in-flight certified ops still receives the full `grace_seconds` drain and\
+    \ is never cut short, proven by a test asserting `should_exit` stays False until\
+    \ the gauge reaches 0.\n- [ ] A NEW certified op arriving after SIGTERM (during\
+    \ the drain window) is REFUSED (`MCPRetiringError`) and does not increment the\
+    \ gauge, while an already-in-flight op is unaffected \u2014 so a landing burst\
+    \ cannot re-pin the retiring port for the full grace. Proven by a gauge-level\
+    \ test and a handler-level test (the handler reports `draining` and refuses a\
+    \ new op while still draining a >0 gauge).\n- [ ] An unreadable `/health` caused\
+    \ by a mid-redeploy bot yields a DEFER with a countable `AUTODEPLOY_DEFERRED bot-redeploying`\
+    \ marker and no `compose build/up`, asserted by the bash harness.\n- [ ] A genuinely\
+    \ wedged/down bot (or an exhausted mid-redeploy defer bound) still fails open,\
+    \ runs `compose build`, and emits the countable `AUTODEPLOY_REVIEW_INTERRUPT signal-unavailable`\
+    \ marker, asserted by the bash harness.\n- [ ] No capacity change is made: `MCP_RELEASES_CAP`\
+    \ and the blue-green port set are unchanged; both fixes are in-process/host-local\
+    \ with no CI-provider dependency.\n- [ ] `make lint`, `make typecheck`, and the\
+    \ two targeted test modules pass; each mechanism has an independent RED\u2192\
+    GREEN test."
+  label: finding
+- input: '## Context
+
+
+    The project has audience guidance distributed across AGENTS.md, CONTRIBUTING.md,
+    docs/README.md, and individual documents. It lacks one current-state policy that
+    distinguishes durable records, maintained documentation, shipped help, comments,
+    generated artifacts, and protected evidence. The audit ticket minimum-rainy-fawn
+    approved F01 and rejected broad prose cleanup and general prose validation.
+
+
+    ## Current enforcement and history
+
+
+    Ticket forworn-zanyish-narwhale added generated markers, two contributor tables
+    in docs/README.md, and tests/unit/test_generated_surface_markers.py after repeated
+    changes edited derived outputs instead of their sources. The test owns the GENERATED
+    and GATED_HAND_AUTHORED collections and parses the tables from docs/README.md.
+    CONTRIBUTING.md points to the existing landing-page anchor. This change preserves
+    both collections, every catalog row, and all marker checks. It relocates the catalog
+    so the landing page can remain a navigation surface.
+
+
+    ## Plan
+
+
+    Add docs/documentation-policy.md as the current policy for tickets, ADRs, internal
+    documentation, external documentation, shipped help, comments, generated artifacts,
+    and protected evidence. Define the audience, purpose, lifecycle, canonical source,
+    use of citations, correction method, exclusions, and examples for each category.
+    Include the approved punctuation, paragraph-shape, diction, and formal-voice rules
+    for new or edited maintained text. State that ticket events remain append-only
+    and that ADR decision substance is preserved through annotations, errata, supersession,
+    or replacement ADRs.
+
+
+    Add docs/generated-artifacts.md as the contributor inventory. Move the existing
+    generated and parity-gated tables from docs/README.md without changing their rows.
+    Update the existing marker test to parse the new inventory while preserving GENERATED
+    and GATED_HAND_AUTHORED. Replace the old CONTRIBUTING.md anchor and add concise
+    policy pointers in AGENTS.md, CONTRIBUTING.md, and docs/README.md.
+
+
+    ## Exclusions
+
+
+    - No edits to generated outputs, ADR decision substance, ticket events, historical
+    evidence, protected evidence, or commit history.
+
+    - No repository-wide prose rewrite.
+
+    - No prose or comment validator.
+
+    - No F05 ownership descriptor, generated catalog generator, or new ADR.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] docs/documentation-policy.md defines all eight documentation categories
+    and gives each category an audience, purpose, lifecycle, canonical source, citation
+    rule, correction method, exclusions, and at least one example.
+
+    - [ ] The policy states the approved punctuation, paragraph-shape, diction, and
+    formal-voice rules for new or edited maintained text.
+
+    - [ ] The policy requires append-only ticket correction and substance-preserving
+    ADR correction through annotations, errata, supersession, or a replacement ADR.
+
+    - [ ] docs/generated-artifacts.md contains the same generated and parity-gated
+    table row sets that docs/README.md contained before this change.
+
+    - [ ] tests/unit/test_generated_surface_markers.py retains the existing GENERATED
+    and GATED_HAND_AUTHORED values and passes while reading docs/generated-artifacts.md.
+
+    - [ ] AGENTS.md, CONTRIBUTING.md, and docs/README.md each link to docs/documentation-policy.md.
+
+    - [ ] CONTRIBUTING.md links to docs/generated-artifacts.md and no longer points
+    to the removed docs/README.md generated-artifacts anchor.
+
+    - [ ] The targeted marker test, make lint, make typecheck, and the project test
+    gate pass.'
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-E6
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

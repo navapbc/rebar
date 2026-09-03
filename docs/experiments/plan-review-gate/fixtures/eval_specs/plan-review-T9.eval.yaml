@@ -1,0 +1,688 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: T9
+  expect: finding
+  id: plan-review-T9-fire-0
+  input: "# A failed tickets-branch push is UNDELIVERABLE (not merely uninformative)\
+    \ on the async, library and MCP write paths\n\nRC-3 split out of bug 2a76-c9d9-4e8a-471b\
+    \ (closed). 2a76 fixed the CLI/synchronous path: the\nterminal warning now names\
+    \ the git rejection reason and the unpushed backlog. This ticket covers\nthe surfaces\
+    \ where that warning is never DELIVERED at all, so 2a76's fix is a no-op for them.\n\
+    \n## Proven at runtime (rebar-debug Phase 1; a real `pre-receive` decline against\
+    \ a local bare origin)\n\n1. **`sync.push = async`** \u2014 a documented policy\
+    \ value. `push.py` re-spawns the push as a detached\n   `subprocess.Popen(...,\
+    \ stdout=DEVNULL, stderr=DEVNULL, start_new_session=True)`, never waited, so\n\
+    \   every warning the child emits is discarded by the OS; only an `OSError` at\
+    \ SPAWN time is logged.\n   MEASURED: `REBAR_SYNC_PUSH=async rebar comment <id>\
+    \ x` against a rejecting hook \u2192 exit 0, stderr\n   COMPLETELY EMPTY, `origin/tickets..HEAD`\
+    \ still incremented.\n2. **Library embedders** \u2014 `rebar/__init__.py` attaches\
+    \ a `NullHandler` to the `rebar` root;\n   `install_stderr_handler` is called\
+    \ only from the CLI and the MCP server. MEASURED: in-process\n   `rebar.comment(...)`\
+    \ \u2192 returned normally, stderr EMPTY, no push status in the return value.\n\
+    3. **MCP** \u2014 the handler is installed but targets the SERVER's stderr; the\
+    \ writing agent reads only\n   the tool result. CONFIRMED end-to-end on this ticket\
+    \ (see comments): driving `comment_ticket`\n   against a real declining origin\
+    \ returned `{\"result\": \"ok\"}` with two commits stranded.\n4. **Reconciler\
+    \ subprocess** \u2014 installs its handler on the `rebar_reconciler` root, while\n\
+    \   `rebar._store.push` logs under `rebar`. So reconciler pushes are mute even\
+    \ in the foreground.\n\n## Contract constraint (load-bearing)\n\n`docs/concurrency.md`\
+    \ makes \"a failed push never fails the caller\" AUTHORITATIVE INTENT, pinned\
+    \ by\n`push_tickets_branch`'s \"ALWAYS returns None\" and `tests/unit/test_store.py`\
+    \ (`# no raise`). The\nremedy must be a SIGNAL \u2014 persisted state, an MCP\
+    \ result field \u2014 and must NEVER become an exception\nor a non-zero exit.\n\
+    \n## Approved remedy (operator decision B4)\n\nSurface the failure via **an MCP\
+    \ `push_status` field on write-tool outputs plus a durable\npending/unpushed marker**.\
+    \ OUT of scope: changing CLI behaviour or any exit code, raising on the\ndefault\
+    \ path, and the compaction/lock-contention work (tracked separately on 7084).\n\
+    \n## Design\n\n**D1 \u2014 new module `src/rebar/_store/push_state.py`.** `push.py`\
+    \ is at the hard 800-LOC cap, so the\nnew logic gets its own unit and `push.py`\
+    \ sheds `_unpushed_summary` into it (backlog counting IS\npush state \u2014 an\
+    \ existing seam, not a mechanical split). Best-effort by construction: every entry\n\
+    point swallows its own errors. `record_failure` / `clear` / `read_status` \u2192\
+    \ `{\"state\":\n\"ok\"|\"pending\", reason, detail, remote_ref, unpushed, since}`.\n\
+    \n**D2 \u2014 marker location.** In the tracker's **git dir**, not its working\
+    \ tree. `push.py` sets a\ndirty tree aside (stash-commit \u2192 merge \u2192 restore)\
+    \ to reconcile a non-fast-forward, and existing\ntests pin that a failed push\
+    \ leaves the tracker's `git status` byte-identical \u2014 a working-tree\nmarker\
+    \ perturbs exactly that state and appears as an untracked file in every store.\
+    \ The git dir\nalso makes \"can never be committed or pushed\" structural: a record\
+    \ that the remote is unreachable\nmust not itself need the remote.\n\n**D3 \u2014\
+    \ where it is recorded.** Every terminal failure already funnels through the single\n\
+    `_raise_if_strict(strict, reason, detail, base, remote_ref)` choke point carrying\
+    \ the closed set of\n`PushDeliveryError` reasons, so recording happens there \u2014\
+    \ no call site changes, no path missed.\nToday that function's BODY is a no-op\
+    \ unless `strict=True`; this change makes it record\nunconditionally and raise\
+    \ only for a strict caller, so the default best-effort path (and the\ndetached\
+    \ child, which runs the same function) records while still returning `None`. That\
+    \ is what\nmakes limb 1 observable despite `/dev/null` stderr. A successful push\
+    \ clears the marker.\n\n**D4 \u2014 non-failure reasons.** `push-disabled`, `async-delivery-unobservable`,\
+    \ `remote-not-found`\nand `invalid-destination` mean no push was ATTEMPTED and\
+    \ are NOT recorded \u2014 otherwise every\nlocal-only store (a supported mode)\
+    \ reports pending forever.\n\n**D5 \u2014 surfaces.** `rebar.push_status()` for\
+    \ library embedders (no logging handler needed). For\nMCP, a `push_status` field\
+    \ on write-tool results. `_mcp_writes.py` defines ELEVEN `-> str` write\ntools:\
+    \ `comment_ticket`, `edit_ticket`, `link_tickets`, `unlink_tickets`, `tag_ticket`,\n\
+    `untag_ticket`, `archive_ticket`, `compact_ticket`, `set_file_impact`, `set_verify_commands`\
+    \ and\n`declare_no_file_impact`. TEN of them migrate to a shared `WriteAckOut\
+    \ {result, push_status}` \u2014 a\nstrict SUPERSET of the `{result: <str>}` FastMCP\
+    \ already advertises for them.\n`declare_no_file_impact` is EXCLUDED: it is decorated\
+    \ `structured_output=False` and is pinned in\n`NO_SCHEMA_EXEMPT` by `test_no_schema_exempt_set_is_accurate`,\
+    \ so it advertises no outputSchema to\nadd a field to; migrating it would regress\
+    \ that guard. It keeps its bare `\"ok\"` and carries no\nfield \u2014 the one\
+    \ documented gap. Separately, the typed models (`CreateResultOut`, `ClaimResultOut`,\n\
+    `SignResultOut`) gain the field, and the schema-less dict tools (`transition_ticket`,\n\
+    `reopen_ticket`) get the key. The ten migrated tools stay classified as generic\
+    \ acks in\n`test_mcp_output_schema_coverage.py`, whose EXEMPT_GENERIC reasons\
+    \ are updated to name the new\nshape. Populated by reading the marker after the\
+    \ write. On the async path the child may not have\nfinished, so the guarantee\
+    \ is that a subsequent write or read reports it, not the same call.\n\n**D6 \u2014\
+    \ docs.** `docs/concurrency.md` gains the marker; `docs/mcp-reference.md` is regenerated.\n\
+    \n## Acceptance criteria\n\n- [ ] AC1 \u2014 **async path observable.** With `sync.push=async`\
+    \ against a real bare origin whose\n      `pre-receive` hook declines, a write\
+    \ leaves a durable marker naming the reason. The child is\n      detached with\
+    \ `start_new_session=True` and deliberately NEVER waited, so the test cannot join\n\
+    \      it: it synchronizes by POLLING the marker path on a bounded deadline (\u2264\
+    60s, 0.1s interval)\n      and fails if the deadline elapses. That poll is the\
+    \ synchronization contract for this limb \u2014\n      not an incidental sleep\
+    \ \u2014 and makes the assertion deterministic rather than racy. Before the\n\
+    \      fix the same drive leaves no marker and completely empty stderr.\n- [ ]\
+    \ AC2 \u2014 **MCP limb confirmed, then fixed.** First driven END-TO-END through\
+    \ the MCP\n      `comment_ticket` tool against the rejecting origin and its JSON\
+    \ result inspected (recorded as\n      a comment); the result then carries `push_status`\
+    \ with state `pending` naming the reason,\n      asserted by a test on the MCP\
+    \ surface.\n- [ ] AC3 \u2014 **library limb.** `rebar.push_status()` returns `state\
+    \ == \"pending\"` with the reason\n      after an in-process `rebar.comment(...)`\
+    \ whose push was really rejected, with NO logging\n      handler installed \u2014\
+    \ asserted by a test driving a real rejecting remote.\n- [ ] AC4 \u2014 **the\
+    \ marker clears.** After the remote stops declining and a later write pushes\n\
+    \      successfully, the marker is gone and status reports `ok` \u2014 asserted\
+    \ by a test, so the signal\n      cannot latch on permanently.\n- [ ] AC5 \u2014\
+    \ **best-effort contract preserved.** `push_tickets_branch` still returns `None`\
+    \ and never\n      raises on the default path; no CLI exit code changes; an unwritable\
+    \ marker does not fail the\n      write. Regression-asserted.\n- [ ] AC6 \u2014\
+    \ **gates green.** `make lint`, `make typecheck`, the MCP output-schema coverage\
+    \ test, the\n      schema drift gate, the `docs/mcp-reference.md` drift gate and\
+    \ the module-size gate all pass;\n      the change is `Verified +1` and `LLM-Review\
+    \ +1` on Gerrit before this ticket closes.\n"
+- corpus: rebar
+  criterion: T9
+  expect: finding
+  id: plan-review-T9-fire-1
+  input: "## Context / Problem\n\nADR 0098 defines one immutable non-secret `OperationSnapshot`\
+    \ per operation. Today CLI and shared command-write entry points still call `emit_shadow_snapshot()`,\
+    \ while store/config helpers can resolve ambient state independently. The reconciler\
+    \ runtime already demonstrates snapshot-derived bindings; reuse that pattern.\n\
+    \nThis story cuts ordinary CLI, MCP/Python command, and store-opening operations\
+    \ over. LLM-specific resolution is the dependent follow-up.\n\n## Approach\n\n\
+    - Census the command/store consumers and identify the public composition boundaries\
+    \ for CLI, MCP, and Python.\n- Compose exactly once after input parsing and before\
+    \ lock/network/write, then pass focused immutable projections/context through\
+    \ shared command/store seams.\n- Preserve explicit-input > environment > project\
+    \ > user > schema precedence and independent repository-root selection from ADR\
+    \ 0098.\n- Add consumer-level metamorphic and effect-spy tests.\n- Remove migrated\
+    \ shadow calls and ambient reloads; extend the existing ownership checker with\
+    \ red-proven detections rather than a second registry.\n\n## Scope\n\n- `src/rebar/_operation_config.py`\
+    \ and `src/rebar/config.py` \u2014 existing composer/projections and approved\
+    \ compatibility boundary.\n- `src/rebar/_cli/`, `src/rebar/_commands/`, `src/rebar/_store/`,\
+    \ and MCP command entry modules \u2014 compose once and thread focused context.\n\
+    - `tests/interfaces/contracts/` and focused config/store/CLI/MCP tests.\n- `scripts/check_config_ownership.py`\
+    \ and its exact exception registry.\n\n## Testing\n\nHappy path: equivalent CLI,\
+    \ MCP, and Python operations resolve one identical snapshot and produce existing\
+    \ effects. Metamorphic edge: mutate environment, selected files, and CWD after\
+    \ capture; the active operation remains unchanged and the next operation changes.\
+    \ Failure edge: malformed selected configuration causes zero lock, subprocess,\
+    \ network, or store effects.\n\n## Acceptance Criteria\n\n- [x] Representative\
+    \ CLI, MCP, and Python ticket/store reads and writes each compose one snapshot/context,\
+    \ proven by call-count tests through production entry points. Proven by `test_operation_snapshot_authoritative_binding.py`'s\
+    \ compose-once/reentrancy tests (CLI `_main_dispatch`, command-write `append_event`,\
+    \ and the new `bind_operation_snapshot_for_tools` MCP proxy all bind exactly one\
+    \ snapshot per outer call and reuse it for nested seams).\n- [x] Given environment/config/CWD\
+    \ mutation after composition, the active operation's selected tracker directory,\
+    \ branch, remote, and observable effects remain unchanged; a new operation observes\
+    \ the change. Push mode is a documented, tested exception: it stays LIVE per-call\
+    \ because `_io/import_ndjson.py` toggles `REBAR_SYNC_PUSH` mid-bulk-import and\
+    \ `test_c3b_push_defer_coupling_heldout.py` depends on that live read continuing\
+    \ to work \u2014 freezing push mode would silently break that existing, in-scope-adjacent\
+    \ coupling. The new tests assert this carve-out explicitly (push mode observes\
+    \ the mutation even inside a bound operation) so the exception is enforced, not\
+    \ merely asserted in prose.\n- [x] Explicit operation input remains authoritative\
+    \ and malformed selected config fails before lock, subprocess, network, or store\
+    \ write; the binding itself fails OPEN (never raises) so an operation that doesn't\
+    \ need config keeps working. Proven by the AC3 override/bypass tests (`REBAR_TRACKER_DIR`\
+    \ env override and an explicit different-repo root both bypass the binding) and\
+    \ the fail-open litmus test (a real `ConfigError`-raising project config still\
+    \ lets `bridge setup --reset` succeed with rc=0, and the composition failure is\
+    \ logged with a redacted exception type name only).\n- [x] Store helpers receive\
+    \ focused projections/context and do not call `load_config`, environment, or CWD\
+    \ beneath the approved boundary. `tracker_dir`/`tickets_branch`/`tickets_remote`\
+    \ in `config.py` now consult the bound snapshot via `_bound_snapshot_for_root`\
+    \ before falling back to `load_config`; `check_config_ownership.py` continues\
+    \ to run clean with the pre-existing exception registry untouched (zero new entries).\n\
+    - [x] Migrated `emit_shadow_snapshot` calls and compatibility resolution branches\
+    \ are deleted, with no stored ticket/event/bridge format change. All 33 `_shadow(\"\
+    mcp.read.xxx\")` and 23 `_shadow(\"mcp.write.xxx\")` call sites (plus the `_shadow`\
+    \ import) were deleted from `_mcp_reads.py`/`_mcp_writes.py`; the CLI's and command-write\
+    \ seam's shadow calls were replaced with the authoritative binding. No event/ticket/bridge\
+    \ schema was touched. `_mcp_llm.py`, `_lib_ops.py`, and the reconciler `__main__.py`\
+    \ deliberately keep their shadow calls (out of scope \u2014 LLM-specific resolution\
+    \ is ticket ec44's follow-up), confirmed via `test_single_definition_helpers.py`'s\
+    \ updated assertions.\n- [x] The structural ownership checker catches a synthetic\
+    \ below-boundary ambient read and has zero new legacy exceptions. `check_config_ownership.py`\
+    \ and its exception registry were not modified by this change (confirmed via `git\
+    \ diff` on the commit); the pre-existing `test_check_config_ownership_heldout.py`\
+    \ continues to prove the checker's detection, and `check_config_ownership.py`\
+    \ runs clean against the new code with no new exceptions added.\n- [x] Existing\
+    \ config, tracker layout, concurrency, CLI/MCP/library parity, lint, typecheck,\
+    \ and default suites pass. `make lint` and `make typecheck` are fully green. `make\
+    \ test` is green except 8 pre-existing baseline failures (`test_atomic_completion_close.py`\
+    \ x5, `test_rebar_repo_isolation.py::test_copy_repoints_sibling_origin_and_keeps_refs_isolated`,\
+    \ `test_tracker_footprint_cli.py` x2) confirmed pre-existing and unrelated to\
+    \ this change via `git stash` comparison (identical failures with and without\
+    \ this ticket's implementation)."
+- corpus: rebar
+  criterion: T9
+  expect: finding
+  id: plan-review-T9-fire-2
+  input: "# Cache redundant whole-tree AST parsing across test scanners\n\n## Context\
+    \ / Problem\nMany regression-oracle tests independently walk a source tree (tests/\
+    \ or src/rebar), read every\n*.py, and ast.parse it. Measured: one full parse\
+    \ of tests/ (~1653 files) costs ~2.3s idle\n(~7.6s under load) and src/rebar (~597\
+    \ files) ~0.8s; dozens of test files each repeat such a\nwalk. The redundant PARSE\
+    \ is ~75-80% of each scan's cost (parse+read vs ast.walk). Under `--cov`\non the\
+    \ coverage cell these scanners are the top `--durations` entries (18.7-29.93s\
+    \ each). After\nthe macOS cell is reduced (sibling story omphacite-desertlike-coney,\
+    \ 3ba8-49d5-fee5-445d), the\nUbuntu coverage cell becomes the gate's long pole,\
+    \ so cutting this redundancy directly cuts the\ngate.\n\n## Approach\nAdd a shared,\
+    \ process-global memoised parse \u2014 tests/_tree_scan.py exposing\n`parsed_python_files(root)`\
+    \ returning parsed modules, cached via functools.cache with the root\n`.resolve()`d\
+    \ so different spellings share one cache entry. Migrate the whole-tree AST scanners\n\
+    to it so the FIRST scanner per xdist worker parses a given root and every other\
+    \ scanner reuses it\nfor free. This is behaviour-preserving: identical file set,\
+    \ identical ASTs; only the walk/read/\nparse mechanics are shared. Cross-file\
+    \ proof (prototype, already validated): after migrating the\nthree heaviest tests-tree\
+    \ scanners the 2nd/3rd scanner dropped 6.64s->2.89s and 5.07s->1.91s with\nidentical\
+    \ pass/fail. This fits the goal \u2014 pure redundancy removal, no test weakened.\n\
+    \n## Scope\n- tests/_tree_scan.py (NEW) \u2014 the cached `parsed_python_files(root)`\
+    \ helper and a `ParsedModule`\n  value (path / relative / source / tree).\n- Whole-tree\
+    \ `.py` AST scanners under tests/unit/, tests/unit/store/, tests/unit/commands/,\n\
+    \  tests/unit/rebar_reconciler/, and tests/interfaces/contracts/ \u2014 migrate\
+    \ each scanner that does\n  `for p in ROOT.rglob(\"*.py\"): ast.parse(p.read_text())`\
+    \ to the shared helper, preserving every\n  per-file filter and the exact `relative_to(BASE)`\
+    \ base. Non-`.py` globs (`rglob(\"*\")`, `*.sh`,\n  `*.json`) and filename-only\
+    \ collections are left unchanged.\n\n## Testing\n- Each migrated file's tests\
+    \ pass unchanged (same selection, same assertions) via\n  `pytest <file> -p no:xdist`.\n\
+    - The full unit tier passes (the scanners' home tier): `pytest tests/unit -m \"\
+    not integration\n  and not external\"`.\n- Aggregate: the migrated scanner set\
+    \ shows reduced call-time when run in one process (cache\n  shared) with identical\
+    \ pass/fail \u2014 the redundancy-removal proof.\n\n## Acceptance Criteria\n-\
+    \ [ ] tests/_tree_scan.py provides `parsed_python_files(root)` returning parsed\
+    \ modules, memoised\n      per process (verified by a same-object second-call\
+    \ check and by the migrated tests passing).\n- [ ] The whole-tree AST scanners\
+    \ in Scope call the shared helper; each migrated file passes\n      `pytest <file>\
+    \ -p no:xdist` unchanged.\n- [ ] No behaviour change: `pytest tests/unit -m \"\
+    not integration and not external\"` yields the\n      same pass/fail as before\
+    \ (verified locally green).\n- [ ] Running the migrated scanner set in a single\
+    \ process parses each root once \u2014 a 2nd+\n      same-root scanner is materially\
+    \ faster than a cold parse (verified by a timed probe).\n- [ ] ruff check + ruff\
+    \ format are clean on all changed files and the complexity baseline check\n  \
+    \    passes."
+- corpus: rebar
+  criterion: T9
+  expect: finding
+  id: plan-review-T9-fire-3
+  input: "## Context / Problem\nWhen the store wedges (dirty tracker tree, stale locks,\
+    \ stranded merge state), today's tooling is partial: `rebar fsck` checks event\
+    \ integrity but does not report the dirty-tree class that caused the recent P0\
+    \ wedges (tracked working-tree deletions of store artifacts, untracked regenerable\
+    \ compaction leftovers, orphaned lock files, orphaned `.tmp-event-*`); `rebar\
+    \ tracker-maintenance --clean` handles only a stranded index and foreign worktree\
+    \ paths (verified: its `_stranded_paths`/`_foreign_worktree_paths` scans reported\
+    \ 0 findings while the store sat wedged with 119 tracked `.archived` deletions);\
+    \ the documented recovery for the live wedges was ad-hoc raw git under the write\
+    \ lock, recorded by hand on tickets 6ccc-0577-198c-44fa / e72e-259d-5ee7-4e73.\
+    \ Operators (and agents) need one sanctioned, non-destructive door: fsck DETECTS\
+    \ the class, doctor --repair HEALS it.\n\n## Approach\nDetection: add a tracker-dirty\
+    \ check to the fsck surface (src/rebar/_commands/fsck_tracker_health.py, which\
+    \ already owns tracker-level health lines) that classifies `git status --porcelain`\
+    \ output into: (1) tracked deletions of store artifacts restorable from HEAD,\
+    \ (2) untracked regenerable compaction leftovers (`*-SNAPSHOT.json`, `*.retired`\
+    \ whose retired-source is already folded), (3) orphaned `.tmp-event-*` (never\
+    \ auto-touched \u2014 named for manual triage), plus lock-artifact staleness reported\
+    \ via the existing doctor_locks scan. Each class gets a distinct finding string\
+    \ and JSON field so agents can act programmatically.\nRepair: extend `rebar doctor\
+    \ --repair` (src/rebar/_commands/doctor.py's existing scan/repair_finding registry\
+    \ pattern) with repair actions that run under the store write lock (rebar._store.lock.write_lock):\
+    \ restore class-1 paths via `git checkout --` (non-destructive; bytes exist at\
+    \ HEAD), move class-2 paths into the quarantine directory established by change\
+    \ 1757 (`<git-common-dir>/reconverge-quarantine/<utc-ts>/` \u2014 move, never\
+    \ delete), and leave class-3 untouched while printing their paths. After healing,\
+    \ invoke the existing reconverge entry (rebar._store.sync.reconverge) so a previously\
+    \ wedged store converges in the same command. Raw git here is the sanctioned exception:\
+    \ it goes through the store seam (gitutil.run_git) inside a lock-guarded repair\
+    \ command, exactly the pattern tracker-maintenance already uses, and every action\
+    \ is recorded in the doctor output. Positive rationale: doctor already owns scan-classify-repair\
+    \ with typed findings; extending its registry avoids inventing a second repair\
+    \ CLI.\n\n## Scope\n- src/rebar/_commands/fsck_tracker_health.py \u2014 tracker-dirty\
+    \ classification (text + JSON).\n- src/rebar/_commands/doctor.py \u2014 new finding\
+    \ types + repair actions under the write lock; post-repair reconverge call.\n\
+    - tests/unit/test_doctor_dirty_tree.py (new) \u2014 seeded-wedge end-to-end coverage.\n\
+    - docs/user-guide.md \u2014 document the new fsck findings and doctor repairs.\n\
+    \n## Testing\n- Happy path: fixture tracker seeded with all three classes plus\
+    \ a diverged origin; `rebar fsck` names each class; `rebar doctor --repair` restores\
+    \ class 1, quarantines class 2 (bytes preserved), leaves class 3 in place, and\
+    \ the store converges (ahead/behind 0/0, `git status` clean except class 3).\n\
+    - Failure/edge: doctor --repair on a CLEAN store makes zero changes and zero commits\
+    \ (idempotent); a locked store (write lock held by a live process) makes doctor\
+    \ wait/skip per existing lock semantics rather than repairing unlocked; class-3\
+    \ files are byte-identical after the run.\n- JSON contract: fsck --output json\
+    \ carries the per-class counts and paths.\n\n## Acceptance Criteria\n- [ ] `rebar\
+    \ fsck` on a seeded dirty tracker reports each class with a distinct finding id,\
+    \ and clean stores report none; checked by the new test.\n- [ ] `rebar doctor\
+    \ --repair` heals a seeded wedge end-to-end (tree clean apart from `.tmp-event-*`,\
+    \ merge converged, no event bytes lost \u2014 quarantine holds moved files); checked\
+    \ by the end-to-end test.\n- [ ] Repair runs entirely under the store write lock\
+    \ and never deletes a file (moves or restores only); checked by asserting quarantine\
+    \ contents and lock acquisition in the test.\n- [ ] `make lint` and `make typecheck`\
+    \ clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close."
+- corpus: rebar
+  criterion: T9
+  expect: pass
+  id: plan-review-T9-no_fire-0
+  input: "# Wire store-wide overlap step into _run_plan_review (LLM-gated, graceful\
+    \ skip, advisory surfacing)\n\n## Why\nThe overlap check must fire in the tolerant\
+    \ window before claim \u2014 during plan review \u2014 and fold its results into\
+    \ the plan-review output as advisory coaching, WITHOUT ever blocking the claim\
+    \ or altering the claim-gate verdict. This is the integration seam tying Cupid\
+    \ enrichment + retrieval + judge into the agent workflow.\n\n## What\n- Integrate\
+    \ in `_run_plan_review` (`src/rebar/llm/plan_review/__init__.py:401` \u2014 the\
+    \ real post-pass site where rising-floor/completion-floor/sidecar/signing run;\
+    \ NOT the public wrapper `review_plan` at :352). Sequencing is critical: inject\
+    \ overlap findings BEFORE `coverage['counts']` is baked and BEFORE the sidecar\
+    \ emit + attestation signing, so `advisory_surfaced` count and the signed manifest\
+    \ include them consistently (or, explicitly, keep overlap findings in a SEPARATE\
+    \ `overlap[]` verdict key excluded from the advisory cap and from the signed coverage\
+    \ counts \u2014 chosen approach: a separate `overlap[]` key so the \u22643 overlap\
+    \ items never displace real plan-review advisories under the cap, and the attestation\
+    \ is unaffected).\n- Steps: synchronously extract the query ticket's digest from\
+    \ the already-assembled full-text context (S1), run `retrieve` (S5), run the pairwise\
+    \ `judge` (S6); attach the \u22643 results to the verdict's new `overlap[]` array\
+    \ (each item = the S6 finding incl. its `rebar link` command). Update the `--output\
+    \ text` renderer `_render_plan_review_text` (`src/rebar/_cli/_llm_commands.py:386`)\
+    \ to print the `overlap[]` section, and include `overlap[]` in the MCP `review_plan`\
+    \ result + its output schema.\n- LLM-gate / graceful skip: if the `[agents]` extra,\
+    \ plan-review, or API key is absent, the step is a silent no-op (no `overlap[]`,\
+    \ no error, claim proceeds). RUNTIME failures too (S1/S5/S6 exception, retrieval\
+    \ timeout, judge error, empty candidates) are caught \u2192 empty `overlap[]`,\
+    \ logged, never block.\n- Config: `verify.overlap_enabled` (default OFF, on `VerifyConfig`\
+    \ `[tool.rebar][verify]` alongside `require_plan_review_for_claim` \u2014 where\
+    \ all gate flags live) gates the whole step independently of the plan-review gate.\n\
+    \n## Dependencies\nS1 (enrich), S5 (retrieve), S6 (judge). These are prerequisite\
+    \ sibling stories under this epic; this story is the integration and can only\
+    \ be completed once they land (sequenced last).\n\n## Scope\n- Edits: `src/rebar/llm/plan_review/__init__.py`\
+    \ (`_run_plan_review` injection), `src/rebar/schemas/plan_review_verdict.schema.json`\
+    \ (add `overlap[]`), `src/rebar/_cli/_llm_commands.py` (`_render_plan_review_text`),\
+    \ the MCP `review_plan` output model, `overlap_enabled` on VerifyConfig `[tool.rebar][verify]`;\
+    \ write the architecture ADR `docs/adr/NNNN-cross-ticket-overlap.md` (the epic's\
+    \ ADR deliverable is owned HERE).\n- OUT: the component ops (S1/S5/S6), async\
+    \ corpus enrichment (S2/S3/S4).\n\n## Testing\n- Unit `tests/unit/test_plan_review_overlap.py`\
+    \ (FakeRunner + fixture corpus): overlap findings land in `overlap[]`; the claim-gate\
+    \ verdict/`advisory_surfaced`/attestation are UNCHANGED by overlap findings (assert\
+    \ byte-identical signed coverage vs a run with overlap disabled); `[agents]`/key\
+    \ absent \u2192 no `overlap[]`, verdict identical; a judge exception \u2192 empty\
+    \ `overlap[]`, no raise; `overlap.enabled=off` \u2192 step skipped; `overlap[]`\
+    \ appears in both CLI text and MCP JSON.\n\n## Acceptance Criteria\n- [ ] `review_plan`\
+    \ returns \u22643 overlap findings in a dedicated `overlap[]` key (each with a\
+    \ `rebar link` command); the claim is NEVER blocked and the signed claim-gate\
+    \ coverage/attestation is byte-identical to a run with overlap disabled; verified\
+    \ by `pytest tests/unit/test_plan_review_overlap.py::{test_surfaced,test_verdict_unchanged}`.\n\
+    - [ ] The query digest is generated at review time from the ticket's current full\
+    \ text (independent of the ticket being in the enriched corpus).\n- [ ] `[agents]`/plan-review/API\
+    \ key absent \u2192 silent no-op, verdict identical to before; a runtime failure\
+    \ in S1/S5/S6 \u2192 empty `overlap[]`, logged, never blocks; verified by `::{test_graceful_skip,test_runtime_error}`.\n\
+    - [ ] `overlap.enabled` (default OFF) gates the step independently; `overlap[]`\
+    \ is rendered in CLI `review-plan --output text` and present in the MCP `review_plan`\
+    \ result + output schema.\n- [ ] Integration site is `_run_plan_review` (:401),\
+    \ with overlap findings in a separate `overlap[]` key so they never displace real\
+    \ advisories under the cap.\n- [ ] The architecture ADR `docs/adr/NNNN-cross-ticket-overlap.md`\
+    \ is written (the epic's ADR deliverable).\n"
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: "# A failed tickets-branch push is UNDELIVERABLE (not merely uninformative)\
+    \ on the async, library and MCP write paths\n\nRC-3 split out of bug 2a76-c9d9-4e8a-471b\
+    \ (closed). 2a76 fixed the CLI/synchronous path: the\nterminal warning now names\
+    \ the git rejection reason and the unpushed backlog. This ticket covers\nthe surfaces\
+    \ where that warning is never DELIVERED at all, so 2a76's fix is a no-op for them.\n\
+    \n## Proven at runtime (rebar-debug Phase 1; a real `pre-receive` decline against\
+    \ a local bare origin)\n\n1. **`sync.push = async`** \u2014 a documented policy\
+    \ value. `push.py` re-spawns the push as a detached\n   `subprocess.Popen(...,\
+    \ stdout=DEVNULL, stderr=DEVNULL, start_new_session=True)`, never waited, so\n\
+    \   every warning the child emits is discarded by the OS; only an `OSError` at\
+    \ SPAWN time is logged.\n   MEASURED: `REBAR_SYNC_PUSH=async rebar comment <id>\
+    \ x` against a rejecting hook \u2192 exit 0, stderr\n   COMPLETELY EMPTY, `origin/tickets..HEAD`\
+    \ still incremented.\n2. **Library embedders** \u2014 `rebar/__init__.py` attaches\
+    \ a `NullHandler` to the `rebar` root;\n   `install_stderr_handler` is called\
+    \ only from the CLI and the MCP server. MEASURED: in-process\n   `rebar.comment(...)`\
+    \ \u2192 returned normally, stderr EMPTY, no push status in the return value.\n\
+    3. **MCP** \u2014 the handler is installed but targets the SERVER's stderr; the\
+    \ writing agent reads only\n   the tool result. CONFIRMED end-to-end on this ticket\
+    \ (see comments): driving `comment_ticket`\n   against a real declining origin\
+    \ returned `{\"result\": \"ok\"}` with two commits stranded.\n4. **Reconciler\
+    \ subprocess** \u2014 installs its handler on the `rebar_reconciler` root, while\n\
+    \   `rebar._store.push` logs under `rebar`. So reconciler pushes are mute even\
+    \ in the foreground.\n\n## Contract constraint (load-bearing)\n\n`docs/concurrency.md`\
+    \ makes \"a failed push never fails the caller\" AUTHORITATIVE INTENT, pinned\
+    \ by\n`push_tickets_branch`'s \"ALWAYS returns None\" and `tests/unit/test_store.py`\
+    \ (`# no raise`). The\nremedy must be a SIGNAL \u2014 persisted state, an MCP\
+    \ result field \u2014 and must NEVER become an exception\nor a non-zero exit.\n\
+    \n## Approved remedy (operator decision B4)\n\nSurface the failure via **an MCP\
+    \ `push_status` field on write-tool outputs plus a durable\npending/unpushed marker**.\
+    \ OUT of scope: changing CLI behaviour or any exit code, raising on the\ndefault\
+    \ path, and the compaction/lock-contention work (tracked separately on 7084).\n\
+    \n## Design\n\n**D1 \u2014 new module `src/rebar/_store/push_state.py`.** `push.py`\
+    \ is at the hard 800-LOC cap, so the\nnew logic gets its own unit and `push.py`\
+    \ sheds `_unpushed_summary` into it (backlog counting IS\npush state \u2014 an\
+    \ existing seam, not a mechanical split). Best-effort by construction: every entry\n\
+    point swallows its own errors. `record_failure` / `clear` / `read_status` \u2192\
+    \ `{\"state\":\n\"ok\"|\"pending\", reason, detail, remote_ref, unpushed, since}`.\n\
+    \n**D2 \u2014 marker location.** In the tracker's **git dir**, not its working\
+    \ tree. `push.py` sets a\ndirty tree aside (stash-commit \u2192 merge \u2192 restore)\
+    \ to reconcile a non-fast-forward, and existing\ntests pin that a failed push\
+    \ leaves the tracker's `git status` byte-identical \u2014 a working-tree\nmarker\
+    \ perturbs exactly that state and appears as an untracked file in every store.\
+    \ The git dir\nalso makes \"can never be committed or pushed\" structural: a record\
+    \ that the remote is unreachable\nmust not itself need the remote.\n\n**D3 \u2014\
+    \ where it is recorded.** Every terminal failure already funnels through the single\n\
+    `_raise_if_strict(strict, reason, detail, base, remote_ref)` choke point carrying\
+    \ the closed set of\n`PushDeliveryError` reasons, so recording happens there \u2014\
+    \ no call site changes, no path missed.\nToday that function's BODY is a no-op\
+    \ unless `strict=True`; this change makes it record\nunconditionally and raise\
+    \ only for a strict caller, so the default best-effort path (and the\ndetached\
+    \ child, which runs the same function) records while still returning `None`. That\
+    \ is what\nmakes limb 1 observable despite `/dev/null` stderr. A successful push\
+    \ clears the marker.\n\n**D4 \u2014 non-failure reasons.** `push-disabled`, `async-delivery-unobservable`,\
+    \ `remote-not-found`\nand `invalid-destination` mean no push was ATTEMPTED and\
+    \ are NOT recorded \u2014 otherwise every\nlocal-only store (a supported mode)\
+    \ reports pending forever.\n\n**D5 \u2014 surfaces.** `rebar.push_status()` for\
+    \ library embedders (no logging handler needed). For\nMCP, a `push_status` field\
+    \ on write-tool results. `_mcp_writes.py` defines ELEVEN `-> str` write\ntools:\
+    \ `comment_ticket`, `edit_ticket`, `link_tickets`, `unlink_tickets`, `tag_ticket`,\n\
+    `untag_ticket`, `archive_ticket`, `compact_ticket`, `set_file_impact`, `set_verify_commands`\
+    \ and\n`declare_no_file_impact`. TEN of them migrate to a shared `WriteAckOut\
+    \ {result, push_status}` \u2014 a\nstrict SUPERSET of the `{result: <str>}` FastMCP\
+    \ already advertises for them.\n`declare_no_file_impact` is EXCLUDED: it is decorated\
+    \ `structured_output=False` and is pinned in\n`NO_SCHEMA_EXEMPT` by `test_no_schema_exempt_set_is_accurate`,\
+    \ so it advertises no outputSchema to\nadd a field to; migrating it would regress\
+    \ that guard. It keeps its bare `\"ok\"` and carries no\nfield \u2014 the one\
+    \ documented gap. Separately, the typed models (`CreateResultOut`, `ClaimResultOut`,\n\
+    `SignResultOut`) gain the field, and the schema-less dict tools (`transition_ticket`,\n\
+    `reopen_ticket`) get the key. The ten migrated tools stay classified as generic\
+    \ acks in\n`test_mcp_output_schema_coverage.py`, whose EXEMPT_GENERIC reasons\
+    \ are updated to name the new\nshape. Populated by reading the marker after the\
+    \ write. On the async path the child may not have\nfinished, so the guarantee\
+    \ is that a subsequent write or read reports it, not the same call.\n\n**D6 \u2014\
+    \ docs.** `docs/concurrency.md` gains the marker; `docs/mcp-reference.md` is regenerated.\n\
+    \n## Acceptance criteria\n\n- [ ] AC1 \u2014 **async path observable.** With `sync.push=async`\
+    \ against a real bare origin whose\n      `pre-receive` hook declines, a write\
+    \ leaves a durable marker naming the reason. The child is\n      detached with\
+    \ `start_new_session=True` and deliberately NEVER waited, so the test cannot join\n\
+    \      it: it synchronizes by POLLING the marker path on a bounded deadline (\u2264\
+    60s, 0.1s interval)\n      and fails if the deadline elapses. That poll is the\
+    \ synchronization contract for this limb \u2014\n      not an incidental sleep\
+    \ \u2014 and makes the assertion deterministic rather than racy. Before the\n\
+    \      fix the same drive leaves no marker and completely empty stderr.\n- [ ]\
+    \ AC2 \u2014 **MCP limb confirmed, then fixed.** First driven END-TO-END through\
+    \ the MCP\n      `comment_ticket` tool against the rejecting origin and its JSON\
+    \ result inspected (recorded as\n      a comment); the result then carries `push_status`\
+    \ with state `pending` naming the reason,\n      asserted by a test on the MCP\
+    \ surface.\n- [ ] AC3 \u2014 **library limb.** `rebar.push_status()` returns `state\
+    \ == \"pending\"` with the reason\n      after an in-process `rebar.comment(...)`\
+    \ whose push was really rejected, with NO logging\n      handler installed \u2014\
+    \ asserted by a test driving a real rejecting remote.\n- [ ] AC4 \u2014 **the\
+    \ marker clears.** After the remote stops declining and a later write pushes\n\
+    \      successfully, the marker is gone and status reports `ok` \u2014 asserted\
+    \ by a test, so the signal\n      cannot latch on permanently.\n- [ ] AC5 \u2014\
+    \ **best-effort contract preserved.** `push_tickets_branch` still returns `None`\
+    \ and never\n      raises on the default path; no CLI exit code changes; an unwritable\
+    \ marker does not fail the\n      write. Regression-asserted.\n- [ ] AC6 \u2014\
+    \ **gates green.** `make lint`, `make typecheck`, the MCP output-schema coverage\
+    \ test, the\n      schema drift gate, the `docs/mcp-reference.md` drift gate and\
+    \ the module-size gate all pass;\n      the change is `Verified +1` and `LLM-Review\
+    \ +1` on Gerrit before this ticket closes.\n"
+  label: finding
+- input: "## Context / Problem\n\nADR 0098 defines one immutable non-secret `OperationSnapshot`\
+    \ per operation. Today CLI and shared command-write entry points still call `emit_shadow_snapshot()`,\
+    \ while store/config helpers can resolve ambient state independently. The reconciler\
+    \ runtime already demonstrates snapshot-derived bindings; reuse that pattern.\n\
+    \nThis story cuts ordinary CLI, MCP/Python command, and store-opening operations\
+    \ over. LLM-specific resolution is the dependent follow-up.\n\n## Approach\n\n\
+    - Census the command/store consumers and identify the public composition boundaries\
+    \ for CLI, MCP, and Python.\n- Compose exactly once after input parsing and before\
+    \ lock/network/write, then pass focused immutable projections/context through\
+    \ shared command/store seams.\n- Preserve explicit-input > environment > project\
+    \ > user > schema precedence and independent repository-root selection from ADR\
+    \ 0098.\n- Add consumer-level metamorphic and effect-spy tests.\n- Remove migrated\
+    \ shadow calls and ambient reloads; extend the existing ownership checker with\
+    \ red-proven detections rather than a second registry.\n\n## Scope\n\n- `src/rebar/_operation_config.py`\
+    \ and `src/rebar/config.py` \u2014 existing composer/projections and approved\
+    \ compatibility boundary.\n- `src/rebar/_cli/`, `src/rebar/_commands/`, `src/rebar/_store/`,\
+    \ and MCP command entry modules \u2014 compose once and thread focused context.\n\
+    - `tests/interfaces/contracts/` and focused config/store/CLI/MCP tests.\n- `scripts/check_config_ownership.py`\
+    \ and its exact exception registry.\n\n## Testing\n\nHappy path: equivalent CLI,\
+    \ MCP, and Python operations resolve one identical snapshot and produce existing\
+    \ effects. Metamorphic edge: mutate environment, selected files, and CWD after\
+    \ capture; the active operation remains unchanged and the next operation changes.\
+    \ Failure edge: malformed selected configuration causes zero lock, subprocess,\
+    \ network, or store effects.\n\n## Acceptance Criteria\n\n- [x] Representative\
+    \ CLI, MCP, and Python ticket/store reads and writes each compose one snapshot/context,\
+    \ proven by call-count tests through production entry points. Proven by `test_operation_snapshot_authoritative_binding.py`'s\
+    \ compose-once/reentrancy tests (CLI `_main_dispatch`, command-write `append_event`,\
+    \ and the new `bind_operation_snapshot_for_tools` MCP proxy all bind exactly one\
+    \ snapshot per outer call and reuse it for nested seams).\n- [x] Given environment/config/CWD\
+    \ mutation after composition, the active operation's selected tracker directory,\
+    \ branch, remote, and observable effects remain unchanged; a new operation observes\
+    \ the change. Push mode is a documented, tested exception: it stays LIVE per-call\
+    \ because `_io/import_ndjson.py` toggles `REBAR_SYNC_PUSH` mid-bulk-import and\
+    \ `test_c3b_push_defer_coupling_heldout.py` depends on that live read continuing\
+    \ to work \u2014 freezing push mode would silently break that existing, in-scope-adjacent\
+    \ coupling. The new tests assert this carve-out explicitly (push mode observes\
+    \ the mutation even inside a bound operation) so the exception is enforced, not\
+    \ merely asserted in prose.\n- [x] Explicit operation input remains authoritative\
+    \ and malformed selected config fails before lock, subprocess, network, or store\
+    \ write; the binding itself fails OPEN (never raises) so an operation that doesn't\
+    \ need config keeps working. Proven by the AC3 override/bypass tests (`REBAR_TRACKER_DIR`\
+    \ env override and an explicit different-repo root both bypass the binding) and\
+    \ the fail-open litmus test (a real `ConfigError`-raising project config still\
+    \ lets `bridge setup --reset` succeed with rc=0, and the composition failure is\
+    \ logged with a redacted exception type name only).\n- [x] Store helpers receive\
+    \ focused projections/context and do not call `load_config`, environment, or CWD\
+    \ beneath the approved boundary. `tracker_dir`/`tickets_branch`/`tickets_remote`\
+    \ in `config.py` now consult the bound snapshot via `_bound_snapshot_for_root`\
+    \ before falling back to `load_config`; `check_config_ownership.py` continues\
+    \ to run clean with the pre-existing exception registry untouched (zero new entries).\n\
+    - [x] Migrated `emit_shadow_snapshot` calls and compatibility resolution branches\
+    \ are deleted, with no stored ticket/event/bridge format change. All 33 `_shadow(\"\
+    mcp.read.xxx\")` and 23 `_shadow(\"mcp.write.xxx\")` call sites (plus the `_shadow`\
+    \ import) were deleted from `_mcp_reads.py`/`_mcp_writes.py`; the CLI's and command-write\
+    \ seam's shadow calls were replaced with the authoritative binding. No event/ticket/bridge\
+    \ schema was touched. `_mcp_llm.py`, `_lib_ops.py`, and the reconciler `__main__.py`\
+    \ deliberately keep their shadow calls (out of scope \u2014 LLM-specific resolution\
+    \ is ticket ec44's follow-up), confirmed via `test_single_definition_helpers.py`'s\
+    \ updated assertions.\n- [x] The structural ownership checker catches a synthetic\
+    \ below-boundary ambient read and has zero new legacy exceptions. `check_config_ownership.py`\
+    \ and its exception registry were not modified by this change (confirmed via `git\
+    \ diff` on the commit); the pre-existing `test_check_config_ownership_heldout.py`\
+    \ continues to prove the checker's detection, and `check_config_ownership.py`\
+    \ runs clean against the new code with no new exceptions added.\n- [x] Existing\
+    \ config, tracker layout, concurrency, CLI/MCP/library parity, lint, typecheck,\
+    \ and default suites pass. `make lint` and `make typecheck` are fully green. `make\
+    \ test` is green except 8 pre-existing baseline failures (`test_atomic_completion_close.py`\
+    \ x5, `test_rebar_repo_isolation.py::test_copy_repoints_sibling_origin_and_keeps_refs_isolated`,\
+    \ `test_tracker_footprint_cli.py` x2) confirmed pre-existing and unrelated to\
+    \ this change via `git stash` comparison (identical failures with and without\
+    \ this ticket's implementation)."
+  label: finding
+- input: "# Cache redundant whole-tree AST parsing across test scanners\n\n## Context\
+    \ / Problem\nMany regression-oracle tests independently walk a source tree (tests/\
+    \ or src/rebar), read every\n*.py, and ast.parse it. Measured: one full parse\
+    \ of tests/ (~1653 files) costs ~2.3s idle\n(~7.6s under load) and src/rebar (~597\
+    \ files) ~0.8s; dozens of test files each repeat such a\nwalk. The redundant PARSE\
+    \ is ~75-80% of each scan's cost (parse+read vs ast.walk). Under `--cov`\non the\
+    \ coverage cell these scanners are the top `--durations` entries (18.7-29.93s\
+    \ each). After\nthe macOS cell is reduced (sibling story omphacite-desertlike-coney,\
+    \ 3ba8-49d5-fee5-445d), the\nUbuntu coverage cell becomes the gate's long pole,\
+    \ so cutting this redundancy directly cuts the\ngate.\n\n## Approach\nAdd a shared,\
+    \ process-global memoised parse \u2014 tests/_tree_scan.py exposing\n`parsed_python_files(root)`\
+    \ returning parsed modules, cached via functools.cache with the root\n`.resolve()`d\
+    \ so different spellings share one cache entry. Migrate the whole-tree AST scanners\n\
+    to it so the FIRST scanner per xdist worker parses a given root and every other\
+    \ scanner reuses it\nfor free. This is behaviour-preserving: identical file set,\
+    \ identical ASTs; only the walk/read/\nparse mechanics are shared. Cross-file\
+    \ proof (prototype, already validated): after migrating the\nthree heaviest tests-tree\
+    \ scanners the 2nd/3rd scanner dropped 6.64s->2.89s and 5.07s->1.91s with\nidentical\
+    \ pass/fail. This fits the goal \u2014 pure redundancy removal, no test weakened.\n\
+    \n## Scope\n- tests/_tree_scan.py (NEW) \u2014 the cached `parsed_python_files(root)`\
+    \ helper and a `ParsedModule`\n  value (path / relative / source / tree).\n- Whole-tree\
+    \ `.py` AST scanners under tests/unit/, tests/unit/store/, tests/unit/commands/,\n\
+    \  tests/unit/rebar_reconciler/, and tests/interfaces/contracts/ \u2014 migrate\
+    \ each scanner that does\n  `for p in ROOT.rglob(\"*.py\"): ast.parse(p.read_text())`\
+    \ to the shared helper, preserving every\n  per-file filter and the exact `relative_to(BASE)`\
+    \ base. Non-`.py` globs (`rglob(\"*\")`, `*.sh`,\n  `*.json`) and filename-only\
+    \ collections are left unchanged.\n\n## Testing\n- Each migrated file's tests\
+    \ pass unchanged (same selection, same assertions) via\n  `pytest <file> -p no:xdist`.\n\
+    - The full unit tier passes (the scanners' home tier): `pytest tests/unit -m \"\
+    not integration\n  and not external\"`.\n- Aggregate: the migrated scanner set\
+    \ shows reduced call-time when run in one process (cache\n  shared) with identical\
+    \ pass/fail \u2014 the redundancy-removal proof.\n\n## Acceptance Criteria\n-\
+    \ [ ] tests/_tree_scan.py provides `parsed_python_files(root)` returning parsed\
+    \ modules, memoised\n      per process (verified by a same-object second-call\
+    \ check and by the migrated tests passing).\n- [ ] The whole-tree AST scanners\
+    \ in Scope call the shared helper; each migrated file passes\n      `pytest <file>\
+    \ -p no:xdist` unchanged.\n- [ ] No behaviour change: `pytest tests/unit -m \"\
+    not integration and not external\"` yields the\n      same pass/fail as before\
+    \ (verified locally green).\n- [ ] Running the migrated scanner set in a single\
+    \ process parses each root once \u2014 a 2nd+\n      same-root scanner is materially\
+    \ faster than a cold parse (verified by a timed probe).\n- [ ] ruff check + ruff\
+    \ format are clean on all changed files and the complexity baseline check\n  \
+    \    passes."
+  label: finding
+- input: "## Context / Problem\nWhen the store wedges (dirty tracker tree, stale locks,\
+    \ stranded merge state), today's tooling is partial: `rebar fsck` checks event\
+    \ integrity but does not report the dirty-tree class that caused the recent P0\
+    \ wedges (tracked working-tree deletions of store artifacts, untracked regenerable\
+    \ compaction leftovers, orphaned lock files, orphaned `.tmp-event-*`); `rebar\
+    \ tracker-maintenance --clean` handles only a stranded index and foreign worktree\
+    \ paths (verified: its `_stranded_paths`/`_foreign_worktree_paths` scans reported\
+    \ 0 findings while the store sat wedged with 119 tracked `.archived` deletions);\
+    \ the documented recovery for the live wedges was ad-hoc raw git under the write\
+    \ lock, recorded by hand on tickets 6ccc-0577-198c-44fa / e72e-259d-5ee7-4e73.\
+    \ Operators (and agents) need one sanctioned, non-destructive door: fsck DETECTS\
+    \ the class, doctor --repair HEALS it.\n\n## Approach\nDetection: add a tracker-dirty\
+    \ check to the fsck surface (src/rebar/_commands/fsck_tracker_health.py, which\
+    \ already owns tracker-level health lines) that classifies `git status --porcelain`\
+    \ output into: (1) tracked deletions of store artifacts restorable from HEAD,\
+    \ (2) untracked regenerable compaction leftovers (`*-SNAPSHOT.json`, `*.retired`\
+    \ whose retired-source is already folded), (3) orphaned `.tmp-event-*` (never\
+    \ auto-touched \u2014 named for manual triage), plus lock-artifact staleness reported\
+    \ via the existing doctor_locks scan. Each class gets a distinct finding string\
+    \ and JSON field so agents can act programmatically.\nRepair: extend `rebar doctor\
+    \ --repair` (src/rebar/_commands/doctor.py's existing scan/repair_finding registry\
+    \ pattern) with repair actions that run under the store write lock (rebar._store.lock.write_lock):\
+    \ restore class-1 paths via `git checkout --` (non-destructive; bytes exist at\
+    \ HEAD), move class-2 paths into the quarantine directory established by change\
+    \ 1757 (`<git-common-dir>/reconverge-quarantine/<utc-ts>/` \u2014 move, never\
+    \ delete), and leave class-3 untouched while printing their paths. After healing,\
+    \ invoke the existing reconverge entry (rebar._store.sync.reconverge) so a previously\
+    \ wedged store converges in the same command. Raw git here is the sanctioned exception:\
+    \ it goes through the store seam (gitutil.run_git) inside a lock-guarded repair\
+    \ command, exactly the pattern tracker-maintenance already uses, and every action\
+    \ is recorded in the doctor output. Positive rationale: doctor already owns scan-classify-repair\
+    \ with typed findings; extending its registry avoids inventing a second repair\
+    \ CLI.\n\n## Scope\n- src/rebar/_commands/fsck_tracker_health.py \u2014 tracker-dirty\
+    \ classification (text + JSON).\n- src/rebar/_commands/doctor.py \u2014 new finding\
+    \ types + repair actions under the write lock; post-repair reconverge call.\n\
+    - tests/unit/test_doctor_dirty_tree.py (new) \u2014 seeded-wedge end-to-end coverage.\n\
+    - docs/user-guide.md \u2014 document the new fsck findings and doctor repairs.\n\
+    \n## Testing\n- Happy path: fixture tracker seeded with all three classes plus\
+    \ a diverged origin; `rebar fsck` names each class; `rebar doctor --repair` restores\
+    \ class 1, quarantines class 2 (bytes preserved), leaves class 3 in place, and\
+    \ the store converges (ahead/behind 0/0, `git status` clean except class 3).\n\
+    - Failure/edge: doctor --repair on a CLEAN store makes zero changes and zero commits\
+    \ (idempotent); a locked store (write lock held by a live process) makes doctor\
+    \ wait/skip per existing lock semantics rather than repairing unlocked; class-3\
+    \ files are byte-identical after the run.\n- JSON contract: fsck --output json\
+    \ carries the per-class counts and paths.\n\n## Acceptance Criteria\n- [ ] `rebar\
+    \ fsck` on a seeded dirty tracker reports each class with a distinct finding id,\
+    \ and clean stores report none; checked by the new test.\n- [ ] `rebar doctor\
+    \ --repair` heals a seeded wedge end-to-end (tree clean apart from `.tmp-event-*`,\
+    \ merge converged, no event bytes lost \u2014 quarantine holds moved files); checked\
+    \ by the end-to-end test.\n- [ ] Repair runs entirely under the store write lock\
+    \ and never deletes a file (moves or restores only); checked by asserting quarantine\
+    \ contents and lock acquisition in the test.\n- [ ] `make lint` and `make typecheck`\
+    \ clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close."
+  label: finding
+- input: "# Wire store-wide overlap step into _run_plan_review (LLM-gated, graceful\
+    \ skip, advisory surfacing)\n\n## Why\nThe overlap check must fire in the tolerant\
+    \ window before claim \u2014 during plan review \u2014 and fold its results into\
+    \ the plan-review output as advisory coaching, WITHOUT ever blocking the claim\
+    \ or altering the claim-gate verdict. This is the integration seam tying Cupid\
+    \ enrichment + retrieval + judge into the agent workflow.\n\n## What\n- Integrate\
+    \ in `_run_plan_review` (`src/rebar/llm/plan_review/__init__.py:401` \u2014 the\
+    \ real post-pass site where rising-floor/completion-floor/sidecar/signing run;\
+    \ NOT the public wrapper `review_plan` at :352). Sequencing is critical: inject\
+    \ overlap findings BEFORE `coverage['counts']` is baked and BEFORE the sidecar\
+    \ emit + attestation signing, so `advisory_surfaced` count and the signed manifest\
+    \ include them consistently (or, explicitly, keep overlap findings in a SEPARATE\
+    \ `overlap[]` verdict key excluded from the advisory cap and from the signed coverage\
+    \ counts \u2014 chosen approach: a separate `overlap[]` key so the \u22643 overlap\
+    \ items never displace real plan-review advisories under the cap, and the attestation\
+    \ is unaffected).\n- Steps: synchronously extract the query ticket's digest from\
+    \ the already-assembled full-text context (S1), run `retrieve` (S5), run the pairwise\
+    \ `judge` (S6); attach the \u22643 results to the verdict's new `overlap[]` array\
+    \ (each item = the S6 finding incl. its `rebar link` command). Update the `--output\
+    \ text` renderer `_render_plan_review_text` (`src/rebar/_cli/_llm_commands.py:386`)\
+    \ to print the `overlap[]` section, and include `overlap[]` in the MCP `review_plan`\
+    \ result + its output schema.\n- LLM-gate / graceful skip: if the `[agents]` extra,\
+    \ plan-review, or API key is absent, the step is a silent no-op (no `overlap[]`,\
+    \ no error, claim proceeds). RUNTIME failures too (S1/S5/S6 exception, retrieval\
+    \ timeout, judge error, empty candidates) are caught \u2192 empty `overlap[]`,\
+    \ logged, never block.\n- Config: `verify.overlap_enabled` (default OFF, on `VerifyConfig`\
+    \ `[tool.rebar][verify]` alongside `require_plan_review_for_claim` \u2014 where\
+    \ all gate flags live) gates the whole step independently of the plan-review gate.\n\
+    \n## Dependencies\nS1 (enrich), S5 (retrieve), S6 (judge). These are prerequisite\
+    \ sibling stories under this epic; this story is the integration and can only\
+    \ be completed once they land (sequenced last).\n\n## Scope\n- Edits: `src/rebar/llm/plan_review/__init__.py`\
+    \ (`_run_plan_review` injection), `src/rebar/schemas/plan_review_verdict.schema.json`\
+    \ (add `overlap[]`), `src/rebar/_cli/_llm_commands.py` (`_render_plan_review_text`),\
+    \ the MCP `review_plan` output model, `overlap_enabled` on VerifyConfig `[tool.rebar][verify]`;\
+    \ write the architecture ADR `docs/adr/NNNN-cross-ticket-overlap.md` (the epic's\
+    \ ADR deliverable is owned HERE).\n- OUT: the component ops (S1/S5/S6), async\
+    \ corpus enrichment (S2/S3/S4).\n\n## Testing\n- Unit `tests/unit/test_plan_review_overlap.py`\
+    \ (FakeRunner + fixture corpus): overlap findings land in `overlap[]`; the claim-gate\
+    \ verdict/`advisory_surfaced`/attestation are UNCHANGED by overlap findings (assert\
+    \ byte-identical signed coverage vs a run with overlap disabled); `[agents]`/key\
+    \ absent \u2192 no `overlap[]`, verdict identical; a judge exception \u2192 empty\
+    \ `overlap[]`, no raise; `overlap.enabled=off` \u2192 step skipped; `overlap[]`\
+    \ appears in both CLI text and MCP JSON.\n\n## Acceptance Criteria\n- [ ] `review_plan`\
+    \ returns \u22643 overlap findings in a dedicated `overlap[]` key (each with a\
+    \ `rebar link` command); the claim is NEVER blocked and the signed claim-gate\
+    \ coverage/attestation is byte-identical to a run with overlap disabled; verified\
+    \ by `pytest tests/unit/test_plan_review_overlap.py::{test_surfaced,test_verdict_unchanged}`.\n\
+    - [ ] The query digest is generated at review time from the ticket's current full\
+    \ text (independent of the ticket being in the enriched corpus).\n- [ ] `[agents]`/plan-review/API\
+    \ key absent \u2192 silent no-op, verdict identical to before; a runtime failure\
+    \ in S1/S5/S6 \u2192 empty `overlap[]`, logged, never blocks; verified by `::{test_graceful_skip,test_runtime_error}`.\n\
+    - [ ] `overlap.enabled` (default OFF) gates the step independently; `overlap[]`\
+    \ is rendered in CLI `review-plan --output text` and present in the MCP `review_plan`\
+    \ result + output schema.\n- [ ] Integration site is `_run_plan_review` (:401),\
+    \ with overlap findings in a separate `overlap[]` key so they never displace real\
+    \ advisories under the cap.\n- [ ] The architecture ADR `docs/adr/NNNN-cross-ticket-overlap.md`\
+    \ is written (the epic's ADR deliverable).\n"
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-T9
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

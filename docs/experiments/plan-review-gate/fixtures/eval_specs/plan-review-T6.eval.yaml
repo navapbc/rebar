@@ -1,0 +1,655 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: T6
+  expect: finding
+  id: plan-review-T6-fire-0
+  input: "# S8 \u2014 `rebar bridge suggest-mapping`: live Jira probe to pre-populate\
+    \ mapping config\n\n## Context / Problem\nEpic 3d7a (S1\u2013S5) adds the mapping\
+    \ seam: a reserved `[mapping]` / `[tool.rebar.mapping]`\nblock with per-layer\
+    \ vocabulary (`statuses`, `issue_types`, `link_types`, `hierarchy`)\nand axis\
+    \ maps (`status_map`, `type_map`, `link_map`, `priority_map`, `create_defaults`),\n\
+    parsed by `src/rebar/_engine/rebar_reconciler/mapping_config.py` (S1). Hand-authoring\
+    \ it\nis transcription-error-prone. S8 adds a READ-ONLY command that observes\
+    \ a live Jira\nproject via the pycontribs client and emits a suggested `[tool.rebar.mapping]`\
+    \ block\nseeded with the project's real vocabulary and identity-seed axis maps.\n\
+    \nFindings resolved:\n- Verb `rebar bridge probe` COLLIDES with the retired alias\
+    \ `bridge-probe`\n  (`_registry.py:579`; parser `_parsers/advanced/bridge.py:117`;\
+    \ handler `_bridge_probe`\n  `_cli/__init__.py:103`, which CREATES+DELETES a throwaway\
+    \ issue \u2014 not read-only). New\n  verb: **`rebar bridge suggest-mapping`**\
+    \ (verified free in `src/`+`tests/`).\n- No private `_get_json` \u2014 it exists\
+    \ ONLY on the Gerrit client\n  (`review_bot/gerrit_client.py:128`), not the jira\
+    \ adapter, which uses only HIGH-LEVEL\n  `jira.JIRA` methods; the probe uses only\
+    \ such methods (below).\n- No tomlkit; TOML read via stdlib `tomllib`; `_emit_toml`\
+    \ is fail-closed on nesting, so\n  an orchestrator + dedicated nested emitter\
+    \ are added (below).\n\n## Approach\nNew verb wired into the bridge group (NEW):\n\
+    - Parser: `commands.add_parser(\"suggest-mapping\", ...)` in\n  `src/rebar/_cli/_parsers/advanced/bridge.py`\
+    \ (beside `check-access` ~line 117), taking\n  `<PROJECT>` and `--write`.\n- Dispatch:\
+    \ add `\"suggest-mapping\"` to `bridge_cli`'s pass-through set\n  (`src/rebar/_cli/_bridge_commands.py:259`)\
+    \ + a `_passthrough`/`_passthrough_help`\n  branch \u2192 NEW handler `_bridge_suggest_mapping`\
+    \ (`_cli/__init__.py`, sibling of\n  `_bridge_probe`).\n\nProbe (NEW `src/rebar/_engine/rebar_reconciler/mapping_probe.py`,\
+    \ <800 LOC): a probe\nPORT with one narrow method per axis, each a thin call to\
+    \ a pycontribs `jira.JIRA`\nmethod. Default port built from `build_client_from_settings`\n\
+    (`adapters/jira_datacenter/transport.py:155`); tests inject a FAKE port \u2192\
+    \ offline. Pin\n`jira>=3.8,<4` (pyproject.toml:202).\n\nAxis grounding \u2014\
+    \ every axis uses a HIGH-LEVEL method (no private REST):\n- `issue_types` + `hierarchy`\
+    \ \u2192 `jira.JIRA.issue_types()` (read each `hierarchyLevel`;\n  if absent,\
+    \ `hierarchy` is DROPPED empty + note, not fabricated).\n- `priority_map` vocab\
+    \ \u2192 `jira.JIRA.priorities()`; `link_types` \u2192\n  `jira.JIRA.issue_link_types()`\
+    \ (documented public).\n- `statuses` vocab \u2192 `jira.JIRA.statuses()` (documented\
+    \ public). pycontribs exposes no\n  per-PROJECT status list publicly, so this\
+    \ is the GLOBAL set \u2014 the block documents that\n  honest limitation.\n- `create_defaults`\
+    \ stubs \u2192 `jira.JIRA.createmeta_issuetypes(<KEY>)` +\n  `createmeta_fieldtypes(<KEY>,\
+    \ <id>)` (public createmeta API); stub only for a\n  `required: true` field NOT\
+    \ in the create BASELINE (see AC footer).\n- transition hints (best-effort) \u2192\
+    \ grounded in the ACTUAL transitions surface:\n  `jira.JIRA.search_issues(jql)`\
+    \ (CONFIRMED in DC adapter) fetches one sample issue per\n  discovered type, then\
+    \ `jira.JIRA.transitions(issue)` (CONFIRMED at\n  `adapters/jira_datacenter/transitions.py:80`).\
+    \ Jira returns transitions only from each\n  sample's CURRENT status, so the set\
+    \ is inherently partial \u2192 flagged best-effort.\n  `status_map` stays identity-seeded;\
+    \ transition data is an ADVISORY marker, not complete.\n\nAnchor: `search_issues`,\
+    \ `transitions`, `fields` are confirmed in-repo on this same\n`jira.JIRA` client\
+    \ (DC adapter); the vocabulary getters are documented pycontribs 3.x\npublic API.\n\
+    \nEmit: build `{\"projects\": {<KEY>: {<layer>}}}`.\n- Default (no `--write`):\
+    \ serialize that block to stdout as TOML. NEVER writes; reads only.\n- `--write`:\
+    \ mirror `write_jira_config`'s target-selection + read-whole/mutate/atomic-\n\
+    \  replace. Target via `config._discover_project_config` \u2192 existing `rebar.toml`,\
+    \ else\n  create `<repo_root>/rebar.toml`; user `pyproject.toml` is NEVER edited.\
+    \ Read with\n  `tomllib`, DEEP-MERGE under `data[\"mapping\"][\"projects\"][<KEY>]`\
+    \ (EXISTING keys win,\n  hand edits never clobbered), re-emit the WHOLE file via\
+    \ the orchestrator below, atomic\n  `os.replace`.\n\nSerialization \u2014 OPTION\
+    \ B, a top-level ORCHESTRATOR (a real `rebar.toml` mixes FLAT\nsiblings `[jira]`/`[tracker]`\
+    \ with the NESTED `[mapping.*]`, so no single emitter can\nwrite the whole file).\
+    \ `_config_writer._emit_toml` (:188) fail-closes on any nested\nsub-table \u2014\
+    \ pinned by `tests/unit/test_jira_onboard.py:149`\n(`_emit_toml({\"jira\": {\"\
+    nested\": {\"k\": \"v\"}}})` must raise `ConfigError`); UNTOUCHED. S8\nadds two\
+    \ NEW helpers in `_config_writer.py`:\n- `_emit_nested_toml(name, table)` \u2014\
+    \ recurses one nested table into dotted-header\n  sub-tables (`[mapping.projects.KEY.status_map]`);\
+    \ only ever handed the `mapping` table.\n- `_emit_config_toml(data)` \u2014 orchestrator:\
+    \ split off the reserved `mapping` key, emit\n  ALL remaining top-level items\
+    \ (scalars + the flat `[jira]`/`[tracker]` siblings it did\n  NOT author) via\
+    \ the EXISTING `_emit_toml`, then append\n  `_emit_nested_toml(\"mapping\", data[\"\
+    mapping\"])` when present, joined by a blank line.\n`_emit_toml` never receives\
+    \ the `mapping` table, so its fail-closed contract + pinned test\nstand; flat\
+    \ siblings round-trip through the flat path, nested `[mapping.*]` through the\n\
+    nested path. The `--write` handler calls `_emit_config_toml`; `write_jira_config`\
+    \ keeps\ncalling `_emit_toml` unchanged. HONEST SCOPE: `tomllib` drops comments\
+    \ (no tomlkit), so\nthe merge keeps existing hand-edited VALUES (existing keys\
+    \ win) but inline comments in\n`[mapping]` are NOT preserved.\n\n## Scope\n- NEW\
+    \ `mapping_probe.py` (probe port + per-axis getters + layer builder + TOML emit),\n\
+    \  <800 LOC.\n- NEW `_config_writer._emit_nested_toml` + `_emit_config_toml` orchestrator\
+    \ (per\n  Serialization); `_emit_toml` (:188) + pinned `tests/unit/test_jira_onboard.py:149`\n\
+    \  stay UNTOUCHED.\n- Wire: `bridge.py` parser, `_bridge_commands.py` dispatch,\
+    \ `__init__.py` handler (NEW).\n- Out of scope: WRITE to Jira; live-credential\
+    \ CI gating; comment round-tripping.\n\n## Testing\nTests use a FAKE probe port\
+    \ returning canned issue-type/priority/link-type/status/\ncreatemeta/search+transitions\
+    \ data \u2014 fully offline, no live Jira or CI credential\n(portability rule).\
+    \ A live smoke run is manual, never a CI gate. New tests in\n`tests/unit/rebar_reconciler/test_probe.py`.\n\
+    \n## Acceptance Criteria\n- [x] `test_probe_emits_mapping` \u2014 `rebar bridge\
+    \ suggest-mapping <KEY>` against the fake\n      port emits a `[tool.rebar.mapping]`\
+    \ block with discovered vocabulary (`issue_types`,\n      `statuses`, `link_types`,\
+    \ priorities, `hierarchy` when `hierarchyLevel` present),\n      identity-seed\
+    \ axis maps, and `create_defaults` stubs.\n- [x] `test_probe_is_read_only` \u2014\
+    \ default invocation writes NO file; the fake port\n      records only reads (no\
+    \ create/transition/delete), distinct from `check-access`.\n- [x] `test_probe_write_preserves_edits`\
+    \ \u2014 `--write` into a `rebar.toml` that already\n      has flat `[jira]`+`[tracker]`\
+    \ sections PRESERVES both AND adds `[mapping.*]`;\n      deep-merge under `projects.<KEY>`\
+    \ keeps a pre-existing hand-edited mapping key\n      (existing keys win); `pyproject.toml`\
+    \ is never edited.\n- [x] `test_probe_transitions_best_effort` \u2014 fake port\
+    \ returns `search_issues` samples +\n      per-issue `transitions()` limited to\
+    \ each sample's current status; emitted\n      transition hints are flagged best-effort/partial\
+    \ (comment/marker), never asserted\n      complete; `status_map` stays identity-seeded.\n\
+    \n\"create_defaults\" baseline (concrete): the outbound create path\n`adapters/jira/outbound_fields.py:140-158`\
+    \ (`map_local_to_remote`) already supplies\n`summary`, `description`, `issuetype`,\
+    \ `priority`, `assignee`, conditionally `status`+\n`parent`; a stub is emitted\
+    \ ONLY for a createmeta `required: true` field NOT in that\nbaseline.\n\nTest\
+    \ tier: unit"
+- corpus: rebar
+  criterion: T6
+  expect: finding
+  id: plan-review-T6-fire-2
+  input: "Consolidate the force-bypass surface across lib + CLI and remove the redundant\
+    \ `force_close` param. Operator ruling (2026-08-18): `force_close` is to be removed,\
+    \ and `--force` must NOT accept an inline reason \u2014 the audit note comes from\
+    \ the already-established separate `reason` parameter.\n\n## Context / Problem\n\
+    `rebar.transition` today exposes TWO overlapping bypass params: `force: bool`\
+    \ (bypasses the start-work / plan-review gate) and `force_close: str` (bypasses\
+    \ the completion-verification / signature CLOSE gate AND carries its audit reason\
+    \ inline). The CLI `--force[=<reason>]` maps to `force_close` on a close and to\
+    \ `force` on start-work, and also accepts an inline `=<reason>`. This is redundant\
+    \ and inconsistent: a single `force` boolean plus the existing separate `reason`\
+    \ param already express the same intent. (The CLI `--force-close` spelling was\
+    \ already retired as a clean break in 24f7; this ticket removes the remaining\
+    \ `force_close` PARAM and the `--force=<reason>` inline form.)\n\n## Approach\n\
+    Make `force: bool` the single gate-bypass across BOTH gates and route the audit\
+    \ note through the existing `reason: str` param; remove `force_close`.\n- Rewire\
+    \ the completion-verification close seam (close_precheck.py `if force_close:`\
+    \ ~line 566; transition_close.py ~line 440 `if not force_close ...`) to key on\
+    \ `force` instead of `force_close`, recording `reason` as the force-close audit\
+    \ note.\n- Remove the `force_close` param from `rebar.transition` (_lib_writes.py).\
+    \ Provide a migration alias via the sanctioned lib-kind deprecation registry (rebar._deprecations,\
+    \ `_KINDS` includes `lib`): a call passing `force_close=\"<r>\"` WARNs and is\
+    \ mapped to `force=True, reason=\"<r>\"`, scheduled for removal. (Not the `RemovedInput`\
+    \ tombstone, whose `_TOMBSTONE_KINDS` is env/cfg/file only.)\n- CLI: `--force`\
+    \ becomes a bare boolean (drop the `--force=<reason>` inline form); the audit\
+    \ note is supplied by the existing `--reason=<text>`. Update the usage/help text\
+    \ in transition.py accordingly.\n- Reducer/schema (reducer/_processors_status.py,\
+    \ schemas/ticket_state.schema.json, txn.py, types.py) are UNCHANGED for historical-event\
+    \ tolerance: this is an event-sourced store, so historical events carrying force_close\
+    \ MUST keep reducing to the same state \u2014 tombstone the INPUT, not the event.\n\
+    \n## Scope\n- src/rebar/_lib_writes.py \u2014 remove force_close param from transition();\
+    \ map a legacy force_close call via _deprecations to force+reason.\n- src/rebar/_commands/close_precheck.py\
+    \ \u2014 key the completion-verify close bypass on `force` (with `reason` audit\
+    \ note) instead of `force_close`.\n- src/rebar/_commands/transition_close.py \u2014\
+    \ same rewiring in the close-execution path + force-close audit comment.\n- src/rebar/_commands/transition.py\
+    \ \u2014 `--force` bare bool only (drop inline `=<reason>`); reason via `--reason`;\
+    \ update usage/help.\n- src/rebar/_deprecations.py \u2014 register the lib `force_close`\
+    \ kwarg deprecation alias.\n- Reducer/schema \u2014 INTENTIONALLY UNCHANGED (back-compat).\n\
+    \n## Testing\n- Closing a work ticket under the completion-verification gate with\
+    \ `force=True, reason=\"x\"` (lib) and `transition ... --force --reason=x` (CLI)\
+    \ bypasses the verifier/signature and records \"x\" as the force-close audit note\
+    \ \u2014 the same closed-without-signature outcome as before (test both surfaces).\n\
+    - Passing `rebar.transition(..., force_close=\"x\")` WARNs via _deprecations and\
+    \ behaves as `force=True, reason=\"x\"` (unit test).\n- The CLI `--force=<reason>`\
+    \ inline form is no longer accepted; bare `--force` + `--reason` is the path (interface\
+    \ test).\n- A historical event carrying force_close still reduces to the identical\
+    \ ticket state (reducer fixture test).\n\n## Acceptance Criteria\n- [ ] `force=True`\
+    \ bypasses BOTH the start-work and completion-verification close gates, and `reason`\
+    \ supplies the force-close audit note (tests on lib + CLI).\n- [ ] The `force_close`\
+    \ param is removed from `rebar.transition`; a legacy `force_close=\"<r>\"` call\
+    \ WARNs via rebar._deprecations and maps to `force=True, reason=\"<r>\"` (unit\
+    \ test).\n- [ ] CLI `--force` no longer accepts an inline reason; the reason is\
+    \ supplied via `--reason` (interface test); usage/help updated.\n- [ ] A historical\
+    \ event carrying force_close still reduces to the same ticket state (reducer fixture\
+    \ test passes).\n- [ ] Docs/docstrings no longer present force_close as a live\
+    \ param or `--force=<reason>` as a supported form (grep is clean).\n- [ ] `make\
+    \ lint` and `make typecheck` are green."
+- corpus: rebar
+  criterion: T6
+  expect: finding
+  id: plan-review-T6-fire-3
+  input: "# S8 \u2014 `rebar bridge suggest-mapping`: live Jira probe to pre-populate\
+    \ mapping config\n\n## Context / Problem\nEpic 3d7a (S1\u2013S5) adds the mapping\
+    \ seam: a reserved `[mapping]` / `[tool.rebar.mapping]`\nblock with per-layer\
+    \ vocabulary (`statuses`, `issue_types`, `link_types`, `hierarchy`)\nand axis\
+    \ maps (`status_map`, `type_map`, `link_map`, `priority_map`, `create_defaults`),\n\
+    parsed by `src/rebar/_engine/rebar_reconciler/mapping_config.py` (S1). Hand-authoring\
+    \ it\nis transcription-error-prone. S8 adds a READ-ONLY command that observes\
+    \ a live Jira\nproject via the pycontribs client and emits a suggested `[tool.rebar.mapping]`\
+    \ block\nseeded with the project's real vocabulary and identity-seed axis maps.\n\
+    \nFindings resolved:\n- Verb `rebar bridge probe` COLLIDES with the retired alias\
+    \ `bridge-probe`\n  (`_registry.py:579`; parser `_parsers/advanced/bridge.py:117`;\
+    \ handler `_bridge_probe`\n  `_cli/__init__.py:103`, which CREATES+DELETES a throwaway\
+    \ issue \u2014 not read-only). New\n  verb: **`rebar bridge suggest-mapping`**\
+    \ (verified free in `src/`+`tests/`).\n- No private `_get_json` \u2014 it exists\
+    \ ONLY on the Gerrit client\n  (`review_bot/gerrit_client.py:128`), not the jira\
+    \ adapter, which uses only HIGH-LEVEL\n  `jira.JIRA` methods; the probe uses only\
+    \ such methods (below).\n- No tomlkit; TOML read via stdlib `tomllib`; `_emit_toml`\
+    \ is fail-closed on nesting, so\n  an orchestrator + dedicated nested emitter\
+    \ are added (below).\n\n## Approach\nNew verb wired into the bridge group (NEW):\n\
+    - Parser: `commands.add_parser(\"suggest-mapping\", ...)` in\n  `src/rebar/_cli/_parsers/advanced/bridge.py`\
+    \ (beside `check-access` ~line 117), taking\n  `<PROJECT>` and `--write`.\n- Dispatch:\
+    \ add `\"suggest-mapping\"` to `bridge_cli`'s pass-through set\n  (`src/rebar/_cli/_bridge_commands.py:259`)\
+    \ + a `_passthrough`/`_passthrough_help`\n  branch \u2192 NEW handler `_bridge_suggest_mapping`\
+    \ (`_cli/__init__.py`, sibling of\n  `_bridge_probe`).\n\nProbe (NEW `src/rebar/_engine/rebar_reconciler/mapping_probe.py`,\
+    \ <800 LOC): a probe\nPORT with one narrow method per axis, each a thin call to\
+    \ a pycontribs `jira.JIRA`\nmethod. Default port built from `build_client_from_settings`\n\
+    (`adapters/jira_datacenter/transport.py:155`); tests inject a FAKE port \u2192\
+    \ offline. Pin\n`jira>=3.8,<4` (pyproject.toml:202).\n\nAxis grounding \u2014\
+    \ every axis uses a HIGH-LEVEL method (no private REST):\n- `issue_types` + `hierarchy`\
+    \ \u2192 `jira.JIRA.issue_types()` (read each `hierarchyLevel`;\n  if absent,\
+    \ `hierarchy` is DROPPED empty + note, not fabricated).\n- `priority_map` vocab\
+    \ \u2192 `jira.JIRA.priorities()`; `link_types` \u2192\n  `jira.JIRA.issue_link_types()`\
+    \ (documented public).\n- `statuses` vocab \u2192 `jira.JIRA.statuses()` (documented\
+    \ public). pycontribs exposes no\n  per-PROJECT status list publicly, so this\
+    \ is the GLOBAL set \u2014 the block documents that\n  honest limitation.\n- `create_defaults`\
+    \ stubs \u2192 `jira.JIRA.createmeta_issuetypes(<KEY>)` +\n  `createmeta_fieldtypes(<KEY>,\
+    \ <id>)` (public createmeta API); stub only for a\n  `required: true` field NOT\
+    \ in the create BASELINE (see AC footer).\n- transition hints (best-effort) \u2192\
+    \ grounded in the ACTUAL transitions surface:\n  `jira.JIRA.search_issues(jql)`\
+    \ (CONFIRMED in DC adapter) fetches one sample issue per\n  discovered type, then\
+    \ `jira.JIRA.transitions(issue)` (CONFIRMED at\n  `adapters/jira_datacenter/transitions.py:80`).\
+    \ Jira returns transitions only from each\n  sample's CURRENT status, so the set\
+    \ is inherently partial \u2192 flagged best-effort.\n  `status_map` stays identity-seeded;\
+    \ transition data is an ADVISORY marker, not complete.\n\nAnchor: `search_issues`,\
+    \ `transitions`, `fields` are confirmed in-repo on this same\n`jira.JIRA` client\
+    \ (DC adapter); the vocabulary getters are documented pycontribs 3.x\npublic API.\n\
+    \nEmit: build `{\"projects\": {<KEY>: {<layer>}}}`.\n- Default (no `--write`):\
+    \ serialize that block to stdout as TOML. NEVER writes; reads only.\n- `--write`:\
+    \ mirror `write_jira_config`'s target-selection + read-whole/mutate/atomic-\n\
+    \  replace. Target via `config._discover_project_config` \u2192 existing `rebar.toml`,\
+    \ else\n  create `<repo_root>/rebar.toml`; user `pyproject.toml` is NEVER edited.\
+    \ Read with\n  `tomllib`, DEEP-MERGE under `data[\"mapping\"][\"projects\"][<KEY>]`\
+    \ (EXISTING keys win,\n  hand edits never clobbered), re-emit the WHOLE file via\
+    \ the orchestrator below, atomic\n  `os.replace`.\n\nSerialization \u2014 OPTION\
+    \ B, a top-level ORCHESTRATOR (a real `rebar.toml` mixes FLAT\nsiblings `[jira]`/`[tracker]`\
+    \ with the NESTED `[mapping.*]`, so no single emitter can\nwrite the whole file).\
+    \ `_config_writer._emit_toml` (:188) fail-closes on any nested\nsub-table \u2014\
+    \ pinned by `tests/unit/test_jira_onboard.py:149`\n(`_emit_toml({\"jira\": {\"\
+    nested\": {\"k\": \"v\"}}})` must raise `ConfigError`); UNTOUCHED. S8\nadds two\
+    \ NEW helpers in `_config_writer.py`:\n- `_emit_nested_toml(name, table)` \u2014\
+    \ recurses one nested table into dotted-header\n  sub-tables (`[mapping.projects.KEY.status_map]`);\
+    \ only ever handed the `mapping` table.\n- `_emit_config_toml(data)` \u2014 orchestrator:\
+    \ split off the reserved `mapping` key, emit\n  ALL remaining top-level items\
+    \ (scalars + the flat `[jira]`/`[tracker]` siblings it did\n  NOT author) via\
+    \ the EXISTING `_emit_toml`, then append\n  `_emit_nested_toml(\"mapping\", data[\"\
+    mapping\"])` when present, joined by a blank line.\n`_emit_toml` never receives\
+    \ the `mapping` table, so its fail-closed contract + pinned test\nstand; flat\
+    \ siblings round-trip through the flat path, nested `[mapping.*]` through the\n\
+    nested path. The `--write` handler calls `_emit_config_toml`; `write_jira_config`\
+    \ keeps\ncalling `_emit_toml` unchanged. HONEST SCOPE: `tomllib` drops comments\
+    \ (no tomlkit), so\nthe merge keeps existing hand-edited VALUES (existing keys\
+    \ win) but inline comments in\n`[mapping]` are NOT preserved.\n\n## Scope\n- NEW\
+    \ `mapping_probe.py` (probe port + per-axis getters + layer builder + TOML emit),\n\
+    \  <800 LOC.\n- NEW `_config_writer._emit_nested_toml` + `_emit_config_toml` orchestrator\
+    \ (per\n  Serialization); `_emit_toml` (:188) + pinned `tests/unit/test_jira_onboard.py:149`\n\
+    \  stay UNTOUCHED.\n- Wire: `bridge.py` parser, `_bridge_commands.py` dispatch,\
+    \ `__init__.py` handler (NEW).\n- Out of scope: WRITE to Jira; live-credential\
+    \ CI gating; comment round-tripping.\n\n## Testing\nTests use a FAKE probe port\
+    \ returning canned issue-type/priority/link-type/status/\ncreatemeta/search+transitions\
+    \ data \u2014 fully offline, no live Jira or CI credential\n(portability rule).\
+    \ A live smoke run is manual, never a CI gate. New tests in\n`tests/unit/rebar_reconciler/test_probe.py`.\n\
+    \n## Acceptance Criteria\n- [x] `test_probe_emits_mapping` \u2014 `rebar bridge\
+    \ suggest-mapping <KEY>` against the fake\n      port emits a `[tool.rebar.mapping]`\
+    \ block with discovered vocabulary (`issue_types`,\n      `statuses`, `link_types`,\
+    \ priorities, `hierarchy` when `hierarchyLevel` present),\n      identity-seed\
+    \ axis maps, and `create_defaults` stubs.\n- [x] `test_probe_is_read_only` \u2014\
+    \ default invocation writes NO file; the fake port\n      records only reads (no\
+    \ create/transition/delete), distinct from `check-access`.\n- [x] `test_probe_write_preserves_edits`\
+    \ \u2014 `--write` into a `rebar.toml` that already\n      has flat `[jira]`+`[tracker]`\
+    \ sections PRESERVES both AND adds `[mapping.*]`;\n      deep-merge under `projects.<KEY>`\
+    \ keeps a pre-existing hand-edited mapping key\n      (existing keys win); `pyproject.toml`\
+    \ is never edited.\n- [x] `test_probe_transitions_best_effort` \u2014 fake port\
+    \ returns `search_issues` samples +\n      per-issue `transitions()` limited to\
+    \ each sample's current status; emitted\n      transition hints are flagged best-effort/partial\
+    \ (comment/marker), never asserted\n      complete; `status_map` stays identity-seeded.\n\
+    \n\"create_defaults\" baseline (concrete): the outbound create path\n`adapters/jira/outbound_fields.py:140-158`\
+    \ (`map_local_to_remote`) already supplies\n`summary`, `description`, `issuetype`,\
+    \ `priority`, `assignee`, conditionally `status`+\n`parent`; a stub is emitted\
+    \ ONLY for a createmeta `required: true` field NOT in that\nbaseline.\n\nTest\
+    \ tier: unit"
+- corpus: rebar
+  criterion: T6
+  expect: pass
+  id: plan-review-T6-no_fire-0
+  input: "# Persist ticket digest as a REVIEW_RESULT-style sidecar record on the ticket\
+    \ (shared cache)\n\n## Why\nThe digest is a billable LLM artifact we never want\
+    \ to recompute. Storing it in the SHARED store (auto-pushed) makes one client's\
+    \ enrichment a cache-hit for every other client. rebar already has the exact precedent:\
+    \ `REVIEW_RESULT` \u2014 a reducer-IGNORED, preserved-and-ignored, per-ticket\
+    \ LLM-derived sidecar event. We reuse that pattern rather than inventing a reducer-projected\
+    \ type, avoiding compaction/SNAPSHOT entanglement.\n\n## What\nA new `TICKET_DIGEST`\
+    \ sidecar event carrying the S1 digest plus a `content_hash` of the fields it\
+    \ was derived from. Freshness is computed on read: the digest is CURRENT iff its\
+    \ stored `content_hash` (and `model`/`schema` version tags) match the ticket's\
+    \ current values; otherwise it reads as stale. Latest-wins: a scan reduces to\
+    \ the most-recent `TICKET_DIGEST` per ticket (by HLC order), so re-enrichment\
+    \ supersedes rather than accumulates in the projection.\n\n## Scope (exact edit\
+    \ targets \u2014 every registry a new event type touches)\n- `src/rebar/_store/event_append.py`:\
+    \ add `\"TICKET_DIGEST\"` to the `EVENT_TYPES` write allow-list (line ~38) or\
+    \ `stage_and_commit` raises StoreError.\n- `src/rebar/reducer/_version.py`: add\
+    \ `\"TICKET_DIGEST\"` to `_NON_REPLAY_KNOWN_TYPES` (line 44), NOT `KNOWN_EVENT_TYPES`\
+    \ \u2014 so it is preserved-and-ignored by the main reducer, is never squashed\
+    \ into SNAPSHOT by compaction, and never trips the fsck \"newer-than-binary\"\
+    \ warning (mirrors REVIEW_RESULT exactly).\n- A `latest_ticket_digest(ticket_id)`\
+    \ reader + `emit`/`prune(keep=1)` in a new `src/rebar/llm/overlap/digest_sidecar.py`\
+    \ (modeled on `plan_review/sidecar.py`) that returns the current digest per ticket\
+    \ for the retrieval stage; `content_hash` helper over a NAMED, versioned field\
+    \ set (`DIGEST_HASH_FIELDS` = title + description + comment bodies, normalized:\
+    \ strip trailing whitespace, join with \"\\n\"). Bump a module-constant `DIGEST_HASH_VERSION`\
+    \ (in `digest_sidecar.py`) when the field set changes so all cached digests invalidate\
+    \ deterministically.\n- `show` renders digest presence + freshness only (not the\
+    \ raw digest text); the raw digest is available to retrieval. No new field in\
+    \ `ticket_state.schema.json` (sidecar, not compiled state), matching REVIEW_RESULT.\n\
+    - Fail-closed freshness: if the current content-hash cannot be computed (partial\
+    \ read), the digest reads as NOT-current (never falsely fresh) \u2014 mirroring\
+    \ `compute_validity` returning None on read error.\n- Prune/retire: a digest for\
+    \ a deleted/archived ticket is dropped by a `prune(keep=1)` retention mirroring\
+    \ `src/rebar/llm/plan_review/sidecar.py` (`emit`+`prune`+`latest_*`); the digest\
+    \ sidecar is a new `src/rebar/llm/overlap/digest_sidecar.py` modeled on it; document\
+    \ that concurrent same-ticket digests from two clients are safe \u2014 both are\
+    \ TICKET_DIGEST appends, latest-by-HLC wins on read, idempotent.\n\n## Dependencies\n\
+    S1 (indecisive-callous-armyworm) \u2014 produces the `ticket_digest` payload this\
+    \ stores.\n\n## Testing\n- Unit `tests/unit/test_ticket_digest_store.py`: write\u2192\
+    read roundtrip; freshness flips stale when title/description/comment changes;\
+    \ fail-closed on unreadable state; latest-wins on two appends; older binary preserves-and-ignores\
+    \ the event (fsck no WARN); archived ticket's digest pruned.\n\n## Acceptance\
+    \ Criteria\n- [ ] A digest is written via a `TICKET_DIGEST` event and read back\
+    \ per ticket; verified by `pytest tests/unit/test_ticket_digest_store.py::test_roundtrip`.\n\
+    - [ ] Freshness is computed on read: mutating any `DIGEST_HASH_FIELDS` field marks\
+    \ the digest stale; verified by `::test_freshness_flips`.\n- [ ] `TICKET_DIGEST`\
+    \ is in `EVENT_TYPES` and `_NON_REPLAY_KNOWN_TYPES` (not `KNOWN_EVENT_TYPES`);\
+    \ an older binary preserves-and-ignores it with no fsck WARN.\n- [ ] An unchanged\
+    \ ticket is NOT re-enriched: the drain skips a ticket whose current content-hash\
+    \ + model/schema tags match its stored digest; verified by `::test_no_reextract_unchanged`.\n\
+    - [ ] Freshness flips stale on ANY of: content-hash mismatch, `model` change,\
+    \ or `schema`/`DIGEST_HASH_VERSION` change; verified by `::test_freshness_all_triggers`.\n\
+    - [ ] Unreadable current state yields NOT-current (fail-closed), never falsely\
+    \ fresh.\n- [ ] Two concurrent same-ticket digest appends resolve latest-by-HLC\
+    \ on read (idempotent, no duplication); an archived/deleted ticket's digest is\
+    \ pruned.\n"
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: "# S8 \u2014 `rebar bridge suggest-mapping`: live Jira probe to pre-populate\
+    \ mapping config\n\n## Context / Problem\nEpic 3d7a (S1\u2013S5) adds the mapping\
+    \ seam: a reserved `[mapping]` / `[tool.rebar.mapping]`\nblock with per-layer\
+    \ vocabulary (`statuses`, `issue_types`, `link_types`, `hierarchy`)\nand axis\
+    \ maps (`status_map`, `type_map`, `link_map`, `priority_map`, `create_defaults`),\n\
+    parsed by `src/rebar/_engine/rebar_reconciler/mapping_config.py` (S1). Hand-authoring\
+    \ it\nis transcription-error-prone. S8 adds a READ-ONLY command that observes\
+    \ a live Jira\nproject via the pycontribs client and emits a suggested `[tool.rebar.mapping]`\
+    \ block\nseeded with the project's real vocabulary and identity-seed axis maps.\n\
+    \nFindings resolved:\n- Verb `rebar bridge probe` COLLIDES with the retired alias\
+    \ `bridge-probe`\n  (`_registry.py:579`; parser `_parsers/advanced/bridge.py:117`;\
+    \ handler `_bridge_probe`\n  `_cli/__init__.py:103`, which CREATES+DELETES a throwaway\
+    \ issue \u2014 not read-only). New\n  verb: **`rebar bridge suggest-mapping`**\
+    \ (verified free in `src/`+`tests/`).\n- No private `_get_json` \u2014 it exists\
+    \ ONLY on the Gerrit client\n  (`review_bot/gerrit_client.py:128`), not the jira\
+    \ adapter, which uses only HIGH-LEVEL\n  `jira.JIRA` methods; the probe uses only\
+    \ such methods (below).\n- No tomlkit; TOML read via stdlib `tomllib`; `_emit_toml`\
+    \ is fail-closed on nesting, so\n  an orchestrator + dedicated nested emitter\
+    \ are added (below).\n\n## Approach\nNew verb wired into the bridge group (NEW):\n\
+    - Parser: `commands.add_parser(\"suggest-mapping\", ...)` in\n  `src/rebar/_cli/_parsers/advanced/bridge.py`\
+    \ (beside `check-access` ~line 117), taking\n  `<PROJECT>` and `--write`.\n- Dispatch:\
+    \ add `\"suggest-mapping\"` to `bridge_cli`'s pass-through set\n  (`src/rebar/_cli/_bridge_commands.py:259`)\
+    \ + a `_passthrough`/`_passthrough_help`\n  branch \u2192 NEW handler `_bridge_suggest_mapping`\
+    \ (`_cli/__init__.py`, sibling of\n  `_bridge_probe`).\n\nProbe (NEW `src/rebar/_engine/rebar_reconciler/mapping_probe.py`,\
+    \ <800 LOC): a probe\nPORT with one narrow method per axis, each a thin call to\
+    \ a pycontribs `jira.JIRA`\nmethod. Default port built from `build_client_from_settings`\n\
+    (`adapters/jira_datacenter/transport.py:155`); tests inject a FAKE port \u2192\
+    \ offline. Pin\n`jira>=3.8,<4` (pyproject.toml:202).\n\nAxis grounding \u2014\
+    \ every axis uses a HIGH-LEVEL method (no private REST):\n- `issue_types` + `hierarchy`\
+    \ \u2192 `jira.JIRA.issue_types()` (read each `hierarchyLevel`;\n  if absent,\
+    \ `hierarchy` is DROPPED empty + note, not fabricated).\n- `priority_map` vocab\
+    \ \u2192 `jira.JIRA.priorities()`; `link_types` \u2192\n  `jira.JIRA.issue_link_types()`\
+    \ (documented public).\n- `statuses` vocab \u2192 `jira.JIRA.statuses()` (documented\
+    \ public). pycontribs exposes no\n  per-PROJECT status list publicly, so this\
+    \ is the GLOBAL set \u2014 the block documents that\n  honest limitation.\n- `create_defaults`\
+    \ stubs \u2192 `jira.JIRA.createmeta_issuetypes(<KEY>)` +\n  `createmeta_fieldtypes(<KEY>,\
+    \ <id>)` (public createmeta API); stub only for a\n  `required: true` field NOT\
+    \ in the create BASELINE (see AC footer).\n- transition hints (best-effort) \u2192\
+    \ grounded in the ACTUAL transitions surface:\n  `jira.JIRA.search_issues(jql)`\
+    \ (CONFIRMED in DC adapter) fetches one sample issue per\n  discovered type, then\
+    \ `jira.JIRA.transitions(issue)` (CONFIRMED at\n  `adapters/jira_datacenter/transitions.py:80`).\
+    \ Jira returns transitions only from each\n  sample's CURRENT status, so the set\
+    \ is inherently partial \u2192 flagged best-effort.\n  `status_map` stays identity-seeded;\
+    \ transition data is an ADVISORY marker, not complete.\n\nAnchor: `search_issues`,\
+    \ `transitions`, `fields` are confirmed in-repo on this same\n`jira.JIRA` client\
+    \ (DC adapter); the vocabulary getters are documented pycontribs 3.x\npublic API.\n\
+    \nEmit: build `{\"projects\": {<KEY>: {<layer>}}}`.\n- Default (no `--write`):\
+    \ serialize that block to stdout as TOML. NEVER writes; reads only.\n- `--write`:\
+    \ mirror `write_jira_config`'s target-selection + read-whole/mutate/atomic-\n\
+    \  replace. Target via `config._discover_project_config` \u2192 existing `rebar.toml`,\
+    \ else\n  create `<repo_root>/rebar.toml`; user `pyproject.toml` is NEVER edited.\
+    \ Read with\n  `tomllib`, DEEP-MERGE under `data[\"mapping\"][\"projects\"][<KEY>]`\
+    \ (EXISTING keys win,\n  hand edits never clobbered), re-emit the WHOLE file via\
+    \ the orchestrator below, atomic\n  `os.replace`.\n\nSerialization \u2014 OPTION\
+    \ B, a top-level ORCHESTRATOR (a real `rebar.toml` mixes FLAT\nsiblings `[jira]`/`[tracker]`\
+    \ with the NESTED `[mapping.*]`, so no single emitter can\nwrite the whole file).\
+    \ `_config_writer._emit_toml` (:188) fail-closes on any nested\nsub-table \u2014\
+    \ pinned by `tests/unit/test_jira_onboard.py:149`\n(`_emit_toml({\"jira\": {\"\
+    nested\": {\"k\": \"v\"}}})` must raise `ConfigError`); UNTOUCHED. S8\nadds two\
+    \ NEW helpers in `_config_writer.py`:\n- `_emit_nested_toml(name, table)` \u2014\
+    \ recurses one nested table into dotted-header\n  sub-tables (`[mapping.projects.KEY.status_map]`);\
+    \ only ever handed the `mapping` table.\n- `_emit_config_toml(data)` \u2014 orchestrator:\
+    \ split off the reserved `mapping` key, emit\n  ALL remaining top-level items\
+    \ (scalars + the flat `[jira]`/`[tracker]` siblings it did\n  NOT author) via\
+    \ the EXISTING `_emit_toml`, then append\n  `_emit_nested_toml(\"mapping\", data[\"\
+    mapping\"])` when present, joined by a blank line.\n`_emit_toml` never receives\
+    \ the `mapping` table, so its fail-closed contract + pinned test\nstand; flat\
+    \ siblings round-trip through the flat path, nested `[mapping.*]` through the\n\
+    nested path. The `--write` handler calls `_emit_config_toml`; `write_jira_config`\
+    \ keeps\ncalling `_emit_toml` unchanged. HONEST SCOPE: `tomllib` drops comments\
+    \ (no tomlkit), so\nthe merge keeps existing hand-edited VALUES (existing keys\
+    \ win) but inline comments in\n`[mapping]` are NOT preserved.\n\n## Scope\n- NEW\
+    \ `mapping_probe.py` (probe port + per-axis getters + layer builder + TOML emit),\n\
+    \  <800 LOC.\n- NEW `_config_writer._emit_nested_toml` + `_emit_config_toml` orchestrator\
+    \ (per\n  Serialization); `_emit_toml` (:188) + pinned `tests/unit/test_jira_onboard.py:149`\n\
+    \  stay UNTOUCHED.\n- Wire: `bridge.py` parser, `_bridge_commands.py` dispatch,\
+    \ `__init__.py` handler (NEW).\n- Out of scope: WRITE to Jira; live-credential\
+    \ CI gating; comment round-tripping.\n\n## Testing\nTests use a FAKE probe port\
+    \ returning canned issue-type/priority/link-type/status/\ncreatemeta/search+transitions\
+    \ data \u2014 fully offline, no live Jira or CI credential\n(portability rule).\
+    \ A live smoke run is manual, never a CI gate. New tests in\n`tests/unit/rebar_reconciler/test_probe.py`.\n\
+    \n## Acceptance Criteria\n- [x] `test_probe_emits_mapping` \u2014 `rebar bridge\
+    \ suggest-mapping <KEY>` against the fake\n      port emits a `[tool.rebar.mapping]`\
+    \ block with discovered vocabulary (`issue_types`,\n      `statuses`, `link_types`,\
+    \ priorities, `hierarchy` when `hierarchyLevel` present),\n      identity-seed\
+    \ axis maps, and `create_defaults` stubs.\n- [x] `test_probe_is_read_only` \u2014\
+    \ default invocation writes NO file; the fake port\n      records only reads (no\
+    \ create/transition/delete), distinct from `check-access`.\n- [x] `test_probe_write_preserves_edits`\
+    \ \u2014 `--write` into a `rebar.toml` that already\n      has flat `[jira]`+`[tracker]`\
+    \ sections PRESERVES both AND adds `[mapping.*]`;\n      deep-merge under `projects.<KEY>`\
+    \ keeps a pre-existing hand-edited mapping key\n      (existing keys win); `pyproject.toml`\
+    \ is never edited.\n- [x] `test_probe_transitions_best_effort` \u2014 fake port\
+    \ returns `search_issues` samples +\n      per-issue `transitions()` limited to\
+    \ each sample's current status; emitted\n      transition hints are flagged best-effort/partial\
+    \ (comment/marker), never asserted\n      complete; `status_map` stays identity-seeded.\n\
+    \n\"create_defaults\" baseline (concrete): the outbound create path\n`adapters/jira/outbound_fields.py:140-158`\
+    \ (`map_local_to_remote`) already supplies\n`summary`, `description`, `issuetype`,\
+    \ `priority`, `assignee`, conditionally `status`+\n`parent`; a stub is emitted\
+    \ ONLY for a createmeta `required: true` field NOT in that\nbaseline.\n\nTest\
+    \ tier: unit"
+  label: finding
+- input: "Consolidate the force-bypass surface across lib + CLI and remove the redundant\
+    \ `force_close` param. Operator ruling (2026-08-18): `force_close` is to be removed,\
+    \ and `--force` must NOT accept an inline reason \u2014 the audit note comes from\
+    \ the already-established separate `reason` parameter.\n\n## Context / Problem\n\
+    `rebar.transition` today exposes TWO overlapping bypass params: `force: bool`\
+    \ (bypasses the start-work / plan-review gate) and `force_close: str` (bypasses\
+    \ the completion-verification / signature CLOSE gate AND carries its audit reason\
+    \ inline). The CLI `--force[=<reason>]` maps to `force_close` on a close and to\
+    \ `force` on start-work, and also accepts an inline `=<reason>`. This is redundant\
+    \ and inconsistent: a single `force` boolean plus the existing separate `reason`\
+    \ param already express the same intent. (The CLI `--force-close` spelling was\
+    \ already retired as a clean break in 24f7; this ticket removes the remaining\
+    \ `force_close` PARAM and the `--force=<reason>` inline form.)\n\n## Approach\n\
+    Make `force: bool` the single gate-bypass across BOTH gates and route the audit\
+    \ note through the existing `reason: str` param; remove `force_close`.\n- Rewire\
+    \ the completion-verification close seam (close_precheck.py `if force_close:`\
+    \ ~line 566; transition_close.py ~line 440 `if not force_close ...`) to key on\
+    \ `force` instead of `force_close`, recording `reason` as the force-close audit\
+    \ note.\n- Remove the `force_close` param from `rebar.transition` (_lib_writes.py).\
+    \ Provide a migration alias via the sanctioned lib-kind deprecation registry (rebar._deprecations,\
+    \ `_KINDS` includes `lib`): a call passing `force_close=\"<r>\"` WARNs and is\
+    \ mapped to `force=True, reason=\"<r>\"`, scheduled for removal. (Not the `RemovedInput`\
+    \ tombstone, whose `_TOMBSTONE_KINDS` is env/cfg/file only.)\n- CLI: `--force`\
+    \ becomes a bare boolean (drop the `--force=<reason>` inline form); the audit\
+    \ note is supplied by the existing `--reason=<text>`. Update the usage/help text\
+    \ in transition.py accordingly.\n- Reducer/schema (reducer/_processors_status.py,\
+    \ schemas/ticket_state.schema.json, txn.py, types.py) are UNCHANGED for historical-event\
+    \ tolerance: this is an event-sourced store, so historical events carrying force_close\
+    \ MUST keep reducing to the same state \u2014 tombstone the INPUT, not the event.\n\
+    \n## Scope\n- src/rebar/_lib_writes.py \u2014 remove force_close param from transition();\
+    \ map a legacy force_close call via _deprecations to force+reason.\n- src/rebar/_commands/close_precheck.py\
+    \ \u2014 key the completion-verify close bypass on `force` (with `reason` audit\
+    \ note) instead of `force_close`.\n- src/rebar/_commands/transition_close.py \u2014\
+    \ same rewiring in the close-execution path + force-close audit comment.\n- src/rebar/_commands/transition.py\
+    \ \u2014 `--force` bare bool only (drop inline `=<reason>`); reason via `--reason`;\
+    \ update usage/help.\n- src/rebar/_deprecations.py \u2014 register the lib `force_close`\
+    \ kwarg deprecation alias.\n- Reducer/schema \u2014 INTENTIONALLY UNCHANGED (back-compat).\n\
+    \n## Testing\n- Closing a work ticket under the completion-verification gate with\
+    \ `force=True, reason=\"x\"` (lib) and `transition ... --force --reason=x` (CLI)\
+    \ bypasses the verifier/signature and records \"x\" as the force-close audit note\
+    \ \u2014 the same closed-without-signature outcome as before (test both surfaces).\n\
+    - Passing `rebar.transition(..., force_close=\"x\")` WARNs via _deprecations and\
+    \ behaves as `force=True, reason=\"x\"` (unit test).\n- The CLI `--force=<reason>`\
+    \ inline form is no longer accepted; bare `--force` + `--reason` is the path (interface\
+    \ test).\n- A historical event carrying force_close still reduces to the identical\
+    \ ticket state (reducer fixture test).\n\n## Acceptance Criteria\n- [ ] `force=True`\
+    \ bypasses BOTH the start-work and completion-verification close gates, and `reason`\
+    \ supplies the force-close audit note (tests on lib + CLI).\n- [ ] The `force_close`\
+    \ param is removed from `rebar.transition`; a legacy `force_close=\"<r>\"` call\
+    \ WARNs via rebar._deprecations and maps to `force=True, reason=\"<r>\"` (unit\
+    \ test).\n- [ ] CLI `--force` no longer accepts an inline reason; the reason is\
+    \ supplied via `--reason` (interface test); usage/help updated.\n- [ ] A historical\
+    \ event carrying force_close still reduces to the same ticket state (reducer fixture\
+    \ test passes).\n- [ ] Docs/docstrings no longer present force_close as a live\
+    \ param or `--force=<reason>` as a supported form (grep is clean).\n- [ ] `make\
+    \ lint` and `make typecheck` are green."
+  label: finding
+- input: "# S8 \u2014 `rebar bridge suggest-mapping`: live Jira probe to pre-populate\
+    \ mapping config\n\n## Context / Problem\nEpic 3d7a (S1\u2013S5) adds the mapping\
+    \ seam: a reserved `[mapping]` / `[tool.rebar.mapping]`\nblock with per-layer\
+    \ vocabulary (`statuses`, `issue_types`, `link_types`, `hierarchy`)\nand axis\
+    \ maps (`status_map`, `type_map`, `link_map`, `priority_map`, `create_defaults`),\n\
+    parsed by `src/rebar/_engine/rebar_reconciler/mapping_config.py` (S1). Hand-authoring\
+    \ it\nis transcription-error-prone. S8 adds a READ-ONLY command that observes\
+    \ a live Jira\nproject via the pycontribs client and emits a suggested `[tool.rebar.mapping]`\
+    \ block\nseeded with the project's real vocabulary and identity-seed axis maps.\n\
+    \nFindings resolved:\n- Verb `rebar bridge probe` COLLIDES with the retired alias\
+    \ `bridge-probe`\n  (`_registry.py:579`; parser `_parsers/advanced/bridge.py:117`;\
+    \ handler `_bridge_probe`\n  `_cli/__init__.py:103`, which CREATES+DELETES a throwaway\
+    \ issue \u2014 not read-only). New\n  verb: **`rebar bridge suggest-mapping`**\
+    \ (verified free in `src/`+`tests/`).\n- No private `_get_json` \u2014 it exists\
+    \ ONLY on the Gerrit client\n  (`review_bot/gerrit_client.py:128`), not the jira\
+    \ adapter, which uses only HIGH-LEVEL\n  `jira.JIRA` methods; the probe uses only\
+    \ such methods (below).\n- No tomlkit; TOML read via stdlib `tomllib`; `_emit_toml`\
+    \ is fail-closed on nesting, so\n  an orchestrator + dedicated nested emitter\
+    \ are added (below).\n\n## Approach\nNew verb wired into the bridge group (NEW):\n\
+    - Parser: `commands.add_parser(\"suggest-mapping\", ...)` in\n  `src/rebar/_cli/_parsers/advanced/bridge.py`\
+    \ (beside `check-access` ~line 117), taking\n  `<PROJECT>` and `--write`.\n- Dispatch:\
+    \ add `\"suggest-mapping\"` to `bridge_cli`'s pass-through set\n  (`src/rebar/_cli/_bridge_commands.py:259`)\
+    \ + a `_passthrough`/`_passthrough_help`\n  branch \u2192 NEW handler `_bridge_suggest_mapping`\
+    \ (`_cli/__init__.py`, sibling of\n  `_bridge_probe`).\n\nProbe (NEW `src/rebar/_engine/rebar_reconciler/mapping_probe.py`,\
+    \ <800 LOC): a probe\nPORT with one narrow method per axis, each a thin call to\
+    \ a pycontribs `jira.JIRA`\nmethod. Default port built from `build_client_from_settings`\n\
+    (`adapters/jira_datacenter/transport.py:155`); tests inject a FAKE port \u2192\
+    \ offline. Pin\n`jira>=3.8,<4` (pyproject.toml:202).\n\nAxis grounding \u2014\
+    \ every axis uses a HIGH-LEVEL method (no private REST):\n- `issue_types` + `hierarchy`\
+    \ \u2192 `jira.JIRA.issue_types()` (read each `hierarchyLevel`;\n  if absent,\
+    \ `hierarchy` is DROPPED empty + note, not fabricated).\n- `priority_map` vocab\
+    \ \u2192 `jira.JIRA.priorities()`; `link_types` \u2192\n  `jira.JIRA.issue_link_types()`\
+    \ (documented public).\n- `statuses` vocab \u2192 `jira.JIRA.statuses()` (documented\
+    \ public). pycontribs exposes no\n  per-PROJECT status list publicly, so this\
+    \ is the GLOBAL set \u2014 the block documents that\n  honest limitation.\n- `create_defaults`\
+    \ stubs \u2192 `jira.JIRA.createmeta_issuetypes(<KEY>)` +\n  `createmeta_fieldtypes(<KEY>,\
+    \ <id>)` (public createmeta API); stub only for a\n  `required: true` field NOT\
+    \ in the create BASELINE (see AC footer).\n- transition hints (best-effort) \u2192\
+    \ grounded in the ACTUAL transitions surface:\n  `jira.JIRA.search_issues(jql)`\
+    \ (CONFIRMED in DC adapter) fetches one sample issue per\n  discovered type, then\
+    \ `jira.JIRA.transitions(issue)` (CONFIRMED at\n  `adapters/jira_datacenter/transitions.py:80`).\
+    \ Jira returns transitions only from each\n  sample's CURRENT status, so the set\
+    \ is inherently partial \u2192 flagged best-effort.\n  `status_map` stays identity-seeded;\
+    \ transition data is an ADVISORY marker, not complete.\n\nAnchor: `search_issues`,\
+    \ `transitions`, `fields` are confirmed in-repo on this same\n`jira.JIRA` client\
+    \ (DC adapter); the vocabulary getters are documented pycontribs 3.x\npublic API.\n\
+    \nEmit: build `{\"projects\": {<KEY>: {<layer>}}}`.\n- Default (no `--write`):\
+    \ serialize that block to stdout as TOML. NEVER writes; reads only.\n- `--write`:\
+    \ mirror `write_jira_config`'s target-selection + read-whole/mutate/atomic-\n\
+    \  replace. Target via `config._discover_project_config` \u2192 existing `rebar.toml`,\
+    \ else\n  create `<repo_root>/rebar.toml`; user `pyproject.toml` is NEVER edited.\
+    \ Read with\n  `tomllib`, DEEP-MERGE under `data[\"mapping\"][\"projects\"][<KEY>]`\
+    \ (EXISTING keys win,\n  hand edits never clobbered), re-emit the WHOLE file via\
+    \ the orchestrator below, atomic\n  `os.replace`.\n\nSerialization \u2014 OPTION\
+    \ B, a top-level ORCHESTRATOR (a real `rebar.toml` mixes FLAT\nsiblings `[jira]`/`[tracker]`\
+    \ with the NESTED `[mapping.*]`, so no single emitter can\nwrite the whole file).\
+    \ `_config_writer._emit_toml` (:188) fail-closes on any nested\nsub-table \u2014\
+    \ pinned by `tests/unit/test_jira_onboard.py:149`\n(`_emit_toml({\"jira\": {\"\
+    nested\": {\"k\": \"v\"}}})` must raise `ConfigError`); UNTOUCHED. S8\nadds two\
+    \ NEW helpers in `_config_writer.py`:\n- `_emit_nested_toml(name, table)` \u2014\
+    \ recurses one nested table into dotted-header\n  sub-tables (`[mapping.projects.KEY.status_map]`);\
+    \ only ever handed the `mapping` table.\n- `_emit_config_toml(data)` \u2014 orchestrator:\
+    \ split off the reserved `mapping` key, emit\n  ALL remaining top-level items\
+    \ (scalars + the flat `[jira]`/`[tracker]` siblings it did\n  NOT author) via\
+    \ the EXISTING `_emit_toml`, then append\n  `_emit_nested_toml(\"mapping\", data[\"\
+    mapping\"])` when present, joined by a blank line.\n`_emit_toml` never receives\
+    \ the `mapping` table, so its fail-closed contract + pinned test\nstand; flat\
+    \ siblings round-trip through the flat path, nested `[mapping.*]` through the\n\
+    nested path. The `--write` handler calls `_emit_config_toml`; `write_jira_config`\
+    \ keeps\ncalling `_emit_toml` unchanged. HONEST SCOPE: `tomllib` drops comments\
+    \ (no tomlkit), so\nthe merge keeps existing hand-edited VALUES (existing keys\
+    \ win) but inline comments in\n`[mapping]` are NOT preserved.\n\n## Scope\n- NEW\
+    \ `mapping_probe.py` (probe port + per-axis getters + layer builder + TOML emit),\n\
+    \  <800 LOC.\n- NEW `_config_writer._emit_nested_toml` + `_emit_config_toml` orchestrator\
+    \ (per\n  Serialization); `_emit_toml` (:188) + pinned `tests/unit/test_jira_onboard.py:149`\n\
+    \  stay UNTOUCHED.\n- Wire: `bridge.py` parser, `_bridge_commands.py` dispatch,\
+    \ `__init__.py` handler (NEW).\n- Out of scope: WRITE to Jira; live-credential\
+    \ CI gating; comment round-tripping.\n\n## Testing\nTests use a FAKE probe port\
+    \ returning canned issue-type/priority/link-type/status/\ncreatemeta/search+transitions\
+    \ data \u2014 fully offline, no live Jira or CI credential\n(portability rule).\
+    \ A live smoke run is manual, never a CI gate. New tests in\n`tests/unit/rebar_reconciler/test_probe.py`.\n\
+    \n## Acceptance Criteria\n- [x] `test_probe_emits_mapping` \u2014 `rebar bridge\
+    \ suggest-mapping <KEY>` against the fake\n      port emits a `[tool.rebar.mapping]`\
+    \ block with discovered vocabulary (`issue_types`,\n      `statuses`, `link_types`,\
+    \ priorities, `hierarchy` when `hierarchyLevel` present),\n      identity-seed\
+    \ axis maps, and `create_defaults` stubs.\n- [x] `test_probe_is_read_only` \u2014\
+    \ default invocation writes NO file; the fake port\n      records only reads (no\
+    \ create/transition/delete), distinct from `check-access`.\n- [x] `test_probe_write_preserves_edits`\
+    \ \u2014 `--write` into a `rebar.toml` that already\n      has flat `[jira]`+`[tracker]`\
+    \ sections PRESERVES both AND adds `[mapping.*]`;\n      deep-merge under `projects.<KEY>`\
+    \ keeps a pre-existing hand-edited mapping key\n      (existing keys win); `pyproject.toml`\
+    \ is never edited.\n- [x] `test_probe_transitions_best_effort` \u2014 fake port\
+    \ returns `search_issues` samples +\n      per-issue `transitions()` limited to\
+    \ each sample's current status; emitted\n      transition hints are flagged best-effort/partial\
+    \ (comment/marker), never asserted\n      complete; `status_map` stays identity-seeded.\n\
+    \n\"create_defaults\" baseline (concrete): the outbound create path\n`adapters/jira/outbound_fields.py:140-158`\
+    \ (`map_local_to_remote`) already supplies\n`summary`, `description`, `issuetype`,\
+    \ `priority`, `assignee`, conditionally `status`+\n`parent`; a stub is emitted\
+    \ ONLY for a createmeta `required: true` field NOT in that\nbaseline.\n\nTest\
+    \ tier: unit"
+  label: finding
+- input: "# Persist ticket digest as a REVIEW_RESULT-style sidecar record on the ticket\
+    \ (shared cache)\n\n## Why\nThe digest is a billable LLM artifact we never want\
+    \ to recompute. Storing it in the SHARED store (auto-pushed) makes one client's\
+    \ enrichment a cache-hit for every other client. rebar already has the exact precedent:\
+    \ `REVIEW_RESULT` \u2014 a reducer-IGNORED, preserved-and-ignored, per-ticket\
+    \ LLM-derived sidecar event. We reuse that pattern rather than inventing a reducer-projected\
+    \ type, avoiding compaction/SNAPSHOT entanglement.\n\n## What\nA new `TICKET_DIGEST`\
+    \ sidecar event carrying the S1 digest plus a `content_hash` of the fields it\
+    \ was derived from. Freshness is computed on read: the digest is CURRENT iff its\
+    \ stored `content_hash` (and `model`/`schema` version tags) match the ticket's\
+    \ current values; otherwise it reads as stale. Latest-wins: a scan reduces to\
+    \ the most-recent `TICKET_DIGEST` per ticket (by HLC order), so re-enrichment\
+    \ supersedes rather than accumulates in the projection.\n\n## Scope (exact edit\
+    \ targets \u2014 every registry a new event type touches)\n- `src/rebar/_store/event_append.py`:\
+    \ add `\"TICKET_DIGEST\"` to the `EVENT_TYPES` write allow-list (line ~38) or\
+    \ `stage_and_commit` raises StoreError.\n- `src/rebar/reducer/_version.py`: add\
+    \ `\"TICKET_DIGEST\"` to `_NON_REPLAY_KNOWN_TYPES` (line 44), NOT `KNOWN_EVENT_TYPES`\
+    \ \u2014 so it is preserved-and-ignored by the main reducer, is never squashed\
+    \ into SNAPSHOT by compaction, and never trips the fsck \"newer-than-binary\"\
+    \ warning (mirrors REVIEW_RESULT exactly).\n- A `latest_ticket_digest(ticket_id)`\
+    \ reader + `emit`/`prune(keep=1)` in a new `src/rebar/llm/overlap/digest_sidecar.py`\
+    \ (modeled on `plan_review/sidecar.py`) that returns the current digest per ticket\
+    \ for the retrieval stage; `content_hash` helper over a NAMED, versioned field\
+    \ set (`DIGEST_HASH_FIELDS` = title + description + comment bodies, normalized:\
+    \ strip trailing whitespace, join with \"\\n\"). Bump a module-constant `DIGEST_HASH_VERSION`\
+    \ (in `digest_sidecar.py`) when the field set changes so all cached digests invalidate\
+    \ deterministically.\n- `show` renders digest presence + freshness only (not the\
+    \ raw digest text); the raw digest is available to retrieval. No new field in\
+    \ `ticket_state.schema.json` (sidecar, not compiled state), matching REVIEW_RESULT.\n\
+    - Fail-closed freshness: if the current content-hash cannot be computed (partial\
+    \ read), the digest reads as NOT-current (never falsely fresh) \u2014 mirroring\
+    \ `compute_validity` returning None on read error.\n- Prune/retire: a digest for\
+    \ a deleted/archived ticket is dropped by a `prune(keep=1)` retention mirroring\
+    \ `src/rebar/llm/plan_review/sidecar.py` (`emit`+`prune`+`latest_*`); the digest\
+    \ sidecar is a new `src/rebar/llm/overlap/digest_sidecar.py` modeled on it; document\
+    \ that concurrent same-ticket digests from two clients are safe \u2014 both are\
+    \ TICKET_DIGEST appends, latest-by-HLC wins on read, idempotent.\n\n## Dependencies\n\
+    S1 (indecisive-callous-armyworm) \u2014 produces the `ticket_digest` payload this\
+    \ stores.\n\n## Testing\n- Unit `tests/unit/test_ticket_digest_store.py`: write\u2192\
+    read roundtrip; freshness flips stale when title/description/comment changes;\
+    \ fail-closed on unreadable state; latest-wins on two appends; older binary preserves-and-ignores\
+    \ the event (fsck no WARN); archived ticket's digest pruned.\n\n## Acceptance\
+    \ Criteria\n- [ ] A digest is written via a `TICKET_DIGEST` event and read back\
+    \ per ticket; verified by `pytest tests/unit/test_ticket_digest_store.py::test_roundtrip`.\n\
+    - [ ] Freshness is computed on read: mutating any `DIGEST_HASH_FIELDS` field marks\
+    \ the digest stale; verified by `::test_freshness_flips`.\n- [ ] `TICKET_DIGEST`\
+    \ is in `EVENT_TYPES` and `_NON_REPLAY_KNOWN_TYPES` (not `KNOWN_EVENT_TYPES`);\
+    \ an older binary preserves-and-ignores it with no fsck WARN.\n- [ ] An unchanged\
+    \ ticket is NOT re-enriched: the drain skips a ticket whose current content-hash\
+    \ + model/schema tags match its stored digest; verified by `::test_no_reextract_unchanged`.\n\
+    - [ ] Freshness flips stale on ANY of: content-hash mismatch, `model` change,\
+    \ or `schema`/`DIGEST_HASH_VERSION` change; verified by `::test_freshness_all_triggers`.\n\
+    - [ ] Unreadable current state yields NOT-current (fail-closed), never falsely\
+    \ fresh.\n- [ ] Two concurrent same-ticket digest appends resolve latest-by-HLC\
+    \ on read (idempotent, no duplication); an archived/deleted ticket's digest is\
+    \ pruned.\n"
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-T6
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

@@ -1,0 +1,707 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: T5e
+  expect: finding
+  id: plan-review-T5e-fire-0
+  input: "## Context / Problem\n\nPass 2 (`src/rebar/llm/review_kernel/verify.py`,\
+    \ questions in `verify_models.py`, prompts `reviewers/plan_review_verifier*.md`,\
+    \ `temperature: 0`, standard class = Sonnet on Bedrock) is the cheapest LLM pass.\
+    \ A question/prompt change can be measured by re-verifying the *stored* Pass-1\
+    \ findings and comparing to the stored answers.\n\n**Production input, byte-identical\
+    \ \u2014 exact seam call.** `verify.finding_listing(batch)` (verify.py:101-108)\
+    \ renders ONLY `claim`/`criteria`/`evidence`/`impact` per finding \u2014 NOT `location`.\
+    \ The real signature (verify.py:345) is `verify_findings(findings, *, context,\
+    \ run_chunk, window_tokens, est_tokens, headroom=DEFAULT_VERIFY_WINDOW_HEADROOM)`.\
+    \ Production's plan-review wrapper (`sizing.verify_request_chunks`, sizing.py:187-206)\
+    \ supplies `window_tokens=sizing.largest_window_tokens(model)` and `est_tokens=det_floor.est_tokens`.\
+    \ The replay calls `verify_findings(stored_findings, context=plan_context, run_chunk=<candidate\
+    \ runner>, window_tokens=sizing.largest_window_tokens(standard_class_model), est_tokens=det_floor.est_tokens)`\
+    \ via `RunRequest.for_structured(..., bounds=RunRequest.INHERIT_POLICY)` (the\
+    \ repo-wide ratchet for single-turn structured calls).\n\n**Missing-answer handling.**\
+    \ `verify_findings` returns `{\"verifications\": {index: {severity_attributes,\
+    \ binary}}, \"omitted\": [...]}`; a chunk whose `run_chunk` raises contributes\
+    \ NO verifications. Excluded from \u03BA/agreement with a reported \"no-answer\"\
+    \ count per question, per binary sub-question AND per severity attribute independently\
+    \ (a question that is no-answer for every finding still appears in the report\
+    \ with `n=0`, not silently dropped).\n\n**Ledger \u2014 flat per-sample, not token-derived.**\
+    \ `ledger.estimate(tier, sample_n)` returns `PER_SAMPLE_ESTIMATE_USD[tier] * sample_n`.\
+    \ Pre-flight is `ledger.reserve(ledger.estimate(\"tier1\", n))` before any call;\
+    \ an empty sampling pool raises `ValueError` immediately (before any ledger interaction)\
+    \ rather than silently producing a `sample_n: 0` report.\n\n**Tier1's candidate\
+    \ is a NEW concept, not Pass-3's `Candidate`/`CANDIDATES`.** `VerifierCandidate`\
+    \ in `src/rebar/llm/evals/plan_replay/verifier_candidates.py`: `prompt_path: str\
+    \ | None = None` (`None` = production's shipped prompt/questions) plus `load_verifier_candidate(path_or_none)`.\n\
+    \n**Distribution shift, defined \u2014 categorical vs continuous axes.** `decide.validity(binary)`\
+    \ and `priority = validity * impact` are CONTINUOUS [0,1] scalars binned into\
+    \ 10 FIXED equal-width buckets; impact's underlying categorical severity-attribute/binary\
+    \ answers use their own closed vocabulary directly as bins. Per-bucket COUNT DELTA\
+    \ + TOTAL VARIATION DISTANCE for every axis.\n\n## Approach\n\nBuilt `src/rebar/llm/evals/plan_replay/tier1.py`,\
+    \ `sampling.py`, `verifier_candidates.py`; `__main__.py`'s `tier1` subparser;\
+    \ `eval_solver.py`'s verifier `run_case` arm mirroring the novelty arm.\n\n##\
+    \ Scope\n\n- `src/rebar/llm/evals/plan_replay/tier1.py`, `sampling.py`, `verifier_candidates.py`\
+    \ (new)\n- `src/rebar/llm/evals/plan_replay/__main__.py` (edited)\n- `src/rebar/llm/evals/eval_solver.py`\
+    \ (edited)\n- `tests/unit/test_subcall_class_selection.py` (edited \u2014 registered\
+    \ the two new RunRequest sites)\n- `docs/experiments/plan-review-gate/replay/tier1-current-ddc8fb442281.md`\
+    \ (generated, committed)\n- `docs/experiments/plan-review-gate/replay/ledger.jsonl`\
+    \ (real commissioning-run row, committed)\n- `tests/unit/evals/test_plan_replay_tier1.py`\
+    \ (new, 24 tests)\n\n## Testing\n\n24 unit tests, mutation-tested (no-answer exclusion,\
+    \ distribution-shift bucketing, ledger pre-flight-before-any-call ordering, run_id\
+    \ path-sanitization, the per-question-agreement fully-no-answer surfacing fix).\
+    \ Landed via Gerrit changes 2433 (main harness, 5 patchsets \u2014 CI's `RunRequest.for_structured`\
+    \ ratchet + a real per-question-agreement bug caught by LLM-Review, both fixed)\
+    \ and 2440 (real commissioning report + ledger.jsonl + a report-filename cosmetic\
+    \ fix). Live commissioning run: N=60, seed=0, reproduction candidate (`VerifierCandidate(prompt_path=None)`).\n\
+    \n## Acceptance Criteria\n\n- [x] `python -m rebar.llm.evals.plan_replay tier1\
+    \ --n 60` over the real corpus produced per-question agreement (with no-answer\
+    \ counts) and distribution shift for a stratified sample of 60/60 requested; checked\
+    \ by `docs/experiments/plan-review-gate/replay/tier1-current-ddc8fb442281.md`.\n\
+    - [x] The reproduction run (`VerifierCandidate(prompt_path=None)`) is recorded\
+    \ with its per-question agreement as the Pass-2 noise floor; checked by the same\
+    \ report (e.g. `absence_confirmed_in_context`: raw=0.735 kappa=0.582 n=328 no_answer=20).\n\
+    - [x] Every call was priced via `ledger.estimate(\"tier1\", n)`/`ledger.reserve`\
+    \ and used the Bedrock standard-class model id; checked by the ledger.jsonl row:\
+    \ `{\"run_id\": \"tier1-current-ddc8fb442281\", \"tier\": \"tier1\", \"sample_n\"\
+    : 60, \"models\": {\"pass2\": \"bedrock:us.anthropic.claude-sonnet-4-6\"}, \"\
+    usd\": 6.72}`.\n- [x] Commissioning spend for this ticket \u2264 $40; actual real\
+    \ spend $6.72 (622413 input / 265196 output / 356518 cache-write tokens), well\
+    \ under the cap; checked by the ledger.jsonl row above.\n- [x] Unit tests pass\
+    \ in `make test` (24/24 passing; full CI `Verified` gate green on both Gerrit\
+    \ changes)."
+- corpus: rebar
+  criterion: T5e
+  expect: finding
+  id: plan-review-T5e-fire-1
+  input: "## Context\n\nA 200 from `/health` does not establish that the container\
+    \ can serve an MCP request, yet it is the\nonly thing the blue-green cutover waits\
+    \ for. `/health` is a FastMCP `custom_route` registered\ndeliberately OUTSIDE\
+    \ the auth middleware and the DNS-rebinding guard (`src/rebar/_mcp_health.py`,\
+    \ `register_health_route`), and\n`infra/scripts/autodeploy.sh` polls `GET http://127.0.0.1:<newport>/health`\
+    \ until 200 and flips\nthe nginx upstream \u2014 the deploy path never issues\
+    \ one `/mcp` request. Measured on the box 2026-08-28: `/health` 200 at 20:21:29.87,\n\
+    cutover 20:21:30, first `/mcp` request 20:22:24 \u2014 promoted 54 s before it\
+    \ served one. A\ncontainer whose `REBAR_MCP_HTTP_ALLOWED_HOSTS` does not admit\
+    \ the hostname real traffic carries\nanswers `/health` 200 while 421-ing every\
+    \ real request, and the deploy promotes it. Same class as\n`mobile-groovy-badger`\
+    \ (a storeless container passing this gate), which established that `/health`\n\
+    must carry enough signal for the gate to mean something.\n\n## Approach\n\nDrive\
+    \ one real `initialize` through this server's own `StreamableHTTPSessionManager`\
+    \ inside the\nASGI lifespan \u2014 after the session manager is running, before\
+    \ Starlette answers\n`lifespan.startup.complete` \u2014 and publish the outcome\
+    \ as a `handshake` object on `/health` beside\n`in_flight` and `store`. Uvicorn\
+    \ accepts no connection until lifespan startup completes (Starlette's `Router.lifespan`\n\
+    sends `lifespan.startup.complete` only after entering the lifespan context), so\
+    \ a later `/health`\n200 proves by construction that this container has already\
+    \ served an MCP handshake. Only that ordering\nbuys the implication, so the probe\
+    \ is no background task or lazy `/health` field.\n\n**Conclusive.** The probe\
+    \ calls `mcp.session_manager.handle_request(scope, receive, send)` \u2014 the\n\
+    same entry point the `/mcp` route serves through (`StreamableHTTPASGIApp(self._session_manager)`,\n\
+    `mcp/server/fastmcp/server.py:970`). A 200 cannot be produced unless the transport-security\
+    \ guard\nadmitted the Host, `StreamableHTTPServerTransport` parsed the body, the\
+    \ session manager's task\ngroup started a server task, and `Server.run` answered\
+    \ the `initialize` JSON-RPC request. A throwaway in-process\nprobe against a `FastMCP`\
+    \ built as `build_server` builds it returned 200 in 3.0 ms with an\nadmitting\
+    \ allowlist and 421 \"Invalid Host header\" in 2.1 ms with a non-admitting one.\
+    \ Boundary:\nthe drive does not traverse `RequireAuthMiddleware`/`ProxyAuthMiddleware`\
+    \ \u2014 the server holds no\ncredential to present to itself, so an auth-enabled\
+    \ boot would always report failure; the\nhandshake proves the transport + protocol\
+    \ path, not auth config.\n\n**Bounded.** The drive runs under `anyio.fail_after(budget)`\
+    \ with module constant\n`DEFAULT_HANDSHAKE_BUDGET_SECONDS = 10`, wrapped so a\
+    \ `TimeoutError`, any `Exception`, or a\nnon-200 status becomes a reported failure\
+    \ record rather than a raise; boot then continues. The\ntimeout scope and clock\
+    \ are injected parameters (`fail_after=anyio.fail_after`,\n`monotonic=time.monotonic`)\
+    \ \u2014 the seam `drain_then_exit(..., sleep=, monotonic=)` already uses\nhere\
+    \ \u2014 so the bound is provable with a fake clock instead of by sleeping.\n\n\
+    **Probe Host** (`select_probe_host`) is a total function of the server's own\n\
+    `TransportSecuritySettings` and bind: (1) the first `allowed_hosts` entry that\
+    \ is a literal host\n(no `*`) \u2014 on the box `rebar.solutions.navateam.com`\
+    \ (`infra/compose/docker-compose.yml:359`),\nwhat real traffic carries; (2) else\
+    \ the first `host:*` entry materialized as `host:<bind port>`,\nthe form `_validate_host`\
+    \ matches (`mcp/server/transport_security.py`); (3) else the bind address,\n`0.0.0.0`/`::`\
+    \ normalized to `127.0.0.1`. An allowlist admitting nothing usable \u2014 empty,\
+    \ or only unsupported wildcard forms such as\n`*.example.com`, which `_validate_host`\
+    \ can never match \u2014 falls to (3) and is refused 421 by its\nown guard: the\
+    \ AC-2 case. Sourcing the Host from the allowlist rather than the bind is deliberate:\n\
+    the box binds `0.0.0.0:8091` (`docker-compose.yml:337`) and allows only the public\
+    \ hostname, so a\nbind-addressed probe would report a correct production container\
+    \ as failed.\n\nThe deploy gate closes as the store gate did (`autodeploy.sh`\
+    \ step 5b): after `/health` 200,\nrefuse the upstream flip when `handshake.ok`\
+    \ is present and false; an absent field promotes\n(mixed-version safety, as the\
+    \ `store` gate already treats an older container).\n\n## Scope\n\n- `src/rebar/_mcp_health.py`\
+    \ \u2014 `select_probe_host`, the ASGI `initialize` drive, the bounded\n  never-raising\
+    \ `run_startup_handshake`, `install_startup_handshake` (wraps\n  `app.router.lifespan_context`,\
+    \ unwrapping the `ProxyAuthMiddleware` wrapper when present), the\n  `handshake`\
+    \ field on `/health`, and its call from `run_http_with_grace`. 372 LOC today;\
+    \ the\n  addition stays well under the 800 cap.\n- `tests/unit/test_mcp_health_startup_handshake.py`\
+    \ \u2014 the new unit tests.\n- `tests/interfaces/facades/test_mcp_http_transport.py`\
+    \ \u2014 pin the new `/health` `handshake` key.\n- `infra/scripts/autodeploy.sh`\
+    \ \u2014 readiness gate on `handshake.ok`, mirroring 5b.\n- `tests/scripts/test_autodeploy_mcp_bluegreen.py`\
+    \ \u2014 deploy-gate tests on the existing `mcp_box`\n  harness, which already\
+    \ stubs per-port `/health` bodies.\n\nNo new config key: the budget is a module\
+    \ constant, for the reason the module docstring records\nfor `DEFAULT_SHUTDOWN_GRACE_SECONDS`\
+    \ (a key ripples into `MCP_ENV_VARS` / `server.json`).\n\n## Testing\n\nEvery\
+    \ assertion is anchored: each test first proves the handshake actually RAN (a\
+    \ recorded drive\ncount, or the record's presence) and only then asserts its outcome\
+    \ \u2014 an assertion that passes when\nthe handshake never ran is this bug restated.\
+    \ Both directions are covered (an admitting allowlist\npasses AND a non-admitting\
+    \ one fails), the bound is proved with an injected clock rather than a\nsleep,\
+    \ and each production edit is then reverted individually with the targeted test\
+    \ required to\nfail (return code checked, seed confirmed applied). Tests are named\
+    \ per criterion\nbelow, plus one covering `select_probe_host`'s three branches.\n\
+    \n## Acceptance Criteria\n\n- [ ] A correctly configured server reports a successful\
+    \ startup handshake on `/health`:\n      `test_correctly_configured_server_reports_a_successful_handshake`\
+    \ asserts the drive counter\n      incremented and the record is `{\"ok\": True,\
+    \ \"status\": 200}` with numeric `elapsed_ms`.\n- [ ] A server whose transport-security\
+    \ host allowlist does not admit its own probe reports the\n      handshake as\
+    \ failed with the refusing status instead of reporting ready:\n      `test_unadmitted_probe_host_is_reported_as_failed_with_421`\
+    \ asserts `ok is False`,\n      `status == 421`.\n- [ ] A handshake that exceeds\
+    \ its budget is reported as a failure and boot continues:\n      `test_a_hanging_drive_is_bounded_by_the_budget`\
+    \ (injected clock, no sleep) asserts the call\n      returns a failure record\
+    \ naming the timeout.\n- [ ] A handshake whose drive raises never propagates the\
+    \ exception:\n      `test_a_raising_drive_is_reported_not_propagated` asserts\
+    \ the failure record carries the\n      message and the lifespan still yields.\n\
+    - [ ] The handshake completes inside the ASGI lifespan before uvicorn accepts\
+    \ its first\n      connection: `test_handshake_is_recorded_before_lifespan_startup_complete`\
+    \ drives the raw\n      ASGI lifespan protocol and asserts the record exists before\
+    \ `lifespan.startup.complete`.\n- [ ] The blue-green cutover refuses to promote\
+    \ a container reporting a failed handshake:\n      `test_failed_handshake_container_is_not_promoted`\
+    \ asserts `mcp-handshake-failed` is logged,\n      the upstream include is byte-identical,\
+    \ nginx not reloaded, the container removed.\n- [ ] A container whose `/health`\
+    \ predates the field is still promoted (mixed-version safety):\n      `test_container_with_no_handshake_field_still_promotes`\
+    \ asserts the upstream flips.\n- [ ] `make lint`, `make typecheck` and the affected\
+    \ test modules exit 0 in-session, and each\n      production edit reverted individually\
+    \ makes its targeted test fail (return code checked).\n"
+- corpus: rebar
+  criterion: T5e
+  expect: finding
+  id: plan-review-T5e-fire-2
+  input: '## Context and evidence
+
+
+    The remaining macOS critical path is filesystem-heavy. The N=3000 import long
+    pole reproduces at 20.19-21.63s on the same macOS host with 15.39-16.65s system
+    CPU versus 4.59-5.67s user CPU. cProfile attributes 13.69s to 24 required git-add/git-commit
+    pairs, while the full default suite creates thousands of temporary Git stores
+    below pytest --basetemp. The workflow deliberately uses runner.temp rather than
+    /tmp because the macOS tmp cleaner previously deleted live test trees.
+
+
+    Maintained OSS precedent matches this mechanism. Apple Git CI creates a 4GB APFS
+    RAM disk for test output and documents greater-than-2x test speedup from avoiding
+    slow storage for many small writes (apple-oss-distributions/Git src/git/.gitlab-ci.yml
+    lines 82-88 at 6b2f9bfe). Aeron creates a macOS APFS RAM disk in GitHub Actions
+    for its temporary test filesystem (aeron-io/aeron .github/workflows/ci.yml lines
+    62-68 at 092f184a). Git t/perf/README says putting test roots on tmpfs can massively
+    speed the suite. Tracker search found no prior RAM-disk/tmpfs proposal or rejection.
+    This changes storage placement only: no test, worker, platform, behavioral assertion,
+    coverage, mutation work, or runner is removed or added.
+
+
+    Operator direction: do not land a control-only patchset, because an extra full-matrix
+    run would create the contention this work is intended to reduce. Use the next
+    full Verify run initiated by another session as the timing control. Storage sizing
+    comes from the stable local full-suite temp tree or one local explicit-basetemp
+    reproduction; only an implementation change may trigger another Gerrit run.
+
+
+    ## Plan
+
+
+    1. Watch the next unrelated full Gerrit Verify run for ambient context without
+    modifying it, and use a no-extra-run trusted-workflow control only when its selectors
+    and collection/pass/skip counts match the treatment. Capture macOS default/integration/job
+    and Ubuntu job wall times, slow-duration tail, queue delay, run conclusion, checked-out
+    patchset, and collection counts. The primary control ultimately captured as 31868300174
+    used runner.temp and matched the first treatment at 13,397 passed / 65 skipped
+    default and 158 passed / 11 skipped integration; unrelated-run timings remain
+    contextual rather than causal proof.
+
+    2. Measure retained temp allocated bytes and file count from a stable local full-suite
+    run using the same selectors and distinct explicit basetemps. Size the RAM disk
+    with at least 50% headroom while keeping it below 40% of detected runner physical
+    memory. If the requirement cannot fit, stop and report infeasibility rather than
+    risk memory pressure or a full volume.
+
+    3. In the existing build/test matrix job, create an APFS RAM disk only when runner.os
+    is macOS, after setup/gates and immediately before pytest. Publish its exact device
+    and /Volumes/RebarTests mount path through step outputs; /Volumes is outside the
+    /tmp and /var/folders locations subject to the macOS tmp cleaner. Non-macOS cells
+    continue using runner.temp byte-for-byte. Route both unchanged pytest selectors
+    to separate basetemps below that mount.
+
+    4. Always report filesystem type, allocated bytes, file count, and capacity, then
+    detach the exact device created by setup after both pytest tiers, including failure/cancellation
+    paths where GitHub permits cleanup. Do not use a broad disk target, persistent
+    mount, cache, extra runner, or extra job.
+
+    5. Add static workflow contract tests proving macOS-only creation, measured bounded
+    sizing, unchanged selectors/xdist worker counts/timeouts/coverage flags, distinct
+    default/integration basetemps, and always-run exact-device cleanup. Explicitly
+    re-run the existing workflow consumers tests/unit/test_ci_workflow_parity.py,
+    tests/unit/test_gate_step_tree_skew.py, tests/unit/test_extra_coverage_guard.py,
+    and tests/unit/test_worktree_python_pin.py; these consumers should remain unchanged
+    unless an existing invariant truly changes. Run actionlint and zizmor.
+
+    6. Push the implementation through Gerrit immediately. Compare matched selector/collection-count
+    treatments primarily with exact no-RAM control 31868300174 and secondarily with
+    recent green runs; report absolute/percentage savings and Ubuntu non-regression.
+    Retain only if the full matrix is green and both macOS default-suite and job wall
+    times improve by at least the larger of 5% or the observed recent-green range.
+    Worked 5% floor from the exact 17m26s default / 20m36s job control: treatment
+    must be at most 16m33.7s default and 19m34.2s job before any larger observed-range
+    requirement; otherwise revert the lifecycle.
+
+
+    ## Test contract card
+
+
+    authoritative_contract: .github/workflows/_build-and-test.yml executes the unchanged
+    default and integration pytest selectors on Ubuntu 3.11/3.12/3.13 and macOS 3.13,
+    with coverage once on Ubuntu 3.13.
+
+    trigger_preconditions: macOS matrix cell reaches the pytest steps after all existing
+    gates.
+
+    production_path: GitHub Actions creates an ephemeral APFS RAM device, pytest tmp_path/basetemp
+    writes real Git repositories there, then cleanup detaches only that device.
+
+    test_tier: static workflow contract tests plus the actual full Gerrit Verify matrix.
+
+    observable_postcondition: identical collection/pass/skip counts and gates, lower
+    macOS pytest/job wall time, bounded RAM use, no mounted device after cleanup.
+
+    negative_control: every Ubuntu cell keeps runner.temp and existing behavior; a
+    RAM-disk setup/sizing failure fails loudly before tests rather than silently changing
+    coverage.
+
+    collateral_invariants: no test selection, assertion, marker, worker count, timeout,
+    coverage, mutation shard, Python/platform cell, or runner concurrency changes.
+
+    ci_gate: actionlint, zizmor, workflow contract tests, full Gerrit Verify, LLM-Review.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] The next unrelated full Verify run records control macOS default/integration/job
+    wall times, Ubuntu job times, queue delay, slow tail, and conclusion without a
+    control-only patchset.
+
+    - [ ] Local retained-temp evidence yields at least 50% RAM-disk headroom below
+    40% of detected physical memory.
+
+    - [ ] The selected outcome is platform-safe: if retained, only macOS creates and
+    uses the APFS RAM disk while Ubuntu retains runner.temp; if rejected by the AC7
+    retention oracle, the RAM-disk lifecycle is absent and every cell uses runner.temp.
+
+    - [ ] Default and integration selectors, markers, xdist counts/distribution, timeouts,
+    coverage-once behavior, collection/pass/skip counts, and all platform/Python cells
+    remain unchanged.
+
+    - [ ] If the RAM-disk outcome is retained, cleanup runs under always(), reports
+    final filesystem usage, and detaches only the exact device created by setup; if
+    rejected by AC7, no RAM-disk cleanup lifecycle remains.
+
+    - [ ] Static workflow tests, actionlint, zizmor, focused/full pytest, LLM-Review,
+    and Gerrit Verified are green.
+
+    - [ ] Against a no-RAM control with matching selectors and collection/pass/skip
+    counts, both macOS default-suite and job wall times are lower than control by
+    at least the larger of 5% or the observed recent-green range, with no Ubuntu regression;
+    otherwise the experimental lifecycle is fully reverted. For the captured 17m26s
+    default / 20m36s job control, the 5% floor is at most 16m33.7s default and 19m34.2s
+    job before applying any larger observed-range requirement.'
+- corpus: rebar
+  criterion: T5e
+  expect: pass
+  id: plan-review-T5e-no_fire-0
+  input: "## Why\n\nDebugging-orchestration sessions periodically sweep for AWS +\
+    \ GitHub Actions errors\n\"since the last sweep.\" Passing the last-sweep timeline\
+    \ across sessions needs a durable,\nzero-noise carrier. We already use a dedicated\
+    \ long-lived `session_log` ticket\n(`tomophobic-stilllife-mayfly` / `b2dc-b1ab-0bd9-47f6`,\
+    \ tagged `ops-sweep`) as an\nappend-only ledger, but the convention is undocumented,\
+    \ so future sessions cannot\nreliably discover or extend it. `session_log` is\
+    \ the right carrier precisely because it\nis excluded from default `list`, `ready`/`next-batch`,\
+    \ and graph-health, and never syncs\nto Jira \u2014 an always-open ledger creates\
+    \ zero work-queue noise.\n\n## What\n\nDocument the \"ops error-sweep ledger\"\
+    \ convention in the docs and add a one-line pointer\nin AGENTS.md so debug sessions\
+    \ discover it. This is a DOCS-ONLY change \u2014 no source or\ntest code is touched.\n\
+    \n- `docs/user-guide.md`: add a new subsection (e.g. \"### Ops error-sweep ledger\"\
+    ) in/after\n  the existing \"## Session logs\" section, matching that section's\
+    \ concise, example-driven\n  style. Cover: the ledger is a `session_log` ticket\
+    \ (and why \u2014 queue/graph/Jira\n  exclusion); the current ledger id/alias\
+    \ + `ops-sweep` tag; discovery via\n  `rebar search \"ops-sweep\"`; the newest\
+    \ comment / `SWEEP <ISO-8601> | window <start>..<end>`\n  header convention and\
+    \ next-window rule; appending with `rebar comment <ledger-id>` (NOT\n  `session-log\
+    \ append`, which is session-keyed and auto-rotates); linking filed tickets\n \
+    \ with `rebar link <filed> <ledger-id> relates_to` (non-blocking relations only);\
+    \ and how\n  to recreate the ledger (`session-log start` + `tag ... ops-sweep`),\
+    \ with the tag+search\n  as the durable anchor.\n- `AGENTS.md`: extend ONLY the\
+    \ existing one-line \"Session logs\" pointer bullet under\n  \"Where to read\"\
+    \ to mention the ops error-sweep ledger convention. Keep it a pointer, not\n \
+    \ restated content (AGENTS.md policy: already-documented topics are one-line pointers\
+    \ into\n  docs/).\n\n## Scope\n\n- Files: `docs/user-guide.md` (new subsection),\
+    \ `AGENTS.md` (one-line pointer extension).\n- Out of scope: any code/test change;\
+    \ restating the full convention in AGENTS.md.\n\n## Acceptance Criteria\n\n- [\
+    \ ] `docs/user-guide.md` has a new subsection under \"## Session logs\" documenting\
+    \ the\n      ops error-sweep ledger convention accurately: session_log rationale,\
+    \ ledger id/alias\n      + `ops-sweep` tag, discovery via search, the `SWEEP ...\
+    \ | window ...` header +\n      next-window rule, append via `rebar comment` (not\
+    \ `session-log append`), link via\n      `relates_to`, and recreation via `session-log\
+    \ start` + tag.\n- [ ] `AGENTS.md`'s existing \"Session logs\" pointer bullet\
+    \ is extended by one line/clause\n      to mention the ops error-sweep ledger\
+    \ convention \u2014 a pointer only, no restated body.\n- [ ] The convention text\
+    \ matches the mechanics in docs/event-schema.md (\"The session_log\n      ticket\
+    \ type\") and docs/user-guide.md (\"Session logs\") \u2014 no contradictions.\n\
+    - [ ] `make lint` passes; no new tooling added; no source/test files changed."
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: "## Context / Problem\n\nPass 2 (`src/rebar/llm/review_kernel/verify.py`,\
+    \ questions in `verify_models.py`, prompts `reviewers/plan_review_verifier*.md`,\
+    \ `temperature: 0`, standard class = Sonnet on Bedrock) is the cheapest LLM pass.\
+    \ A question/prompt change can be measured by re-verifying the *stored* Pass-1\
+    \ findings and comparing to the stored answers.\n\n**Production input, byte-identical\
+    \ \u2014 exact seam call.** `verify.finding_listing(batch)` (verify.py:101-108)\
+    \ renders ONLY `claim`/`criteria`/`evidence`/`impact` per finding \u2014 NOT `location`.\
+    \ The real signature (verify.py:345) is `verify_findings(findings, *, context,\
+    \ run_chunk, window_tokens, est_tokens, headroom=DEFAULT_VERIFY_WINDOW_HEADROOM)`.\
+    \ Production's plan-review wrapper (`sizing.verify_request_chunks`, sizing.py:187-206)\
+    \ supplies `window_tokens=sizing.largest_window_tokens(model)` and `est_tokens=det_floor.est_tokens`.\
+    \ The replay calls `verify_findings(stored_findings, context=plan_context, run_chunk=<candidate\
+    \ runner>, window_tokens=sizing.largest_window_tokens(standard_class_model), est_tokens=det_floor.est_tokens)`\
+    \ via `RunRequest.for_structured(..., bounds=RunRequest.INHERIT_POLICY)` (the\
+    \ repo-wide ratchet for single-turn structured calls).\n\n**Missing-answer handling.**\
+    \ `verify_findings` returns `{\"verifications\": {index: {severity_attributes,\
+    \ binary}}, \"omitted\": [...]}`; a chunk whose `run_chunk` raises contributes\
+    \ NO verifications. Excluded from \u03BA/agreement with a reported \"no-answer\"\
+    \ count per question, per binary sub-question AND per severity attribute independently\
+    \ (a question that is no-answer for every finding still appears in the report\
+    \ with `n=0`, not silently dropped).\n\n**Ledger \u2014 flat per-sample, not token-derived.**\
+    \ `ledger.estimate(tier, sample_n)` returns `PER_SAMPLE_ESTIMATE_USD[tier] * sample_n`.\
+    \ Pre-flight is `ledger.reserve(ledger.estimate(\"tier1\", n))` before any call;\
+    \ an empty sampling pool raises `ValueError` immediately (before any ledger interaction)\
+    \ rather than silently producing a `sample_n: 0` report.\n\n**Tier1's candidate\
+    \ is a NEW concept, not Pass-3's `Candidate`/`CANDIDATES`.** `VerifierCandidate`\
+    \ in `src/rebar/llm/evals/plan_replay/verifier_candidates.py`: `prompt_path: str\
+    \ | None = None` (`None` = production's shipped prompt/questions) plus `load_verifier_candidate(path_or_none)`.\n\
+    \n**Distribution shift, defined \u2014 categorical vs continuous axes.** `decide.validity(binary)`\
+    \ and `priority = validity * impact` are CONTINUOUS [0,1] scalars binned into\
+    \ 10 FIXED equal-width buckets; impact's underlying categorical severity-attribute/binary\
+    \ answers use their own closed vocabulary directly as bins. Per-bucket COUNT DELTA\
+    \ + TOTAL VARIATION DISTANCE for every axis.\n\n## Approach\n\nBuilt `src/rebar/llm/evals/plan_replay/tier1.py`,\
+    \ `sampling.py`, `verifier_candidates.py`; `__main__.py`'s `tier1` subparser;\
+    \ `eval_solver.py`'s verifier `run_case` arm mirroring the novelty arm.\n\n##\
+    \ Scope\n\n- `src/rebar/llm/evals/plan_replay/tier1.py`, `sampling.py`, `verifier_candidates.py`\
+    \ (new)\n- `src/rebar/llm/evals/plan_replay/__main__.py` (edited)\n- `src/rebar/llm/evals/eval_solver.py`\
+    \ (edited)\n- `tests/unit/test_subcall_class_selection.py` (edited \u2014 registered\
+    \ the two new RunRequest sites)\n- `docs/experiments/plan-review-gate/replay/tier1-current-ddc8fb442281.md`\
+    \ (generated, committed)\n- `docs/experiments/plan-review-gate/replay/ledger.jsonl`\
+    \ (real commissioning-run row, committed)\n- `tests/unit/evals/test_plan_replay_tier1.py`\
+    \ (new, 24 tests)\n\n## Testing\n\n24 unit tests, mutation-tested (no-answer exclusion,\
+    \ distribution-shift bucketing, ledger pre-flight-before-any-call ordering, run_id\
+    \ path-sanitization, the per-question-agreement fully-no-answer surfacing fix).\
+    \ Landed via Gerrit changes 2433 (main harness, 5 patchsets \u2014 CI's `RunRequest.for_structured`\
+    \ ratchet + a real per-question-agreement bug caught by LLM-Review, both fixed)\
+    \ and 2440 (real commissioning report + ledger.jsonl + a report-filename cosmetic\
+    \ fix). Live commissioning run: N=60, seed=0, reproduction candidate (`VerifierCandidate(prompt_path=None)`).\n\
+    \n## Acceptance Criteria\n\n- [x] `python -m rebar.llm.evals.plan_replay tier1\
+    \ --n 60` over the real corpus produced per-question agreement (with no-answer\
+    \ counts) and distribution shift for a stratified sample of 60/60 requested; checked\
+    \ by `docs/experiments/plan-review-gate/replay/tier1-current-ddc8fb442281.md`.\n\
+    - [x] The reproduction run (`VerifierCandidate(prompt_path=None)`) is recorded\
+    \ with its per-question agreement as the Pass-2 noise floor; checked by the same\
+    \ report (e.g. `absence_confirmed_in_context`: raw=0.735 kappa=0.582 n=328 no_answer=20).\n\
+    - [x] Every call was priced via `ledger.estimate(\"tier1\", n)`/`ledger.reserve`\
+    \ and used the Bedrock standard-class model id; checked by the ledger.jsonl row:\
+    \ `{\"run_id\": \"tier1-current-ddc8fb442281\", \"tier\": \"tier1\", \"sample_n\"\
+    : 60, \"models\": {\"pass2\": \"bedrock:us.anthropic.claude-sonnet-4-6\"}, \"\
+    usd\": 6.72}`.\n- [x] Commissioning spend for this ticket \u2264 $40; actual real\
+    \ spend $6.72 (622413 input / 265196 output / 356518 cache-write tokens), well\
+    \ under the cap; checked by the ledger.jsonl row above.\n- [x] Unit tests pass\
+    \ in `make test` (24/24 passing; full CI `Verified` gate green on both Gerrit\
+    \ changes)."
+  label: finding
+- input: "## Context\n\nA 200 from `/health` does not establish that the container\
+    \ can serve an MCP request, yet it is the\nonly thing the blue-green cutover waits\
+    \ for. `/health` is a FastMCP `custom_route` registered\ndeliberately OUTSIDE\
+    \ the auth middleware and the DNS-rebinding guard (`src/rebar/_mcp_health.py`,\
+    \ `register_health_route`), and\n`infra/scripts/autodeploy.sh` polls `GET http://127.0.0.1:<newport>/health`\
+    \ until 200 and flips\nthe nginx upstream \u2014 the deploy path never issues\
+    \ one `/mcp` request. Measured on the box 2026-08-28: `/health` 200 at 20:21:29.87,\n\
+    cutover 20:21:30, first `/mcp` request 20:22:24 \u2014 promoted 54 s before it\
+    \ served one. A\ncontainer whose `REBAR_MCP_HTTP_ALLOWED_HOSTS` does not admit\
+    \ the hostname real traffic carries\nanswers `/health` 200 while 421-ing every\
+    \ real request, and the deploy promotes it. Same class as\n`mobile-groovy-badger`\
+    \ (a storeless container passing this gate), which established that `/health`\n\
+    must carry enough signal for the gate to mean something.\n\n## Approach\n\nDrive\
+    \ one real `initialize` through this server's own `StreamableHTTPSessionManager`\
+    \ inside the\nASGI lifespan \u2014 after the session manager is running, before\
+    \ Starlette answers\n`lifespan.startup.complete` \u2014 and publish the outcome\
+    \ as a `handshake` object on `/health` beside\n`in_flight` and `store`. Uvicorn\
+    \ accepts no connection until lifespan startup completes (Starlette's `Router.lifespan`\n\
+    sends `lifespan.startup.complete` only after entering the lifespan context), so\
+    \ a later `/health`\n200 proves by construction that this container has already\
+    \ served an MCP handshake. Only that ordering\nbuys the implication, so the probe\
+    \ is no background task or lazy `/health` field.\n\n**Conclusive.** The probe\
+    \ calls `mcp.session_manager.handle_request(scope, receive, send)` \u2014 the\n\
+    same entry point the `/mcp` route serves through (`StreamableHTTPASGIApp(self._session_manager)`,\n\
+    `mcp/server/fastmcp/server.py:970`). A 200 cannot be produced unless the transport-security\
+    \ guard\nadmitted the Host, `StreamableHTTPServerTransport` parsed the body, the\
+    \ session manager's task\ngroup started a server task, and `Server.run` answered\
+    \ the `initialize` JSON-RPC request. A throwaway in-process\nprobe against a `FastMCP`\
+    \ built as `build_server` builds it returned 200 in 3.0 ms with an\nadmitting\
+    \ allowlist and 421 \"Invalid Host header\" in 2.1 ms with a non-admitting one.\
+    \ Boundary:\nthe drive does not traverse `RequireAuthMiddleware`/`ProxyAuthMiddleware`\
+    \ \u2014 the server holds no\ncredential to present to itself, so an auth-enabled\
+    \ boot would always report failure; the\nhandshake proves the transport + protocol\
+    \ path, not auth config.\n\n**Bounded.** The drive runs under `anyio.fail_after(budget)`\
+    \ with module constant\n`DEFAULT_HANDSHAKE_BUDGET_SECONDS = 10`, wrapped so a\
+    \ `TimeoutError`, any `Exception`, or a\nnon-200 status becomes a reported failure\
+    \ record rather than a raise; boot then continues. The\ntimeout scope and clock\
+    \ are injected parameters (`fail_after=anyio.fail_after`,\n`monotonic=time.monotonic`)\
+    \ \u2014 the seam `drain_then_exit(..., sleep=, monotonic=)` already uses\nhere\
+    \ \u2014 so the bound is provable with a fake clock instead of by sleeping.\n\n\
+    **Probe Host** (`select_probe_host`) is a total function of the server's own\n\
+    `TransportSecuritySettings` and bind: (1) the first `allowed_hosts` entry that\
+    \ is a literal host\n(no `*`) \u2014 on the box `rebar.solutions.navateam.com`\
+    \ (`infra/compose/docker-compose.yml:359`),\nwhat real traffic carries; (2) else\
+    \ the first `host:*` entry materialized as `host:<bind port>`,\nthe form `_validate_host`\
+    \ matches (`mcp/server/transport_security.py`); (3) else the bind address,\n`0.0.0.0`/`::`\
+    \ normalized to `127.0.0.1`. An allowlist admitting nothing usable \u2014 empty,\
+    \ or only unsupported wildcard forms such as\n`*.example.com`, which `_validate_host`\
+    \ can never match \u2014 falls to (3) and is refused 421 by its\nown guard: the\
+    \ AC-2 case. Sourcing the Host from the allowlist rather than the bind is deliberate:\n\
+    the box binds `0.0.0.0:8091` (`docker-compose.yml:337`) and allows only the public\
+    \ hostname, so a\nbind-addressed probe would report a correct production container\
+    \ as failed.\n\nThe deploy gate closes as the store gate did (`autodeploy.sh`\
+    \ step 5b): after `/health` 200,\nrefuse the upstream flip when `handshake.ok`\
+    \ is present and false; an absent field promotes\n(mixed-version safety, as the\
+    \ `store` gate already treats an older container).\n\n## Scope\n\n- `src/rebar/_mcp_health.py`\
+    \ \u2014 `select_probe_host`, the ASGI `initialize` drive, the bounded\n  never-raising\
+    \ `run_startup_handshake`, `install_startup_handshake` (wraps\n  `app.router.lifespan_context`,\
+    \ unwrapping the `ProxyAuthMiddleware` wrapper when present), the\n  `handshake`\
+    \ field on `/health`, and its call from `run_http_with_grace`. 372 LOC today;\
+    \ the\n  addition stays well under the 800 cap.\n- `tests/unit/test_mcp_health_startup_handshake.py`\
+    \ \u2014 the new unit tests.\n- `tests/interfaces/facades/test_mcp_http_transport.py`\
+    \ \u2014 pin the new `/health` `handshake` key.\n- `infra/scripts/autodeploy.sh`\
+    \ \u2014 readiness gate on `handshake.ok`, mirroring 5b.\n- `tests/scripts/test_autodeploy_mcp_bluegreen.py`\
+    \ \u2014 deploy-gate tests on the existing `mcp_box`\n  harness, which already\
+    \ stubs per-port `/health` bodies.\n\nNo new config key: the budget is a module\
+    \ constant, for the reason the module docstring records\nfor `DEFAULT_SHUTDOWN_GRACE_SECONDS`\
+    \ (a key ripples into `MCP_ENV_VARS` / `server.json`).\n\n## Testing\n\nEvery\
+    \ assertion is anchored: each test first proves the handshake actually RAN (a\
+    \ recorded drive\ncount, or the record's presence) and only then asserts its outcome\
+    \ \u2014 an assertion that passes when\nthe handshake never ran is this bug restated.\
+    \ Both directions are covered (an admitting allowlist\npasses AND a non-admitting\
+    \ one fails), the bound is proved with an injected clock rather than a\nsleep,\
+    \ and each production edit is then reverted individually with the targeted test\
+    \ required to\nfail (return code checked, seed confirmed applied). Tests are named\
+    \ per criterion\nbelow, plus one covering `select_probe_host`'s three branches.\n\
+    \n## Acceptance Criteria\n\n- [ ] A correctly configured server reports a successful\
+    \ startup handshake on `/health`:\n      `test_correctly_configured_server_reports_a_successful_handshake`\
+    \ asserts the drive counter\n      incremented and the record is `{\"ok\": True,\
+    \ \"status\": 200}` with numeric `elapsed_ms`.\n- [ ] A server whose transport-security\
+    \ host allowlist does not admit its own probe reports the\n      handshake as\
+    \ failed with the refusing status instead of reporting ready:\n      `test_unadmitted_probe_host_is_reported_as_failed_with_421`\
+    \ asserts `ok is False`,\n      `status == 421`.\n- [ ] A handshake that exceeds\
+    \ its budget is reported as a failure and boot continues:\n      `test_a_hanging_drive_is_bounded_by_the_budget`\
+    \ (injected clock, no sleep) asserts the call\n      returns a failure record\
+    \ naming the timeout.\n- [ ] A handshake whose drive raises never propagates the\
+    \ exception:\n      `test_a_raising_drive_is_reported_not_propagated` asserts\
+    \ the failure record carries the\n      message and the lifespan still yields.\n\
+    - [ ] The handshake completes inside the ASGI lifespan before uvicorn accepts\
+    \ its first\n      connection: `test_handshake_is_recorded_before_lifespan_startup_complete`\
+    \ drives the raw\n      ASGI lifespan protocol and asserts the record exists before\
+    \ `lifespan.startup.complete`.\n- [ ] The blue-green cutover refuses to promote\
+    \ a container reporting a failed handshake:\n      `test_failed_handshake_container_is_not_promoted`\
+    \ asserts `mcp-handshake-failed` is logged,\n      the upstream include is byte-identical,\
+    \ nginx not reloaded, the container removed.\n- [ ] A container whose `/health`\
+    \ predates the field is still promoted (mixed-version safety):\n      `test_container_with_no_handshake_field_still_promotes`\
+    \ asserts the upstream flips.\n- [ ] `make lint`, `make typecheck` and the affected\
+    \ test modules exit 0 in-session, and each\n      production edit reverted individually\
+    \ makes its targeted test fail (return code checked).\n"
+  label: finding
+- input: '## Context and evidence
+
+
+    The remaining macOS critical path is filesystem-heavy. The N=3000 import long
+    pole reproduces at 20.19-21.63s on the same macOS host with 15.39-16.65s system
+    CPU versus 4.59-5.67s user CPU. cProfile attributes 13.69s to 24 required git-add/git-commit
+    pairs, while the full default suite creates thousands of temporary Git stores
+    below pytest --basetemp. The workflow deliberately uses runner.temp rather than
+    /tmp because the macOS tmp cleaner previously deleted live test trees.
+
+
+    Maintained OSS precedent matches this mechanism. Apple Git CI creates a 4GB APFS
+    RAM disk for test output and documents greater-than-2x test speedup from avoiding
+    slow storage for many small writes (apple-oss-distributions/Git src/git/.gitlab-ci.yml
+    lines 82-88 at 6b2f9bfe). Aeron creates a macOS APFS RAM disk in GitHub Actions
+    for its temporary test filesystem (aeron-io/aeron .github/workflows/ci.yml lines
+    62-68 at 092f184a). Git t/perf/README says putting test roots on tmpfs can massively
+    speed the suite. Tracker search found no prior RAM-disk/tmpfs proposal or rejection.
+    This changes storage placement only: no test, worker, platform, behavioral assertion,
+    coverage, mutation work, or runner is removed or added.
+
+
+    Operator direction: do not land a control-only patchset, because an extra full-matrix
+    run would create the contention this work is intended to reduce. Use the next
+    full Verify run initiated by another session as the timing control. Storage sizing
+    comes from the stable local full-suite temp tree or one local explicit-basetemp
+    reproduction; only an implementation change may trigger another Gerrit run.
+
+
+    ## Plan
+
+
+    1. Watch the next unrelated full Gerrit Verify run for ambient context without
+    modifying it, and use a no-extra-run trusted-workflow control only when its selectors
+    and collection/pass/skip counts match the treatment. Capture macOS default/integration/job
+    and Ubuntu job wall times, slow-duration tail, queue delay, run conclusion, checked-out
+    patchset, and collection counts. The primary control ultimately captured as 31868300174
+    used runner.temp and matched the first treatment at 13,397 passed / 65 skipped
+    default and 158 passed / 11 skipped integration; unrelated-run timings remain
+    contextual rather than causal proof.
+
+    2. Measure retained temp allocated bytes and file count from a stable local full-suite
+    run using the same selectors and distinct explicit basetemps. Size the RAM disk
+    with at least 50% headroom while keeping it below 40% of detected runner physical
+    memory. If the requirement cannot fit, stop and report infeasibility rather than
+    risk memory pressure or a full volume.
+
+    3. In the existing build/test matrix job, create an APFS RAM disk only when runner.os
+    is macOS, after setup/gates and immediately before pytest. Publish its exact device
+    and /Volumes/RebarTests mount path through step outputs; /Volumes is outside the
+    /tmp and /var/folders locations subject to the macOS tmp cleaner. Non-macOS cells
+    continue using runner.temp byte-for-byte. Route both unchanged pytest selectors
+    to separate basetemps below that mount.
+
+    4. Always report filesystem type, allocated bytes, file count, and capacity, then
+    detach the exact device created by setup after both pytest tiers, including failure/cancellation
+    paths where GitHub permits cleanup. Do not use a broad disk target, persistent
+    mount, cache, extra runner, or extra job.
+
+    5. Add static workflow contract tests proving macOS-only creation, measured bounded
+    sizing, unchanged selectors/xdist worker counts/timeouts/coverage flags, distinct
+    default/integration basetemps, and always-run exact-device cleanup. Explicitly
+    re-run the existing workflow consumers tests/unit/test_ci_workflow_parity.py,
+    tests/unit/test_gate_step_tree_skew.py, tests/unit/test_extra_coverage_guard.py,
+    and tests/unit/test_worktree_python_pin.py; these consumers should remain unchanged
+    unless an existing invariant truly changes. Run actionlint and zizmor.
+
+    6. Push the implementation through Gerrit immediately. Compare matched selector/collection-count
+    treatments primarily with exact no-RAM control 31868300174 and secondarily with
+    recent green runs; report absolute/percentage savings and Ubuntu non-regression.
+    Retain only if the full matrix is green and both macOS default-suite and job wall
+    times improve by at least the larger of 5% or the observed recent-green range.
+    Worked 5% floor from the exact 17m26s default / 20m36s job control: treatment
+    must be at most 16m33.7s default and 19m34.2s job before any larger observed-range
+    requirement; otherwise revert the lifecycle.
+
+
+    ## Test contract card
+
+
+    authoritative_contract: .github/workflows/_build-and-test.yml executes the unchanged
+    default and integration pytest selectors on Ubuntu 3.11/3.12/3.13 and macOS 3.13,
+    with coverage once on Ubuntu 3.13.
+
+    trigger_preconditions: macOS matrix cell reaches the pytest steps after all existing
+    gates.
+
+    production_path: GitHub Actions creates an ephemeral APFS RAM device, pytest tmp_path/basetemp
+    writes real Git repositories there, then cleanup detaches only that device.
+
+    test_tier: static workflow contract tests plus the actual full Gerrit Verify matrix.
+
+    observable_postcondition: identical collection/pass/skip counts and gates, lower
+    macOS pytest/job wall time, bounded RAM use, no mounted device after cleanup.
+
+    negative_control: every Ubuntu cell keeps runner.temp and existing behavior; a
+    RAM-disk setup/sizing failure fails loudly before tests rather than silently changing
+    coverage.
+
+    collateral_invariants: no test selection, assertion, marker, worker count, timeout,
+    coverage, mutation shard, Python/platform cell, or runner concurrency changes.
+
+    ci_gate: actionlint, zizmor, workflow contract tests, full Gerrit Verify, LLM-Review.
+
+
+    ## Acceptance Criteria
+
+
+    - [ ] The next unrelated full Verify run records control macOS default/integration/job
+    wall times, Ubuntu job times, queue delay, slow tail, and conclusion without a
+    control-only patchset.
+
+    - [ ] Local retained-temp evidence yields at least 50% RAM-disk headroom below
+    40% of detected physical memory.
+
+    - [ ] The selected outcome is platform-safe: if retained, only macOS creates and
+    uses the APFS RAM disk while Ubuntu retains runner.temp; if rejected by the AC7
+    retention oracle, the RAM-disk lifecycle is absent and every cell uses runner.temp.
+
+    - [ ] Default and integration selectors, markers, xdist counts/distribution, timeouts,
+    coverage-once behavior, collection/pass/skip counts, and all platform/Python cells
+    remain unchanged.
+
+    - [ ] If the RAM-disk outcome is retained, cleanup runs under always(), reports
+    final filesystem usage, and detaches only the exact device created by setup; if
+    rejected by AC7, no RAM-disk cleanup lifecycle remains.
+
+    - [ ] Static workflow tests, actionlint, zizmor, focused/full pytest, LLM-Review,
+    and Gerrit Verified are green.
+
+    - [ ] Against a no-RAM control with matching selectors and collection/pass/skip
+    counts, both macOS default-suite and job wall times are lower than control by
+    at least the larger of 5% or the observed recent-green range, with no Ubuntu regression;
+    otherwise the experimental lifecycle is fully reverted. For the captured 17m26s
+    default / 20m36s job control, the 5% floor is at most 16m33.7s default and 19m34.2s
+    job before applying any larger observed-range requirement.'
+  label: finding
+- input: "## Why\n\nDebugging-orchestration sessions periodically sweep for AWS +\
+    \ GitHub Actions errors\n\"since the last sweep.\" Passing the last-sweep timeline\
+    \ across sessions needs a durable,\nzero-noise carrier. We already use a dedicated\
+    \ long-lived `session_log` ticket\n(`tomophobic-stilllife-mayfly` / `b2dc-b1ab-0bd9-47f6`,\
+    \ tagged `ops-sweep`) as an\nappend-only ledger, but the convention is undocumented,\
+    \ so future sessions cannot\nreliably discover or extend it. `session_log` is\
+    \ the right carrier precisely because it\nis excluded from default `list`, `ready`/`next-batch`,\
+    \ and graph-health, and never syncs\nto Jira \u2014 an always-open ledger creates\
+    \ zero work-queue noise.\n\n## What\n\nDocument the \"ops error-sweep ledger\"\
+    \ convention in the docs and add a one-line pointer\nin AGENTS.md so debug sessions\
+    \ discover it. This is a DOCS-ONLY change \u2014 no source or\ntest code is touched.\n\
+    \n- `docs/user-guide.md`: add a new subsection (e.g. \"### Ops error-sweep ledger\"\
+    ) in/after\n  the existing \"## Session logs\" section, matching that section's\
+    \ concise, example-driven\n  style. Cover: the ledger is a `session_log` ticket\
+    \ (and why \u2014 queue/graph/Jira\n  exclusion); the current ledger id/alias\
+    \ + `ops-sweep` tag; discovery via\n  `rebar search \"ops-sweep\"`; the newest\
+    \ comment / `SWEEP <ISO-8601> | window <start>..<end>`\n  header convention and\
+    \ next-window rule; appending with `rebar comment <ledger-id>` (NOT\n  `session-log\
+    \ append`, which is session-keyed and auto-rotates); linking filed tickets\n \
+    \ with `rebar link <filed> <ledger-id> relates_to` (non-blocking relations only);\
+    \ and how\n  to recreate the ledger (`session-log start` + `tag ... ops-sweep`),\
+    \ with the tag+search\n  as the durable anchor.\n- `AGENTS.md`: extend ONLY the\
+    \ existing one-line \"Session logs\" pointer bullet under\n  \"Where to read\"\
+    \ to mention the ops error-sweep ledger convention. Keep it a pointer, not\n \
+    \ restated content (AGENTS.md policy: already-documented topics are one-line pointers\
+    \ into\n  docs/).\n\n## Scope\n\n- Files: `docs/user-guide.md` (new subsection),\
+    \ `AGENTS.md` (one-line pointer extension).\n- Out of scope: any code/test change;\
+    \ restating the full convention in AGENTS.md.\n\n## Acceptance Criteria\n\n- [\
+    \ ] `docs/user-guide.md` has a new subsection under \"## Session logs\" documenting\
+    \ the\n      ops error-sweep ledger convention accurately: session_log rationale,\
+    \ ledger id/alias\n      + `ops-sweep` tag, discovery via search, the `SWEEP ...\
+    \ | window ...` header +\n      next-window rule, append via `rebar comment` (not\
+    \ `session-log append`), link via\n      `relates_to`, and recreation via `session-log\
+    \ start` + tag.\n- [ ] `AGENTS.md`'s existing \"Session logs\" pointer bullet\
+    \ is extended by one line/clause\n      to mention the ops error-sweep ledger\
+    \ convention \u2014 a pointer only, no restated body.\n- [ ] The convention text\
+    \ matches the mechanics in docs/event-schema.md (\"The session_log\n      ticket\
+    \ type\") and docs/user-guide.md (\"Session logs\") \u2014 no contradictions.\n\
+    - [ ] `make lint` passes; no new tooling added; no source/test files changed."
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-T5e
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

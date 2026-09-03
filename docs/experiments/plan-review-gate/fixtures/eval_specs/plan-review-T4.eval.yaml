@@ -1,0 +1,405 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: T4
+  expect: finding
+  id: plan-review-T4-fire-0
+  input: "## Summary\n\n`/health` on the MCP server returns 200 without ever touching\
+    \ the ticket store, so a container\nwith **no store at all** passes both the container\
+    \ HEALTHCHECK and the blue-green readiness\ngate. A structurally broken deploy\
+    \ is indistinguishable from a healthy one.\n\n## Evidence\n\n- `src/rebar/_mcp_health.py:118-120`\
+    \ \u2014 the handler returns `JSONResponse({\"in_flight\": gauge.value})`\n  and\
+    \ nothing else.\n- `infra/compose/Dockerfile.mcp:56-57` \u2014 the container HEALTHCHECK\
+    \ is a plain 200 check on\n  `/health`.\n- `infra/scripts/autodeploy.sh:130` \u2014\
+    \ the blue-green readiness gate promotes on that same probe.\n- `src/rebar/mcp_server.py:759-761`\
+    \ \u2014 the boot sweep is guarded by `if os.path.isdir(_tracker)`\n  and emits\
+    \ NOTHING when the store is absent; the comment at `:752` states the intent\n\
+    \  (\"a missing store / import / sweep error never aborts boot\"), so not even\
+    \ the `debug` line at\n  `:769` fires (that needs an exception).\n\nCorroborating\
+    \ log evidence: 60 SSM invocations spanning 2026-08-06 to 2026-08-25 contain zero\n\
+    matches for `tickets-tracker`, `not initialized`, or `ticket init` \u2014 exactly\
+    \ what the code\npredicts. (Container logs use `driver: journald` at `docker-compose.yml:72,258,306,383`\
+    \ and no\nCloudWatch log group exists for them, so there is no remote log trail\
+    \ either.)\n\n## Why this matters\n\nThis is the reason the missing-store defect\
+    \ went unnoticed since deployment. Log-and-continue on\nboot is a defensible posture\
+    \ on its own; combining it with a health probe that cannot observe the\nstore\
+    \ means nothing in the pipeline can ever report the failure.\n\n## Acceptance\
+    \ Criteria\n\n- [ ] The readiness signal distinguishes \"serving with a usable\
+    \ store\" from \"serving with no\n      store\" \u2014 either `/health` reports\
+    \ store status, or a separate readiness endpoint does and\n      the autodeploy\
+    \ gate consumes it.\n- [ ] Whatever the store decision in the sibling provisioning\
+    \ ticket, boot emits at least one log\n      line naming the store path and whether\
+    \ it was found.\n- [ ] Coverage asserts a storeless container does not pass the\
+    \ readiness gate (when a store is\n      expected)."
+- corpus: rebar
+  criterion: T4
+  expect: finding
+  id: plan-review-T4-fire-1
+  input: "## Context / Problem\n\nADR 0098 defines one immutable non-secret `OperationSnapshot`\
+    \ per operation. Today CLI and shared command-write entry points still call `emit_shadow_snapshot()`,\
+    \ while store/config helpers can resolve ambient state independently. The reconciler\
+    \ runtime already demonstrates snapshot-derived bindings; reuse that pattern.\n\
+    \nThis story cuts ordinary CLI, MCP/Python command, and store-opening operations\
+    \ over. LLM-specific resolution is the dependent follow-up.\n\n## Approach\n\n\
+    - Census the command/store consumers and identify the public composition boundaries\
+    \ for CLI, MCP, and Python.\n- Compose exactly once after input parsing and before\
+    \ lock/network/write, then pass focused immutable projections/context through\
+    \ shared command/store seams.\n- Preserve explicit-input > environment > project\
+    \ > user > schema precedence and independent repository-root selection from ADR\
+    \ 0098.\n- Add consumer-level metamorphic and effect-spy tests.\n- Remove migrated\
+    \ shadow calls and ambient reloads; extend the existing ownership checker with\
+    \ red-proven detections rather than a second registry.\n\n## Scope\n\n- `src/rebar/_operation_config.py`\
+    \ and `src/rebar/config.py` \u2014 existing composer/projections and approved\
+    \ compatibility boundary.\n- `src/rebar/_cli/`, `src/rebar/_commands/`, `src/rebar/_store/`,\
+    \ and MCP command entry modules \u2014 compose once and thread focused context.\n\
+    - `tests/interfaces/contracts/` and focused config/store/CLI/MCP tests.\n- `scripts/check_config_ownership.py`\
+    \ and its exact exception registry.\n\n## Testing\n\nHappy path: equivalent CLI,\
+    \ MCP, and Python operations resolve one identical snapshot and produce existing\
+    \ effects. Metamorphic edge: mutate environment, selected files, and CWD after\
+    \ capture; the active operation remains unchanged and the next operation changes.\
+    \ Failure edge: malformed selected configuration causes zero lock, subprocess,\
+    \ network, or store effects.\n\n## Acceptance Criteria\n\n- [x] Representative\
+    \ CLI, MCP, and Python ticket/store reads and writes each compose one snapshot/context,\
+    \ proven by call-count tests through production entry points. Proven by `test_operation_snapshot_authoritative_binding.py`'s\
+    \ compose-once/reentrancy tests (CLI `_main_dispatch`, command-write `append_event`,\
+    \ and the new `bind_operation_snapshot_for_tools` MCP proxy all bind exactly one\
+    \ snapshot per outer call and reuse it for nested seams).\n- [x] Given environment/config/CWD\
+    \ mutation after composition, the active operation's selected tracker directory,\
+    \ branch, remote, and observable effects remain unchanged; a new operation observes\
+    \ the change. Push mode is a documented, tested exception: it stays LIVE per-call\
+    \ because `_io/import_ndjson.py` toggles `REBAR_SYNC_PUSH` mid-bulk-import and\
+    \ `test_c3b_push_defer_coupling_heldout.py` depends on that live read continuing\
+    \ to work \u2014 freezing push mode would silently break that existing, in-scope-adjacent\
+    \ coupling. The new tests assert this carve-out explicitly (push mode observes\
+    \ the mutation even inside a bound operation) so the exception is enforced, not\
+    \ merely asserted in prose.\n- [x] Explicit operation input remains authoritative\
+    \ and malformed selected config fails before lock, subprocess, network, or store\
+    \ write; the binding itself fails OPEN (never raises) so an operation that doesn't\
+    \ need config keeps working. Proven by the AC3 override/bypass tests (`REBAR_TRACKER_DIR`\
+    \ env override and an explicit different-repo root both bypass the binding) and\
+    \ the fail-open litmus test (a real `ConfigError`-raising project config still\
+    \ lets `bridge setup --reset` succeed with rc=0, and the composition failure is\
+    \ logged with a redacted exception type name only).\n- [x] Store helpers receive\
+    \ focused projections/context and do not call `load_config`, environment, or CWD\
+    \ beneath the approved boundary. `tracker_dir`/`tickets_branch`/`tickets_remote`\
+    \ in `config.py` now consult the bound snapshot via `_bound_snapshot_for_root`\
+    \ before falling back to `load_config`; `check_config_ownership.py` continues\
+    \ to run clean with the pre-existing exception registry untouched (zero new entries).\n\
+    - [x] Migrated `emit_shadow_snapshot` calls and compatibility resolution branches\
+    \ are deleted, with no stored ticket/event/bridge format change. All 33 `_shadow(\"\
+    mcp.read.xxx\")` and 23 `_shadow(\"mcp.write.xxx\")` call sites (plus the `_shadow`\
+    \ import) were deleted from `_mcp_reads.py`/`_mcp_writes.py`; the CLI's and command-write\
+    \ seam's shadow calls were replaced with the authoritative binding. No event/ticket/bridge\
+    \ schema was touched. `_mcp_llm.py`, `_lib_ops.py`, and the reconciler `__main__.py`\
+    \ deliberately keep their shadow calls (out of scope \u2014 LLM-specific resolution\
+    \ is ticket ec44's follow-up), confirmed via `test_single_definition_helpers.py`'s\
+    \ updated assertions.\n- [x] The structural ownership checker catches a synthetic\
+    \ below-boundary ambient read and has zero new legacy exceptions. `check_config_ownership.py`\
+    \ and its exception registry were not modified by this change (confirmed via `git\
+    \ diff` on the commit); the pre-existing `test_check_config_ownership_heldout.py`\
+    \ continues to prove the checker's detection, and `check_config_ownership.py`\
+    \ runs clean against the new code with no new exceptions added.\n- [x] Existing\
+    \ config, tracker layout, concurrency, CLI/MCP/library parity, lint, typecheck,\
+    \ and default suites pass. `make lint` and `make typecheck` are fully green. `make\
+    \ test` is green except 8 pre-existing baseline failures (`test_atomic_completion_close.py`\
+    \ x5, `test_rebar_repo_isolation.py::test_copy_repoints_sibling_origin_and_keeps_refs_isolated`,\
+    \ `test_tracker_footprint_cli.py` x2) confirmed pre-existing and unrelated to\
+    \ this change via `git stash` comparison (identical failures with and without\
+    \ this ticket's implementation)."
+- corpus: rebar
+  criterion: T4
+  expect: finding
+  id: plan-review-T4-fire-2
+  input: "## Summary\n\n`list_tickets` against this store can terminate with `MCP\
+    \ request failed: Transport closed` and\nno structured error payload \u2014 the\
+    \ caller cannot tell whether the query was invalid, the server\nfailed, or the\
+    \ response was simply too large.\n\n## Observed (parallel Copilot CLI session)\n\
+    \n    list_tickets -> MCP server 'rebar': MCP request failed: Transport closed\n\
+    \nThe reporter attributes it to response size, noting that `ready_tickets` and\
+    \ `bridge_fsck`\n'needed disk-spill just to return'.\n\n## Corroborating datum\
+    \ from a different client\n\nIn a Claude Code session the same tool SUCCEEDED\
+    \ but returned **219,815 characters**, which\nexceeded the client's token budget\
+    \ and had to be spilled to a file. So the server can emit\npayloads far beyond\
+    \ what a client can absorb, and it does so without pagination or a size guard.\n\
+    \n## Candidate causes \u2014 deliberately NOT collapsed into one\n\nThree are\
+    \ live and this ticket should not presume among them:\n1. **Response size** \u2014\
+    \ the reporter's hypothesis, supported by the 219KB datum.\n2. **BigInt serialization**\
+    \ (`unreal-milky-sloth`) \u2014 a JS client can fail on out-of-JS-range\n   integers;\
+    \ a failure during serialization can look like a dropped transport.\n3. **A deploy\
+    \ cutover** \u2014 the mcp container was replaced at 18:54:29Z\n   (`nemophilic-prettyish-cockroach`),\
+    \ which orphans live sessions.\n\nThese produce similar client-visible symptoms\
+    \ and must be separated by evidence before a fix.\n\n## Acceptance Criteria\n\n\
+    - [ ] The cause is identified and distinguished from the two sibling tickets above.\n\
+    - [ ] A large result is bounded \u2014 pagination, an explicit limit, or a documented\
+    \ cap \u2014 rather\n      than emitted at unbounded size.\n- [ ] Exceeding any\
+    \ limit produces a STRUCTURED, actionable error, never a bare transport close.\n\
+    - [ ] Regression coverage exercises a store large enough to trip the previous\
+    \ behaviour.\n\n- [ ] **LIVE VALIDATION \u2014 REQUIRED TO CLOSE.** `list_tickets`\
+    \ and `ready_tickets` called through the deployed endpoint return results (or\
+    \ a structured limit error) with no transport close.\n      Evidence must be OBSERVED\
+    \ against the deployed server at\n      `https://rebar.solutions.navateam.com/mcp`\
+    \ and recorded in a ticket comment naming\n      the tool(s) called, the arguments,\
+    \ and the actual response. A passing local test is\n      NOT sufficient, and\
+    \ neither is a merged change: the container must have redeployed\n      and served\
+    \ the call. This exists because a fix here was previously reported complete\n\
+    \      on the strength of a merge while the deployed behaviour was still broken.\n"
+- corpus: rebar
+  criterion: T4
+  expect: pass
+  id: plan-review-T4-no_fire-0
+  input: "# Persist ticket digest as a REVIEW_RESULT-style sidecar record on the ticket\
+    \ (shared cache)\n\n## Why\nThe digest is a billable LLM artifact we never want\
+    \ to recompute. Storing it in the SHARED store (auto-pushed) makes one client's\
+    \ enrichment a cache-hit for every other client. rebar already has the exact precedent:\
+    \ `REVIEW_RESULT` \u2014 a reducer-IGNORED, preserved-and-ignored, per-ticket\
+    \ LLM-derived sidecar event. We reuse that pattern rather than inventing a reducer-projected\
+    \ type, avoiding compaction/SNAPSHOT entanglement.\n\n## What\nA new `TICKET_DIGEST`\
+    \ sidecar event carrying the S1 digest plus a `content_hash` of the fields it\
+    \ was derived from. Freshness is computed on read: the digest is CURRENT iff its\
+    \ stored `content_hash` (and `model`/`schema` version tags) match the ticket's\
+    \ current values; otherwise it reads as stale. Latest-wins: a scan reduces to\
+    \ the most-recent `TICKET_DIGEST` per ticket (by HLC order), so re-enrichment\
+    \ supersedes rather than accumulates in the projection.\n\n## Scope (exact edit\
+    \ targets \u2014 every registry a new event type touches)\n- `src/rebar/_store/event_append.py`:\
+    \ add `\"TICKET_DIGEST\"` to the `EVENT_TYPES` write allow-list (line ~38) or\
+    \ `stage_and_commit` raises StoreError.\n- `src/rebar/reducer/_version.py`: add\
+    \ `\"TICKET_DIGEST\"` to `_NON_REPLAY_KNOWN_TYPES` (line 44), NOT `KNOWN_EVENT_TYPES`\
+    \ \u2014 so it is preserved-and-ignored by the main reducer, is never squashed\
+    \ into SNAPSHOT by compaction, and never trips the fsck \"newer-than-binary\"\
+    \ warning (mirrors REVIEW_RESULT exactly).\n- A `latest_ticket_digest(ticket_id)`\
+    \ reader + `emit`/`prune(keep=1)` in a new `src/rebar/llm/overlap/digest_sidecar.py`\
+    \ (modeled on `plan_review/sidecar.py`) that returns the current digest per ticket\
+    \ for the retrieval stage; `content_hash` helper over a NAMED, versioned field\
+    \ set (`DIGEST_HASH_FIELDS` = title + description + comment bodies, normalized:\
+    \ strip trailing whitespace, join with \"\\n\"). Bump a module-constant `DIGEST_HASH_VERSION`\
+    \ (in `digest_sidecar.py`) when the field set changes so all cached digests invalidate\
+    \ deterministically.\n- `show` renders digest presence + freshness only (not the\
+    \ raw digest text); the raw digest is available to retrieval. No new field in\
+    \ `ticket_state.schema.json` (sidecar, not compiled state), matching REVIEW_RESULT.\n\
+    - Fail-closed freshness: if the current content-hash cannot be computed (partial\
+    \ read), the digest reads as NOT-current (never falsely fresh) \u2014 mirroring\
+    \ `compute_validity` returning None on read error.\n- Prune/retire: a digest for\
+    \ a deleted/archived ticket is dropped by a `prune(keep=1)` retention mirroring\
+    \ `src/rebar/llm/plan_review/sidecar.py` (`emit`+`prune`+`latest_*`); the digest\
+    \ sidecar is a new `src/rebar/llm/overlap/digest_sidecar.py` modeled on it; document\
+    \ that concurrent same-ticket digests from two clients are safe \u2014 both are\
+    \ TICKET_DIGEST appends, latest-by-HLC wins on read, idempotent.\n\n## Dependencies\n\
+    S1 (indecisive-callous-armyworm) \u2014 produces the `ticket_digest` payload this\
+    \ stores.\n\n## Testing\n- Unit `tests/unit/test_ticket_digest_store.py`: write\u2192\
+    read roundtrip; freshness flips stale when title/description/comment changes;\
+    \ fail-closed on unreadable state; latest-wins on two appends; older binary preserves-and-ignores\
+    \ the event (fsck no WARN); archived ticket's digest pruned.\n\n## Acceptance\
+    \ Criteria\n- [ ] A digest is written via a `TICKET_DIGEST` event and read back\
+    \ per ticket; verified by `pytest tests/unit/test_ticket_digest_store.py::test_roundtrip`.\n\
+    - [ ] Freshness is computed on read: mutating any `DIGEST_HASH_FIELDS` field marks\
+    \ the digest stale; verified by `::test_freshness_flips`.\n- [ ] `TICKET_DIGEST`\
+    \ is in `EVENT_TYPES` and `_NON_REPLAY_KNOWN_TYPES` (not `KNOWN_EVENT_TYPES`);\
+    \ an older binary preserves-and-ignores it with no fsck WARN.\n- [ ] An unchanged\
+    \ ticket is NOT re-enriched: the drain skips a ticket whose current content-hash\
+    \ + model/schema tags match its stored digest; verified by `::test_no_reextract_unchanged`.\n\
+    - [ ] Freshness flips stale on ANY of: content-hash mismatch, `model` change,\
+    \ or `schema`/`DIGEST_HASH_VERSION` change; verified by `::test_freshness_all_triggers`.\n\
+    - [ ] Unreadable current state yields NOT-current (fail-closed), never falsely\
+    \ fresh.\n- [ ] Two concurrent same-ticket digest appends resolve latest-by-HLC\
+    \ on read (idempotent, no duplication); an archived/deleted ticket's digest is\
+    \ pruned.\n"
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: "## Summary\n\n`/health` on the MCP server returns 200 without ever touching\
+    \ the ticket store, so a container\nwith **no store at all** passes both the container\
+    \ HEALTHCHECK and the blue-green readiness\ngate. A structurally broken deploy\
+    \ is indistinguishable from a healthy one.\n\n## Evidence\n\n- `src/rebar/_mcp_health.py:118-120`\
+    \ \u2014 the handler returns `JSONResponse({\"in_flight\": gauge.value})`\n  and\
+    \ nothing else.\n- `infra/compose/Dockerfile.mcp:56-57` \u2014 the container HEALTHCHECK\
+    \ is a plain 200 check on\n  `/health`.\n- `infra/scripts/autodeploy.sh:130` \u2014\
+    \ the blue-green readiness gate promotes on that same probe.\n- `src/rebar/mcp_server.py:759-761`\
+    \ \u2014 the boot sweep is guarded by `if os.path.isdir(_tracker)`\n  and emits\
+    \ NOTHING when the store is absent; the comment at `:752` states the intent\n\
+    \  (\"a missing store / import / sweep error never aborts boot\"), so not even\
+    \ the `debug` line at\n  `:769` fires (that needs an exception).\n\nCorroborating\
+    \ log evidence: 60 SSM invocations spanning 2026-08-06 to 2026-08-25 contain zero\n\
+    matches for `tickets-tracker`, `not initialized`, or `ticket init` \u2014 exactly\
+    \ what the code\npredicts. (Container logs use `driver: journald` at `docker-compose.yml:72,258,306,383`\
+    \ and no\nCloudWatch log group exists for them, so there is no remote log trail\
+    \ either.)\n\n## Why this matters\n\nThis is the reason the missing-store defect\
+    \ went unnoticed since deployment. Log-and-continue on\nboot is a defensible posture\
+    \ on its own; combining it with a health probe that cannot observe the\nstore\
+    \ means nothing in the pipeline can ever report the failure.\n\n## Acceptance\
+    \ Criteria\n\n- [ ] The readiness signal distinguishes \"serving with a usable\
+    \ store\" from \"serving with no\n      store\" \u2014 either `/health` reports\
+    \ store status, or a separate readiness endpoint does and\n      the autodeploy\
+    \ gate consumes it.\n- [ ] Whatever the store decision in the sibling provisioning\
+    \ ticket, boot emits at least one log\n      line naming the store path and whether\
+    \ it was found.\n- [ ] Coverage asserts a storeless container does not pass the\
+    \ readiness gate (when a store is\n      expected)."
+  label: finding
+- input: "## Context / Problem\n\nADR 0098 defines one immutable non-secret `OperationSnapshot`\
+    \ per operation. Today CLI and shared command-write entry points still call `emit_shadow_snapshot()`,\
+    \ while store/config helpers can resolve ambient state independently. The reconciler\
+    \ runtime already demonstrates snapshot-derived bindings; reuse that pattern.\n\
+    \nThis story cuts ordinary CLI, MCP/Python command, and store-opening operations\
+    \ over. LLM-specific resolution is the dependent follow-up.\n\n## Approach\n\n\
+    - Census the command/store consumers and identify the public composition boundaries\
+    \ for CLI, MCP, and Python.\n- Compose exactly once after input parsing and before\
+    \ lock/network/write, then pass focused immutable projections/context through\
+    \ shared command/store seams.\n- Preserve explicit-input > environment > project\
+    \ > user > schema precedence and independent repository-root selection from ADR\
+    \ 0098.\n- Add consumer-level metamorphic and effect-spy tests.\n- Remove migrated\
+    \ shadow calls and ambient reloads; extend the existing ownership checker with\
+    \ red-proven detections rather than a second registry.\n\n## Scope\n\n- `src/rebar/_operation_config.py`\
+    \ and `src/rebar/config.py` \u2014 existing composer/projections and approved\
+    \ compatibility boundary.\n- `src/rebar/_cli/`, `src/rebar/_commands/`, `src/rebar/_store/`,\
+    \ and MCP command entry modules \u2014 compose once and thread focused context.\n\
+    - `tests/interfaces/contracts/` and focused config/store/CLI/MCP tests.\n- `scripts/check_config_ownership.py`\
+    \ and its exact exception registry.\n\n## Testing\n\nHappy path: equivalent CLI,\
+    \ MCP, and Python operations resolve one identical snapshot and produce existing\
+    \ effects. Metamorphic edge: mutate environment, selected files, and CWD after\
+    \ capture; the active operation remains unchanged and the next operation changes.\
+    \ Failure edge: malformed selected configuration causes zero lock, subprocess,\
+    \ network, or store effects.\n\n## Acceptance Criteria\n\n- [x] Representative\
+    \ CLI, MCP, and Python ticket/store reads and writes each compose one snapshot/context,\
+    \ proven by call-count tests through production entry points. Proven by `test_operation_snapshot_authoritative_binding.py`'s\
+    \ compose-once/reentrancy tests (CLI `_main_dispatch`, command-write `append_event`,\
+    \ and the new `bind_operation_snapshot_for_tools` MCP proxy all bind exactly one\
+    \ snapshot per outer call and reuse it for nested seams).\n- [x] Given environment/config/CWD\
+    \ mutation after composition, the active operation's selected tracker directory,\
+    \ branch, remote, and observable effects remain unchanged; a new operation observes\
+    \ the change. Push mode is a documented, tested exception: it stays LIVE per-call\
+    \ because `_io/import_ndjson.py` toggles `REBAR_SYNC_PUSH` mid-bulk-import and\
+    \ `test_c3b_push_defer_coupling_heldout.py` depends on that live read continuing\
+    \ to work \u2014 freezing push mode would silently break that existing, in-scope-adjacent\
+    \ coupling. The new tests assert this carve-out explicitly (push mode observes\
+    \ the mutation even inside a bound operation) so the exception is enforced, not\
+    \ merely asserted in prose.\n- [x] Explicit operation input remains authoritative\
+    \ and malformed selected config fails before lock, subprocess, network, or store\
+    \ write; the binding itself fails OPEN (never raises) so an operation that doesn't\
+    \ need config keeps working. Proven by the AC3 override/bypass tests (`REBAR_TRACKER_DIR`\
+    \ env override and an explicit different-repo root both bypass the binding) and\
+    \ the fail-open litmus test (a real `ConfigError`-raising project config still\
+    \ lets `bridge setup --reset` succeed with rc=0, and the composition failure is\
+    \ logged with a redacted exception type name only).\n- [x] Store helpers receive\
+    \ focused projections/context and do not call `load_config`, environment, or CWD\
+    \ beneath the approved boundary. `tracker_dir`/`tickets_branch`/`tickets_remote`\
+    \ in `config.py` now consult the bound snapshot via `_bound_snapshot_for_root`\
+    \ before falling back to `load_config`; `check_config_ownership.py` continues\
+    \ to run clean with the pre-existing exception registry untouched (zero new entries).\n\
+    - [x] Migrated `emit_shadow_snapshot` calls and compatibility resolution branches\
+    \ are deleted, with no stored ticket/event/bridge format change. All 33 `_shadow(\"\
+    mcp.read.xxx\")` and 23 `_shadow(\"mcp.write.xxx\")` call sites (plus the `_shadow`\
+    \ import) were deleted from `_mcp_reads.py`/`_mcp_writes.py`; the CLI's and command-write\
+    \ seam's shadow calls were replaced with the authoritative binding. No event/ticket/bridge\
+    \ schema was touched. `_mcp_llm.py`, `_lib_ops.py`, and the reconciler `__main__.py`\
+    \ deliberately keep their shadow calls (out of scope \u2014 LLM-specific resolution\
+    \ is ticket ec44's follow-up), confirmed via `test_single_definition_helpers.py`'s\
+    \ updated assertions.\n- [x] The structural ownership checker catches a synthetic\
+    \ below-boundary ambient read and has zero new legacy exceptions. `check_config_ownership.py`\
+    \ and its exception registry were not modified by this change (confirmed via `git\
+    \ diff` on the commit); the pre-existing `test_check_config_ownership_heldout.py`\
+    \ continues to prove the checker's detection, and `check_config_ownership.py`\
+    \ runs clean against the new code with no new exceptions added.\n- [x] Existing\
+    \ config, tracker layout, concurrency, CLI/MCP/library parity, lint, typecheck,\
+    \ and default suites pass. `make lint` and `make typecheck` are fully green. `make\
+    \ test` is green except 8 pre-existing baseline failures (`test_atomic_completion_close.py`\
+    \ x5, `test_rebar_repo_isolation.py::test_copy_repoints_sibling_origin_and_keeps_refs_isolated`,\
+    \ `test_tracker_footprint_cli.py` x2) confirmed pre-existing and unrelated to\
+    \ this change via `git stash` comparison (identical failures with and without\
+    \ this ticket's implementation)."
+  label: finding
+- input: "## Summary\n\n`list_tickets` against this store can terminate with `MCP\
+    \ request failed: Transport closed` and\nno structured error payload \u2014 the\
+    \ caller cannot tell whether the query was invalid, the server\nfailed, or the\
+    \ response was simply too large.\n\n## Observed (parallel Copilot CLI session)\n\
+    \n    list_tickets -> MCP server 'rebar': MCP request failed: Transport closed\n\
+    \nThe reporter attributes it to response size, noting that `ready_tickets` and\
+    \ `bridge_fsck`\n'needed disk-spill just to return'.\n\n## Corroborating datum\
+    \ from a different client\n\nIn a Claude Code session the same tool SUCCEEDED\
+    \ but returned **219,815 characters**, which\nexceeded the client's token budget\
+    \ and had to be spilled to a file. So the server can emit\npayloads far beyond\
+    \ what a client can absorb, and it does so without pagination or a size guard.\n\
+    \n## Candidate causes \u2014 deliberately NOT collapsed into one\n\nThree are\
+    \ live and this ticket should not presume among them:\n1. **Response size** \u2014\
+    \ the reporter's hypothesis, supported by the 219KB datum.\n2. **BigInt serialization**\
+    \ (`unreal-milky-sloth`) \u2014 a JS client can fail on out-of-JS-range\n   integers;\
+    \ a failure during serialization can look like a dropped transport.\n3. **A deploy\
+    \ cutover** \u2014 the mcp container was replaced at 18:54:29Z\n   (`nemophilic-prettyish-cockroach`),\
+    \ which orphans live sessions.\n\nThese produce similar client-visible symptoms\
+    \ and must be separated by evidence before a fix.\n\n## Acceptance Criteria\n\n\
+    - [ ] The cause is identified and distinguished from the two sibling tickets above.\n\
+    - [ ] A large result is bounded \u2014 pagination, an explicit limit, or a documented\
+    \ cap \u2014 rather\n      than emitted at unbounded size.\n- [ ] Exceeding any\
+    \ limit produces a STRUCTURED, actionable error, never a bare transport close.\n\
+    - [ ] Regression coverage exercises a store large enough to trip the previous\
+    \ behaviour.\n\n- [ ] **LIVE VALIDATION \u2014 REQUIRED TO CLOSE.** `list_tickets`\
+    \ and `ready_tickets` called through the deployed endpoint return results (or\
+    \ a structured limit error) with no transport close.\n      Evidence must be OBSERVED\
+    \ against the deployed server at\n      `https://rebar.solutions.navateam.com/mcp`\
+    \ and recorded in a ticket comment naming\n      the tool(s) called, the arguments,\
+    \ and the actual response. A passing local test is\n      NOT sufficient, and\
+    \ neither is a merged change: the container must have redeployed\n      and served\
+    \ the call. This exists because a fix here was previously reported complete\n\
+    \      on the strength of a merge while the deployed behaviour was still broken.\n"
+  label: finding
+- input: "# Persist ticket digest as a REVIEW_RESULT-style sidecar record on the ticket\
+    \ (shared cache)\n\n## Why\nThe digest is a billable LLM artifact we never want\
+    \ to recompute. Storing it in the SHARED store (auto-pushed) makes one client's\
+    \ enrichment a cache-hit for every other client. rebar already has the exact precedent:\
+    \ `REVIEW_RESULT` \u2014 a reducer-IGNORED, preserved-and-ignored, per-ticket\
+    \ LLM-derived sidecar event. We reuse that pattern rather than inventing a reducer-projected\
+    \ type, avoiding compaction/SNAPSHOT entanglement.\n\n## What\nA new `TICKET_DIGEST`\
+    \ sidecar event carrying the S1 digest plus a `content_hash` of the fields it\
+    \ was derived from. Freshness is computed on read: the digest is CURRENT iff its\
+    \ stored `content_hash` (and `model`/`schema` version tags) match the ticket's\
+    \ current values; otherwise it reads as stale. Latest-wins: a scan reduces to\
+    \ the most-recent `TICKET_DIGEST` per ticket (by HLC order), so re-enrichment\
+    \ supersedes rather than accumulates in the projection.\n\n## Scope (exact edit\
+    \ targets \u2014 every registry a new event type touches)\n- `src/rebar/_store/event_append.py`:\
+    \ add `\"TICKET_DIGEST\"` to the `EVENT_TYPES` write allow-list (line ~38) or\
+    \ `stage_and_commit` raises StoreError.\n- `src/rebar/reducer/_version.py`: add\
+    \ `\"TICKET_DIGEST\"` to `_NON_REPLAY_KNOWN_TYPES` (line 44), NOT `KNOWN_EVENT_TYPES`\
+    \ \u2014 so it is preserved-and-ignored by the main reducer, is never squashed\
+    \ into SNAPSHOT by compaction, and never trips the fsck \"newer-than-binary\"\
+    \ warning (mirrors REVIEW_RESULT exactly).\n- A `latest_ticket_digest(ticket_id)`\
+    \ reader + `emit`/`prune(keep=1)` in a new `src/rebar/llm/overlap/digest_sidecar.py`\
+    \ (modeled on `plan_review/sidecar.py`) that returns the current digest per ticket\
+    \ for the retrieval stage; `content_hash` helper over a NAMED, versioned field\
+    \ set (`DIGEST_HASH_FIELDS` = title + description + comment bodies, normalized:\
+    \ strip trailing whitespace, join with \"\\n\"). Bump a module-constant `DIGEST_HASH_VERSION`\
+    \ (in `digest_sidecar.py`) when the field set changes so all cached digests invalidate\
+    \ deterministically.\n- `show` renders digest presence + freshness only (not the\
+    \ raw digest text); the raw digest is available to retrieval. No new field in\
+    \ `ticket_state.schema.json` (sidecar, not compiled state), matching REVIEW_RESULT.\n\
+    - Fail-closed freshness: if the current content-hash cannot be computed (partial\
+    \ read), the digest reads as NOT-current (never falsely fresh) \u2014 mirroring\
+    \ `compute_validity` returning None on read error.\n- Prune/retire: a digest for\
+    \ a deleted/archived ticket is dropped by a `prune(keep=1)` retention mirroring\
+    \ `src/rebar/llm/plan_review/sidecar.py` (`emit`+`prune`+`latest_*`); the digest\
+    \ sidecar is a new `src/rebar/llm/overlap/digest_sidecar.py` modeled on it; document\
+    \ that concurrent same-ticket digests from two clients are safe \u2014 both are\
+    \ TICKET_DIGEST appends, latest-by-HLC wins on read, idempotent.\n\n## Dependencies\n\
+    S1 (indecisive-callous-armyworm) \u2014 produces the `ticket_digest` payload this\
+    \ stores.\n\n## Testing\n- Unit `tests/unit/test_ticket_digest_store.py`: write\u2192\
+    read roundtrip; freshness flips stale when title/description/comment changes;\
+    \ fail-closed on unreadable state; latest-wins on two appends; older binary preserves-and-ignores\
+    \ the event (fsck no WARN); archived ticket's digest pruned.\n\n## Acceptance\
+    \ Criteria\n- [ ] A digest is written via a `TICKET_DIGEST` event and read back\
+    \ per ticket; verified by `pytest tests/unit/test_ticket_digest_store.py::test_roundtrip`.\n\
+    - [ ] Freshness is computed on read: mutating any `DIGEST_HASH_FIELDS` field marks\
+    \ the digest stale; verified by `::test_freshness_flips`.\n- [ ] `TICKET_DIGEST`\
+    \ is in `EVENT_TYPES` and `_NON_REPLAY_KNOWN_TYPES` (not `KNOWN_EVENT_TYPES`);\
+    \ an older binary preserves-and-ignores it with no fsck WARN.\n- [ ] An unchanged\
+    \ ticket is NOT re-enriched: the drain skips a ticket whose current content-hash\
+    \ + model/schema tags match its stored digest; verified by `::test_no_reextract_unchanged`.\n\
+    - [ ] Freshness flips stale on ANY of: content-hash mismatch, `model` change,\
+    \ or `schema`/`DIGEST_HASH_VERSION` change; verified by `::test_freshness_all_triggers`.\n\
+    - [ ] Unreadable current state yields NOT-current (fail-closed), never falsely\
+    \ fresh.\n- [ ] Two concurrent same-ticket digest appends resolve latest-by-HLC\
+    \ on read (idempotent, no duplication); an archived/deleted ticket's digest is\
+    \ pruned.\n"
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-T4
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

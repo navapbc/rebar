@@ -163,6 +163,11 @@ EXEMPT = {
     "docs/experiments/plan-review-gate/runs/e6_selfconsistency_inputs.jsonl",
     "docs/experiments/plan-review-gate/runs/exp2_agentic.jsonl",
     "docs/experiments/plan-review-gate/runs/operator_attested_ac_corpus.jsonl",
+    # Mined plan-review regression fixture (67aa AC10). Its `input` is recorded review-
+    # sidecar plan text — a captured ticket plan that itself DESCRIBES retiring the flag in
+    # 24f7 — so the retired spelling is part of the frozen experiment INPUT. Rewriting it
+    # would change what the criterion was scored against and corrupt the fixture.
+    "docs/experiments/plan-review-gate/fixtures/eval_specs/plan-review-T6.eval.yaml",
     # Historical records that must name the OLD spelling to describe the break itself.
     "CHANGELOG.md",
     "docs/release-notes.md",
