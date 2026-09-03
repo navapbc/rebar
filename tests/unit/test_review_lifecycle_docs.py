@@ -95,6 +95,30 @@ def test_det_floor_seam_boundary_comments_keep_p1_p9_verbatim():
     assert "P1-P9" in det_lint or "P1\u2013P9" in det_lint
 
 
+def test_plan_review_precheck_schema_names_p1_p11_floor():
+    """The plan_review_precheck output schema's top-level description names the
+    shipped P1-P11 DET floor, not the stale pre-registry-expansion P1-P9 count."""
+    import json
+
+    schema_path = (
+        REPO_ROOT / "src" / "rebar" / "schemas" / "plan_review_precheck_output.schema.json"
+    )
+    description = json.loads(schema_path.read_text(encoding="utf-8"))["description"]
+    assert "P1-P11" in description or "P1\u2013P11" in description
+    assert "P1-P9" not in description and "P1\u2013P9" not in description
+
+
+def test_plan_review_verdict_schema_names_p1_p11_floor():
+    """The plan_review_verdict output schema's top-level description names the
+    shipped P1-P11 DET floor, not the stale pre-registry-expansion P1-P9 count."""
+    import json
+
+    schema_path = REPO_ROOT / "src" / "rebar" / "schemas" / "plan_review_verdict.schema.json"
+    description = json.loads(schema_path.read_text(encoding="utf-8"))["description"]
+    assert "P1-P11" in description or "P1\u2013P11" in description
+    assert "P1-P9" not in description and "P1\u2013P9" not in description
+
+
 def test_gen_mcp_reference_check_mode_passes_against_committed_doc():
     """The regenerated docs/mcp-reference.md is byte-consistent with the generator
     after the description fix -- proves the doc was actually regenerated, not
