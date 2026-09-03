@@ -47,10 +47,10 @@ _OWNED_FILES = (
 # The enumerated owned-in-place allowlist: file -> exact number of ``# read-via:`` marked
 # lines it may carry. Everything else must be ZERO.
 _MARKER_BUDGET = {
-    "_store/hlc.py": 2,  # REBAR_HLC (L61) kill-switch + REBAR_HLC_NOW (L71) test injection
+    "_store/hlc.py": 1,  # REBAR_HLC_NOW (L71) test injection
     "_io/import_ndjson.py": 3,  # REBAR_SYNC_PUSH env-control across L216/L217/L395
 }
-_TOTAL_MARKER_CAP = 5
+_TOTAL_MARKER_CAP = 4
 
 _MARKER_RE = re.compile(r"#\s*read-via:")
 _SRC = gate.REPO_ROOT / "src" / "rebar"

@@ -54,7 +54,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_GATE_REVERIFY_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_SOURCE` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_TMPDIR` | `src/rebar/_config_resolvers.py` |  |
-| `REBAR_HLC` | `src/rebar/_store/hlc.py` |  |
 | `REBAR_HLC_NOW` | `src/rebar/_store/hlc.py` |  |
 | `REBAR_ID_GUARD_MODE` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_UNSAFE_ID_GUARD_BYPASS` |
 | `REBAR_LLM_ALLOW_LOCAL_PROXY` | `src/rebar/llm/anthropic_model.py` |  |
@@ -182,7 +181,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_170 variables._
+_169 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

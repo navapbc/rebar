@@ -32,13 +32,11 @@ durable log — the local-lock RMW is a fast path, not a correctness dependency.
 Do **not** "fix" the global-cache / per-ticket-witness asymmetry by making the
 cache per-ticket: that would weaken the monotonicity the single local lock gives.
 
-**Staging.** The whole clock is behind ``REBAR_HLC`` (default-on; kill-switch
-``REBAR_HLC=0`` reverts to raw ``physical_now()``). The RMW is
-best-effort: any error falls back to ``physical_now()`` so a write never fails on
-the clock. ``REBAR_HLC_NOW`` injects the physical source for the skewed-clock
-tests. The dedicated ``.rebar/hlc.lock`` is acquired and released *inside*
-``next_tick`` only — never held across the store write lock, so there is no
-lock-ordering hazard.
+**Operation.** The RMW is best-effort: any error falls back to ``physical_now()``
+so a write never fails on the clock. ``REBAR_HLC_NOW`` injects the physical
+source for the skewed-clock tests. The dedicated ``.rebar/hlc.lock`` is
+acquired and released *inside* ``next_tick`` only — never held across the store
+write lock, so there is no lock-ordering hazard.
 """
 
 from __future__ import annotations
@@ -53,17 +51,6 @@ from pathlib import Path
 from rebar._store.paths import StorePaths
 
 logger = logging.getLogger(__name__)
-
-_FALSY = {"0", "false", "no", "off", ""}
-
-
-def _enabled() -> bool:
-    """``REBAR_HLC`` gates the clock — default ON. ``REBAR_HLC=0`` (or false/no/off)
-    is the one-release kill-switch back to raw ``physical_now()``."""
-    val = os.environ.get("REBAR_HLC")  # read-via: subsystem-kill-switch
-    if val is None:
-        return True
-    return val.strip().lower() not in _FALSY
 
 
 def physical_now() -> int:
@@ -137,14 +124,10 @@ def _write_state(rebar_dir: Path, value: int) -> None:
 def next_tick(tracker: str | os.PathLike, ticket_id: str) -> int:
     """Return the next event timestamp for ``ticket_id`` under ``tracker``.
 
-    With the clock disabled (``REBAR_HLC=0``) this is exactly ``physical_now()`` —
-    today's ``time.time_ns()`` behavior, for clean rollback. Enabled, it performs
-    the monotonic ``max(cache, witness, physical_now()) + 1`` RMW under the local
-    ``.rebar/hlc.lock``. Any error in the enabled path falls back to
+    Performs the monotonic ``max(cache, witness, physical_now()) + 1`` RMW under
+    the local ``.rebar/hlc.lock``. Any error in the enabled path falls back to
     ``physical_now()`` so a write never fails on the clock.
     """
-    if not _enabled():
-        return physical_now()
     try:
         rebar_dir = Path(StorePaths(tracker).rebar_dir)
         witness = _max_event_prefix(tracker, ticket_id)
