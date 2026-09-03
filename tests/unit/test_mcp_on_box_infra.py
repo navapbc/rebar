@@ -12,10 +12,16 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
+from _healthcheck_oracles import (
+    assert_socket_healthcheck_semantics,
+    final_stage_healthcheck_argv,
+    healthcheck_test_argv,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -95,10 +101,11 @@ def test_compose_mcp_publishes_dedicated_loopback_port_8091() -> None:
 
 
 def test_compose_mcp_has_health_check_against_health_endpoint() -> None:
-    """AC1: the service healthcheck probes the /health endpoint."""
+    """AC1: the service healthcheck must be a real /health probe, not token text."""
     doc = yaml.safe_load(_COMPOSE.read_text())
-    test = doc["services"]["mcp"]["healthcheck"]["test"]
-    assert any("/health" in part for part in test)
+    argv = healthcheck_test_argv(doc["services"]["mcp"]["healthcheck"]["test"])
+    assert any("/health" in part for part in argv)
+    assert_socket_healthcheck_semantics(argv)
 
 
 def test_compose_mcp_stop_grace_covers_the_module_shutdown_budget() -> None:
@@ -128,11 +135,30 @@ def test_dockerfile_mcp_builds_locked_with_agents_and_mcp_extras() -> None:
 
 
 def test_dockerfile_mcp_has_healthcheck_hitting_health() -> None:
-    """AC1: a container HEALTHCHECK hits the MCP /health endpoint."""
-    text = _DOCKERFILE.read_text()
-    assert "HEALTHCHECK" in text
-    hc_line = next(line for line in text.splitlines() if "urlopen" in line)
-    assert "/health" in hc_line
+    """AC1: the FINAL shipped stage healthcheck must probe MCP /health semantically."""
+    argv = final_stage_healthcheck_argv(_DOCKERFILE.read_text())
+    assert any("/health" in part for part in argv)
+    assert_socket_healthcheck_semantics(argv)
+
+
+def test_dockerfile_final_stage_healthcheck_wins_over_earlier_stage_tokens() -> None:
+    """A good probe in an earlier stage must not hide a broken final-stage probe."""
+    text = """
+FROM python:3.12-slim AS builder
+HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health')"
+FROM python:3.12-slim
+HEALTHCHECK CMD python -c "print('http://127.0.0.1:8091/health')"
+"""
+    argv = final_stage_healthcheck_argv(text)
+    with pytest.raises(AssertionError, match="closed listener"):
+        assert_socket_healthcheck_semantics(argv)
+
+
+def test_healthcheck_oracle_rejects_url_print_commands() -> None:
+    """Printing a plausible loopback URL is not a health probe."""
+    argv = [sys.executable, "-c", "print('http://127.0.0.1:8091/health')"]
+    with pytest.raises(AssertionError, match="closed listener"):
+        assert_socket_healthcheck_semantics(argv)
 
 
 def test_dockerfile_mcp_boots_rebar_mcp() -> None:
