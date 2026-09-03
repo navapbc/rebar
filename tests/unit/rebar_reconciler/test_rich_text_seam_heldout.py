@@ -5,9 +5,9 @@ This file is HELD OUT from the implementation subagent.
 What it proves that the happy-path spec does not:
 
 1. **Cloud's send path is behaviourally unchanged.** The composition
-   ``normalize_outbound(fit_outbound(v))`` must equal what ``_fit_description``
-   computed before this story — asserted against the ADF module directly, so the
-   codec cannot quietly reorder or drop a step. The order is load-bearing: fit
+   ``normalize_outbound(fit_outbound(v))`` must equal the historical Cloud
+   send-path composition — asserted against the ADF module directly, so the codec
+   cannot quietly reorder or drop a step. The order is load-bearing: fit
    measures the ADF the send path serializes, and the stored body is then read
    back normalized, which is what makes the value its own fixed point.
 2. **The two Cloud callers stay distinct.** The description sanitizer applies the
@@ -32,6 +32,16 @@ _REC = Path(__file__).resolve().parents[3] / "src" / "rebar" / "_engine" / "reba
 _ADAPTERS = _REC / "adapters"
 
 
+def test_cloud_send_path_prose_names_shared_codec_owner() -> None:
+    """The dead Cloud helper name is gone; prose points at the shared codec path instead."""
+    for path in (
+        _ADAPTERS / "jira" / "backend.py",
+        _ADAPTERS / "jira" / "jira_fields.py",
+        _ADAPTERS / "jira_family" / "rich_text.py",
+    ):
+        assert "_fit_description" not in path.read_text()
+
+
 # ---------------------------------------------------------------------------
 # 1–2. Cloud behavioural parity — the composition and the two distinct callers
 # ---------------------------------------------------------------------------
@@ -47,7 +57,7 @@ _ADAPTERS = _REC / "adapters"
     ids=["short", "soft-wrapped", "over-limit"],
 )
 def test_cloud_send_path_composition_is_unchanged(text: str) -> None:
-    """``normalize_outbound(fit_outbound(v))`` == the pre-story ``_fit_description(v)``.
+    """``normalize_outbound(fit_outbound(v))`` == the pre-story Cloud send path.
 
     Both sides evaluated live against the pinned ADF module, so a reordering, a
     dropped step, or a reimplementation all break this.
