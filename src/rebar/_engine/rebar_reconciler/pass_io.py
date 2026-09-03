@@ -19,9 +19,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
-import os
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -213,18 +211,15 @@ def _write_mapping_json_atomic(mapping_path: Path, data: dict) -> None:
         mapping_path: Full path to mapping.json.
         data:         Complete dict to serialize.
     """
+    from rebar._store.fsutil import atomic_write
+
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=mapping_path.parent, suffix=".tmp", prefix="mapping_")
-    try:
-        with os.fdopen(tmp_fd, "w") as fh:
-            json.dump(data, fh, indent=2)
-        os.replace(tmp_path, mapping_path)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass  # cleanup is best-effort; preserve and re-raise original write error
-        raise
+    atomic_write(
+        mapping_path,
+        json.dumps(data, indent=2, sort_keys=True),
+        encoding="utf-8",
+        fsync=True,
+    )
 
 
 def _persist_field_provenance(
@@ -253,19 +248,22 @@ def _persist_field_provenance(
     else:
         provenance_record = []
 
-    data = _load_mapping(mapping_path)
+    from rebar_reconciler.sidecar_transactions import mutate_json_object
 
-    # Ensure nested structure exists
-    if jira_key not in data:
-        data[jira_key] = {}
-    if not isinstance(data[jira_key], dict):
-        data[jira_key] = {}
-    if "field_provenance" not in data[jira_key]:
-        data[jira_key]["field_provenance"] = {}
+    def mutate(data: dict) -> None:
+        # Ensure nested structure exists using the latest mapping loaded under
+        # the lock, so another writer's distinct key cannot be clobbered.
+        if jira_key not in data:
+            data[jira_key] = {}
+        if not isinstance(data[jira_key], dict):
+            data[jira_key] = {}
+        if "field_provenance" not in data[jira_key] or not isinstance(
+            data[jira_key]["field_provenance"], dict
+        ):
+            data[jira_key]["field_provenance"] = {}
+        data[jira_key]["field_provenance"][field_name] = provenance_record
 
-    data[jira_key]["field_provenance"][field_name] = provenance_record
-
-    _write_mapping_json_atomic(mapping_path, data)
+    mutate_json_object(mapping_path, mutate, log_label="mapping")
 
 
 def _write_mapping_atomic(mapping_path: Path, local_id: str, jira_key: str) -> None:
@@ -278,10 +276,9 @@ def _write_mapping_atomic(mapping_path: Path, local_id: str, jira_key: str) -> N
         local_id:     Local ticket ID (key to set).
         jira_key:     Jira issue key (value to set).
     """
-    mapping_path.parent.mkdir(parents=True, exist_ok=True)
+    from rebar_reconciler.sidecar_transactions import mutate_json_object
 
-    # Load existing mapping (tolerate missing file)
-    existing = _load_mapping(mapping_path)
-    existing[local_id] = jira_key
+    def mutate(data: dict) -> None:
+        data[local_id] = jira_key
 
-    _write_mapping_json_atomic(mapping_path, existing)
+    mutate_json_object(mapping_path, mutate, log_label="mapping")
