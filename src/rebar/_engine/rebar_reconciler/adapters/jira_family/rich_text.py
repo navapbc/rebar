@@ -15,8 +15,9 @@ behaviour needs all four kept distinct:
 * ``decode_inbound(body)``     — wire shape back to plain text.
 
 ``fit_outbound`` and ``normalize_outbound`` are separate on purpose: Cloud's send
-path (``backend.py``'s ``_fit_description``) composes BOTH, while the description
-sanitizer (``jira_fields._sanitize_description``) applies only the fit.
+path (the shared ``OutboundFieldMapper`` composed with ``AdfCodec``) uses BOTH,
+while the description sanitizer (``jira_fields._sanitize_description``) applies
+only the fit.
 Collapsing the two into one operation would silently change the observable
 behaviour of whichever caller lost its distinct step.
 

@@ -2,10 +2,10 @@
 """AcliClient REST transport mixin.
 
 The direct-REST surface of the ACLI client: a retrying urlopen wrapper plus the
-``_direct_rest_{get,put,put_raw,post_raw,post_json,delete}`` helpers and the
+``_direct_rest_{get,put_raw,post_raw,post_json,delete}`` helpers and the
 issue/entity property get/set methods built on them. Jira endpoints that ACLI
 does not expose (issue properties, assignee unassign, transitions, parent,
-priority/issuetype edits, comment delete) route through these.
+priority/issuetype edits, comment delete) route through these concrete writes.
 
 Mixed into ``AcliClient`` (``acli.py``); every method depends only on the
 credential attributes ``self.jira_url`` / ``self.user`` / ``self.api_token``
@@ -112,19 +112,6 @@ class AcliRestMixin:
         assert last_exc is not None
         raise last_exc
 
-    def _direct_rest_put(self, path: str, data: Any) -> None:
-        """PUT JSON data to a Jira issue-properties REST path using stored credentials.
-
-        Wraps the body as ``{"value": data}`` per the Jira issue-properties
-        API contract (used by set_issue_property). Do NOT use this for any
-        other PUT endpoint (e.g. /rest/api/3/issue/{key} updates) — use
-        _direct_rest_put_raw() instead so the body is sent unwrapped.
-
-        Spike confirmed ACLI has no issue properties subcommand.
-        Raises urllib.error.HTTPError on non-2xx response.
-        """
-        self._direct_rest_put_raw(path, {"value": data})
-
     def _direct_rest_post_raw(self, path: str, body: Any) -> None:
         """POST JSON body to a Jira REST path verbatim (no wrapping).
 
@@ -184,13 +171,13 @@ class AcliRestMixin:
         value sent as the request body verbatim. Jira's issue-properties API
         stores whatever JSON is PUT as the property's value (the docs are
         explicit: "Request body: The value of the property. Must be valid
-        JSON"). The earlier wrapping path (`_direct_rest_put` adding a
-        `{"value": ...}` envelope) was incorrect — it caused the property to
-        be stored as the literal `{"value": uuid}` dict instead of the uuid
-        string. Bug 0b27-b785-dea8-49a0 surfaced this via the cfd6 live probe
-        (STEP_PROPERTY_READ returned `{'value': uuid}` instead of `uuid`).
+        JSON"). The earlier wrapped helper was incorrect — it caused the
+        property to be stored as the literal `{"value": uuid}` dict instead of
+        the uuid string. Bug 0b27-b785-dea8-49a0 surfaced this via the cfd6
+        live probe (STEP_PROPERTY_READ returned `{'value': uuid}` instead of
+        `uuid`).
 
-        Now uses `_direct_rest_put_raw` so the value is PUT exactly as-is.
+        Uses `_direct_rest_put_raw` so the value is PUT exactly as-is.
         """
         path = f"/rest/api/3/issue/{jira_key}/properties/{property_key}"
         self._direct_rest_put_raw(path, value)
@@ -198,9 +185,8 @@ class AcliRestMixin:
     def set_reporter(self, jira_key: str, account_id: str) -> None:
         """Set a Jira issue's reporter to ``account_id`` via REST (264f).
 
-        Uses ``_direct_rest_put_raw`` (NOT ``_direct_rest_put``, which wraps the body as
-        ``{"value": ...}`` for the issue-properties API) so the issue-edit body is sent
-        verbatim: ``PUT /rest/api/3/issue/{key}`` with
+        Uses ``_direct_rest_put_raw`` so the issue-edit body is sent verbatim:
+        ``PUT /rest/api/3/issue/{key}`` with
         ``{"fields": {"reporter": {"accountId": account_id}}}``. Raises
         ``urllib.error.HTTPError`` on a non-2xx response (a 4xx = Modify-Reporter not
         granted); the caller (dispatch's ``_update_one_apply_reporter``) softens it."""
@@ -237,7 +223,7 @@ class AcliRestMixin:
     def _direct_rest_get(self, path: str, *, retry_policy: Any = None) -> Any:
         """GET JSON data from a Jira REST path using stored credentials.
 
-        Follows the same urllib pattern as _direct_rest_put().
+        Follows the same urllib pattern as ``_direct_rest_put_raw``.
         Raises urllib.error.HTTPError on non-2xx response.
 
         ``retry_policy`` is threaded to :meth:`_rest_urlopen_with_retry`; the ONLY
