@@ -1,6 +1,6 @@
 """The public ``review_code`` surface, gate-backed (epic b744 / WS4).
 
-This REPLACES the retired single-pass route: ``review_code`` keeps its name/signature and its
+This REPLACES the retired single-pass route: ``review_code`` keeps its name and
 ``review_result`` return shape, but its IMPLEMENTATION is now the four-pass gate.
 
 An explicit ``review_code`` call — the CLI ``rebar review-code``, the library function, the MCP
@@ -13,7 +13,7 @@ shape: a config key may control whether a gate is REQUIRED, never whether the op
 AVAILABLE — ``verify.enable_code_review`` keeps its enablement meaning only for dispatch-level
 callers of ``produce_code_review_verdict`` that leave ``enabled=None``.
 
-The CLI (``rebar review-code``) and MCP (``review_code``) call this unchanged.
+The CLI (``rebar review-code``) and MCP (``review_code``) call this gate-backed surface.
 """
 
 from __future__ import annotations
@@ -110,7 +110,6 @@ def review_code(
     diff_text: str | None = None,
     changed_files: list[str] | None = None,
     commit_message: str = "",
-    reviewers: list[str] | None = None,
     ref: str | None = None,
     source: str | None = None,
     target_ticket: str | None = None,
@@ -121,8 +120,7 @@ def review_code(
 ) -> dict[str, Any]:
     """Review a code change and return a ``review_result``. Gate-backed (epic b744): always
     runs the four-pass gate and translates its verdict — an explicit call is the caller's
-    intent, so no config key gates availability (bug 5b32-37c4-f99a-4315). (``reviewers`` is
-    accepted for surface compatibility but the gate selects its own overlays.)
+    intent, so no config key gates availability (bug 5b32-37c4-f99a-4315).
 
     ``ref``/``source`` select the read-root like every other code-reading gate. The gate pins
     ONE ref (there is no base+head snapshot pair) and it is the REVIEWED commit, so an explicit

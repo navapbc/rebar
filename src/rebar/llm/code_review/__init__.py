@@ -7,7 +7,7 @@ the per-overlay :mod:`batch_runner`, the verdict sidecar (:mod:`sidecar`), and t
 gate-backed surface (:mod:`shim`).
 
 The SINGLE-PASS route is RETIRED (WS4, ADR 0011): ``review_code`` is now the gate-backed shim —
-it keeps its name/signature and ``review_result`` return shape, but its implementation is the
+it keeps its name and ``review_result`` return shape, but its implementation is the
 four-pass gate. An explicit ``review_code`` call always runs (bug 5b32-37c4-f99a-4315);
 ``verify.enable_code_review`` gates only dispatch-level callers that leave ``enabled=None``.
 Importing this package registers the structured-output contracts (cheap — pydantic is lazy).

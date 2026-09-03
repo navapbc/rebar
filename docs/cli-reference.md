@@ -837,7 +837,7 @@ options:
 ### `review-code`
 
 ```
-Usage: rebar review-code [-h] [--base BASE] [--head HEAD] [--diff-file DIFF_FILE] [--reviewer REVIEWERS] [--output {json,text}] [--ref REF] [--source {attested,local}]
+Usage: rebar review-code [-h] [--base BASE] [--head HEAD] [--diff-file DIFF_FILE] [--output {json,text}] [--ref REF] [--source {attested,local}]
 
 Run an LLM code review of a change (a git range or a diff file) and emit
 aggregated structured findings. Requires the 'agents' extra and an API key.
@@ -848,8 +848,6 @@ options:
   --head HEAD           head git ref (default HEAD)
   --diff-file DIFF_FILE
                         review this unified-diff file instead of a git range
-  --reviewer REVIEWERS  reviewer id, repeatable (default: deterministic
-                        selection)
   --output, -o {json,text}
   --ref REF             a branch, tag, or commit SHA to verify against (default:
                         the reviewed --head)
