@@ -50,6 +50,9 @@ REQUIRED_TOPICS = {
     "subprocess limitations": "subprocess",
     "behavior deltas": "behavior delta",
     "cli exposure": "Exposure (CLI exposure)",
+    "scanner-lock authority": "review scanner lock authority",
+    "checksum provenance": "checksum provenance",
+    "withdrawn-asset recovery": "withdrawn",
 }
 
 
@@ -274,6 +277,17 @@ def test_security_doc_lists_every_adapter_secret_name():
     assert names, "fixture guard: expected declared adapter secret names"
     for name in names:
         assert name in doc, f"secret env-var {name!r} missing from security.md"
+
+
+def test_security_doc_documents_scanner_lock_update_contract():
+    """The generated security narrative owns the scanner-lock operating procedure."""
+    doc = gen.render_security()
+    assert "## Review scanner lock authority" in doc
+    assert "infra/compose/review-scanners.lock.json" in doc
+    assert "gitleaks_<version>_checksums.txt" in doc
+    assert "linux/amd64" in doc and "linux/arm64" in doc
+    assert "uv pip compile" in doc and "--require-hashes" in doc
+    assert "withdrawn" in doc and "do not loosen digest checking" in doc
 
 
 # ── REQUIRED_TOPICS coverage across BOTH docs ─────────────────────────────────

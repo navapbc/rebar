@@ -615,3 +615,182 @@ def test_security_pin_main_uses_aware_now_local_date_not_date_today():
         isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "date"
         for n in ast.walk(main_fn)
     ), "main() must convert the aware instant to a local date via .date()"
+
+
+# ── deployed scanner lock + provisioner contract (story aa9e) ───────────────────────────────
+# mechanism-ok: test_helper _load_review_scanners — aa9e scanner installer import seam.
+def _load_review_scanners():
+    import importlib.util
+    import sys
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "install_review_scanners.py"
+    spec = importlib.util.spec_from_file_location("install_review_scanners", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_review_scanner_lock_manifest_has_two_platform_contracts():
+    import json
+
+    mod = _load_review_scanners()
+    manifest_path = (
+        Path(__file__).resolve().parents[2] / "infra" / "compose" / "review-scanners.lock.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert set(manifest["platforms"]) == {"linux/amd64", "linux/arm64"}
+
+    semgrep_versions = set()
+    for platform_name, entry in manifest["platforms"].items():
+        gitleaks = entry["gitleaks"]
+        assert gitleaks["version"] == "8.30.1"
+        assert gitleaks["asset_arch"] in {"x64", "arm64"}
+        assert gitleaks["url"].endswith(
+            f"gitleaks_{gitleaks['version']}_linux_{gitleaks['asset_arch']}.tar.gz"
+        )
+        assert gitleaks["checksums_url"].endswith(f"gitleaks_{gitleaks['version']}_checksums.txt")
+        assert len(gitleaks["sha256"]) == 64
+        selected = mod.selected_entry(platform_name)
+        mod.validate_requirements_lock(selected.semgrep_requirements)
+        semgrep_versions.add(selected.semgrep_version)
+    assert semgrep_versions == {"1.145.0"}
+
+
+def test_review_scanner_platform_detection_prefers_docker_then_runner_env():
+    mod = _load_review_scanners()
+    assert mod.detect_platform({"TARGETOS": "linux", "TARGETARCH": "arm64"}) == "linux/arm64"
+    assert mod.detect_platform({"RUNNER_OS": "Linux", "RUNNER_ARCH": "X64"}) == "linux/amd64"
+
+
+def test_review_scanner_installer_rejects_unsupported_platform_before_install():
+    mod = _load_review_scanners()
+    with pytest.raises(mod.ScannerInstallError, match="unsupported scanner platform"):
+        mod.selected_entry("darwin/arm64")
+
+
+def test_semgrep_requirements_lock_validation_rejects_missing_hash(tmp_path):
+    mod = _load_review_scanners()
+    bad = tmp_path / "bad.requirements.txt"
+    bad.write_text("semgrep==1.145.0\n", encoding="utf-8")
+    with pytest.raises(mod.ScannerInstallError, match="lacks --hash"):
+        mod.validate_requirements_lock(bad)
+
+
+def test_gitleaks_archive_digest_mismatch_fails_before_extraction(tmp_path):
+    mod = _load_review_scanners()
+    archive = tmp_path / "gitleaks.tar.gz"
+    archive.write_bytes(b"not the release archive")
+    with pytest.raises(mod.ScannerInstallError, match="digest mismatch"):
+        mod._verify_digest(archive, "0" * 64)
+
+
+def test_scanner_check_rejects_missing_binaries(tmp_path):
+    mod = _load_review_scanners()
+    entry = mod.selected_entry("linux/amd64")
+    with pytest.raises(mod.ScannerInstallError, match="could not execute"):
+        mod.check_scanners(entry, tmp_path / "missing-prefix")
+
+
+def test_scanner_check_rejects_wrong_gitleaks_version(tmp_path):
+    mod = _load_review_scanners()
+    entry = mod.selected_entry("linux/amd64")
+    bin_dir = tmp_path / "prefix" / "bin"
+    bin_dir.mkdir(parents=True)
+    for name, version in {"gitleaks": "0.0.0", "semgrep": entry.semgrep_version}.items():
+        tool = bin_dir / name
+        tool.write_text(f"#!/bin/sh\nprintf '%s\\n' '{version}'\n", encoding="utf-8")
+        tool.chmod(0o755)
+
+    with pytest.raises(mod.ScannerInstallError, match="gitleaks version mismatch"):
+        mod.check_scanners(entry, tmp_path / "prefix")
+
+
+def test_semgrep_install_command_uses_require_hashes(tmp_path):
+    mod = _load_review_scanners()
+    cmd = mod._pip_install_command(tmp_path / "pip", tmp_path / "requirements.txt")
+    assert "--require-hashes" in cmd
+    assert "-r" in cmd
+
+
+def test_semgrep_bad_hash_install_failure_is_rejected(tmp_path, monkeypatch):
+    import subprocess
+
+    mod = _load_review_scanners()
+    req = tmp_path / "requirements.txt"
+    req.write_text("semgrep==1.145.0 \\\n    --hash=sha256:" + "0" * 64 + "\n")
+    entry = mod.PlatformEntry("linux/amd64", "8.30.1", "x64", "", "0" * 64, "", "1.145.0", req)
+
+    class FakeBuilder:
+        def create(self, _path):
+            return None
+
+    monkeypatch.setattr(mod.venv, "EnvBuilder", lambda with_pip: FakeBuilder())
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(subprocess.CalledProcessError(1, "pip")),
+    )
+    with pytest.raises(mod.ScannerInstallError, match="hash-locked pip install failed"):
+        mod._install_semgrep(entry, tmp_path / "venv")
+
+
+def test_make_scanner_integration_target_provisions_then_runs_nine_real_contracts():
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+    assert "\nscanner-integration:" in makefile
+    target = makefile.split("\nscanner-integration:", 1)[1]
+    assert "scripts/install_review_scanners.py install" in target
+    assert "scripts/install_review_scanners.py check" in target
+    assert "$(SCANNER_INTEGRATION_NODES)" in target
+    expected_nodes = {
+        "tests/unit/test_code_review_conflict_markers.py::test_positive_conflict_markers_match",
+        "tests/unit/test_code_review_conflict_markers.py::test_negative_bare_equals_does_not_match",
+        "tests/unit/test_code_review_conflict_markers.py::test_conflict_marker_match_stays_advisory",
+        "tests/unit/test_code_review_conflict_markers.py::test_clean_diff_produces_no_finding",
+        "tests/unit/test_code_review_public_exposure.py::test_positive_public_exposure_matches",
+        "tests/unit/test_code_review_public_exposure.py::test_negative_fp_guards_do_not_match",
+        "tests/unit/test_code_review_public_exposure.py::test_public_exposure_match_stays_advisory",
+        "tests/unit/test_code_review_ws5.py::test_planted_secret_blocks_end_to_end_real_gitleaks",
+        "tests/unit/test_code_review_ws5.py::test_repo_gitleaks_config_allowlists_doc_throwaway_but_not_real_secret",
+    }
+    for node in expected_nodes:
+        assert node in makefile
+
+
+def test_scanner_workflow_is_shared_by_mirror_and_gerrit_verified():
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+    scanner_text = (root / ".github" / "workflows" / "_scanner-integration.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "workflow_call:" in scanner_text
+    assert "make scanner-integration" in scanner_text
+    assert "1.5-3 runner-minutes" in scanner_text
+
+    test_yml = yaml.safe_load((root / ".github" / "workflows" / "test.yml").read_text())
+    gerrit = yaml.safe_load((root / ".github" / "workflows" / "gerrit-verify.yaml").read_text())
+    assert (
+        test_yml["jobs"]["scanner-integration"]["uses"]
+        == "./.github/workflows/_scanner-integration.yml"
+    )
+
+    gerrit_job = gerrit["jobs"]["scanner-integration"]
+    assert gerrit_job["uses"] == "./.github/workflows/_scanner-integration.yml"
+    assert gerrit_job["with"]["gerrit-refspec"] == "${{ inputs.GERRIT_REFSPEC }}"
+    assert "full" in gerrit_job["if"]
+
+    vote = gerrit["jobs"]["vote"]
+    assert "scanner-integration" in vote["needs"]
+    conclusion = vote["steps"][2]["env"]["CONCLUSION"]
+    assert "needs.scanner-integration.result == 'success'" in conclusion
+    assert "needs.scanner-integration.result == 'skipped'" in conclusion
+
+
+def test_reviewbot_dockerfile_uses_shared_arm64_scanner_provisioner():
+    dockerfile = Path("infra/compose/Dockerfile.reviewbot").read_text(encoding="utf-8")
+    assert "scripts/install_review_scanners.py install --platform linux/arm64" in dockerfile
+    assert "scripts/install_review_scanners.py check --platform linux/arm64" in dockerfile
+    assert "gitleaks/releases/latest" not in dockerfile
+    assert "pip install --no-cache-dir semgrep" not in dockerfile

@@ -133,6 +133,57 @@ environment; an owning child receives its own credential only from an explicit o
   non-`same_capability` child (and the refusal to apply an overlay for an `unrelated`
   child). Every other variable — non-secret config and unknown native variables — passes
   through unchanged.
+
+## Review scanner lock authority
+
+`infra/compose/review-scanners.lock.json` is the single update authority for the native
+Semgrep and Gitleaks scanners used by the code-review gate, the review-bot image, and the
+explicit Verified scanner lane. The manifest declares exactly two supported platforms:
+`linux/amd64` for the GitHub runner lane and `linux/arm64` for the Graviton review-bot
+deployment. Each platform entry records the exact Gitleaks version, asset architecture,
+release URL, SHA-256, and checksum provenance: the Gitleaks release `*_checksums.txt`
+URL used at lock-update time. There is no `latest` lookup and no platform fallback.
+
+Semgrep is locked differently because it is a Python application resolved as a set of
+packages, wheels, and environment markers rather than one archive. Each platform entry
+therefore points to its own `infra/compose/review-scanners.<platform>.requirements.txt`
+file, generated for that Linux architecture with `pip --require-hashes`-compatible hashes.
+Both requirement locks must keep the same top-level `semgrep==...` version, and the shared
+installer must invoke `pip install --require-hashes`.
+
+### Bumping scanner pins
+
+For a per-platform Gitleaks bump, open the target release and read its published
+`gitleaks_<version>_checksums.txt` asset. Copy the `linux_x64.tar.gz` digest into the
+`linux/amd64` manifest entry and the `linux_arm64.tar.gz` digest into the `linux/arm64`
+entry, keeping each URL/version/asset-arch tuple aligned. Regenerate both Semgrep locks for
+the same top-level version and their target architectures, for example:
+
+```sh
+printf 'semgrep==<version>\\n' | uv pip compile - --generate-hashes \
+  --python-platform x86_64-manylinux2014 --only-binary=:all: \
+  -o infra/compose/review-scanners.linux-amd64.requirements.txt
+printf 'semgrep==<version>\\n' | uv pip compile - --generate-hashes \
+  --python-platform aarch64-manylinux2014 --only-binary=:all: \
+  -o infra/compose/review-scanners.linux-arm64.requirements.txt
+```
+
+Then run the portable validation path before review:
+
+```sh
+python scripts/install_review_scanners.py validate-locks
+REBAR_SCANNER_PLATFORM=linux/amd64 make scanner-integration
+python scripts/gen_config_reference.py
+```
+
+### Withdrawn asset recovery
+
+The withdrawn asset recovery procedure is fail-closed. If an upstream Gitleaks asset is
+withdrawn or its checksum asset disappears, do not patch in
+an unverifiable replacement and do not loosen digest checking. Move both platform entries to
+an available release whose `*_checksums.txt` asset can verify every referenced archive,
+regenerate the Semgrep locks if their top-level version changes, rerun the installer
+validation target, and regenerate this generated security reference.
 """
 
 
