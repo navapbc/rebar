@@ -190,20 +190,82 @@ MUTATION_VERBS: dict[str, dict[str, object]] = {
 }
 
 
+#: The sentence both prose copies open with. They are hand-written guidance with rationale,
+#: not generated lists, so the gate pins the SET and leaves the wording to a human.
+_VERB_SENTENCE = re.compile(r"Every mutating verb \(([^)]*)\)", re.DOTALL)
+
+#: Where the user-facing prose copy of the confirmable-verb list lives.
+USER_GUIDE_PATH = REPO_ROOT / "docs" / "user-guide.md"
+
+
+def prose_mutation_verbs(text: str) -> set[str] | None:
+    """The backticked verbs in ``text``'s "Every mutating verb (...)" sentence.
+
+    ``None`` when that sentence is absent — distinguished from an empty set so a rewritten
+    passage fails as "cannot locate" rather than silently reporting every verb missing.
+    """
+    match = _VERB_SENTENCE.search(text)
+    if match is None:
+        return None
+    return set(re.findall(r"`([a-z][a-z-]*)`", match.group(1)))
+
+
+def prose_verb_drift(label: str, text: str, canonical: set[str]) -> str | None:
+    """Describe how ``text``'s verb list differs from ``canonical``, or ``None`` if it agrees.
+
+    Pure, so each prose copy's drift behaviour is testable without editing the real documents.
+    """
+    verbs = prose_mutation_verbs(text)
+    if verbs is None:
+        return (
+            f"{label}: could not locate the 'Every mutating verb (...)' sentence, so the "
+            "confirmable-verb list is no longer gated. Restore the sentence or update "
+            "_VERB_SENTENCE in scripts/gen_cli_reference.py."
+        )
+    if verbs == canonical:
+        return None
+    missing = sorted(canonical - verbs)
+    extra = sorted(verbs - canonical)
+    return (
+        f"{label} is out of sync with rebar._cli._CONFIRM_SCOPE: "
+        f"missing {missing}, stale/extra {extra}."
+    )
+
+
 def _check_mutation_verbs() -> None:
-    """Fail loudly when ``MUTATION_VERBS`` drifts from the CLI's confirmation scope."""
+    """Fail loudly when any copy of the verb list drifts from the CLI's confirmation scope.
+
+    Three copies, one canonical source. ``MUTATION_VERBS`` was already gated; the two PROSE
+    copies were not, so adding a ``confirmable=True`` route left both stale in exactly the
+    documents that tell an agent which commands ask for confirmation (mirror F14).
+    """
     from rebar._cli import _CONFIRM_SCOPE
 
+    canonical = set(_CONFIRM_SCOPE)
     curated = set(MUTATION_VERBS)
-    if curated != set(_CONFIRM_SCOPE):
-        missing = sorted(set(_CONFIRM_SCOPE) - curated)
-        extra = sorted(curated - set(_CONFIRM_SCOPE))
+    if curated != canonical:
+        missing = sorted(canonical - curated)
+        extra = sorted(curated - canonical)
         raise ValueError(
             "MUTATION_VERBS is out of sync with rebar._cli._CONFIRM_SCOPE "
             f"(_WRITES_FULL | _LIFECYCLE): unclassified verbs {missing}, "
             f"stale/extra curated entries {extra}. "
             "Classify the verb in MUTATION_VERBS in scripts/gen_cli_reference.py."
         )
+
+    problems = [
+        prose_verb_drift(
+            "EDITORIAL_PREAMBLE (scripts/gen_cli_reference.py)", EDITORIAL_PREAMBLE, canonical
+        ),
+        prose_verb_drift(
+            f"{USER_GUIDE_PATH.name} (mutation confirmations)",
+            USER_GUIDE_PATH.read_text(encoding="utf-8"),
+            canonical,
+        ),
+    ]
+    reported = [problem for problem in problems if problem is not None]
+    if reported:
+        raise ValueError(" ".join(reported))
 
 
 def _cell(value: object) -> str:
