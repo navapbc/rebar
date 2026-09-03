@@ -1,0 +1,749 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: T2
+  expect: finding
+  id: plan-review-T2-fire-0
+  input: "Add an `mcp` autodeploy target to `infra/scripts/autodeploy.sh` implementing\
+    \ the ADR 0079\namendment's blue-green pointer-swap, so on-box `rebar-mcp` tracks\
+    \ `origin/main` without killing an\nin-flight certified op. Scope: MCP deploy\
+    \ path only (service/edge = esok, secrets = avians); no\nnew timer (`rebar-autodeploy.timer`\u2192\
+    `.service` runs `autodeploy.sh`).\n\n## Approach (blue-green, ADR deft-evolutive-mosasaur\
+    \ / 0079 amendment)\nModel on the LOCAL `origin/main` updater (`sticky-genetic-narwhal`):\
+    \ immutable release + atomic\npointer swap + retire-when-idle, NOT stop-and-drain.\
+    \ On an MCP source change:\n1. Build + tag immutable `compose-mcp:<target-sha>`\
+    \ (`docker compose build mcp`).\n2. **Memory pre-check BEFORE the 2x overlap**\
+    \ (t4g.large 8 GiB): read `MemAvailable`\n   (`/proc/meminfo`, MB); `< MCP_MEM_MIN_MB`\
+    \ (default 1024) ABORTS \u2014 `AUTODEPLOY_MCP_MEM_ABORT`,\n   backoff, start\
+    \ NO second container. Unreadable fails OPEN; `MCP_MEM_AVAILABLE_MB` overrides.\n\
+    3. Start a NEW container alongside old via **`docker run -d`** (see Run mechanism)\
+    \ on the OTHER A/B\n   host port; one-in/one-out, never N.\n4. Health-check the\
+    \ NEW `/health` 200 within `MCP_HEALTH_TIMEOUT` (default 120). On failure:\n \
+    \  `docker rm -f` new, leave OLD include UNCHANGED, `AUTODEPLOY_ERROR` `mcp-unhealthy`,\
+    \ backoff,\n   exit 1 \u2192 next tick retries.\n5. **Atomically flip the nginx\
+    \ `/mcp/` upstream**: back up the include, write\n   `server 127.0.0.1:<newport>;`\
+    \ to a dotfile temp NOT matching the `mcp-upstream*.conf` glob in\n   the same\
+    \ dir, `mv` (atomic rename) over `/etc/nginx/mcp-upstream.conf`, `nginx -t`,\n\
+    \   `nginx -s reload`. On failure: RESTORE the backup, `docker rm -f` new, backoff,\
+    \ exit 1. Deploy\n   is DONE at a successful reload; never waited on/killed an\
+    \ op.\n6. **Retire the OLD container off the critical path**, gated by a \"still\
+    \ serving?\" check on its\n   `/health` `in_flight` gauge. Retain newest `MCP_RELEASES_KEEP`\
+    \ (default 1); remove older ones\n   ONLY when idle; NEVER kill `in_flight>0`.\
+    \ If the managed count exceeds `MCP_RELEASES_CAP`\n   (default 3) because busy\
+    \ containers can't be reclaimed, emit `AUTODEPLOY_MCP_RETIRE_CAP`\n   instead\
+    \ of killing a live one or growing unbounded. Because `autodeploy.sh` exits early\
+    \ when\nup-to-date, also run `mcp_retire_sweep` on the no-op tick (like `reclaim_under_pressure`)\
+    \ so\nretirement re-triggers once an old container goes idle.\n\nWhy: eliminates\
+    \ bug 7b4a (never-idle shared MCP can't satisfy a gauge-gated drain bound);\n\
+    decoupling retire from deploy means it never blocks/kills, and a killed op is\
+    \ idempotent so\nretire is safe.\n\n## Run mechanism + the original compose container\
+    \ (bootstrap)\n`docker compose up mcp` pins `8091` and would recreate/collide,\
+    \ so it CANNOT run the parallel\ncontainer. The NEW container starts via **`docker\
+    \ run -d`** from `compose-mcp:<sha>` (helper\n`mcp_run_new`) reproducing the compose\
+    \ `mcp:` service on a blue-green HOST port\n`-p 127.0.0.1:<newport>:8091` (container\
+    \ port stays 8091; blue-green alternates\n`MCP_PORT_A=8092`\u2194`MCP_PORT_B=8093`,\
+    \ RESERVING 8091 for the compose-original so no boot collision):\n`--env-file\
+    \ \"$COMPOSE_DIR/.env\"`, and every `REBAR_MCP_*` + `REBAR_OPCERT_*` var with\
+    \ the SAME\nliteral defaults compose's `${VAR:-default}` interpolates (`docker\
+    \ run` does not interpolate), the\ntwo `:ro` secret bind-mounts, `--restart always`,\
+    \ `--stop-timeout 1260` \u2014 a comment marks these MIRRORING compose `mcp:`.\
+    \ The live port is read from the include; the new takes the\nother blue-green\
+    \ port (or A if the include still points at 8091).\n\nAt boot `compose-up.sh`\
+    \ `docker compose up -d`s the whole stack, so the ORIGINAL container is\n`compose-mcp-1`\
+    \ on 8091 (seed include\u21928091). The managed MCP set the sweep/cap count over\
+    \ = names\nmatching `MCP_CONTAINER_PREFIX` (`rebar-mcp`) OR `MCP_COMPOSE_CONTAINER`\
+    \ (default `compose-mcp-1`).\nSo the first deploy's OLD backend is `compose-mcp-1`,\
+    \ adopted into retire-when-idle by the same\nliveness gate (autodeploy never runs\
+    \ `docker compose up mcp`); cap counts the union. Since\nblue-green never binds\
+    \ 8091, on reboot compose recreates `compose-mcp-1` with NO collision and the\n\
+    sweep reclaims it when idle. The sweep discovers each old port via `docker port\
+    \ <name> 8091/tcp`;\nan unreadable OLD `/health` read is treated as still-serving\
+    \ (fail-safe: never kill on unknown).\n\n## Change detection + blast radius\n\
+    `MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/compose/docker-compose.yml\
+    \ uv.lock pyproject.toml'`\n\u2014 the canonical set esok committed in the `mcp:`\
+    \ compose comment. Diffed `deployed..target` it\ntriggers ONLY `mcp`. Since `src/rebar`\
+    \ and `docker-compose.yml` are shared with `BOT_PATHS`, a\nshared change triggers\
+    \ BOTH targets, each in its own independent `if changed` block. `gerrit` is\n\
+    never touched (before/after gerrit-id assert). `flock` still serializes.\n\n##\
+    \ Failure interaction with deployed-sha + backoff\nThe `mcp` branch failure is\
+    \ FATAL like `review-bot` (`record_backoff_failure` + `exit 1`), so the\nfooter\
+    \ advancing `deployed-sha` is not reached. For a shared change review-bot runs\
+    \ first; if it\nsucceeds but mcp fails, `deployed-sha` does not advance and BOTH\
+    \ retry next tick (review-bot\nrebuild is idempotent) \u2014 a failed mcp deploy\
+    \ is always retried.\n\n## Alerting (marker \u2192 observability \u2192 CloudWatch\
+    \ \u2192 SNS; NO direct SNS publish)\nautodeploy.sh has no `sns:Publish` path\
+    \ and must not gain one. Like every existing autodeploy\nalert: a countable `marker\
+    \ AUTODEPLOY_MCP_* {json}` \u2192 `observability.sh`\n`publish_autodeploy_marker_delta`\
+    \ greps the journal into a dimensionless `rebar/host` metric \u2192 a\nterraform\
+    \ `aws_cloudwatch_metric_alarm` routes it to `aws_sns_topic.alerts.arn`. Adds\
+    \ tokens\n`AUTODEPLOY_MCP_RETIRE_CAP` + `AUTODEPLOY_MCP_MEM_ABORT`; two marker-delta\
+    \ calls (+ offset files)\npublishing `rebar/host:mcp_retire_cap` + `rebar/host:mcp_mem_abort`;\
+    \ two alarms mirroring\n`monitoring_autodeploy.tf`'s dimensionless 900s/2-of-4/Sum>0/notBreaching\
+    \ shape. Both tokens are\ndistinct from `AUTODEPLOY_ERROR`.\n\n## Portability\
+    \ (`project.portability`)\nTrigger is the on-box systemd/launchd timer polling\
+    \ the git mirror \u2014 operation-linked, not CI;\ndrain/flip/retire run in-process;\
+    \ works with any/no CI.\n\n## Acceptance Criteria\n- [ ] Tier: **real subprocess/bash\
+    \ integration, temp git repos + fake docker/nginx**. Tests stub\n  the box binaries\
+    \ onto PATH and run the REAL `autodeploy.sh`, in `tests/scripts/`. Oracles:\n\
+    \  - Change detection (REAL temp git repo, two commits): an MCP-only change (touch\n\
+    \    `Dockerfile.mcp`) triggers `mcp` and NO review-bot/gerrit rebuild; a review-bot-only\
+    \ change\n    (`Dockerfile.reviewbot`) does the inverse; a shared `src/rebar`\
+    \ change triggers BOTH\n    independently \u2014 via the docker call log.\n  -\
+    \ Cutover order start-new \u2192 health \u2192 flip \u2192 retire (recorded docker/nginx/curl\
+    \ log); the deploy\n    returns success WITHOUT waiting on `in_flight` (with `in_flight>0`\
+    \ on OLD it still flips and\n    exits 0).\n  - Retire honors liveness: an OLD\
+    \ `in_flight>0` container is NOT killed (no `docker rm` of it);\n    over `MCP_RELEASES_CAP`\
+    \ the `AUTODEPLOY_MCP_RETIRE_CAP` marker is emitted, no live container\n    deleted.\n\
+    \  - Memory pre-check: `MCP_MEM_AVAILABLE_MB < MCP_MEM_MIN_MB` ABORTS \u2014 no\
+    \ second container started,\n    `AUTODEPLOY_MCP_MEM_ABORT` emitted, backoff recorded,\
+    \ include unchanged.\n  - Health-check OR nginx reload failure leaves the OLD\
+    \ include byte-identical\n    (`AUTODEPLOY_ERROR`, backoff, `deployed-sha` not\
+    \ advanced); a retry next healthy tick flips it.\n  - `gerrit` container id UNCHANGED\
+    \ across an mcp deploy (blast radius).\n- [ ] observability.sh publishes `rebar/host:mcp_retire_cap`\
+    \ + `rebar/host:mcp_mem_abort`; two\n  terraform CloudWatch alarms route them\
+    \ to `aws_sns_topic.alerts.arn` (mirror\n  `monitoring_autodeploy.tf`).\n\n##\
+    \ Compat / rollback\nAdditive (new `if changed \"$MCP_PATHS\"` block + no-op sweep);\
+    \ other targets unchanged (existing\nautodeploy tests stay green). ADRs 0079/0104\
+    \ document it. Rollback = revert the additions.\n\nDepends on: deft-evolutive-mosasaur,\
+    \ cibophobic-holohedral-esok."
+- corpus: rebar
+  criterion: T2
+  expect: pass
+  id: plan-review-T2-no_fire-0
+  input: "# Enforce release-source authorization + version lockstep before publication\n\
+    \nRe-anchor the release to the proven OSS pattern (uv model): a single\n`workflow_dispatch`-from-`main`\
+    \ workflow that asserts version-lockstep + ancestry,\nthen **builds and publishes\
+    \ directly** via PyPA Trusted Publishing (OIDC \u2014 no\nlong-lived secret, no\
+    \ tag relay), gated on a required-reviewers `pypi` environment\nre-keyed from\
+    \ \"v* tags only\" to \"`main` via dispatch\". The source is reviewed-and-\nlanded\
+    \ `main` **by construction**. (Readiness Finding 1 \u2014 verified VALID against\n\
+    `release.yml:17-21`, `infra/terraform-github/main.tf:23-101`, `docs/releasing.md`.)\n\
+    \n## Why\n\n`main` is constrained to the Gerrit replication deploy key, but `refs/tags/v*`\
+    \ was\ndeliberately left open (`infra/terraform-github/main.tf:23-28`) so a human\
+    \ can push\na `v*` tag to drive PyPI + MCP-registry + GitHub-Release publication\n\
+    (`release.yml:17-21`, jobs `build`/`publish`/`github_release`/`mcp_registry`).\
+    \ The\nonly gate anywhere is `if: github.event_name == 'push' && startsWith(github.ref,\n\
+    'refs/tags/v')` (release.yml:53/81/116) \u2014 nothing checks that the tagged\
+    \ SHA is an\nancestor of (or equal to) reviewed `main`, verifies any Gerrit/CI\
+    \ result for that\nexact SHA, or asserts version consistency. A PEP 740\nattestation\
+    \ would correctly name this repo's workflow but cannot distinguish a tag\non reviewed\
+    \ `main` from a tag on any other commit. Separately, the three version\nvalues\
+    \ (`pyproject.toml:10`, `server.json` top-level and `packages[].version`) are\n\
+    kept in lockstep only by a manual runbook (`docs/releasing.md`), so a future\n\
+    mismatch would publish disagreeing versions across the PyPI / GitHub-Release /\
+    \ MCP\nchannels with no machine check.\n\n## What\n\nAdopt uv's proven release\
+    \ process and pydantic's pre-build version check, in this\norder of control strength:\n\
+    \n- **Primary control \u2014 initiate from `main` via `workflow_dispatch` (source\
+    \ reviewed\n  by construction).** Make `workflow_dispatch` the sanctioned release\
+    \ trigger, run\n  from the `main` ref. Because the GitHub mirror's `main` is exactly\
+    \ the\n  Gerrit-reviewed-and-landed history, releasing from `main` guarantees\
+    \ the source is\n  reviewed **by construction** \u2014 the same guarantee the\
+    \ wider OSS world gets from\n  \"release only from the protected branch.\" This\
+    \ replaces \"accept whatever commit an\n  arbitrary pushed tag points at,\" which\
+    \ was the actual divergence from consensus.\n- **Version-lockstep, before build\
+    \ (pydantic pattern).** A first job parses the\n  intended version and every manifest\
+    \ and asserts exact equality **before build**:\n  `version_input == project.version\
+    \ == server.json.version ==\n  each server.json.packages[].version`; mismatch\
+    \ fails before build.\n- **Ancestry assertion (belt-and-suspenders).** In the\
+    \ same dispatch job, assert the\n  checked-out `main` HEAD is reachable from `origin/main`\
+    \ via\n  `git merge-base --is-ancestor \"$GITHUB_SHA\" origin/main` (checkout\
+    \ with\n  `fetch-depth: 0` + `git fetch origin main`, since a shallow clone defeats\
+    \ ancestry \u2014\n  the repo documents this at `reconcile-bridge.yml:83-88` and\
+    \ `verify-identity.yaml`\n  already uses `fetch-depth: 0`). With dispatch-from-`main`\
+    \ this is redundant with the\n  ref guard, kept as defense-in-depth.\n- **Build,\
+    \ then publish DIRECTLY via PyPA Trusted Publishing \u2014 no tag relay.** The\n\
+    \  same workflow builds and then publishes using OIDC (`id-token: write`, the\
+    \ existing\n  `pypa/gh-action-pypi-publish` trusted-publishing flow). There is\
+    \ **no** intermediate\n  tag push: a tag pushed by the built-in `GITHUB_TOKEN`\
+    \ would not trigger a downstream\n  workflow anyway (GitHub's anti-recursion rule),\
+    \ so a two-phase relay is avoided\n  entirely, and no PAT / GitHub App secret\
+    \ is introduced.\n- **Compose with \u2014 do not regress \u2014 F3 and F4 (this\
+    \ story lands last).** Per the\n  dependency chain (F4 \u2192 F3 \u2192 F1), this\
+    \ story edits `release.yml` on top of F4's and\n  F3's changes. The dispatch trigger\
+    \ must **retain** F3's build-once \u2192 test-wheel /\n  test-sdist \u2192 hash-gated-`publish`\
+    \ job graph and F4's `mcp_verify`/`mcp_registry`\n  split + evidence-consolidation\
+    \ job \u2014 the trigger change swaps only *how the run\n  starts and is authorized*,\
+    \ not the internal job structure. Concretely, **re-key\n  every downstream version\
+    \ source and job guard from `github.ref_name` / the\n  tag-context `if:` to the\
+    \ `workflow_dispatch` input** (the `github_release` and\n  `mcp_registry` jobs\
+    \ derive their version from the input, and their\n  `if: github.event_name ==\
+    \ 'push' && startsWith(github.ref, 'refs/tags/v')` guards \u2014\n  which go always-false\
+    \ once the tag trigger is removed \u2014 are updated to the dispatch\n  condition).\n\
+    - **Human authorization \u2014 re-key the `pypi` environment + a fail-closed preflight\n\
+    \  (uv release-gate + PyPA Trusted Publishing).** The `publish` job runs in the\
+    \ `pypi`\n  deployment environment with **required reviewers**, so publication\
+    \ needs a second\n  human's approval. Because the job now runs in the dispatch\
+    \ (`refs/heads/main`)\n  context rather than a tag context, the environment's\
+    \ deployment-ref policy is\n  **re-keyed from \"v* tags only\" to \"`main` via\
+    \ `workflow_dispatch`\"** with required\n  reviewers \u2014 **no new secret**.\
+    \ This is the single most security-critical gate\n  (anyone with `actions:write`\
+    \ can start a dispatch; only the environment's reviewers +\n  branch policy enforce\
+    \ \"a second human approves each publish\"), so it must not live\n  as an un-versioned\
+    \ console setting that could be silently cleared. Rather than couple\n  to the\
+    \ AWS-authed `terraform-drift.yml` (a different provider/auth model), enforce\
+    \ it\n  **at release time**: a **preflight step queries the GitHub REST API\n\
+    \  (`GET /repos/{owner}/{repo}/environments/pypi`) and FAILS the release closed**\
+    \ if the\n  environment lacks required reviewers or its deployment-branch policy\
+    \ is not\n  `main`-only. This detects drift exactly when it matters (it blocks\
+    \ the actual\n  publish, stronger than a periodic plan), is codebase-verifiable\
+    \ (the step exists in\n  `release.yml`), and needs only the workflow's own read\
+    \ token. Net effect: \"only `v*`\n  tags may publish\" becomes the stronger, self-enforced\
+    \ \"only a dispatch-from-`main`,\n  reviewer-approved run may publish \u2014 and\
+    \ a release aborts if that protection is\n  missing\".\n- **Tag + GitHub Release\
+    \ created AFTER a successful publish (record only).** Once\n  publish succeeds,\
+    \ the workflow creates the `v*` tag and the GitHub Release for the\n  record/mirror;\
+    \ the tag is an **output**, never a trigger. Concretely, the `github_release`\n\
+    \  job (which holds `contents: write`) **drops `--verify-tag`** and calls\n  `gh\
+    \ release create \"v<version>\" --target \"$GITHUB_SHA\" --generate-notes --latest\
+    \ dist/*`,\n  which **creates the lightweight tag at the release SHA** when it\
+    \ does not pre-exist \u2014 so no\n  intermediate tag push / PAT is needed, and\
+    \ the version comes from the dispatch input, not a\n  pre-pushed tag. (An existing-release\
+    \ run stays idempotent via the `gh release view` path.) The MCP job derives the\n\
+    \  version from the dispatch input (not from a tag).\n- **No raw-tag publish path.**\
+    \ With the environment keyed to dispatch-from-`main`, a\n  hand-pushed `v*` tag\
+    \ cannot reach the `pypi` environment and therefore cannot\n  publish \u2014 this\
+    \ eliminates the \"arbitrary pushed tag publishes\" surface that was the\n  original\
+    \ finding, rather than merely gating it.\n- **OIDC subject stays environment-scoped\
+    \ \u2014 the PyPI trusted-publisher entry is\n  unaffected by the trigger change.**\
+    \ The `publish` job keeps running in the `pypi`\n  deployment environment, so\
+    \ the OIDC token's `sub` claim stays\n  `repo:navapbc/rebar:environment:pypi`\
+    \ \u2014 **environment-scoped and ref-independent**.\n  PyPA Trusted Publishing\
+    \ matches on owner/repo + **workflow filename (`release.yml`)\n  + environment\
+    \ name (`pypi`)** and does **not** constrain on the git ref/tag, so the\n  tag\u2192\
+    dispatch trigger change alters none of the matched fields and the existing\n \
+    \ trusted-publisher entry continues to accept the dispatch-context token with\
+    \ no\n  reconfiguration. (Were the entry ever ref-constrained, the mismatch would\
+    \ fail\n  **loudly** at the `pypa/gh-action-pypi-publish` step on the first dispatch\
+    \ run \u2014\n  never silently \u2014 surfacing rather than corrupting a release.)\n\
+    - **Verify the guard LOGIC with unit tests (no live staging needed).** Extract\
+    \ the\n  three guards into small testable units \u2014 the version-lockstep comparison,\
+    \ the\n  ancestry check, and the env-preflight response parsing \u2014 and unit-test\
+    \ them with\n  fixtures (matching/mismatching versions; ancestor/non-ancestor\
+    \ SHAs; env-protection\n  present/absent JSON). This makes the negative paths\
+    \ codebase-verifiable without any\n  live publish. The guard *steps existing*\
+    \ in `release.yml` is likewise\n  codebase-verifiable.\n- **Guard-firing is verified\
+    \ AUTONOMOUSLY on the real workflow \u2014 no staging fork.** The\n  three abort\
+    \ guards precede every publishing job, so they can be demonstrated to fire\n \
+    \ WITHOUT any real publish: after this story lands, the agent triggers `release.yml`\
+    \ via\n  `gh workflow run` with a non-`main` ref and a mismatched version input,\
+    \ and confirms via\n  `gh run view --log` that each run aborts at its guard step\
+    \ before build/publish. This\n  needs only the environment's `workflow` scope\
+    \ (present) and produces no PyPI/registry\n  side effect. A staging fork + a TestPyPI\
+    \ trusted-publisher would only be needed to\n  exercise the *positive* real-publish\
+    \ path, which is deliberately NOT part of verifying\n  this story (publishing\
+    \ a real release is not a story deliverable); that positive path is\n  covered\
+    \ by the unit-tested guard helpers + the codebase-verifiable dispatch-from-`main`\n\
+    \  wiring. **Live `pypi` environment config is also autonomous:** the agent reads\
+    \ and, if\n  drifted, configures the environment's required reviewers + `main`-only\
+    \ branch policy via\n  the admin GitHub API (the environment holds a `repo`-scoped\
+    \ admin token), then confirms\n  \u2014 escalating to request access only if the\
+    \ API write is denied.\n- **`main.tf` / tag-push restriction stays OUT of scope\
+    \ (unchanged, deliberate).**\n  `main.tf:23-28` documents the `tag_lock` was removed\
+    \ (no viable GitHub tag bypass\n  actor in this mirror topology) and the contract\
+    \ test\n  `tests/unit/test_mirror_lock_terraform.py::test_module_is_main_only_no_tag_lock`\n\
+    \  codifies \"no tag lock\". We do not restrict *who* can push a tag; publication\
+    \ safety\n  now comes entirely from dispatch-from-`main` + the re-keyed reviewer-gated\
+    \ environment.\n- Record the approved SHA, version, manifest versions, and artifact\
+    \ hashes in release\n  evidence.\n\n## Scope\n\n- `.github/workflows/release.yml`\
+    \ \u2014 switch the trigger to `workflow_dispatch` (version\n  input, run from\
+    \ `main`); enforce `github.ref == 'refs/heads/main'`; add the\n  version-lockstep\
+    \ + ancestry checks before build; build then publish directly via the\n  OIDC\
+    \ trusted-publishing flow gated on the re-keyed `pypi` environment; create the\n\
+    \  `v*` tag + GitHub Release after a successful publish (record only). Remove\
+    \ the\n  `push: tags: v*` publish trigger (it can no longer reach the re-keyed\
+    \ environment).\n- **Autonomous post-landing verification (no operator fork):**\
+    \ after this story lands,\n  the agent (a) triggers `release.yml` via `gh workflow\
+    \ run` with invalid inputs and\n  confirms via `gh run view` that each guard aborts\
+    \ before publish (needs only the\n  `workflow` scope), and (b) reads/configures/verifies\
+    \ the live `pypi` environment's\n  required reviewers + `main`-only branch policy\
+    \ via the admin GitHub API (`repo` scope).\n  Both record their evidence as comments\
+    \ on this ticket. No staging fork or TestPyPI\n  publisher is required; escalation\
+    \ is a fallback only if the needed GitHub scope is\n  denied.\n- Unit tests for\
+    \ the extracted guard helpers (version-lockstep, ancestry, env-preflight\n  parsing)\
+    \ \u2014 the codebase-verifiable proof the guards behave correctly.\n- `tests/unit/test_release_workflow_pins.py`\
+    \ \u2014 **extend** with fd84's structural checks\n  (dispatch-only trigger with\
+    \ a `version` input; the `authorize` job's four guards precede\n  build via `needs`;\
+    \ no stale tag-context `if:`/`github.ref_name` remains; the\n  `github_release`\
+    \ job needs `publish`). The existing 08a8/6168 invariants are\n  **preserved unbroken**\
+    \ by this story's edits: the `authorize` job holds only\n  `contents: read` (no\
+    \ `id-token: write`), so `test_single_annotated_zizmor_suppression`\n  (exactly\
+    \ one suppression) still holds; the publish job's hash-gate/no-rebuild body\n\
+    \  (`test_g_publish_hash_gated_no_rebuild`) and the mcp_verify/mcp_registry split\n\
+    \  (`test_mcp_verify_registry_split`) are untouched except for the tag\u2192dispatch\
+    \ `if:` re-key,\n  which those tests do not assert on \u2014 so they stay green\
+    \ (re-run the full module to confirm).\n- `.github/workflows/release.yml` \u2014\
+    \ a **preflight step** in the dispatch flow that\n  calls `GET /repos/{owner}/{repo}/environments/pypi`\
+    \ and fails the release if the\n  environment lacks required reviewers or a `main`-only\
+    \ deployment-branch policy\n  (fail-closed drift detection at release time). **Preflight\
+    \ schema (the exact\n  field paths the fail-closed parser inspects and the unit-test\
+    \ fixtures replicate):**\n  from `GET .../environments/pypi`, require `protection_rules[]`\
+    \ to contain an entry with\n  `type == \"required_reviewers\"` **and** a non-empty\
+    \ `reviewers` list; and require\n  `deployment_branch_policy` to be non-null with\
+    \ `custom_branch_policies == true`. From\n  `GET .../environments/pypi/deployment-branch-policies`,\
+    \ require `branch_policies[].name`\n  to be **exactly** `{\"main\"}` (any other/extra\
+    \ branch fails). These live in\n  `scripts/release_guards.py::check_env_protection`.\
+    \ No `infra/terraform-github/`,\n  `terraform-drift.yml`, or terraform-contract-test\
+    \ changes (the GitHub provider's\n  AWS-vs-GitHub auth split made drift-workflow\
+    \ coupling disproportionate; the\n  preflight is the stronger, self-contained\
+    \ control). `infra/terraform-github/main.tf`\n  and its no-tag-lock contract test\
+    \ remain **unchanged**.\n- `docs/releasing.md` \u2014 document the dispatch-from-`main`\
+    \ process, the version-lockstep\n  invariant, and the required environment reviewers.\
+    \ **Section ownership:** this story\n  owns the \"Release-source authorization\"\
+    \ section **and rewrites the now-obsolete\n  existing sections it invalidates**\
+    \ \u2014 the \"Tag \u2192 PyPI publishes automatically\"\n  procedure (replaced\
+    \ by dispatch-from-`main`) and the \"Hard rules\" manual-lockstep\n  framing (now\
+    \ machine-enforced). (Finding 3 owns \"Build-once\" + rewriting the\n  \"Post-release\
+    \ smoke test\" section; Finding 4 owns \"Pinning\" \u2014 so the three concurrent\n\
+    \  release stories do not overlap-edit the same headings.)\n- Out of scope: the\
+    \ build-once / pinning work (Findings 3 and 4 \u2014 separate stories\n  that\
+    \ also touch `release.yml`; coordinate ordering per the epic).\n\n## Acceptance\
+    \ Criteria\n\n- [ ] **AC 0 (dependency gate \u2014 verify before starting).**\
+    \ This story composes on top of\n  F3 (build-once) and F4 (pinning), which land\
+    \ first per the epic chain (F4 \u2192 F3 \u2192 F1).\n  Before implementation,\
+    \ confirm by grep that `release.yml` on the working base already\n  contains F3's\
+    \ `wheel_test` / `sdist_test` jobs and its hash-gated `publish` (no rebuild),\n\
+    \  AND F4's `mcp_verify` / `mcp_registry` split + the evidence-consolidation job.\
+    \ If they are\n  absent (F3/F4 not yet landed/merged into this branch's base),\
+    \ STOP and rebase onto the\n  landed F3/F4 first \u2014 this story only re-keys\
+    \ *how the run starts and is authorized* and must\n  not re-introduce or fork\
+    \ those job graphs. (This makes the cross-story dependency an\n  explicit, checkable\
+    \ precondition rather than an assumed baseline.)\n- [ ] The workflow **retains**\
+    \ F3's build-once \u2192 wheel_test/sdist_test \u2192 hash-gated `publish`\n \
+    \ job graph and F4's `mcp_verify`/`mcp_registry` split + evidence-consolidation\
+    \ job unchanged\n  in structure (verified by grep: those job names still present\
+    \ after this story's trigger\n  re-key), so the authorization change is additive,\
+    \ not a rewrite.\n- [ ] `release.yml` is triggered by `workflow_dispatch` (version\
+    \ input), contains a\n  guard step failing when `github.ref != 'refs/heads/main'`,\
+    \ a version-lockstep step,\n  and an ancestry step (`git merge-base --is-ancestor`,\
+    \ checkout `fetch-depth: 0` +\n  `git fetch origin main`), all before build; and\
+    \ it has **no** `push: tags` publish\n  trigger \u2014 all codebase-verifiable\
+    \ from the workflow definition.\n- [ ] The workflow **retains** F3's build-once\
+    \ \u2192 wheel_test/sdist_test \u2192\n  hash-gated-`publish` job graph and F4's\
+    \ `mcp_verify`/`mcp_registry` split +\n  evidence-consolidation job, and re-keys\
+    \ the `github_release`/`mcp_registry` version\n  sources + guards from the tag\
+    \ context to the `workflow_dispatch` input \u2014 verified by\n  the workflow\
+    \ definition still containing those jobs and no `github.ref_name`/tag-`if:`\n\
+    \  version derivation remaining.\n- [ ] The workflow publishes directly via the\
+    \ OIDC trusted-publishing flow (no\n  intermediate tag push / no relay / no PAT)\
+    \ and creates the `v*` tag + GitHub Release\n  only **after** a successful publish\
+    \ (tag is an output, not a trigger) \u2014 codebase-\n  verifiable from the job\
+    \ graph.\n- [ ] A release-time preflight step calls `GET /repos/{owner}/{repo}/environments/pypi`\n\
+    \  and fails the release closed when required reviewers are absent or the\n  deployment-branch\
+    \ policy is not `main`-only \u2014 codebase-verifiable (the step exists in\n \
+    \ `release.yml`); the actual live environment configuration is set + verified\n\
+    \  **autonomously** via the admin GitHub API (see the environment-config AC below).\
+    \ So a\n  cleared environment protection aborts the release instead of silently\
+    \ enabling\n  single-actor publishing.\n- [ ] Unit tests for the extracted guard\
+    \ helpers pass: version-lockstep flags a\n  deliberate mismatch, the ancestry\
+    \ check rejects a non-ancestor SHA (and accepts a\n  non-tip ancestor), and the\
+    \ env-preflight parser fails on env-protection-absent JSON \u2014\n  all codebase-verifiable\
+    \ without a live publish.\n- [ ] The guards are demonstrated to **fire in a real\
+    \ `workflow_dispatch` run**,\n  completed **autonomously** by the agent (no operator\
+    \ fork/TestPyPI needed): after this\n  story lands, the agent triggers `release.yml`\
+    \ on `navapbc/rebar` via `gh workflow run`\n  with (i) a **non-`main` ref** and\
+    \ (ii) a **mismatched version input**, and confirms via\n  `gh run view --log`\
+    \ that each run **ABORTS at its guard step before any\n  build/publish/tag job**\
+    \ \u2014 so NO PyPI / MCP-registry / GitHub-Release side effect occurs\n  (the\
+    \ ref guard, version-lockstep, and ancestry checks all precede every publishing\
+    \ job).\n  The run URLs + the aborting guard-step log lines are recorded as a\
+    \ comment on this\n  ticket. The **positive** clean-dispatch \u2192 real-PyPI\
+    \ publish is deliberately NOT\n  triggered (publishing a real release is out of\
+    \ scope for verifying the story; the\n  guard-PASS path is covered by the unit-tested\
+    \ helpers + the codebase-verifiable\n  dispatch-from-`main` wiring). Escalate\
+    \ only if `gh workflow run` / `actions:write` is\n  unavailable in the environment.\n\
+    - [ ] The live `pypi` GitHub environment is **configured to the codified policy\
+    \ \u2014\n  required reviewers enabled AND a `main`-only deployment-branch policy\
+    \ \u2014 and verified,\n  autonomously** by the agent using the environment's\
+    \ admin GitHub token: it reads\n  `GET /repos/navapbc/rebar/environments/pypi`;\
+    \ if required reviewers are absent or the\n  branch policy is not `main`-only,\
+    \ it **configures** the environment via\n  `PUT /repos/navapbc/rebar/environments/pypi`\
+    \ with a `reviewers` body of the shape\n  `[{\"type\": \"User\", \"id\": <numeric-github-user-id>}]`\
+    \ (the API requires a **numeric**\n  user/team id, not a login \u2014 resolve\
+    \ it with `gh api users/<login> --jq .id`; use\n  `{\"type\": \"Team\", \"id\"\
+    : <team-id>}` if a release-approvers team is preferred), set to at\n  least the\
+    \ repo owner / a designated maintainer; `deployment_branch_policy` = custom +\
+    \ a `main`-only\n  branch policy via the deployment-branch-policies endpoint),\
+    \ then **re-reads to confirm**\n  compliance. The before/after API responses are\
+    \ recorded as a comment on this ticket,\n  and the release-time preflight (the\
+    \ AC above) then passes against the live environment.\n  Escalate only if the\
+    \ admin API write is denied (request repo-admin on `navapbc/rebar`).\n- [ ] `docs/releasing.md`\
+    \ documents the dispatch-from-`main` process, the\n  version-lockstep invariant,\
+    \ the environment re-key, and the reviewer requirement.\n- [ ] `make lint`, `make\
+    \ typecheck`, and `make test` each pass locally (the exact\n  commands CI runs,\
+    \ per the Makefile).\n- [ ] The change lands on `main` through the Gerrit two-vote\
+    \ gate (`LLM-Review +1`\n  AND `Verified +1`).\n\n"
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: "Add an `mcp` autodeploy target to `infra/scripts/autodeploy.sh` implementing\
+    \ the ADR 0079\namendment's blue-green pointer-swap, so on-box `rebar-mcp` tracks\
+    \ `origin/main` without killing an\nin-flight certified op. Scope: MCP deploy\
+    \ path only (service/edge = esok, secrets = avians); no\nnew timer (`rebar-autodeploy.timer`\u2192\
+    `.service` runs `autodeploy.sh`).\n\n## Approach (blue-green, ADR deft-evolutive-mosasaur\
+    \ / 0079 amendment)\nModel on the LOCAL `origin/main` updater (`sticky-genetic-narwhal`):\
+    \ immutable release + atomic\npointer swap + retire-when-idle, NOT stop-and-drain.\
+    \ On an MCP source change:\n1. Build + tag immutable `compose-mcp:<target-sha>`\
+    \ (`docker compose build mcp`).\n2. **Memory pre-check BEFORE the 2x overlap**\
+    \ (t4g.large 8 GiB): read `MemAvailable`\n   (`/proc/meminfo`, MB); `< MCP_MEM_MIN_MB`\
+    \ (default 1024) ABORTS \u2014 `AUTODEPLOY_MCP_MEM_ABORT`,\n   backoff, start\
+    \ NO second container. Unreadable fails OPEN; `MCP_MEM_AVAILABLE_MB` overrides.\n\
+    3. Start a NEW container alongside old via **`docker run -d`** (see Run mechanism)\
+    \ on the OTHER A/B\n   host port; one-in/one-out, never N.\n4. Health-check the\
+    \ NEW `/health` 200 within `MCP_HEALTH_TIMEOUT` (default 120). On failure:\n \
+    \  `docker rm -f` new, leave OLD include UNCHANGED, `AUTODEPLOY_ERROR` `mcp-unhealthy`,\
+    \ backoff,\n   exit 1 \u2192 next tick retries.\n5. **Atomically flip the nginx\
+    \ `/mcp/` upstream**: back up the include, write\n   `server 127.0.0.1:<newport>;`\
+    \ to a dotfile temp NOT matching the `mcp-upstream*.conf` glob in\n   the same\
+    \ dir, `mv` (atomic rename) over `/etc/nginx/mcp-upstream.conf`, `nginx -t`,\n\
+    \   `nginx -s reload`. On failure: RESTORE the backup, `docker rm -f` new, backoff,\
+    \ exit 1. Deploy\n   is DONE at a successful reload; never waited on/killed an\
+    \ op.\n6. **Retire the OLD container off the critical path**, gated by a \"still\
+    \ serving?\" check on its\n   `/health` `in_flight` gauge. Retain newest `MCP_RELEASES_KEEP`\
+    \ (default 1); remove older ones\n   ONLY when idle; NEVER kill `in_flight>0`.\
+    \ If the managed count exceeds `MCP_RELEASES_CAP`\n   (default 3) because busy\
+    \ containers can't be reclaimed, emit `AUTODEPLOY_MCP_RETIRE_CAP`\n   instead\
+    \ of killing a live one or growing unbounded. Because `autodeploy.sh` exits early\
+    \ when\nup-to-date, also run `mcp_retire_sweep` on the no-op tick (like `reclaim_under_pressure`)\
+    \ so\nretirement re-triggers once an old container goes idle.\n\nWhy: eliminates\
+    \ bug 7b4a (never-idle shared MCP can't satisfy a gauge-gated drain bound);\n\
+    decoupling retire from deploy means it never blocks/kills, and a killed op is\
+    \ idempotent so\nretire is safe.\n\n## Run mechanism + the original compose container\
+    \ (bootstrap)\n`docker compose up mcp` pins `8091` and would recreate/collide,\
+    \ so it CANNOT run the parallel\ncontainer. The NEW container starts via **`docker\
+    \ run -d`** from `compose-mcp:<sha>` (helper\n`mcp_run_new`) reproducing the compose\
+    \ `mcp:` service on a blue-green HOST port\n`-p 127.0.0.1:<newport>:8091` (container\
+    \ port stays 8091; blue-green alternates\n`MCP_PORT_A=8092`\u2194`MCP_PORT_B=8093`,\
+    \ RESERVING 8091 for the compose-original so no boot collision):\n`--env-file\
+    \ \"$COMPOSE_DIR/.env\"`, and every `REBAR_MCP_*` + `REBAR_OPCERT_*` var with\
+    \ the SAME\nliteral defaults compose's `${VAR:-default}` interpolates (`docker\
+    \ run` does not interpolate), the\ntwo `:ro` secret bind-mounts, `--restart always`,\
+    \ `--stop-timeout 1260` \u2014 a comment marks these MIRRORING compose `mcp:`.\
+    \ The live port is read from the include; the new takes the\nother blue-green\
+    \ port (or A if the include still points at 8091).\n\nAt boot `compose-up.sh`\
+    \ `docker compose up -d`s the whole stack, so the ORIGINAL container is\n`compose-mcp-1`\
+    \ on 8091 (seed include\u21928091). The managed MCP set the sweep/cap count over\
+    \ = names\nmatching `MCP_CONTAINER_PREFIX` (`rebar-mcp`) OR `MCP_COMPOSE_CONTAINER`\
+    \ (default `compose-mcp-1`).\nSo the first deploy's OLD backend is `compose-mcp-1`,\
+    \ adopted into retire-when-idle by the same\nliveness gate (autodeploy never runs\
+    \ `docker compose up mcp`); cap counts the union. Since\nblue-green never binds\
+    \ 8091, on reboot compose recreates `compose-mcp-1` with NO collision and the\n\
+    sweep reclaims it when idle. The sweep discovers each old port via `docker port\
+    \ <name> 8091/tcp`;\nan unreadable OLD `/health` read is treated as still-serving\
+    \ (fail-safe: never kill on unknown).\n\n## Change detection + blast radius\n\
+    `MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/compose/docker-compose.yml\
+    \ uv.lock pyproject.toml'`\n\u2014 the canonical set esok committed in the `mcp:`\
+    \ compose comment. Diffed `deployed..target` it\ntriggers ONLY `mcp`. Since `src/rebar`\
+    \ and `docker-compose.yml` are shared with `BOT_PATHS`, a\nshared change triggers\
+    \ BOTH targets, each in its own independent `if changed` block. `gerrit` is\n\
+    never touched (before/after gerrit-id assert). `flock` still serializes.\n\n##\
+    \ Failure interaction with deployed-sha + backoff\nThe `mcp` branch failure is\
+    \ FATAL like `review-bot` (`record_backoff_failure` + `exit 1`), so the\nfooter\
+    \ advancing `deployed-sha` is not reached. For a shared change review-bot runs\
+    \ first; if it\nsucceeds but mcp fails, `deployed-sha` does not advance and BOTH\
+    \ retry next tick (review-bot\nrebuild is idempotent) \u2014 a failed mcp deploy\
+    \ is always retried.\n\n## Alerting (marker \u2192 observability \u2192 CloudWatch\
+    \ \u2192 SNS; NO direct SNS publish)\nautodeploy.sh has no `sns:Publish` path\
+    \ and must not gain one. Like every existing autodeploy\nalert: a countable `marker\
+    \ AUTODEPLOY_MCP_* {json}` \u2192 `observability.sh`\n`publish_autodeploy_marker_delta`\
+    \ greps the journal into a dimensionless `rebar/host` metric \u2192 a\nterraform\
+    \ `aws_cloudwatch_metric_alarm` routes it to `aws_sns_topic.alerts.arn`. Adds\
+    \ tokens\n`AUTODEPLOY_MCP_RETIRE_CAP` + `AUTODEPLOY_MCP_MEM_ABORT`; two marker-delta\
+    \ calls (+ offset files)\npublishing `rebar/host:mcp_retire_cap` + `rebar/host:mcp_mem_abort`;\
+    \ two alarms mirroring\n`monitoring_autodeploy.tf`'s dimensionless 900s/2-of-4/Sum>0/notBreaching\
+    \ shape. Both tokens are\ndistinct from `AUTODEPLOY_ERROR`.\n\n## Portability\
+    \ (`project.portability`)\nTrigger is the on-box systemd/launchd timer polling\
+    \ the git mirror \u2014 operation-linked, not CI;\ndrain/flip/retire run in-process;\
+    \ works with any/no CI.\n\n## Acceptance Criteria\n- [ ] Tier: **real subprocess/bash\
+    \ integration, temp git repos + fake docker/nginx**. Tests stub\n  the box binaries\
+    \ onto PATH and run the REAL `autodeploy.sh`, in `tests/scripts/`. Oracles:\n\
+    \  - Change detection (REAL temp git repo, two commits): an MCP-only change (touch\n\
+    \    `Dockerfile.mcp`) triggers `mcp` and NO review-bot/gerrit rebuild; a review-bot-only\
+    \ change\n    (`Dockerfile.reviewbot`) does the inverse; a shared `src/rebar`\
+    \ change triggers BOTH\n    independently \u2014 via the docker call log.\n  -\
+    \ Cutover order start-new \u2192 health \u2192 flip \u2192 retire (recorded docker/nginx/curl\
+    \ log); the deploy\n    returns success WITHOUT waiting on `in_flight` (with `in_flight>0`\
+    \ on OLD it still flips and\n    exits 0).\n  - Retire honors liveness: an OLD\
+    \ `in_flight>0` container is NOT killed (no `docker rm` of it);\n    over `MCP_RELEASES_CAP`\
+    \ the `AUTODEPLOY_MCP_RETIRE_CAP` marker is emitted, no live container\n    deleted.\n\
+    \  - Memory pre-check: `MCP_MEM_AVAILABLE_MB < MCP_MEM_MIN_MB` ABORTS \u2014 no\
+    \ second container started,\n    `AUTODEPLOY_MCP_MEM_ABORT` emitted, backoff recorded,\
+    \ include unchanged.\n  - Health-check OR nginx reload failure leaves the OLD\
+    \ include byte-identical\n    (`AUTODEPLOY_ERROR`, backoff, `deployed-sha` not\
+    \ advanced); a retry next healthy tick flips it.\n  - `gerrit` container id UNCHANGED\
+    \ across an mcp deploy (blast radius).\n- [ ] observability.sh publishes `rebar/host:mcp_retire_cap`\
+    \ + `rebar/host:mcp_mem_abort`; two\n  terraform CloudWatch alarms route them\
+    \ to `aws_sns_topic.alerts.arn` (mirror\n  `monitoring_autodeploy.tf`).\n\n##\
+    \ Compat / rollback\nAdditive (new `if changed \"$MCP_PATHS\"` block + no-op sweep);\
+    \ other targets unchanged (existing\nautodeploy tests stay green). ADRs 0079/0104\
+    \ document it. Rollback = revert the additions.\n\nDepends on: deft-evolutive-mosasaur,\
+    \ cibophobic-holohedral-esok."
+  label: finding
+- input: "# Enforce release-source authorization + version lockstep before publication\n\
+    \nRe-anchor the release to the proven OSS pattern (uv model): a single\n`workflow_dispatch`-from-`main`\
+    \ workflow that asserts version-lockstep + ancestry,\nthen **builds and publishes\
+    \ directly** via PyPA Trusted Publishing (OIDC \u2014 no\nlong-lived secret, no\
+    \ tag relay), gated on a required-reviewers `pypi` environment\nre-keyed from\
+    \ \"v* tags only\" to \"`main` via dispatch\". The source is reviewed-and-\nlanded\
+    \ `main` **by construction**. (Readiness Finding 1 \u2014 verified VALID against\n\
+    `release.yml:17-21`, `infra/terraform-github/main.tf:23-101`, `docs/releasing.md`.)\n\
+    \n## Why\n\n`main` is constrained to the Gerrit replication deploy key, but `refs/tags/v*`\
+    \ was\ndeliberately left open (`infra/terraform-github/main.tf:23-28`) so a human\
+    \ can push\na `v*` tag to drive PyPI + MCP-registry + GitHub-Release publication\n\
+    (`release.yml:17-21`, jobs `build`/`publish`/`github_release`/`mcp_registry`).\
+    \ The\nonly gate anywhere is `if: github.event_name == 'push' && startsWith(github.ref,\n\
+    'refs/tags/v')` (release.yml:53/81/116) \u2014 nothing checks that the tagged\
+    \ SHA is an\nancestor of (or equal to) reviewed `main`, verifies any Gerrit/CI\
+    \ result for that\nexact SHA, or asserts version consistency. A PEP 740\nattestation\
+    \ would correctly name this repo's workflow but cannot distinguish a tag\non reviewed\
+    \ `main` from a tag on any other commit. Separately, the three version\nvalues\
+    \ (`pyproject.toml:10`, `server.json` top-level and `packages[].version`) are\n\
+    kept in lockstep only by a manual runbook (`docs/releasing.md`), so a future\n\
+    mismatch would publish disagreeing versions across the PyPI / GitHub-Release /\
+    \ MCP\nchannels with no machine check.\n\n## What\n\nAdopt uv's proven release\
+    \ process and pydantic's pre-build version check, in this\norder of control strength:\n\
+    \n- **Primary control \u2014 initiate from `main` via `workflow_dispatch` (source\
+    \ reviewed\n  by construction).** Make `workflow_dispatch` the sanctioned release\
+    \ trigger, run\n  from the `main` ref. Because the GitHub mirror's `main` is exactly\
+    \ the\n  Gerrit-reviewed-and-landed history, releasing from `main` guarantees\
+    \ the source is\n  reviewed **by construction** \u2014 the same guarantee the\
+    \ wider OSS world gets from\n  \"release only from the protected branch.\" This\
+    \ replaces \"accept whatever commit an\n  arbitrary pushed tag points at,\" which\
+    \ was the actual divergence from consensus.\n- **Version-lockstep, before build\
+    \ (pydantic pattern).** A first job parses the\n  intended version and every manifest\
+    \ and asserts exact equality **before build**:\n  `version_input == project.version\
+    \ == server.json.version ==\n  each server.json.packages[].version`; mismatch\
+    \ fails before build.\n- **Ancestry assertion (belt-and-suspenders).** In the\
+    \ same dispatch job, assert the\n  checked-out `main` HEAD is reachable from `origin/main`\
+    \ via\n  `git merge-base --is-ancestor \"$GITHUB_SHA\" origin/main` (checkout\
+    \ with\n  `fetch-depth: 0` + `git fetch origin main`, since a shallow clone defeats\
+    \ ancestry \u2014\n  the repo documents this at `reconcile-bridge.yml:83-88` and\
+    \ `verify-identity.yaml`\n  already uses `fetch-depth: 0`). With dispatch-from-`main`\
+    \ this is redundant with the\n  ref guard, kept as defense-in-depth.\n- **Build,\
+    \ then publish DIRECTLY via PyPA Trusted Publishing \u2014 no tag relay.** The\n\
+    \  same workflow builds and then publishes using OIDC (`id-token: write`, the\
+    \ existing\n  `pypa/gh-action-pypi-publish` trusted-publishing flow). There is\
+    \ **no** intermediate\n  tag push: a tag pushed by the built-in `GITHUB_TOKEN`\
+    \ would not trigger a downstream\n  workflow anyway (GitHub's anti-recursion rule),\
+    \ so a two-phase relay is avoided\n  entirely, and no PAT / GitHub App secret\
+    \ is introduced.\n- **Compose with \u2014 do not regress \u2014 F3 and F4 (this\
+    \ story lands last).** Per the\n  dependency chain (F4 \u2192 F3 \u2192 F1), this\
+    \ story edits `release.yml` on top of F4's and\n  F3's changes. The dispatch trigger\
+    \ must **retain** F3's build-once \u2192 test-wheel /\n  test-sdist \u2192 hash-gated-`publish`\
+    \ job graph and F4's `mcp_verify`/`mcp_registry`\n  split + evidence-consolidation\
+    \ job \u2014 the trigger change swaps only *how the run\n  starts and is authorized*,\
+    \ not the internal job structure. Concretely, **re-key\n  every downstream version\
+    \ source and job guard from `github.ref_name` / the\n  tag-context `if:` to the\
+    \ `workflow_dispatch` input** (the `github_release` and\n  `mcp_registry` jobs\
+    \ derive their version from the input, and their\n  `if: github.event_name ==\
+    \ 'push' && startsWith(github.ref, 'refs/tags/v')` guards \u2014\n  which go always-false\
+    \ once the tag trigger is removed \u2014 are updated to the dispatch\n  condition).\n\
+    - **Human authorization \u2014 re-key the `pypi` environment + a fail-closed preflight\n\
+    \  (uv release-gate + PyPA Trusted Publishing).** The `publish` job runs in the\
+    \ `pypi`\n  deployment environment with **required reviewers**, so publication\
+    \ needs a second\n  human's approval. Because the job now runs in the dispatch\
+    \ (`refs/heads/main`)\n  context rather than a tag context, the environment's\
+    \ deployment-ref policy is\n  **re-keyed from \"v* tags only\" to \"`main` via\
+    \ `workflow_dispatch`\"** with required\n  reviewers \u2014 **no new secret**.\
+    \ This is the single most security-critical gate\n  (anyone with `actions:write`\
+    \ can start a dispatch; only the environment's reviewers +\n  branch policy enforce\
+    \ \"a second human approves each publish\"), so it must not live\n  as an un-versioned\
+    \ console setting that could be silently cleared. Rather than couple\n  to the\
+    \ AWS-authed `terraform-drift.yml` (a different provider/auth model), enforce\
+    \ it\n  **at release time**: a **preflight step queries the GitHub REST API\n\
+    \  (`GET /repos/{owner}/{repo}/environments/pypi`) and FAILS the release closed**\
+    \ if the\n  environment lacks required reviewers or its deployment-branch policy\
+    \ is not\n  `main`-only. This detects drift exactly when it matters (it blocks\
+    \ the actual\n  publish, stronger than a periodic plan), is codebase-verifiable\
+    \ (the step exists in\n  `release.yml`), and needs only the workflow's own read\
+    \ token. Net effect: \"only `v*`\n  tags may publish\" becomes the stronger, self-enforced\
+    \ \"only a dispatch-from-`main`,\n  reviewer-approved run may publish \u2014 and\
+    \ a release aborts if that protection is\n  missing\".\n- **Tag + GitHub Release\
+    \ created AFTER a successful publish (record only).** Once\n  publish succeeds,\
+    \ the workflow creates the `v*` tag and the GitHub Release for the\n  record/mirror;\
+    \ the tag is an **output**, never a trigger. Concretely, the `github_release`\n\
+    \  job (which holds `contents: write`) **drops `--verify-tag`** and calls\n  `gh\
+    \ release create \"v<version>\" --target \"$GITHUB_SHA\" --generate-notes --latest\
+    \ dist/*`,\n  which **creates the lightweight tag at the release SHA** when it\
+    \ does not pre-exist \u2014 so no\n  intermediate tag push / PAT is needed, and\
+    \ the version comes from the dispatch input, not a\n  pre-pushed tag. (An existing-release\
+    \ run stays idempotent via the `gh release view` path.) The MCP job derives the\n\
+    \  version from the dispatch input (not from a tag).\n- **No raw-tag publish path.**\
+    \ With the environment keyed to dispatch-from-`main`, a\n  hand-pushed `v*` tag\
+    \ cannot reach the `pypi` environment and therefore cannot\n  publish \u2014 this\
+    \ eliminates the \"arbitrary pushed tag publishes\" surface that was the\n  original\
+    \ finding, rather than merely gating it.\n- **OIDC subject stays environment-scoped\
+    \ \u2014 the PyPI trusted-publisher entry is\n  unaffected by the trigger change.**\
+    \ The `publish` job keeps running in the `pypi`\n  deployment environment, so\
+    \ the OIDC token's `sub` claim stays\n  `repo:navapbc/rebar:environment:pypi`\
+    \ \u2014 **environment-scoped and ref-independent**.\n  PyPA Trusted Publishing\
+    \ matches on owner/repo + **workflow filename (`release.yml`)\n  + environment\
+    \ name (`pypi`)** and does **not** constrain on the git ref/tag, so the\n  tag\u2192\
+    dispatch trigger change alters none of the matched fields and the existing\n \
+    \ trusted-publisher entry continues to accept the dispatch-context token with\
+    \ no\n  reconfiguration. (Were the entry ever ref-constrained, the mismatch would\
+    \ fail\n  **loudly** at the `pypa/gh-action-pypi-publish` step on the first dispatch\
+    \ run \u2014\n  never silently \u2014 surfacing rather than corrupting a release.)\n\
+    - **Verify the guard LOGIC with unit tests (no live staging needed).** Extract\
+    \ the\n  three guards into small testable units \u2014 the version-lockstep comparison,\
+    \ the\n  ancestry check, and the env-preflight response parsing \u2014 and unit-test\
+    \ them with\n  fixtures (matching/mismatching versions; ancestor/non-ancestor\
+    \ SHAs; env-protection\n  present/absent JSON). This makes the negative paths\
+    \ codebase-verifiable without any\n  live publish. The guard *steps existing*\
+    \ in `release.yml` is likewise\n  codebase-verifiable.\n- **Guard-firing is verified\
+    \ AUTONOMOUSLY on the real workflow \u2014 no staging fork.** The\n  three abort\
+    \ guards precede every publishing job, so they can be demonstrated to fire\n \
+    \ WITHOUT any real publish: after this story lands, the agent triggers `release.yml`\
+    \ via\n  `gh workflow run` with a non-`main` ref and a mismatched version input,\
+    \ and confirms via\n  `gh run view --log` that each run aborts at its guard step\
+    \ before build/publish. This\n  needs only the environment's `workflow` scope\
+    \ (present) and produces no PyPI/registry\n  side effect. A staging fork + a TestPyPI\
+    \ trusted-publisher would only be needed to\n  exercise the *positive* real-publish\
+    \ path, which is deliberately NOT part of verifying\n  this story (publishing\
+    \ a real release is not a story deliverable); that positive path is\n  covered\
+    \ by the unit-tested guard helpers + the codebase-verifiable dispatch-from-`main`\n\
+    \  wiring. **Live `pypi` environment config is also autonomous:** the agent reads\
+    \ and, if\n  drifted, configures the environment's required reviewers + `main`-only\
+    \ branch policy via\n  the admin GitHub API (the environment holds a `repo`-scoped\
+    \ admin token), then confirms\n  \u2014 escalating to request access only if the\
+    \ API write is denied.\n- **`main.tf` / tag-push restriction stays OUT of scope\
+    \ (unchanged, deliberate).**\n  `main.tf:23-28` documents the `tag_lock` was removed\
+    \ (no viable GitHub tag bypass\n  actor in this mirror topology) and the contract\
+    \ test\n  `tests/unit/test_mirror_lock_terraform.py::test_module_is_main_only_no_tag_lock`\n\
+    \  codifies \"no tag lock\". We do not restrict *who* can push a tag; publication\
+    \ safety\n  now comes entirely from dispatch-from-`main` + the re-keyed reviewer-gated\
+    \ environment.\n- Record the approved SHA, version, manifest versions, and artifact\
+    \ hashes in release\n  evidence.\n\n## Scope\n\n- `.github/workflows/release.yml`\
+    \ \u2014 switch the trigger to `workflow_dispatch` (version\n  input, run from\
+    \ `main`); enforce `github.ref == 'refs/heads/main'`; add the\n  version-lockstep\
+    \ + ancestry checks before build; build then publish directly via the\n  OIDC\
+    \ trusted-publishing flow gated on the re-keyed `pypi` environment; create the\n\
+    \  `v*` tag + GitHub Release after a successful publish (record only). Remove\
+    \ the\n  `push: tags: v*` publish trigger (it can no longer reach the re-keyed\
+    \ environment).\n- **Autonomous post-landing verification (no operator fork):**\
+    \ after this story lands,\n  the agent (a) triggers `release.yml` via `gh workflow\
+    \ run` with invalid inputs and\n  confirms via `gh run view` that each guard aborts\
+    \ before publish (needs only the\n  `workflow` scope), and (b) reads/configures/verifies\
+    \ the live `pypi` environment's\n  required reviewers + `main`-only branch policy\
+    \ via the admin GitHub API (`repo` scope).\n  Both record their evidence as comments\
+    \ on this ticket. No staging fork or TestPyPI\n  publisher is required; escalation\
+    \ is a fallback only if the needed GitHub scope is\n  denied.\n- Unit tests for\
+    \ the extracted guard helpers (version-lockstep, ancestry, env-preflight\n  parsing)\
+    \ \u2014 the codebase-verifiable proof the guards behave correctly.\n- `tests/unit/test_release_workflow_pins.py`\
+    \ \u2014 **extend** with fd84's structural checks\n  (dispatch-only trigger with\
+    \ a `version` input; the `authorize` job's four guards precede\n  build via `needs`;\
+    \ no stale tag-context `if:`/`github.ref_name` remains; the\n  `github_release`\
+    \ job needs `publish`). The existing 08a8/6168 invariants are\n  **preserved unbroken**\
+    \ by this story's edits: the `authorize` job holds only\n  `contents: read` (no\
+    \ `id-token: write`), so `test_single_annotated_zizmor_suppression`\n  (exactly\
+    \ one suppression) still holds; the publish job's hash-gate/no-rebuild body\n\
+    \  (`test_g_publish_hash_gated_no_rebuild`) and the mcp_verify/mcp_registry split\n\
+    \  (`test_mcp_verify_registry_split`) are untouched except for the tag\u2192dispatch\
+    \ `if:` re-key,\n  which those tests do not assert on \u2014 so they stay green\
+    \ (re-run the full module to confirm).\n- `.github/workflows/release.yml` \u2014\
+    \ a **preflight step** in the dispatch flow that\n  calls `GET /repos/{owner}/{repo}/environments/pypi`\
+    \ and fails the release if the\n  environment lacks required reviewers or a `main`-only\
+    \ deployment-branch policy\n  (fail-closed drift detection at release time). **Preflight\
+    \ schema (the exact\n  field paths the fail-closed parser inspects and the unit-test\
+    \ fixtures replicate):**\n  from `GET .../environments/pypi`, require `protection_rules[]`\
+    \ to contain an entry with\n  `type == \"required_reviewers\"` **and** a non-empty\
+    \ `reviewers` list; and require\n  `deployment_branch_policy` to be non-null with\
+    \ `custom_branch_policies == true`. From\n  `GET .../environments/pypi/deployment-branch-policies`,\
+    \ require `branch_policies[].name`\n  to be **exactly** `{\"main\"}` (any other/extra\
+    \ branch fails). These live in\n  `scripts/release_guards.py::check_env_protection`.\
+    \ No `infra/terraform-github/`,\n  `terraform-drift.yml`, or terraform-contract-test\
+    \ changes (the GitHub provider's\n  AWS-vs-GitHub auth split made drift-workflow\
+    \ coupling disproportionate; the\n  preflight is the stronger, self-contained\
+    \ control). `infra/terraform-github/main.tf`\n  and its no-tag-lock contract test\
+    \ remain **unchanged**.\n- `docs/releasing.md` \u2014 document the dispatch-from-`main`\
+    \ process, the version-lockstep\n  invariant, and the required environment reviewers.\
+    \ **Section ownership:** this story\n  owns the \"Release-source authorization\"\
+    \ section **and rewrites the now-obsolete\n  existing sections it invalidates**\
+    \ \u2014 the \"Tag \u2192 PyPI publishes automatically\"\n  procedure (replaced\
+    \ by dispatch-from-`main`) and the \"Hard rules\" manual-lockstep\n  framing (now\
+    \ machine-enforced). (Finding 3 owns \"Build-once\" + rewriting the\n  \"Post-release\
+    \ smoke test\" section; Finding 4 owns \"Pinning\" \u2014 so the three concurrent\n\
+    \  release stories do not overlap-edit the same headings.)\n- Out of scope: the\
+    \ build-once / pinning work (Findings 3 and 4 \u2014 separate stories\n  that\
+    \ also touch `release.yml`; coordinate ordering per the epic).\n\n## Acceptance\
+    \ Criteria\n\n- [ ] **AC 0 (dependency gate \u2014 verify before starting).**\
+    \ This story composes on top of\n  F3 (build-once) and F4 (pinning), which land\
+    \ first per the epic chain (F4 \u2192 F3 \u2192 F1).\n  Before implementation,\
+    \ confirm by grep that `release.yml` on the working base already\n  contains F3's\
+    \ `wheel_test` / `sdist_test` jobs and its hash-gated `publish` (no rebuild),\n\
+    \  AND F4's `mcp_verify` / `mcp_registry` split + the evidence-consolidation job.\
+    \ If they are\n  absent (F3/F4 not yet landed/merged into this branch's base),\
+    \ STOP and rebase onto the\n  landed F3/F4 first \u2014 this story only re-keys\
+    \ *how the run starts and is authorized* and must\n  not re-introduce or fork\
+    \ those job graphs. (This makes the cross-story dependency an\n  explicit, checkable\
+    \ precondition rather than an assumed baseline.)\n- [ ] The workflow **retains**\
+    \ F3's build-once \u2192 wheel_test/sdist_test \u2192 hash-gated `publish`\n \
+    \ job graph and F4's `mcp_verify`/`mcp_registry` split + evidence-consolidation\
+    \ job unchanged\n  in structure (verified by grep: those job names still present\
+    \ after this story's trigger\n  re-key), so the authorization change is additive,\
+    \ not a rewrite.\n- [ ] `release.yml` is triggered by `workflow_dispatch` (version\
+    \ input), contains a\n  guard step failing when `github.ref != 'refs/heads/main'`,\
+    \ a version-lockstep step,\n  and an ancestry step (`git merge-base --is-ancestor`,\
+    \ checkout `fetch-depth: 0` +\n  `git fetch origin main`), all before build; and\
+    \ it has **no** `push: tags` publish\n  trigger \u2014 all codebase-verifiable\
+    \ from the workflow definition.\n- [ ] The workflow **retains** F3's build-once\
+    \ \u2192 wheel_test/sdist_test \u2192\n  hash-gated-`publish` job graph and F4's\
+    \ `mcp_verify`/`mcp_registry` split +\n  evidence-consolidation job, and re-keys\
+    \ the `github_release`/`mcp_registry` version\n  sources + guards from the tag\
+    \ context to the `workflow_dispatch` input \u2014 verified by\n  the workflow\
+    \ definition still containing those jobs and no `github.ref_name`/tag-`if:`\n\
+    \  version derivation remaining.\n- [ ] The workflow publishes directly via the\
+    \ OIDC trusted-publishing flow (no\n  intermediate tag push / no relay / no PAT)\
+    \ and creates the `v*` tag + GitHub Release\n  only **after** a successful publish\
+    \ (tag is an output, not a trigger) \u2014 codebase-\n  verifiable from the job\
+    \ graph.\n- [ ] A release-time preflight step calls `GET /repos/{owner}/{repo}/environments/pypi`\n\
+    \  and fails the release closed when required reviewers are absent or the\n  deployment-branch\
+    \ policy is not `main`-only \u2014 codebase-verifiable (the step exists in\n \
+    \ `release.yml`); the actual live environment configuration is set + verified\n\
+    \  **autonomously** via the admin GitHub API (see the environment-config AC below).\
+    \ So a\n  cleared environment protection aborts the release instead of silently\
+    \ enabling\n  single-actor publishing.\n- [ ] Unit tests for the extracted guard\
+    \ helpers pass: version-lockstep flags a\n  deliberate mismatch, the ancestry\
+    \ check rejects a non-ancestor SHA (and accepts a\n  non-tip ancestor), and the\
+    \ env-preflight parser fails on env-protection-absent JSON \u2014\n  all codebase-verifiable\
+    \ without a live publish.\n- [ ] The guards are demonstrated to **fire in a real\
+    \ `workflow_dispatch` run**,\n  completed **autonomously** by the agent (no operator\
+    \ fork/TestPyPI needed): after this\n  story lands, the agent triggers `release.yml`\
+    \ on `navapbc/rebar` via `gh workflow run`\n  with (i) a **non-`main` ref** and\
+    \ (ii) a **mismatched version input**, and confirms via\n  `gh run view --log`\
+    \ that each run **ABORTS at its guard step before any\n  build/publish/tag job**\
+    \ \u2014 so NO PyPI / MCP-registry / GitHub-Release side effect occurs\n  (the\
+    \ ref guard, version-lockstep, and ancestry checks all precede every publishing\
+    \ job).\n  The run URLs + the aborting guard-step log lines are recorded as a\
+    \ comment on this\n  ticket. The **positive** clean-dispatch \u2192 real-PyPI\
+    \ publish is deliberately NOT\n  triggered (publishing a real release is out of\
+    \ scope for verifying the story; the\n  guard-PASS path is covered by the unit-tested\
+    \ helpers + the codebase-verifiable\n  dispatch-from-`main` wiring). Escalate\
+    \ only if `gh workflow run` / `actions:write` is\n  unavailable in the environment.\n\
+    - [ ] The live `pypi` GitHub environment is **configured to the codified policy\
+    \ \u2014\n  required reviewers enabled AND a `main`-only deployment-branch policy\
+    \ \u2014 and verified,\n  autonomously** by the agent using the environment's\
+    \ admin GitHub token: it reads\n  `GET /repos/navapbc/rebar/environments/pypi`;\
+    \ if required reviewers are absent or the\n  branch policy is not `main`-only,\
+    \ it **configures** the environment via\n  `PUT /repos/navapbc/rebar/environments/pypi`\
+    \ with a `reviewers` body of the shape\n  `[{\"type\": \"User\", \"id\": <numeric-github-user-id>}]`\
+    \ (the API requires a **numeric**\n  user/team id, not a login \u2014 resolve\
+    \ it with `gh api users/<login> --jq .id`; use\n  `{\"type\": \"Team\", \"id\"\
+    : <team-id>}` if a release-approvers team is preferred), set to at\n  least the\
+    \ repo owner / a designated maintainer; `deployment_branch_policy` = custom +\
+    \ a `main`-only\n  branch policy via the deployment-branch-policies endpoint),\
+    \ then **re-reads to confirm**\n  compliance. The before/after API responses are\
+    \ recorded as a comment on this ticket,\n  and the release-time preflight (the\
+    \ AC above) then passes against the live environment.\n  Escalate only if the\
+    \ admin API write is denied (request repo-admin on `navapbc/rebar`).\n- [ ] `docs/releasing.md`\
+    \ documents the dispatch-from-`main` process, the\n  version-lockstep invariant,\
+    \ the environment re-key, and the reviewer requirement.\n- [ ] `make lint`, `make\
+    \ typecheck`, and `make test` each pass locally (the exact\n  commands CI runs,\
+    \ per the Makefile).\n- [ ] The change lands on `main` through the Gerrit two-vote\
+    \ gate (`LLM-Review +1`\n  AND `Verified +1`).\n\n"
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-T2
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

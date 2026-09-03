@@ -1,0 +1,778 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: T5b
+  expect: finding
+  id: plan-review-T5b-fire-0
+  input: "# A failed tickets-branch push is UNDELIVERABLE (not merely uninformative)\
+    \ on the async, library and MCP write paths\n\nRC-3 split out of bug 2a76-c9d9-4e8a-471b\
+    \ (closed). 2a76 fixed the CLI/synchronous path: the\nterminal warning now names\
+    \ the git rejection reason and the unpushed backlog. This ticket covers\nthe surfaces\
+    \ where that warning is never DELIVERED at all, so 2a76's fix is a no-op for them.\n\
+    \n## Proven at runtime (rebar-debug Phase 1; a real `pre-receive` decline against\
+    \ a local bare origin)\n\n1. **`sync.push = async`** \u2014 a documented policy\
+    \ value. `push.py` re-spawns the push as a detached\n   `subprocess.Popen(...,\
+    \ stdout=DEVNULL, stderr=DEVNULL, start_new_session=True)`, never waited, so\n\
+    \   every warning the child emits is discarded by the OS; only an `OSError` at\
+    \ SPAWN time is logged.\n   MEASURED: `REBAR_SYNC_PUSH=async rebar comment <id>\
+    \ x` against a rejecting hook \u2192 exit 0, stderr\n   COMPLETELY EMPTY, `origin/tickets..HEAD`\
+    \ still incremented.\n2. **Library embedders** \u2014 `rebar/__init__.py` attaches\
+    \ a `NullHandler` to the `rebar` root;\n   `install_stderr_handler` is called\
+    \ only from the CLI and the MCP server. MEASURED: in-process\n   `rebar.comment(...)`\
+    \ \u2192 returned normally, stderr EMPTY, no push status in the return value.\n\
+    3. **MCP** \u2014 the handler is installed but targets the SERVER's stderr; the\
+    \ writing agent reads only\n   the tool result. CONFIRMED end-to-end on this ticket\
+    \ (see comments): driving `comment_ticket`\n   against a real declining origin\
+    \ returned `{\"result\": \"ok\"}` with two commits stranded.\n4. **Reconciler\
+    \ subprocess** \u2014 installs its handler on the `rebar_reconciler` root, while\n\
+    \   `rebar._store.push` logs under `rebar`. So reconciler pushes are mute even\
+    \ in the foreground.\n\n## Contract constraint (load-bearing)\n\n`docs/concurrency.md`\
+    \ makes \"a failed push never fails the caller\" AUTHORITATIVE INTENT, pinned\
+    \ by\n`push_tickets_branch`'s \"ALWAYS returns None\" and `tests/unit/test_store.py`\
+    \ (`# no raise`). The\nremedy must be a SIGNAL \u2014 persisted state, an MCP\
+    \ result field \u2014 and must NEVER become an exception\nor a non-zero exit.\n\
+    \n## Approved remedy (operator decision B4)\n\nSurface the failure via **an MCP\
+    \ `push_status` field on write-tool outputs plus a durable\npending/unpushed marker**.\
+    \ OUT of scope: changing CLI behaviour or any exit code, raising on the\ndefault\
+    \ path, and the compaction/lock-contention work (tracked separately on 7084).\n\
+    \n## Design\n\n**D1 \u2014 new module `src/rebar/_store/push_state.py`.** `push.py`\
+    \ is at the hard 800-LOC cap, so the\nnew logic gets its own unit and `push.py`\
+    \ sheds `_unpushed_summary` into it (backlog counting IS\npush state \u2014 an\
+    \ existing seam, not a mechanical split). Best-effort by construction: every entry\n\
+    point swallows its own errors. `record_failure` / `clear` / `read_status` \u2192\
+    \ `{\"state\":\n\"ok\"|\"pending\", reason, detail, remote_ref, unpushed, since}`.\n\
+    \n**D2 \u2014 marker location.** In the tracker's **git dir**, not its working\
+    \ tree. `push.py` sets a\ndirty tree aside (stash-commit \u2192 merge \u2192 restore)\
+    \ to reconcile a non-fast-forward, and existing\ntests pin that a failed push\
+    \ leaves the tracker's `git status` byte-identical \u2014 a working-tree\nmarker\
+    \ perturbs exactly that state and appears as an untracked file in every store.\
+    \ The git dir\nalso makes \"can never be committed or pushed\" structural: a record\
+    \ that the remote is unreachable\nmust not itself need the remote.\n\n**D3 \u2014\
+    \ where it is recorded.** Every terminal failure already funnels through the single\n\
+    `_raise_if_strict(strict, reason, detail, base, remote_ref)` choke point carrying\
+    \ the closed set of\n`PushDeliveryError` reasons, so recording happens there \u2014\
+    \ no call site changes, no path missed.\nToday that function's BODY is a no-op\
+    \ unless `strict=True`; this change makes it record\nunconditionally and raise\
+    \ only for a strict caller, so the default best-effort path (and the\ndetached\
+    \ child, which runs the same function) records while still returning `None`. That\
+    \ is what\nmakes limb 1 observable despite `/dev/null` stderr. A successful push\
+    \ clears the marker.\n\n**D4 \u2014 non-failure reasons.** `push-disabled`, `async-delivery-unobservable`,\
+    \ `remote-not-found`\nand `invalid-destination` mean no push was ATTEMPTED and\
+    \ are NOT recorded \u2014 otherwise every\nlocal-only store (a supported mode)\
+    \ reports pending forever.\n\n**D5 \u2014 surfaces.** `rebar.push_status()` for\
+    \ library embedders (no logging handler needed). For\nMCP, a `push_status` field\
+    \ on write-tool results. `_mcp_writes.py` defines ELEVEN `-> str` write\ntools:\
+    \ `comment_ticket`, `edit_ticket`, `link_tickets`, `unlink_tickets`, `tag_ticket`,\n\
+    `untag_ticket`, `archive_ticket`, `compact_ticket`, `set_file_impact`, `set_verify_commands`\
+    \ and\n`declare_no_file_impact`. TEN of them migrate to a shared `WriteAckOut\
+    \ {result, push_status}` \u2014 a\nstrict SUPERSET of the `{result: <str>}` FastMCP\
+    \ already advertises for them.\n`declare_no_file_impact` is EXCLUDED: it is decorated\
+    \ `structured_output=False` and is pinned in\n`NO_SCHEMA_EXEMPT` by `test_no_schema_exempt_set_is_accurate`,\
+    \ so it advertises no outputSchema to\nadd a field to; migrating it would regress\
+    \ that guard. It keeps its bare `\"ok\"` and carries no\nfield \u2014 the one\
+    \ documented gap. Separately, the typed models (`CreateResultOut`, `ClaimResultOut`,\n\
+    `SignResultOut`) gain the field, and the schema-less dict tools (`transition_ticket`,\n\
+    `reopen_ticket`) get the key. The ten migrated tools stay classified as generic\
+    \ acks in\n`test_mcp_output_schema_coverage.py`, whose EXEMPT_GENERIC reasons\
+    \ are updated to name the new\nshape. Populated by reading the marker after the\
+    \ write. On the async path the child may not have\nfinished, so the guarantee\
+    \ is that a subsequent write or read reports it, not the same call.\n\n**D6 \u2014\
+    \ docs.** `docs/concurrency.md` gains the marker; `docs/mcp-reference.md` is regenerated.\n\
+    \n## Acceptance criteria\n\n- [ ] AC1 \u2014 **async path observable.** With `sync.push=async`\
+    \ against a real bare origin whose\n      `pre-receive` hook declines, a write\
+    \ leaves a durable marker naming the reason. The child is\n      detached with\
+    \ `start_new_session=True` and deliberately NEVER waited, so the test cannot join\n\
+    \      it: it synchronizes by POLLING the marker path on a bounded deadline (\u2264\
+    60s, 0.1s interval)\n      and fails if the deadline elapses. That poll is the\
+    \ synchronization contract for this limb \u2014\n      not an incidental sleep\
+    \ \u2014 and makes the assertion deterministic rather than racy. Before the\n\
+    \      fix the same drive leaves no marker and completely empty stderr.\n- [ ]\
+    \ AC2 \u2014 **MCP limb confirmed, then fixed.** First driven END-TO-END through\
+    \ the MCP\n      `comment_ticket` tool against the rejecting origin and its JSON\
+    \ result inspected (recorded as\n      a comment); the result then carries `push_status`\
+    \ with state `pending` naming the reason,\n      asserted by a test on the MCP\
+    \ surface.\n- [ ] AC3 \u2014 **library limb.** `rebar.push_status()` returns `state\
+    \ == \"pending\"` with the reason\n      after an in-process `rebar.comment(...)`\
+    \ whose push was really rejected, with NO logging\n      handler installed \u2014\
+    \ asserted by a test driving a real rejecting remote.\n- [ ] AC4 \u2014 **the\
+    \ marker clears.** After the remote stops declining and a later write pushes\n\
+    \      successfully, the marker is gone and status reports `ok` \u2014 asserted\
+    \ by a test, so the signal\n      cannot latch on permanently.\n- [ ] AC5 \u2014\
+    \ **best-effort contract preserved.** `push_tickets_branch` still returns `None`\
+    \ and never\n      raises on the default path; no CLI exit code changes; an unwritable\
+    \ marker does not fail the\n      write. Regression-asserted.\n- [ ] AC6 \u2014\
+    \ **gates green.** `make lint`, `make typecheck`, the MCP output-schema coverage\
+    \ test, the\n      schema drift gate, the `docs/mcp-reference.md` drift gate and\
+    \ the module-size gate all pass;\n      the change is `Verified +1` and `LLM-Review\
+    \ +1` on Gerrit before this ticket closes.\n"
+- corpus: rebar
+  criterion: T5b
+  expect: finding
+  id: plan-review-T5b-fire-1
+  input: "## Context / Problem\nGerrit change 1757 (merged as 065af7c163, ticket small-delicious-loris)\
+    \ taught rebar._store.sync._union_merge to recover ONE merge-abort class: untracked\
+    \ files origin wants to create (\"untracked working tree files would be overwritten\
+    \ by merge\") \u2014 quarantine the named paths, retry once. The second proven\
+    \ abort class, variant (b), remains unhandled: tracked files with local working-tree\
+    \ changes \u2014 in practice deletions of tracked per-ticket artifacts left by\
+    \ an interrupted compaction fold \u2014 make `git merge origin/tickets` abort\
+    \ with \"Your local changes to the following files would be overwritten by merge\"\
+    . The abort leaves reconverge unable to advance and strands local ticket commits\
+    \ off origin (live recurrence recorded on e72e-259d-5ee7-4e73: 119 tracked `.archived`\
+    \ deletions wedged the store). Sibling story untrack-runtime-markers removes the\
+    \ marker sub-class at its source, but an interrupted fold can still leave tracked\
+    \ EVENT-file deletions (compact_txn renames sources to `*.retired` \u2014 a rename\
+    \ of a tracked file is a tracked deletion + an untracked creation), so reconverge\
+    \ must self-heal this class regardless.\n\n## Approach\nExtend the recovery seam\
+    \ 1757 added in src/rebar/_store/sync.py: on merge failure, additionally detect\
+    \ the \"Your local changes to the following files would be overwritten by merge\"\
+    \ signature and parse the paths git names (same parsing pattern as the merged\
+    \ `_untracked_overwrite_paths`). For each named path, act by its status: a working-tree\
+    \ DELETION of a tracked file (`git status --porcelain` reports ` D`) is restored\
+    \ non-destructively via `git checkout -- <path>` (content already at HEAD \u2014\
+    \ nothing can be lost); a working-tree MODIFICATION is first copied into the same\
+    \ quarantine directory 1757 established (`<git-common-dir>/reconverge-quarantine/<utc-ts>/`)\
+    \ and then restored via `git checkout -- <path>` (the local bytes are preserved\
+    \ in quarantine, the HEAD bytes unblock the merge). Then retry the merge once.\
+    \ Any other failure \u2014 including a genuine index/content conflict \u2014 keeps\
+    \ today's behavior exactly: `git merge --abort`, keep local, hint `rebar fsck-recover`.\
+    \ Positive rationale: this reuses the exact recovery shape already reviewed and\
+    \ merged for variant (a) (parse-what-git-names, move-never-delete, single retry,\
+    \ fall back to abort), extending one proven seam rather than adding a second recovery\
+    \ mechanism.\n\n## Scope\n- src/rebar/_store/sync.py \u2014 detect + parse the\
+    \ local-changes abort; restore/quarantine the named paths; single retry.\n- tests/unit/test_store_sync_reconverge.py\
+    \ \u2014 extend the 1757 test module with RED-first coverage for variant (b):\
+    \ tracked-deletion fixture and tracked-modification fixture.\n\n## Testing\n-\
+    \ RED first: fixture tracker where HEAD tracks a file, the worktree deletes it,\
+    \ and origin/tickets modifies it; assert the union merge currently aborts and\
+    \ HEAD is un-merged, for the local-changes reason specifically.\n- GREEN: same\
+    \ fixture after the fix \u2014 merge completes with both parents, the local-only\
+    \ commit stays reachable, the deleted file is back at its merged content.\n- Modification\
+    \ path: worktree-modified tracked file named by the abort \u2014 quarantine copy\
+    \ exists with the local bytes, merge completes.\n- Guard: a genuine content conflict\
+    \ (both sides commit different content) still aborts and keeps local (unchanged\
+    \ behavior); `.tmp-event-*` and paths git does not name are untouched.\n- Mutation\
+    \ check: skipping the restore step returns the RED assertion.\n\n## Acceptance\
+    \ Criteria\n- [ ] A reconverge whose union merge aborts only on local changes\
+    \ to tracked store-artifact paths now completes keeping both parents, with no\
+    \ local commit orphaned; checked by the new RED-to-GREEN tests.\n- [ ] A worktree\
+    \ modification named by the abort is preserved byte-for-byte in the quarantine\
+    \ directory before restore; checked by test comparing quarantined bytes.\n- [\
+    \ ] A genuine merge conflict still aborts, keeps local, and hints fsck-recover;\
+    \ checked by the guard test.\n- [ ] `make lint` and `make typecheck` clean; lands\
+    \ via Gerrit (LLM-Review +1 AND Verified +1) before close."
+- corpus: rebar
+  criterion: T5b
+  expect: finding
+  id: plan-review-T5b-fire-2
+  input: "## Context / Problem\n\nEvery operator-seeded SSM `SecureString` secret\
+    \ managed by `infra/terraform` persists its\nCLEARTEXT value in the remote terraform\
+    \ state (S3 `rebar-tfstate-896586841071`, key\n`rebar/prod/terraform.tfstate`,\
+    \ SSE-S3 not a CMK). The `value = \"CHANGEME\"` +\n`lifecycle { ignore_changes\
+    \ = [value] }` pattern stops terraform WRITING the secret from git, but\nterraform\
+    \ still READS the live value into `attributes.value` on every refresh/import,\
+    \ so the\nplaintext lands in state. This collapses the secret tier to the state-bucket\
+    \ ACL (`terraform state\npull` renders 23 secrets in cleartext to any state-bucket\
+    \ reader), and versioning retains the tail\nacross rotation. Root cause is proven;\
+    \ see the evidence comments below.\n\n## Decision (operator-approved \u2014 Option\
+    \ 1)\n\nMigrate every operator-seeded SSM `SecureString` SECRET from the `value\
+    \ = \"CHANGEME\"` +\n`ignore_changes = [value]` pattern to terraform WRITE-ONLY\
+    \ arguments `value_wo` + `value_wo_version`.\nWrite-only arguments are, by design,\
+    \ NEVER persisted to state \u2014 the structural fix. Non-secret\n`String` config\
+    \ params (`jira-url`, `jira-user`, `jira-project`) and the terraform-GENERATED\n\
+    `SecureString` `opcert_origin_guard` (its value is `random_password.opcert_guard.result`,\
+    \ already in\nstate via the random resource + the API-Gateway header, so `value_wo`\
+    \ gives no net benefit) are OUT\nof scope and stay as-is.\n\n## Approach\n\nThree\
+    \ resources carry the seeded-secret antipattern and migrate to `value_wo`/`value_wo_version`\n\
+    (drop `value` and the `lifecycle { ignore_changes = [value] }`):\n- `aws_ssm_parameter.rebar_secrets`\
+    \ (for_each, 18 params) \u2014 `infra/terraform/ssm.tf:90`\n- `aws_ssm_parameter.opcert_ed25519_key`\
+    \ \u2014 `infra/terraform/opcert.tf:52`\n- `aws_ssm_parameter.cookie_signing_secret`\
+    \ \u2014 `infra/terraform/auth_sso.tf:39`\n\n`value_wo = \"CHANGEME\"` + `value_wo_version\
+    \ = 1` preserves the create-placeholder + operator-seed +\nno-revert contract\
+    \ (write-only value is only (re)sent when `value_wo_version` changes, and is never\n\
+    compared/stored, so the operator's out-of-band value is never clobbered and `user_data.sh`'s\n\
+    `CHANGEME` fail-fast still fires on an unseeded slot). Raise the `versions.tf`\
+    \ floors, which today\nsit below the write-only floors: terraform `required_version`\
+    \ `>= 1.10` \u2192 `>= 1.11` (write-only args\nneed 1.11; host is 1.15.8) and\
+    \ AWS provider `~> 5.0` \u2192 `~> 5.79` (`value_wo` on `aws_ssm_parameter`\n\
+    needs 5.79; host/lock is 5.100.0). Rationale: write-only args are the provider-native\
+    \ mechanism\npurpose-built for exactly this (keep a secret out of state) \u2014\
+    \ no new dependency, no secrets-manager,\nno KMS CMK, minimal blast radius.\n\n\
+    ## Scope\n\n- `infra/terraform/ssm.tf`, `infra/terraform/opcert.tf`, `infra/terraform/auth_sso.tf`\
+    \ \u2014 migrate the\n  three secret resources to `value_wo`/`value_wo_version`.\n\
+    - `infra/terraform/versions.tf` \u2014 raise the terraform + AWS-provider floors.\n\
+    - `scripts/check_ssm_secret_state.py` (NEW) \u2014 hermetic structural guard (no\
+    \ live AWS) that parses\n  `infra/terraform/*.tf`, and for every `aws_ssm_parameter`\
+    \ with `type = \"SecureString\"` flags the\n  persisted-secret antipattern (a\
+    \ quoted string-literal `value` and/or `ignore_changes = [value]`)\n  and requires\
+    \ `value_wo` be paired with `value_wo_version`. Allows the generated-value case\n\
+    \  (`value` = an expression, no `ignore_changes`). Modeled on `scripts/check_templatefile_escapes.py`.\n\
+    - `Makefile` \u2014 wire the new guard into `make lint` (alongside `check_templatefile_escapes.py`\
+    \ at\n  `Makefile:302`).\n- `tests/unit/test_check_ssm_secret_state.py` (NEW)\
+    \ \u2014 pins RED\u2192GREEN + mutation teeth + committed\n  tree clean + make-lint\
+    \ wiring, mirroring `tests/unit/test_check_templatefile_escapes.py`.\n- `docs/adr/0105-ssm-secrets-never-in-terraform-state.md`\
+    \ (+ `docs/adr/.numbers/0105`, regenerated\n  `docs/adr/README.md`) \u2014 record\
+    \ the decision, extending ADR 0008 and relating to ADR 0046.\n- `infra/runbooks/ssm-secret-write-only.md`\
+    \ (NEW) \u2014 declare/seed/rotate via write-only args, and the\n  operator REMEDIATION\
+    \ procedure (state scrub + crown-jewel rotation).\n\n## Testing\n\n- RED first:\
+    \ the new guard/test fail against the CURRENT tree for the right reason (three\n\
+    \  SecureString secrets persist a `value` literal + `ignore_changes = [value]`);\
+    \ proven before the\n  fix.\n- GREEN after: guard + test pass once the three resources\
+    \ use `value_wo`/`value_wo_version`.\n- Mutation teeth: reverting any one param\
+    \ to `value = \"\u2026\" + ignore_changes = [value]` returns the\n  guard to RED\
+    \ (asserted by `tests/unit/test_check_ssm_secret_state.py`).\n- `terraform validate`\
+    \ in `infra/terraform` passes (static; no plan/apply against the real backend\
+    \ \u2014\n  that prod mutation is the deferred operator ticket, linked `discovered_from`).\n\
+    - `make lint` passes (ruff + the new guard + siblings).\n\nNo secret VALUE is\
+    \ printed, logged, or committed by the fix or its verification \u2014 the guard\
+    \ digests\nstructure only, never values.\n\n## Acceptance Criteria\n\n- [ ] All\
+    \ three seeded-secret `SecureString` resources (`rebar_secrets`, `opcert_ed25519_key`,\n\
+    \      `cookie_signing_secret`) use `value_wo` + `value_wo_version` and carry\
+    \ no `value`/`ignore_changes\n      = [value]`; verified by `scripts/check_ssm_secret_state.py`\
+    \ exiting 0 and by reading the diff.\n- [ ] `scripts/check_ssm_secret_state.py`\
+    \ is RED on the pre-fix tree and GREEN on the post-fix tree,\n      and a one-param\
+    \ mutation returns it to RED; verified by `tests/unit/test_check_ssm_secret_state.py`.\n\
+    - [ ] The guard is wired into `make lint`; verified by a wiring test and by `make\
+    \ lint` exit 0.\n- [ ] `versions.tf` floors are terraform `>= 1.11` and AWS provider\
+    \ `~> 5.79`; verified by reading the file.\n- [ ] `terraform validate` in `infra/terraform`\
+    \ succeeds; verified by its exit 0.\n- [ ] ADR 0105 exists with marker `docs/adr/.numbers/0105`,\
+    \ the index is regenerated, and\n      `scripts/check_adr_numbers.py` + `python\
+    \ scripts/gen_adr_index.py --check` pass.\n- [ ] `infra/runbooks/ssm-secret-write-only.md`\
+    \ covers declare/seed/rotate + the exposure-remediation\n      procedure and cross-links\
+    \ ADR 0105; verified by reading it.\n- [ ] A deferred OPERATOR `task` ticket for\
+    \ the prod remediation (apply \u2192 verify no SecureString value\n      in `terraform\
+    \ state pull` \u2192 rotate crown-jewels) exists and is linked `discovered_from`\
+    \ this\n      ticket; verified by `show_ticket`. [non-codebase] evidence: the\
+    \ new ticket id recorded in a comment.\n- [ ] No credential value is printed,\
+    \ logged, or committed by the fix or its verification."
+- corpus: rebar
+  criterion: T5b
+  expect: finding
+  id: plan-review-T5b-fire-3
+  input: "## Context\nConstruction-time or preview-time repair would violate read-only\
+    \ commands. Retirement completion is safe only after provider preflight and exclusive\
+    \ pass ownership succeed and under-lock staleness validation passes, and it must\
+    \ precede any remote observation so the pass cannot interleave fresh liveness\
+    \ evidence with completion.\n\n## Outcome\nInvoke the S3 recovery operation once\
+    \ at the validated write-bearing reconcile boundary before remote observation;\
+    \ every read-only or filtered path stays zero-write for this operation.\n\n##\
+    \ Verified invocation site (corrected from this task's original impact set)\n\
+    The original plan named `run_differs.py`. That is wrong, and the ordering it asked\
+    \ for is unreachable there. Verified by reading the spine:\n\n- `reconcile._load_snapshots`\
+    \ is called at `reconcile.py:222`; inside it the binding store is constructed\
+    \ (`:280`), the under-lock staleness gate runs (`:281-282`), `scoped_ids` is computed\
+    \ (`:287`), and the FIRST remote issue fetch happens (`:328-333`).\n- `bind_operation_runtime`\
+    \ (the immutable operation/config snapshot) is composed at `:227`, after `_load_snapshots`\
+    \ returns and therefore after that fetch.\n- `run_differs()` is invoked at `:231`,\
+    \ also after the fetch; the existing `recover_pending_bindings` call at `run_differs.py:418`\
+    \ already runs post-fetch.\n\nSo the invocation goes in `reconcile.py`, after\
+    \ the staleness gate and the `scoped_ids` computation and before the fetch. `run_differs.py`\
+    \ is NOT edited by this task. The real size constraint is `reconcile.py` at 794\
+    \ of the 800-line cap \u2014 SIX lines of headroom, and RP-04 S7.3.a is editing\
+    \ the same file \u2014 so the spine gets ONE call line plus a short comment, and\
+    \ no new import.\n\n## Plan\n1. Add `BindingRecovery.repair_at_write_boundary(*,\
+    \ persist, scoped)` owning the guard: it returns an empty outcome without any\
+    \ classification or write unless the pass is write-bearing (`persist`) and unscoped\
+    \ (`not scoped`). Expose it through the facade so the spine needs no new import.\
+    \ The unguarded `complete_interrupted_retirements()` from T1 keeps its semantics\
+    \ and stays the direct-test entry point.\n2. Call it from `reconcile.py` on one\
+    \ line, positioned after the under-lock staleness validation and before the first\
+    \ remote issue fetch, binding walk, differ, or lifecycle mutation.\n3. Treat a\
+    \ durable tombstone as authoritative until explicit `unretire`; an automatic 200,\
+    \ `clear_absent`, or same-key confirmation cannot revoke it.\n4. On completion\
+    \ failure, preserve the overlap for retry. Because the call precedes the fetch,\
+    \ a failure structurally cannot have made a remote call.\n\n## Testing\n- Order\
+    \ tests pin the call between the staleness gate and the first fetch, and assert\
+    \ zero provider calls when completion aborts.\n- A read-only table drives construction,\
+    \ load, reconcile-check, dry-run, preview, selection, and filtered paths and asserts\
+    \ zero repository writes attributable to this operation.\n- Guard tests exercise\
+    \ `repair_at_write_boundary` directly across the persist/scoped matrix and prove\
+    \ the non-write-bearing cases do no classification at all.\n\n## Acceptance Criteria\n\
+    - [ ] A live write-bearing unscoped pass completes exact recovery after the under-lock\
+    \ staleness gate.\n- [ ] That completion happens before the pass's first remote\
+    \ issue observation.\n- [ ] Construction, load, reconcile-check, dry-run, preview,\
+    \ selection, and filtered paths perform zero writes from this operation.\n- [\
+    \ ] A completion failure performs zero remote calls and preserves the overlap\
+    \ as recoverable evidence.\n- [ ] An automatic success, absence reset, or same-key\
+    \ confirmation does not override the tombstone.\n- [ ] Explicit `unretire` removes\
+    \ the tombstone and therefore removes the completion candidate.\n- [ ] `run_differs.py`\
+    \ is unmodified and the pre-existing create-recovery gate is unchanged.\n\n##\
+    \ Out of scope\nRich-emission caller cutover, ADR finalization, and any change\
+    \ to the pre-existing create-recovery gate (its no-write-pass remote-write defect\
+    \ is filed separately as `easygoing-tremendous-frogmouth`)."
+- corpus: rebar
+  criterion: T5b
+  expect: pass
+  id: plan-review-T5b-no_fire-0
+  input: '## Why
+
+    Pass-4 coaching (move registry + deterministically rendered notes + guide_url
+    deep-links into docs/plan-review-criteria-guide.md) currently runs only over SURVIVING
+    ADVISORY findings. Blocking findings - the ones an agent MUST remediate before
+    claim - get no coaching note and no guide_url. Field data: the E6/F1 oracle-strictness
+    finding family recurred 3-5 consecutive rounds on tickets fde0/0ee8/76d2 because
+    agents reworded ACs instead of adding the demanded executable oracle; a guide
+    link plus a move-shaped nudge on the block itself is the cheapest one-round-remediation
+    lever. The reviewer/writer separation must be preserved exactly as-is: moves come
+    from the locked registry, prose is rendered deterministically, the C1 subject
+    validator still rejects code/imperatives/solutions.
+
+
+    ## What
+
+    Coaching over blocking findings must be widened at BOTH execution seams, plus
+    the prompt and renderer:
+
+    - Bespoke (non-workflow) path: widen the Pass-4 coach invocation in src/rebar/llm/plan_review/passes.py
+    from advisory-only to advisory+blocking, tagging each coaching entry with the
+    source finding''s decision ("block" | "advisory").
+
+    - Workflow path (the v3 engine, authoritative in production): in src/rebar/llm/workflow/gates/plan-review.yaml,
+    widen the coach_inputs binding (currently `surviving: ${{ steps.decide.outputs.surfaced
+    }}`) to the union of blocking + surfaced advisory findings, and update the coach_gate
+    branch `when:` condition so the coach step fires when EITHER blocking or advisory
+    findings survive. In src/rebar/llm/workflow/workflow_ops.py, widen `plan_review_coach_inputs`
+    (reads ctx.inputs "surfaced") and `plan_review_coach` (reads ctx.inputs "surviving")
+    to carry the widened set.
+
+    - Prompt + listing header: src/rebar/llm/reviewers/plan_review_coach.md currently
+    frames the task as "SURVIVING advisory findings" and src/rebar/llm/review_kernel/coach.py
+    hardcodes the listing header `## Surviving advisory findings (by id)`. Reword
+    both to decision-neutral "surviving findings" (parameterize the header label),
+    so the prompt never contradicts its input.
+
+    - guide_url: attach to blocking findings'' coaching notes exactly as for advisories
+    today (src/rebar/llm/plan_review/orchestrator.py:515-530 passthrough-additive
+    field).
+
+    - CLI: `rebar review-plan` renders the coaching line + guide link for blocking
+    findings the same way it does for advisories (src/rebar/_cli/_llm_commands.py,
+    the existing `-> <coaching> [<link>]` renderer).
+
+    - Sidecar: coaching entries for blocking findings flow through the existing coaching[]
+    persistence unchanged (additive; the decision tag is a new optional field on coaching
+    entries, not a schema break).
+
+
+    ## Scope
+
+    IN: pass-4 finding-set widening on both seams (passes.py + plan-review.yaml/workflow_ops.py),
+    decision tag, prompt/header rewording, guide_url attach, CLI rendering, unit tests.
+    OUT: any change to the move registry contents, the subject validator, blocking/advisory
+    decisions, thresholds, or the sidecar schema beyond the optional decision tag.
+    OUT: conflict-detection between findings (parked epic grumpy-gland-rose).
+
+
+    ## Acceptance Criteria
+
+    - [ ] A plan review whose verdict contains blocking findings emits a coaching
+    entry (move_id + rendered note + guide_url) for each blocking finding. Oracle:
+    new unit test asserting a synthetic verdict with 1 block + 1 advisory yields 2
+    coaching entries, where the block''s entry carries decision="block" and guide_url
+    and the advisory''s carries decision="advisory" and guide_url; `python -m pytest
+    tests/unit -k "coach" -x` green.
+
+    - [ ] The workflow path produces the same widening: a workflow-executed plan review
+    over a verdict with blocking findings passes the union to the coach op. Oracle:
+    unit test over `plan_review_coach_inputs`/`plan_review_coach` (tests/unit/workflow/)
+    asserting blocking findings appear in the coach inputs and outputs.
+
+    - [ ] The coach prompt and listing header no longer say "advisory": Oracle: `grep
+    -ni "advisory" src/rebar/llm/reviewers/plan_review_coach.md` returns no hits framing
+    the input set as advisory-only, and the rendered listing header for a mixed set
+    reads decision-neutral (unit test asserts the header text).
+
+    - [ ] Blocking-finding coaching notes pass the same C1 subject validation as advisory
+    notes. Oracle: existing subject-validator tests extended to a blocking-finding
+    case; suite green.
+
+    - [ ] `rebar review-plan` output for a BLOCK verdict shows the coaching line +
+    guide link under each blocking finding. Oracle: CLI rendering unit test asserting
+    the rendered text contains the guide_url for a blocking finding.
+
+    - [ ] `make lint && make typecheck && make test` all pass.'
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: "# A failed tickets-branch push is UNDELIVERABLE (not merely uninformative)\
+    \ on the async, library and MCP write paths\n\nRC-3 split out of bug 2a76-c9d9-4e8a-471b\
+    \ (closed). 2a76 fixed the CLI/synchronous path: the\nterminal warning now names\
+    \ the git rejection reason and the unpushed backlog. This ticket covers\nthe surfaces\
+    \ where that warning is never DELIVERED at all, so 2a76's fix is a no-op for them.\n\
+    \n## Proven at runtime (rebar-debug Phase 1; a real `pre-receive` decline against\
+    \ a local bare origin)\n\n1. **`sync.push = async`** \u2014 a documented policy\
+    \ value. `push.py` re-spawns the push as a detached\n   `subprocess.Popen(...,\
+    \ stdout=DEVNULL, stderr=DEVNULL, start_new_session=True)`, never waited, so\n\
+    \   every warning the child emits is discarded by the OS; only an `OSError` at\
+    \ SPAWN time is logged.\n   MEASURED: `REBAR_SYNC_PUSH=async rebar comment <id>\
+    \ x` against a rejecting hook \u2192 exit 0, stderr\n   COMPLETELY EMPTY, `origin/tickets..HEAD`\
+    \ still incremented.\n2. **Library embedders** \u2014 `rebar/__init__.py` attaches\
+    \ a `NullHandler` to the `rebar` root;\n   `install_stderr_handler` is called\
+    \ only from the CLI and the MCP server. MEASURED: in-process\n   `rebar.comment(...)`\
+    \ \u2192 returned normally, stderr EMPTY, no push status in the return value.\n\
+    3. **MCP** \u2014 the handler is installed but targets the SERVER's stderr; the\
+    \ writing agent reads only\n   the tool result. CONFIRMED end-to-end on this ticket\
+    \ (see comments): driving `comment_ticket`\n   against a real declining origin\
+    \ returned `{\"result\": \"ok\"}` with two commits stranded.\n4. **Reconciler\
+    \ subprocess** \u2014 installs its handler on the `rebar_reconciler` root, while\n\
+    \   `rebar._store.push` logs under `rebar`. So reconciler pushes are mute even\
+    \ in the foreground.\n\n## Contract constraint (load-bearing)\n\n`docs/concurrency.md`\
+    \ makes \"a failed push never fails the caller\" AUTHORITATIVE INTENT, pinned\
+    \ by\n`push_tickets_branch`'s \"ALWAYS returns None\" and `tests/unit/test_store.py`\
+    \ (`# no raise`). The\nremedy must be a SIGNAL \u2014 persisted state, an MCP\
+    \ result field \u2014 and must NEVER become an exception\nor a non-zero exit.\n\
+    \n## Approved remedy (operator decision B4)\n\nSurface the failure via **an MCP\
+    \ `push_status` field on write-tool outputs plus a durable\npending/unpushed marker**.\
+    \ OUT of scope: changing CLI behaviour or any exit code, raising on the\ndefault\
+    \ path, and the compaction/lock-contention work (tracked separately on 7084).\n\
+    \n## Design\n\n**D1 \u2014 new module `src/rebar/_store/push_state.py`.** `push.py`\
+    \ is at the hard 800-LOC cap, so the\nnew logic gets its own unit and `push.py`\
+    \ sheds `_unpushed_summary` into it (backlog counting IS\npush state \u2014 an\
+    \ existing seam, not a mechanical split). Best-effort by construction: every entry\n\
+    point swallows its own errors. `record_failure` / `clear` / `read_status` \u2192\
+    \ `{\"state\":\n\"ok\"|\"pending\", reason, detail, remote_ref, unpushed, since}`.\n\
+    \n**D2 \u2014 marker location.** In the tracker's **git dir**, not its working\
+    \ tree. `push.py` sets a\ndirty tree aside (stash-commit \u2192 merge \u2192 restore)\
+    \ to reconcile a non-fast-forward, and existing\ntests pin that a failed push\
+    \ leaves the tracker's `git status` byte-identical \u2014 a working-tree\nmarker\
+    \ perturbs exactly that state and appears as an untracked file in every store.\
+    \ The git dir\nalso makes \"can never be committed or pushed\" structural: a record\
+    \ that the remote is unreachable\nmust not itself need the remote.\n\n**D3 \u2014\
+    \ where it is recorded.** Every terminal failure already funnels through the single\n\
+    `_raise_if_strict(strict, reason, detail, base, remote_ref)` choke point carrying\
+    \ the closed set of\n`PushDeliveryError` reasons, so recording happens there \u2014\
+    \ no call site changes, no path missed.\nToday that function's BODY is a no-op\
+    \ unless `strict=True`; this change makes it record\nunconditionally and raise\
+    \ only for a strict caller, so the default best-effort path (and the\ndetached\
+    \ child, which runs the same function) records while still returning `None`. That\
+    \ is what\nmakes limb 1 observable despite `/dev/null` stderr. A successful push\
+    \ clears the marker.\n\n**D4 \u2014 non-failure reasons.** `push-disabled`, `async-delivery-unobservable`,\
+    \ `remote-not-found`\nand `invalid-destination` mean no push was ATTEMPTED and\
+    \ are NOT recorded \u2014 otherwise every\nlocal-only store (a supported mode)\
+    \ reports pending forever.\n\n**D5 \u2014 surfaces.** `rebar.push_status()` for\
+    \ library embedders (no logging handler needed). For\nMCP, a `push_status` field\
+    \ on write-tool results. `_mcp_writes.py` defines ELEVEN `-> str` write\ntools:\
+    \ `comment_ticket`, `edit_ticket`, `link_tickets`, `unlink_tickets`, `tag_ticket`,\n\
+    `untag_ticket`, `archive_ticket`, `compact_ticket`, `set_file_impact`, `set_verify_commands`\
+    \ and\n`declare_no_file_impact`. TEN of them migrate to a shared `WriteAckOut\
+    \ {result, push_status}` \u2014 a\nstrict SUPERSET of the `{result: <str>}` FastMCP\
+    \ already advertises for them.\n`declare_no_file_impact` is EXCLUDED: it is decorated\
+    \ `structured_output=False` and is pinned in\n`NO_SCHEMA_EXEMPT` by `test_no_schema_exempt_set_is_accurate`,\
+    \ so it advertises no outputSchema to\nadd a field to; migrating it would regress\
+    \ that guard. It keeps its bare `\"ok\"` and carries no\nfield \u2014 the one\
+    \ documented gap. Separately, the typed models (`CreateResultOut`, `ClaimResultOut`,\n\
+    `SignResultOut`) gain the field, and the schema-less dict tools (`transition_ticket`,\n\
+    `reopen_ticket`) get the key. The ten migrated tools stay classified as generic\
+    \ acks in\n`test_mcp_output_schema_coverage.py`, whose EXEMPT_GENERIC reasons\
+    \ are updated to name the new\nshape. Populated by reading the marker after the\
+    \ write. On the async path the child may not have\nfinished, so the guarantee\
+    \ is that a subsequent write or read reports it, not the same call.\n\n**D6 \u2014\
+    \ docs.** `docs/concurrency.md` gains the marker; `docs/mcp-reference.md` is regenerated.\n\
+    \n## Acceptance criteria\n\n- [ ] AC1 \u2014 **async path observable.** With `sync.push=async`\
+    \ against a real bare origin whose\n      `pre-receive` hook declines, a write\
+    \ leaves a durable marker naming the reason. The child is\n      detached with\
+    \ `start_new_session=True` and deliberately NEVER waited, so the test cannot join\n\
+    \      it: it synchronizes by POLLING the marker path on a bounded deadline (\u2264\
+    60s, 0.1s interval)\n      and fails if the deadline elapses. That poll is the\
+    \ synchronization contract for this limb \u2014\n      not an incidental sleep\
+    \ \u2014 and makes the assertion deterministic rather than racy. Before the\n\
+    \      fix the same drive leaves no marker and completely empty stderr.\n- [ ]\
+    \ AC2 \u2014 **MCP limb confirmed, then fixed.** First driven END-TO-END through\
+    \ the MCP\n      `comment_ticket` tool against the rejecting origin and its JSON\
+    \ result inspected (recorded as\n      a comment); the result then carries `push_status`\
+    \ with state `pending` naming the reason,\n      asserted by a test on the MCP\
+    \ surface.\n- [ ] AC3 \u2014 **library limb.** `rebar.push_status()` returns `state\
+    \ == \"pending\"` with the reason\n      after an in-process `rebar.comment(...)`\
+    \ whose push was really rejected, with NO logging\n      handler installed \u2014\
+    \ asserted by a test driving a real rejecting remote.\n- [ ] AC4 \u2014 **the\
+    \ marker clears.** After the remote stops declining and a later write pushes\n\
+    \      successfully, the marker is gone and status reports `ok` \u2014 asserted\
+    \ by a test, so the signal\n      cannot latch on permanently.\n- [ ] AC5 \u2014\
+    \ **best-effort contract preserved.** `push_tickets_branch` still returns `None`\
+    \ and never\n      raises on the default path; no CLI exit code changes; an unwritable\
+    \ marker does not fail the\n      write. Regression-asserted.\n- [ ] AC6 \u2014\
+    \ **gates green.** `make lint`, `make typecheck`, the MCP output-schema coverage\
+    \ test, the\n      schema drift gate, the `docs/mcp-reference.md` drift gate and\
+    \ the module-size gate all pass;\n      the change is `Verified +1` and `LLM-Review\
+    \ +1` on Gerrit before this ticket closes.\n"
+  label: finding
+- input: "## Context / Problem\nGerrit change 1757 (merged as 065af7c163, ticket small-delicious-loris)\
+    \ taught rebar._store.sync._union_merge to recover ONE merge-abort class: untracked\
+    \ files origin wants to create (\"untracked working tree files would be overwritten\
+    \ by merge\") \u2014 quarantine the named paths, retry once. The second proven\
+    \ abort class, variant (b), remains unhandled: tracked files with local working-tree\
+    \ changes \u2014 in practice deletions of tracked per-ticket artifacts left by\
+    \ an interrupted compaction fold \u2014 make `git merge origin/tickets` abort\
+    \ with \"Your local changes to the following files would be overwritten by merge\"\
+    . The abort leaves reconverge unable to advance and strands local ticket commits\
+    \ off origin (live recurrence recorded on e72e-259d-5ee7-4e73: 119 tracked `.archived`\
+    \ deletions wedged the store). Sibling story untrack-runtime-markers removes the\
+    \ marker sub-class at its source, but an interrupted fold can still leave tracked\
+    \ EVENT-file deletions (compact_txn renames sources to `*.retired` \u2014 a rename\
+    \ of a tracked file is a tracked deletion + an untracked creation), so reconverge\
+    \ must self-heal this class regardless.\n\n## Approach\nExtend the recovery seam\
+    \ 1757 added in src/rebar/_store/sync.py: on merge failure, additionally detect\
+    \ the \"Your local changes to the following files would be overwritten by merge\"\
+    \ signature and parse the paths git names (same parsing pattern as the merged\
+    \ `_untracked_overwrite_paths`). For each named path, act by its status: a working-tree\
+    \ DELETION of a tracked file (`git status --porcelain` reports ` D`) is restored\
+    \ non-destructively via `git checkout -- <path>` (content already at HEAD \u2014\
+    \ nothing can be lost); a working-tree MODIFICATION is first copied into the same\
+    \ quarantine directory 1757 established (`<git-common-dir>/reconverge-quarantine/<utc-ts>/`)\
+    \ and then restored via `git checkout -- <path>` (the local bytes are preserved\
+    \ in quarantine, the HEAD bytes unblock the merge). Then retry the merge once.\
+    \ Any other failure \u2014 including a genuine index/content conflict \u2014 keeps\
+    \ today's behavior exactly: `git merge --abort`, keep local, hint `rebar fsck-recover`.\
+    \ Positive rationale: this reuses the exact recovery shape already reviewed and\
+    \ merged for variant (a) (parse-what-git-names, move-never-delete, single retry,\
+    \ fall back to abort), extending one proven seam rather than adding a second recovery\
+    \ mechanism.\n\n## Scope\n- src/rebar/_store/sync.py \u2014 detect + parse the\
+    \ local-changes abort; restore/quarantine the named paths; single retry.\n- tests/unit/test_store_sync_reconverge.py\
+    \ \u2014 extend the 1757 test module with RED-first coverage for variant (b):\
+    \ tracked-deletion fixture and tracked-modification fixture.\n\n## Testing\n-\
+    \ RED first: fixture tracker where HEAD tracks a file, the worktree deletes it,\
+    \ and origin/tickets modifies it; assert the union merge currently aborts and\
+    \ HEAD is un-merged, for the local-changes reason specifically.\n- GREEN: same\
+    \ fixture after the fix \u2014 merge completes with both parents, the local-only\
+    \ commit stays reachable, the deleted file is back at its merged content.\n- Modification\
+    \ path: worktree-modified tracked file named by the abort \u2014 quarantine copy\
+    \ exists with the local bytes, merge completes.\n- Guard: a genuine content conflict\
+    \ (both sides commit different content) still aborts and keeps local (unchanged\
+    \ behavior); `.tmp-event-*` and paths git does not name are untouched.\n- Mutation\
+    \ check: skipping the restore step returns the RED assertion.\n\n## Acceptance\
+    \ Criteria\n- [ ] A reconverge whose union merge aborts only on local changes\
+    \ to tracked store-artifact paths now completes keeping both parents, with no\
+    \ local commit orphaned; checked by the new RED-to-GREEN tests.\n- [ ] A worktree\
+    \ modification named by the abort is preserved byte-for-byte in the quarantine\
+    \ directory before restore; checked by test comparing quarantined bytes.\n- [\
+    \ ] A genuine merge conflict still aborts, keeps local, and hints fsck-recover;\
+    \ checked by the guard test.\n- [ ] `make lint` and `make typecheck` clean; lands\
+    \ via Gerrit (LLM-Review +1 AND Verified +1) before close."
+  label: finding
+- input: "## Context / Problem\n\nEvery operator-seeded SSM `SecureString` secret\
+    \ managed by `infra/terraform` persists its\nCLEARTEXT value in the remote terraform\
+    \ state (S3 `rebar-tfstate-896586841071`, key\n`rebar/prod/terraform.tfstate`,\
+    \ SSE-S3 not a CMK). The `value = \"CHANGEME\"` +\n`lifecycle { ignore_changes\
+    \ = [value] }` pattern stops terraform WRITING the secret from git, but\nterraform\
+    \ still READS the live value into `attributes.value` on every refresh/import,\
+    \ so the\nplaintext lands in state. This collapses the secret tier to the state-bucket\
+    \ ACL (`terraform state\npull` renders 23 secrets in cleartext to any state-bucket\
+    \ reader), and versioning retains the tail\nacross rotation. Root cause is proven;\
+    \ see the evidence comments below.\n\n## Decision (operator-approved \u2014 Option\
+    \ 1)\n\nMigrate every operator-seeded SSM `SecureString` SECRET from the `value\
+    \ = \"CHANGEME\"` +\n`ignore_changes = [value]` pattern to terraform WRITE-ONLY\
+    \ arguments `value_wo` + `value_wo_version`.\nWrite-only arguments are, by design,\
+    \ NEVER persisted to state \u2014 the structural fix. Non-secret\n`String` config\
+    \ params (`jira-url`, `jira-user`, `jira-project`) and the terraform-GENERATED\n\
+    `SecureString` `opcert_origin_guard` (its value is `random_password.opcert_guard.result`,\
+    \ already in\nstate via the random resource + the API-Gateway header, so `value_wo`\
+    \ gives no net benefit) are OUT\nof scope and stay as-is.\n\n## Approach\n\nThree\
+    \ resources carry the seeded-secret antipattern and migrate to `value_wo`/`value_wo_version`\n\
+    (drop `value` and the `lifecycle { ignore_changes = [value] }`):\n- `aws_ssm_parameter.rebar_secrets`\
+    \ (for_each, 18 params) \u2014 `infra/terraform/ssm.tf:90`\n- `aws_ssm_parameter.opcert_ed25519_key`\
+    \ \u2014 `infra/terraform/opcert.tf:52`\n- `aws_ssm_parameter.cookie_signing_secret`\
+    \ \u2014 `infra/terraform/auth_sso.tf:39`\n\n`value_wo = \"CHANGEME\"` + `value_wo_version\
+    \ = 1` preserves the create-placeholder + operator-seed +\nno-revert contract\
+    \ (write-only value is only (re)sent when `value_wo_version` changes, and is never\n\
+    compared/stored, so the operator's out-of-band value is never clobbered and `user_data.sh`'s\n\
+    `CHANGEME` fail-fast still fires on an unseeded slot). Raise the `versions.tf`\
+    \ floors, which today\nsit below the write-only floors: terraform `required_version`\
+    \ `>= 1.10` \u2192 `>= 1.11` (write-only args\nneed 1.11; host is 1.15.8) and\
+    \ AWS provider `~> 5.0` \u2192 `~> 5.79` (`value_wo` on `aws_ssm_parameter`\n\
+    needs 5.79; host/lock is 5.100.0). Rationale: write-only args are the provider-native\
+    \ mechanism\npurpose-built for exactly this (keep a secret out of state) \u2014\
+    \ no new dependency, no secrets-manager,\nno KMS CMK, minimal blast radius.\n\n\
+    ## Scope\n\n- `infra/terraform/ssm.tf`, `infra/terraform/opcert.tf`, `infra/terraform/auth_sso.tf`\
+    \ \u2014 migrate the\n  three secret resources to `value_wo`/`value_wo_version`.\n\
+    - `infra/terraform/versions.tf` \u2014 raise the terraform + AWS-provider floors.\n\
+    - `scripts/check_ssm_secret_state.py` (NEW) \u2014 hermetic structural guard (no\
+    \ live AWS) that parses\n  `infra/terraform/*.tf`, and for every `aws_ssm_parameter`\
+    \ with `type = \"SecureString\"` flags the\n  persisted-secret antipattern (a\
+    \ quoted string-literal `value` and/or `ignore_changes = [value]`)\n  and requires\
+    \ `value_wo` be paired with `value_wo_version`. Allows the generated-value case\n\
+    \  (`value` = an expression, no `ignore_changes`). Modeled on `scripts/check_templatefile_escapes.py`.\n\
+    - `Makefile` \u2014 wire the new guard into `make lint` (alongside `check_templatefile_escapes.py`\
+    \ at\n  `Makefile:302`).\n- `tests/unit/test_check_ssm_secret_state.py` (NEW)\
+    \ \u2014 pins RED\u2192GREEN + mutation teeth + committed\n  tree clean + make-lint\
+    \ wiring, mirroring `tests/unit/test_check_templatefile_escapes.py`.\n- `docs/adr/0105-ssm-secrets-never-in-terraform-state.md`\
+    \ (+ `docs/adr/.numbers/0105`, regenerated\n  `docs/adr/README.md`) \u2014 record\
+    \ the decision, extending ADR 0008 and relating to ADR 0046.\n- `infra/runbooks/ssm-secret-write-only.md`\
+    \ (NEW) \u2014 declare/seed/rotate via write-only args, and the\n  operator REMEDIATION\
+    \ procedure (state scrub + crown-jewel rotation).\n\n## Testing\n\n- RED first:\
+    \ the new guard/test fail against the CURRENT tree for the right reason (three\n\
+    \  SecureString secrets persist a `value` literal + `ignore_changes = [value]`);\
+    \ proven before the\n  fix.\n- GREEN after: guard + test pass once the three resources\
+    \ use `value_wo`/`value_wo_version`.\n- Mutation teeth: reverting any one param\
+    \ to `value = \"\u2026\" + ignore_changes = [value]` returns the\n  guard to RED\
+    \ (asserted by `tests/unit/test_check_ssm_secret_state.py`).\n- `terraform validate`\
+    \ in `infra/terraform` passes (static; no plan/apply against the real backend\
+    \ \u2014\n  that prod mutation is the deferred operator ticket, linked `discovered_from`).\n\
+    - `make lint` passes (ruff + the new guard + siblings).\n\nNo secret VALUE is\
+    \ printed, logged, or committed by the fix or its verification \u2014 the guard\
+    \ digests\nstructure only, never values.\n\n## Acceptance Criteria\n\n- [ ] All\
+    \ three seeded-secret `SecureString` resources (`rebar_secrets`, `opcert_ed25519_key`,\n\
+    \      `cookie_signing_secret`) use `value_wo` + `value_wo_version` and carry\
+    \ no `value`/`ignore_changes\n      = [value]`; verified by `scripts/check_ssm_secret_state.py`\
+    \ exiting 0 and by reading the diff.\n- [ ] `scripts/check_ssm_secret_state.py`\
+    \ is RED on the pre-fix tree and GREEN on the post-fix tree,\n      and a one-param\
+    \ mutation returns it to RED; verified by `tests/unit/test_check_ssm_secret_state.py`.\n\
+    - [ ] The guard is wired into `make lint`; verified by a wiring test and by `make\
+    \ lint` exit 0.\n- [ ] `versions.tf` floors are terraform `>= 1.11` and AWS provider\
+    \ `~> 5.79`; verified by reading the file.\n- [ ] `terraform validate` in `infra/terraform`\
+    \ succeeds; verified by its exit 0.\n- [ ] ADR 0105 exists with marker `docs/adr/.numbers/0105`,\
+    \ the index is regenerated, and\n      `scripts/check_adr_numbers.py` + `python\
+    \ scripts/gen_adr_index.py --check` pass.\n- [ ] `infra/runbooks/ssm-secret-write-only.md`\
+    \ covers declare/seed/rotate + the exposure-remediation\n      procedure and cross-links\
+    \ ADR 0105; verified by reading it.\n- [ ] A deferred OPERATOR `task` ticket for\
+    \ the prod remediation (apply \u2192 verify no SecureString value\n      in `terraform\
+    \ state pull` \u2192 rotate crown-jewels) exists and is linked `discovered_from`\
+    \ this\n      ticket; verified by `show_ticket`. [non-codebase] evidence: the\
+    \ new ticket id recorded in a comment.\n- [ ] No credential value is printed,\
+    \ logged, or committed by the fix or its verification."
+  label: finding
+- input: "## Context\nConstruction-time or preview-time repair would violate read-only\
+    \ commands. Retirement completion is safe only after provider preflight and exclusive\
+    \ pass ownership succeed and under-lock staleness validation passes, and it must\
+    \ precede any remote observation so the pass cannot interleave fresh liveness\
+    \ evidence with completion.\n\n## Outcome\nInvoke the S3 recovery operation once\
+    \ at the validated write-bearing reconcile boundary before remote observation;\
+    \ every read-only or filtered path stays zero-write for this operation.\n\n##\
+    \ Verified invocation site (corrected from this task's original impact set)\n\
+    The original plan named `run_differs.py`. That is wrong, and the ordering it asked\
+    \ for is unreachable there. Verified by reading the spine:\n\n- `reconcile._load_snapshots`\
+    \ is called at `reconcile.py:222`; inside it the binding store is constructed\
+    \ (`:280`), the under-lock staleness gate runs (`:281-282`), `scoped_ids` is computed\
+    \ (`:287`), and the FIRST remote issue fetch happens (`:328-333`).\n- `bind_operation_runtime`\
+    \ (the immutable operation/config snapshot) is composed at `:227`, after `_load_snapshots`\
+    \ returns and therefore after that fetch.\n- `run_differs()` is invoked at `:231`,\
+    \ also after the fetch; the existing `recover_pending_bindings` call at `run_differs.py:418`\
+    \ already runs post-fetch.\n\nSo the invocation goes in `reconcile.py`, after\
+    \ the staleness gate and the `scoped_ids` computation and before the fetch. `run_differs.py`\
+    \ is NOT edited by this task. The real size constraint is `reconcile.py` at 794\
+    \ of the 800-line cap \u2014 SIX lines of headroom, and RP-04 S7.3.a is editing\
+    \ the same file \u2014 so the spine gets ONE call line plus a short comment, and\
+    \ no new import.\n\n## Plan\n1. Add `BindingRecovery.repair_at_write_boundary(*,\
+    \ persist, scoped)` owning the guard: it returns an empty outcome without any\
+    \ classification or write unless the pass is write-bearing (`persist`) and unscoped\
+    \ (`not scoped`). Expose it through the facade so the spine needs no new import.\
+    \ The unguarded `complete_interrupted_retirements()` from T1 keeps its semantics\
+    \ and stays the direct-test entry point.\n2. Call it from `reconcile.py` on one\
+    \ line, positioned after the under-lock staleness validation and before the first\
+    \ remote issue fetch, binding walk, differ, or lifecycle mutation.\n3. Treat a\
+    \ durable tombstone as authoritative until explicit `unretire`; an automatic 200,\
+    \ `clear_absent`, or same-key confirmation cannot revoke it.\n4. On completion\
+    \ failure, preserve the overlap for retry. Because the call precedes the fetch,\
+    \ a failure structurally cannot have made a remote call.\n\n## Testing\n- Order\
+    \ tests pin the call between the staleness gate and the first fetch, and assert\
+    \ zero provider calls when completion aborts.\n- A read-only table drives construction,\
+    \ load, reconcile-check, dry-run, preview, selection, and filtered paths and asserts\
+    \ zero repository writes attributable to this operation.\n- Guard tests exercise\
+    \ `repair_at_write_boundary` directly across the persist/scoped matrix and prove\
+    \ the non-write-bearing cases do no classification at all.\n\n## Acceptance Criteria\n\
+    - [ ] A live write-bearing unscoped pass completes exact recovery after the under-lock\
+    \ staleness gate.\n- [ ] That completion happens before the pass's first remote\
+    \ issue observation.\n- [ ] Construction, load, reconcile-check, dry-run, preview,\
+    \ selection, and filtered paths perform zero writes from this operation.\n- [\
+    \ ] A completion failure performs zero remote calls and preserves the overlap\
+    \ as recoverable evidence.\n- [ ] An automatic success, absence reset, or same-key\
+    \ confirmation does not override the tombstone.\n- [ ] Explicit `unretire` removes\
+    \ the tombstone and therefore removes the completion candidate.\n- [ ] `run_differs.py`\
+    \ is unmodified and the pre-existing create-recovery gate is unchanged.\n\n##\
+    \ Out of scope\nRich-emission caller cutover, ADR finalization, and any change\
+    \ to the pre-existing create-recovery gate (its no-write-pass remote-write defect\
+    \ is filed separately as `easygoing-tremendous-frogmouth`)."
+  label: finding
+- input: '## Why
+
+    Pass-4 coaching (move registry + deterministically rendered notes + guide_url
+    deep-links into docs/plan-review-criteria-guide.md) currently runs only over SURVIVING
+    ADVISORY findings. Blocking findings - the ones an agent MUST remediate before
+    claim - get no coaching note and no guide_url. Field data: the E6/F1 oracle-strictness
+    finding family recurred 3-5 consecutive rounds on tickets fde0/0ee8/76d2 because
+    agents reworded ACs instead of adding the demanded executable oracle; a guide
+    link plus a move-shaped nudge on the block itself is the cheapest one-round-remediation
+    lever. The reviewer/writer separation must be preserved exactly as-is: moves come
+    from the locked registry, prose is rendered deterministically, the C1 subject
+    validator still rejects code/imperatives/solutions.
+
+
+    ## What
+
+    Coaching over blocking findings must be widened at BOTH execution seams, plus
+    the prompt and renderer:
+
+    - Bespoke (non-workflow) path: widen the Pass-4 coach invocation in src/rebar/llm/plan_review/passes.py
+    from advisory-only to advisory+blocking, tagging each coaching entry with the
+    source finding''s decision ("block" | "advisory").
+
+    - Workflow path (the v3 engine, authoritative in production): in src/rebar/llm/workflow/gates/plan-review.yaml,
+    widen the coach_inputs binding (currently `surviving: ${{ steps.decide.outputs.surfaced
+    }}`) to the union of blocking + surfaced advisory findings, and update the coach_gate
+    branch `when:` condition so the coach step fires when EITHER blocking or advisory
+    findings survive. In src/rebar/llm/workflow/workflow_ops.py, widen `plan_review_coach_inputs`
+    (reads ctx.inputs "surfaced") and `plan_review_coach` (reads ctx.inputs "surviving")
+    to carry the widened set.
+
+    - Prompt + listing header: src/rebar/llm/reviewers/plan_review_coach.md currently
+    frames the task as "SURVIVING advisory findings" and src/rebar/llm/review_kernel/coach.py
+    hardcodes the listing header `## Surviving advisory findings (by id)`. Reword
+    both to decision-neutral "surviving findings" (parameterize the header label),
+    so the prompt never contradicts its input.
+
+    - guide_url: attach to blocking findings'' coaching notes exactly as for advisories
+    today (src/rebar/llm/plan_review/orchestrator.py:515-530 passthrough-additive
+    field).
+
+    - CLI: `rebar review-plan` renders the coaching line + guide link for blocking
+    findings the same way it does for advisories (src/rebar/_cli/_llm_commands.py,
+    the existing `-> <coaching> [<link>]` renderer).
+
+    - Sidecar: coaching entries for blocking findings flow through the existing coaching[]
+    persistence unchanged (additive; the decision tag is a new optional field on coaching
+    entries, not a schema break).
+
+
+    ## Scope
+
+    IN: pass-4 finding-set widening on both seams (passes.py + plan-review.yaml/workflow_ops.py),
+    decision tag, prompt/header rewording, guide_url attach, CLI rendering, unit tests.
+    OUT: any change to the move registry contents, the subject validator, blocking/advisory
+    decisions, thresholds, or the sidecar schema beyond the optional decision tag.
+    OUT: conflict-detection between findings (parked epic grumpy-gland-rose).
+
+
+    ## Acceptance Criteria
+
+    - [ ] A plan review whose verdict contains blocking findings emits a coaching
+    entry (move_id + rendered note + guide_url) for each blocking finding. Oracle:
+    new unit test asserting a synthetic verdict with 1 block + 1 advisory yields 2
+    coaching entries, where the block''s entry carries decision="block" and guide_url
+    and the advisory''s carries decision="advisory" and guide_url; `python -m pytest
+    tests/unit -k "coach" -x` green.
+
+    - [ ] The workflow path produces the same widening: a workflow-executed plan review
+    over a verdict with blocking findings passes the union to the coach op. Oracle:
+    unit test over `plan_review_coach_inputs`/`plan_review_coach` (tests/unit/workflow/)
+    asserting blocking findings appear in the coach inputs and outputs.
+
+    - [ ] The coach prompt and listing header no longer say "advisory": Oracle: `grep
+    -ni "advisory" src/rebar/llm/reviewers/plan_review_coach.md` returns no hits framing
+    the input set as advisory-only, and the rendered listing header for a mixed set
+    reads decision-neutral (unit test asserts the header text).
+
+    - [ ] Blocking-finding coaching notes pass the same C1 subject validation as advisory
+    notes. Oracle: existing subject-validator tests extended to a blocking-finding
+    case; suite green.
+
+    - [ ] `rebar review-plan` output for a BLOCK verdict shows the coaching line +
+    guide link under each blocking finding. Oracle: CLI rendering unit test asserting
+    the rendered text contains the guide_url for a blocking finding.
+
+    - [ ] `make lint && make typecheck && make test` all pass.'
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-T5b
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

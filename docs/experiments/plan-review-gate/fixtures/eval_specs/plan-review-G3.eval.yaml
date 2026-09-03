@@ -1,0 +1,650 @@
+coverage_threshold: 1.0
+dataset:
+- children:
+  - ticket_id: 0d5f-6745-16bc-403c
+  - ticket_id: 3192-a652-0368-42c2
+  - ticket_id: 36ab-b649-b72b-4608
+  - ticket_id: 754c-f6bd-0326-4ee8
+  - ticket_id: ea28-020e-8215-4eb9
+  corpus: rebar
+  criterion: G3
+  expect: finding
+  id: plan-review-G3-fire-2
+  input: "Add plan-review criterion T15 \"overlay-derisk\" so plans prove risky runtime\
+    \ mechanisms via a fast out-of-loop experiment BEFORE committing them into a slow,\
+    \ codified delivery loop (CI/CD, IaC apply, provisioning pipeline). Motivation:\
+    \ on infra epics, basic failures (a service that won't boot, a credential that\
+    \ doesn't authorize, a dependency that won't connect, a readiness check that never\
+    \ passes) are discovered only at the END of a long delivery cycle. No existing\
+    \ criterion rewards front-loading those checks into a cheap local run or a manual\
+    \ probe against the real target. This is a CORE built-in change (not project-specific),\
+    \ stack-agnostic (no hardcoded Terraform/docker), routed by the self-gating Pass-1\
+    \ finder like the other Txx overlays.\n\n## The finalized T15 rubric (design of\
+    \ record)\n\nOVERLAY \u2014 apply only when ALL of the following hold; else PASS\
+    \ not-applicable.\n- S1 Codified loop? the mechanism is delivered/validated by\
+    \ pushing through an automated pipeline or an environment/infrastructure apply,\
+    \ not by running or unit-testing code directly.\n- S2 Slow or costly pass? one\
+    \ pass through that loop is slow (minutes-to-hours) or otherwise costly to run.\n\
+    - S3 Runtime-only correctness? the change introduces behavior whose correctness\
+    \ only resolves when it actually runs in a realistic environment (boots, authenticates,\
+    \ connects, is authorized, passes readiness) \u2014 unreachable by static/unit\
+    \ checks.\n\nWhen applicable, report a finding for each check not satisfied:\n\
+    - (a) RISK NAMED \u2014 the plan identifies the specific mechanism(s) confirmable\
+    \ only by completing the full loop.\n- (b) FAST OUT-OF-LOOP PROOF \u2014 for each\
+    \ named risk, the plan commits to proving it via the fastest feedback path available\
+    \ for that mechanism, outside the slow loop: running the unit locally/emulated\
+    \ where feasible, OR a manual experiment directly against the real target (an\
+    \ interactive call, a one-off CLI/console action, a probe script, a throwaway\
+    \ resource) where local reproduction isn't possible. The experiment is concrete\
+    \ and returns a verdict in minutes, not a delivery cycle. An unnamed \"we'll verify\"\
+    \ / \"we'll check after deploy\" does not satisfy it.\n- (c) PROVE-THEN-CODIFY\
+    \ \u2014 the cheap experiment comes before committing the mechanism into the slow\
+    \ loop, so the loop validates an already-proven mechanism.\n- (d) SCOPED CLEANUP\
+    \ \u2014 throwaway experiments are cleaned up afterward, with teardown that removes\
+    \ ONLY the artifacts the experiment itself created (the records a probe inserted,\
+    \ the scratch resource it spun up) and touches nothing pre-existing, shared, or\
+    \ persistent; a cleanup step that could delete, reset, or truncate a resource\
+    \ the experiment did not create (e.g. dropping an existing table or wiping a bucket\
+    \ to \"reset\" it) fails this check.\n\nANTI-FP: a manual experiment against the\
+    \ real target is a fully valid proof \u2014 never penalize choosing it over local\
+    \ reproduction; many stacks cannot be reproduced locally. A mechanism already\
+    \ proven elsewhere in the codebase needn't be re-proven.\n\nFacet ~ empirical\
+    \ / approach-soundness; exec AGENT (it ground-checks that the named mechanism\
+    \ and named experiment are real/plausible against the codebase). Posture (advisory\
+    \ vs blocking) and block_threshold are NOT decided here \u2014 set by the normal\
+    \ registry/review process.\n\n## Required companion change: T10 boundary partition\n\
+    The de-risk (transient experiment) phase and T10's production-hardening phase\
+    \ must not overlap; there is no runtime cross-criterion suppression by design.\
+    \ Fix by partitioning in T10's own rubric text \u2014 add a scope clause: \"This\
+    \ overlay evaluates the DURABLE infrastructure \u2014 the IaC/config that persists.\
+    \ Transient, throwaway experiments used to de-risk a mechanism before committing\
+    \ it \u2014 their creation, isolation, and teardown \u2014 are out of scope here.\"\
+    \ (T10 does NOT name T15 or any other overlay.)\n\n## Acceptance Criteria\n\n\
+    - [x] all child tickets are closed\n- [x] `rebar explain T15` renders the criterion\
+    \ with its descriptive name (not the bare id), and\n      `python -m rebar.llm.plan_review.registry\
+    \ regenerate-criteria-guide` regenerates\n      `docs/plan-review-criteria-guide.md`\
+    \ with a T15 section, with the criteria-guide and registry\n      validators passing\n\
+    - [x] the writing-a-passing-plan guide instructs authors to de-risk out-of-loop\
+    \ before slow delivery loops,\n      evidenced by the T15 guidance appearing in\
+    \ `src/rebar/_guides/writing-a-passing-plan.md`\n- [x] the coach-move decision\
+    \ (add or reject the proposed out-of-loop-proof move) is recorded on this epic\n\
+    \      as a comment naming the decision and its rationale"
+- children:
+  - ticket_id: 72d0-0f09-1694-4010
+  - ticket_id: 7bc2-5203-d5f4-4a4a
+  - ticket_id: a8cd-01cd-c370-454f
+  - ticket_id: c6f3-cda5-c460-4c5c
+  corpus: rebar
+  criterion: G3
+  expect: finding
+  id: plan-review-G3-fire-3
+  input: '## Context / Outcome
+
+    Current Jira writes can cross dispatch, Cloud ACLI/REST, or DC SDK/wrapper retries.
+    A timeout can multiply writes or leave acceptance ambiguous. Prove one provider-neutral
+    budget by setting an exact summary through Cloud and DC. Because Jira has no Rebar
+    idempotency key, recovery observes desired state before replay. S1 establishes
+    ADR 0100; S3 owns cutover/outcome consumption; S5 finalizes it after all operation
+    families migrate.
+
+
+    ## Approach
+
+    1. Define an operation/outcome contract: stable logical id, desired postcondition,
+    invocation/request counts, disposition, failure scope, replay safety, provider
+    delay, `retry_not_before`, and bounded redacted diagnostics. An operation carries
+    at most eight chronological diagnostic entries; every diagnostic message is redacted
+    first and then capped at 512 Unicode code points.
+
+    2. One physical invocation is one executor call to a write or observation; raw
+    requests are counted separately. Allow at most three invocations and 15 seconds
+    cumulative sleep. Use `2**(attempt+1) + U[0,1)`: [2s,3s), then [4s,5s). Provider
+    `Retry-After`, parsed by `_errors.parse_retry_after`, is a lower bound.
+
+    3. Add a constructor-injected internal route selector at dispatch. It defaults
+    to legacy in S1; tests explicitly select the executor. It is not config or an
+    environment variable. Only exact `{"summary"}` is eligible; mixed fields remain
+    one legacy call. No dual-send. S3 owns venue-gated validation and default-on cutover.
+
+    4. Cloud makes one ACLI process per write and preserves existing POSIX/non-POSIX
+    cleanup. Decode sanitized exit/stdout/stderr; unknown shapes fail loud. Recovery
+    uses primary-store `get_issue_by_rest`, never ACLI JQL. Add a per-call policy
+    to `acli_rest._rest_urlopen_with_retry`; summary recovery alone selects one attempt/no
+    sleep. All existing callers retain three attempts with 2s/5s waits.
+
+    5. Build the dedicated DC executor with the Jira 3.10.5 public `jira.JIRA(...,
+    max_retries=0)` seam, then fail fast unless the constructed client''s `_session.max_retries
+    == 0`. The legacy client keeps current SDK retry. Selected pre-read/write/read-back
+    calls use `_with_connection_retry` under a per-call one-attempt/no-sleep policy;
+    legacy callers keep current behavior.
+
+    6. A DC summary-write invocation is GET -> PUT -> GET, with no hidden repeats.
+    Failure ends that invocation. Successful read-back is authoritative. After ambiguous
+    PUT, a separate GET observation consumes the next invocation.
+
+    7. Desired summary observed after timeout means recovered success. Conclusive
+    old state may replay within the remaining budget. Failed, rate-limited, or inconclusive
+    observation returns non-replaying `commit_unknown`. An authoritative delay that
+    cannot fit returns `retry_not_before` without sleeping. Auth, TLS, permission,
+    invalid request, and permanent failures do not retry; eligible network, 429, and
+    retryable 5xx failures use the shared schedule.
+
+    8. Preserve the `update_one` / `apply_handlers.handle_update` boundary while S1
+    is test-only. `dispatch_one` maps success/recovered success to the legacy result
+    and fills `_fields_synced` only after conclusive success; `_comment_errors` and
+    `_subop` keep their shapes. `commit_unknown`/`retry_not_before` map to a tagged
+    internal result. `handle_update` records exactly one redacted per-mutation error/disposition
+    message capped at 512 Unicode code points, leaves `_fields_synced` empty, advances
+    no baseline or set-field provenance, persists no deferral in S1, and lets the
+    batch continue. S3 maps terminal dispositions to pass/fuse control and durable
+    deferral, then retires the bridge.
+
+    9. Emit exactly one redacted completion log for every terminal/exhausted outcome
+    or cleanup failure. It contains only logical id, disposition, invocation count,
+    request count, cleanup status, `retry_not_before`, and one redacted message capped
+    at 512 Unicode code points; the complete serialized log is capped at 1,024 Unicode
+    code points.
+
+    10. ADR 0100 records the retry owner, Jira idempotency limit, observe-before-replay,
+    budget, lifecycle owners, rollback, and deltas from ADR 0084/0087 and desired-state
+    ADRs 0004/0026/0029. The 15-second cumulative limit supersedes ADR 0084 only on
+    selected routes.
+
+
+    ## Scope
+
+    - Core: `operation_outcome.py`, `retry_budget.py`, `dispatch_one.py`, `dispatch_apply_phases.py`,
+    `apply_handlers.py`.
+
+    - Cloud: `acli.py`, `acli_subprocess.py`, `acli_rest.py`, backend; preserve unrelated
+    REST retry defaults.
+
+    - DC: `transport.py`, `retry.py`, `_issues.py`, backend; dedicated executor client
+    and per-call policy preserve legacy defaults.
+
+    - ADR 0100; budget/outcome, handler, historical ACLI, cleanup, and DC request
+    tests.
+
+
+    ## Testing
+
+    Fake-clock/stateful tests cover schedules, deadlines, request order, ambiguity,
+    recovery, failure classes, and no real sleep. Poison tests reject hidden retry
+    or extra ACLI processes; neighbor tests preserve unselected behavior. Handler
+    tests prevent false state advance. Historical triples pin decoding, real processes
+    pin cleanup, and output tests pin bounds/redaction. S3 owns venue-gated evidence;
+    S5 owns final live confirmation.
+
+
+    ## Compatibility / Rollback
+
+    Production stays on legacy through the internal selector. Rollback selects legacy
+    before a call; there is no config/env surface or dual-send. S3 changes the default
+    after validation. Selected routes use the new budget, long-delay deferral, fail-loud
+    unknown ACLI shapes, and non-replaying inconclusive recovery; other callers retain
+    current behavior.
+
+
+    ## Acceptance Criteria
+
+    - [ ] Cloud and DC summary routes produce one provider-neutral outcome schema;
+    tests assert every field.
+
+    - [ ] Repeated invocations preserve one logical id.
+
+    - [ ] No selected operation exceeds three invocations or 15 seconds cumulative
+    sleep.
+
+    - [ ] Each selected DC write invocation is exactly GET/PUT/GET with no hidden
+    repeats.
+
+    - [ ] Cloud recovery performs one primary-store REST request with no sleep; neighbor
+    tests preserve existing REST retry.
+
+    - [ ] Executor-selected exact `{"summary"}` bypasses generic `_call_with_retry`.
+
+    - [ ] The constructor selector defaults to legacy, adds no config/env key, and
+    tests explicitly enable it.
+
+    - [ ] Mixed fields stay one unsplit legacy call.
+
+    - [ ] Confirmed outcomes preserve legacy result, `_fields_synced`, `_comment_errors`,
+    and `_subop` shapes.
+
+    - [ ] Every terminal outcome records exactly one redacted per-mutation message
+    capped at 512 Unicode code points, with no baseline/provenance advance or S1 deferral.
+
+    - [ ] ADR and contract name S3 as sole cutover, fuse/deferral consumer, and bridge-retirement
+    owner.
+
+    - [ ] The Jira 3.10.5 executor passes `max_retries=0` and fails fast unless `_session.max_retries
+    == 0`; legacy SDK retry is unchanged.
+
+    - [ ] Selected DC wrapper calls are one-attempt/no-sleep; legacy wrapper behavior
+    is unchanged.
+
+    - [ ] Fallback sleeps remain [2s,3s), then [4s,5s).
+
+    - [ ] Over-budget provider delay returns `retry_not_before` without sleep.
+
+    - [ ] Permanent failures use one invocation; eligible transient failures use the
+    schedule.
+
+    - [ ] Satisfied observation returns recovered success without another write.
+
+    - [ ] Conclusive old state permits only remaining-budget replay.
+
+    - [ ] Failed/inconclusive observation returns non-replaying `commit_unknown`.
+
+    - [ ] ACLI cleanup passes for POSIX groups and non-POSIX children.
+
+    - [ ] Historical ACLI triples decode deterministically; unknown triples do not
+    retry.
+
+    - [ ] Operation outcomes hold at most eight diagnostics, with each redacted message
+    capped at 512 Unicode code points.
+
+    - [ ] Every terminal/exhausted outcome or cleanup failure emits exactly one completion
+    log containing only logical id, disposition, invocation/request counts, cleanup
+    status, `retry_not_before`, and one redacted message capped at 512 Unicode code
+    points; the whole log is at most 1,024 Unicode code points.
+
+    - [ ] ADR 0100 records contract, ownership, compatibility deltas, rollback, and
+    prior art; index checks pass.'
+- children:
+  - ticket_id: 26ae-041f-dcc4-4279
+  - ticket_id: 6cd0-0786-4de8-415e
+  - ticket_id: 98b6-efa8-bf15-4760
+  - ticket_id: ee8a-6355-2e8f-4da3
+  corpus: rebar
+  criterion: G3
+  expect: pass
+  id: plan-review-G3-no_fire-0
+  input: "## Context / Problem\n\nOperators who run rebar's gate operations through\
+    \ an OpenAI-compatible gateway (set via\n`llm.base_url`) have that gateway reporting\
+    \ to an observability backend such as Langfuse.\nrebar sends no request metadata,\
+    \ so every gate call arrives anonymous: it cannot be\nattributed to rebar, grouped\
+    \ into one trace per gate run, or tied back to the ticket and\nsigned verdict\
+    \ that produced it.\n\nrebar already reserved the field for this. `src/rebar/schemas/review_result.schema.json`\
+    \ and\n`src/rebar/schemas/completion_verdict.schema.json` each declare `trace_id`\
+    \ as\n`[\"string\",\"null\"]`, described as \"Langfuse trace id when tracing is\
+    \ enabled; null\notherwise\", while `src/rebar/llm/runner.py:259` and `:719` pass\
+    \ `trace_id=None`\nunconditionally. The correlation identity was specified and\
+    \ never implemented.\n\nThe existing OTLP path (`src/rebar/llm/tracing.py:196`,\
+    \ `setup_tracing`) is a different\nmechanism and is unchanged by this epic: it\
+    \ exports rebar's own spans directly to Langfuse.\nThis epic serves the deployment\
+    \ where the gateway, not rebar, feeds the backend.\n\n## Approach\n\nAdd one generic,\
+    \ operator-configured request-header surface on `LLMConfig`, delivered\nthrough\
+    \ pydantic-ai's `ModelSettings.extra_headers`, whose values may interpolate\n\
+    environment variables (`${env:VAR}`) and rebar-supplied per-run values (`${run:trace_id}`,\n\
+    `${run:ticket_id}`, `${run:operation}`).\n\nRationale for this shape:\n\n- **One\
+    \ generic dict beats named per-vendor knobs.** A dedicated \"trace header name\"\
+    \ field\n  would force rebar to ship a vendor default, hard-coding one gateway's\
+    \ dialect. A generic\n  dict with substitution carries LiteLLM's `x-litellm-trace-id`,\
+    \ Helicone's\n  `Helicone-Session-Id`, or an internal gateway's own names equally\
+    \ well. rebar ships no\n  vendor header name in code or defaults; vendor names\
+    \ appear only as documentation\n  examples, keeping the feature portable across\
+    \ supported client shapes.\n- **`ModelSettings.extra_headers` beats patching httpx\
+    \ clients.** It is upstream-supported\n  (`pydantic_ai/settings.py`, documented\
+    \ for OpenAI, Anthropic, Bedrock, Google and others)\n  and rebar already has\
+    \ a pure assembly seam at `src/rebar/llm/structured_run.py:338`\n  (`build_model_settings`)\
+    \ feeding `src/rebar/llm/runner.py:567`. Patching transport instead\n  would require\
+    \ touching two separate httpx constructions\n  (`src/rebar/llm/providers.py:295`\
+    \ and `src/rebar/llm/anthropic_model.py:155`) and would\n  still miss non-httpx\
+    \ providers.\n- **Static and per-run headers are one feature, not two.** A constant\
+    \ header is a dict entry\n  without a placeholder; per-run correlation is a dict\
+    \ entry with one. One code path, one\n  test surface.\n\nHeader values are a credential-bearing\
+    \ surface: both vendor SDKs merge caller headers last,\nso a caller-supplied `Authorization`\
+    \ silently displaces the real key. Validation and\nredaction are therefore delivered\
+    \ scope, not follow-on work.\n\n## Out of scope\n\nNo rebar-owned root span, no\
+    \ unification of rebar's own OTLP spans with the gateway's\nrecords, and no W3C\
+    \ `traceparent` injection. The 32-hex lowercase id format is chosen so\nlater\
+    \ work can carry a real OTel trace id without a schema or format migration.\n\n\
+    ## Acceptance Criteria\n\n- [ ] An operator can configure arbitrary request headers\
+    \ for gate LLM calls without editing\n      rebar source, and no gateway vendor's\
+    \ header name appears in rebar's shipped code or\n      defaults; checked by a\
+    \ test asserting the shipped default is empty and by a test\n      asserting no\
+    \ vendor header-name constant exists under `src/rebar/llm/`.\n- [ ] A header value\
+    \ can reference an environment variable so a gateway credential is never\n   \
+    \   required in a committed config file; checked by a test resolving `${env:VAR}`\
+    \ from a\n      monkeypatched environment.\n- [ ] All LLM calls within one gate\
+    \ run carry the same correlation value, and two runs carry\n      different ones;\
+    \ checked by a test capturing headers across the calls of one simulated\n    \
+    \  run.\n- [ ] A produced gate verdict names the correlation value in its existing\
+    \ `trace_id` field\n      instead of `null`, on both gate surfaces; checked by\
+    \ asserting `trace_id` on a produced\n      plan-review verdict validated against\
+    \ `review_result.schema.json` and on a produced\n      completion verdict validated\
+    \ against `completion_verdict.schema.json`.\n- [ ] A configured header value never\
+    \ appears in logs, diagnostics, or the\n      `provider_provenance` record written\
+    \ into verdicts and sidecars; checked by a test\n      asserting a sentinel value\
+    \ is absent from captured log output and from the serialized\n      provenance\
+    \ record.\n- [ ] Header names and values that could forge authentication or inject\
+    \ protocol bytes are\n      rejected at config resolution with a named error;\
+    \ checked by parametrized tests over\n      the rejected set.\n\n## Child decomposition\n\
+    \n- A **configuration** child owns the `headers` field, its resolution across\
+    \ the CLI, env and\n  file layers, `${env:...}` interpolation, and the name/value\
+    \ validation that rejects\n  authentication and protocol-injection headers. It\
+    \ delivers criteria 1, 2 and 6.\n- A **run-correlation** child owns minting the\
+    \ per-run identity at the gate run boundaries\n  and populating the verdict `trace_id`\
+    \ field. It delivers criterion 4.\n- A **delivery** child owns `${run:...}` interpolation\
+    \ and placing resolved headers on the\n  wire through `extra_headers`, gated on\
+    \ a configured `base_url`, together with the\n  redaction guarantee at every emission\
+    \ point. It delivers criteria 3 and 5, and depends on\n  both children above.\n\
+    - A **documentation** child records the operator-facing recipe and security guidance,\
+    \ and\n  depends on the delivery child."
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: "Add plan-review criterion T15 \"overlay-derisk\" so plans prove risky runtime\
+    \ mechanisms via a fast out-of-loop experiment BEFORE committing them into a slow,\
+    \ codified delivery loop (CI/CD, IaC apply, provisioning pipeline). Motivation:\
+    \ on infra epics, basic failures (a service that won't boot, a credential that\
+    \ doesn't authorize, a dependency that won't connect, a readiness check that never\
+    \ passes) are discovered only at the END of a long delivery cycle. No existing\
+    \ criterion rewards front-loading those checks into a cheap local run or a manual\
+    \ probe against the real target. This is a CORE built-in change (not project-specific),\
+    \ stack-agnostic (no hardcoded Terraform/docker), routed by the self-gating Pass-1\
+    \ finder like the other Txx overlays.\n\n## The finalized T15 rubric (design of\
+    \ record)\n\nOVERLAY \u2014 apply only when ALL of the following hold; else PASS\
+    \ not-applicable.\n- S1 Codified loop? the mechanism is delivered/validated by\
+    \ pushing through an automated pipeline or an environment/infrastructure apply,\
+    \ not by running or unit-testing code directly.\n- S2 Slow or costly pass? one\
+    \ pass through that loop is slow (minutes-to-hours) or otherwise costly to run.\n\
+    - S3 Runtime-only correctness? the change introduces behavior whose correctness\
+    \ only resolves when it actually runs in a realistic environment (boots, authenticates,\
+    \ connects, is authorized, passes readiness) \u2014 unreachable by static/unit\
+    \ checks.\n\nWhen applicable, report a finding for each check not satisfied:\n\
+    - (a) RISK NAMED \u2014 the plan identifies the specific mechanism(s) confirmable\
+    \ only by completing the full loop.\n- (b) FAST OUT-OF-LOOP PROOF \u2014 for each\
+    \ named risk, the plan commits to proving it via the fastest feedback path available\
+    \ for that mechanism, outside the slow loop: running the unit locally/emulated\
+    \ where feasible, OR a manual experiment directly against the real target (an\
+    \ interactive call, a one-off CLI/console action, a probe script, a throwaway\
+    \ resource) where local reproduction isn't possible. The experiment is concrete\
+    \ and returns a verdict in minutes, not a delivery cycle. An unnamed \"we'll verify\"\
+    \ / \"we'll check after deploy\" does not satisfy it.\n- (c) PROVE-THEN-CODIFY\
+    \ \u2014 the cheap experiment comes before committing the mechanism into the slow\
+    \ loop, so the loop validates an already-proven mechanism.\n- (d) SCOPED CLEANUP\
+    \ \u2014 throwaway experiments are cleaned up afterward, with teardown that removes\
+    \ ONLY the artifacts the experiment itself created (the records a probe inserted,\
+    \ the scratch resource it spun up) and touches nothing pre-existing, shared, or\
+    \ persistent; a cleanup step that could delete, reset, or truncate a resource\
+    \ the experiment did not create (e.g. dropping an existing table or wiping a bucket\
+    \ to \"reset\" it) fails this check.\n\nANTI-FP: a manual experiment against the\
+    \ real target is a fully valid proof \u2014 never penalize choosing it over local\
+    \ reproduction; many stacks cannot be reproduced locally. A mechanism already\
+    \ proven elsewhere in the codebase needn't be re-proven.\n\nFacet ~ empirical\
+    \ / approach-soundness; exec AGENT (it ground-checks that the named mechanism\
+    \ and named experiment are real/plausible against the codebase). Posture (advisory\
+    \ vs blocking) and block_threshold are NOT decided here \u2014 set by the normal\
+    \ registry/review process.\n\n## Required companion change: T10 boundary partition\n\
+    The de-risk (transient experiment) phase and T10's production-hardening phase\
+    \ must not overlap; there is no runtime cross-criterion suppression by design.\
+    \ Fix by partitioning in T10's own rubric text \u2014 add a scope clause: \"This\
+    \ overlay evaluates the DURABLE infrastructure \u2014 the IaC/config that persists.\
+    \ Transient, throwaway experiments used to de-risk a mechanism before committing\
+    \ it \u2014 their creation, isolation, and teardown \u2014 are out of scope here.\"\
+    \ (T10 does NOT name T15 or any other overlay.)\n\n## Acceptance Criteria\n\n\
+    - [x] all child tickets are closed\n- [x] `rebar explain T15` renders the criterion\
+    \ with its descriptive name (not the bare id), and\n      `python -m rebar.llm.plan_review.registry\
+    \ regenerate-criteria-guide` regenerates\n      `docs/plan-review-criteria-guide.md`\
+    \ with a T15 section, with the criteria-guide and registry\n      validators passing\n\
+    - [x] the writing-a-passing-plan guide instructs authors to de-risk out-of-loop\
+    \ before slow delivery loops,\n      evidenced by the T15 guidance appearing in\
+    \ `src/rebar/_guides/writing-a-passing-plan.md`\n- [x] the coach-move decision\
+    \ (add or reject the proposed out-of-loop-proof move) is recorded on this epic\n\
+    \      as a comment naming the decision and its rationale"
+  label: finding
+- input: '## Context / Outcome
+
+    Current Jira writes can cross dispatch, Cloud ACLI/REST, or DC SDK/wrapper retries.
+    A timeout can multiply writes or leave acceptance ambiguous. Prove one provider-neutral
+    budget by setting an exact summary through Cloud and DC. Because Jira has no Rebar
+    idempotency key, recovery observes desired state before replay. S1 establishes
+    ADR 0100; S3 owns cutover/outcome consumption; S5 finalizes it after all operation
+    families migrate.
+
+
+    ## Approach
+
+    1. Define an operation/outcome contract: stable logical id, desired postcondition,
+    invocation/request counts, disposition, failure scope, replay safety, provider
+    delay, `retry_not_before`, and bounded redacted diagnostics. An operation carries
+    at most eight chronological diagnostic entries; every diagnostic message is redacted
+    first and then capped at 512 Unicode code points.
+
+    2. One physical invocation is one executor call to a write or observation; raw
+    requests are counted separately. Allow at most three invocations and 15 seconds
+    cumulative sleep. Use `2**(attempt+1) + U[0,1)`: [2s,3s), then [4s,5s). Provider
+    `Retry-After`, parsed by `_errors.parse_retry_after`, is a lower bound.
+
+    3. Add a constructor-injected internal route selector at dispatch. It defaults
+    to legacy in S1; tests explicitly select the executor. It is not config or an
+    environment variable. Only exact `{"summary"}` is eligible; mixed fields remain
+    one legacy call. No dual-send. S3 owns venue-gated validation and default-on cutover.
+
+    4. Cloud makes one ACLI process per write and preserves existing POSIX/non-POSIX
+    cleanup. Decode sanitized exit/stdout/stderr; unknown shapes fail loud. Recovery
+    uses primary-store `get_issue_by_rest`, never ACLI JQL. Add a per-call policy
+    to `acli_rest._rest_urlopen_with_retry`; summary recovery alone selects one attempt/no
+    sleep. All existing callers retain three attempts with 2s/5s waits.
+
+    5. Build the dedicated DC executor with the Jira 3.10.5 public `jira.JIRA(...,
+    max_retries=0)` seam, then fail fast unless the constructed client''s `_session.max_retries
+    == 0`. The legacy client keeps current SDK retry. Selected pre-read/write/read-back
+    calls use `_with_connection_retry` under a per-call one-attempt/no-sleep policy;
+    legacy callers keep current behavior.
+
+    6. A DC summary-write invocation is GET -> PUT -> GET, with no hidden repeats.
+    Failure ends that invocation. Successful read-back is authoritative. After ambiguous
+    PUT, a separate GET observation consumes the next invocation.
+
+    7. Desired summary observed after timeout means recovered success. Conclusive
+    old state may replay within the remaining budget. Failed, rate-limited, or inconclusive
+    observation returns non-replaying `commit_unknown`. An authoritative delay that
+    cannot fit returns `retry_not_before` without sleeping. Auth, TLS, permission,
+    invalid request, and permanent failures do not retry; eligible network, 429, and
+    retryable 5xx failures use the shared schedule.
+
+    8. Preserve the `update_one` / `apply_handlers.handle_update` boundary while S1
+    is test-only. `dispatch_one` maps success/recovered success to the legacy result
+    and fills `_fields_synced` only after conclusive success; `_comment_errors` and
+    `_subop` keep their shapes. `commit_unknown`/`retry_not_before` map to a tagged
+    internal result. `handle_update` records exactly one redacted per-mutation error/disposition
+    message capped at 512 Unicode code points, leaves `_fields_synced` empty, advances
+    no baseline or set-field provenance, persists no deferral in S1, and lets the
+    batch continue. S3 maps terminal dispositions to pass/fuse control and durable
+    deferral, then retires the bridge.
+
+    9. Emit exactly one redacted completion log for every terminal/exhausted outcome
+    or cleanup failure. It contains only logical id, disposition, invocation count,
+    request count, cleanup status, `retry_not_before`, and one redacted message capped
+    at 512 Unicode code points; the complete serialized log is capped at 1,024 Unicode
+    code points.
+
+    10. ADR 0100 records the retry owner, Jira idempotency limit, observe-before-replay,
+    budget, lifecycle owners, rollback, and deltas from ADR 0084/0087 and desired-state
+    ADRs 0004/0026/0029. The 15-second cumulative limit supersedes ADR 0084 only on
+    selected routes.
+
+
+    ## Scope
+
+    - Core: `operation_outcome.py`, `retry_budget.py`, `dispatch_one.py`, `dispatch_apply_phases.py`,
+    `apply_handlers.py`.
+
+    - Cloud: `acli.py`, `acli_subprocess.py`, `acli_rest.py`, backend; preserve unrelated
+    REST retry defaults.
+
+    - DC: `transport.py`, `retry.py`, `_issues.py`, backend; dedicated executor client
+    and per-call policy preserve legacy defaults.
+
+    - ADR 0100; budget/outcome, handler, historical ACLI, cleanup, and DC request
+    tests.
+
+
+    ## Testing
+
+    Fake-clock/stateful tests cover schedules, deadlines, request order, ambiguity,
+    recovery, failure classes, and no real sleep. Poison tests reject hidden retry
+    or extra ACLI processes; neighbor tests preserve unselected behavior. Handler
+    tests prevent false state advance. Historical triples pin decoding, real processes
+    pin cleanup, and output tests pin bounds/redaction. S3 owns venue-gated evidence;
+    S5 owns final live confirmation.
+
+
+    ## Compatibility / Rollback
+
+    Production stays on legacy through the internal selector. Rollback selects legacy
+    before a call; there is no config/env surface or dual-send. S3 changes the default
+    after validation. Selected routes use the new budget, long-delay deferral, fail-loud
+    unknown ACLI shapes, and non-replaying inconclusive recovery; other callers retain
+    current behavior.
+
+
+    ## Acceptance Criteria
+
+    - [ ] Cloud and DC summary routes produce one provider-neutral outcome schema;
+    tests assert every field.
+
+    - [ ] Repeated invocations preserve one logical id.
+
+    - [ ] No selected operation exceeds three invocations or 15 seconds cumulative
+    sleep.
+
+    - [ ] Each selected DC write invocation is exactly GET/PUT/GET with no hidden
+    repeats.
+
+    - [ ] Cloud recovery performs one primary-store REST request with no sleep; neighbor
+    tests preserve existing REST retry.
+
+    - [ ] Executor-selected exact `{"summary"}` bypasses generic `_call_with_retry`.
+
+    - [ ] The constructor selector defaults to legacy, adds no config/env key, and
+    tests explicitly enable it.
+
+    - [ ] Mixed fields stay one unsplit legacy call.
+
+    - [ ] Confirmed outcomes preserve legacy result, `_fields_synced`, `_comment_errors`,
+    and `_subop` shapes.
+
+    - [ ] Every terminal outcome records exactly one redacted per-mutation message
+    capped at 512 Unicode code points, with no baseline/provenance advance or S1 deferral.
+
+    - [ ] ADR and contract name S3 as sole cutover, fuse/deferral consumer, and bridge-retirement
+    owner.
+
+    - [ ] The Jira 3.10.5 executor passes `max_retries=0` and fails fast unless `_session.max_retries
+    == 0`; legacy SDK retry is unchanged.
+
+    - [ ] Selected DC wrapper calls are one-attempt/no-sleep; legacy wrapper behavior
+    is unchanged.
+
+    - [ ] Fallback sleeps remain [2s,3s), then [4s,5s).
+
+    - [ ] Over-budget provider delay returns `retry_not_before` without sleep.
+
+    - [ ] Permanent failures use one invocation; eligible transient failures use the
+    schedule.
+
+    - [ ] Satisfied observation returns recovered success without another write.
+
+    - [ ] Conclusive old state permits only remaining-budget replay.
+
+    - [ ] Failed/inconclusive observation returns non-replaying `commit_unknown`.
+
+    - [ ] ACLI cleanup passes for POSIX groups and non-POSIX children.
+
+    - [ ] Historical ACLI triples decode deterministically; unknown triples do not
+    retry.
+
+    - [ ] Operation outcomes hold at most eight diagnostics, with each redacted message
+    capped at 512 Unicode code points.
+
+    - [ ] Every terminal/exhausted outcome or cleanup failure emits exactly one completion
+    log containing only logical id, disposition, invocation/request counts, cleanup
+    status, `retry_not_before`, and one redacted message capped at 512 Unicode code
+    points; the whole log is at most 1,024 Unicode code points.
+
+    - [ ] ADR 0100 records contract, ownership, compatibility deltas, rollback, and
+    prior art; index checks pass.'
+  label: finding
+- input: "## Context / Problem\n\nOperators who run rebar's gate operations through\
+    \ an OpenAI-compatible gateway (set via\n`llm.base_url`) have that gateway reporting\
+    \ to an observability backend such as Langfuse.\nrebar sends no request metadata,\
+    \ so every gate call arrives anonymous: it cannot be\nattributed to rebar, grouped\
+    \ into one trace per gate run, or tied back to the ticket and\nsigned verdict\
+    \ that produced it.\n\nrebar already reserved the field for this. `src/rebar/schemas/review_result.schema.json`\
+    \ and\n`src/rebar/schemas/completion_verdict.schema.json` each declare `trace_id`\
+    \ as\n`[\"string\",\"null\"]`, described as \"Langfuse trace id when tracing is\
+    \ enabled; null\notherwise\", while `src/rebar/llm/runner.py:259` and `:719` pass\
+    \ `trace_id=None`\nunconditionally. The correlation identity was specified and\
+    \ never implemented.\n\nThe existing OTLP path (`src/rebar/llm/tracing.py:196`,\
+    \ `setup_tracing`) is a different\nmechanism and is unchanged by this epic: it\
+    \ exports rebar's own spans directly to Langfuse.\nThis epic serves the deployment\
+    \ where the gateway, not rebar, feeds the backend.\n\n## Approach\n\nAdd one generic,\
+    \ operator-configured request-header surface on `LLMConfig`, delivered\nthrough\
+    \ pydantic-ai's `ModelSettings.extra_headers`, whose values may interpolate\n\
+    environment variables (`${env:VAR}`) and rebar-supplied per-run values (`${run:trace_id}`,\n\
+    `${run:ticket_id}`, `${run:operation}`).\n\nRationale for this shape:\n\n- **One\
+    \ generic dict beats named per-vendor knobs.** A dedicated \"trace header name\"\
+    \ field\n  would force rebar to ship a vendor default, hard-coding one gateway's\
+    \ dialect. A generic\n  dict with substitution carries LiteLLM's `x-litellm-trace-id`,\
+    \ Helicone's\n  `Helicone-Session-Id`, or an internal gateway's own names equally\
+    \ well. rebar ships no\n  vendor header name in code or defaults; vendor names\
+    \ appear only as documentation\n  examples, keeping the feature portable across\
+    \ supported client shapes.\n- **`ModelSettings.extra_headers` beats patching httpx\
+    \ clients.** It is upstream-supported\n  (`pydantic_ai/settings.py`, documented\
+    \ for OpenAI, Anthropic, Bedrock, Google and others)\n  and rebar already has\
+    \ a pure assembly seam at `src/rebar/llm/structured_run.py:338`\n  (`build_model_settings`)\
+    \ feeding `src/rebar/llm/runner.py:567`. Patching transport instead\n  would require\
+    \ touching two separate httpx constructions\n  (`src/rebar/llm/providers.py:295`\
+    \ and `src/rebar/llm/anthropic_model.py:155`) and would\n  still miss non-httpx\
+    \ providers.\n- **Static and per-run headers are one feature, not two.** A constant\
+    \ header is a dict entry\n  without a placeholder; per-run correlation is a dict\
+    \ entry with one. One code path, one\n  test surface.\n\nHeader values are a credential-bearing\
+    \ surface: both vendor SDKs merge caller headers last,\nso a caller-supplied `Authorization`\
+    \ silently displaces the real key. Validation and\nredaction are therefore delivered\
+    \ scope, not follow-on work.\n\n## Out of scope\n\nNo rebar-owned root span, no\
+    \ unification of rebar's own OTLP spans with the gateway's\nrecords, and no W3C\
+    \ `traceparent` injection. The 32-hex lowercase id format is chosen so\nlater\
+    \ work can carry a real OTel trace id without a schema or format migration.\n\n\
+    ## Acceptance Criteria\n\n- [ ] An operator can configure arbitrary request headers\
+    \ for gate LLM calls without editing\n      rebar source, and no gateway vendor's\
+    \ header name appears in rebar's shipped code or\n      defaults; checked by a\
+    \ test asserting the shipped default is empty and by a test\n      asserting no\
+    \ vendor header-name constant exists under `src/rebar/llm/`.\n- [ ] A header value\
+    \ can reference an environment variable so a gateway credential is never\n   \
+    \   required in a committed config file; checked by a test resolving `${env:VAR}`\
+    \ from a\n      monkeypatched environment.\n- [ ] All LLM calls within one gate\
+    \ run carry the same correlation value, and two runs carry\n      different ones;\
+    \ checked by a test capturing headers across the calls of one simulated\n    \
+    \  run.\n- [ ] A produced gate verdict names the correlation value in its existing\
+    \ `trace_id` field\n      instead of `null`, on both gate surfaces; checked by\
+    \ asserting `trace_id` on a produced\n      plan-review verdict validated against\
+    \ `review_result.schema.json` and on a produced\n      completion verdict validated\
+    \ against `completion_verdict.schema.json`.\n- [ ] A configured header value never\
+    \ appears in logs, diagnostics, or the\n      `provider_provenance` record written\
+    \ into verdicts and sidecars; checked by a test\n      asserting a sentinel value\
+    \ is absent from captured log output and from the serialized\n      provenance\
+    \ record.\n- [ ] Header names and values that could forge authentication or inject\
+    \ protocol bytes are\n      rejected at config resolution with a named error;\
+    \ checked by parametrized tests over\n      the rejected set.\n\n## Child decomposition\n\
+    \n- A **configuration** child owns the `headers` field, its resolution across\
+    \ the CLI, env and\n  file layers, `${env:...}` interpolation, and the name/value\
+    \ validation that rejects\n  authentication and protocol-injection headers. It\
+    \ delivers criteria 1, 2 and 6.\n- A **run-correlation** child owns minting the\
+    \ per-run identity at the gate run boundaries\n  and populating the verdict `trace_id`\
+    \ field. It delivers criterion 4.\n- A **delivery** child owns `${run:...}` interpolation\
+    \ and placing resolved headers on the\n  wire through `extra_headers`, gated on\
+    \ a configured `base_url`, together with the\n  redaction guarantee at every emission\
+    \ point. It delivers criteria 3 and 5, and depends on\n  both children above.\n\
+    - A **documentation** child records the operator-facing recipe and security guidance,\
+    \ and\n  depends on the delivery child."
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-G3
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

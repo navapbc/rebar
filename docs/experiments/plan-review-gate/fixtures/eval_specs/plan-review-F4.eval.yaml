@@ -1,0 +1,247 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: F4
+  expect: finding
+  id: plan-review-F4-fire-3
+  input: "## Why\nAutomate the FFO rebase-to-tip-then-submit so parallel agent sessions\
+    \ stop hand-rolling it and racing; serialize so the tested tree is always the\
+    \ merged tree with no thrash.\n\n## What\nA project service (Python, project infra\
+    \ \u2014 NOT `src/rebar` core) that, for the front `Autosubmit`+submittable change/chain:\
+    \ rebases to the current tip, awaits a fresh `Verified +1`, and ancestor-atomic\
+    \ submits the exact tested SHA. Holds a single in-flight `wipChain`.\n\n**Poll\
+    \ cadence (design-fixed).** The loop runs on a fixed **15 s poll interval** \u2014\
+    \ the \"bot poll interval\" that S4 and S5 reference. Rationale: a freshly-`Autosubmit`'d\
+    \ change is picked up within ~15 s (good agent UX) while staying gentle on the\
+    \ Gerrit REST API; it is intentionally distinct from `land`'s own 30 s client-side\
+    \ poll (S4). The bot writes its liveness heartbeat once per poll iteration (S5\
+    \ AC5), so under normal operation the heartbeat is never older than ~15 s.\n\n\
+    **Terminology \u2014 REST-submittable vs FFO-landable.** *REST-submittable* =\
+    \ Gerrit reports `submittable=True` (both gate votes at MAX, no unresolved comments).\
+    \ *FFO-landable* = REST-submittable AND the change's parent is `main`'s current\
+    \ tip (i.e. it fast-forwards). Under Fast-Forward-Only `main` (ADR-0040) the two\
+    \ are NOT equivalent: a behind-tip change stays `submittable=True` yet `POST /submit`\
+    \ fails with a `not fast-forward` error. This loop must always drive to **FFO-landable**,\
+    \ never trust `is:submittable` alone.\n\n## Dependencies\nDepends on **S1** (`sterilized-papery-horse`,\
+    \ 843b-801f-9ef9-442d) \u2014 the `Autosubmit` label + its **requester-votable\
+    \ ACL** (the vote is granted to group `Contributors`, so an *agent* sets the label\
+    \ under its OWN identity via S4's `land`; this loop casts no votes of its own).\
+    \ The loop only *selects on* `label:Autosubmit+1`, so the label and its Contributor-votable\
+    \ ACL must exist and be live before the loop can select or drive anything.\n\n\
+    ## Scope\nHappy-path loop + serialization + identity/attribution. Failure paths,\
+    \ deploy, and the agent-facing command are separate stories.\n\n## Acceptance\
+    \ Criteria\n- [ ] Selects the front `label:Autosubmit+1 is:submittable` change/chain;\
+    \ **FIFO ordering keyed on the `Autosubmit` vote's timestamp** (oldest-voted-submittable-first).\
+    \ (`is:submittable` is the REST *candidate* filter; the change is only *landed*\
+    \ once confirmed FFO-landable \u2014 see the TOCTOU guard below.)\n- [ ] **Rebase-selection\
+    \ rule:** detect a relation chain via `GET /changes/{id}/revisions/current/related`\
+    \ (the RelatedChanges endpoint) \u2014 a chain of >1 non-merge member rebases\
+    \ with `POST /rebase:chain`. A **`--no-ff` merge change is ALWAYS rebased with\
+    \ `POST /changes/{id}/rebase`** (first-parent-only \u2192 `MERGE_FIRST_PARENT_UPDATE`),\
+    \ **NEVER `/rebase:chain`**, even when it sits at a chain tip \u2014 `/rebase:chain`\
+    \ is for non-merge chains only. A single non-merge change also uses `POST /changes/{id}/rebase`.\
+    \ `on_behalf_of_uploader=true` preserves author/DCO `Signed-off-by`/`rebar-ticket`\
+    \ trailer.\n- [ ] Awaits a **fresh** `Verified +1` \u2014 defined as a `Verified\
+    \ +1` on the exact rebased patchset SHA (not a copied/carried vote from a prior\
+    \ patchset) \u2014 before submit (`LLM-Review` carries `TRIVIAL_REBASE`/`MERGE_FIRST_PARENT_UPDATE`\
+    \ per ADR-0041; `Verified` re-runs on the new patchset).\n- [ ] Ancestor-atomic\
+    \ submit of the exact tested SHA. **FFO TOCTOU guard + re-drive:** REST-submittable\
+    \ does NOT imply FFO-landable (a behind-tip change stays `submittable=True` but\
+    \ `POST /submit` fails `not fast-forward`). So immediately before `POST /submit`,\
+    \ confirm the tested SHA is still **FFO-landable** \u2014 `is:submittable` AND\
+    \ its parent is still `main`'s current tip; if `main` advanced (parent no longer\
+    \ tip) or the SHA changed, do NOT submit \u2014 instead **re-drive the same `wipChain`**:\
+    \ reset its `phase` to `rebasing`, rebase-to-new-tip \u2192 await fresh Verified\
+    \ \u2192 re-check, looping **at most `N=5` times**; after `N=5` re-drives park\
+    \ the change and surface `needs_rebase` rather than casting a stale submit.\n\
+    - [ ] **`wipChain` schema:** a single in-memory record `{change_id, chain_member_ids[],\
+    \ tested_sha, verified_at, phase}` held by the single instance, where **`phase\
+    \ \u2208 {selecting, rebasing, awaiting_verified, submitting, idle}`**; `tested_sha`\
+    \ is set to the post-rebase patchset SHA on entering `awaiting_verified` and cleared\
+    \ on `idle`.\n- [ ] Single `wipChain` / single instance (serialized) \u2014 never\
+    \ rebases multiple changes onto the same HEAD concurrently.\n- [ ] Reads existing\
+    \ `Verified` votes only; casts NO votes (no gate-semantics change in Phase 1)."
+- corpus: rebar
+  criterion: F4
+  expect: pass
+  id: plan-review-F4-no_fire-0
+  input: "# Persist ticket digest as a REVIEW_RESULT-style sidecar record on the ticket\
+    \ (shared cache)\n\n## Why\nThe digest is a billable LLM artifact we never want\
+    \ to recompute. Storing it in the SHARED store (auto-pushed) makes one client's\
+    \ enrichment a cache-hit for every other client. rebar already has the exact precedent:\
+    \ `REVIEW_RESULT` \u2014 a reducer-IGNORED, preserved-and-ignored, per-ticket\
+    \ LLM-derived sidecar event. We reuse that pattern rather than inventing a reducer-projected\
+    \ type, avoiding compaction/SNAPSHOT entanglement.\n\n## What\nA new `TICKET_DIGEST`\
+    \ sidecar event carrying the S1 digest plus a `content_hash` of the fields it\
+    \ was derived from. Freshness is computed on read: the digest is CURRENT iff its\
+    \ stored `content_hash` (and `model`/`schema` version tags) match the ticket's\
+    \ current values; otherwise it reads as stale. Latest-wins: a scan reduces to\
+    \ the most-recent `TICKET_DIGEST` per ticket (by HLC order), so re-enrichment\
+    \ supersedes rather than accumulates in the projection.\n\n## Scope (exact edit\
+    \ targets \u2014 every registry a new event type touches)\n- `src/rebar/_store/event_append.py`:\
+    \ add `\"TICKET_DIGEST\"` to the `EVENT_TYPES` write allow-list (line ~38) or\
+    \ `stage_and_commit` raises StoreError.\n- `src/rebar/reducer/_version.py`: add\
+    \ `\"TICKET_DIGEST\"` to `_NON_REPLAY_KNOWN_TYPES` (line 44), NOT `KNOWN_EVENT_TYPES`\
+    \ \u2014 so it is preserved-and-ignored by the main reducer, is never squashed\
+    \ into SNAPSHOT by compaction, and never trips the fsck \"newer-than-binary\"\
+    \ warning (mirrors REVIEW_RESULT exactly).\n- A `latest_ticket_digest(ticket_id)`\
+    \ reader + `emit`/`prune(keep=1)` in a new `src/rebar/llm/overlap/digest_sidecar.py`\
+    \ (modeled on `plan_review/sidecar.py`) that returns the current digest per ticket\
+    \ for the retrieval stage; `content_hash` helper over a NAMED, versioned field\
+    \ set (`DIGEST_HASH_FIELDS` = title + description + comment bodies, normalized:\
+    \ strip trailing whitespace, join with \"\\n\"). Bump a module-constant `DIGEST_HASH_VERSION`\
+    \ (in `digest_sidecar.py`) when the field set changes so all cached digests invalidate\
+    \ deterministically.\n- `show` renders digest presence + freshness only (not the\
+    \ raw digest text); the raw digest is available to retrieval. No new field in\
+    \ `ticket_state.schema.json` (sidecar, not compiled state), matching REVIEW_RESULT.\n\
+    - Fail-closed freshness: if the current content-hash cannot be computed (partial\
+    \ read), the digest reads as NOT-current (never falsely fresh) \u2014 mirroring\
+    \ `compute_validity` returning None on read error.\n- Prune/retire: a digest for\
+    \ a deleted/archived ticket is dropped by a `prune(keep=1)` retention mirroring\
+    \ `src/rebar/llm/plan_review/sidecar.py` (`emit`+`prune`+`latest_*`); the digest\
+    \ sidecar is a new `src/rebar/llm/overlap/digest_sidecar.py` modeled on it; document\
+    \ that concurrent same-ticket digests from two clients are safe \u2014 both are\
+    \ TICKET_DIGEST appends, latest-by-HLC wins on read, idempotent.\n\n## Dependencies\n\
+    S1 (indecisive-callous-armyworm) \u2014 produces the `ticket_digest` payload this\
+    \ stores.\n\n## Testing\n- Unit `tests/unit/test_ticket_digest_store.py`: write\u2192\
+    read roundtrip; freshness flips stale when title/description/comment changes;\
+    \ fail-closed on unreadable state; latest-wins on two appends; older binary preserves-and-ignores\
+    \ the event (fsck no WARN); archived ticket's digest pruned.\n\n## Acceptance\
+    \ Criteria\n- [ ] A digest is written via a `TICKET_DIGEST` event and read back\
+    \ per ticket; verified by `pytest tests/unit/test_ticket_digest_store.py::test_roundtrip`.\n\
+    - [ ] Freshness is computed on read: mutating any `DIGEST_HASH_FIELDS` field marks\
+    \ the digest stale; verified by `::test_freshness_flips`.\n- [ ] `TICKET_DIGEST`\
+    \ is in `EVENT_TYPES` and `_NON_REPLAY_KNOWN_TYPES` (not `KNOWN_EVENT_TYPES`);\
+    \ an older binary preserves-and-ignores it with no fsck WARN.\n- [ ] An unchanged\
+    \ ticket is NOT re-enriched: the drain skips a ticket whose current content-hash\
+    \ + model/schema tags match its stored digest; verified by `::test_no_reextract_unchanged`.\n\
+    - [ ] Freshness flips stale on ANY of: content-hash mismatch, `model` change,\
+    \ or `schema`/`DIGEST_HASH_VERSION` change; verified by `::test_freshness_all_triggers`.\n\
+    - [ ] Unreadable current state yields NOT-current (fail-closed), never falsely\
+    \ fresh.\n- [ ] Two concurrent same-ticket digest appends resolve latest-by-HLC\
+    \ on read (idempotent, no duplication); an archived/deleted ticket's digest is\
+    \ pruned.\n"
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: "## Why\nAutomate the FFO rebase-to-tip-then-submit so parallel agent sessions\
+    \ stop hand-rolling it and racing; serialize so the tested tree is always the\
+    \ merged tree with no thrash.\n\n## What\nA project service (Python, project infra\
+    \ \u2014 NOT `src/rebar` core) that, for the front `Autosubmit`+submittable change/chain:\
+    \ rebases to the current tip, awaits a fresh `Verified +1`, and ancestor-atomic\
+    \ submits the exact tested SHA. Holds a single in-flight `wipChain`.\n\n**Poll\
+    \ cadence (design-fixed).** The loop runs on a fixed **15 s poll interval** \u2014\
+    \ the \"bot poll interval\" that S4 and S5 reference. Rationale: a freshly-`Autosubmit`'d\
+    \ change is picked up within ~15 s (good agent UX) while staying gentle on the\
+    \ Gerrit REST API; it is intentionally distinct from `land`'s own 30 s client-side\
+    \ poll (S4). The bot writes its liveness heartbeat once per poll iteration (S5\
+    \ AC5), so under normal operation the heartbeat is never older than ~15 s.\n\n\
+    **Terminology \u2014 REST-submittable vs FFO-landable.** *REST-submittable* =\
+    \ Gerrit reports `submittable=True` (both gate votes at MAX, no unresolved comments).\
+    \ *FFO-landable* = REST-submittable AND the change's parent is `main`'s current\
+    \ tip (i.e. it fast-forwards). Under Fast-Forward-Only `main` (ADR-0040) the two\
+    \ are NOT equivalent: a behind-tip change stays `submittable=True` yet `POST /submit`\
+    \ fails with a `not fast-forward` error. This loop must always drive to **FFO-landable**,\
+    \ never trust `is:submittable` alone.\n\n## Dependencies\nDepends on **S1** (`sterilized-papery-horse`,\
+    \ 843b-801f-9ef9-442d) \u2014 the `Autosubmit` label + its **requester-votable\
+    \ ACL** (the vote is granted to group `Contributors`, so an *agent* sets the label\
+    \ under its OWN identity via S4's `land`; this loop casts no votes of its own).\
+    \ The loop only *selects on* `label:Autosubmit+1`, so the label and its Contributor-votable\
+    \ ACL must exist and be live before the loop can select or drive anything.\n\n\
+    ## Scope\nHappy-path loop + serialization + identity/attribution. Failure paths,\
+    \ deploy, and the agent-facing command are separate stories.\n\n## Acceptance\
+    \ Criteria\n- [ ] Selects the front `label:Autosubmit+1 is:submittable` change/chain;\
+    \ **FIFO ordering keyed on the `Autosubmit` vote's timestamp** (oldest-voted-submittable-first).\
+    \ (`is:submittable` is the REST *candidate* filter; the change is only *landed*\
+    \ once confirmed FFO-landable \u2014 see the TOCTOU guard below.)\n- [ ] **Rebase-selection\
+    \ rule:** detect a relation chain via `GET /changes/{id}/revisions/current/related`\
+    \ (the RelatedChanges endpoint) \u2014 a chain of >1 non-merge member rebases\
+    \ with `POST /rebase:chain`. A **`--no-ff` merge change is ALWAYS rebased with\
+    \ `POST /changes/{id}/rebase`** (first-parent-only \u2192 `MERGE_FIRST_PARENT_UPDATE`),\
+    \ **NEVER `/rebase:chain`**, even when it sits at a chain tip \u2014 `/rebase:chain`\
+    \ is for non-merge chains only. A single non-merge change also uses `POST /changes/{id}/rebase`.\
+    \ `on_behalf_of_uploader=true` preserves author/DCO `Signed-off-by`/`rebar-ticket`\
+    \ trailer.\n- [ ] Awaits a **fresh** `Verified +1` \u2014 defined as a `Verified\
+    \ +1` on the exact rebased patchset SHA (not a copied/carried vote from a prior\
+    \ patchset) \u2014 before submit (`LLM-Review` carries `TRIVIAL_REBASE`/`MERGE_FIRST_PARENT_UPDATE`\
+    \ per ADR-0041; `Verified` re-runs on the new patchset).\n- [ ] Ancestor-atomic\
+    \ submit of the exact tested SHA. **FFO TOCTOU guard + re-drive:** REST-submittable\
+    \ does NOT imply FFO-landable (a behind-tip change stays `submittable=True` but\
+    \ `POST /submit` fails `not fast-forward`). So immediately before `POST /submit`,\
+    \ confirm the tested SHA is still **FFO-landable** \u2014 `is:submittable` AND\
+    \ its parent is still `main`'s current tip; if `main` advanced (parent no longer\
+    \ tip) or the SHA changed, do NOT submit \u2014 instead **re-drive the same `wipChain`**:\
+    \ reset its `phase` to `rebasing`, rebase-to-new-tip \u2192 await fresh Verified\
+    \ \u2192 re-check, looping **at most `N=5` times**; after `N=5` re-drives park\
+    \ the change and surface `needs_rebase` rather than casting a stale submit.\n\
+    - [ ] **`wipChain` schema:** a single in-memory record `{change_id, chain_member_ids[],\
+    \ tested_sha, verified_at, phase}` held by the single instance, where **`phase\
+    \ \u2208 {selecting, rebasing, awaiting_verified, submitting, idle}`**; `tested_sha`\
+    \ is set to the post-rebase patchset SHA on entering `awaiting_verified` and cleared\
+    \ on `idle`.\n- [ ] Single `wipChain` / single instance (serialized) \u2014 never\
+    \ rebases multiple changes onto the same HEAD concurrently.\n- [ ] Reads existing\
+    \ `Verified` votes only; casts NO votes (no gate-semantics change in Phase 1)."
+  label: finding
+- input: "# Persist ticket digest as a REVIEW_RESULT-style sidecar record on the ticket\
+    \ (shared cache)\n\n## Why\nThe digest is a billable LLM artifact we never want\
+    \ to recompute. Storing it in the SHARED store (auto-pushed) makes one client's\
+    \ enrichment a cache-hit for every other client. rebar already has the exact precedent:\
+    \ `REVIEW_RESULT` \u2014 a reducer-IGNORED, preserved-and-ignored, per-ticket\
+    \ LLM-derived sidecar event. We reuse that pattern rather than inventing a reducer-projected\
+    \ type, avoiding compaction/SNAPSHOT entanglement.\n\n## What\nA new `TICKET_DIGEST`\
+    \ sidecar event carrying the S1 digest plus a `content_hash` of the fields it\
+    \ was derived from. Freshness is computed on read: the digest is CURRENT iff its\
+    \ stored `content_hash` (and `model`/`schema` version tags) match the ticket's\
+    \ current values; otherwise it reads as stale. Latest-wins: a scan reduces to\
+    \ the most-recent `TICKET_DIGEST` per ticket (by HLC order), so re-enrichment\
+    \ supersedes rather than accumulates in the projection.\n\n## Scope (exact edit\
+    \ targets \u2014 every registry a new event type touches)\n- `src/rebar/_store/event_append.py`:\
+    \ add `\"TICKET_DIGEST\"` to the `EVENT_TYPES` write allow-list (line ~38) or\
+    \ `stage_and_commit` raises StoreError.\n- `src/rebar/reducer/_version.py`: add\
+    \ `\"TICKET_DIGEST\"` to `_NON_REPLAY_KNOWN_TYPES` (line 44), NOT `KNOWN_EVENT_TYPES`\
+    \ \u2014 so it is preserved-and-ignored by the main reducer, is never squashed\
+    \ into SNAPSHOT by compaction, and never trips the fsck \"newer-than-binary\"\
+    \ warning (mirrors REVIEW_RESULT exactly).\n- A `latest_ticket_digest(ticket_id)`\
+    \ reader + `emit`/`prune(keep=1)` in a new `src/rebar/llm/overlap/digest_sidecar.py`\
+    \ (modeled on `plan_review/sidecar.py`) that returns the current digest per ticket\
+    \ for the retrieval stage; `content_hash` helper over a NAMED, versioned field\
+    \ set (`DIGEST_HASH_FIELDS` = title + description + comment bodies, normalized:\
+    \ strip trailing whitespace, join with \"\\n\"). Bump a module-constant `DIGEST_HASH_VERSION`\
+    \ (in `digest_sidecar.py`) when the field set changes so all cached digests invalidate\
+    \ deterministically.\n- `show` renders digest presence + freshness only (not the\
+    \ raw digest text); the raw digest is available to retrieval. No new field in\
+    \ `ticket_state.schema.json` (sidecar, not compiled state), matching REVIEW_RESULT.\n\
+    - Fail-closed freshness: if the current content-hash cannot be computed (partial\
+    \ read), the digest reads as NOT-current (never falsely fresh) \u2014 mirroring\
+    \ `compute_validity` returning None on read error.\n- Prune/retire: a digest for\
+    \ a deleted/archived ticket is dropped by a `prune(keep=1)` retention mirroring\
+    \ `src/rebar/llm/plan_review/sidecar.py` (`emit`+`prune`+`latest_*`); the digest\
+    \ sidecar is a new `src/rebar/llm/overlap/digest_sidecar.py` modeled on it; document\
+    \ that concurrent same-ticket digests from two clients are safe \u2014 both are\
+    \ TICKET_DIGEST appends, latest-by-HLC wins on read, idempotent.\n\n## Dependencies\n\
+    S1 (indecisive-callous-armyworm) \u2014 produces the `ticket_digest` payload this\
+    \ stores.\n\n## Testing\n- Unit `tests/unit/test_ticket_digest_store.py`: write\u2192\
+    read roundtrip; freshness flips stale when title/description/comment changes;\
+    \ fail-closed on unreadable state; latest-wins on two appends; older binary preserves-and-ignores\
+    \ the event (fsck no WARN); archived ticket's digest pruned.\n\n## Acceptance\
+    \ Criteria\n- [ ] A digest is written via a `TICKET_DIGEST` event and read back\
+    \ per ticket; verified by `pytest tests/unit/test_ticket_digest_store.py::test_roundtrip`.\n\
+    - [ ] Freshness is computed on read: mutating any `DIGEST_HASH_FIELDS` field marks\
+    \ the digest stale; verified by `::test_freshness_flips`.\n- [ ] `TICKET_DIGEST`\
+    \ is in `EVENT_TYPES` and `_NON_REPLAY_KNOWN_TYPES` (not `KNOWN_EVENT_TYPES`);\
+    \ an older binary preserves-and-ignores it with no fsck WARN.\n- [ ] An unchanged\
+    \ ticket is NOT re-enriched: the drain skips a ticket whose current content-hash\
+    \ + model/schema tags match its stored digest; verified by `::test_no_reextract_unchanged`.\n\
+    - [ ] Freshness flips stale on ANY of: content-hash mismatch, `model` change,\
+    \ or `schema`/`DIGEST_HASH_VERSION` change; verified by `::test_freshness_all_triggers`.\n\
+    - [ ] Unreadable current state yields NOT-current (fail-closed), never falsely\
+    \ fresh.\n- [ ] Two concurrent same-ticket digest appends resolve latest-by-HLC\
+    \ on read (idempotent, no duplication); an archived/deleted ticket's digest is\
+    \ pruned.\n"
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-F4
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic

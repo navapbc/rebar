@@ -1,0 +1,837 @@
+coverage_threshold: 1.0
+dataset:
+- corpus: rebar
+  criterion: T12
+  expect: finding
+  id: plan-review-T12-fire-0
+  input: '## Context / Problem
+
+    A Jira update currently crosses `dispatch_one._update_one_scalar_update`, generic
+    `dispatch_apply_phases._call_with_retry`, Cloud ACLI retry, or Jira DC SDK and
+    `_with_connection_retry` loops. A timeout can multiply calls or leave an accepted
+    write ambiguous. Jira updates expose no Rebar-controlled idempotency key, so recovery
+    needs desired-state observation instead of blind replay.
+
+
+    ## Outcome
+
+    Prove the provider-neutral contract by setting an issue summary to an exact value.
+    Cloud follows `dispatch_one._update_one_scalar_update -> AcliClient.update_issue(key,
+    summary=...)`; DC terminates at `_IssuesMixin.update_issue(key, summary=...)`.
+    Both return typed outcomes from one logical-operation budget. This story establishes
+    ADR 0100; RP-03 S5 finalizes it after all families migrate.
+
+
+    ## Approach
+
+    1. Define operation/outcome values with stable logical id, desired postcondition,
+    attempt count, disposition, failure scope, replay safety, provider delay, `retry_not_before`,
+    plus bounded redacted diagnostics.
+
+    2. A physical invocation is one executor call to an adapter write or observation,
+    not each required request inside it. Count raw provider requests separately. The
+    shared owner permits three physical invocations and 15 seconds cumulative sleep
+    across initial write, observation, plus safe replan. Use `2**(attempt+1) + U[0,1)`
+    jitter: [2s,3s) then [4s,5s). Reuse `_errors.parse_retry_after`; provider delay
+    is a lower bound.
+
+    3. Route only an exact `{"summary"}` field set to the executor. Mixed `{"summary","description"}`
+    stays one unsplit legacy call in S1. The flag defaults to the executor when this
+    slice lands. Legacy is an explicit pre-call rollback value; no dual-send. A poison
+    test proves generic retry is unreachable.
+
+    4. Cloud retains one process and shared cleanup: POSIX group reap or non-POSIX
+    child kill/bounded wait, with partial output. Rebar adds no replay below the budget
+    and claims no control over undocumented vendor-binary retry. Decode exit/stdout/stderr
+    only from sanitized historical shapes, including captured exit-1 unauthorized
+    output plus ticket timeout evidence. Unknown shapes fail loud as unclassified;
+    REST observations use structured status/header decoding.
+
+    5. DC `build_client_from_settings` passes `jira.JIRA(..., max_retries=0)`; a fail-fast
+    guard checks the resulting session. The migrated summary entrypoint invokes each
+    pre-read/write/read-back through `_with_connection_retry` with a single-attempt,
+    no-sleep policy. Legacy routes keep today''s wrapper until cutover.
+
+    6. One DC summary-write invocation has fixed raw requests GET issue -> PUT fields
+    -> GET read-back, with no SDK/wrapper repeats. Failure ends that invocation. Successful
+    read-back is its authoritative result; after ambiguous PUT, a separate GET observation
+    consumes the next physical invocation. Tests assert top-level attempts plus raw
+    order.
+
+    7. After ambiguous timeout, desired summary observed means recovered success.
+    A conclusive old value may replay inside remaining budget. Failed, rate-limited,
+    or inconclusive observation returns non-replaying `commit_unknown` with deferral
+    metadata; no fallthrough write.
+
+    8. Worked example: DC invocation 1 issues GET then ambiguous PUT; observation
+    2 issues one GET that times out. Return `commit_unknown` after two invocations,
+    three requests, plus one PUT. If observation 2 returns the old summary, invocation
+    3 may run GET/PUT/GET; no fourth invocation. A poison sleeper proves `_with_connection_retry`
+    never delays or replays.
+
+    9. Credential, TLS, permission, invalid-request, plus other permanent failures
+    do not retry. Eligible network failures, 429, plus retryable 5xx use the shared
+    schedule. Over-budget authoritative delay returns `retry_not_before` without early
+    sleep or fictional attempt.
+
+    10. Emit one bounded redacted operation-completion log for `commit_unknown`, `retry_not_before`,
+    exhaustion, plus child cleanup failure. Tests pin fields, level, redaction, and
+    size.
+
+    11. Establish ADR 0100 with the contract, retry owner, Jira idempotency limitation,
+    observe-before-replay rationale, budget, deltas, plus rollback. Relate ADR 0084/0087
+    and desired-state ADRs 0004/0026/0029: observation reuses existing convergence;
+    the new decision is one budget across dispatch, CLI, SDK, and adapter loops. The
+    15-second cumulative budget supersedes ADR 0084''s 60-second per-sleep cap for
+    migrated routes; longer delays become `retry_not_before`.
+
+
+    ## Scope
+
+    - `operation_outcome.py`, `retry_budget.py`: contract and sole budget.
+
+    - `dispatch_one.py`, `dispatch_apply_phases.py`: default-on route and wrapper
+    bypass.
+
+    - Cloud adapters: one-process execution, observation, decoding, cleanup, typed
+    surface.
+
+    - DC `transport.py`, `retry.py`, `_issues.py`, backend: SDK disabled, one-attempt
+    wrapper policy, fixed request shape.
+
+    - ADR 0100, budget/outcome tests, historical ACLI fixtures, reaping regressions,
+    DC request tests.
+
+
+    ## Testing
+
+    - Fake-clock tables assert attempts, requests, sleep, deadlines, provider lower
+    bounds, plus `retry_not_before` with no real sleep.
+
+    - Stateful Cloud/DC fakes cover success, disconnect, ambiguity, inconclusive observation,
+    recovery, 429/503, malformed delay, TLS/auth/permanent 4xx, plus request order.
+
+    - Poison tests fail on generic retry, DC wrapper replay/sleep, SDK retry, or an
+    extra ACLI process.
+
+    - Historical ACLI triples pin decoding; unknown shapes fail loud. Real child-process
+    tests prove reaping.
+
+    - Output tests pin logs, redaction, bounded diagnostics, plus fast-fail behavior.
+    Required tests are local and credential-free; S5 `diamond-flavoured-esok` owns
+    venue-gated live confirmation before contract removal.
+
+
+    ## Compatibility / Rollback
+
+    The summary flag ships default-on for the executor; legacy is the rollback value.
+    Rollback preserves successful effects, then re-observes ambiguity. Intentional
+    deltas are the shared three-invocation/15-second budget, long-delay deferral,
+    fail-loud unknown ACLI shapes, plus non-replaying inconclusive recovery.
+
+
+    ## Acceptance Criteria
+
+    - [ ] Both summary routes return the same provider-neutral outcome schema; deterministic
+    tests assert every field.
+
+    - [ ] Repeated physical invocations preserve one logical id; a unit test asserts
+    identity stability.
+
+    - [ ] Top-level counters prove no postcondition exceeds three invocations or 15
+    seconds cumulative sleep.
+
+    - [ ] Raw counters prove each DC write invocation follows GET/PUT/GET without
+    hidden repeats.
+
+    - [ ] Exact `{"summary"}` bypasses `_call_with_retry`; a poison test proves it.\n-
+    [ ] Mixed fields stay one legacy call; a table test proves no split.
+
+    - [ ] DC construction passes `max_retries=0`; a guard test rejects a nonzero session
+    value.
+
+    - [ ] Migrated DC calls use single-attempt/no-sleep `_with_connection_retry`;
+    poison tests reject replay or sleep.
+
+    - [ ] Fallback sleeps stay in [2s,3s), then [4s,5s); fake-clock tests pin bounds.\n-
+    [ ] Over-budget provider delay returns `retry_not_before` without sleeping.
+
+    - [ ] Permanent failures perform one invocation; transient failures follow the
+    injected schedule.
+
+    - [ ] Satisfied post-timeout observation returns recovered success without a second
+    write.
+
+    - [ ] Conclusively unsatisfied observation permits only remaining-budget replay.
+
+    - [ ] Failed or inconclusive observation returns non-replaying `commit_unknown`;
+    the example asserts two invocations, three requests, one PUT.
+
+    - [ ] ACLI cleanup tests pass for POSIX groups and non-POSIX direct children.
+
+    - [ ] Historical ACLI triples decode as expected; an unknown triple returns unclassified
+    without retry.
+
+    - [ ] Completion logs expose deferred/exhausted outcomes without secret or unbounded
+    content.
+
+    - [ ] ADR 0100 records the contract and prior-art relationships; index checks
+    pass.'
+- corpus: rebar
+  criterion: T12
+  expect: finding
+  id: plan-review-T12-fire-2
+  input: "## Surface\nAWS CloudWatch, us-east-1, acct 896586841071, host `rebar-gerrit`\
+    \ (rebar-autodeploy.service). Three correlated autodeploy alarms flapped 2026-08-29\u2192\
+    30: `deploy_errors` \xD711, `mcp_retire_cap` \xD711, `review_interrupts_signal_unavailable`\
+    \ \xD72. Deploy path is fail-safe (no outage) but releases were not landing cleanly\
+    \ and in-flight reviews may have been killed blind. Full RCA + evidence is in\
+    \ this ticket's RCA comment.\n\n## Root cause (proven \u2014 detail in the RCA\
+    \ comment)\n**Mechanism 1 (deploy_errors \xD711 + mcp-retire-cap \xD711, one event).**\
+    \ `src/rebar/_mcp_health.py` sets uvicorn `timeout_graceful_shutdown=int(grace_seconds)`\
+    \ (line 743) with `grace_seconds` defaulting to the 1200s certified-op drain budget\
+    \ `DEFAULT_SHUTDOWN_GRACE_SECONDS` (line 51), and `make_sigterm_handler` sets\
+    \ `server.should_exit=True` **before** draining the in-flight gauge. Streamable-HTTP\
+    \ clients hold long-lived streams, so uvicorn's graceful shutdown waits the full\
+    \ 1200s for idle held-open streams even at 0 in-flight. With only two blue-green\
+    \ ports (8092/8093) a retiring container pins a port ~20 min \u2192 the next mcp\
+    \ deploy hits `port-exhausted` \u2192 `deploy_failed` + backoff. A landing burst\
+    \ (14 mcp + 142 bot redeploys in-window) drove it 11\xD7.\n\n**Mechanism 3 (signal-unavailable\
+    \ \xD72).** In `infra/scripts/autodeploy.sh` the drain gate reads the bot `/health`\
+    \ `in_flight`; on an unreadable signal `bot_in_flight_reviews()` returns `-1`\
+    \ and the gate **fails open** \u2014 recreates the bot with no drain check, emitting\
+    \ `AUTODEPLOY_REVIEW_INTERRUPT signal-unavailable`. It cannot tell a bot that\
+    \ is **mid-redeploy** (unreachable only because it is being recreated / still\
+    \ starting) from one genuinely **wedged**; the blind recreate can kill the very\
+    \ startup it should wait for.\n\n## Approach\nTwo independent, bounded, reversible\
+    \ fixes; each with its own RED\u2192GREEN test.\n\n**Fix 1 \u2014 decouple uvicorn\
+    \ graceful-shutdown from the certified-op grace (`_mcp_health.py`).**\n- Add a\
+    \ short constant `DEFAULT_UVICORN_GRACEFUL_SECONDS` and use it for `uvicorn.Config(timeout_graceful_shutdown=...)`,\
+    \ decoupled from `grace_seconds` (which stays the op-drain budget); thread it\
+    \ as a defaulted `uvicorn_graceful_seconds` param on `run_http_with_grace` for\
+    \ testability.\n- Reorder `make_sigterm_handler._on_sigterm` to drain the gauge\
+    \ FIRST (existing `drain_then_exit`, bounded by `grace_seconds`) and set `server.should_exit=True`\
+    \ only AFTER the gauge hits 0. A real in-flight op's streaming response then completes\
+    \ normally; once the gauge is 0, uvicorn's short backstop sweeps idle held-open\
+    \ streams in seconds instead of the full 1200s.\n- Close NEW intake at SIGTERM\
+    \ so the fast-drain-at-0 cannot be re-pinned by a landing burst: add a `draining`\
+    \ flag to `InFlightGauge` (`begin_draining()`), and have the certified-op wrapper\
+    \ REFUSE a new certified op (raise `MCPRetiringError`, never incrementing) once\
+    \ draining. `_on_sigterm` calls `begin_draining()` FIRST (immediate intake-stop),\
+    \ before the drain loop; a certified request arriving mid-drain is rejected so\
+    \ the client retries the live (green) container and the gauge can actually reach\
+    \ 0. This replaces uvicorn's `should_exit`-first intake-stop (which we cannot\
+    \ keep, since a short `timeout_graceful_shutdown` would then force-close a real\
+    \ in-flight op) with an explicit refusal that does not truncate in-flight work.\
+    \ Ops already counted still drain to completion.\n- Invariant preserved: >0 in-flight\
+    \ \u21D2 full `grace_seconds` drain (never cut a real op short); 0 in-flight \u21D2\
+    \ fast drain; new intake refused during drain \u21D2 a burst cannot extend the\
+    \ window or re-pin the port. The op bound is enforced by the gauge poll, never\
+    \ uvicorn's short backstop.\n\n**Fix 3 \u2014 distinguish \"bot mid-redeploy\"\
+    \ from \"bot wedged\" (`autodeploy.sh`).**\n- Add best-effort `bot_unreachable_disposition()`\
+    \ that inspects the bot container's docker state/health \u2192 `redeploying` (status\
+    \ `restarting`/`created`/`removing`/`paused`, or docker health `starting`) vs\
+    \ `wedged` (running-but-unreachable, `unhealthy`, no container, or any inspect\
+    \ error \u2192 default `wedged`).\n- In the drain gate's `inflight < 0` branch,\
+    \ when `redeploying`, DEFER (retry next tick) with a countable `AUTODEPLOY_DEFERRED\
+    \ bot-redeploying` marker, bounded by the existing `DEPLOY_DEFER_MAX` episode;\
+    \ on bound-exhaustion or `wedged`, fall through to the existing fail-open recreate\
+    \ + `signal-unavailable`. Maps the single unknown `-1` onto its own disposition\
+    \ instead of a blind fail-open (mirrors the 1c0d disposition-contract intent).\n\
+    - Invariant preserved: a wedged/down bot still fails open and deploys (recovery\
+    \ path); the mid-redeploy defer is bounded so it cannot live-lock the gate; any\
+    \ docker error defaults to `wedged` (== pre-fix behavior).\n\n## Scope\n- `src/rebar/_mcp_health.py`\
+    \ \u2014 Fix 1 only. No change to `DEFAULT_SHUTDOWN_GRACE_SECONDS` (stays 1200),\
+    \ the gauge, or `drain_then_exit`.\n- `infra/scripts/autodeploy.sh` \u2014 Fix\
+    \ 3 only. No change to the `inflight > 0` busy-defer path, the port pool, or `MCP_RELEASES_CAP`.\n\
+    - Tests otherwise. **Deferred / out of scope:** raising `MCP_RELEASES_CAP` / expanding\
+    \ the port pool (Option 2); any nginx/compose capacity change; the separate concurrent\
+    \ disk bug e4f3.\n\n## Testing\n- Fix 1 (`tests/interfaces/facades/test_mcp_http_transport.py`):\
+    \ `make_sigterm_handler` does NOT set `should_exit` while the gauge is >0 and\
+    \ flips it only after the gauge drains to 0 (fast-drain + >0-in-flight preservation\
+    \ guard); `run_http_with_grace` configures `timeout_graceful_shutdown` to `DEFAULT_UVICORN_GRACEFUL_SECONDS`,\
+    \ decoupled from and less than the 1200s grace; and a new certified op during\
+    \ draining is refused (`MCPRetiringError`) without incrementing the gauge (intake-stop).\
+    \ Existing bound/exit tests still pass.\n- Fix 3 (`tests/scripts/test_autodeploy_review_drain.py`,\
+    \ real-bash stub harness): mid-redeploy bot (unreachable `/health` + docker `starting`)\
+    \ is DEFERRED (no `compose build/up`, `AUTODEPLOY_DEFERRED bot-redeploying` emitted,\
+    \ no `signal-unavailable`, deployed-sha unchanged, rc 0); wedged bot (unreachable\
+    \ + docker `running`) still fails open (`compose build` runs, `signal-unavailable`\
+    \ counted); the mid-redeploy defer is bounded (pre-aged episode past `DEPLOY_DEFER_MAX`\
+    \ falls through to fail-open).\n- `make lint` + `make typecheck` + the two targeted\
+    \ test modules; mutation check with teeth on the changed logic.\n\n## Acceptance\
+    \ Criteria\n- [ ] A retiring MCP container with 0 in-flight certified ops shuts\
+    \ down within the short `DEFAULT_UVICORN_GRACEFUL_SECONDS` backstop (not the 1200s\
+    \ op grace), proven by a test asserting `timeout_graceful_shutdown == DEFAULT_UVICORN_GRACEFUL_SECONDS`\
+    \ and `< DEFAULT_SHUTDOWN_GRACE_SECONDS`.\n- [ ] A retiring MCP container with\
+    \ >0 in-flight certified ops still receives the full `grace_seconds` drain and\
+    \ is never cut short, proven by a test asserting `should_exit` stays False until\
+    \ the gauge reaches 0.\n- [ ] A NEW certified op arriving after SIGTERM (during\
+    \ the drain window) is REFUSED (`MCPRetiringError`) and does not increment the\
+    \ gauge, while an already-in-flight op is unaffected \u2014 so a landing burst\
+    \ cannot re-pin the retiring port for the full grace. Proven by a gauge-level\
+    \ test and a handler-level test (the handler reports `draining` and refuses a\
+    \ new op while still draining a >0 gauge).\n- [ ] An unreadable `/health` caused\
+    \ by a mid-redeploy bot yields a DEFER with a countable `AUTODEPLOY_DEFERRED bot-redeploying`\
+    \ marker and no `compose build/up`, asserted by the bash harness.\n- [ ] A genuinely\
+    \ wedged/down bot (or an exhausted mid-redeploy defer bound) still fails open,\
+    \ runs `compose build`, and emits the countable `AUTODEPLOY_REVIEW_INTERRUPT signal-unavailable`\
+    \ marker, asserted by the bash harness.\n- [ ] No capacity change is made: `MCP_RELEASES_CAP`\
+    \ and the blue-green port set are unchanged; both fixes are in-process/host-local\
+    \ with no CI-provider dependency.\n- [ ] `make lint`, `make typecheck`, and the\
+    \ two targeted test modules pass; each mechanism has an independent RED\u2192\
+    GREEN test."
+- corpus: rebar
+  criterion: T12
+  expect: finding
+  id: plan-review-T12-fire-3
+  input: "## Summary\n\n`list_tickets` against this store can terminate with `MCP\
+    \ request failed: Transport closed` and\nno structured error payload \u2014 the\
+    \ caller cannot tell whether the query was invalid, the server\nfailed, or the\
+    \ response was simply too large.\n\n## Observed (parallel Copilot CLI session)\n\
+    \n    list_tickets -> MCP server 'rebar': MCP request failed: Transport closed\n\
+    \nThe reporter attributes it to response size, noting that `ready_tickets` and\
+    \ `bridge_fsck`\n'needed disk-spill just to return'.\n\n## Corroborating datum\
+    \ from a different client\n\nIn a Claude Code session the same tool SUCCEEDED\
+    \ but returned **219,815 characters**, which\nexceeded the client's token budget\
+    \ and had to be spilled to a file. So the server can emit\npayloads far beyond\
+    \ what a client can absorb, and it does so without pagination or a size guard.\n\
+    \n## Candidate causes \u2014 deliberately NOT collapsed into one\n\nThree are\
+    \ live and this ticket should not presume among them:\n1. **Response size** \u2014\
+    \ the reporter's hypothesis, supported by the 219KB datum.\n2. **BigInt serialization**\
+    \ (`unreal-milky-sloth`) \u2014 a JS client can fail on out-of-JS-range\n   integers;\
+    \ a failure during serialization can look like a dropped transport.\n3. **A deploy\
+    \ cutover** \u2014 the mcp container was replaced at 18:54:29Z\n   (`nemophilic-prettyish-cockroach`),\
+    \ which orphans live sessions.\n\nThese produce similar client-visible symptoms\
+    \ and must be separated by evidence before a fix.\n\n## Acceptance Criteria\n\n\
+    - [ ] The cause is identified and distinguished from the two sibling tickets above.\n\
+    - [ ] A large result is bounded \u2014 pagination, an explicit limit, or a documented\
+    \ cap \u2014 rather\n      than emitted at unbounded size.\n- [ ] Exceeding any\
+    \ limit produces a STRUCTURED, actionable error, never a bare transport close.\n\
+    - [ ] Regression coverage exercises a store large enough to trip the previous\
+    \ behaviour.\n\n- [ ] **LIVE VALIDATION \u2014 REQUIRED TO CLOSE.** `list_tickets`\
+    \ and `ready_tickets` called through the deployed endpoint return results (or\
+    \ a structured limit error) with no transport close.\n      Evidence must be OBSERVED\
+    \ against the deployed server at\n      `https://rebar.solutions.navateam.com/mcp`\
+    \ and recorded in a ticket comment naming\n      the tool(s) called, the arguments,\
+    \ and the actual response. A passing local test is\n      NOT sufficient, and\
+    \ neither is a merged change: the container must have redeployed\n      and served\
+    \ the call. This exists because a fix here was previously reported complete\n\
+    \      on the strength of a merge while the deployed behaviour was still broken.\n"
+- corpus: rebar
+  criterion: T12
+  expect: pass
+  id: plan-review-T12-no_fire-0
+  input: "## Context / Problem\nEvery **attested-source** LLM gate operation fails\
+    \ on the LIVE MCP server\n(`https://rebar.solutions.navateam.com/mcp`, container\
+    \ `compose-mcp-1`, image\n`compose-mcp:9499312eb7b05dc3d75d39c23ab74a5b4afc26b5`).\n\
+    \nObserved 2026-08-27 against the live endpoint:\n\n```\nreview_plan       {\"\
+    ticket_id\": \"ruby-griffinish-goitered\"}\n  -> Error executing tool review_plan:\
+    \ cannot resolve ref 'origin/main' to a commit in '.'.\nreview_plan       {\"\
+    ticket_id\": \"...\", \"ref\": \"HEAD\"}\n  -> Error executing tool review_plan:\
+    \ cannot resolve ref 'HEAD' to a commit in '.'.\nverify_completion {\"ticket_id\"\
+    : \"...\"}\n  -> Error executing tool verify_completion: cannot resolve ref 'origin/main'\
+    \ to a commit in '.'.\nreview_plan       {\"ticket_id\": \"...\", \"source\":\
+    \ \"local\"}   -> RUNS (P1/P2/P3 emitted)\n```\n\n## Mechanism\nThe container's\
+    \ repo root has **no git metadata at all**. Verified in-container:\n\n```\n$ docker\
+    \ exec compose-mcp-1 sh -c 'pwd; ls -d /app/.git; git -C /app rev-parse origin/main'\n\
+    /app\nls: cannot access '/app/.git': No such file or directory\nfatal: not a git\
+    \ repository (or any of the parent directories): .git\n```\n\n`docker inspect`\
+    \ confirms `WorkingDir=/app`, `Cmd=[\"rebar-mcp\"]`, and the env carries\n`REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets`\
+    \ but **no `REBAR_ROOT`** \u2014 so the repo root\nresolves to the cwd `/app`,\
+    \ which is a plain source copy, not a work tree. The image ships\n`/app/.deployed_ref`\
+    \ (`d4a0a2a44 (feat/gerrit-ci-verified-gate)`) as a text marker instead of a\n\
+    real clone. `source=attested` pins a snapshot at `ref` against that root's object\
+    \ DB, so ref\nresolution fails before any LLM call.\n\nThe tracker itself is unaffected:\
+    \ it is an out-of-tree clone reached via `REBAR_TRACKER_DIR`,\nso all non-git\
+    \ tools (create/show/search/list/comment/edit/link/claim/transition) work.\n\n\
+    ## Impact\n`attested` is the DEFAULT source for both gate ops, and a `local`-source\
+    \ verdict is never\nsigned. So **no plan-review or completion attestation can\
+    \ be earned through the live MCP\nserver**, and consequently no `task`/`story`/`epic`\
+    \ can be closed through it while\n`verify.require_plan_review_for_close` is on\
+    \ \u2014 the only remaining path is `--force`, which\nagents are prohibited from\
+    \ using. Reproduced live: probe task `ruby-griffinish-goitered`\n(`c67b-ece5-707e-460e`)\
+    \ is stuck `in_progress` with\n`plan-review close gate: unsigned: no certified\
+    \ plan-review attestation`, and the prescribed\nremedy (`review-plan`) is the\
+    \ very operation that cannot run.\n\n## Reproduction\n1. Call `review_plan` on\
+    \ any claimable ticket through the live MCP endpoint with default args.\n2. Observe\
+    \ `cannot resolve ref 'origin/main' to a commit in '.'`.\n3. Repeat with `source:\
+    \ \"local\"` and observe it runs.\n\n## Fix\n\nProvision a real repository for\
+    \ the gate ops to resolve against, and point the repo root at it.\n\n**Why not\
+    \ the obvious alternatives.** Shipping `.git` in the image (removing the\n`.dockerignore:5`\
+    \ exclusion) bloats every layer and pins a main that goes stale the moment the\n\
+    image is built \u2014 the gates need a ref that tracks main, not a frozen one.\
+    \ Re-using the tickets\nclone at `REBAR_TRACKER_DIR` is tempting since `MCP_TICKETS_URL`\
+    \ is the SAME repository, but it\nconflates the code root with the tracker: two\
+    \ different lifetimes, two different refspecs, and\na reader can no longer tell\
+    \ which one a failure came from.\n\n**Shape.** `provision_store` gains a sibling\
+    \ that clones the CODE side into\n`/var/gerrit/site/mcp-code` \u2014 `--filter=blob:none\
+    \ --single-branch --branch main`, so it is a\nblobless clone that fetches objects\
+    \ on demand rather than materializing the history \u2014 and\n`REBAR_ROOT` is\
+    \ set to it (compose env + `mcp_run_new`, which must stay in parity). That root\n\
+    carries `rebar.toml`, so config resolution moves from the source copy at `/app`\
+    \ to a real\ncheckout, which is strictly better: the two agree today, and a real\
+    \ root is what the config\nseam expects.\n\n**Ordering.** Like the tickets clone\
+    \ this is backgrounded, so it cannot block `exec` past the\nreadiness deadline.\
+    \ Until it converges the gates fail exactly as they do today \u2014 no worse.\n\
+    \n**Enforcement is OUT OF SCOPE** (operator ruling, 2026-08-27). This change makes\
+    \ the attested\ngates work; it does NOT add a deploy-time check that refuses to\
+    \ promote a container whose code\nroot failed to resolve. A failed code clone\
+    \ therefore degrades to today's behaviour \u2014 the\ngates error \u2014 rather\
+    \ than blocking the deploy. That is a deliberate boundary, not an oversight:\n\
+    gating promotion on a backgrounded clone is what produced the rollback loop in\n\
+    `unfit-beneficial-whimbrel`, and re-introducing it here would trade one outage\
+    \ shape for\nanother.\n\n## Acceptance Criteria\n- [x] AC1: `review_plan` with\
+    \ default arguments against the deployed MCP server returns a plan-review verdict\
+    \ (PASS/BLOCK/INDETERMINATE) rather than a ref-resolution error.\n- [x] AC2: `verify_completion`\
+    \ with default arguments likewise returns a completion verdict.\n- [x] AC3: A\
+    \ PASS from AC1 persists a signed plan-review attestation.\n      OPERATOR DECISION\
+    \ 2026-08-28: `foreign_key` is ACCEPTED as sufficient; `certified` is\n      NOT\
+    \ required. Observed: the AC1 run returned `attestation.signed: true`, so the\n\
+    \      attestation IS produced and persisted; `plan_review_status(b928-3ab6-5985-417b)`\n\
+    \      through the deployed server then returns `verdict: foreign_key` because\
+    \ that\n      environment holds no op-cert public key and so cannot certify its\
+    \ own signature.\n      The original wording demanded `certified`; that is waived\
+    \ here. The missing public\n      key remains tracked separately (`dire-expectable-terr\u2026\
+    `, see Scope boundaries).\n- [x] AC4: The deployed container exposes a git object\
+    \ DB for the repo root reachable by the gate ops (a real clone at the repo root,\
+    \ or an explicit `REBAR_ROOT` pointing at one), verified by `git -C <root> rev-parse\
+    \ origin/main` succeeding inside the container.\n\n## Definition of Done\n- [x]\
+    \ DD1: AC1-AC3 demonstrated against a deployed MCP server.\n\n## Scope boundaries\
+    \ (operator rulings, 2026-08-27)\n\n- **Enforcement is out of scope.** No deploy-time\
+    \ refusal; see the Fix section.\n- **A shared op-cert is acceptable.** The server\
+    \ signing under the box's existing opcert\n  environment (ADR 0104 \xA73, Option\
+    \ A) is the accepted design. The separate observation that\n  the environment\
+    \ holds no public key, so `verify_signature` returns `foreign_key`, is tracked\n\
+    \  as `dire-expectable-terrapin` and is NOT in scope here.\n\n- [x] **LIVE VALIDATION\
+    \ \u2014 REQUIRED TO CLOSE.** `review_plan` called through the deployed endpoint\
+    \ returns a VERDICT rather than `cannot resolve ref ... in '.'`, and an attestation\
+    \ is persisted.\n      OPERATOR DECISION 2026-08-28: `scan_spec` is DROPPED from\
+    \ this criterion, and a\n      persisted-but-`foreign_key` attestation is accepted\
+    \ in place of a certified one.\n      Evidence recorded in the LIVE VALIDATION\
+    \ comment on this ticket: `review_plan`\n      and `verify_completion` both returned\
+    \ real verdicts (PASS) through\n      `https://rebar.solutions.navateam.com/mcp`\
+    \ against container\n      `rebar-mcp-2dbdcc8abe2c-8093`, with `attestation.signed:\
+    \ true`.\n      Evidence must be OBSERVED against the deployed server at\n   \
+    \   `https://rebar.solutions.navateam.com/mcp` and recorded in a ticket comment\
+    \ naming\n      the tool(s) called, the arguments, and the actual response. A\
+    \ passing local test is\n      NOT sufficient, and neither is a merged change:\
+    \ the container must have redeployed\n      and served the call. This exists because\
+    \ a fix here was previously reported complete\n      on the strength of a merge\
+    \ while the deployed behaviour was still broken."
+epochs: 3
+gate: at_least(2)
+gold_set:
+- input: '## Context / Problem
+
+    A Jira update currently crosses `dispatch_one._update_one_scalar_update`, generic
+    `dispatch_apply_phases._call_with_retry`, Cloud ACLI retry, or Jira DC SDK and
+    `_with_connection_retry` loops. A timeout can multiply calls or leave an accepted
+    write ambiguous. Jira updates expose no Rebar-controlled idempotency key, so recovery
+    needs desired-state observation instead of blind replay.
+
+
+    ## Outcome
+
+    Prove the provider-neutral contract by setting an issue summary to an exact value.
+    Cloud follows `dispatch_one._update_one_scalar_update -> AcliClient.update_issue(key,
+    summary=...)`; DC terminates at `_IssuesMixin.update_issue(key, summary=...)`.
+    Both return typed outcomes from one logical-operation budget. This story establishes
+    ADR 0100; RP-03 S5 finalizes it after all families migrate.
+
+
+    ## Approach
+
+    1. Define operation/outcome values with stable logical id, desired postcondition,
+    attempt count, disposition, failure scope, replay safety, provider delay, `retry_not_before`,
+    plus bounded redacted diagnostics.
+
+    2. A physical invocation is one executor call to an adapter write or observation,
+    not each required request inside it. Count raw provider requests separately. The
+    shared owner permits three physical invocations and 15 seconds cumulative sleep
+    across initial write, observation, plus safe replan. Use `2**(attempt+1) + U[0,1)`
+    jitter: [2s,3s) then [4s,5s). Reuse `_errors.parse_retry_after`; provider delay
+    is a lower bound.
+
+    3. Route only an exact `{"summary"}` field set to the executor. Mixed `{"summary","description"}`
+    stays one unsplit legacy call in S1. The flag defaults to the executor when this
+    slice lands. Legacy is an explicit pre-call rollback value; no dual-send. A poison
+    test proves generic retry is unreachable.
+
+    4. Cloud retains one process and shared cleanup: POSIX group reap or non-POSIX
+    child kill/bounded wait, with partial output. Rebar adds no replay below the budget
+    and claims no control over undocumented vendor-binary retry. Decode exit/stdout/stderr
+    only from sanitized historical shapes, including captured exit-1 unauthorized
+    output plus ticket timeout evidence. Unknown shapes fail loud as unclassified;
+    REST observations use structured status/header decoding.
+
+    5. DC `build_client_from_settings` passes `jira.JIRA(..., max_retries=0)`; a fail-fast
+    guard checks the resulting session. The migrated summary entrypoint invokes each
+    pre-read/write/read-back through `_with_connection_retry` with a single-attempt,
+    no-sleep policy. Legacy routes keep today''s wrapper until cutover.
+
+    6. One DC summary-write invocation has fixed raw requests GET issue -> PUT fields
+    -> GET read-back, with no SDK/wrapper repeats. Failure ends that invocation. Successful
+    read-back is its authoritative result; after ambiguous PUT, a separate GET observation
+    consumes the next physical invocation. Tests assert top-level attempts plus raw
+    order.
+
+    7. After ambiguous timeout, desired summary observed means recovered success.
+    A conclusive old value may replay inside remaining budget. Failed, rate-limited,
+    or inconclusive observation returns non-replaying `commit_unknown` with deferral
+    metadata; no fallthrough write.
+
+    8. Worked example: DC invocation 1 issues GET then ambiguous PUT; observation
+    2 issues one GET that times out. Return `commit_unknown` after two invocations,
+    three requests, plus one PUT. If observation 2 returns the old summary, invocation
+    3 may run GET/PUT/GET; no fourth invocation. A poison sleeper proves `_with_connection_retry`
+    never delays or replays.
+
+    9. Credential, TLS, permission, invalid-request, plus other permanent failures
+    do not retry. Eligible network failures, 429, plus retryable 5xx use the shared
+    schedule. Over-budget authoritative delay returns `retry_not_before` without early
+    sleep or fictional attempt.
+
+    10. Emit one bounded redacted operation-completion log for `commit_unknown`, `retry_not_before`,
+    exhaustion, plus child cleanup failure. Tests pin fields, level, redaction, and
+    size.
+
+    11. Establish ADR 0100 with the contract, retry owner, Jira idempotency limitation,
+    observe-before-replay rationale, budget, deltas, plus rollback. Relate ADR 0084/0087
+    and desired-state ADRs 0004/0026/0029: observation reuses existing convergence;
+    the new decision is one budget across dispatch, CLI, SDK, and adapter loops. The
+    15-second cumulative budget supersedes ADR 0084''s 60-second per-sleep cap for
+    migrated routes; longer delays become `retry_not_before`.
+
+
+    ## Scope
+
+    - `operation_outcome.py`, `retry_budget.py`: contract and sole budget.
+
+    - `dispatch_one.py`, `dispatch_apply_phases.py`: default-on route and wrapper
+    bypass.
+
+    - Cloud adapters: one-process execution, observation, decoding, cleanup, typed
+    surface.
+
+    - DC `transport.py`, `retry.py`, `_issues.py`, backend: SDK disabled, one-attempt
+    wrapper policy, fixed request shape.
+
+    - ADR 0100, budget/outcome tests, historical ACLI fixtures, reaping regressions,
+    DC request tests.
+
+
+    ## Testing
+
+    - Fake-clock tables assert attempts, requests, sleep, deadlines, provider lower
+    bounds, plus `retry_not_before` with no real sleep.
+
+    - Stateful Cloud/DC fakes cover success, disconnect, ambiguity, inconclusive observation,
+    recovery, 429/503, malformed delay, TLS/auth/permanent 4xx, plus request order.
+
+    - Poison tests fail on generic retry, DC wrapper replay/sleep, SDK retry, or an
+    extra ACLI process.
+
+    - Historical ACLI triples pin decoding; unknown shapes fail loud. Real child-process
+    tests prove reaping.
+
+    - Output tests pin logs, redaction, bounded diagnostics, plus fast-fail behavior.
+    Required tests are local and credential-free; S5 `diamond-flavoured-esok` owns
+    venue-gated live confirmation before contract removal.
+
+
+    ## Compatibility / Rollback
+
+    The summary flag ships default-on for the executor; legacy is the rollback value.
+    Rollback preserves successful effects, then re-observes ambiguity. Intentional
+    deltas are the shared three-invocation/15-second budget, long-delay deferral,
+    fail-loud unknown ACLI shapes, plus non-replaying inconclusive recovery.
+
+
+    ## Acceptance Criteria
+
+    - [ ] Both summary routes return the same provider-neutral outcome schema; deterministic
+    tests assert every field.
+
+    - [ ] Repeated physical invocations preserve one logical id; a unit test asserts
+    identity stability.
+
+    - [ ] Top-level counters prove no postcondition exceeds three invocations or 15
+    seconds cumulative sleep.
+
+    - [ ] Raw counters prove each DC write invocation follows GET/PUT/GET without
+    hidden repeats.
+
+    - [ ] Exact `{"summary"}` bypasses `_call_with_retry`; a poison test proves it.\n-
+    [ ] Mixed fields stay one legacy call; a table test proves no split.
+
+    - [ ] DC construction passes `max_retries=0`; a guard test rejects a nonzero session
+    value.
+
+    - [ ] Migrated DC calls use single-attempt/no-sleep `_with_connection_retry`;
+    poison tests reject replay or sleep.
+
+    - [ ] Fallback sleeps stay in [2s,3s), then [4s,5s); fake-clock tests pin bounds.\n-
+    [ ] Over-budget provider delay returns `retry_not_before` without sleeping.
+
+    - [ ] Permanent failures perform one invocation; transient failures follow the
+    injected schedule.
+
+    - [ ] Satisfied post-timeout observation returns recovered success without a second
+    write.
+
+    - [ ] Conclusively unsatisfied observation permits only remaining-budget replay.
+
+    - [ ] Failed or inconclusive observation returns non-replaying `commit_unknown`;
+    the example asserts two invocations, three requests, one PUT.
+
+    - [ ] ACLI cleanup tests pass for POSIX groups and non-POSIX direct children.
+
+    - [ ] Historical ACLI triples decode as expected; an unknown triple returns unclassified
+    without retry.
+
+    - [ ] Completion logs expose deferred/exhausted outcomes without secret or unbounded
+    content.
+
+    - [ ] ADR 0100 records the contract and prior-art relationships; index checks
+    pass.'
+  label: finding
+- input: "## Surface\nAWS CloudWatch, us-east-1, acct 896586841071, host `rebar-gerrit`\
+    \ (rebar-autodeploy.service). Three correlated autodeploy alarms flapped 2026-08-29\u2192\
+    30: `deploy_errors` \xD711, `mcp_retire_cap` \xD711, `review_interrupts_signal_unavailable`\
+    \ \xD72. Deploy path is fail-safe (no outage) but releases were not landing cleanly\
+    \ and in-flight reviews may have been killed blind. Full RCA + evidence is in\
+    \ this ticket's RCA comment.\n\n## Root cause (proven \u2014 detail in the RCA\
+    \ comment)\n**Mechanism 1 (deploy_errors \xD711 + mcp-retire-cap \xD711, one event).**\
+    \ `src/rebar/_mcp_health.py` sets uvicorn `timeout_graceful_shutdown=int(grace_seconds)`\
+    \ (line 743) with `grace_seconds` defaulting to the 1200s certified-op drain budget\
+    \ `DEFAULT_SHUTDOWN_GRACE_SECONDS` (line 51), and `make_sigterm_handler` sets\
+    \ `server.should_exit=True` **before** draining the in-flight gauge. Streamable-HTTP\
+    \ clients hold long-lived streams, so uvicorn's graceful shutdown waits the full\
+    \ 1200s for idle held-open streams even at 0 in-flight. With only two blue-green\
+    \ ports (8092/8093) a retiring container pins a port ~20 min \u2192 the next mcp\
+    \ deploy hits `port-exhausted` \u2192 `deploy_failed` + backoff. A landing burst\
+    \ (14 mcp + 142 bot redeploys in-window) drove it 11\xD7.\n\n**Mechanism 3 (signal-unavailable\
+    \ \xD72).** In `infra/scripts/autodeploy.sh` the drain gate reads the bot `/health`\
+    \ `in_flight`; on an unreadable signal `bot_in_flight_reviews()` returns `-1`\
+    \ and the gate **fails open** \u2014 recreates the bot with no drain check, emitting\
+    \ `AUTODEPLOY_REVIEW_INTERRUPT signal-unavailable`. It cannot tell a bot that\
+    \ is **mid-redeploy** (unreachable only because it is being recreated / still\
+    \ starting) from one genuinely **wedged**; the blind recreate can kill the very\
+    \ startup it should wait for.\n\n## Approach\nTwo independent, bounded, reversible\
+    \ fixes; each with its own RED\u2192GREEN test.\n\n**Fix 1 \u2014 decouple uvicorn\
+    \ graceful-shutdown from the certified-op grace (`_mcp_health.py`).**\n- Add a\
+    \ short constant `DEFAULT_UVICORN_GRACEFUL_SECONDS` and use it for `uvicorn.Config(timeout_graceful_shutdown=...)`,\
+    \ decoupled from `grace_seconds` (which stays the op-drain budget); thread it\
+    \ as a defaulted `uvicorn_graceful_seconds` param on `run_http_with_grace` for\
+    \ testability.\n- Reorder `make_sigterm_handler._on_sigterm` to drain the gauge\
+    \ FIRST (existing `drain_then_exit`, bounded by `grace_seconds`) and set `server.should_exit=True`\
+    \ only AFTER the gauge hits 0. A real in-flight op's streaming response then completes\
+    \ normally; once the gauge is 0, uvicorn's short backstop sweeps idle held-open\
+    \ streams in seconds instead of the full 1200s.\n- Close NEW intake at SIGTERM\
+    \ so the fast-drain-at-0 cannot be re-pinned by a landing burst: add a `draining`\
+    \ flag to `InFlightGauge` (`begin_draining()`), and have the certified-op wrapper\
+    \ REFUSE a new certified op (raise `MCPRetiringError`, never incrementing) once\
+    \ draining. `_on_sigterm` calls `begin_draining()` FIRST (immediate intake-stop),\
+    \ before the drain loop; a certified request arriving mid-drain is rejected so\
+    \ the client retries the live (green) container and the gauge can actually reach\
+    \ 0. This replaces uvicorn's `should_exit`-first intake-stop (which we cannot\
+    \ keep, since a short `timeout_graceful_shutdown` would then force-close a real\
+    \ in-flight op) with an explicit refusal that does not truncate in-flight work.\
+    \ Ops already counted still drain to completion.\n- Invariant preserved: >0 in-flight\
+    \ \u21D2 full `grace_seconds` drain (never cut a real op short); 0 in-flight \u21D2\
+    \ fast drain; new intake refused during drain \u21D2 a burst cannot extend the\
+    \ window or re-pin the port. The op bound is enforced by the gauge poll, never\
+    \ uvicorn's short backstop.\n\n**Fix 3 \u2014 distinguish \"bot mid-redeploy\"\
+    \ from \"bot wedged\" (`autodeploy.sh`).**\n- Add best-effort `bot_unreachable_disposition()`\
+    \ that inspects the bot container's docker state/health \u2192 `redeploying` (status\
+    \ `restarting`/`created`/`removing`/`paused`, or docker health `starting`) vs\
+    \ `wedged` (running-but-unreachable, `unhealthy`, no container, or any inspect\
+    \ error \u2192 default `wedged`).\n- In the drain gate's `inflight < 0` branch,\
+    \ when `redeploying`, DEFER (retry next tick) with a countable `AUTODEPLOY_DEFERRED\
+    \ bot-redeploying` marker, bounded by the existing `DEPLOY_DEFER_MAX` episode;\
+    \ on bound-exhaustion or `wedged`, fall through to the existing fail-open recreate\
+    \ + `signal-unavailable`. Maps the single unknown `-1` onto its own disposition\
+    \ instead of a blind fail-open (mirrors the 1c0d disposition-contract intent).\n\
+    - Invariant preserved: a wedged/down bot still fails open and deploys (recovery\
+    \ path); the mid-redeploy defer is bounded so it cannot live-lock the gate; any\
+    \ docker error defaults to `wedged` (== pre-fix behavior).\n\n## Scope\n- `src/rebar/_mcp_health.py`\
+    \ \u2014 Fix 1 only. No change to `DEFAULT_SHUTDOWN_GRACE_SECONDS` (stays 1200),\
+    \ the gauge, or `drain_then_exit`.\n- `infra/scripts/autodeploy.sh` \u2014 Fix\
+    \ 3 only. No change to the `inflight > 0` busy-defer path, the port pool, or `MCP_RELEASES_CAP`.\n\
+    - Tests otherwise. **Deferred / out of scope:** raising `MCP_RELEASES_CAP` / expanding\
+    \ the port pool (Option 2); any nginx/compose capacity change; the separate concurrent\
+    \ disk bug e4f3.\n\n## Testing\n- Fix 1 (`tests/interfaces/facades/test_mcp_http_transport.py`):\
+    \ `make_sigterm_handler` does NOT set `should_exit` while the gauge is >0 and\
+    \ flips it only after the gauge drains to 0 (fast-drain + >0-in-flight preservation\
+    \ guard); `run_http_with_grace` configures `timeout_graceful_shutdown` to `DEFAULT_UVICORN_GRACEFUL_SECONDS`,\
+    \ decoupled from and less than the 1200s grace; and a new certified op during\
+    \ draining is refused (`MCPRetiringError`) without incrementing the gauge (intake-stop).\
+    \ Existing bound/exit tests still pass.\n- Fix 3 (`tests/scripts/test_autodeploy_review_drain.py`,\
+    \ real-bash stub harness): mid-redeploy bot (unreachable `/health` + docker `starting`)\
+    \ is DEFERRED (no `compose build/up`, `AUTODEPLOY_DEFERRED bot-redeploying` emitted,\
+    \ no `signal-unavailable`, deployed-sha unchanged, rc 0); wedged bot (unreachable\
+    \ + docker `running`) still fails open (`compose build` runs, `signal-unavailable`\
+    \ counted); the mid-redeploy defer is bounded (pre-aged episode past `DEPLOY_DEFER_MAX`\
+    \ falls through to fail-open).\n- `make lint` + `make typecheck` + the two targeted\
+    \ test modules; mutation check with teeth on the changed logic.\n\n## Acceptance\
+    \ Criteria\n- [ ] A retiring MCP container with 0 in-flight certified ops shuts\
+    \ down within the short `DEFAULT_UVICORN_GRACEFUL_SECONDS` backstop (not the 1200s\
+    \ op grace), proven by a test asserting `timeout_graceful_shutdown == DEFAULT_UVICORN_GRACEFUL_SECONDS`\
+    \ and `< DEFAULT_SHUTDOWN_GRACE_SECONDS`.\n- [ ] A retiring MCP container with\
+    \ >0 in-flight certified ops still receives the full `grace_seconds` drain and\
+    \ is never cut short, proven by a test asserting `should_exit` stays False until\
+    \ the gauge reaches 0.\n- [ ] A NEW certified op arriving after SIGTERM (during\
+    \ the drain window) is REFUSED (`MCPRetiringError`) and does not increment the\
+    \ gauge, while an already-in-flight op is unaffected \u2014 so a landing burst\
+    \ cannot re-pin the retiring port for the full grace. Proven by a gauge-level\
+    \ test and a handler-level test (the handler reports `draining` and refuses a\
+    \ new op while still draining a >0 gauge).\n- [ ] An unreadable `/health` caused\
+    \ by a mid-redeploy bot yields a DEFER with a countable `AUTODEPLOY_DEFERRED bot-redeploying`\
+    \ marker and no `compose build/up`, asserted by the bash harness.\n- [ ] A genuinely\
+    \ wedged/down bot (or an exhausted mid-redeploy defer bound) still fails open,\
+    \ runs `compose build`, and emits the countable `AUTODEPLOY_REVIEW_INTERRUPT signal-unavailable`\
+    \ marker, asserted by the bash harness.\n- [ ] No capacity change is made: `MCP_RELEASES_CAP`\
+    \ and the blue-green port set are unchanged; both fixes are in-process/host-local\
+    \ with no CI-provider dependency.\n- [ ] `make lint`, `make typecheck`, and the\
+    \ two targeted test modules pass; each mechanism has an independent RED\u2192\
+    GREEN test."
+  label: finding
+- input: "## Summary\n\n`list_tickets` against this store can terminate with `MCP\
+    \ request failed: Transport closed` and\nno structured error payload \u2014 the\
+    \ caller cannot tell whether the query was invalid, the server\nfailed, or the\
+    \ response was simply too large.\n\n## Observed (parallel Copilot CLI session)\n\
+    \n    list_tickets -> MCP server 'rebar': MCP request failed: Transport closed\n\
+    \nThe reporter attributes it to response size, noting that `ready_tickets` and\
+    \ `bridge_fsck`\n'needed disk-spill just to return'.\n\n## Corroborating datum\
+    \ from a different client\n\nIn a Claude Code session the same tool SUCCEEDED\
+    \ but returned **219,815 characters**, which\nexceeded the client's token budget\
+    \ and had to be spilled to a file. So the server can emit\npayloads far beyond\
+    \ what a client can absorb, and it does so without pagination or a size guard.\n\
+    \n## Candidate causes \u2014 deliberately NOT collapsed into one\n\nThree are\
+    \ live and this ticket should not presume among them:\n1. **Response size** \u2014\
+    \ the reporter's hypothesis, supported by the 219KB datum.\n2. **BigInt serialization**\
+    \ (`unreal-milky-sloth`) \u2014 a JS client can fail on out-of-JS-range\n   integers;\
+    \ a failure during serialization can look like a dropped transport.\n3. **A deploy\
+    \ cutover** \u2014 the mcp container was replaced at 18:54:29Z\n   (`nemophilic-prettyish-cockroach`),\
+    \ which orphans live sessions.\n\nThese produce similar client-visible symptoms\
+    \ and must be separated by evidence before a fix.\n\n## Acceptance Criteria\n\n\
+    - [ ] The cause is identified and distinguished from the two sibling tickets above.\n\
+    - [ ] A large result is bounded \u2014 pagination, an explicit limit, or a documented\
+    \ cap \u2014 rather\n      than emitted at unbounded size.\n- [ ] Exceeding any\
+    \ limit produces a STRUCTURED, actionable error, never a bare transport close.\n\
+    - [ ] Regression coverage exercises a store large enough to trip the previous\
+    \ behaviour.\n\n- [ ] **LIVE VALIDATION \u2014 REQUIRED TO CLOSE.** `list_tickets`\
+    \ and `ready_tickets` called through the deployed endpoint return results (or\
+    \ a structured limit error) with no transport close.\n      Evidence must be OBSERVED\
+    \ against the deployed server at\n      `https://rebar.solutions.navateam.com/mcp`\
+    \ and recorded in a ticket comment naming\n      the tool(s) called, the arguments,\
+    \ and the actual response. A passing local test is\n      NOT sufficient, and\
+    \ neither is a merged change: the container must have redeployed\n      and served\
+    \ the call. This exists because a fix here was previously reported complete\n\
+    \      on the strength of a merge while the deployed behaviour was still broken.\n"
+  label: finding
+- input: "## Context / Problem\nEvery **attested-source** LLM gate operation fails\
+    \ on the LIVE MCP server\n(`https://rebar.solutions.navateam.com/mcp`, container\
+    \ `compose-mcp-1`, image\n`compose-mcp:9499312eb7b05dc3d75d39c23ab74a5b4afc26b5`).\n\
+    \nObserved 2026-08-27 against the live endpoint:\n\n```\nreview_plan       {\"\
+    ticket_id\": \"ruby-griffinish-goitered\"}\n  -> Error executing tool review_plan:\
+    \ cannot resolve ref 'origin/main' to a commit in '.'.\nreview_plan       {\"\
+    ticket_id\": \"...\", \"ref\": \"HEAD\"}\n  -> Error executing tool review_plan:\
+    \ cannot resolve ref 'HEAD' to a commit in '.'.\nverify_completion {\"ticket_id\"\
+    : \"...\"}\n  -> Error executing tool verify_completion: cannot resolve ref 'origin/main'\
+    \ to a commit in '.'.\nreview_plan       {\"ticket_id\": \"...\", \"source\":\
+    \ \"local\"}   -> RUNS (P1/P2/P3 emitted)\n```\n\n## Mechanism\nThe container's\
+    \ repo root has **no git metadata at all**. Verified in-container:\n\n```\n$ docker\
+    \ exec compose-mcp-1 sh -c 'pwd; ls -d /app/.git; git -C /app rev-parse origin/main'\n\
+    /app\nls: cannot access '/app/.git': No such file or directory\nfatal: not a git\
+    \ repository (or any of the parent directories): .git\n```\n\n`docker inspect`\
+    \ confirms `WorkingDir=/app`, `Cmd=[\"rebar-mcp\"]`, and the env carries\n`REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets`\
+    \ but **no `REBAR_ROOT`** \u2014 so the repo root\nresolves to the cwd `/app`,\
+    \ which is a plain source copy, not a work tree. The image ships\n`/app/.deployed_ref`\
+    \ (`d4a0a2a44 (feat/gerrit-ci-verified-gate)`) as a text marker instead of a\n\
+    real clone. `source=attested` pins a snapshot at `ref` against that root's object\
+    \ DB, so ref\nresolution fails before any LLM call.\n\nThe tracker itself is unaffected:\
+    \ it is an out-of-tree clone reached via `REBAR_TRACKER_DIR`,\nso all non-git\
+    \ tools (create/show/search/list/comment/edit/link/claim/transition) work.\n\n\
+    ## Impact\n`attested` is the DEFAULT source for both gate ops, and a `local`-source\
+    \ verdict is never\nsigned. So **no plan-review or completion attestation can\
+    \ be earned through the live MCP\nserver**, and consequently no `task`/`story`/`epic`\
+    \ can be closed through it while\n`verify.require_plan_review_for_close` is on\
+    \ \u2014 the only remaining path is `--force`, which\nagents are prohibited from\
+    \ using. Reproduced live: probe task `ruby-griffinish-goitered`\n(`c67b-ece5-707e-460e`)\
+    \ is stuck `in_progress` with\n`plan-review close gate: unsigned: no certified\
+    \ plan-review attestation`, and the prescribed\nremedy (`review-plan`) is the\
+    \ very operation that cannot run.\n\n## Reproduction\n1. Call `review_plan` on\
+    \ any claimable ticket through the live MCP endpoint with default args.\n2. Observe\
+    \ `cannot resolve ref 'origin/main' to a commit in '.'`.\n3. Repeat with `source:\
+    \ \"local\"` and observe it runs.\n\n## Fix\n\nProvision a real repository for\
+    \ the gate ops to resolve against, and point the repo root at it.\n\n**Why not\
+    \ the obvious alternatives.** Shipping `.git` in the image (removing the\n`.dockerignore:5`\
+    \ exclusion) bloats every layer and pins a main that goes stale the moment the\n\
+    image is built \u2014 the gates need a ref that tracks main, not a frozen one.\
+    \ Re-using the tickets\nclone at `REBAR_TRACKER_DIR` is tempting since `MCP_TICKETS_URL`\
+    \ is the SAME repository, but it\nconflates the code root with the tracker: two\
+    \ different lifetimes, two different refspecs, and\na reader can no longer tell\
+    \ which one a failure came from.\n\n**Shape.** `provision_store` gains a sibling\
+    \ that clones the CODE side into\n`/var/gerrit/site/mcp-code` \u2014 `--filter=blob:none\
+    \ --single-branch --branch main`, so it is a\nblobless clone that fetches objects\
+    \ on demand rather than materializing the history \u2014 and\n`REBAR_ROOT` is\
+    \ set to it (compose env + `mcp_run_new`, which must stay in parity). That root\n\
+    carries `rebar.toml`, so config resolution moves from the source copy at `/app`\
+    \ to a real\ncheckout, which is strictly better: the two agree today, and a real\
+    \ root is what the config\nseam expects.\n\n**Ordering.** Like the tickets clone\
+    \ this is backgrounded, so it cannot block `exec` past the\nreadiness deadline.\
+    \ Until it converges the gates fail exactly as they do today \u2014 no worse.\n\
+    \n**Enforcement is OUT OF SCOPE** (operator ruling, 2026-08-27). This change makes\
+    \ the attested\ngates work; it does NOT add a deploy-time check that refuses to\
+    \ promote a container whose code\nroot failed to resolve. A failed code clone\
+    \ therefore degrades to today's behaviour \u2014 the\ngates error \u2014 rather\
+    \ than blocking the deploy. That is a deliberate boundary, not an oversight:\n\
+    gating promotion on a backgrounded clone is what produced the rollback loop in\n\
+    `unfit-beneficial-whimbrel`, and re-introducing it here would trade one outage\
+    \ shape for\nanother.\n\n## Acceptance Criteria\n- [x] AC1: `review_plan` with\
+    \ default arguments against the deployed MCP server returns a plan-review verdict\
+    \ (PASS/BLOCK/INDETERMINATE) rather than a ref-resolution error.\n- [x] AC2: `verify_completion`\
+    \ with default arguments likewise returns a completion verdict.\n- [x] AC3: A\
+    \ PASS from AC1 persists a signed plan-review attestation.\n      OPERATOR DECISION\
+    \ 2026-08-28: `foreign_key` is ACCEPTED as sufficient; `certified` is\n      NOT\
+    \ required. Observed: the AC1 run returned `attestation.signed: true`, so the\n\
+    \      attestation IS produced and persisted; `plan_review_status(b928-3ab6-5985-417b)`\n\
+    \      through the deployed server then returns `verdict: foreign_key` because\
+    \ that\n      environment holds no op-cert public key and so cannot certify its\
+    \ own signature.\n      The original wording demanded `certified`; that is waived\
+    \ here. The missing public\n      key remains tracked separately (`dire-expectable-terr\u2026\
+    `, see Scope boundaries).\n- [x] AC4: The deployed container exposes a git object\
+    \ DB for the repo root reachable by the gate ops (a real clone at the repo root,\
+    \ or an explicit `REBAR_ROOT` pointing at one), verified by `git -C <root> rev-parse\
+    \ origin/main` succeeding inside the container.\n\n## Definition of Done\n- [x]\
+    \ DD1: AC1-AC3 demonstrated against a deployed MCP server.\n\n## Scope boundaries\
+    \ (operator rulings, 2026-08-27)\n\n- **Enforcement is out of scope.** No deploy-time\
+    \ refusal; see the Fix section.\n- **A shared op-cert is acceptable.** The server\
+    \ signing under the box's existing opcert\n  environment (ADR 0104 \xA73, Option\
+    \ A) is the accepted design. The separate observation that\n  the environment\
+    \ holds no public key, so `verify_signature` returns `foreign_key`, is tracked\n\
+    \  as `dire-expectable-terrapin` and is NOT in scope here.\n\n- [x] **LIVE VALIDATION\
+    \ \u2014 REQUIRED TO CLOSE.** `review_plan` called through the deployed endpoint\
+    \ returns a VERDICT rather than `cannot resolve ref ... in '.'`, and an attestation\
+    \ is persisted.\n      OPERATOR DECISION 2026-08-28: `scan_spec` is DROPPED from\
+    \ this criterion, and a\n      persisted-but-`foreign_key` attestation is accepted\
+    \ in place of a certified one.\n      Evidence recorded in the LIVE VALIDATION\
+    \ comment on this ticket: `review_plan`\n      and `verify_completion` both returned\
+    \ real verdicts (PASS) through\n      `https://rebar.solutions.navateam.com/mcp`\
+    \ against container\n      `rebar-mcp-2dbdcc8abe2c-8093`, with `attestation.signed:\
+    \ true`.\n      Evidence must be OBSERVED against the deployed server at\n   \
+    \   `https://rebar.solutions.navateam.com/mcp` and recorded in a ticket comment\
+    \ naming\n      the tool(s) called, the arguments, and the actual response. A\
+    \ passing local test is\n      NOT sufficient, and neither is a merged change:\
+    \ the container must have redeployed\n      and served the call. This exists because\
+    \ a fix here was previously reported complete\n      on the strength of a merge\
+    \ while the deployed behaviour was still broken."
+  label: pass
+model: anthropic:claude-sonnet-4-6
+prompt: plan-review-T12
+scorers:
+- description: Output validates as a plan-review finding set.
+  name: emits_valid_findings
+  type: deterministic
