@@ -24,6 +24,7 @@ import subprocess
 import time
 
 import pytest
+from _healthcheck_oracles import assert_socket_healthcheck_semantics, healthcheck_test_argv
 
 from rebar.review_bot import adapter, reconcile, voter
 from rebar.review_bot.config import ReceiverConfig
@@ -1953,7 +1954,8 @@ def test_reviewbot_healthcheck_probes_its_own_listener():
     assert hc, "the review-bot service must declare a healthcheck (AC4: the zombie must alarm)"
     test = hc.get("test")
     assert test, "the review-bot healthcheck must declare a `test`"
-    probe = " ".join(test) if isinstance(test, list) else str(test)
+    argv = healthcheck_test_argv(test)
+    probe = " ".join(argv)
     # Probes the process's OWN listener (container loopback) at the /health route, so a closed
     # listener with a live process is detected as unhealthy rather than reading green.
     assert "/health" in probe, f"the healthcheck must probe /health, got {probe!r}"
@@ -1961,6 +1963,7 @@ def test_reviewbot_healthcheck_probes_its_own_listener():
         f"the healthcheck must hit the review-bot's own container listener on 127.0.0.1:8000, "
         f"got {probe!r}"
     )
+    assert_socket_healthcheck_semantics(argv)
 
 
 def test_reviewbot_stop_grace_period_covers_an_in_flight_store_write():
