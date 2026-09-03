@@ -628,9 +628,18 @@ mcp_free_port() {
 # where the variable is unset, and pass an empty value that OVERRIDES the real one from the
 # env-file. They are listed in `_ENV_FILE_ONLY` in tests/scripts/test_autodeploy_mcp_bluegreen.py
 # so the parity oracle asserts that exclusion rather than demanding a matching `-e`.
+#
+# `--label rebar.service=mcp` is the container's STABLE SERVICE IDENTITY (bug
+# 9ea3-7d07-ea55-4496). The --name below embeds the deploy SHA and the blue/green port, so
+# it is unique per deploy and unusable as a CloudWatch dimension: keyed on it, the
+# per-container memory series would restart on every commit and grow custom-metric
+# cardinality without bound. compose stamps `com.docker.compose.service` on the containers
+# it manages, but this one is a bare `docker run` that compose never sees, so it declares
+# what it IS here. observability.sh's §2c census reads the label and never the name.
 mcp_run_new() {
   docker run -d --name "$1" \
     --restart always \
+    --label rebar.service=mcp \
     --stop-timeout "$MCP_STOP_GRACE" \
     --env-file "$COMPOSE_DIR/.env" \
     -e FORWARDED_ALLOW_IPS='*' \

@@ -13,6 +13,10 @@
 #   2c. Non-`site/` debris on the Gerrit data volume (bytes under /var/gerrit that are not
 #       the Gerrit site tree) -> rebar/host:data_disk_debris_bytes (task 3e92 alarm). Answers
 #       "full OF WHAT", which the used-percent reading in 2 structurally cannot.
+#   2d. Host memory (mem_available_percent / mem_used_percent / mem_probe_ok) and
+#       per-container resident set (container_memory_rss_bytes, `container` dimension, plus
+#       the container_stats_ok census heartbeat) -> rebar/host (bug 9ea3; measurement only,
+#       no alarm yet).
 #   3. Gerrit->GitHub replication failures (replication_log) -> rebar/host:replication_errors (S5 alarm).
 #   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
 #   4c. review-bot merge-change failures (MERGE_CHANGE_ERROR) -> rebar/host:review_bot_merge_change_errors (epic 88ab/S2 alarm).
@@ -202,6 +206,201 @@ if [ -d "$DATA_MOUNT" ]; then
   fi
 fi
 
+# --- 2d. HOST MEMORY + per-container RSS (bug 9ea3-7d07-ea55-4496) ----------
+# MEMORY WAS ENTIRELY UNMETERED ON THIS BOX. The mcp container was OOM-killed ~3
+# minutes into a plan-review gate run (docker inspect: OOMKilled=true, Exit=137) on a
+# t4g.large (8 GiB) it shares with Gerrit — which alone reserves ~3 GiB by config
+# (gerrit.config heapLimit + container_heap_limit) — the review-bot, and opcert. NO
+# container declares a memory limit (docker-compose.yml has neither `mem_limit` nor
+# `deploy.resources.limits`), and this probe published disk and health but not one
+# byte of memory. The only memory check anywhere was autodeploy.sh's MCP_MEM_MIN_MB
+# (default 1024), an UNDERIVED fail-open deploy-time floor.
+#
+# So the box was sized, and its deploy floor set, on a guess. This section exists to
+# replace that guess with data. It is DELIBERATELY MEASUREMENT-ONLY: no alarm watches
+# these metrics yet and no limit is derived from them here, because any threshold
+# chosen today would be another guess. Measure first, choose limits later.
+#
+# HEARTBEAT, NOT AN EVENT (ticket bff5-9163-cddd-4158). The host gauges publish on
+# EVERY tick, including the paths where the read fails, so their ABSENCE means the
+# probe/timer/host is dead rather than "memory was fine". A failed read publishes the
+# PESSIMISTIC value in each metric's own direction (0% available / 100% used), the same
+# convention §5's mirror_out_of_sync uses when its comparison cannot be made — and
+# `mem_probe_ok` is published alongside precisely so a synthesised pessimistic reading is
+# never mistaken for a measured one. A future alarm must gate on `mem_probe_ok`, and any
+# ANALYSIS of this data must drop the ticks where it is 0.
+#
+# DIMENSIONS. The host gauges are DIMENSIONLESS, following root_disk_used_percent (§2b)
+# and the GerritReachable convention: every rebar/host alarm in monitoring*.tf declares
+# no dimensions, and CloudWatch keys a metric by namespace+name+dimensions, so a
+# dimension added on only one side silently unmatches. The per-container gauge instead
+# follows the OTHER local precedent — disk_used_percent's `mount` dimension (§2) — and
+# publishes ONE metric name carrying a `service` dimension rather than a metric name
+# per service. That is what the question needs: "which resident set grew" is a
+# comparison ACROSS services, which a dimension makes a single graph/`Max by service`
+# query, whereas per-service metric names would need this probe (and every consumer)
+# edited each time compose gains or renames a service. The dimension VALUE is a stable
+# service identity read from a container label, never the container name — see the block
+# below for why a name would be unbounded. InstanceId rides along exactly as it does on
+# disk_used_percent.
+
+# Host memory. `free -k` reports KiB; column 7 of the Mem: row is `available` (what a new
+# allocation can actually get, accounting for reclaimable page cache) which is the number
+# an OOM-kill is about — NOT `free` (column 4), which reads alarmingly low on any healthy
+# box with a warm cache. Very old procps has no `available` column, so fall back to
+# free+buff/cache there. A missing/failed `free` leaves both empty and takes the
+# pessimistic branch below.
+mem_avail_pct=""
+mem_used_pct=""
+mem_stats=$(free -k 2>/dev/null | awk '/^Mem:/ {
+  total = $2
+  if (total <= 0) exit
+  avail = (NF >= 7) ? $7 : $4 + $6
+  printf "%d %d", (avail * 100) / total, ((total - avail) * 100) / total
+  exit
+}') || true
+case "$mem_stats" in
+  *[0-9]" "[0-9]*)
+    mem_avail_pct=${mem_stats%% *}
+    mem_used_pct=${mem_stats##* }
+    ;;
+esac
+mem_probe_ok=1
+if [ -z "$mem_avail_pct" ] || [ -z "$mem_used_pct" ]; then
+  # Publish rather than fall silent, in each gauge's pessimistic direction, and say so.
+  mem_probe_ok=0
+  mem_avail_pct=0
+  mem_used_pct=100
+  logger -t rebar-health "memory probe FAILED (free unavailable or unparseable); published pessimistic mem_available_percent=0 mem_used_percent=100 with mem_probe_ok=0"
+fi
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name mem_available_percent --unit Percent --value "$mem_avail_pct" 2>/dev/null || true
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name mem_used_percent --unit Percent --value "$mem_used_pct" 2>/dev/null || true
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name mem_probe_ok --unit Count --value "$mem_probe_ok" 2>/dev/null || true
+[ "$mem_probe_ok" -eq 1 ] && logger -t rebar-health \
+  "memory available_percent=${mem_avail_pct} used_percent=${mem_used_pct}"
+
+# Per-container resident set. BOUNDED TWICE, because the docker calls here are the ones
+# that can WEDGE THE 5-MINUTE TIMER: `docker stats` streams by default, and on a loaded or
+# memory-pressured box (exactly the condition this metric exists to catch) either call can
+# block on the daemon indefinitely. `--no-stream` makes stats a single sample instead of a
+# stream, and `timeout 15` caps the wall clock on BOTH regardless — the same
+# `timeout N docker …` idiom autodeploy.sh already uses for `docker compose logs` and the
+# prune calls, which is the established precedent for bounding docker on this host. If
+# `timeout` itself is missing, the commands simply fail and the ok-gauge below reports 0;
+# they can never hang.
+#
+# THE DIMENSION IS A STABLE SERVICE IDENTITY, NEVER THE CONTAINER NAME. autodeploy's
+# blue-green mcp containers are named "${MCP_CONTAINER_PREFIX}-${TARGET:0:12}-${port}"
+# (observed on the box: rebar-mcp-3e04025b684e-8092, rebar-mcp-8db373933654-8093), so
+# EVERY DEPLOY MINTS A NEW NAME. Keying the CloudWatch dimension on that name would grow
+# custom-metric cardinality without bound — CloudWatch bills per unique dimension
+# combination — and, fatally for the campaign this section exists to run, RESTART THE
+# SERIES AT EVERY DEPLOY: "peak mcp RSS during a gate" is a comparison across gate runs,
+# and a series that resets whenever a commit lands cannot answer it.
+#
+# The identity comes from a LABEL, not from parsing the name. A regex over a naming
+# convention re-breaks the moment the convention changes, silently and in the direction of
+# MORE cardinality (an unmatched name falls through as itself), which is the failure this
+# is guarding against. `docker stats --format` cannot emit labels, so a second bounded
+# `docker ps` supplies the name->service map and the awk below joins the two streams:
+#   - `com.docker.compose.service` already labels every compose-managed container on the
+#     box (gerrit, review-bot, opcert, and the boot mcp backend compose-mcp-1). Nothing to
+#     add there — compose stamps it, and its value IS the service name.
+#   - the blue-green mcp containers come from a bare `docker run` in autodeploy.sh
+#     (mcp_run_new), which compose never sees and never labels, so autodeploy stamps
+#     `rebar.service=mcp` on them. That is the one place the unbounded name is minted, so
+#     it is the one place that has to declare what the container IS.
+# `rebar.service` wins where both are present, so an explicit stamp can always override a
+# compose default. A container carrying NEITHER label — an mcp container that predates the
+# stamp, or something hand-run — is bucketed under the single constant `unlabeled` rather
+# than under its own name: bounded by construction, obvious in the data, and self-healing
+# at the next deploy. Its raw name still reaches journald, where cardinality is free.
+#
+# During a blue-green cutover two mcp containers are briefly live and both publish to
+# service=mcp in the same tick. That is intended: CloudWatch keeps both datapoints, and
+# `Maximum` — the statistic a peak-RSS question asks for — reads the larger of them.
+#
+# MemUsage is human-formatted ("1.234GiB / 7.664GiB"), so the awk converts the used side
+# to bytes. Docker emits binary units (B/KiB/MiB/GiB/TiB); the decimal spellings are
+# accepted too so a docker version that prints them is not silently dropped.
+#
+# AN UNPARSEABLE ROW IS COUNTED, NOT SWALLOWED. A row whose unit or figure the awk does not
+# recognise used to `next` in silence while `container_stats_ok` still went to 1 off any
+# other row — a container present in `docker stats` vanished from the data behind a flag
+# that said everything was observed. That is the same defect class this whole section was
+# written to remove, so the drops are published as their own count
+# (`container_stats_unparsed_rows`) and named individually in journald. It is a SEPARATE
+# metric rather than a failure of `container_stats_ok` deliberately: that gauge answers
+# "did the census run at all", which is what distinguishes a wedged daemon from an idle
+# box, and folding row-level parse quality into it would make one weird row
+# indistinguishable from a dead docker. Both signals are published on every tick,
+# including 0, so their absence still means the probe is dead.
+container_stats_ok=0
+container_unparsed=0
+container_ps=$(timeout 15 docker ps --no-trunc \
+  --format 'PS|{{.Names}}|{{.Label "rebar.service"}}|{{.Label "com.docker.compose.service"}}' \
+  2>/dev/null) || true
+container_stats=$(timeout 15 docker stats --no-stream \
+  --format 'ST|{{.Name}}|{{.MemUsage}}' 2>/dev/null) || true
+container_census=$(printf '%s\n%s\n' "$container_ps" "$container_stats" | awk -F'|' '
+  $1 == "PS" {
+    service[$2] = ($3 != "") ? $3 : $4
+    next
+  }
+  $1 == "ST" {
+    split($3, used, " ")
+    value = used[1]
+    unit = value
+    gsub(/[0-9.]/, "", unit)
+    figure = value
+    gsub(/[^0-9.]/, "", figure)
+    mult = 1
+    if (unit == "KiB" || unit == "kB" || unit == "KB") mult = 1024
+    else if (unit == "MiB" || unit == "MB") mult = 1048576
+    else if (unit == "GiB" || unit == "GB") mult = 1073741824
+    else if (unit == "TiB" || unit == "TB") mult = 1099511627776
+    else if (unit != "B" && unit != "") { print "DROP " $2 " " $3; next }
+    # An absent or non-numeric figure is NOT a zero-byte container. Publishing 0 for it
+    # would be the same silent lie as dropping the row, so it is a drop that gets counted.
+    if (figure !~ /^[0-9]+(\.[0-9]+)?$/) { print "DROP " $2 " " $3; next }
+    printf "ROW %s %.0f %s\n", (service[$2] != "" ? service[$2] : "unlabeled"), \
+      (figure + 0) * mult, ($2 == "" ? "<unnamed>" : $2)
+  }') || true
+while read -r kind field_a field_b field_rest; do
+  case "$kind" in
+    ROW)
+      container_stats_ok=1
+      aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+        --metric-name container_memory_rss_bytes --unit Bytes --value "$field_b" \
+        --dimensions InstanceId="$IID",service="$field_a" 2>/dev/null || true
+      logger -t rebar-health \
+        "container ${field_rest} service=${field_a} memory_rss_bytes=${field_b}"
+      if [ "$field_a" = "unlabeled" ]; then
+        logger -t rebar-health "container ${field_rest} carries neither rebar.service nor com.docker.compose.service; bucketed as service=unlabeled (its raw name is recorded here, never as a metric dimension)"
+      fi
+      ;;
+    DROP)
+      container_unparsed=$((container_unparsed + 1))
+      logger -t rebar-health \
+        "container ${field_a} memory row UNPARSEABLE (\"${field_b} ${field_rest}\"); dropped from the census and counted in container_stats_unparsed_rows"
+      ;;
+  esac
+done <<EOF
+$container_census
+EOF
+# The census's own heartbeat: WITHOUT it, "docker stats timed out / the daemon is wedged"
+# and "every container is stopped" are the same observation (no per-container datapoints
+# at all), and the per-container gauge cannot carry a heartbeat of its own because its
+# dimension set is only knowable from a census that succeeded.
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name container_stats_ok --unit Count --value "$container_stats_ok" 2>/dev/null || true
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name container_stats_unparsed_rows --unit Count --value "$container_unparsed" 2>/dev/null || true
+[ "$container_stats_ok" -eq 0 ] && logger -t rebar-health \
+  "container memory census produced no rows (docker stats failed, timed out, or no containers are running)"
 # --- 3. Gerrit->GitHub replication failures (S5) ---------------------------
 # Watch the replication plugin's log for failure signatures and publish the COUNT
 # of NEW failure lines since last run to rebar/host:replication_errors (the metric

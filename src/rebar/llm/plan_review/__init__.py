@@ -267,9 +267,14 @@ def review_plan(
     """
     from rebar.llm import gate_source
     from rebar.llm.config_binding import compose_and_bind_llm_config
+    from rebar.llm.peak_rss import gate_peak_rss
 
     handle = gate_source.resolve_gate_handle(ref, source, repo_root)
     with (
+        # Measurement only (bug 9ea3): emits the GATE_PEAK_RSS marker on completion,
+        # including on the raising paths. Wrapping HERE covers both the MCP daemon and
+        # the CLI, which both reach the gate through this function.
+        gate_peak_rss("plan_review", ticket_id),
         gate_source.gate_read_root(handle),
         compose_and_bind_llm_config(repo_root=repo_root, explicit=config) as bound,
     ):
