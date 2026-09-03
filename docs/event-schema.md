@@ -24,8 +24,7 @@ ${timestamp_ns}-${uuid}-${TYPE}.json
   order is **skew-immune and causal**, not merely best-effort wall-clock. It stays
   a 19-digit integer (until ~year 2286), and ordering compares prefixes **as
   integers** (`reducer/_sort.prefix_ts`) so legacy ns names and HLC names form one
-  global order regardless of width. Staged behind `REBAR_HLC` (default-on;
-  `REBAR_HLC=0` reverts to raw `time.time_ns()`). The clock is >2^53, so jq must
+  global order regardless of width. The clock is >2^53, so jq must
   never read or compute on it (P1.0 keeps jq out of the event path).
 - `${uuid}` identifies a fresh UUID4 for each event. This makes every filename globally unique. Concurrent clients do not collide, and git merges their files as a union. `rebar._store.event_append` owns the shared write path, while `rebar._commands.txn` owns lifecycle transactions.
 - `${TYPE}` — the event kind (below).

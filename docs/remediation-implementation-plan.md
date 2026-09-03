@@ -588,8 +588,7 @@ per the integer-width argument above).
 - Forward-compat: a v1-reducer replay of a v2 store still yields a valid state.
 
 **Rollout & rollback.** Land the convergence test **red first**, then the clock
-(green), behind a default-on `REBAR_HLC` with an env kill-switch for one release.
-Rollback is clean (integers either way).
+(green). Rollback is clean (integers either way).
 
 **Risk.** Medium — it changes the ordering key. *Mitigations:* single-integer
 encoding removes the width hazard; integer comparator pinned by test; clock is

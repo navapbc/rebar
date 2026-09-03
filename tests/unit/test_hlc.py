@@ -1,13 +1,14 @@
 """Unit tests for the Hybrid Logical Clock (P2.1, epic snappy-weed-ruin).
 
-Pins the four properties the design rests on: the ``REBAR_HLC`` kill-switch
-(disabled → raw ``physical_now()``, today's behavior), strict monotonicity,
-the per-ticket ``max(prefix)`` witness (the cross-clone causal floor, correct even
-with NO cache file), and the injectable ``REBAR_HLC_NOW`` source.
+Pins the four properties the design rests on: strict monotonicity, the per-ticket
+``max(prefix)`` witness (the cross-clone causal floor, correct even with NO cache
+file), the injectable ``REBAR_HLC_NOW`` source, and the retirement of the old
+``REBAR_HLC`` rollback switch.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -27,30 +28,23 @@ def _write_event(tracker: Path, ticket_id: str, prefix: int, etype: str = "EDIT"
     (tracker / ticket_id / f"{prefix}-uuid-{etype}.json").write_text("{}", encoding="utf-8")
 
 
-# ── kill-switch & injection ─────────────────────────────────────────────────
+# ── injection and retired rollback switch ───────────────────────────────────
 def test_physical_now_honors_injection(monkeypatch):
     monkeypatch.setenv("REBAR_HLC_NOW", "123456789012345678")
     assert hlc.physical_now() == 123456789012345678
 
 
-def test_disabled_returns_physical_now_exactly(tracker, monkeypatch):
-    monkeypatch.setenv("REBAR_HLC", "0")  # kill-switch
+def test_rebar_hlc_env_no_longer_disables_the_clock(tracker, monkeypatch):
+    monkeypatch.setenv("REBAR_HLC", "0")
     monkeypatch.setenv("REBAR_HLC_NOW", "1700000000000000000")
-    # Disabled path is exactly physical_now() — no +1, no witness, no cache.
-    assert hlc.next_tick(tracker, "tk-1") == 1700000000000000000
-    assert not (tracker.parent / ".rebar" / "hlc.state").exists()
-
-
-def test_enabled_by_default(monkeypatch):
-    monkeypatch.delenv("REBAR_HLC", raising=False)
-    assert hlc._enabled() is True
-    monkeypatch.setenv("REBAR_HLC", "off")
-    assert hlc._enabled() is False
+    # The retired rollback switch no longer bypasses the monotonic HLC path.
+    assert hlc.next_tick(tracker, "tk-1") == 1700000000000000001
+    assert hlc.next_tick(tracker, "tk-1") == 1700000000000000002
+    assert (tracker.parent / ".rebar" / "hlc.state").exists()
 
 
 # ── monotonicity & witness (enabled) ────────────────────────────────────────
 def test_strictly_monotonic(tracker, monkeypatch):
-    monkeypatch.delenv("REBAR_HLC", raising=False)
     monkeypatch.setenv("REBAR_HLC_NOW", "1700000000000000000")  # frozen physical clock
     ticks = [hlc.next_tick(tracker, "tk-1") for _ in range(50)]
     assert ticks == sorted(ticks)
@@ -59,7 +53,6 @@ def test_strictly_monotonic(tracker, monkeypatch):
 
 
 def test_witness_max_prefix_floors_the_tick(tracker, monkeypatch):
-    monkeypatch.delenv("REBAR_HLC", raising=False)
     # A pulled event whose prefix is far ABOVE the physical clock (a fast peer).
     big = 5_000_000_000_000_000_000
     monkeypatch.setenv("REBAR_HLC_NOW", "1700000000000000000")  # slow local clock
@@ -71,7 +64,6 @@ def test_witness_max_prefix_floors_the_tick(tracker, monkeypatch):
 def test_witness_correct_with_no_cache_file(tracker, monkeypatch):
     # EXP4b: even with NO .rebar/hlc.state, the tick still exceeds the ticket's
     # max(prefix) — correctness is re-derived from the durable log.
-    monkeypatch.delenv("REBAR_HLC", raising=False)
     monkeypatch.setenv("REBAR_HLC_NOW", "1700000000000000000")
     big = 5_000_000_000_000_000_000
     _write_event(tracker, "tk-1", big)
@@ -82,7 +74,6 @@ def test_witness_correct_with_no_cache_file(tracker, monkeypatch):
 def test_witness_is_per_ticket(tracker, monkeypatch):
     # A huge prefix on ANOTHER ticket must not floor this ticket's tick (the
     # witness is per-ticket; only the global cache carries cross-ticket high-water).
-    monkeypatch.delenv("REBAR_HLC", raising=False)
     monkeypatch.setenv("REBAR_HLC_NOW", "1700000000000000000")
     (tracker / "tk-other").mkdir()
     _write_event(tracker, "tk-other", 9_000_000_000_000_000_000)
@@ -91,6 +82,13 @@ def test_witness_is_per_ticket(tracker, monkeypatch):
 
 
 def test_never_raises_on_missing_ticket_dir(tracker, monkeypatch):
-    monkeypatch.delenv("REBAR_HLC", raising=False)
     # A ticket dir that does not exist yet (e.g. CREATE) must still return a tick.
     assert isinstance(hlc.next_tick(tracker, "does-not-exist-yet"), int)
+
+
+def test_hlc_source_retains_only_the_test_clock_override():
+    source = Path(hlc.__file__).read_text(encoding="utf-8")
+    assert re.search(r"\bREBAR_HLC_NOW\b", source), "the injected test clock must remain"
+    assert re.search(r"\bREBAR_HLC\b", source) is None, (
+        "the retired rollback switch must not appear anywhere in the HLC module"
+    )

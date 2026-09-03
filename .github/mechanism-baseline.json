@@ -499,7 +499,6 @@
     "env_var::REBAR_GATE_REVERIFY_SECONDS": 1,
     "env_var::REBAR_GATE_SOURCE": 1,
     "env_var::REBAR_GATE_TMPDIR": 1,
-    "env_var::REBAR_HLC": 1,
     "env_var::REBAR_HLC_NOW": 1,
     "env_var::REBAR_ID_GUARD_MODE": 1,
     "env_var::REBAR_LLM_ALLOW_LOCAL_PROXY": 1,
