@@ -1,0 +1,448 @@
+"""Selector + JSONL manifest writer for plan-review regression fixtures (ticket 549b).
+
+Reads a plan-review corpus (``plan_replay/corpus.py`` rows enriched with their slimmed
+sidecar findings) and emits a LABELED CANDIDATE MANIFEST: per criterion, each candidate
+with its direction, tier, signals and rank, plus a zero-candidate row (with a reason) for
+every criterion that produced none. The manifest is JSONL — one JSON object per line, keys
+sorted — a byte-stable contract consumed by the diff acceptance test and the downstream
+emitter. No YAML, no model call: selection is a pure function of the corpus + git metadata.
+
+Public surface (stable import path ``rebar.llm.evals.fixture_selection``):
+
+- :data:`MIN_MARGIN` — the blocking-tier margin floor.
+- :func:`rubric_path` — the rubric file the vintage gate git-logs for a criterion
+  (``.rebar/prompts/<pid>.md`` override-wins, else the packaged reviewer ``fallback_file``).
+- :func:`last_rubric_commit_ts` — the timestamp of the last commit touching that file on the
+  gate's base ref, or ``None`` when there is no committed history / the base ref is absent /
+  git errs (the vintage gate then fails closed).
+- :func:`select_candidates` — the selector: synthetic-or-real reviews in, manifest rows out.
+- :func:`write_manifest` — the byte-stable JSONL writer.
+
+INPUT REVIEW SHAPE (each element of ``reviews``), a dict:
+    ``ticket_id``            : str
+    ``review_event_ts``      : int   (used for vintage eligibility + consecutive ordering)
+    ``review_event_uuid``    : str   (deterministic tie-break)
+    ``verdict``              : str
+    ``material_fingerprint`` : str   (equal-fingerprint reviews are reproduction pairs)
+    ``findings``             : list[slimmed-finding]  (sidecar ``_slim`` shape: ``norm_id``,
+                               ``criteria`` list, ``cohort`` list|None, ``decision_margin``
+                               float|None, ``decision``, ...)
+    ``ticket_state``         : dict  (fed to ``labels.escaped_defect``: ``close_class``,
+                               ``inbound_deps``)
+
+MANIFEST ROW SHAPES (JSON objects, keys sorted on write):
+    candidate  : {"kind":"candidate","criterion":str,"direction":"fire"|"no_fire",
+                  "norm_id":str|None,"tier":"blocking"|"advisory","rank":int,
+                  "signals":[sorted signal names],"escaped_defect":bool,
+                  "abs_margin":float|None,"review_event_uuid":str}
+    zero       : {"kind":"zero_candidate","criterion":str,"reason":str}
+
+Reasons for a zero-candidate row:
+    "no-committed-prompt-history"   — no committed rubric history / absent base ref / git err
+    "unreliable-criterion:<id>"     — an open unreliable-criterion ticket skips the criterion
+    "no-admitted-candidate"         — eligible, non-skipped, but every candidate was rejected
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from collections import Counter
+from collections.abc import Callable
+from itertools import pairwise
+from pathlib import Path
+from typing import Any
+
+MIN_MARGIN = 0.15
+
+# Tier-determining fire signals (escaped_defect is a PRIORITY signal, not one of these).
+FIRE_SIGNALS = ("reproduction_consensus", "author_response", "margin")
+
+
+def rubric_path(criterion_id: str, *, repo_root: str, gate_key: str = "plan_review") -> Path:
+    """Return the rubric file the vintage gate git-logs for ``criterion_id``.
+
+    Resolves ``criterion_prompt_id(criterion_id, gate_key=...)`` then applies ``get_prompt``'s
+    override-wins ordering: ``<repo_root>/.rebar/prompts/<pid>.md`` when that file exists,
+    else ``<catalog>/reviewers/<fallback_file>`` (the packaged reviewer prompt).
+    """
+    from rebar.llm.criteria.ids import criterion_prompt_id
+    from rebar.llm.prompting.prompts import _catalog_dir, get_prompt
+
+    pid = criterion_prompt_id(criterion_id, gate_key=gate_key)
+    override = Path(repo_root) / ".rebar" / "prompts" / f"{pid}.md"
+    if override.is_file():
+        return override
+
+    prompt = get_prompt(pid, repo_root=repo_root)
+    if not prompt.fallback_file:
+        raise FileNotFoundError(f"no packaged fallback file for prompt {pid!r}")
+    packaged = Path(str(_catalog_dir())) / prompt.fallback_file
+    if not packaged.is_file():
+        raise FileNotFoundError(f"packaged prompt file not found: {packaged}")
+    return packaged
+
+
+def last_rubric_commit_ts(
+    criterion_id: str,
+    *,
+    repo_root: str,
+    base_ref: str = "origin/main",
+    gate_key: str = "plan_review",
+) -> int | None:
+    """Return the epoch-second timestamp of the last commit touching the criterion's rubric
+    file on ``base_ref``, or ``None`` when there is no committed history, ``base_ref`` is
+    absent (shallow clone, differently-named remote), or git errs. Never raises."""
+    from rebar.llm.prompting.prompts import PromptNotFound
+
+    try:
+        path = rubric_path(criterion_id, repo_root=repo_root, gate_key=gate_key)
+        try:
+            logged_path = str(path.resolve().relative_to(Path(repo_root).resolve()))
+        except ValueError:
+            logged_path = str(path)
+        proc = subprocess.run(  # raw-git-ok: read-only history query
+            ["git", "-C", repo_root, "log", "-1", "--format=%ct", base_ref, "--", logged_path],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError, FileNotFoundError, PromptNotFound):
+        return None
+
+    text = proc.stdout.strip()
+    if not text:
+        return None
+    try:
+        return int(text.splitlines()[0])
+    except ValueError:
+        return None
+
+
+def _abs_margin(value: Any) -> float | None:
+    if value is None:
+        return None
+    return abs(float(value))
+
+
+def _review_sort_key(review: dict[str, Any]) -> tuple[int, str]:
+    return (int(review["review_event_ts"]), str(review["review_event_uuid"]))
+
+
+def _eligible_reviews(
+    reviews: list[dict[str, Any]], criterion_id: str, rubric_ts: int
+) -> list[dict[str, Any]]:
+    return sorted(
+        [r for r in reviews if int(r["review_event_ts"]) > rubric_ts],
+        key=_review_sort_key,
+    )
+
+
+def _findings_for_criterion(review: dict[str, Any], criterion_id: str) -> list[dict[str, Any]]:
+    return [f for f in review.get("findings", []) if criterion_id in (f.get("criteria") or [])]
+
+
+def _routed_without_fire(review: dict[str, Any], criterion_id: str) -> bool:
+    if _findings_for_criterion(review, criterion_id):
+        return False
+    for finding in review.get("findings", []):
+        cohort = finding.get("cohort")
+        if isinstance(cohort, list) and criterion_id in cohort:
+            return True
+    return False
+
+
+def _has_reproduction(reviews: list[dict[str, Any]]) -> bool:
+    fingerprints = Counter(str(r["material_fingerprint"]) for r in reviews)
+    return any(count >= 2 for count in fingerprints.values())
+
+
+def _author_response_norm_ids(eligible: list[dict[str, Any]]) -> set[str]:
+    from rebar.llm.evals.plan_replay.labels import classify_finding_survival
+
+    resolved: set[str] = set()
+    by_ticket: dict[str, list[dict[str, Any]]] = {}
+    for review in eligible:
+        by_ticket.setdefault(str(review["ticket_id"]), []).append(review)
+    for ticket_reviews in by_ticket.values():
+        for prev, curr in pairwise(sorted(ticket_reviews, key=_review_sort_key)):
+            if prev["material_fingerprint"] == curr["material_fingerprint"]:
+                continue
+            labels = classify_finding_survival(prev.get("findings", []), curr.get("findings", []))
+            resolved.update(
+                norm_id for norm_id, label in labels.items() if label == "resolved_by_author"
+            )
+    return resolved
+
+
+def _escaped(review: dict[str, Any]) -> bool:
+    from rebar.llm.evals.plan_replay.labels import escaped_defect
+
+    return escaped_defect(review.get("ticket_state", {}))
+
+
+def _representative(items: list[tuple[dict[str, Any], float | None]]) -> tuple[float | None, str]:
+    margin, review = min(
+        ((margin, review) for review, margin in items),
+        key=lambda item: (item[0] is None, -(item[0] or 0.0), str(item[1]["review_event_uuid"])),
+    )
+    return margin, str(review["review_event_uuid"])
+
+
+def _candidate_sort_key(row: dict[str, Any]) -> tuple[int, bool, bool, float, str]:
+    margin = row["abs_margin"]
+    return (
+        0 if row["tier"] == "blocking" else 1,
+        not bool(row["escaped_defect"]),
+        margin is None,
+        -(margin or 0.0),
+        str(row["review_event_uuid"]),
+    )
+
+
+def _fire_rows(criterion_id: str, eligible: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_norm: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+    for review in eligible:
+        for finding in _findings_for_criterion(review, criterion_id):
+            by_norm.setdefault(str(finding["norm_id"]), []).append((review, finding))
+
+    author_responses = _author_response_norm_ids(eligible)
+    rows: list[dict[str, Any]] = []
+    for norm_id, entries in by_norm.items():
+        reviews_for_norm = [review for review, _finding in entries]
+        signals: set[str] = set()
+        if _has_reproduction(_unique_reviews(reviews_for_norm)):
+            signals.add("reproduction_consensus")
+        if norm_id in author_responses:
+            signals.add("author_response")
+        rep_items = [
+            (review, _abs_margin(finding.get("decision_margin"))) for review, finding in entries
+        ]
+        if any(margin is not None and margin >= MIN_MARGIN for _review, margin in rep_items):
+            signals.add("margin")
+        if not signals:
+            continue
+        abs_margin, review_uuid = _representative(rep_items)
+        tier = "blocking" if set(FIRE_SIGNALS) <= signals else "advisory"
+        rows.append(
+            {
+                "kind": "candidate",
+                "criterion": criterion_id,
+                "direction": "fire",
+                "norm_id": norm_id,
+                "tier": tier,
+                "rank": 0,
+                "signals": sorted(signals),
+                "escaped_defect": any(
+                    _escaped(review) for review in _unique_reviews(reviews_for_norm)
+                ),
+                "abs_margin": abs_margin,
+                "review_event_uuid": review_uuid,
+            }
+        )
+    return _rank(rows)
+
+
+def _unique_reviews(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for review in sorted(reviews, key=_review_sort_key):
+        uuid = str(review["review_event_uuid"])
+        if uuid in seen:
+            continue
+        seen.add(uuid)
+        out.append(review)
+    return out
+
+
+def _no_fire_rows(criterion_id: str, eligible: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    silent = [review for review in eligible if _routed_without_fire(review, criterion_id)]
+    if not _has_reproduction(silent):
+        return []
+    abs_margin, review_uuid = _representative([(review, None) for review in silent])
+    return [
+        {
+            "kind": "candidate",
+            "criterion": criterion_id,
+            "direction": "no_fire",
+            "norm_id": None,
+            "tier": "advisory",
+            "rank": 0,
+            "signals": ["reproduction_consensus"],
+            "escaped_defect": any(_escaped(review) for review in silent),
+            "abs_margin": abs_margin,
+            "review_event_uuid": review_uuid,
+        }
+    ]
+
+
+def _rank(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ranked = sorted(rows, key=_candidate_sort_key)
+    for idx, row in enumerate(ranked):
+        row["rank"] = idx
+    return ranked
+
+
+def select_candidates(
+    reviews: list[dict[str, Any]],
+    *,
+    criteria_ids: list[str],
+    repo_root: str = ".",
+    base_ref: str = "origin/main",
+    unreliable: dict[str, str] | None = None,
+    rubric_history: Callable[[str], int | None] | None = None,
+    gate_key: str = "plan_review",
+) -> list[dict[str, Any]]:
+    """Select labeled candidates for ``criteria_ids`` from ``reviews`` and return manifest rows.
+
+    ``unreliable`` maps a criterion id → the open ``unreliable-criterion`` ticket id that skips
+    it (a ``"unreliable-criterion:<id>"`` zero-candidate row). ``rubric_history`` injects the
+    vintage gate for tests: a callable criterion→last-rubric-commit-ts (``None`` fails closed);
+    when omitted, :func:`last_rubric_commit_ts` is used against ``base_ref``.
+
+    Rows are returned already ordered: grouped per criterion (in ``criteria_ids`` order), and
+    within a criterion each direction's candidates in rank order (blocking before advisory,
+    then escaped-defect priority, then descending ``abs_margin`` with ``None`` last, then
+    ascending ``review_event_uuid``); ``rank`` is the 0-based position within the direction.
+    """
+    rows: list[dict[str, Any]] = []
+    unreliable = unreliable or {}
+    for criterion_id in criteria_ids:
+        if criterion_id in unreliable:
+            rows.append(
+                {
+                    "kind": "zero_candidate",
+                    "criterion": criterion_id,
+                    "reason": f"unreliable-criterion:{unreliable[criterion_id]}",
+                }
+            )
+            continue
+
+        rubric_ts = (
+            rubric_history(criterion_id)
+            if rubric_history is not None
+            else last_rubric_commit_ts(
+                criterion_id, repo_root=repo_root, base_ref=base_ref, gate_key=gate_key
+            )
+        )
+        if rubric_ts is None:
+            rows.append(
+                {
+                    "kind": "zero_candidate",
+                    "criterion": criterion_id,
+                    "reason": "no-committed-prompt-history",
+                }
+            )
+            continue
+
+        eligible = _eligible_reviews(reviews, criterion_id, rubric_ts)
+        fire = _fire_rows(criterion_id, eligible)
+        no_fire = _rank(_no_fire_rows(criterion_id, eligible))
+        admitted = fire + no_fire
+        rows.extend(admitted)
+        if not admitted:
+            rows.append(
+                {
+                    "kind": "zero_candidate",
+                    "criterion": criterion_id,
+                    "reason": "no-admitted-candidate",
+                }
+            )
+    return rows
+
+
+def _load_cache_rows(cache_dir: Path, content_hash: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with (cache_dir / f"{content_hash}.jsonl").open(encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
+
+
+def _review_findings(tracker_path: str) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    from rebar.llm.evals.plan_replay import corpus
+
+    findings: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for ticket_id, by_type in corpus._load_ticket_events(tracker_path).items():
+        for event in by_type.get("REVIEW_RESULT", []):
+            raw = event.get("data", {}).get("findings")
+            findings[(ticket_id, event["uuid"])] = raw if isinstance(raw, list) else []
+    return findings
+
+
+def _has_eval_spec(criterion_id: str, *, repo_root: str, gate_key: str) -> bool:
+    from rebar.llm.criteria.ids import criterion_prompt_id
+    from rebar.llm.evals.eval import _packaged_eval_spec, eval_spec_path
+
+    pid = criterion_prompt_id(criterion_id, gate_key=gate_key)
+    return eval_spec_path(pid, repo_root).is_file() or _packaged_eval_spec(pid).is_file()
+
+
+def _default_criteria(repo_root: str, gate_key: str) -> list[str]:
+    import rebar.llm.plan_review.registry  # noqa: F401
+    from rebar.llm.criteria.overlay import effective_routing
+
+    return [
+        criterion_id
+        for criterion_id in effective_routing(repo_root, gate_key=gate_key)
+        if not _has_eval_spec(criterion_id, repo_root=repo_root, gate_key=gate_key)
+    ]
+
+
+def select_from_corpus(
+    *,
+    repo_root: str = ".",
+    tracker_path: str | None = None,
+    base_ref: str = "origin/main",
+    cache_dir: str | Path,
+    criteria_ids: list[str] | None = None,
+    gate_key: str = "plan_review",
+) -> list[dict[str, Any]]:
+    """Assemble reviews from the real committed corpus and return manifest rows.
+
+    Builds corpus rows via ``plan_replay/corpus.py`` (over ``tracker_path``, the tickets
+    tracker), enriches each with its slimmed sidecar ``findings``, restricts to
+    ``criteria_ids`` when given else the criteria ``criteria.effective_routing(repo_root,
+    gate_key=...)`` reports with no eval spec, and calls :func:`select_candidates` with the
+    real vintage gate (git-log against ``base_ref`` in ``repo_root``). Pure git + local
+    hashing: no model call, no network. Deterministic — two runs over the same committed
+    history return byte-identical rows.
+    """
+    from rebar import config
+    from rebar.llm.evals.plan_replay.corpus import build_corpus
+
+    tracker = tracker_path or str(config.tracker_dir(repo_root))
+    cache_path = Path(cache_dir)
+    manifest = build_corpus({"default": tracker}, cache_dir=cache_path)
+    reviews = _load_cache_rows(cache_path, str(manifest["content_hash"]))
+    findings = _review_findings(tracker)
+    for review in reviews:
+        key = (review["ticket_id"], review["review_event_uuid"])
+        review["findings"] = findings.get(key, [])
+        review["ticket_state"] = review.get("ticket_state", {})
+
+    selected_criteria = criteria_ids or _default_criteria(repo_root, gate_key)
+
+    def _rubric_history_ns(criterion_id: str) -> int | None:
+        seconds = last_rubric_commit_ts(
+            criterion_id, repo_root=repo_root, base_ref=base_ref, gate_key=gate_key
+        )
+        return None if seconds is None else seconds * 1_000_000_000
+
+    return select_candidates(
+        reviews,
+        criteria_ids=selected_criteria,
+        repo_root=repo_root,
+        base_ref=base_ref,
+        rubric_history=_rubric_history_ns,
+        gate_key=gate_key,
+    )
+
+
+def write_manifest(rows: list[dict[str, Any]], path: str | Path) -> None:
+    """Write ``rows`` as JSONL to ``path`` — one ``json.dumps(row, sort_keys=True)`` per line,
+    in the order given, each terminated by a single ``\\n``. Byte-stable for the diff AC."""
+    with Path(path).open("w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, sort_keys=True) + "\n")
