@@ -71,6 +71,13 @@ jobs:
     if: github.event_name != 'schedule'
     uses: ./.github/workflows/_mutation.yml
 
+  # Pinned native scanner contracts (ticket aa9e). Expected cold cost: approximately
+  # 1.5-3 runner-minutes. It runs as its own parallel reusable lane, so it does not extend
+  # the existing critical path when runner capacity is available.
+  scanner-integration:
+    if: github.event_name != 'schedule'
+    uses: ./.github/workflows/_scanner-integration.yml
+
   # External-integration tier (tests/external/): live, billable, real-mutation
   # tests (live Jira via the `acli` SUBPROCESS, live LLM calls). This is the ONLY
   # job that:

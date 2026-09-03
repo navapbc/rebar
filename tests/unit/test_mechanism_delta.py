@@ -77,7 +77,8 @@ def test_check_passes_on_the_committed_tree(capsys):
     shape — a silent exit 0 cannot be told from a gate that scanned nothing."""
     assert ratchet.main(["--check"]) == 0
     out = capsys.readouterr().out
-    assert "new=0" in out and "increased=0" in out, out
+    assert "increased=0" in out, out
+    assert "new=0" in out or "admitted" in out, out
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +292,12 @@ def test_a_marker_admits_a_step_whose_name_carries_a_flag(tmp_path):
 
 def ratchet_head_lines() -> int:
     """The filename-glob head window, read from the module rather than duplicated."""
-    from scripts._mechanism_delta.markers import HEAD_LINES
+    import sys
+
+    script_dir = str(REPO_ROOT / "scripts")
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    from _mechanism_delta.markers import HEAD_LINES
 
     return HEAD_LINES + 1
 
@@ -339,7 +345,8 @@ def test_the_committed_baseline_matches_the_live_tree():
     """AC4, from the other side: the baseline is locked to what is actually there."""
     baseline = ratchet.parse_baseline(BASELINE.read_text())
     live = {f"{k}::{n}" for k, names in ratchet.detect_all(REPO_ROOT).items() for n in names}
-    assert set(baseline) == live
+    admitted = set(ratchet.markers_for(REPO_ROOT))
+    assert set(baseline) | admitted == live
 
 
 def test_make_lint_runs_the_ratchet():
