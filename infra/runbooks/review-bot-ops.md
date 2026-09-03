@@ -495,6 +495,12 @@ the content-addressed snapshot store on the **ROOT** disk (`/tmp/rebar-gate-snap
 and builds docker images/build-cache there too; when the root filesystem fills, a clone
 or subprocess can **hang** or fail mid-review and each `LLM-Review` vote fail-closes.
 
+>  **If you cannot get a shell, you are in the wrong runbook.** This procedure assumes SSM
+> still answers. When the root disk reaches 100% the SSM agent dies with everything else and
+> `send-command` invocations hang in `InProgress` forever, while both EC2 status checks stay
+> `ok`. Recover from the AWS control plane instead — see
+> [`gerrit-host-wedged-ssm-lost.md`](gerrit-host-wedged-ssm-lost.md).
+
 **Automated defenses now in place (verify first, then recover manually only if needed).**
 
 - **Snapshot-cache janitor.** The receiver's FastAPI lifespan starts a background
