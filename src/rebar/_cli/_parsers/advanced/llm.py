@@ -64,12 +64,6 @@ def build_review_code(*, prog: str) -> argparse.ArgumentParser:
     parser.add_argument("--base", default="HEAD~1", help="base git ref (default HEAD~1)")
     parser.add_argument("--head", default="HEAD", help="head git ref (default HEAD)")
     parser.add_argument("--diff-file", help="review this unified-diff file instead of a git range")
-    parser.add_argument(
-        "--reviewer",
-        action="append",
-        dest="reviewers",
-        help="reviewer id, repeatable (default: deterministic selection)",
-    )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
     _add_ref_source(parser, ref_default="the reviewed --head", ref_configurable=False)
     return parser

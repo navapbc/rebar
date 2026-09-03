@@ -38,6 +38,15 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): `review-code` no longer accepts caller-selected reviewers.**
+  The `rebar review-code` CLI, the MCP `review_code` tool, and the
+  `rebar.llm.review_code()` library surface all dropped the compatibility-only
+  `reviewers` input because the four-pass code-review gate has long selected its
+  own overlays/reviewers internally. This removes a misleading no-op knob without
+  changing the returned `review_result`: the output still carries a `reviewers`
+  field reporting the reviewers that actually ran. Migrate by removing
+  `--reviewer ...` and `reviewers=[...]` from callers.
+
 - **`severity` is now optional on `review_result` findings.** Code-review and plan-review
   findings no longer carry an impact-only `severity` label that could disagree with the
   review-kernel's own `priority`/blocking decision; they now surface `priority` and

@@ -131,8 +131,8 @@ def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
 def _review_code(argv: list[str]) -> int:
     """``rebar review-code`` → rebar.llm.review_code (native, like reconcile).
 
-    Reviews a git range (``--base``/``--head``) or a ``--diff-file`` with one or
-    more reviewers; JSON output conforms to the ``review_result`` schema."""
+    Reviews a git range (``--base``/``--head``) or a ``--diff-file``; JSON output
+    conforms to the ``review_result`` schema."""
 
     parser = _llm_parsers.build_review_code(prog="rebar review-code")
     args = parser.parse_args(argv)
@@ -163,7 +163,6 @@ def _review_code(argv: list[str]) -> int:
             base=args.base,
             head=args.head,
             diff_text=diff_text,
-            reviewers=args.reviewers,
             ref=args.ref,
             source=args.source,
             session_id=session_id,
