@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE = REPO_ROOT / "scripts" / "check_uv_pin.py"
@@ -89,6 +90,14 @@ runs:
 """
 
 
+DOCKERFILE_CLEAN = """\
+FROM python:3.12-slim
+
+COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv
+RUN uv sync --locked
+"""
+
+
 def _run(root: Path) -> subprocess.CompletedProcess[str]:
     """Invoke the checker as a subprocess against ``root``, exactly as ``make lint`` does."""
     return subprocess.run(
@@ -109,6 +118,9 @@ def tree(tmp_path: Path) -> Path:
     action = tmp_path / ".github" / "actions" / "setup-uv"
     action.mkdir(parents=True)
     (action / "action.yml").write_text(ACTION_CLEAN, encoding="utf-8")
+    compose = tmp_path / "infra" / "compose"
+    compose.mkdir(parents=True)
+    (compose / "Dockerfile.svc").write_text(DOCKERFILE_CLEAN, encoding="utf-8")
     return tmp_path
 
 
@@ -286,3 +298,87 @@ def test_make_lint_invokes_the_gate() -> None:
     """
     body = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     assert "python scripts/check_uv_pin.py" in body
+
+
+def test_real_repository_dockerfiles_do_not_float_the_uv_tag() -> None:
+    """AC1/AC3 -- no container build may resolve uv from a moving upstream tag.
+
+    ``:latest`` moved to 0.12.9 while ``[tool.uv] required-version`` stayed at 0.12.7, and
+    ``uv sync`` reads that key itself: every image build died with "Required uv version
+    `==0.12.7` does not match the running version `0.12.9`". The defect is a TIME BOMB by
+    construction -- it fires when upstream publishes, with no change to this repository -- so
+    the tree itself, not only a fixture, must be asserted free of floating toolchain tags.
+    """
+    offenders = [
+        f"{path}:{number}"
+        for path in sorted(REPO_ROOT.glob("**/Dockerfile*"))
+        if ".git/" not in path.as_posix()
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if ":latest" in line and line.lstrip().startswith(("FROM", "COPY --from="))
+    ]
+    assert not offenders, f"floating :latest toolchain tags: {offenders}"
+
+
+def test_real_repository_dockerfiles_match_the_pyproject_pin() -> None:
+    """AC2 -- the images must install the uv that ``pyproject.toml`` requires."""
+    required = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    version = required["tool"]["uv"]["required-version"].removeprefix("==")
+    for path in sorted(REPO_ROOT.glob("infra/compose/Dockerfile.*")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "astral-sh/uv" not in line:
+                continue
+            assert f"astral-sh/uv:{version}" in line, f"{path.name}: {line.strip()}"
+
+
+def test_dockerfile_floating_uv_tag_is_rejected(tree: Path) -> None:
+    """The exact production defect: ``uv:latest`` against an exact ``required-version``."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", "uv:latest"), encoding="utf-8")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert "Dockerfile.svc" in result.stderr
+    assert "latest" in result.stderr
+
+
+def test_dockerfile_uv_tag_skewed_from_pyproject_is_rejected(tree: Path) -> None:
+    """A pinned-but-WRONG tag is the same outage with a slower fuse."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", "uv:0.12.9"), encoding="utf-8")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert "0.12.9" in result.stderr
+    assert "0.12.7" in result.stderr
+
+
+def test_dockerfile_untagged_uv_reference_is_rejected(tree: Path) -> None:
+    """An omitted tag IS ``:latest`` -- the identical failure, spelled differently."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.12.7", "uv"), encoding="utf-8")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert "Dockerfile.svc" in result.stderr
+
+
+def test_dockerfile_floating_base_image_is_rejected(tree: Path) -> None:
+    """AC3 generalises beyond uv: no Dockerfile may pull ANY image from ``:latest``."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        DOCKERFILE_CLEAN.replace("python:3.12-slim", "python:latest"), encoding="utf-8"
+    )
+    result = _run(tree)
+    assert result.returncode == 1
+    assert "python:latest" in result.stderr
+
+
+def test_dockerfile_named_build_stage_reference_is_allowed(tree: Path) -> None:
+    """``COPY --from=builder`` names a local stage, not a registry image -- never a finding."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(
+        "FROM python:3.12-slim AS builder\n"
+        "FROM python:3.12-slim\n"
+        "COPY --from=builder /app /app\n"
+        "COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv\n",
+        encoding="utf-8",
+    )
+    result = _run(tree)
+    assert result.returncode == 0, result.stderr
