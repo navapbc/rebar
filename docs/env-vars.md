@@ -59,40 +59,40 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_ID_GUARD_MODE` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_UNSAFE_ID_GUARD_BYPASS` |
 | `REBAR_LLM_ALLOW_LOCAL_PROXY` | `src/rebar/llm/anthropic_model.py` |  |
 | `REBAR_LLM_API_KEY` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_BASE_URL` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_BASE_URL` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_BEDROCK_REGION` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_CONFIG_FILE` | `src/rebar/_config_sources.py` |  |
 | `REBAR_LLM_FRONTIER_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_FRONTIER_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_FRONTIER_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_HEADERS` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_MAX_STEPS` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_MAX_TOKENS` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_MAX_STEPS` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_MAX_TOKENS` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_MCP_SERVERS` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_MODEL_PROVIDER` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_CONF_THRESHOLD` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_DRAIN` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_DRAIN_BATCH` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_DRAIN_GATE_BUDGET_MS` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_K` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_LEASE_TTL_MIN` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_MAX_DOC_FREQ` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_MIN_SHOULD_MATCH` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_PROPOSITIONS_MAX` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_PROPOSITIONS_MIN` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_REENRICH_DEBOUNCE_MIN` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_SOAK_MIN` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_OVERLAP_SURFACE_CAP` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_MODEL_PROVIDER` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_CONF_THRESHOLD` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_DRAIN` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_DRAIN_BATCH` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_DRAIN_GATE_BUDGET_MS` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_K` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_LEASE_TTL_MIN` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_MAX_DOC_FREQ` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_MIN_SHOULD_MATCH` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_PROPOSITIONS_MAX` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_PROPOSITIONS_MIN` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_REENRICH_DEBOUNCE_MIN` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_SOAK_MIN` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_OVERLAP_SURFACE_CAP` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_REPO_PATH` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_RETRY_MAX_ATTEMPTS` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_RETRY_MAX_WAIT_S` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_RETRY_MAX_ATTEMPTS` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_RETRY_MAX_WAIT_S` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_STANDARD_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_STANDARD_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_STANDARD_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
-| `REBAR_LLM_TEMPERATURE` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_TIMEOUT` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_TOOL_TIMEOUT_S` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_TEMPERATURE` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_TIMEOUT` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_TOOL_TIMEOUT_S` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_TRIVIAL_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_TRIVIAL_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_TRIVIAL_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
@@ -197,11 +197,11 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/config.py:721` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:78` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:517` — `_llm_str(<non-literal>)`
-- `src/rebar/llm/config_readers.py:20` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config_readers.py:75` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config_readers.py:89` — `_llm_str_source(<non-literal>)`
-- `src/rebar/llm/config_readers.py:98` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config_readers.py:118` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config_readers.py:21` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config_readers.py:76` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config_readers.py:90` — `_llm_str_source(<non-literal>)`
+- `src/rebar/llm/config_readers.py:99` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config_readers.py:119` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config_readers.py:152` — `_llm_str(<non-literal>)`
 - `src/rebar/opcert_service/config.py:72` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:259` — `os.environ.get(<non-literal>)`
