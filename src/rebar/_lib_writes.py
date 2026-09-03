@@ -35,7 +35,6 @@ from rebar._errors import ConcurrencyError, RebarError
 from rebar._lib_identity import (  # noqa: F401
     add_identity_key,
     create_identity,
-    create_placeholder,
     ensure_identity_for,
     resolve_current_identity,
     revoke_identity_key,

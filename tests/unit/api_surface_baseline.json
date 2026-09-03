@@ -553,31 +553,6 @@
         ]
       ]
     },
-    "create_placeholder": {
-      "kind": "callable",
-      "params": [
-        [
-          "provider",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ],
-        [
-          "external_id",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ],
-        [
-          "display_name",
-          "POSITIONAL_OR_KEYWORD",
-          "<none>"
-        ],
-        [
-          "repo_root",
-          "KEYWORD_ONLY",
-          "None"
-        ]
-      ]
-    },
     "create_ticket": {
       "kind": "callable",
       "params": [
