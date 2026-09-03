@@ -73,6 +73,60 @@ def escaped_defect(ticket_state: dict[str, Any]) -> bool:
     return any(dep.get("relation") == "caused_by" for dep in inbound_deps)
 
 
+def build_escaped_ticket_index(tracker_path: str) -> frozenset[str]:
+    """Every ticket id in ``tracker_path`` for which :func:`escaped_defect` is True, built
+    in ONE store-wide reducer pass (ticket f0d1-b0cf-0690-4b3f).
+
+    :func:`escaped_defect` needs exactly two facts per ticket -- its own ``close_class``,
+    and whether any OTHER ticket points an inbound ``caused_by`` at it -- but the only
+    reader that supplies them, ``show_ticket(include_inbound=True)``, derives the inbound
+    half via ``find_inbound_relationships``, which byte-scans EVERY event file in the store
+    per subject. Asking it for N tickets is therefore O(N x store); on rebar's own tracker
+    that is ~5s a ticket. This inverts the loop: reduce each ticket once, keep the
+    ``plan_defect`` closes, and collect ``caused_by`` deps into a reverse index -- so the
+    whole store costs one pass and every lookup is a set membership test.
+
+    Fidelity mirrors ``reducer._inbound.find_inbound_relationships``: a source in an
+    inactive terminal status (or archived) contributes no inbound edge, and a ticket is
+    never its own inbound source (``_mentioning_dirs`` excludes the subject directory).
+    ``caused_by`` is not a symmetric relation, so no reciprocal suppression applies.
+
+    Differs from the per-ticket reader only where that reader would RAISE rather than
+    answer -- an unreadable/absent/``error``-status ticket is simply absent from the index
+    (i.e. not escaped) instead of aborting the caller.
+    """
+    from rebar.reducer._api import reduce_ticket
+    from rebar.reducer._inbound import _INACTIVE_SOURCE_STATUSES
+
+    root = os.path.normpath(str(tracker_path))
+    try:
+        entries = sorted(os.listdir(root))
+    except OSError:
+        return frozenset()
+
+    escaped: set[str] = set()
+    for entry in entries:
+        if entry.startswith("."):
+            continue
+        path = os.path.join(root, entry)
+        if not os.path.isdir(path):
+            continue
+        state = reduce_ticket(path)
+        if not isinstance(state, dict):
+            continue
+        if state.get("close_class") == "plan_defect":
+            escaped.add(entry)
+        if state.get("status") in _INACTIVE_SOURCE_STATUSES or state.get("archived"):
+            continue
+        for dep in state.get("deps") or []:
+            if dep.get("relation") != "caused_by":
+                continue
+            target = str(dep.get("target_id", dep.get("target", "")) or "")
+            if target and target != entry:
+                escaped.add(target)
+    return frozenset(escaped)
+
+
 def escape_signals(*, escaped: bool, completion_failed: bool, reopened: bool, forced: bool) -> bool:
     """Simple boolean OR over the four independent escape signals."""
     return escaped or completion_failed or reopened or forced

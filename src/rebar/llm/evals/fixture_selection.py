@@ -28,7 +28,10 @@ INPUT REVIEW SHAPE (each element of ``reviews``), a dict:
                                ``criteria`` list, ``cohort`` list|None, ``decision_margin``
                                float|None, ``decision``, ...)
     ``ticket_state``         : dict  (fed to ``labels.escaped_defect``: ``close_class``,
-                               ``inbound_deps``)
+                               ``inbound_deps``) — OPTIONAL when ``escaped_defect`` is given
+    ``escaped_defect``       : bool  (OPTIONAL precomputed answer; wins over
+                               ``ticket_state`` so a batched index can replace the
+                               per-ticket state compile)
 
 MANIFEST ROW SHAPES (JSON objects, keys sorted on write):
     candidate  : {"kind":"candidate","criterion":str,"direction":"fire"|"no_fire",
@@ -203,8 +206,21 @@ def _author_response_norm_ids(eligible: list[dict[str, Any]]) -> set[str]:
 
 
 def _escaped(review: dict[str, Any]) -> bool:
+    """The escaped-defect priority signal for one review's ticket.
+
+    ``escaped_defect`` is a set-UNION over every review backing a candidate (see
+    ``_fire_rows``/``_no_fire_rows``: ``any(_escaped(r) for r in ...)``), so the ticket
+    population this needs an answer for is the union of ticket ids across ALL backing
+    reviews — not one ticket per emitted candidate. A review may carry that answer
+    precomputed under ``escaped_defect`` (the batched-index path in
+    :func:`select_from_corpus`); otherwise it is derived from the compiled
+    ``ticket_state`` the eager per-ticket reader supplied.
+    """
     from rebar.llm.evals.plan_replay.labels import escaped_defect
 
+    precomputed = review.get("escaped_defect")
+    if precomputed is not None:
+        return bool(precomputed)
     return escaped_defect(review.get("ticket_state", {}))
 
 
@@ -431,6 +447,41 @@ def _default_criteria(repo_root: str, gate_key: str) -> list[str]:
     ]
 
 
+def _enrich_escaped_batched(reviews: list[dict[str, Any]], tracker: str) -> None:
+    """Stamp each review's ``escaped_defect`` from ONE store-wide index (the default).
+
+    Replaces the per-ticket ``show_ticket(include_inbound=True)`` fan-out: that reader
+    was invoked once per review-bearing ticket, and because ``escaped_defect`` unions
+    over every review backing a candidate, that population is most of the store's
+    review-bearing tickets (measured on rebar's own tracker: 1554 of 1960, 79%), each
+    costing an O(store) inbound byte-scan. The index answers all of them in one pass.
+    """
+    from rebar.llm.evals.plan_replay.labels import build_escaped_ticket_index
+
+    escaped = build_escaped_ticket_index(tracker)
+    for review in reviews:
+        review["escaped_defect"] = review["ticket_id"] in escaped
+
+
+def _enrich_escaped_eager(
+    reviews: list[dict[str, Any]],
+    tracker: str,
+    reader: Callable[[str, str], dict[str, Any]],
+) -> None:
+    """Stamp each review's ``ticket_state`` by compiling it per ticket via ``reader``.
+
+    The pre-batched-index path, kept reachable (and exercised by the byte-identical
+    regression test) so the batched default can be diffed against the real original
+    rather than against a snapshot generated from the new code.
+    """
+    state_cache: dict[str, dict[str, Any]] = {}
+    for review in reviews:
+        ticket_id = review["ticket_id"]
+        if ticket_id not in state_cache:
+            state_cache[ticket_id] = dict(reader(ticket_id, tracker))
+        review["ticket_state"] = state_cache[ticket_id]
+
+
 def select_from_corpus(
     *,
     repo_root: str = ".",
@@ -444,33 +495,38 @@ def select_from_corpus(
     """Assemble reviews from the real committed corpus and return manifest rows.
 
     Builds corpus rows via ``plan_replay/corpus.py`` (over ``tracker_path``, the tickets
-    tracker), enriches each with its slimmed sidecar ``findings`` AND its ticket's compiled
-    state (so the escaped-defect priority can fire), restricts to ``criteria_ids`` when given
-    else the criteria ``criteria.effective_routing(repo_root, gate_key=...)`` reports with no
-    eval spec, and calls :func:`select_candidates` with the real vintage gate (git-log against
-    ``base_ref`` in ``repo_root``). ``read_ticket_state`` (``ticket_id, tracker_path -> state``)
-    defaults to the real multi-store-safe reader; tests inject a stub. Pure git + local
-    hashing: no model call, no network. Deterministic — two runs over the same committed
-    history return byte-identical rows.
+    tracker), enriches each with its slimmed sidecar ``findings`` AND its ticket's
+    escaped-defect answer (so that priority signal can fire), restricts to ``criteria_ids``
+    when given else the criteria ``criteria.effective_routing(repo_root, gate_key=...)``
+    reports with no eval spec, and calls :func:`select_candidates` with the real vintage gate
+    (git-log against ``base_ref`` in ``repo_root``).
+
+    The escaped-defect answer comes from ONE store-wide
+    ``labels.build_escaped_ticket_index`` pass by default — NOT a per-ticket
+    ``show_ticket(include_inbound=True)`` compile. That compile derives its inbound half by
+    byte-scanning every event file in the store, so it cost ~5s per ticket and had to run for
+    the UNION of ticket ids across every review backing a candidate (``escaped_defect`` unions
+    over backing reviews, so that is most of the review-bearing population, not one ticket per
+    candidate) — hours before a single row was emitted. Passing ``read_ticket_state``
+    (``ticket_id, tracker_path -> state``) selects that eager per-ticket path instead: tests
+    inject a stub, and the byte-identical regression test injects the real reader. Pure git +
+    local hashing: no model call, no network. Deterministic — two runs over the same
+    committed history return byte-identical rows.
     """
     from rebar import config
     from rebar.llm.evals.plan_replay.corpus import build_corpus
-    from rebar.llm.evals.plan_replay.labels import _read_ticket_state_via_env_override
 
-    reader = read_ticket_state or _read_ticket_state_via_env_override
     tracker = tracker_path or str(config.tracker_dir(repo_root))
     cache_path = Path(cache_dir)
     manifest = build_corpus({"default": tracker}, cache_dir=cache_path)
     reviews = _load_cache_rows(cache_path, str(manifest["content_hash"]))
     findings = _review_findings(tracker)
-    state_cache: dict[str, dict[str, Any]] = {}
     for review in reviews:
-        ticket_id = review["ticket_id"]
-        key = (ticket_id, review["review_event_uuid"])
-        review["findings"] = findings.get(key, [])
-        if ticket_id not in state_cache:
-            state_cache[ticket_id] = dict(reader(ticket_id, tracker))
-        review["ticket_state"] = state_cache[ticket_id]
+        review["findings"] = findings.get((review["ticket_id"], review["review_event_uuid"]), [])
+    if read_ticket_state is None:
+        _enrich_escaped_batched(reviews, tracker)
+    else:
+        _enrich_escaped_eager(reviews, tracker, read_ticket_state)
 
     selected_criteria = criteria_ids or _default_criteria(repo_root, gate_key)
 
