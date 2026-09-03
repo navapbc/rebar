@@ -33,9 +33,12 @@
 #                unmatches and the alarm goes permanently INSUFFICIENT_DATA).
 #   Unit       = Count  (per-period count of new matching journal lines)
 #
-# CADENCE: the 900s / 2-of-4 / Sum > 0 / notBreaching shape of monitoring_autodeploy.tf's
+# CADENCE: the 900s / 2-of-4 / Sum > 0 / breaching shape of monitoring_autodeploy.tf's
 # deploy_errors alarm — matched to the deploy's capped backoff (BACKOFF_CAP=900s), so a persistent
-# loop latches within ~an hour while a single transient occurrence does not page.
+# loop latches within ~an hour while a single transient occurrence does not page. MISSING DATA IS
+# BREACHING (ticket bff5-9163-cddd-4158): observability.sh 4f publishes each counter's delta on
+# every 5-minute run, 0 included, so an absent metric means the probe is dead — not that the mcp
+# deploy is healthy. The 2-of-4 window keeps ordinary timer jitter from paging.
 #
 # ACTION: wires the shared SNS alerts topic (not a silent alarm), like every alarm above.
 # ---------------------------------------------------------------------------
@@ -65,7 +68,12 @@ resource "aws_cloudwatch_metric_alarm" "mcp_retire_cap" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  treat_missing_data = "notBreaching"
+  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
+  # publishes mcp_retire_cap's per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
+  # period publishes 0 — the metric is continuously present. Missing data therefore means the
+  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
+  # The 2-of-4 window above already absorbs the jitter this setting introduces.
+  treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
@@ -101,7 +109,12 @@ resource "aws_cloudwatch_metric_alarm" "mcp_mem_abort" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  treat_missing_data = "notBreaching"
+  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
+  # publishes mcp_mem_abort's per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
+  # period publishes 0 — the metric is continuously present. Missing data therefore means the
+  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
+  # The 2-of-4 window above already absorbs the jitter this setting introduces.
+  treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]

@@ -227,13 +227,26 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_high" {
     mount      = "/var/gerrit"
   }
 
+  # 2 breaching datapoints inside a 3-period window (the root_disk_pressure shape in
+  # monitoring_autodeploy.tf). Widened from a 1-period latch by ticket bff5-9163-cddd-4158:
+  # missing data is breaching here, and a single absent 5-minute probe interval is ordinary
+  # timer jitter (~22 of 24 periods present is the observed norm), so a 1-datapoint latch
+  # would page on it.
   period              = 300
-  evaluation_periods  = 1
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
   threshold           = 85
   comparison_operator = "GreaterThanOrEqualToThreshold"
 
-  # Missing data means the host-published disk probe stopped; page rather than
-  # letting a dying host clear its own data-volume alarm to OK.
+  # Pre-dates ticket bff5-9163-cddd-4158; that ticket only widened the window above. Missing
+  # data has two causes here and BOTH warrant a page: the host-published probe stopped, or
+  # observability.sh §2 read no percentage for $DATA_MOUNT (`df --output=pcent /var/gerrit`
+  # produced no digits) and skipped the publish. Unlike the rebar/host counters, §2 is NOT
+  # unconditional and deliberately stays that way — its metric is a reading, not a delta, so
+  # there is no honest placeholder: publishing 0 would assert an empty volume and 100 would
+  # fabricate a full one. A df that cannot report on the Gerrit data volume means that volume
+  # is gone or unmountable, which is a worse fault than the one this alarm names, so silence
+  # is allowed to page. The 3-period/2-datapoint window above absorbs a one-off read failure.
   treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]

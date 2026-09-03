@@ -75,9 +75,14 @@ resource "aws_cloudwatch_metric_alarm" "voter_errors" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # No voter errors published in a period is the healthy steady state and should NOT
-  # alarm, so missing data is treated as not-breaching.
-  treat_missing_data = "notBreaching"
+  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
+  # publishes voter_errors' per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
+  # period publishes 0 — the metric is continuously present. Missing data therefore means the
+  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
+  # The rationale this replaces — "no voter errors published in a period is the healthy
+  # steady state" — described a probe that stays silent when healthy. This one publishes 0.
+  # The 3-of-5 window above already absorbs the jitter this setting introduces.
+  treat_missing_data = "breaching"
 
   # Notify the shared alerts topic on BOTH edges (ticket 9baf). This alarm previously declared
   # neither, so it transitioned OK -> ALARM and told nobody — the "silent-alarm gap" named in

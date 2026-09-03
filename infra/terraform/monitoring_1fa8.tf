@@ -65,15 +65,23 @@ resource "aws_cloudwatch_metric_alarm" "g2p_dispatch_errors" {
   metric_name = "g2p_dispatch_errors"
   statistic   = "Sum"
 
-  # 5-minute periods; alarm on a single period with any g2p error lines.
+  # 5-minute periods, 2 breaching datapoints inside a 3-period window. The window is
+  # wider than one period because treat_missing_data is "breaching" below: a single
+  # jittered probe interval is a breaching datapoint (~22 of 24 periods present is the
+  # observed norm), so a 1-period latch would page on ordinary timer jitter.
   period              = 300
-  evaluation_periods  = 1
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # No dispatch errors published in a period is the healthy steady state and should
-  # NOT alarm, so missing data is treated as not-breaching.
-  treat_missing_data = "notBreaching"
+  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
+  # publishes g2p_dispatch_errors' per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
+  # period publishes 0 — the metric is continuously present. Missing data therefore means the
+  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
+  # The rationale this replaces — "no dispatch errors published in a period is the healthy
+  # steady state" — described a probe that stays silent when healthy. This one publishes 0.
+  treat_missing_data = "breaching"
 
   # WIRE SNS (unlike S5/S4b): a broken CI dispatcher blocks all submits once the gate
   # is active, so page the operator (same choice as monitoring_ws7.tf).
