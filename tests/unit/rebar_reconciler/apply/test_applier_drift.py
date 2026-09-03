@@ -77,28 +77,14 @@ def _make_mock_acli_module() -> tuple[MagicMock, MagicMock]:
 
 
 def _make_mock_concurrency_module(head_sequence: list[str]) -> types.ModuleType:
-    """Return a mock _concurrency module whose snapshot_head pops from head_sequence.
-
-    Also provides a rebase_retry stub that calls write_fn() without
-    invoking snapshot_head (avoids consuming from head_sequence).
-    """
+    """Return a mock _concurrency module whose snapshot_head pops from head_sequence."""
     call_iter = iter(head_sequence)
 
     def _snapshot_head(_repo_root):
         return next(call_iter)
 
-    class _FakeResult:
-        ok = True
-        event = None
-        value = None
-
-    def _fake_rebase_retry(_repo_root, write_fn, **_kwargs):
-        write_fn()
-        return _FakeResult()
-
     mock_mod = types.ModuleType("_concurrency_mock")
     mock_mod.snapshot_head = _snapshot_head  # type: ignore[attr-defined]
-    mock_mod.rebase_retry = _fake_rebase_retry  # type: ignore[attr-defined]
     return mock_mod
 
 
@@ -163,35 +149,21 @@ def test_empty_mutations_no_head_check(tmp_path, applier):
     """Empty mutation list skips the drift guard: no explicit snapshot_head calls from apply().
 
     The apply() function must not call snapshot_head for the PIN step or the
-    per-iteration check when the mutations list is empty.  (Internal calls made
-    by rebase_retry are separately tracked and are not the drift guard.)
+    per-iteration check when the mutations list is empty.
     """
     mock_acli_mod, _mock_client = _make_mock_acli_module()
 
-    # Tracks calls made directly by apply() (not inside rebase_retry)
+    # Tracks calls made directly by apply() itself.
     direct_snapshot_calls: list = []
 
-    # Build a mock concurrency module:
-    # - snapshot_head tracks calls (used directly by apply() drift guard)
-    # - rebase_retry is a no-op stub that returns a successful Result
+    # Build a mock concurrency module whose snapshot_head tracks any direct drift checks.
     mock_concurrency = types.ModuleType("_concurrency_empty")
-
-    class _FakeResult:
-        ok = True
-        event = None
-        value = None
 
     def _fake_snapshot_head(_repo_root):
         direct_snapshot_calls.append(1)
         return "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 
-    def _fake_rebase_retry(_repo_root, write_fn, **_kwargs):
-        # Execute the write function but do NOT call snapshot_head
-        write_fn()
-        return _FakeResult()
-
     mock_concurrency.snapshot_head = _fake_snapshot_head  # type: ignore[attr-defined]
-    mock_concurrency.rebase_retry = _fake_rebase_retry  # type: ignore[attr-defined]
 
     with (
         patch.object(applier, "_load_acli", return_value=mock_acli_mod),

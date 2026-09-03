@@ -14,7 +14,6 @@ import importlib.util
 import json
 import os
 import sys
-import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -133,12 +132,10 @@ def test_mapping_json_not_written_on_jql_miss(applier, tmp_path):
 
 
 def _make_mock_concurrency():
-    """Return a mock concurrency module with stable snapshot_head and rebase_retry."""
+    """Return a mock concurrency module with a stable snapshot_head."""
     mock_concurrency = MagicMock()
     # Always return the same HEAD SHA so no drift is detected
     mock_concurrency.snapshot_head.return_value = "abc1234def567890" * 2  # 32-char sha
-    # rebase_retry just calls the callback immediately and returns ok=True
-    mock_concurrency.rebase_retry.side_effect = lambda repo_root, fn: types.SimpleNamespace(ok=True)
     return mock_concurrency
 
 

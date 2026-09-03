@@ -5,8 +5,8 @@ Owns the filesystem artifacts a pass writes and the lazy loaders for the
 sibling stores it consults:
   * the local↔Jira id/field mapping (``mapping.json``) — load + atomic writes +
     set-field provenance,
-  * the reschedule contract (``RescheduleError``/``EXIT_RESCHEDULE``) raised when
-    the tickets-branch write exhausts ``rebase_retry``,
+  * the reschedule contract (``RescheduleError``/``EXIT_RESCHEDULE``) re-exported to
+    preserve the bridge's public exit/status contract,
   * lazy loaders for ``conflict_resolver`` and ``alert_store``.
 
 This is the unit-of-work/persistence seam beneath the orchestrator: ``applier``
@@ -34,7 +34,7 @@ EXIT_RESCHEDULE: int = 75
 
 
 class RescheduleError(Exception):
-    """Raised by apply() when rebase_retry exhausts all write attempts.
+    """Raised by apply() when the write path must reschedule the pass.
 
     Carries the attempt count and the last error message so the caller can
     emit a structured health event before exiting with EXIT_RESCHEDULE.
@@ -285,32 +285,3 @@ def _write_mapping_atomic(mapping_path: Path, local_id: str, jira_key: str) -> N
     existing[local_id] = jira_key
 
     _write_mapping_json_atomic(mapping_path, existing)
-
-
-def _handle_failed_write_result(write_result, pass_id: str) -> None:
-    """Emit a health event to stderr and raise RescheduleError for a failed write.
-
-    Called when rebase_retry returns ok=False.  The only kind that maps to a
-    reschedule exit is 'reject_and_reschedule'; other kinds propagate as-is
-    through other code paths (HeadDriftError for drift, exception for error).
-
-    Args:
-        write_result: Result(ok=False) returned by rebase_retry.
-        pass_id:      Current reconciliation pass identifier (included in the
-                      health event for traceability).
-
-    Raises:
-        RescheduleError: Always, when this function is called.
-    """
-    event = write_result.event
-    attempt_count = event.attempt if event is not None else 0
-    last_error = event.message if event is not None else ""
-
-    health_event = {
-        "kind": "reject_and_reschedule",
-        "pass_id": pass_id,
-        "attempt_count": attempt_count,
-        "last_error": last_error,
-    }
-    print(json.dumps(health_event), file=sys.stderr)
-    raise RescheduleError(attempt_count=attempt_count, last_error=last_error)

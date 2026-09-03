@@ -1,18 +1,4 @@
-"""Unit tests for _concurrency.py.
-
-Tests cover:
-  - test_snapshot_head_returns_nonempty_string: snapshot_head() on a real tmp
-    git repo returns a non-empty hex SHA string.
-  - test_rebase_retry_ok_when_write_succeeds: rebase_retry() returns
-    Result(ok=True) when write_fn succeeds and HEAD is stable.
-  - test_rebase_retry_abort_due_to_error: rebase_retry() returns
-    Result(ok=False, event.kind='abort_due_to_error') when write_fn raises.
-  - test_rebase_retry_abort_due_to_drift: rebase_retry() returns
-    Result(ok=False, event.kind='abort_due_to_drift') when HEAD changes between
-    the before-capture and the after-check.
-  - test_concurrency_event_kind_values: ConcurrencyEvent accepts each of the
-    three expected kind strings without error.
-"""
+"""Unit tests for _concurrency.py's remaining snapshot-head contract."""
 
 from __future__ import annotations
 
@@ -124,105 +110,7 @@ def test_snapshot_head_returns_sentinel_on_empty_repo(concurrency, tmp_path: Pat
     )
 
 
-def test_rebase_retry_ok_when_write_succeeds(concurrency, tmp_git_repo: Path) -> None:
-    """rebase_retry() returns Result(ok=True) when write_fn succeeds and HEAD is stable."""
-    sentinel = object()
-
-    def write_fn():
-        return sentinel
-
-    result = concurrency.rebase_retry(tmp_git_repo, write_fn)
-    assert result.ok is True
-    assert result.event is None
-    assert result.value is sentinel
-
-
-def test_rebase_retry_abort_due_to_error(concurrency, tmp_git_repo: Path) -> None:
-    """rebase_retry() returns Result(ok=False, event.kind='abort_due_to_error') when write_fn
-    raises.
-    """
-
-    def write_fn():
-        raise RuntimeError("simulated write failure")
-
-    result = concurrency.rebase_retry(tmp_git_repo, write_fn)
-    assert result.ok is False
-    assert result.event is not None
-    assert result.event.kind == "abort_due_to_error"
-    assert "simulated write failure" in result.event.message
-    assert result.event.attempt == 1
-
-
-def test_rebase_retry_reject_and_reschedule_when_all_attempts_drift(
-    concurrency, tmp_git_repo: Path
-) -> None:
-    """rebase_retry() returns Result(ok=False, event.kind='reject_and_reschedule')
-    when HEAD drifts on every attempt and max_attempts is exhausted.
-
-    Drift is retryable — the loop re-pins and retries. Only after every attempt
-    drifts does the result settle on reject_and_reschedule.
-    """
-    # snapshot_head is called twice per attempt: once before, once after.
-    # Returning a different SHA each call guarantees drift on every attempt.
-    sha_seq = iter(["aaaa" * 10, "bbbb" * 10, "cccc" * 10, "dddd" * 10, "eeee" * 10, "ffff" * 10])
-
-    def fake_snapshot_head(repo_root):
-        return next(sha_seq)
-
-    def write_fn():
-        return "write_result"
-
-    original_snapshot_head = concurrency.snapshot_head
-    concurrency.snapshot_head = fake_snapshot_head
-    try:
-        result = concurrency.rebase_retry(tmp_git_repo, write_fn, max_attempts=3)
-    finally:
-        concurrency.snapshot_head = original_snapshot_head
-
-    assert result.ok is False
-    assert result.event is not None
-    assert result.event.kind == "reject_and_reschedule"
-    assert result.event.attempt == 3
-
-
-def test_rebase_retry_retries_on_drift_then_succeeds(concurrency, tmp_git_repo: Path) -> None:
-    """Regression for F1: rebase_retry must retry on drift.
-
-    With max_attempts=3, 2 forced drifts followed by 1 stable HEAD must result
-    in 3 attempts total and Result.ok=True. Before F1, the for-loop returned on
-    every branch and max_attempts > 1 was dead code.
-    """
-    # Sequence of snapshot_head returns (two calls per attempt):
-    #   attempt 1: before="aaaa", after="bbbb"  → drift, retry
-    #   attempt 2: before="cccc", after="dddd"  → drift, retry
-    #   attempt 3: before="eeee", after="eeee"  → stable, success
-    sha_seq = iter(["a" * 40, "b" * 40, "c" * 40, "d" * 40, "e" * 40, "e" * 40])
-
-    write_call_count = {"n": 0}
-
-    def fake_snapshot_head(repo_root):
-        return next(sha_seq)
-
-    def write_fn():
-        write_call_count["n"] += 1
-        return f"write_{write_call_count['n']}"
-
-    original_snapshot_head = concurrency.snapshot_head
-    concurrency.snapshot_head = fake_snapshot_head
-    try:
-        result = concurrency.rebase_retry(tmp_git_repo, write_fn, max_attempts=3)
-    finally:
-        concurrency.snapshot_head = original_snapshot_head
-
-    assert result.ok is True, f"Expected ok=True after retry-then-success; got event={result.event}"
-    assert result.value == "write_3"
-    assert write_call_count["n"] == 3, (
-        f"write_fn must be invoked once per attempt (3 total); got {write_call_count['n']}"
-    )
-
-
-def test_concurrency_event_kind_values(concurrency) -> None:
-    """ConcurrencyEvent accepts each of the three expected kind strings."""
-    for kind in ("abort_due_to_drift", "reject_and_reschedule", "abort_due_to_error"):
-        evt = concurrency.ConcurrencyEvent(kind=kind, message="test", attempt=1)
-        assert evt.kind == kind
+def test_snapshot_module_keeps_only_snapshot_head_contract(concurrency) -> None:
+    assert not hasattr(concurrency, "ConcurrencyEvent")
+    assert not hasattr(concurrency, "Result")
+    assert not hasattr(concurrency, "rebase_retry")

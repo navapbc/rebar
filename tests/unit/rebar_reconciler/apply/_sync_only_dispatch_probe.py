@@ -148,19 +148,8 @@ class _FakeClient:
 
 
 def _make_ok_concurrency() -> types.ModuleType:
-    class _Result:
-        ok = True
-        event = None
-        value = None
-
     mod = types.ModuleType("_concurrency")
     mod.snapshot_head = lambda _repo_root: "aabbccdd" * 5  # type: ignore[attr-defined]
-
-    def _rebase_retry(_repo_root: Any, write_fn: Any, *, max_attempts: int = 3) -> Any:
-        write_fn()
-        return _Result()
-
-    mod.rebase_retry = _rebase_retry  # type: ignore[attr-defined]
     return mod
 
 

@@ -213,25 +213,11 @@ def _make_committing_acli_module(root: Path, drift_subjects: list):
 
 
 def _make_real_head_concurrency_module() -> types.ModuleType:
-    """Mock _concurrency whose snapshot_head is the REAL one (reads actual HEAD).
-
-    Only ``rebase_retry`` is stubbed — to run the pass-record write without a
-    network push — so the drift guard reads the genuine tickets-branch HEAD.
-    """
+    """Mock _concurrency whose snapshot_head is the REAL one (reads actual HEAD)."""
     from rebar_reconciler import _concurrency as real_conc
-
-    class _Result:
-        ok = True
-        event = None
-        value = None
-
-    def _stub_rebase_retry(_repo_root, write_fn, **_kwargs):
-        write_fn()
-        return _Result()
 
     mod = types.ModuleType("_concurrency_real_head")
     mod.snapshot_head = real_conc.snapshot_head  # type: ignore[attr-defined]
-    mod.rebase_retry = _stub_rebase_retry  # type: ignore[attr-defined]
     return mod
 
 

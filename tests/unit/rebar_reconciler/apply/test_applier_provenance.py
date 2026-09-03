@@ -12,7 +12,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -51,12 +50,9 @@ def applier():
 
 
 def _make_mock_concurrency():
-    """Return a mock concurrency module with stable snapshot_head and rebase_retry."""
+    """Return a mock concurrency module with a stable snapshot_head."""
     mock_concurrency = MagicMock()
     mock_concurrency.snapshot_head.return_value = "abc1234def567890" * 2
-    mock_concurrency.rebase_retry.side_effect = lambda repo_root, fn: (
-        fn() or types.SimpleNamespace(ok=True)
-    )
     return mock_concurrency
 
 

@@ -104,17 +104,6 @@ def _patch_apply_deps(applier, monkeypatch):
 
     fake_conc = types.ModuleType("concurrency_stub")
     fake_conc.snapshot_head = lambda _repo_root: "deadbeef" * 5  # type: ignore[attr-defined]
-
-    class _Result:
-        ok = True
-        event = None
-        value = None
-
-    def _rebase_retry(_repo_root, write_fn, **_kwargs):
-        write_fn()
-        return _Result()
-
-    fake_conc.rebase_retry = _rebase_retry  # type: ignore[attr-defined]
     monkeypatch.setattr(applier, "_load_concurrency", lambda: fake_conc)
 
 

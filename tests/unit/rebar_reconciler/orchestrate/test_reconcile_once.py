@@ -164,34 +164,13 @@ def _make_acli_module(issues: list[dict]) -> object:
 
 
 def _make_ok_concurrency() -> types.ModuleType:
-    """Return a stub _concurrency module that always reports ok=True."""
-    from dataclasses import dataclass
-    from typing import Any
-
-    @dataclass
-    class _ConcurrencyEvent:
-        kind: str
-        message: str = ""
-        attempt: int = 0
-
-    @dataclass
-    class _Result:
-        ok: bool
-        event: _ConcurrencyEvent | None = None
-        value: Any = None
+    """Return a stub _concurrency module with a stable snapshot head."""
 
     def _snapshot_head(repo_root: Path) -> str:
         return "aabbccdd" * 5
 
-    def _rebase_retry(repo_root, write_fn, *, max_attempts=3):
-        write_fn()
-        return _Result(ok=True)
-
     fake = types.ModuleType("_concurrency")
-    fake.ConcurrencyEvent = _ConcurrencyEvent
-    fake.Result = _Result
     fake.snapshot_head = _snapshot_head
-    fake.rebase_retry = _rebase_retry
     return fake
 
 
