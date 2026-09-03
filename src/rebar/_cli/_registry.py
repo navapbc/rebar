@@ -77,6 +77,10 @@ class Route:
     intercept: bool = False
     no_auto_mount: bool = False
     confirmable: bool = False
+    # Advisory cross-session warning: this spelling takes a single ticket id, so another
+    # session holding it is worth surfacing before the command runs (mirror F11). WHICH
+    # verbs warn is a policy judgement; the flag only makes the set BE route names.
+    warn_cross_session: bool = False
     legacy_output: bool = False
     handler: str | None = None
     parser_factory: str | None = None
@@ -167,8 +171,19 @@ def _reads_init_only() -> tuple[Route, ...]:
             handler=_READS_DISPATCHER,
             adapter="dispatcher",
             init="init_only",
+            warn_cross_session=warn,
         )
-        for name in ("show", "list", "next-batch", "deps", "ready", "search", "session-logs")
+        # The flag rides the definition site, so renaming a spelling carries its warning
+        # instead of leaving a stale entry that silently never matches again (mirror F11).
+        for name, warn in (
+            ("show", True),
+            ("list", False),
+            ("next-batch", False),
+            ("deps", True),
+            ("ready", False),
+            ("search", False),
+            ("session-logs", False),
+        )
     )
 
 
@@ -233,6 +248,7 @@ def _simple_read_groups() -> tuple[Route, ...]:
         Route(
             "clarity-check",
             group="gates",
+            warn_cross_session=True,
             parser_factory=_core_factory("clarity-check"),
             handler=f"{_GATES_MOD}:clarity_check_cli",
             adapter="argv_tracker_root",
@@ -241,6 +257,7 @@ def _simple_read_groups() -> tuple[Route, ...]:
         Route(
             "check-ac",
             group="gates",
+            warn_cross_session=True,
             parser_factory=_core_factory("check-ac"),
             handler=f"{_GATES_MOD}:check_ac_cli",
             adapter="argv_tracker",
@@ -326,6 +343,7 @@ def _lifecycle() -> tuple[Route, ...]:
         Route(
             "transition",
             group="lifecycle",
+            warn_cross_session=True,
             confirmable=True,
             legacy_output=True,
             parser_factory=_core_factory("transition"),
@@ -336,6 +354,7 @@ def _lifecycle() -> tuple[Route, ...]:
         Route(
             "reopen",
             group="lifecycle",
+            warn_cross_session=True,
             confirmable=True,
             legacy_output=True,
             parser_factory=_core_factory("reopen"),
@@ -358,21 +377,23 @@ def _lifecycle() -> tuple[Route, ...]:
 
 def _writes_full() -> tuple[Route, ...]:
     legacy = {"create", "idea"}
+    # (spelling, warns-cross-session) — the flag rides the definition site so a rename
+    # carries the warning with it (mirror F11).
     names = (
-        "create",
-        "idea",
-        "comment",
-        "link",
-        "unlink",
-        "revert",
-        "edit",
-        "tag",
-        "untag",
-        "archive",
-        "set-file-impact",
-        "set-verify-commands",
-        "attach-commits",
-        "session-log",
+        ("create", False),
+        ("idea", False),
+        ("comment", True),
+        ("link", True),
+        ("unlink", True),
+        ("revert", False),
+        ("edit", True),
+        ("tag", True),
+        ("untag", True),
+        ("archive", True),
+        ("set-file-impact", True),
+        ("set-verify-commands", False),
+        ("attach-commits", False),
+        ("session-log", False),
     )
     return tuple(
         Route(
@@ -384,8 +405,9 @@ def _writes_full() -> tuple[Route, ...]:
             handler="rebar._commands:main",
             adapter="dispatcher",
             init="full",
+            warn_cross_session=warn,
         )
-        for name in names
+        for name, warn in names
     )
 
 
@@ -666,6 +688,7 @@ def derive_policy_sets(routes: tuple[Route, ...] = ROUTES) -> dict[str, frozense
     derived["_NO_AUTO_MOUNT"] = frozenset(r.name for r in live if r.no_auto_mount)
     derived["_LEGACY_OUTPUT"] = frozenset(r.name for r in live if r.legacy_output)
     derived["_CONFIRM_SCOPE"] = frozenset(r.name for r in live if r.confirmable)
+    derived["_WARN_CROSS_SESSION"] = frozenset(r.name for r in live if r.warn_cross_session)
     return derived
 
 
