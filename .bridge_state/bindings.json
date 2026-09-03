@@ -8299,10 +8299,24 @@
     },
     "21b3-0e7b-f287-44c8": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\n`src/rebar/_commands/fsck_repair.py:330-491` contains a 162-line `_repair_run` with measured CCN 43 after the earlier extraction in commit `970b0dd4451e`. Further corruption shapes or restoration sources currently enlarge the same integrity-sensitive branch matrix.\n\n## Approach\n\nExtract the already-cohesive planning, per-ticket policy, restoration-source selection, pause ownership, and commit/application clusters. Keep `_repair_run` as the lifecycle facade with explicit state and abort semantics. This follows existing calls rather than introducing a new policy framework.\n\n## Scope\n\n- `src/rebar/_commands/fsck_repair.py`\n- `src/rebar/_commands/_repair_pause.py`\n- focused fsck repair and pause-ownership tests\n\nCascade flag: true. Recensus semantic callers plus string, reflection, dependency-injection, and monkeypatch references before moving symbols.\n\n## Testing\n\nRun focused restoration and pause-ownership suites for successful repair, skipped/aborted repair, source selection, and cleanup, then the normal lint/typecheck/test gates.\n\n## Acceptance Criteria\n\n- [ ] Planning, policy, restoration-source selection, pause ownership, and application are extracted along existing call relationships; verified by symbol/reference review and the module-size/complexity gates.\n- [ ] `_repair_run` remains a small lifecycle facade whose abort and partial-failure outcomes are explicit; verified by focused failure-path tests.\n- [ ] Existing repair source selection and tracker write results are unchanged; verified by `tests/interfaces/store/test_fsck_repair_restore_08c8.py`.\n- [ ] Pause acquisition/release ownership remains correct on success and failure; verified by the two pause-ownership suites.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Stage the fsck repair pipeline along existing call-graph seams"
       },
       "created_at": "2026-09-02T01:46:08Z",
@@ -31662,10 +31676,24 @@
     },
     "79fb-2c91-241c-4a9d": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context / Problem\n\n`src/rebar/_engine/rebar_reconciler/adapters/jira/backend.py:40-53::_fit_description` has no executable consumer; commit `e0eab05b0cceb` moved behavior to `OutboundFieldMapper(AdfCodec(...))`. `adapters/jira/acli_rest.py:115-126::_direct_rest_put` also has no production caller and applies a wrong universal envelope; live calls use `_direct_rest_put_raw`.\n\nThe shared link canonicalizer prerequisite is bacteroid-computable-vole [rebar:bacteroid-computable-vole].\n\n## Approach\n\nAfter the canonicalizer prerequisite, delete both unreachable helpers and stale mock/inventory/comment ownership. Retain mapper/codec sanitizer ordering and raw PUT body/auth/rate-limit/retry behavior.\n\n## Scope\n\n- Jira backend field helper and mapper ownership prose/tests\n- ACLI REST helper, mocks/inventories/comments, and raw-PUT contract tests\n\n## Testing\n\nRun mapper fit/normalization/sanitizer controls and raw PUT endpoint/body/auth/retry tests.\n\n## Acceptance Criteria\n\n- [ ] `_fit_description` is removed and maintained prose/tests name `OutboundFieldMapper` plus codec composition as owner.\n- [ ] `_direct_rest_put` is removed with unused mocks, inventories, and stale comments.\n- [ ] `_direct_rest_put_raw` retains exact body, authentication, rate-limit, and retry contracts.\n- [ ] Mapper fit/normalize/sanitizer ordering remains covered.\n- [ ] Focused Jira adapter and raw-PUT suites pass.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\nThe Cloud Jira adapter still carries two dead private helpers. backend.py::_fit_description no longer has an executable consumer because the live send-path composition moved to the shared OutboundFieldMapper built with AdfCodec. acli_rest.py::_direct_rest_put also has no production caller and preserves the wrong issue-property envelope shape; the live issue-property, reporter, parent, and unassign flows already use concrete raw PUT writes instead.\n\nBecause both helpers are named in docstrings and held-out inventories, this cleanup must remove the dead code and retarget every surviving prose/test consumer to the real owners rather than leaving dangling references.\n\n## Approach\n\n1. Remove backend.py::_fit_description and keep Cloud description composition owned by the shared OutboundFieldMapper plus RichTextCodec path.\n2. Update every prose/test consumer that still names _fit_description: adapters/jira/jira_fields.py, adapters/jira_family/rich_text.py, adapters/jira/backend.py comment prose, and tests/unit/rebar_reconciler/test_rich_text_seam_heldout.py.\n3. Remove acli_rest.py::_direct_rest_put and keep set_issue_property, set_reporter, set_parent, and unassign semantics on the concrete raw PUT implementations already used in production.\n4. Update every stale _direct_rest_put consumer or inventory: adapters/jira/acli_rest.py comments, adapters/jira/acli.py unassign prose, tests/unit/rebar_reconciler/test_cloud_rate_limit_sweep_heldout.py, and tests/scripts/bridge/test_jira_capability_probe.py.\n5. Re-run focused Jira adapter/rich-text/raw-PUT suites, then lint, typecheck, and the default make test selector, treating test_atomic_completion_close::test_relevant_remote_rejection_never_places_candidate_on_shared_head as the known pre-existing baseline failure if it is the only remaining broad-suite miss.\n\n## Scope\n\n- src/rebar/_engine/rebar_reconciler/adapters/jira/backend.py\n- src/rebar/_engine/rebar_reconciler/adapters/jira/jira_fields.py\n- src/rebar/_engine/rebar_reconciler/adapters/jira_family/rich_text.py\n- src/rebar/_engine/rebar_reconciler/adapters/jira/acli_rest.py\n- src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py\n- tests/unit/rebar_reconciler/test_rich_text_seam_heldout.py\n- tests/unit/rebar_reconciler/test_cloud_rate_limit_sweep_heldout.py\n- tests/scripts/bridge/test_jira_capability_probe.py\n\n## Testing\n\nRun focused rich-text seam, raw-PUT transport, Cloud unassign, capability-probe, and Jira adapter inventory suites; then run make lint, make typecheck, and pytest -m \"not integration and not external\" -x -q.\n\n## Acceptance Criteria\n\n- [ ] backend.py::_fit_description is removed.\n- [ ] Cloud rich-text prose points at the shared OutboundFieldMapper plus RichTextCodec composition instead of the deleted helper.\n- [ ] test_rich_text_seam_heldout.py guards the helper-name cleanup while preserving the send-path composition oracle.\n- [ ] acli_rest.py::_direct_rest_put is removed.\n- [ ] Issue-property, reporter, parent, and unassign paths still use the concrete raw PUT writes they used before the cleanup.\n- [ ] The stale _direct_rest_put inventory/mock sites in test_cloud_rate_limit_sweep_heldout.py and test_jira_capability_probe.py are updated.\n- [ ] Focused Jira adapter/rich-text/raw-PUT suites pass.\n- [ ] make lint and make typecheck pass.\n- [ ] pytest -m \"not integration and not external\" -x -q fails only on the known pre-existing atomic completion baseline test.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Remove dead Jira adapter description and PUT helpers"
       },
       "created_at": "2026-09-02T03:00:35Z",
