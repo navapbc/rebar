@@ -43,10 +43,9 @@ assignee may be a Jira user with no local mapping. rebar then mints a **placehol
 (ghost) identity** storing the raw `(provider, external_id, display_name)`, tagged
 `placeholder`:
 
-- `rebar.create_placeholder(provider, external_id, display_name)` mints the ghost
-  (a keyless, partial-data identity); it is a thin idempotent alias over
-  `rebar.ensure_identity_for(...)`, which resolves the mapping first, so re-running
-  yields **one** identity, not two.
+- `rebar.ensure_identity_for(provider, external_id, display_name)` resolves the
+  mapping first and otherwise mints the ghost (a keyless, partial-data identity),
+  so re-running yields **one** identity, not two.
 - When a real name/mapping later appears, the placeholder is **upgraded in place**
   (keyed on the stable `external_id`) — a human's real identity is never overwritten
   and never forked.

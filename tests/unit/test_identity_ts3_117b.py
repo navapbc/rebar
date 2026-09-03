@@ -5,8 +5,7 @@ The ONLY TS3 test the implementation sees. Pins the end-to-end happy path: with 
 identity holding a valid key and `identity.signing_key` configured, an event written
 through the write seam (in-toto Statement `author_sig`) is classified `verified` by
 `rebar verify-authorship`. The ledger schema, `key_not_valid_at_era`, forged
-`bad-signature`, the untouched verify-signature schema, and `create_placeholder` are held
-out.
+`bad-signature`, and the untouched verify-signature schema are held out.
 """
 
 from __future__ import annotations
@@ -88,3 +87,13 @@ def test_live_signed_event_verifies(store: Path, tmp_path: Path, monkeypatch) ->
     out = (res.stdout + res.stderr).lower()
     assert "verified" in out
     assert "not verified" not in out
+
+
+def test_ensure_identity_for_replaces_public_create_placeholder(store: Path) -> None:
+    assert not hasattr(rebar, "create_placeholder")
+
+    first = rebar.ensure_identity_for("jira", "acct-123", "Jane Doe", repo_root=str(store))
+    again = rebar.ensure_identity_for("jira", "acct-123", "Jane Doe", repo_root=str(store))
+
+    assert first == again
+    assert rebar.is_placeholder(first, repo_root=str(store))
