@@ -7,7 +7,8 @@ The approved-design behaviour the happy path cannot cover:
   from bad-signature / unknown-author);
 - `bad-signature` for a signature that verifies against no key the identity ever held;
 - `verify_signature_result.schema.json` (the SEPARATE verify-signature command) is unchanged;
-- `rebar.create_placeholder` is importable and idempotent.
+- `rebar.create_placeholder` is absent and `rebar.ensure_identity_for` remains the idempotent
+  placeholder entrypoint.
 Observable behaviour only.
 """
 
@@ -265,13 +266,13 @@ def test_verify_signature_schema_includes_key_not_valid_at_era() -> None:
     }
 
 
-# ── AC6: create_placeholder importable + idempotent ───────────────────────────
-def test_create_placeholder_importable_and_idempotent(tmp_path: Path, monkeypatch) -> None:
+# ── AC6: ensure_identity_for is canonical after alias removal ─────────────────
+def test_ensure_identity_for_replaces_create_placeholder(tmp_path: Path, monkeypatch) -> None:
     repo = _init(tmp_path, monkeypatch, "placeholder")
-    assert hasattr(rebar, "create_placeholder"), "rebar.create_placeholder must be importable"
-    first = rebar.create_placeholder("jira", "acct-123", "Jane Doe", repo_root=str(repo))
-    again = rebar.create_placeholder("jira", "acct-123", "Jane Doe", repo_root=str(repo))
-    assert first == again, "create_placeholder must be idempotent on the same mapping"
+    assert not hasattr(rebar, "create_placeholder")
+    first = rebar.ensure_identity_for("jira", "acct-123", "Jane Doe", repo_root=str(repo))
+    again = rebar.ensure_identity_for("jira", "acct-123", "Jane Doe", repo_root=str(repo))
+    assert first == again, "ensure_identity_for must be idempotent on the same mapping"
     state = rebar.show_ticket(first, repo_root=str(repo))
     assert state["ticket_type"] == "identity"
     assert not (state.get("keys") or [])  # keyless placeholder

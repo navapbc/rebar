@@ -38,6 +38,12 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): `rebar.create_placeholder()` has been removed from the Python API.**
+  Use `rebar.ensure_identity_for(provider, external_id, display_name)` instead. The
+  canonical function still resolves an existing mapping first and otherwise mints the
+  same placeholder identity, so the behavior is preserved while the compatibility alias
+  disappears.
+
 - **BREAKING (pre-1.0): `review-code` no longer accepts caller-selected reviewers.**
   The `rebar review-code` CLI, the MCP `review_code` tool, and the
   `rebar.llm.review_code()` library surface all dropped the compatibility-only
