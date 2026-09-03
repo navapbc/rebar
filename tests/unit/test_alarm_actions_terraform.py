@@ -16,7 +16,21 @@ inside its block::
 
     # rebar:allow-actionless-alarm: <reason>
 
-Silence never passes. This is an offline text-contract test on the committed IaC, following
+Silence never passes.
+
+The same file also guards the DEAD-PUBLISHER case (ticket bff5-9163-cddd-4158). Every
+``rebar/host`` metric is an offset-delta published unconditionally by
+``infra/scripts/observability.sh`` on a 5-minute timer: a healthy period publishes ``0``, not
+nothing. So ``treat_missing_data = "notBreaching"`` on such an alarm does not mean "quiet when
+healthy" — it means "quiet when the publisher is DEAD", which is the one state the alarm most
+needs to announce. Every alarm in the ``rebar/host`` namespace must therefore treat missing
+data as breaching, unless its block carries::
+
+    # rebar:allow-missing-data-notbreaching: <reason>
+
+Both markers require a non-empty reason; a bare marker is an error, not an opt-out.
+
+This is an offline text-contract test on the committed IaC, following
 ``tests/unit/test_mirror_lock_terraform.py``; live confirmation is an apply-time observation.
 """
 
@@ -47,6 +61,30 @@ _TREAT_MISSING_DATA_RE = re.compile(
     r'^[ \t]*treat_missing_data[ \t]*=[ \t]*"(?P<value>[^"]+)"', re.MULTILINE
 )
 _OPT_OUT_RE = re.compile(r"#\s*rebar:allow-actionless-alarm:\s*\S+")
+_MISSING_DATA_OPT_OUT_RE = re.compile(r"#\s*rebar:allow-missing-data-notbreaching:\s*\S+")
+
+# Host-published alarms had 13 rebar/host blocks when this guard was written. Same
+# anti-vacuity role as _MIN_EXPECTED_ALARMS: a scope filter that silently matches nothing
+# makes the guard below pass for free.
+_MIN_EXPECTED_HOST_ALARMS = 13
+
+
+def _quoted_attr(raw: str, masked: str, attr: str) -> str | None:
+    """Value of a top-level quoted attribute, ignoring any mention of it in a comment.
+
+    The assignment is located on the MASK (so a commented-out or prose ``namespace =`` line
+    cannot match) and the value is read back from the RAW text at the same offset (masking
+    blanks string bodies, so the value is unreadable there). Indices are aligned by
+    construction — see :func:`_mask_noncode`.
+    """
+    # Stop the mask-side match AT the ``=``: everything after it is blanked in the mask, so a
+    # greedy trailing ``[ \t]*`` would run past the opening quote in the aligned raw text.
+    assign = re.compile(rf"^[ \t]*{re.escape(attr)}[ \t]*=", re.MULTILINE)
+    for hit in assign.finditer(masked):
+        value = re.match(r'[ \t]*"([^"]*)"', raw[hit.end() :])
+        if value is not None:
+            return value.group(1)
+    return None
 
 
 def _mask_noncode(src: str) -> str:
@@ -254,3 +292,98 @@ def test_opt_out_marker_requires_a_reason() -> None:
     """A bare marker with no reason must not silence the guard."""
     assert not _OPT_OUT_RE.search("# rebar:allow-actionless-alarm:")
     assert _OPT_OUT_RE.search("# rebar:allow-actionless-alarm: dashboard-only, see ticket X")
+
+
+def _host_alarm_blocks() -> list[tuple[str, str, str, str]]:
+    """Alarm blocks whose top-level ``namespace`` is the host-published ``rebar/host``.
+
+    Scoped deliberately: ``monitoring_eb6e.tf``'s Bedrock alarm reads an AWS-PUBLISHED metric
+    that is genuinely absent when nothing invokes the model, so notBreaching is correct there.
+    It declares its namespaces inside nested ``metric`` blocks and none at the top level, so it
+    is excluded by construction rather than by an allowlist.
+    """
+    return [
+        block
+        for block in _alarm_blocks()
+        if _quoted_attr(block[2], block[3], "namespace") == "rebar/host"
+    ]
+
+
+def test_parser_actually_finds_the_host_alarms() -> None:
+    """ANTI-VACUITY for the dead-publisher guard: the rebar/host filter must select alarms."""
+    host = _host_alarm_blocks()
+    assert len(host) >= _MIN_EXPECTED_HOST_ALARMS, (
+        f"selected only {len(host)} alarms in the rebar/host namespace, expected at least "
+        f"{_MIN_EXPECTED_HOST_ALARMS}. Either alarms were deleted or the namespace filter "
+        f"stopped matching — the missing-data guard is vacuous until this is resolved."
+    )
+
+
+def test_host_alarms_treat_missing_data_as_breaching() -> None:
+    """A dead publisher must page, not read as health (ticket bff5-9163-cddd-4158).
+
+    Every ``rebar/host`` counter is an offset-delta that ``infra/scripts/observability.sh``
+    publishes UNCONDITIONALLY on its 5-minute timer — the healthy path publishes ``0``, so the
+    metric is continuously present. Missing data therefore does not mean "nothing happened";
+    it means the probe, the timer, or the host is dead. ``notBreaching`` renders exactly that
+    outage as OK.
+    """
+    offenders: list[str] = []
+    for file_name, label, raw, masked in _host_alarm_blocks():
+        if _MISSING_DATA_OPT_OUT_RE.search(raw):
+            continue  # deliberately fails open, and says why
+        value = _quoted_attr(raw, masked, "treat_missing_data")
+        if value != "breaching":
+            offenders.append(f"{file_name}:{label} treats missing data as {value or 'unset'}")
+    assert not offenders, (
+        "rebar/host alarm(s) treat missing data as healthy, so a dead publisher (probe crash, "
+        "stopped timer, dead host) silently clears them to OK: " + ", ".join(offenders) + ". "
+        "The healthy path publishes 0 (observability.sh publishes every counter delta "
+        'unconditionally), so set `treat_missing_data = "breaching"` — and widen the alarm to '
+        "evaluation_periods >= 3 so ordinary timer jitter does not flap it. If an alarm "
+        "genuinely must fail open, add `# rebar:allow-missing-data-notbreaching: <reason>` "
+        "inside its resource block naming what else covers the dead-publisher case."
+    )
+
+
+def test_breaching_host_alarms_are_wide_enough_not_to_flap() -> None:
+    """``breaching`` on a single period turns ordinary timer jitter into a page.
+
+    A live 2-hour sample of the 5-minute probe showed ~22 of 24 periods present: isolated
+    missing periods are NORMAL. With ``breaching``, each one is a breaching datapoint, so an
+    alarm that latches on one datapoint pages on jitter and the operator learns to ignore it.
+    Three evaluation periods is the floor (``root_disk_pressure``'s 300/3/2 shape).
+    """
+    offenders: list[str] = []
+    for file_name, label, raw, masked in _host_alarm_blocks():
+        if _quoted_attr(raw, masked, "treat_missing_data") != "breaching":
+            continue
+        match = re.search(r"^[ \t]*evaluation_periods[ \t]*=[ \t]*(\d+)", masked, re.MULTILINE)
+        periods = int(match.group(1)) if match else 0
+        if periods < 3:
+            offenders.append(f"{file_name}:{label} evaluation_periods={periods or 'unset'}")
+    assert not offenders, (
+        "alarm(s) treat missing data as breaching but evaluate too few periods, so a single "
+        "jittered probe interval pages: " + ", ".join(offenders) + ". Widen to "
+        "evaluation_periods >= 3 (with datapoints_to_alarm sized below it), matching "
+        "root_disk_pressure's period=300 / evaluation_periods=3 / datapoints_to_alarm=2."
+    )
+
+
+def test_missing_data_opt_out_marker_requires_a_reason() -> None:
+    """A bare missing-data marker with no reason must not silence the guard."""
+    assert not _MISSING_DATA_OPT_OUT_RE.search("# rebar:allow-missing-data-notbreaching:")
+    assert _MISSING_DATA_OPT_OUT_RE.search(
+        "# rebar:allow-missing-data-notbreaching: the heartbeat canary owns the dead case"
+    )
+
+
+def test_quoted_attr_ignores_commented_assignments() -> None:
+    """A commented-out attribute must not be read as the block's real value."""
+    raw = (
+        'resource "aws_cloudwatch_metric_alarm" "x" {\n'
+        '  # namespace = "AWS/Bedrock"\n'
+        '  namespace = "rebar/host"\n'
+        "}\n"
+    )
+    assert _quoted_attr(raw, _mask_noncode(raw), "namespace") == "rebar/host"

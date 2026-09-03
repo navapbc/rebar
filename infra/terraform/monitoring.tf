@@ -227,8 +227,14 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_high" {
     mount      = "/var/gerrit"
   }
 
+  # 2 breaching datapoints inside a 3-period window (the root_disk_pressure shape in
+  # monitoring_autodeploy.tf). Widened from a 1-period latch by ticket bff5-9163-cddd-4158:
+  # missing data is breaching here, and a single absent 5-minute probe interval is ordinary
+  # timer jitter (~22 of 24 periods present is the observed norm), so a 1-datapoint latch
+  # would page on it.
   period              = 300
-  evaluation_periods  = 1
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
   threshold           = 85
   comparison_operator = "GreaterThanOrEqualToThreshold"
 

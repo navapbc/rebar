@@ -37,11 +37,15 @@
 # quiet and only a sustained outage pages. Detection latency moves from roughly 40 minutes to
 # roughly 2 hours — the price of the hourly cadence, not of this tuning.
 #
-# treat_missing_data = "notBreaching" — matching the autodeploy alarms. Note what that means
-# here: a bridge that stops running ENTIRELY publishes nothing and will NOT alarm through this
-# path. That case is already owned by the Reconciler Heartbeat Canary (which files a bug ticket
-# on staleness); this alarm is for runs that execute and fail, which the canary cannot see
-# quickly. The two are complements, not substitutes.
+# treat_missing_data = "notBreaching" — the DELIBERATE EXCEPTION among rebar/host alarms, and
+# the only one. Ticket bff5-9163-cddd-4158 moved every other alarm in this namespace to
+# "breaching" because their host-probe counters publish 0 on the healthy path, so silence there
+# means a dead publisher rather than calm. This metric's publisher is NOT that probe: it is the
+# GitHub Actions workflow itself, which cannot publish a 0 for a pass it never ran. A bridge that
+# stops running ENTIRELY therefore publishes nothing and will NOT alarm through this path — and
+# that case is already owned, with a named compensating control, by the Reconciler Heartbeat
+# Canary (which files a bug ticket on staleness). This alarm is for runs that execute and fail,
+# which the canary cannot see quickly. The two are complements, not substitutes.
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "bridge_run_failures" {
@@ -72,6 +76,10 @@ resource "aws_cloudwatch_metric_alarm" "bridge_run_failures" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
+  # rebar:allow-missing-data-notbreaching: the publisher is the GitHub Actions bridge
+  # workflow, not the host probe, so it cannot emit a healthy 0 for a run that never
+  # happened; the stopped-entirely case is owned by the Reconciler Heartbeat Canary. See
+  # the cadence rationale at the top of this file (ticket bff5-9163-cddd-4158).
   treat_missing_data = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]

@@ -37,17 +37,25 @@ resource "aws_cloudwatch_metric_alarm" "mirror_out_of_sync" {
   metric_name = "mirror_out_of_sync"
   statistic   = "Maximum" # the flag is 1/0; alarm if it is 1 across the window
 
-  # Require a SUSTAINED divergence (2 x 5-min periods = ~10 min) so the normal
-  # ~15s post-submit replication lag never pages — only a genuinely stuck mirror does.
+  # Require a SUSTAINED divergence (2 breaching 5-min periods) so the normal ~15s
+  # post-submit replication lag never pages — only a genuinely stuck mirror does. The
+  # window is 3 periods rather than 2 consecutive because treat_missing_data is now
+  # "breaching": a single jittered probe interval is a breaching datapoint, and ~22 of 24
+  # periods present is the observed norm, so 2-of-3 absorbs that jitter while still
+  # latching a real divergence (or a dead probe) inside ~15 minutes.
   period              = 300
-  evaluation_periods  = 2
+  evaluation_periods  = 3
   datapoints_to_alarm = 2
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # Missing data (probe not publishing / a transient fetch failure that publishes
-  # nothing) is treated as not-breaching, matching S5 — the probe fails safe.
-  treat_missing_data = "notBreaching"
+  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The probe
+  # publishes mirror_out_of_sync on EVERY 5-minute run — 0 when the SHAs match, and (since
+  # the same ticket) 1 when the comparison itself could not be made. A healthy period is a
+  # published 0, never silence, so missing data means the probe, its timer, or the host is
+  # dead — and a dead probe cannot notice that GitHub `main` has stopped tracking Gerrit.
+  # The earlier "the probe fails safe" rationale had it backwards: it failed OPEN.
+  treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
