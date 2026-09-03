@@ -144,7 +144,7 @@ rebar transition <id> in_progress closed   # explicit current -> target
 rebar transition <id> closed               # auto-detect current
 ```
 
-Statuses are `idea | open | in_progress | closed | blocked`. Closing a **bug**
+Statuses are `idea | open | in_progress | blocked | closed | archived | deleted`. Closing a **bug**
 requires a bounded `--class <value>` — one of `regression`, `plan_defect`,
 `env_integration`, `flaky`, `preexisting`, `not_a_bug`, `duplicate`, `escalated`,
 `obsolete`, `superseded`, `wontfix`, or `undetermined` (the escape hatch). The
