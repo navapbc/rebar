@@ -309,3 +309,141 @@ def test_container_criterion_rehydrates_children_as_dicts(tmp_path, monkeypatch)
         case for _pid, case in solver.calls if case["id"] == case_id(crit, "no_fire", 0)
     )
     assert pass_case["children"] == [{"ticket_id": "child-c"}]
+
+
+# ── inline-unadmissible criterion (regression: ISF finder crashes the run) ──────────────
+def test_isf_criterion_is_skipped_not_dispatched(tmp_path, monkeypatch):
+    """An ISF finder needs a real session log, so ``eval_solver`` RAISES for it over an inline
+    fixture. If the runner dispatches an ISF candidate to the solver, that ``ValueError``
+    propagates and crashes the WHOLE admission run — losing every not-yet-processed criterion
+    (observed live during the 67aa AC10 admission run, after several agent-tier criteria had
+    already been admitted). The runner must instead SKIP any criterion in
+    ``eval_solver.INLINE_UNADMISSIBLE_CRITERIA`` the way it skips packaged ones: never dispatch
+    it, admit nothing for it, write no spec and no ledger row, record it in the drift report as
+    ``not-inline-admissible`` — and keep processing the remaining criteria."""
+    from rebar.llm.evals import eval_solver
+
+    stub_genai_prices(monkeypatch, usd_per_row=0.01)
+    isf = "ISF"
+    good = "project.alpha"  # sorts AFTER "ISF", so a crash on ISF would starve it
+    assert isf in eval_solver.INLINE_UNADMISSIBLE_CRITERIA
+    fire_plan = "PLAN whose material must fire the criterion — rehydrated from history."
+    pass_plan = "PLAN whose material must stay silent — a clean, well-formed decomposition."
+    rows = [
+        candidate(isf, "fire", 0, "uuid-isf-fire"),
+        candidate(isf, "no_fire", 0, "uuid-isf-pass"),
+        candidate(good, "fire", 0, "uuid-fire"),
+        candidate(good, "no_fire", 0, "uuid-pass"),
+    ]
+    manifest = write_manifest_file(rows, tmp_path)
+    material = {
+        "uuid-isf-fire": sidecar_row("uuid-isf-fire", ticket_id="t-i1", description="isf plan A"),
+        "uuid-isf-pass": sidecar_row("uuid-isf-pass", ticket_id="t-i2", description="isf plan B"),
+        "uuid-fire": sidecar_row("uuid-fire", ticket_id="t-fire", description=fire_plan),
+        "uuid-pass": sidecar_row("uuid-pass", ticket_id="t-pass", description=pass_plan),
+    }
+    # The solver RAISES the exact production error if ever handed an ISF case — proving the run
+    # would crash without the skip; the good criterion is scripted to reproduce and admit.
+    isf_boom = ValueError(
+        "criterion 'ISF' is an ISF finder (needs a session log), "
+        "not runnable over an inline eval fixture"
+    )
+    solver = ScriptedSolver(
+        {
+            case_id(good, "fire", 0): [True, True, False],
+            case_id(good, "no_fire", 0): [False, False, True],
+        },
+        raises={
+            case_id(isf, "fire", 0): isf_boom,
+            case_id(isf, "no_fire", 0): isf_boom,
+        },
+    )
+    p = admission_paths(tmp_path)
+
+    summary = run_admission(
+        manifest,
+        material_index=material,
+        solver=solver,
+        out_dir=p["out_dir"],
+        drift_path=p["drift_path"],
+        ledger_path=p["ledger_path"],
+        cap_usd=250.0,
+        reserve_usd=0.0,
+        epochs=3,
+        packaged_ids=frozenset(),
+        tier_for=lambda _c: CHEAP,
+    )
+
+    # ISF was never dispatched to the solver — the run did not crash.
+    assert all(not cid.startswith(criterion_prompt_id(isf)) for cid in solver.case_ids())
+    # ISF admitted nothing; the good criterion after it in sort order still admitted.
+    assert isf not in summary.admitted
+    assert summary.admitted == [good]
+    # No ISF spec, no ISF ledger row.
+    assert not (p["out_dir"] / f"{criterion_prompt_id(isf)}.eval.yaml").exists()
+    ledger_text = p["ledger_path"].read_text(encoding="utf-8") if p["ledger_path"].exists() else ""
+    assert f"admission-{criterion_prompt_id(isf)}" not in ledger_text
+    # ISF is recorded in the drift report as not-inline-admissible.
+    isf_drift = [d for d in summary.drift if d.criterion == isf]
+    assert isf_drift and all(d.reason == "not-inline-admissible" for d in isf_drift)
+    assert "not-inline-admissible" in p["drift_path"].read_text(encoding="utf-8")
+
+
+def test_isf_skip_row_is_not_duplicated_across_a_resume_run(tmp_path, monkeypatch):
+    """The ISF skip marks the criterion ``processed`` so the drift-report MERGE on a resume run
+    REPLACES its prior ``not-inline-admissible`` row instead of appending a second one. Run the
+    admission over the same paths twice (a resume): the ISF row must appear EXACTLY once in the
+    persisted drift report, not accumulate one per run."""
+    from rebar.llm.evals import eval_solver
+
+    stub_genai_prices(monkeypatch, usd_per_row=0.01)
+    isf = "ISF"
+    good = "project.alpha"
+    assert isf in eval_solver.INLINE_UNADMISSIBLE_CRITERIA
+    fire_plan = "PLAN whose material must fire the criterion — rehydrated from history."
+    pass_plan = "PLAN whose material must stay silent — a clean, well-formed decomposition."
+    rows = [
+        candidate(isf, "fire", 0, "uuid-isf-fire"),
+        candidate(isf, "no_fire", 0, "uuid-isf-pass"),
+        candidate(good, "fire", 0, "uuid-fire"),
+        candidate(good, "no_fire", 0, "uuid-pass"),
+    ]
+    manifest = write_manifest_file(rows, tmp_path)
+    material = {
+        "uuid-isf-fire": sidecar_row("uuid-isf-fire", ticket_id="t-i1", description="isf plan A"),
+        "uuid-isf-pass": sidecar_row("uuid-isf-pass", ticket_id="t-i2", description="isf plan B"),
+        "uuid-fire": sidecar_row("uuid-fire", ticket_id="t-fire", description=fire_plan),
+        "uuid-pass": sidecar_row("uuid-pass", ticket_id="t-pass", description=pass_plan),
+    }
+    p = admission_paths(tmp_path)
+
+    def run(solver: ScriptedSolver) -> None:
+        run_admission(
+            manifest,
+            material_index=material,
+            solver=solver,
+            out_dir=p["out_dir"],
+            drift_path=p["drift_path"],
+            ledger_path=p["ledger_path"],
+            cap_usd=250.0,
+            reserve_usd=0.0,
+            epochs=3,
+            packaged_ids=frozenset(),
+            tier_for=lambda _c: CHEAP,
+        )
+
+    script = {
+        case_id(good, "fire", 0): [True, True, False],
+        case_id(good, "no_fire", 0): [False, False, True],
+    }
+    run(ScriptedSolver(dict((k, list(v)) for k, v in script.items())))
+    # Resume: `good` is now finalized (ledger row) and skipped; ISF is re-skipped.
+    run(ScriptedSolver())
+
+    report = p["drift_path"].read_text(encoding="utf-8")
+    isf_rows = [
+        line
+        for line in report.splitlines()
+        if line.startswith("| ") and line[2:].split(" | ", 1)[0] == isf
+    ]
+    assert len(isf_rows) == 1, f"ISF drift row duplicated across resume: {isf_rows}"
