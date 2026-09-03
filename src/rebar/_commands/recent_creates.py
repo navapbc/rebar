@@ -61,18 +61,10 @@ def normalize_title(title: str) -> str:
 def _journal_lock(rebar_dir: str) -> Iterator[None]:
     """A dedicated, local exclusive lock for the journal RMW — held only for the one
     small-file read-modify-write, never across the store write lock (no ordering hazard)."""
-    import fcntl
+    from rebar._store.fsutil import sibling_exclusive_lock
 
-    os.makedirs(rebar_dir, exist_ok=True)
-    fd = os.open(os.path.join(rebar_dir, _LOCK_NAME), os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+    with sibling_exclusive_lock(os.path.join(rebar_dir, _JOURNAL_NAME), lock_name=_LOCK_NAME):
         yield
-    finally:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        finally:
-            os.close(fd)
 
 
 def _read_entries(journal_path: str) -> list[dict[str, Any]]:

@@ -61,8 +61,43 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 
-__all__ = ["atomic_write"]
+__all__ = ["atomic_write", "sibling_exclusive_lock"]
+
+
+@contextmanager
+def sibling_exclusive_lock(
+    path: str | os.PathLike[str],
+    *,
+    lock_name: str | None = None,
+) -> Iterator[None]:
+    """Hold an exclusive ``fcntl.flock`` on a stable sibling lock file.
+
+    The lock file is intentionally retained after release. A retained empty
+    lock path is harmless, avoids create/unlink races, and gives every process
+    a stable inode-adjacent rendezvous point for read-modify-write sidecars.
+    """
+    import fcntl
+
+    path = os.fspath(path)
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    base = os.path.basename(path)
+    lock_path = os.path.join(directory, lock_name or f"{base}.lock")
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    locked = False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        locked = True
+        yield
+    finally:
+        try:
+            if locked:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def _umask_mode() -> int:

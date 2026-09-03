@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -209,6 +210,36 @@ def test_provenance_preserves_existing_mapping_entries(applier, tmp_path):
     data = json.loads(mapping_path.read_text())
     assert data.get("old-local-id") == "DIG-1", "Pre-existing mapping entry must be preserved"
     assert "DIG-999" in data, "New provenance entry for DIG-999 must be present"
+
+
+def test_concurrent_provenance_writes_merge_distinct_issue_keys(tmp_path):
+    """Independent provenance writes must merge rather than snapshot-clobber."""
+    pass_io = __import__("rebar_reconciler.pass_io", fromlist=["_persist_field_provenance"])
+    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path.parent.mkdir(parents=True, exist_ok=True)
+    mapping_path.write_text(json.dumps({"old-local-id": "DIG-1"}), encoding="utf-8")
+    errors: list[BaseException] = []
+
+    def worker(jira_key: str, label: str) -> None:
+        try:
+            pass_io._persist_field_provenance(mapping_path, jira_key, "labels", [label])
+        except BaseException as exc:  # noqa: BLE001 — surfaced below
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=worker, args=("DIG-LEFT", "left")),
+        threading.Thread(target=worker, args=("DIG-RIGHT", "right")),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
+    assert data["old-local-id"] == "DIG-1"
+    assert data["DIG-LEFT"]["field_provenance"]["labels"] == ["left"]
+    assert data["DIG-RIGHT"]["field_provenance"]["labels"] == ["right"]
 
 
 def test_provenance_multiple_set_valued_fields(applier, tmp_path):

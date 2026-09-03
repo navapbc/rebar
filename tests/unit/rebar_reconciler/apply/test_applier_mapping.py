@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import os
 import sys
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -263,6 +265,36 @@ def test_mapping_write_is_atomic_via_temp_rename(applier, tmp_path):
     assert data.get("tick-atomic1") == "DIG-555"
 
 
+def test_concurrent_mapping_writes_merge_distinct_keys(applier, tmp_path):
+    """Two writers loaded from the same mapping baseline must not clobber keys."""
+    mapping_path = tmp_path / "bridge_state" / "mapping.json"
+    mapping_path.parent.mkdir(parents=True, exist_ok=True)
+    mapping_path.write_text(json.dumps({"old-id": "DIG-1"}), encoding="utf-8")
+
+    errors: list[BaseException] = []
+
+    def worker(local_id: str, jira_key: str) -> None:
+        try:
+            applier._write_mapping_atomic(mapping_path, local_id, jira_key)
+        except BaseException as exc:  # noqa: BLE001 — surfaced below
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=worker, args=("left-id", "DIG-LEFT")),
+        threading.Thread(target=worker, args=("right-id", "DIG-RIGHT")),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
+    assert data["old-id"] == "DIG-1"
+    assert data["left-id"] == "DIG-LEFT"
+    assert data["right-id"] == "DIG-RIGHT"
+
+
 def test_no_partial_mapping_visible_during_write(applier, tmp_path):
     """mapping.json is never in a truncated state: the file appears complete atomically.
 
@@ -279,7 +311,9 @@ def test_no_partial_mapping_visible_during_write(applier, tmp_path):
     assert data["tick-partial1"] == "DIG-200"
 
 
-def test_load_mapping_returns_empty_dict_for_non_dict_json(applier, tmp_path):
+def test_load_mapping_returns_empty_dict_for_non_dict_json(
+    applier, tmp_path, caplog: pytest.LogCaptureFixture
+):
     """F10 regression: _load_mapping must return {} when JSON parses to a non-dict.
 
     Before F10, a corrupt write that produced a list / string / int parsed
@@ -295,8 +329,10 @@ def test_load_mapping_returns_empty_dict_for_non_dict_json(applier, tmp_path):
     loaded = applier._load_mapping(mapping_path)
     assert loaded == {}, f"_load_mapping must return {{}} for non-dict JSON; got {loaded!r}"
 
-    # And a subsequent write must succeed cleanly, replacing the corrupt list
-    applier._write_mapping_atomic(mapping_path, "tick-recover", "DIG-RECOVER")
-    final = json.loads(mapping_path.read_text())
-    assert isinstance(final, dict)
-    assert final == {"tick-recover": "DIG-RECOVER"}
+    # A write must fail open and preserve the prior bytes rather than overwriting
+    # a malformed sidecar based on an untrusted empty fallback.
+    before = mapping_path.read_bytes()
+    with caplog.at_level(logging.WARNING):
+        applier._write_mapping_atomic(mapping_path, "tick-recover", "DIG-RECOVER")
+    assert mapping_path.read_bytes() == before
+    assert str(mapping_path) in caplog.text

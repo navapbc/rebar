@@ -48,6 +48,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from rebar._store.fsutil import sibling_exclusive_lock
 from rebar._store.paths import StorePaths
 
 logger = logging.getLogger(__name__)
@@ -90,19 +91,8 @@ def _max_event_prefix(tracker: str | os.PathLike, ticket_id: str) -> int:
 def _hlc_lock(rebar_dir: Path) -> Iterator[None]:
     """A dedicated, local exclusive lock on ``.rebar/hlc.lock`` — held only for the
     duration of one RMW, never across the store write lock (no ordering hazard)."""
-    import fcntl
-
-    rebar_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = rebar_dir / "hlc.lock"
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+    with sibling_exclusive_lock(rebar_dir / "hlc.state", lock_name="hlc.lock"):
         yield
-    finally:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        finally:
-            os.close(fd)
 
 
 def _read_state(rebar_dir: Path) -> int:

@@ -46,11 +46,10 @@ confirmed" rather than raising, matching ``bindings-retired.json`` and NOT
 
 from __future__ import annotations
 
-import contextlib
+import copy
 import json
 import logging
 import os
-import tempfile
 import time
 from typing import Any
 
@@ -96,6 +95,7 @@ class PeerConfirmationStore:
         self.tracker_dir = str(tracker_dir)
         self.path = os.path.join(self.tracker_dir, STORE_RELATIVE)
         self._records: dict[str, dict[str, Any]] = {}
+        self._baseline_records: dict[str, dict[str, Any]] = {}
         self._dirty = False
         # Did the store FILE not exist when we opened it? The one-shot upgrade
         # backfill keys off this rather than off emptiness: an operator who
@@ -125,6 +125,7 @@ class PeerConfirmationStore:
             self._records = {
                 key: value for key, value in records.items() if isinstance(value, dict)
             }
+        self._baseline_records = copy.deepcopy(self._records)
 
     def __len__(self) -> int:
         return len(self._records)
@@ -188,28 +189,17 @@ class PeerConfirmationStore:
         """Persist the records if anything changed (atomic replace)."""
         if not self._dirty:
             return
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        payload = {"version": SCHEMA_VERSION, "records": self._records}
-        # A UNIQUE per-writer temp (not a shared f"{self.path}.tmp"): two concurrent
-        # passes persisting this sidecar must not collide on one temp path, where the
-        # first os.replace would consume it and the second raise FileNotFoundError —
-        # a silently-lost write (bug b3dd, sibling of the 7dea/d284 fixes).
-        tmp_path = ""
-        try:
-            fd, tmp_path = tempfile.mkstemp(
-                dir=os.path.dirname(self.path),
-                prefix=os.path.basename(self.path) + ".",
-                suffix=".tmp",
-            )
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2, sort_keys=True)
-            os.replace(tmp_path, self.path)
-        except OSError as exc:
-            logger.warning("peer_confirmations: could not persist %s (%r)", self.path, exc)
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
-            return
-        self._dirty = False
+        from rebar_reconciler.sidecar_transactions import persist_record_deltas
+
+        if persist_record_deltas(
+            self.path,
+            version=SCHEMA_VERSION,
+            baseline_records=self._baseline_records,
+            desired_records=self._records,
+            log_label="peer_confirmations",
+        ):
+            self._baseline_records = copy.deepcopy(self._records)
+            self._dirty = False
 
 
 def confirm_from_snapshot(
