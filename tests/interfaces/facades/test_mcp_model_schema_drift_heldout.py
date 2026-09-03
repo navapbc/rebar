@@ -173,22 +173,120 @@ def test_a_property_without_an_enum_on_either_side_is_not_compared() -> None:
 
 
 def test_the_gate_is_green_at_rest() -> None:
-    """AC5. A more capable gate that fails on the committed tree is not shippable; the known
-    gaps are baselined against their own ticket and anything NEW fails."""
+    """AC5. A more capable gate that fails on the committed tree is not shippable; every
+    model now declares its schema's properties and anything NEW fails."""
     from rebar.schemas.check_mcp_models import find_drift
 
     assert find_drift() == {}
 
 
-def test_the_baseline_names_its_tracking_ticket_and_is_not_open_ended() -> None:
-    """A baseline with no ticket is just a suppression. This one must stay attributable."""
+# ── bug 3a02: the baseline is drained, not merely emptied ────────────────────
+
+
+def test_the_known_omission_baseline_is_gone_not_emptied() -> None:
+    """AC2. The four baselined models now declare their schema properties, so the
+    suppression map itself is deleted — an empty dict left behind is an invitation to
+    refill it, and the exception map must name only genuine permissive omissions."""
     from pathlib import Path as _P
 
+    from rebar.schemas import check_mcp_models
+
+    assert not hasattr(check_mcp_models, "BASELINED_OMISSIONS")
     source = _P(check_mcp_models_path()).read_text(encoding="utf-8")
-    assert "3a02-66ea-9229-470c" in source, "the baseline must name the ticket that drains it"
+    assert "BASELINED_OMISSIONS" not in source
+    assert "3a02-66ea-9229-470c" not in source
+
+
+def test_the_formerly_baselined_models_declare_their_schema_properties() -> None:
+    """AC1. Each of the four models covers its canonical schema, minus only the two
+    documented call-shape omissions."""
+    from rebar import _mcp_models
+    from rebar.schemas.check_mcp_models import PERMISSIVE_OMISSIONS, missing_declarations
+
+    for model_name, schema_name in (
+        ("CreateResultOut", "create_result"),
+        ("GateResultOut", "gate_result"),
+        ("NextBatchOut", "next_batch"),
+        ("TicketStateOut", "ticket_state"),
+    ):
+        cls = getattr(_mcp_models, model_name)
+        props = set(schemas.load(schema_name).get("properties", {}))
+        omitted = PERMISSIVE_OMISSIONS.get(model_name, set())
+        assert missing_declarations(set(cls.model_fields), props, omitted) == []
+        assert omitted <= props, f"{model_name} omits a property its schema does not define"
+
+
+def test_every_permissive_omission_states_a_reason() -> None:
+    """AC3. A permissive omission with no stated reason is indistinguishable from an
+    undrained baseline, so each entry is preceded by a comment explaining it."""
+    from pathlib import Path as _P
+
+    from rebar.schemas.check_mcp_models import PERMISSIVE_OMISSIONS
+
+    source = _P(check_mcp_models_path()).read_text(encoding="utf-8")
+    block = source.split("PERMISSIVE_OMISSIONS: dict[str, set[str]] = {", 1)[1]
+    lines = block.split("\n}\n", 1)[0].splitlines()
+    for model_name in PERMISSIVE_OMISSIONS:
+        idx = next(i for i, line in enumerate(lines) if line.strip().startswith(f'"{model_name}"'))
+        assert lines[idx - 1].strip().startswith("#"), (
+            f"{model_name}'s permissive omission states no reason"
+        )
+
+
+def test_ticket_state_timestamps_are_declared_js_safe() -> None:
+    """The nanosecond stamps must accept the decimal-STRING wire form js_safe_result
+    produces (bug 6fe7); an int-only annotation would coerce them back to a lossy
+    bare number when FastMCP re-validates the result."""
+    from rebar._mcp_models import TicketStateOut
+
+    big = "1787856371950409998"
+    row = TicketStateOut.model_validate(
+        {
+            "ticket_id": "a",
+            "ticket_type": "bug",
+            "title": "t",
+            "status": "open",
+            "priority": 2,
+            "created_at": big,
+            "updated_at": big,
+            "last_reopened_at": big,
+            "source_created_at": big,
+        }
+    )
+    dumped = row.model_dump()
+    for field in ("created_at", "updated_at", "last_reopened_at", "source_created_at"):
+        assert dumped[field] == big, field
 
 
 def check_mcp_models_path() -> str:
     import rebar.schemas.check_mcp_models as mod
 
     return mod.__file__
+
+
+def test_a_declared_nullless_property_is_omitted_when_unset_not_emitted_as_null() -> None:
+    """Declaring a property whose canonical type admits no null (`const: true`, a bare
+    `string`, an enum `$ref`, `integer`) must not put an explicit null on the wire — that
+    null would make the payload violate the very schema the declaration mirrors."""
+    from rebar._mcp_models import GateResultOut, TicketStateOut
+
+    row = TicketStateOut.model_validate(
+        {
+            "ticket_id": "a",
+            "ticket_type": "bug",
+            "title": "t",
+            "status": "open",
+            "priority": 2,
+            "tags": [],
+        }
+    ).model_dump()
+    for absent in ("creation_channel_inferred", "detected_by", "close_class", "close_reason"):
+        assert absent not in row, absent
+    schemas.validator("ticket_state").validate(row)
+
+    check_ac = GateResultOut.model_validate(
+        {"verdict": "pass", "reason": "1 criteria lines", "criteria_count": 1, "passed": True}
+    ).model_dump()
+    assert check_ac["criteria_count"] == 1
+    assert "line_count" not in check_ac
+    schemas.validator("gate_result").validate(check_ac)
