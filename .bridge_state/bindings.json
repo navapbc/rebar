@@ -19477,10 +19477,24 @@
     },
     "4ac6-9eb3-b0a5-408f": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nThe plan-review gate source is commit `952f0825321c755f41edce412ad1fe9f1db9268d`. At that commit, `git show 952f0825321c755f41edce412ad1fe9f1db9268d:src/rebar/_mcp_health.py | wc -l` reports 712 lines. It owns startup handshake, health routing, in-flight instrumentation, and startup checks. The separate `src/rebar/_mcp_serving.py` is 207 lines. It owns `run_mcp`, `run_http_with_grace`, SIGTERM handling, and shutdown. `_mcp_health` re-exports that serving cluster at its file end. `_mcp_serving` imports `install_startup_handshake` from `_mcp_health` and calls it before uvicorn serves.\n\n## End State\n\nA leaf `_mcp_startup_handshake.py` owns only the cohesive initialize-probe call graph: probe-host selection, ASGI request drive, bounded result record, lifespan wrapping, and handshake status. `_mcp_health` remains the health facade. It re-exports existing handshake names. `_mcp_serving` remains the serving facade. It retains HTTP transport, SIGTERM draining, and the existing `install_startup_handshake` call through `_mcp_health`. `mcp_server.py` retains facade-level imports.\n\n## Implementation Plan\n\n1. Before coding, recensus the checkout. Record on this ticket the HEAD SHA, the line counts, and the command output above. Treat `952f...` as the reviewed-source attestation.\n2. Move the handshake-only cluster into `_mcp_startup_handshake.py`. The new leaf must not import `_mcp_health` or `_mcp_serving`.\n3. Import plus re-export handshake names through `_mcp_health` before its existing end-of-file serving re-export. Preserve current direct imports and monkeypatch targets.\n4. Keep `_mcp_serving` as the only owner of `run_mcp`, `run_http_with_grace`, `make_sigterm_handler`, and `drain_then_exit`. Preserve its `_mcp_health.install_startup_handshake` import/call shape so the established import cycle remains acyclic.\n5. Do not move health routing, gauge instrumentation, startup store/op-cert checks, HTTP transport, SIGTERM drainage, or shutdown behavior.\n6. Prove the handshake success, non-200, exception, timeout, host selection, lifespan ordering, facade re-export, transport, and shutdown contracts with focused tests.\n\n## File Impact\n\n- `src/rebar/_mcp_startup_handshake.py` \u2014 new handshake-only leaf\n- `src/rebar/_mcp_health.py` \u2014 health facade imports plus handshake re-exports\n- `src/rebar/_mcp_serving.py` \u2014 preserved serving import/call seam plus re-export-cycle contract\n- `src/rebar/mcp_server.py` \u2014 only if facade import/annotation verification requires a change\n- `tests/unit/test_mcp_health_startup_handshake.py` \u2014 handshake result and facade compatibility\n- `tests/interfaces/facades/test_mcp_http_transport.py` \u2014 pre-serve handshake, HTTP transport, and graceful-shutdown behavior\n\nCascade flag: true. Re-run semantic, string, dynamic-import, and monkeypatch consumer census at implementation start.\n\n## Acceptance Criteria\n\n- [ ] The implementation ticket comment records the current HEAD SHA.\n- [ ] The comment records `_mcp_health.py` plus `_mcp_serving.py` line counts.\n- [ ] The comment records the gate-pinned `952f0825321c755f41edce412ad1fe9f1db9268d` source attestation.\n- [ ] Only the startup-handshake call graph moves into `_mcp_startup_handshake.py`.\n- [ ] `_mcp_startup_handshake.py` has no import of `_mcp_health`.\n- [ ] `_mcp_startup_handshake.py` has no import of `_mcp_serving`.\n- [ ] `_mcp_health` re-exports every existing handshake name.\n- [ ] `_mcp_serving` keeps `run_mcp`.\n- [ ] `_mcp_serving` keeps `run_http_with_grace`.\n- [ ] `_mcp_serving` keeps `make_sigterm_handler`.\n- [ ] `_mcp_serving` keeps `drain_then_exit`.\n- [ ] `_mcp_serving` retains its `install_startup_handshake` call through `_mcp_health` before uvicorn serves.\n- [ ] Existing direct imports plus monkeypatch targets continue resolving through `_mcp_health`.\n- [ ] Handshake success preserves its result record.\n- [ ] Handshake non-200 preserves its result record.\n- [ ] Handshake exception preserves its result record.\n- [ ] Handshake timeout preserves its result record.\n- [ ] Public-host selection preserves its existing output.\n- [ ] Lifespan ordering preserves pre-serve handshake execution.\n- [ ] Health routing remains in `_mcp_health`.\n- [ ] Gauge instrumentation remains in `_mcp_health`.\n- [ ] Startup store/op-cert checks remain in `_mcp_health`.\n- [ ] HTTP transport remains in `_mcp_serving`.\n- [ ] SIGTERM draining remains in `_mcp_serving`.\n- [ ] Focused MCP unit tests pass.\n- [ ] Focused MCP facade tests pass.\n- [ ] Module-size checks pass.\n- [ ] Complexity checks pass.\n- [ ] Lint passes.\n- [ ] Typecheck passes.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Extract only the MCP startup-handshake call-graph unit"
       },
       "created_at": "2026-09-02T01:46:13Z",
@@ -20246,9 +20260,31 @@
       "updated_at": "2026-08-21T23:36:13Z"
     },
     "4d53-b972-bcda-4f1f": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\n`src/rebar/llm/config_readers.py` already owns the extracted `_llm_*` reader helpers from ticket 02b7. The remaining janitor target is the still-inline composition block inside `LLMConfig.from_env`: after tombstone checks, table/CLI loading, and runtime-path resolution, `from_env` still spells out a long sequence of per-field `_llm_str` / `_llm_int` / `_llm_float` calls and overlap assignments before the final `cls(...)`.\n\n## Approach\n\nKeep `LLMConfig.from_env` as the sole precedence/composition facade and keep the target basename `src/rebar/llm/config_readers.py` unchanged. Extract cohesive helper assemblers in that existing leaf for the current field groups so `from_env` shrinks to orchestration: load table/CLI state, resolve runtime-only roots and tombstones, call the grouped assemblers, and construct `cls(...)`. Do not introduce new sibling module names; existing guards and AST tests already pin `config_readers.py` as the composition-root leaf.\n\n## Scope\n\n- `src/rebar/llm/config.py`\n- `src/rebar/llm/config_readers.py`\n- `tests/unit/test_config_llm.py`\n- `tests/unit/test_llm_config_pointer.py`\n- `tests/unit/test_llm_config_gate_root.py`\n\n## Testing\n\nRun focused config precedence/default/error tests that cover config-file, environment, explicit override, malformed value, missing value, cross-field precedence, and the monkeypatch-visible import surface, plus lint/typecheck/module-size/complexity gates.\n\n## Acceptance Criteria\n\n- [ ] Cohesive helper assemblers for the existing field groups move the repetitive per-field resolution out of `LLMConfig.from_env` while reusing the current `_llm_*` readers in `config_readers.py`.\n- [ ] `LLMConfig.from_env` remains the only place that performs tombstone enforcement, loads the merged config table/CLI overrides, resolves runtime-only repo/tickets roots, and constructs `LLMConfig`.\n- [ ] The `config_readers.py` basename and monkeypatch-visible behavior stay unchanged, and defaults, validation failures, and precedence remain value-equivalent.\n- [ ] Focused config tests plus lint, typecheck, module-size, and complexity gates pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Extract table-driven LLM config readers"
+      },
       "created_at": "2026-09-03T14:43:40Z",
       "jira_id": "4591590",
       "jira_key": "REB-4519",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-03T14:43:43Z"
     },
@@ -23083,9 +23119,31 @@
       "updated_at": "2026-08-15T14:59:52Z"
     },
     "57c4-4834-2a7a-4a05": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\n\n`fixture_selection.select_candidates` groups a criterion's matched findings by `norm_id` and also compares finding `norm_id` sets across a ticket's successive reviews. On the REAL committed plan-review corpus these paths raise `KeyError: 'norm_id'`. `select_from_corpus` reconstructs findings from every `REVIEW_RESULT` sidecar event across ALL committed history (`_review_findings` -> `corpus._load_ticket_events`, keyed by review-event uuid). The `norm_id` field is emitted by the sidecar `_slim` projection UNCONDITIONALLY \u2014 current `_slim` (`sidecar.py:664`, `\"norm_id\": norm_id(f)`) writes it for every finding regardless of tier, and `norm_id()` (`sidecar.py:311-319`) never returns None. That line was ADDED by commit `314e4191c826` (2026-06-29). Sidecar events committed BEFORE that commit predate the field, so their reconstructed findings carry no `norm_id` key at all \u2014 the crash is a schema-VINTAGE gap in historical records, NOT current `_slim` tier behavior.\n\nEvidence (scan of the tickets tracker via `_review_findings`, recorded here as the `[non-codebase]` provenance attestation for this root-cause claim): 1437 of 79914 criterion-naming findings lack a `norm_id` key; ALL 1437 have a review-event timestamp before 2026-06-29 and ZERO are after; they span BOTH tiers (LLM 1299, DET 138). The vintage cutoff matches commit `314e4191c826` exactly. The first such finding aborts the whole candidate-selection pass, so the fixture-mining pipeline (epic 65dd-e93b-666a-4caa) cannot run over real history at all \u2014 it blocks ticket 67aa's live admission run (AC10).\n\nA norm-less finding is subscripted `finding[\"norm_id\"]` at SIX sites reached from `select_candidates`: the `_fire_rows` grouping (`fixture_selection.py:234`) AND \u2014 via `_author_response_norm_ids` -> `classify_finding_survival` \u2014 `labels.py:167,169`, plus `_criterion_sets`/churn `labels.py:184,220,221`. A fix scoped to `_fire_rows` alone would leave the `classify_finding_survival` path (reached whenever a ticket has two reviews with differing `material_fingerprint`) still crashing.\n\n## Approach\n\nNormalize norm-less findings out ONCE at the `select_candidates` entry \u2014 the single point every eligible review passes through before ANY norm-keyed consumer. At the top of `select_candidates`, rebuild each review as `{**review, \"findings\": [f for f in review[\"findings\"] if f.get(\"norm_id\") is not None]}`, then proceed unchanged. Because `_eligible_reviews`, `_fire_rows`, `_no_fire_rows`, and `_author_response_norm_ids` all derive from this list, the single normalization covers all six subscript sites \u2014 and it protects BOTH the public `select_candidates` (direct callers / tests) and `select_from_corpus` (which calls it).\n\nRationale for the entry-boundary normalization over scattered per-consumer defensive reads: a finding with no `norm_id` has no stable cross-review identity, so it cannot participate in ANY norm-keyed operation (reproduction-consensus grouping, author-response survival, or per-criterion churn) \u2014 excluding it once at the entry is both the minimal single-point fix and semantically correct. For every norm-BEARING finding the normalized lists are byte-identical to today, so all existing selection behavior is unchanged. No change to `labels.py` is needed: the boundary keeps norm-less findings from ever reaching it.\n\n## Acceptance Criteria\n\n- [ ] `select_candidates` no longer raises `KeyError: 'norm_id'` when an eligible review's findings\n      include a criterion-naming finding with no `norm_id` key, exercised through BOTH norm-keyed\n      paths: `_fire_rows` grouping AND the `_author_response_norm_ids` -> `classify_finding_survival`\n      survival path (two reviews of one ticket with differing `material_fingerprint`, at least one\n      norm-less finding) \u2014 the run returns rows without error (`pytest`).\n- [ ] A finding lacking `norm_id` contributes NO candidate and does not perturb the candidates\n      produced by norm-bearing findings for the same criterion: the emitted rows for an eligible\n      set containing a norm-less finding equal the rows produced when that finding is absent\n      (`pytest`).\n- [ ] Existing norm-bearing selection behavior is unchanged: the module's current\n      `test_fixture_selection` suite still passes (`pytest`).\n- [ ] Selection remains deterministic \u2014 two `select_candidates` runs over the same eligible set\n      return byte-identical manifest rows (`pytest`).\n\n## Definition of Done\n\n`make lint` / `make typecheck` / targeted `pytest` pass; the fix lands through Gerrit (`LLM-Review +1` and `Verified +1`); the fixture-mining selection pass runs over the real corpus without the `norm_id` KeyError.\n\n## File impact\n\n- `src/rebar/llm/evals/fixture_selection.py` \u2014 normalize norm-less findings out at the\n  `select_candidates` entry (single point; covers `_fire_rows` + the `classify_finding_survival`\n  and churn paths in `labels.py`).\n- `tests/unit/test_fixture_selection.py` \u2014 held-out regression: a norm-less finding routed\n  through both the fire-grouping and the author-response/survival paths.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "fixture_selection._fire_rows KeyError on findings without norm_id blocks real-corpus selection"
+      },
       "created_at": "2026-09-03T14:43:50Z",
       "jira_id": "4591591",
       "jira_key": "REB-4520",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-03T14:43:58Z"
     },
@@ -35013,10 +35071,24 @@
     },
     "86c0-59ec-a28b-4f7c": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nAt the audited snapshot, `src/rebar/llm/config.py` was 799 lines and `LLMConfig.from_env` occupied lines 566-768. ADR 0056 and closed ticket `candied-senseless-squirrel` anticipated this next headroom breach.\n\n## Approach\n\nKeep `LLMConfig.from_env` as the sole precedence and composition facade. Extract cohesive table-driven readers for model/provider, budgets, tracing, web, and path settings into focused sibling modules. Preserve current precedence, validation, defaults, and patch-visible exports during this extraction; the separately ADR-gated internal-shim work may later migrate private compatibility paths.\n\n## Scope\n\n- `src/rebar/llm/config.py`\n- focused LLM configuration reader siblings\n- `tests/unit/test_config_llm.py` and config precedence/patch tests\n\nCascade flag: true. Recensus semantic, string, dynamic-import, environment, and monkeypatch references.\n\n## Testing\n\nUse table-driven cases for config-file, environment, explicit override, malformed value, missing value, and cross-field precedence.\n\n## Acceptance Criteria\n\n- [ ] Model/provider, budget, tracing, web, and path parsing are owned by cohesive readers without duplicating precedence logic.\n- [ ] `LLMConfig.from_env` remains the only composition/precedence facade.\n- [ ] Existing defaults, validation failures, environment/config precedence, and patch-visible behavior are byte/value equivalent.\n- [ ] Focused config tests plus module-size, complexity, lint, and typecheck gates pass.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Extract cohesive table-driven LLM configuration readers"
       },
       "created_at": "2026-09-02T01:46:18Z",
@@ -53497,10 +53569,24 @@
     },
     "cdc4-2896-50a8-4af3": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\n`src/rebar/_lib_identity.py:105` retains `rebar.create_placeholder(...)` as a compatibility alias for `rebar.ensure_identity_for(...)` and `_commands.identity.ensure_identity_for`. The maintainer approved removal of all Python/MCP operation aliases.\n\n## Approach\n\nMigrate every repository consumer, documentation example, dynamic reference, and monkeypatch target to `ensure_identity_for`, then delete the old public alias and export. Record the intentional pre-1.0 break and preserve the canonical identity result/error behavior.\n\n## Scope\n\n- `src/rebar/_lib_identity.py`, public exports, and canonical identity command\n- docs/examples/changelog and Python API tests\n- static, string, dynamic, and monkeypatch consumers\n\n## Testing\n\nAssert the old alias is absent/rejected at the Python boundary; run canonical identity creation, existing-identity, and validation-failure controls.\n\n## Acceptance Criteria\n\n- [ ] `create_placeholder` is absent from public Python exports, docs, examples, and repository consumers.\n- [ ] Every former consumer uses `ensure_identity_for` and its canonical command owner.\n- [ ] The canonical operation preserves identity creation, existing-identity, and validation-failure behavior.\n- [ ] Changelog/release material identifies the pre-1.0 breaking replacement and focused identity tests pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Remove the create_placeholder Python compatibility alias"
       },
       "created_at": "2026-09-02T03:01:56Z",
