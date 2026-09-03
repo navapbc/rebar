@@ -32,7 +32,12 @@ LEDGER_RESERVE_USD = 30.0
 #: Flat historical per-sample cost estimate, in USD, keyed by eval tier. Not a
 #: token-derived prediction -- a pre-flight number cheap enough to compute before any
 #: LLM call is made.
-PER_SAMPLE_ESTIMATE_USD = {"tier1": 0.5, "tier2": 3.4}
+PER_SAMPLE_ESTIMATE_USD = {
+    "tier1": 0.5,
+    "tier2": 3.4,
+    "criteria-eval-cheap": 0.03,
+    "criteria-eval-agent": 0.25,
+}
 
 #: Default location of the committed ledger JSONL file (one row per finalized eval run).
 DEFAULT_LEDGER_PATH = "docs/experiments/plan-review-gate/replay/ledger.jsonl"
@@ -78,19 +83,30 @@ def _spent_so_far(ledger_path: str) -> float:
     return sum(float(row.get("usd", 0.0) or 0.0) for row in _read_ledger(ledger_path))
 
 
-def reserve(estimate_usd: float, *, ledger_path: str = DEFAULT_LEDGER_PATH) -> None:
+def reserve(
+    estimate_usd: float,
+    *,
+    ledger_path: str = DEFAULT_LEDGER_PATH,
+    cap_usd: float | None = None,
+    reserve_usd: float | None = None,
+) -> None:
     """Refuse a run whose ``estimate_usd`` would exceed the remaining budget.
 
-    Remaining budget is the cap, minus the reserve headroom, minus everything already
-    recorded in the ledger. Raises :class:`BudgetExceeded` naming the remaining
-    allocation when the estimate does not fit; otherwise returns ``None``.
+    Remaining budget is ``cap_usd``, minus the ``reserve_usd`` headroom, minus
+    everything already recorded in the ledger. ``cap_usd``/``reserve_usd`` default to the
+    module globals (resolved live at call time, so patching the globals still takes
+    effect) when omitted; a sibling epic passes its own ceiling. Raises
+    :class:`BudgetExceeded` naming the remaining allocation when the estimate does not
+    fit; otherwise returns ``None``.
     """
+    cap = LEDGER_CAP_USD if cap_usd is None else cap_usd
+    reserve_headroom = LEDGER_RESERVE_USD if reserve_usd is None else reserve_usd
     spent = _spent_so_far(ledger_path)
-    remaining = LEDGER_CAP_USD - LEDGER_RESERVE_USD - spent
+    remaining = cap - reserve_headroom - spent
     if estimate_usd > remaining:
         raise BudgetExceeded(
             f"estimate ${estimate_usd:.2f} exceeds remaining allocation ${remaining:.2f} "
-            f"(cap ${LEDGER_CAP_USD:.2f}, reserve ${LEDGER_RESERVE_USD:.2f}, "
+            f"(cap ${cap:.2f}, reserve ${reserve_headroom:.2f}, "
             f"spent ${spent:.2f})"
         )
 
@@ -190,14 +206,17 @@ def reconcile(
     )
 
 
-def print_summary(*, ledger_path: str = DEFAULT_LEDGER_PATH) -> str:
+def print_summary(*, ledger_path: str = DEFAULT_LEDGER_PATH, cap_usd: float | None = None) -> str:
     """Multi-line report: total spent, remaining allocation, and a per-tier breakdown.
 
-    All dollar amounts render with exactly two decimal places.
+    ``cap_usd`` defaults to the module global (resolved live at call time) when omitted;
+    a sibling epic passes its own ceiling so the reported headroom reflects that cap. All
+    dollar amounts render with exactly two decimal places.
     """
+    cap = LEDGER_CAP_USD if cap_usd is None else cap_usd
     rows = _read_ledger(ledger_path)
     spent = sum(float(row.get("usd", 0.0) or 0.0) for row in rows)
-    remaining = LEDGER_CAP_USD - spent
+    remaining = cap - spent
     per_tier: dict[str, float] = {}
     for row in rows:
         tier = str(row.get("tier", "?"))
@@ -206,7 +225,7 @@ def print_summary(*, ledger_path: str = DEFAULT_LEDGER_PATH) -> str:
     lines = [
         "Eval budget ledger",
         f"  spent:     ${spent:.2f}",
-        f"  cap:       ${LEDGER_CAP_USD:.2f}",
+        f"  cap:       ${cap:.2f}",
         f"  remaining: ${remaining:.2f}",
         "  by tier:",
     ]
