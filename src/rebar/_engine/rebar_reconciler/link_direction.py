@@ -48,6 +48,44 @@ def resolve_inbound_link(link: dict[str, Any]) -> tuple[str | None, str | None]:
     return None, None
 
 
+def canonicalize_jira_issue_links(
+    remote_fields: dict[str, Any],
+) -> list[tuple[str | None, str, str]]:
+    """Canonicalize Jira ``issuelinks`` into ``(relation, remote_key, vendor_type)``.
+
+    The outbound diffing ports compare in provider-neutral relation vocabulary, but
+    Jira-family transports expose raw ``issuelinks`` payloads. This helper owns the
+    shared translation for both Cloud and Data Center: it reuses
+    :func:`resolve_inbound_link`, falls back to a direction-agnostic peer-key scan
+    for unmapped-but-keyed vendor types, and de-duplicates by
+    ``(vendor_type, remote_key)`` regardless of direction.
+    """
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str | None, str, str]] = []
+    for link in remote_fields.get("issuelinks") or []:
+        if not isinstance(link, dict):
+            continue
+        link_type = link.get("type") or {}
+        type_name = link_type.get("name") if isinstance(link_type, dict) else None
+        if not type_name:
+            continue
+        other_key, relation = resolve_inbound_link(link)
+        if other_key is None:
+            for side_key in ("inwardIssue", "outwardIssue"):
+                side = link.get(side_key)
+                if isinstance(side, dict) and side.get("key"):
+                    other_key = side["key"]
+                    break
+        if not other_key:
+            continue
+        dedup_key = (type_name, other_key)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        out.append((relation, other_key, type_name))
+    return out
+
+
 def observed_peer_deps(
     issuelinks: Any, get_local_id: Callable[[str], str | None]
 ) -> set[tuple[str, str]]:
