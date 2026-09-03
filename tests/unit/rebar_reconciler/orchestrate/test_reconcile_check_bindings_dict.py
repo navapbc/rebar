@@ -171,3 +171,64 @@ def test_reconcile_check_uses_binding_store_module_when_available(tmp_path, monk
         f"got: {captured.get('binding_store_class')}"
     )
     assert captured["repo_root"] == tmp_path
+
+
+def test_reconcile_check_writes_report_under_resolved_tracker_store(tmp_path, monkeypatch):
+    """The JSON report path must follow the resolved tracker store, not repo_root."""
+    main_mod = _load_main()
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    external_store = tmp_path / "outside" / "mcp-tickets"
+    monkeypatch.setenv("REBAR_TRACKER_DIR", str(external_store))
+
+    captured: dict[str, object] = {}
+
+    class _FakeRcMod:
+        @staticmethod
+        def reconcile_check(local_tickets, jira_snapshot, binding_store):
+            return {
+                "total_bindings": 0,
+                "checked": 0,
+                "in_sync": 0,
+                "discrepancies": [],
+                "orphaned_bindings": [],
+                "orphaned_jira": [],
+                "unbound_local": 0,
+                "unbound_jira": 0,
+            }
+
+        @staticmethod
+        def load_local_tickets(tracker_dir):
+            captured["tracker_dir"] = tracker_dir
+            return []
+
+        @staticmethod
+        def format_report(report):
+            return "fake report"
+
+        @staticmethod
+        def write_report_json(report, path):
+            captured["output_path"] = path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}")
+
+    class _FakeFetcher:
+        @staticmethod
+        def compute_snapshot(pass_id, repo_root):
+            return {}
+
+    def _fake_try_load_step(name):
+        if name == "reconcile_check":
+            return _FakeRcMod
+        if name == "fetcher":
+            return _FakeFetcher
+        if name == "binding_store":
+            return None
+        return None
+
+    monkeypatch.setattr(main_mod, "_try_load_step", _fake_try_load_step)
+
+    rc = main_mod._run_reconcile_check(repo_root)
+    assert rc == 0
+    assert captured["tracker_dir"] == external_store
+    assert captured["output_path"] == external_store / ".bridge_state" / "reconcile-check.json"

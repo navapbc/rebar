@@ -207,6 +207,31 @@ def test_confirmed_404_state_sources_dangling(fsck, tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.scripts
+def test_absent_local_without_confirmed_404_stays_informational(fsck, tmp_path):
+    # Regression guard for the 2571 refactor: a confirmed binding absent from the
+    # windowed snapshot but never confirmed 404 stays informational even when the
+    # local ticket is absent from the reducer output.
+    tracker = tmp_path / ".tickets-tracker"
+    _write_bindings(
+        tracker,
+        bindings={"loc-gone": _confirmed("REB-404")},
+        reverse={"REB-404": "loc-gone"},
+    )
+
+    drift = fsck.audit_binding_drift(
+        tracker,
+        local_states=[],
+        jira_snapshot={},
+    )
+
+    assert drift["local_gone"] == []
+    assert drift["dangling"] == []
+    assert drift["orphaned_bindings"] == []
+    assert drift["absent_in_window_unprobed"] == [{"local_id": "loc-gone", "jira_key": "REB-404"}]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
 def test_unbound_jira_native_flagged_with_snapshot(fsck, tmp_path):
     # AC1(c) — a Jira-native issue in the snapshot with no binding is unbound_jira.
     tracker = tmp_path / ".tickets-tracker"
@@ -221,6 +246,58 @@ def test_unbound_jira_native_flagged_with_snapshot(fsck, tmp_path):
     )
     assert drift["unbound_jira"] == [{"jira_key": "REB-532"}]
     assert drift["dangling"] == []  # REB-1 is present + bound + active → no drift
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_reconcile_check_compatibility_buckets_surface_in_fsck(fsck, tmp_path):
+    tracker = tmp_path / ".tickets-tracker"
+    entry = _confirmed("REB-404")
+    entry["absent_404_count"] = 1
+    _write_bindings(
+        tracker,
+        bindings={
+            "loc-bound": _confirmed("REB-1"),
+            "loc-gone": _confirmed("REB-2"),
+            "loc-confirmed-absent": entry,
+        },
+        reverse={
+            "REB-1": "loc-bound",
+            "REB-2": "loc-gone",
+            "REB-404": "loc-confirmed-absent",
+        },
+    )
+    drift = fsck.audit_binding_drift(
+        tracker,
+        local_states=[
+            {"ticket_id": "loc-bound", "status": "in_progress", "archived": False},
+            {"ticket_id": "loc-unbound", "status": "open", "archived": False},
+        ],
+        jira_snapshot={
+            "REB-1": {"status": "In Progress"},
+            "REB-777": {
+                "summary": "orphaned",
+                "labels": ["team:platform", "rebar-id-lost-binding"],
+            },
+        },
+    )
+
+    assert drift["orphaned_bindings"] == [
+        {"local_id": "loc-confirmed-absent", "jira_key": "REB-404", "reason": "confirmed_404"},
+    ]
+    assert drift["orphaned_jira"] == [{"jira_key": "REB-777"}]
+    assert drift["unbound_local"] == [{"local_id": "loc-unbound"}]
+    assert drift["absent_in_window_unprobed"] == [{"local_id": "loc-gone", "jira_key": "REB-2"}]
+
+    report = fsck._format_report(
+        {"unknown_event_types": [], "binding_drift": drift, "store_integrity": []}
+    )
+    assert (
+        "orphaned_bindings: local=loc-confirmed-absent jira_key=REB-404 reason=confirmed_404"
+        in report
+    )
+    assert "orphaned_jira: jira_key=REB-777" in report
+    assert "unbound_local: local=loc-unbound" in report
 
 
 @pytest.mark.unit

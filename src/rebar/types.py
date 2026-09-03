@@ -444,6 +444,7 @@ class BridgeStatus(TypedDict):
     completed_at: NotRequired[str | None]
     lock_fence: NotRequired[int | None]
     detail: NotRequired[dict[str, Any]]
+    reconcile_diagnostics: NotRequired[dict[str, Any]]
     lock_oid: NotRequired[str]
     lock_holder: NotRequired[str]
     lock_lease_secs: NotRequired[float]
