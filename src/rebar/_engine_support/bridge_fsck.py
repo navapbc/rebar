@@ -32,6 +32,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 from rebar._errors import RebarError
 from rebar._mcp_errors import js_safe_dumps
@@ -325,6 +326,9 @@ def _empty_binding_drift() -> dict:
         "local_gone": [],
         "retired_overlap": [],
         "dangling": [],
+        "orphaned_bindings": [],
+        "orphaned_jira": [],
+        "unbound_local": [],
         # ADR 0028 §1: snapshot-window absence is NOT a deletion signal. The
         # offline audit never probes, so un-probed window-absent bindings land
         # here — informational only, NEVER alerting (see _ALERTING_DRIFT_CLASSES).
@@ -333,10 +337,193 @@ def _empty_binding_drift() -> dict:
     }
 
 
+def _append_orphaned_binding(
+    drift: dict[str, Any], *, local_id: str, jira_key: str, reason: str
+) -> None:
+    drift["orphaned_bindings"].append(
+        {"local_id": local_id, "jira_key": jira_key, "reason": reason}
+    )
+
+
+def _append_local_gone(
+    drift: dict[str, Any],
+    *,
+    local_id: str,
+    jira_key: str,
+    absent_404: int = 0,
+) -> None:
+    drift["local_gone"].append({"local_id": local_id, "jira_key": jira_key})
+    if absent_404 > 0:
+        drift["dangling"].append(
+            {"local_id": local_id, "jira_key": jira_key, "absent_404_count": absent_404}
+        )
+    _append_orphaned_binding(
+        drift,
+        local_id=local_id,
+        jira_key=jira_key,
+        reason="confirmed_404" if absent_404 > 0 else "local_gone",
+    )
+
+
+def _audit_binding_without_snapshot(
+    drift: dict[str, Any],
+    *,
+    local_id: str,
+    jira_key: str,
+    local: dict[str, Any] | None,
+    classify_mod: Any,
+) -> None:
+    lstate = classify_mod.local_state(local)
+    if lstate is classify_mod.LocalState.TERMINAL:
+        drift["would_terminal"].append({"local_id": local_id, "jira_key": jira_key})
+    elif lstate is classify_mod.LocalState.ABSENT:
+        _append_local_gone(drift, local_id=local_id, jira_key=jira_key)
+
+
+def _audit_present_binding(
+    drift: dict[str, Any],
+    *,
+    local_id: str,
+    jira_key: str,
+    local: dict[str, Any] | None,
+    jira_fields: dict[str, Any],
+    entry: dict[str, Any],
+    classify_mod: Any,
+) -> None:
+    if classify_mod.local_state(local) is classify_mod.LocalState.TERMINAL and jira_fields == {}:
+        drift.setdefault("indeterminate", []).append(
+            {
+                "local_id": local_id,
+                "jira_key": jira_key,
+                "reason": "jira status unavailable in key-set snapshot",
+            }
+        )
+        return
+    obs = classify_mod.JiraObservation(
+        classify_mod.ObservedJira.PRESENT,
+        key=jira_key,
+        fields=jira_fields,
+    )
+    decision = classify_mod.classify(local, obs, entry, entry.get("baseline"))
+    if decision.kind is classify_mod.DecisionKind.TERMINAL_TRANSITION:
+        drift["would_terminal"].append({"local_id": local_id, "jira_key": jira_key})
+    elif decision.kind is classify_mod.DecisionKind.ALERT:
+        _append_local_gone(drift, local_id=local_id, jira_key=jira_key)
+
+
+def _audit_absent_binding(
+    drift: dict[str, Any],
+    *,
+    local_id: str,
+    jira_key: str,
+    local: dict[str, Any] | None,
+    entry: dict[str, Any],
+    classify_mod: Any,
+) -> None:
+    absent_404 = int(entry.get("absent_404_count", 0) or 0)
+    if classify_mod.local_state(local) is classify_mod.LocalState.ABSENT:
+        _append_local_gone(drift, local_id=local_id, jira_key=jira_key, absent_404=absent_404)
+        return
+    if absent_404 > 0:
+        drift["dangling"].append(
+            {"local_id": local_id, "jira_key": jira_key, "absent_404_count": absent_404}
+        )
+        _append_orphaned_binding(
+            drift,
+            local_id=local_id,
+            jira_key=jira_key,
+            reason="confirmed_404",
+        )
+        return
+    drift["absent_in_window_unprobed"].append({"local_id": local_id, "jira_key": jira_key})
+
+
+def _record_unbound_local(
+    drift: dict[str, Any], *, local_by_id: dict[str, dict[str, Any]], bindings: dict[str, Any]
+) -> None:
+    confirmed_local_ids = {
+        local_id
+        for local_id, entry in bindings.items()
+        if isinstance(entry, dict) and entry.get("state") == "confirmed"
+    }
+    for local_id in sorted(local_by_id):
+        if local_id not in confirmed_local_ids:
+            drift["unbound_local"].append({"local_id": local_id})
+
+
+def _record_unbound_jira(
+    drift: dict[str, Any],
+    *,
+    jira_snapshot: dict[str, Any],
+    reverse: dict[str, str] | None,
+    classify_mod: Any,
+    is_retired: Any,
+) -> None:
+    bound_keys = set(reverse) if isinstance(reverse, dict) else set()
+    for key, issue in jira_snapshot.items():
+        if key in bound_keys:
+            continue
+        if not isinstance(issue, dict):
+            continue
+        labels = issue.get("labels") or []
+        if any(isinstance(label, str) and label.startswith("rebar-id-") for label in labels):
+            drift["orphaned_jira"].append({"jira_key": key})
+            continue
+        obs = classify_mod.JiraObservation(
+            classify_mod.ObservedJira.PRESENT,
+            key=key,
+            fields=issue,
+            retired=is_retired(key),
+        )
+        decision = classify_mod.classify(None, obs, None, None)
+        if decision.kind is classify_mod.DecisionKind.ADOPT:
+            drift["unbound_jira"].append({"jira_key": key})
+
+
+def _finalize_binding_drift(drift: dict[str, Any]) -> dict[str, Any]:
+    drift["orphaned_bindings"].sort(
+        key=lambda entry: (
+            entry.get("local_id", ""),
+            entry.get("jira_key", ""),
+            entry.get("reason", ""),
+        )
+    )
+    drift["orphaned_jira"].sort(key=lambda entry: entry.get("jira_key", ""))
+    drift["unbound_local"].sort(key=lambda entry: entry.get("local_id", ""))
+    drift["unbound_jira"].sort(key=lambda entry: entry.get("jira_key", ""))
+    return drift
+
+
+def _load_local_by_id(
+    tickets_tracker: Path, local_states: list[dict[str, Any]] | None
+) -> dict[str, dict[str, Any]]:
+    if local_states is None:
+        from rebar.reducer import reduce_all_tickets
+
+        local_states = reduce_all_tickets(str(tickets_tracker))
+    local_by_id: dict[str, dict[str, Any]] = {}
+    for state in local_states:
+        tid = state.get("ticket_id") or state.get("id")
+        if tid:
+            local_by_id[tid] = state
+    return local_by_id
+
+
+def _resolve_jira_snapshot(
+    bridge_state: Path,
+    jira_snapshot: dict[str, Any] | None,
+    use_prev_snapshot: bool,
+) -> tuple[dict[str, Any] | None, bool]:
+    if jira_snapshot is None and use_prev_snapshot:
+        prev = _read_json(bridge_state / "prev_snapshot.json")
+        jira_snapshot = prev if isinstance(prev, dict) else None
+    return jira_snapshot, isinstance(jira_snapshot, dict)
+
+
 def audit_binding_drift(
     tickets_tracker: Path,
-    local_states: list[dict] | None = None,
-    jira_snapshot: dict | None = None,
+    local_states: list[dict[str, Any]] | None = None,
+    jira_snapshot: dict[str, Any] | None = None,
     use_prev_snapshot: bool = True,
 ) -> dict:
     """Binding-level drift audit (epic 3006-e198, child 8de5) — the REPORT consumer
@@ -378,31 +565,12 @@ def audit_binding_drift(
     if not isinstance(bindings, dict):
         return drift
 
-    # Local ticket states (INCLUDING archived + deleted — the whole point). No
-    # exclusions: an archived/deleted ticket must still be resolved so its binding
-    # can be classified TERMINAL. ``local_states`` may be injected for testing.
-    if local_states is None:
-        from rebar.reducer import reduce_all_tickets
-
-        local_states = reduce_all_tickets(str(tickets_tracker))
-    local_by_id: dict[str, dict] = {}
-    for state in local_states:
-        tid = state.get("ticket_id") or state.get("id")
-        if tid:
-            local_by_id[tid] = state
-
-    # The Jira side: the persisted snapshot artifact (offline). None ⇒ the
-    # snapshot-requiring cells (dangling / unbound_jira) are skipped.
-    if jira_snapshot is None and use_prev_snapshot:
-        prev = _read_json(bridge_state / "prev_snapshot.json")
-        jira_snapshot = prev if isinstance(prev, dict) else None
-    have_snapshot = isinstance(jira_snapshot, dict)
+    local_by_id = _load_local_by_id(tickets_tracker, local_states)
+    jira_snapshot, have_snapshot = _resolve_jira_snapshot(
+        bridge_state, jira_snapshot, use_prev_snapshot
+    )
 
     classify_mod = _load_classify()
-    LocalState = classify_mod.LocalState
-    DecisionKind = classify_mod.DecisionKind
-    ObservedJira = classify_mod.ObservedJira
-    JiraObservation = classify_mod.JiraObservation
 
     def _is_retired(key: str) -> bool:
         retired = _read_json(bridge_state / "bindings-retired.json")
@@ -416,75 +584,48 @@ def audit_binding_drift(
         if not isinstance(entry, dict) or entry.get("state") != "confirmed":
             continue
         jira_key = entry.get("jira_key")
+        if not isinstance(jira_key, str) or not jira_key:
+            continue
         local = local_by_id.get(local_id)
         if not have_snapshot:
-            # Local-decidable-only projection (no Jira artifact available).
-            lstate = classify_mod.local_state(local)
-            if lstate is LocalState.TERMINAL:
-                drift["would_terminal"].append({"local_id": local_id, "jira_key": jira_key})
-            elif lstate is LocalState.ABSENT:
-                drift["local_gone"].append({"local_id": local_id, "jira_key": jira_key})
+            _audit_binding_without_snapshot(
+                drift,
+                local_id=local_id,
+                jira_key=jira_key,
+                local=local,
+                classify_mod=classify_mod,
+            )
             continue
         assert jira_snapshot is not None  # narrowed by have_snapshot
         if jira_key in jira_snapshot:
-            jira_fields = jira_snapshot[jira_key]
-            # A future key-set snapshot deliberately stores present keys as
-            # ``{jira_key: {}}``. Presence is enough for the other classifier
-            # cells, but terminal-local routing also needs Jira's status to
-            # distinguish an already-Done issue from one that needs a transition.
-            # Do not infer drift from that missing field value.
-            if classify_mod.local_state(local) is LocalState.TERMINAL and jira_fields == {}:
-                drift.setdefault("indeterminate", []).append(
-                    {
-                        "local_id": local_id,
-                        "jira_key": jira_key,
-                        "reason": "jira status unavailable in key-set snapshot",
-                    }
-                )
-                continue
-            # Present in the window → run the full classifier (local × snapshot ×
-            # binding). Present-bound decisions are TERMINAL_TRANSITION / ALERT /
-            # steady-state NOOP — never PROBE_GET, so dangling is not sourced here.
-            obs = JiraObservation(ObservedJira.PRESENT, key=jira_key, fields=jira_fields)
-            decision = classify_mod.classify(local, obs, entry, entry.get("baseline"))
-            if decision.kind is DecisionKind.TERMINAL_TRANSITION:
-                drift["would_terminal"].append({"local_id": local_id, "jira_key": jira_key})
-            elif decision.kind is DecisionKind.ALERT:
-                drift["local_gone"].append({"local_id": local_id, "jira_key": jira_key})
+            _audit_present_binding(
+                drift,
+                local_id=local_id,
+                jira_key=jira_key,
+                local=local,
+                jira_fields=jira_snapshot[jira_key],
+                entry=entry,
+                classify_mod=classify_mod,
+            )
             continue
-        # Absent from the fetch window. ADR 0028 §1: absence in a DELIBERATELY
-        # windowed snapshot (Done items beyond the recent cap are alive in Jira
-        # but intentionally out of window) is NOT a deletion signal, and this
-        # offline audit has no Jira client to probe. Feeding ABSENT_IN_WINDOW to
-        # classify() yields PROBE_GET, which the old code bucketed as ``dangling``
-        # — so every alive aged-out binding was reported dangling every pass
-        # forever (unhealable; bug f436). ADR 0028 §2: deletion is proven ONLY by
-        # a bounded GET returning 404, counted toward the retirement grace. That
-        # confirmed-404 state is persisted on the binding entry as
-        # ``absent_404_count`` (binding_store.note_absent) — readable offline. So
-        # source ``dangling`` ONLY from that persisted confirmed-absence state;
-        # route un-probed window-absence to a separate informational, NON-alerting
-        # bucket.
-        absent_404 = int(entry.get("absent_404_count", 0) or 0)
-        if absent_404 > 0:
-            drift["dangling"].append(
-                {"local_id": local_id, "jira_key": jira_key, "absent_404_count": absent_404}
-            )
-        else:
-            drift["absent_in_window_unprobed"].append({"local_id": local_id, "jira_key": jira_key})
+        _audit_absent_binding(
+            drift,
+            local_id=local_id,
+            jira_key=jira_key,
+            local=local,
+            entry=entry,
+            classify_mod=classify_mod,
+        )
 
-    # Unbound Jira-native issues (drift class B) — snapshot keys with no binding.
+    _record_unbound_local(drift, local_by_id=local_by_id, bindings=bindings)
     if jira_snapshot is not None:
-        bound_keys = set(reverse) if isinstance(reverse, dict) else set()
-        for key in jira_snapshot:
-            if key in bound_keys:
-                continue
-            obs = JiraObservation(
-                ObservedJira.PRESENT, key=key, fields=jira_snapshot[key], retired=_is_retired(key)
-            )
-            decision = classify_mod.classify(None, obs, None, None)
-            if decision.kind is DecisionKind.ADOPT:
-                drift["unbound_jira"].append({"jira_key": key})
+        _record_unbound_jira(
+            drift,
+            jira_snapshot=jira_snapshot,
+            reverse=reverse if isinstance(reverse, dict) else None,
+            classify_mod=classify_mod,
+            is_retired=_is_retired,
+        )
 
     # Overlap sanity: a key must not be both a live binding and retired.
     retired = _read_json(bridge_state / "bindings-retired.json")
@@ -495,7 +636,7 @@ def audit_binding_drift(
         for key in sorted(retired_keys & live_keys):
             drift["retired_overlap"].append({"jira_key": key})
 
-    return drift
+    return _finalize_binding_drift(drift)
 
 
 # ---------------------------------------------------------------------------
@@ -503,18 +644,94 @@ def audit_binding_drift(
 # ---------------------------------------------------------------------------
 
 
+def _append_store_integrity_lines(lines: list[str], store_integrity: list[dict]) -> None:
+    if not store_integrity:
+        return
+    lines.append("")
+    lines.append("--- Binding Store Integrity ---")
+    for entry in store_integrity:
+        details = " ".join(f"{key}={value}" for key, value in entry.items() if key != "kind")
+        lines.append(f"  {entry['kind']}: {details}")
+
+
+def _append_alerting_drift_lines(lines: list[str], binding_drift: dict) -> None:
+    drift_total = sum(len(binding_drift.get(k, [])) for k in _ALERTING_DRIFT_CLASSES)
+    if not drift_total:
+        return
+    lines.append("")
+    lines.append("--- Binding-Level Drift ---")
+    for entry in binding_drift.get("would_terminal", []):
+        lines.append(
+            f"  would_terminal: local={entry['local_id']} jira_key={entry['jira_key']}"
+            " (local archived/deleted; Jira would be driven to Done)"
+        )
+    for entry in binding_drift.get("local_gone", []):
+        lines.append(
+            f"  local_gone: local={entry['local_id']} jira_key={entry['jira_key']}"
+            " (bound but local ticket absent from store)"
+        )
+    for entry in binding_drift.get("retired_overlap", []):
+        lines.append(
+            f"  retired_overlap: jira_key={entry['jira_key']}"
+            " (present in BOTH live and retired stores)"
+        )
+    for entry in binding_drift.get("unbound_jira", []):
+        lines.append(f"  unbound_jira: jira_key={entry.get('jira_key')}")
+
+
+def _informational_drift_present(binding_drift: dict) -> bool:
+    return any(
+        binding_drift.get(key, [])
+        for key in (
+            "dangling",
+            "orphaned_bindings",
+            "orphaned_jira",
+            "unbound_local",
+            "absent_in_window_unprobed",
+            "indeterminate",
+        )
+    )
+
+
+def _append_informational_drift_lines(lines: list[str], binding_drift: dict) -> None:
+    if not _informational_drift_present(binding_drift):
+        return
+    lines.append("")
+    lines.append("--- Binding-Level Drift (informational; not alerting) ---")
+    for entry in binding_drift.get("dangling", []):
+        lines.append(
+            f"  dangling: local={entry.get('local_id')} jira_key={entry.get('jira_key')}"
+            " (confirmed-404 candidate; healer-tracked, not yet retired)"
+        )
+    for entry in binding_drift.get("orphaned_bindings", []):
+        lines.append(
+            f"  orphaned_bindings: local={entry.get('local_id')}"
+            f" jira_key={entry.get('jira_key')} reason={entry.get('reason')}"
+        )
+    for entry in binding_drift.get("orphaned_jira", []):
+        lines.append(f"  orphaned_jira: jira_key={entry.get('jira_key')}")
+    for entry in binding_drift.get("unbound_local", []):
+        lines.append(f"  unbound_local: local={entry.get('local_id')}")
+    for entry in binding_drift.get("absent_in_window_unprobed", []):
+        lines.append(
+            f"  absent_in_window_unprobed: local={entry.get('local_id')}"
+            f" jira_key={entry.get('jira_key')}"
+            " (absent from windowed snapshot; NOT a deletion signal — ADR 0028 §1)"
+        )
+    for entry in binding_drift.get("indeterminate", []):
+        lines.append(
+            f"  indeterminate: local={entry.get('local_id')}"
+            f" jira_key={entry.get('jira_key')}"
+            f" ({entry.get('reason')})"
+        )
+
+
 def _format_report(findings: dict) -> str:
     """Format the audit findings as a human-readable report."""
     unknown_types = findings.get("unknown_event_types", [])
     store_integrity = findings.get("store_integrity", [])
     binding_drift = findings.get("binding_drift") or {}
-    # Only offline-decidable, actionable classes count as alertable "drift" (bug
-    # f436). dangling (confirmed-404 candidate) and absent_in_window_unprobed
-    # (windowed absence, ADR 0028 §1) are informational and never gate exit/alert.
     drift_total = sum(len(binding_drift.get(k, [])) for k in _ALERTING_DRIFT_CLASSES)
-    info_dangling = binding_drift.get("dangling", [])
-    info_unprobed = binding_drift.get("absent_in_window_unprobed", [])
-    info_indeterminate = binding_drift.get("indeterminate", [])
 
     lines: list[str] = ["=== Bridge FSck Report ==="]
     lines.append(
@@ -530,55 +747,10 @@ def _format_report(findings: dict) -> str:
             "binary reduces without them and may push stale state to Jira."
         )
 
-    if store_integrity:
-        lines.append("")
-        lines.append("--- Binding Store Integrity ---")
-        for entry in store_integrity:
-            details = " ".join(f"{key}={value}" for key, value in entry.items() if key != "kind")
-            lines.append(f"  {entry['kind']}: {details}")
-
-    if drift_total:
-        lines.append("")
-        lines.append("--- Binding-Level Drift ---")
-        for entry in binding_drift.get("would_terminal", []):
-            lines.append(
-                f"  would_terminal: local={entry['local_id']} jira_key={entry['jira_key']}"
-                " (local archived/deleted; Jira would be driven to Done)"
-            )
-        for entry in binding_drift.get("local_gone", []):
-            lines.append(
-                f"  local_gone: local={entry['local_id']} jira_key={entry['jira_key']}"
-                " (bound but local ticket absent from store)"
-            )
-        for entry in binding_drift.get("retired_overlap", []):
-            lines.append(
-                f"  retired_overlap: jira_key={entry['jira_key']}"
-                " (present in BOTH live and retired stores)"
-            )
-        for entry in binding_drift.get("unbound_jira", []):
-            lines.append(f"  unbound_jira: jira_key={entry.get('jira_key')}")
-
-    if info_dangling or info_unprobed or info_indeterminate:
-        lines.append("")
-        lines.append("--- Binding-Level Drift (informational; not alerting) ---")
-        for entry in info_dangling:
-            lines.append(
-                f"  dangling: local={entry.get('local_id')} jira_key={entry.get('jira_key')}"
-                " (confirmed-404 candidate; healer-tracked, not yet retired)"
-            )
-        for entry in info_unprobed:
-            lines.append(
-                f"  absent_in_window_unprobed: local={entry.get('local_id')}"
-                f" jira_key={entry.get('jira_key')}"
-                " (absent from windowed snapshot; NOT a deletion signal — ADR 0028 §1)"
-            )
-        for entry in info_indeterminate:
-            lines.append(
-                f"  indeterminate: local={entry.get('local_id')}"
-                f" jira_key={entry.get('jira_key')}"
-                f" ({entry.get('reason')})"
-            )
-    if not (store_integrity or drift_total):
+    _append_store_integrity_lines(lines, store_integrity)
+    _append_alerting_drift_lines(lines, binding_drift)
+    _append_informational_drift_lines(lines, binding_drift)
+    if not (store_integrity or drift_total or _informational_drift_present(binding_drift)):
         lines.append("")
         lines.append("No issues found.")
 
