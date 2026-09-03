@@ -2300,6 +2300,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:34Z"
     },
+    "08ab-60d2-3082-4b47": {
+      "created_at": "2026-09-03T21:33:16Z",
+      "jira_id": "4591626",
+      "jira_key": "REB-4522",
+      "state": "confirmed",
+      "updated_at": "2026-09-03T21:33:20Z"
+    },
     "08af-b2f0-aef0-4d59": {
       "baseline": {
         "assignee": null,
@@ -6839,6 +6846,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:20Z"
+    },
+    "1c52-5e73-4d61-4124": {
+      "created_at": "2026-09-03T21:33:26Z",
+      "jira_id": "4591627",
+      "jira_key": "REB-4523",
+      "state": "confirmed",
+      "updated_at": "2026-09-03T21:33:30Z"
     },
     "1c66-6644-4dfb-4afa": {
       "baseline": {
@@ -41554,7 +41568,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Observed\nOn 2026-09-02 the configured rebar MCP endpoint initially accepted tracker calls and started plan-review job 1788399093580353346-ab9badfce4eb4b45a6db70794296455e. A later status poll returned \"Transport closed\"; every subsequent rebar MCP call returned nginx HTTP 502 for more than 20 minutes, including a fresh user-requested retry. The local CLI remained functional.\n\n## Impact\nAgents cannot poll gate results, claim work, or perform tracker operations through the required MCP surface. Long gate state is ambiguous and restarting it risks duplicate billed work.\n\n## Reproduction\n1. Start an async plan review through MCP.\n2. Poll gate_status for its job handle.\n3. Observe transport closure followed by persistent HTTP 502 responses.\n\n## Acceptance criteria\n- The deployed MCP endpoint remains reachable during and after long async gate jobs.\n- An unhealthy upstream is detected and recovered or reported with an actionable health signal.\n- A regression test or operational probe covers loss of the MCP upstream while a gate job is active.",
+        "description": "## Observed\nOn 2026-09-02 the configured rebar MCP endpoint initially accepted tracker calls and started plan-review job 1788399093580353346-ab9badfce4eb4b45a6db70794296455e. A later status poll returned \"Transport closed\"; every subsequent rebar MCP call returned nginx HTTP 502. The local CLI remained functional.\n\n**Corrected from the original report:** the outage was not \"more than 20 minutes\". It ran ~18:31 PDT 09-02 to ~06:41 PDT 09-03 \u2014 about **12 hours**, with no self-recovery. A human reported it; nothing in the system could observe it.\n\n## Impact\nAgents cannot poll gate results, claim work, or perform tracker operations through the required MCP surface. Long gate state is ambiguous and restarting it risks duplicate billed work.\n\n## Root cause (confirmed on-box, read-only)\n1. The MCP container was **OOM-killed ~3 minutes into a plan-review gate run** \u2014 `docker inspect` reported `OOMKilled=true`, `Exit=137`, finished 18:36:51 PDT against a job started 18:31:33 PDT. Host is a t4g.large (8 GiB) shared with Gerrit, the review-bot and opcert.\n2. nginx's `upstream rebar_mcp` is a **single `server` line with no failover**, and still named the dead container's port, so every request 502'd while nginx itself stayed healthy.\n3. Recovery was structurally impossible: redeploy is the only path back, and every build failed on `uv required-version ==0.12.7 does not match 0.12.9` (split out as `febd-6b13-1976-43be`, now closed).\n4. `mcp_retire_sweep` reaped the exited-but-live container while nginx still pointed at its port, converting a transient crash into a permanent 502.\n\nRuled OUT: `mcp_mem_abort` and `mcp_retire_cap` both read 0.0 throughout. They are deploy-path markers, not observers of the serving process, so a kernel OOM-kill is invisible to them.\n\n## Reproduction\n1. Start an async plan review through MCP.\n2. Poll `gate_status` for its job handle.\n3. Observe transport closure followed by persistent HTTP 502 responses.\n\n## Acceptance Criteria\n\n- [x] AC1: an unhealthy MCP upstream is detected and reported with an actionable signal. Verified by `aws cloudwatch describe-alarms --alarm-names rebar-mcp-serving-path-down` showing the alarm live on metric `mcp_healthy`, and by `aws cloudwatch get-metric-statistics --namespace rebar/host --metric-name mcp_healthy` returning datapoints.\n- [x] AC2: a regression test covers loss of the MCP upstream. Verified by `python -m pytest tests/scripts/test_observability_mcp_health_9ea3.py -q`, which drives the real `observability.sh` against stubbed 502/timeout responses and asserts a `0` is published rather than nothing.\n- [x] AC3: a transient MCP crash can no longer become a permanent 502 via the retire sweep. Verified by `python -m pytest tests/scripts -k retire -q`, including a case that reproduces the incident signature (the sweep freeing the port nginx still names).\n- [ ] AC4: host and per-container memory, and peak RSS per gate run, are measured and queryable, so a memory limit or instance size can be chosen from data rather than guessed. Verified by `python -m pytest tests/scripts/test_observability_memory_9ea3.py tests/unit/test_gate_peak_rss_9ea3.py -q`, and post-deploy by `aws cloudwatch get-metric-statistics --namespace rebar/host --metric-name mem_available_percent` returning datapoints and a `GATE_PEAK_RSS` marker appearing in `journalctl` after a gate run.\n- [ ] AC5 [non-codebase]: the measurement campaign has produced the numbers the OOM decision needs \u2014 peak MCP RSS during a gate, steady-state RSS per container, and how RSS scales with ticket size. Verified by a comment on this ticket recording those figures.\n\n**Deliberately NOT in this ticket, per operator decision:** choosing a container `mem_limit`, an instance size, or a fan-out width. Every candidate value today is a guess; the decision waits on AC5's data. ADRs 0079 and 0104 explicitly decided against upsizing to t4g.xlarge, and `3276`'s operator-approved principle \u2014 growing a resource is an unwedge, not a fix \u2014 applies identically. Moving gate execution off-box is the honest end-state and is epic-sized.\n\n## Testing\n\n- `python -m pytest tests/scripts/test_observability_mcp_health_9ea3.py -q` \u2014 the serving-path probe.\n- `python -m pytest tests/scripts/test_observability_memory_9ea3.py tests/unit/test_gate_peak_rss_9ea3.py -q` \u2014 the memory instrumentation.\n- `python -m pytest tests/scripts -q` \u2014 the full shell-probe suite.\n- `python -m pytest tests/unit/test_alarm_actions_terraform.py -q` \u2014 the alarm guards, including the AWS description-length limit.\n- `make lint && make typecheck`.\n- Post-deploy: `aws cloudwatch describe-alarms --alarm-names rebar-mcp-serving-path-down` and `get-metric-statistics` on `mcp_healthy`, `mem_available_percent` and `container_memory_rss_bytes`.",
         "priority": "High",
         "status": "In Progress",
         "summary": "Configured rebar MCP endpoint returns persistent HTTP 502 after async gate start"
@@ -46169,6 +46183,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T21:34:00Z"
+    },
+    "afe3-5aec-51cb-4e02": {
+      "created_at": "2026-09-03T21:33:36Z",
+      "jira_id": "4591628",
+      "jira_key": "REB-4524",
+      "state": "confirmed",
+      "updated_at": "2026-09-03T21:33:40Z"
     },
     "afe6-47e5-6469-43e2": {
       "baseline": {
@@ -51957,6 +51978,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:04Z"
+    },
+    "c6ce-4d8d-1c12-47cc": {
+      "created_at": "2026-09-03T21:33:46Z",
+      "jira_id": "4591629",
+      "jira_key": "REB-4525",
+      "state": "confirmed",
+      "updated_at": "2026-09-03T21:34:21Z"
     },
     "c6d7-1d9a-0885-491d": {
       "baseline": {
@@ -62232,9 +62260,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\n`tests/unit/test_mcp_on_box_infra.py:122-176` searches Dockerfile text, so a later broken final stage can still pass. `tests/unit/test_review_bot.py:1944-1972` and `test_mcp_on_box_infra.py:97-101` accept commands that merely contain loopback health tokens without opening a socket.\n\n## Approach\n\nParse the shipped final Docker stage and inspect its effective entrypoint, installed artifacts, and health command. Execute the configured health command against controlled good and bad listeners so the oracle observes a real socket and response. Keep this in the portable Python test path; do not require Docker.\n\n## Scope\n\n- `tests/unit/test_mcp_on_box_infra.py`\n- `tests/unit/test_review_bot.py`\n- `infra/compose/Dockerfile.mcp`\n- `infra/compose/Dockerfile.reviewbot`\n- `infra/compose/docker-compose.yml`\n\n## Testing\n\nAdd a broken trailing-stage fixture, a no-op URL-print command, a healthy listener, and malformed/closed-listener controls.\n\n## Acceptance Criteria\n\n- [ ] A broken shipped final stage fails even when an earlier stage retains all expected tokens.\n- [ ] A command that only prints the health URL fails the oracle.\n- [ ] The real configured health command succeeds against a valid listener and fails on closed or malformed response paths.\n- [ ] The focused tests run without Docker and leave normal local/default test dependencies unchanged.",
+        "description": "## Context / Problem\n\n`tests/unit/test_mcp_on_box_infra.py:122-176` searches Dockerfile text, so a later broken final stage can still pass. `tests/unit/test_review_bot.py:1944-1972` and `test_mcp_on_box_infra.py:97-101` accept commands that merely contain loopback health tokens without opening a socket.\n\n## Approach\n\nParse the shipped final Docker stage and inspect its effective entrypoint, installed artifacts, and health command. Execute the configured health command against controlled good and bad listeners so the oracle observes a real socket and response. Keep this in the portable Python test path; do not require Docker.\n\n## Scope\n\n- `tests/unit/test_mcp_on_box_infra.py`\n- `tests/unit/test_review_bot.py`\n- `infra/compose/Dockerfile.mcp`\n- `infra/compose/Dockerfile.reviewbot`\n- `infra/compose/docker-compose.yml`\n\n## Testing\n\nAdd a broken trailing-stage fixture, a no-op URL-print command, a healthy listener, and malformed/closed-listener controls.\n\n## Acceptance Criteria\n\n- [x] A broken shipped final stage fails even when an earlier stage retains all expected tokens.\n- [x] A command that only prints the health URL fails the oracle.\n- [x] The real configured health command succeeds against a valid listener and fails on closed or malformed response paths.\n- [x] The focused tests run without Docker and leave normal local/default test dependencies unchanged.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Parse shipped container stages and prove live health-command semantics"
       },
       "created_at": "2026-09-02T01:46:55Z",
@@ -62925,6 +62953,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:59Z"
+    },
+    "ee2e-6fec-aa8a-4e77": {
+      "created_at": "2026-09-03T21:34:45Z",
+      "jira_id": "4591630",
+      "jira_key": "REB-4526",
+      "state": "confirmed",
+      "updated_at": "2026-09-03T21:34:49Z"
     },
     "ee3d-fc7b-e280-4cbb": {
       "baseline": {
@@ -66999,9 +67034,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\n`src/rebar/_store/hlc.py:35-41,60-66,137-156` still honors `REBAR_HLC=0`, although `docs/remediation-implementation-plan.md:590-592` calls it a one-release rollback and many releases have since shipped. Disabling HLC can reintroduce causal-ordering errors under skewed clocks. The removal also affects compaction-concurrency scenarios that used the switch for timestamp placement and a seam guard that counts its `# read-via:` marker.\n\n## Approach\n\nRemove `_enabled`, the `REBAR_HLC` environment read, and the disabled raw-clock branch. Retain `REBAR_HLC_NOW` as the test-only physical-clock injection, legacy event reads, persisted-state locking, and deterministic clock tests. The generated environment reference must change through removal of the implementation read; no separate deprecation-registry entry exists to delete.\n\nMigrate the two compaction integration scenarios without disabling HLC. Scenario A will build its far-past subject from a fresh clone with no HLC cache, then use strictly ordered forward `REBAR_HLC_NOW` values for the young event, snapshot, and remote append; each tick is monotonic and the test proves the append sorts after the snapshot without a wall-clock race. Scenario B will create B\u2019s below-snapshot orphan while B\u2019s remote is disconnected and before B witnesses A\u2019s future snapshot, using a valid injected future timestamp. After A publishes the higher future snapshot, reconnect B and drive a real engine write/push to merge and publish the pre-existing orphan; the test continues to prove detection and repair.\n\nUpdate all removal consumers: generated environment documentation, event-schema staging prose, the mechanism baseline, HLC unit tests, `test_store_paths` cleanup, the concurrency scenarios, and the held-out seam-marker budget. In the held-out guard, reduce both `_MARKER_BUDGET[\"_store/hlc.py\"]` from 2 to 1 and its exact-count `_TOTAL_MARKER_CAP` from 5 to 4, including the adjacent budget comment. Add a focused exact-name sweep/oracle so `REBAR_HLC` cannot reappear while the distinct `REBAR_HLC_NOW` injection remains allowed.\n\n## Scope\n\n- HLC implementation and generated environment reference\n- generated/operator and event-schema documentation plus the mechanism baseline\n- unit/store/integration/held-out consumers of the retired switch\n- a focused exact-name removal oracle\n\n## Testing\n\nRun the HLC unit suite, store-path test, both real push/fetch/merge compaction scenarios, the held-out snapshot-I/O seam guard, the environment-reference generator/check, lint, and typecheck. Use deterministic injected values and explicit cache/remote preconditions rather than wall-clock timing.\n\n## Acceptance Criteria\n\n- [ ] The HLC implementation contains no `REBAR_HLC` disable branch or environment read; `REBAR_HLC_NOW` remains the sole test-time physical-clock override.\n- [ ] Regenerating the environment reference after removing the implementation read produces no `REBAR_HLC=0` entry; `docs/event-schema.md` and completed-remediation guidance no longer describe it.\n- [ ] `.github/mechanism-baseline.json` no longer contains the retired `env_var::REBAR_HLC` mechanism entry.\n- [ ] Scenario A constructs its far-past ticket from a clone with an empty HLC cache and uses ordered forward injected clock values to prove the remote append sorts after the snapshot with HLC continuously enabled.\n- [ ] Scenario B writes its below-snapshot orphan while disconnected before it can witness A\u2019s higher snapshot, then reconnects through a real engine write/push and still proves orphan detection plus snapshot repair.\n- [ ] In `tests/scripts/test_store_snapshot_io_seam_clean_heldout.py`, removal of the HLC read-via marker lowers `_MARKER_BUDGET[\"_store/hlc.py\"]` from 2 to 1, `_TOTAL_MARKER_CAP` from 5 to 4, and the associated budget comment so the exact-total guard remains valid.\n- [ ] HLC unit and store-path tests preserve legacy event readability, injected-clock behavior, and canonical HLC-state placement without setting or clearing `REBAR_HLC`.\n- [ ] A focused exact-name scan/test fails if `REBAR_HLC` is reintroduced outside the explicitly retained `REBAR_HLC_NOW` injection contract.\n- [ ] The HLC, store, concurrency, seam-guard, environment-reference, lint, and typecheck suites pass.",
+        "description": "## Context / Problem\n\n`src/rebar/_store/hlc.py:35-41,60-66,137-156` still honors `REBAR_HLC=0`, although `docs/remediation-implementation-plan.md:590-592` calls it a one-release rollback and many releases have since shipped. Disabling HLC can reintroduce causal-ordering errors under skewed clocks. The removal also affects compaction-concurrency scenarios that used the switch for timestamp placement and a seam guard that counts its `# read-via:` marker.\n\n## Approach\n\nRemove `_enabled`, the `REBAR_HLC` environment read, and the disabled raw-clock branch. Retain `REBAR_HLC_NOW` as the test-only physical-clock injection, legacy event reads, persisted-state locking, and deterministic clock tests. The generated environment reference must change through removal of the implementation read; no separate deprecation-registry entry exists to delete.\n\nMigrate the two compaction integration scenarios without disabling HLC. Scenario A will build its far-past subject from a fresh clone with no HLC cache, then use strictly ordered forward `REBAR_HLC_NOW` values for the young event, snapshot, and remote append; each tick is monotonic and the test proves the append sorts after the snapshot without a wall-clock race. Scenario B will create B\u2019s below-snapshot orphan while B\u2019s remote is disconnected and before B witnesses A\u2019s future snapshot, using a valid injected future timestamp. After A publishes the higher future snapshot, reconnect B and drive a real engine write/push to merge and publish the pre-existing orphan; the test continues to prove detection and repair.\n\nUpdate all removal consumers: generated environment documentation, event-schema staging prose, the mechanism baseline, HLC unit tests, `test_store_paths` cleanup, the concurrency scenarios, and the held-out seam-marker budget. In the held-out guard, reduce both `_MARKER_BUDGET[\"_store/hlc.py\"]` from 2 to 1 and its exact-count `_TOTAL_MARKER_CAP` from 5 to 4, including the adjacent budget comment. Add a focused exact-name sweep/oracle so `REBAR_HLC` cannot reappear while the distinct `REBAR_HLC_NOW` injection remains allowed.\n\n## Scope\n\n- HLC implementation and generated environment reference\n- generated/operator and event-schema documentation plus the mechanism baseline\n- unit/store/integration/held-out consumers of the retired switch\n- a focused exact-name removal oracle\n\n## Testing\n\nRun the HLC unit suite, store-path test, both real push/fetch/merge compaction scenarios, the held-out snapshot-I/O seam guard, the environment-reference generator/check, lint, and typecheck. Use deterministic injected values and explicit cache/remote preconditions rather than wall-clock timing.\n\n## Acceptance Criteria\n\n- [x] The HLC implementation contains no `REBAR_HLC` disable branch or environment read; `REBAR_HLC_NOW` remains the sole test-time physical-clock override.\n- [x] Regenerating the environment reference after removing the implementation read produces no `REBAR_HLC=0` entry; `docs/event-schema.md` and completed-remediation guidance no longer describe it.\n- [x] `.github/mechanism-baseline.json` no longer contains the retired `env_var::REBAR_HLC` mechanism entry.\n- [x] Scenario A constructs its far-past ticket from a clone with an empty HLC cache and uses ordered forward injected clock values to prove the remote append sorts after the snapshot with HLC continuously enabled.\n- [x] Scenario B writes its below-snapshot orphan while disconnected before it can witness A\u2019s higher snapshot, then reconnects through a real engine write/push and still proves orphan detection plus snapshot repair.\n- [x] In `tests/scripts/test_store_snapshot_io_seam_clean_heldout.py`, removal of the HLC read-via marker lowers `_MARKER_BUDGET[\"_store/hlc.py\"]` from 2 to 1, `_TOTAL_MARKER_CAP` from 5 to 4, and the associated budget comment so the exact-total guard remains valid.\n- [x] HLC unit and store-path tests preserve legacy event readability, injected-clock behavior, and canonical HLC-state placement without setting or clearing `REBAR_HLC`.\n- [x] A focused exact-name scan/test fails if `REBAR_HLC` is reintroduced outside the explicitly retained `REBAR_HLC_NOW` injection contract.\n- [x] The HLC, store, concurrency, seam-guard, environment-reference, lint, and typecheck suites pass.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Retire the expired HLC rollback switch"
       },
       "created_at": "2026-09-02T03:02:45Z",
@@ -69849,7 +69884,25 @@
     "1788463545791743001": "__rebar_unknown_comment_id__",
     "1788463647458355001": "__rebar_unknown_comment_id__",
     "1788463860116412001": "__rebar_unknown_comment_id__",
-    "1788465831155325001": "__rebar_unknown_comment_id__"
+    "1788465831155325001": "__rebar_unknown_comment_id__",
+    "1788467515469738001": "__rebar_unknown_comment_id__",
+    "1788467865376093281": "__rebar_unknown_comment_id__",
+    "1788467865376946315": "__rebar_unknown_comment_id__",
+    "1788468511986489840": "__rebar_unknown_comment_id__",
+    "1788468751020979937": "__rebar_unknown_comment_id__",
+    "1788468880065392001": "__rebar_unknown_comment_id__",
+    "1788468938187799480": "__rebar_unknown_comment_id__",
+    "1788469034333024001": "__rebar_unknown_comment_id__",
+    "1788469088111957001": "__rebar_unknown_comment_id__",
+    "1788469095405204402": "__rebar_unknown_comment_id__",
+    "1788469180510618647": "__rebar_unknown_comment_id__",
+    "1788469271058774532": "__rebar_unknown_comment_id__",
+    "1788469503519356001": "__rebar_unknown_comment_id__",
+    "1788469509837130347": "__rebar_unknown_comment_id__",
+    "1788469709702472851": "__rebar_unknown_comment_id__",
+    "1788469791820384001": "__rebar_unknown_comment_id__",
+    "1788470051066477001": "__rebar_unknown_comment_id__",
+    "1788470800571198001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -72789,6 +72842,11 @@
     "REB-452": "908c-0f55-4a3b-4ae0",
     "REB-4520": "57c4-4834-2a7a-4a05",
     "REB-4521": "f0d1-b0cf-0690-4b3f",
+    "REB-4522": "08ab-60d2-3082-4b47",
+    "REB-4523": "1c52-5e73-4d61-4124",
+    "REB-4524": "afe3-5aec-51cb-4e02",
+    "REB-4525": "c6ce-4d8d-1c12-47cc",
+    "REB-4526": "ee2e-6fec-aa8a-4e77",
     "REB-453": "b4d4-3369-6dd2-41e6",
     "REB-454": "c81c-cbcd-17a0-43d2",
     "REB-455": "ba2c-e08d-cfeb-42f2",
