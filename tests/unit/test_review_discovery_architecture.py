@@ -35,11 +35,12 @@ _SRC = _REPO_ROOT / "src" / "rebar"
 _LLM = _SRC / "llm"
 _KERNEL = _LLM / "review_kernel"
 
-# The discovery-projection builders — the seam where review policy becomes discovery units.
-_PROJECTION_BUILDERS = (
-    _LLM / "plan_review" / "sizing.py",
-    _LLM / "code_review" / "batch_runner.py",
-)
+# The review gates that MUST each still own a discovery-projection seam — the place where
+# that gate's review policy becomes kernel discovery units. The builders themselves are
+# DISCOVERED from the tree (see ``_projection_builders``) rather than hand-listed, so a new
+# builder is guarded the moment it appears and moving one between modules cannot silently
+# drop it out of the guard's scope; this tuple only pins that the seam has not vanished.
+_PROJECTION_BUILDER_GATES = ("plan_review", "code_review")
 
 # Per-unit trace/debug keys that must never surface on a public review output schema.
 _TRACE_DEBUG_KEYS = frozenset(
@@ -148,6 +149,14 @@ def _iter_llm_sources() -> list[tuple[Path, ast.AST]]:
     return [(module.path, module.tree) for module in parsed_python_files(_LLM)]
 
 
+def _projection_builders() -> list[tuple[Path, ast.AST]]:
+    """Every module under ``src/rebar/llm`` that CONSTRUCTS a ``DiscoveryStagePlan`` — the
+    discovery-projection builders, found by scanning the tree instead of by hand-listing
+    paths. Whole-tree discovery is what gives the AC3(a) prohibition its reach: a builder
+    added in a new module, or moved to a different one, is still covered."""
+    return [(path, tree) for path, tree in _iter_llm_sources() if _constructs_discovery_stage(tree)]
+
+
 # ── AC3(a): direct-routing-reader prohibition ───────────────────────────────────
 def test_direct_routing_reader_detector_has_teeth() -> None:
     violation = (
@@ -180,12 +189,16 @@ def test_a_criteria_routing_json_literal_in_a_builder_is_a_violation() -> None:
 
 @pytest.mark.repo_policy
 def test_no_projection_builder_reads_raw_routing_directly() -> None:
-    offenders = []
-    for path in _PROJECTION_BUILDERS:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        assert _constructs_discovery_stage(tree), f"{path} is expected to build a stage"
-        if _reads_raw_routing(tree):
-            offenders.append(str(path.relative_to(_REPO_ROOT)))
+    builders = _projection_builders()
+    gates = {path.relative_to(_LLM).parts[0] for path, _ in builders}
+    for gate in _PROJECTION_BUILDER_GATES:
+        assert gate in gates, (
+            f"no discovery-projection builder found under llm/{gate}/ — the seam where that "
+            "gate's policy becomes kernel discovery units must exist for this guard to bind"
+        )
+    offenders = [
+        str(path.relative_to(_REPO_ROOT)) for path, tree in builders if _reads_raw_routing(tree)
+    ]
     assert not offenders, (
         "review-gate discovery builder(s) read raw routing directly instead of via "
         f"CriteriaSnapshot: {offenders}"
