@@ -268,7 +268,7 @@ def _run_reconcile_check(repo_root: Path) -> int:
         print(rc_mod.format_report(report))
 
         # Write JSON report
-        output_path = repo_root / "bridge_state" / "reconcile-check.json"
+        output_path = tracker_dir / ".bridge_state" / "reconcile-check.json"
         rc_mod.write_report_json(report, output_path)
         print(f"\nFull report written to {output_path}")
         return 0
