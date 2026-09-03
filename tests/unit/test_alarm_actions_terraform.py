@@ -50,7 +50,7 @@ _TF_DIR = Path(__file__).resolve().parents[2] / "infra" / "terraform"
 # loudly instead of passing vacuously. A vacuous guard is the failure mode this guard exists
 # to prevent, so it must not be able to fall to it itself. Raise this floor when alarms are
 # added; never lower it without deleting alarms.
-_MIN_EXPECTED_ALARMS = 16
+_MIN_EXPECTED_ALARMS = 19
 
 _ALARM_RE = re.compile(
     r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{',

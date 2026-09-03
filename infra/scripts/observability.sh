@@ -10,6 +10,9 @@
 #      the materialized `upstream rebar_mcp` include) -> rebar/host:mcp_healthy, a 1/0
 #      heartbeat published on every tick (bug 9ea3-7d07-ea55-4496; alarm in monitoring_9ea3.tf).
 #   2. Gerrit data-volume disk-used-percent -> rebar/host:disk_used_percent (S2 alarm).
+#   2c. Non-`site/` debris on the Gerrit data volume (bytes under /var/gerrit that are not
+#       the Gerrit site tree) -> rebar/host:data_disk_debris_bytes (task 3e92 alarm). Answers
+#       "full OF WHAT", which the used-percent reading in 2 structurally cannot.
 #   3. Gerrit->GitHub replication failures (replication_log) -> rebar/host:replication_errors (S5 alarm).
 #   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
 #   4c. review-bot merge-change failures (MERGE_CHANGE_ERROR) -> rebar/host:review_bot_merge_change_errors (epic 88ab/S2 alarm).
@@ -142,6 +145,61 @@ if [ -n "$root_pct" ]; then
   aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
     --metric-name root_disk_used_percent --unit Percent --value "$root_pct" 2>/dev/null || true
   logger -t rebar-health "disk / used_percent=${root_pct}"
+fi
+
+# --- 2c. Non-`site/` debris on the Gerrit DATA volume (task 3e92) ------------
+# §2 above answers "how full is /var/gerrit"; it cannot answer "full OF WHAT". The
+# 2026-08-26 disk-fill was 65% one-off investigation evidence —
+# /var/gerrit/rebar-quiet-window-evidence/ held two ~5.2G epoch-probe dumps — written by
+# ad-hoc operator/agent shell, not by any rebar process. Nothing observed that until a
+# human ran `du` during the incident, so the fill read as ordinary growth of the git
+# repos it was not.
+#
+# This census is the DETECTION half of that remediation and the only enforceable half:
+# rebar cannot stop a shell on the box from writing wherever it likes, so the guard is
+# that such a write becomes VISIBLE within one probe interval instead of accumulating
+# silently. The policy half — where evidence is supposed to go — is documented in
+# infra/runbooks/gerrit-data-volume-reclaim.md and is advisory.
+#
+# EVERYTHING that is not the Gerrit site tree is debris by definition. The allow-list is
+# deliberately tiny (`site` — the Gerrit data root compose-up.sh binds — plus the
+# filesystem's own `lost+found`) and NOT extended per incident: a legitimate new
+# top-level consumer of the data volume is itself a decision worth paging about once.
+# DATA_DEBRIS_ALLOW is the seam the tests drive; it is not a production tuning knob.
+#
+# Publishes a READING, not a delta, so it follows §2's honesty rule rather than the
+# offset-counter convention: when $DATA_MOUNT is not a directory nothing is published,
+# because 0 would assert a clean volume we did not observe. The alarm
+# (rebar-gerrit-data-disk-debris, monitoring.tf) is treat_missing_data = "breaching", so
+# that silence pages exactly like a dead publisher.
+DATA_DEBRIS_ALLOW="${DATA_DEBRIS_ALLOW:-site lost+found}"
+if [ -d "$DATA_MOUNT" ]; then
+  debris_bytes=0
+  debris_names=""
+  for entry in "$DATA_MOUNT"/* "$DATA_MOUNT"/.[!.]*; do
+    [ -e "$entry" ] || continue   # unmatched glob stays literal; skip it
+    name=${entry##*/}
+    allowed=0
+    for keep in $DATA_DEBRIS_ALLOW; do
+      if [ "$name" = "$keep" ]; then allowed=1; break; fi
+    done
+    [ "$allowed" -eq 1 ] && continue
+    # `du -sk` (not -sb): -b is GNU-only and this must also run under the macOS du the
+    # test suite invokes. KiB * 1024 is exact for the sizes involved.
+    entry_kb=$(du -sk "$entry" 2>/dev/null | tail -1 | awk '{print $1}')
+    entry_kb=${entry_kb:-0}
+    debris_bytes=$((debris_bytes + entry_kb * 1024))
+    debris_names="${debris_names} ${name}"
+  done
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name data_disk_debris_bytes --unit Bytes --value "$debris_bytes" \
+    --dimensions InstanceId="$IID",mount="$DATA_MOUNT" 2>/dev/null || true
+  logger -t rebar-health \
+    "disk ${DATA_MOUNT} debris_bytes=${debris_bytes} entries=[${debris_names# }]"
+  if [ "$debris_bytes" -gt 0 ]; then
+    logger -t rebar-health \
+      "non-site debris on the Gerrit DATA volume ${DATA_MOUNT}:${debris_names} — investigation output does not belong here; see infra/runbooks/gerrit-data-volume-reclaim.md"
+  fi
 fi
 
 # --- 3. Gerrit->GitHub replication failures (S5) ---------------------------

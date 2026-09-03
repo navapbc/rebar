@@ -257,3 +257,58 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_high" {
     Ticket  = "c7d4"
   }
 }
+
+# --- Alarm 5: non-`site/` debris on the Gerrit DATA volume (task 3e92) ------
+# Companion to Alarm 4 above, and deliberately a DIFFERENT question. Alarm 4 watches
+# disk_used_percent — "how full is /var/gerrit" — which cannot distinguish the git repos
+# and review DB the volume exists for from one-off investigation output dumped beside
+# them. The 2026-08-26 fill was 65% the latter: two ~5.2G epoch-probe dumps under
+# /var/gerrit/rebar-quiet-window-evidence/, invisible to every metric until a human ran
+# `du` mid-incident.
+#
+# observability.sh §2c publishes rebar/host:data_disk_debris_bytes — the summed size of
+# every top-level entry under /var/gerrit that is not `site` or `lost+found` — with the
+# same InstanceId+mount dimensions as disk_used_percent. A healthy volume publishes 0, so
+# this alarm fires on the PRESENCE of debris well before it becomes capacity pressure,
+# which is the whole point: at 85% used the volume is already an incident.
+#
+# 1 GiB, not 0 bytes. A byte-exact threshold would page on a stray dotfile or an
+# operator's half-second `ls > /var/gerrit/x`, and an alarm that pages on noise gets
+# muted — which is how the condition went unwatched in the first place. 1 GiB is well
+# under the ~11G that produced the incident and far above anything incidental.
+resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_debris" {
+  alarm_name        = "rebar-gerrit-data-disk-debris"
+  alarm_description = "Non-site/ content on the Gerrit data volume (/var/gerrit) exceeds 1 GiB. observability.sh publishes rebar/host:data_disk_debris_bytes; investigation/probe evidence belongs on the operator workstation, not here — see infra/runbooks/gerrit-data-volume-reclaim.md."
+
+  namespace   = "rebar/host"
+  metric_name = "data_disk_debris_bytes"
+  statistic   = "Maximum"
+
+  dimensions = {
+    InstanceId = data.aws_instance.gerrit.id
+    mount      = "/var/gerrit"
+  }
+
+  # The 3-period/2-datapoint window of Alarm 4, for the same reason: a single absent
+  # 5-minute probe interval is ordinary timer jitter, and missing data breaches here.
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 1073741824
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+
+  # Same reasoning as Alarm 4 and NOT the rebar/host counter convention: §2c publishes a
+  # READING, not an offset delta, and it publishes NOTHING when /var/gerrit is not a
+  # directory — because 0 would assert a volume we could not observe was clean. Both
+  # causes of silence (a dead probe, an unmountable data volume) are worse than the
+  # condition this alarm names, so silence pages.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "3e92"
+  }
+}
