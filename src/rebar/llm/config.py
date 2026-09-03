@@ -44,7 +44,10 @@ from rebar.llm.config_readers import (  # noqa: F401  (re-export: monkeypatch.se
     _llm_int,
     _llm_str,
     _llm_str_source,
+    _read_llm_core_settings,
     _read_llm_file_table,
+    _read_llm_limit_settings,
+    _read_llm_overlap_settings,
 )
 
 # The gate read-root / snapshot-session domain lives in `gate_context` (ticket b300 moved ~185
@@ -510,58 +513,17 @@ class LLMConfig:
         bedrock_region_name, bedrock_region_source = _llm_str_source(
             table, cli, "REBAR_LLM_BEDROCK_REGION", "bedrock_region_name", None
         )
-        return cls(
-            runner=runner,
-            # No env channel: the bare REBAR_LLM_MODEL was removed (tombstoned above);
-            # `model` now resolves CLI > [tool.rebar.llm].model > DEFAULT_MODEL.
-            model=_llm_str(table, cli, None, "model", DEFAULT_MODEL),
-            model_provider=_llm_str(table, cli, "REBAR_LLM_MODEL_PROVIDER", "model_provider", None),
-            base_url=_llm_str(table, cli, "REBAR_LLM_BASE_URL", "base_url", None),
-            parse_failure_artifact_dir=_llm_str(
-                table,
-                cli,
-                "REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR",
-                "parse_failure_artifact_dir",
-                None,
-            ),
+        core_settings = _read_llm_core_settings(
+            table,
+            cli,
             bedrock_region_name=bedrock_region_name,
             bedrock_region_source=bedrock_region_source,
+        )
+        limit_settings = _read_llm_limit_settings(table, cli)
+        overlap_settings = _read_llm_overlap_settings(table, cli)
+        return cls(
+            runner=runner,
             api_key=os.environ.get("REBAR_LLM_API_KEY") or None,
-            max_tokens=_llm_int(
-                table, cli, "REBAR_LLM_MAX_TOKENS", "max_tokens", DEFAULT_MAX_TOKENS
-            ),
-            max_iterations=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_MAX_STEPS",
-                "max_steps",
-                DEFAULT_MAX_ITERATIONS,
-            ),
-            timeout_s=_llm_int(table, cli, "REBAR_LLM_TIMEOUT", "timeout", DEFAULT_TIMEOUT_S),
-            # Default None → provider default (unchanged); an operator may pin a global
-            # temperature, and the Pass-2 verify steps pin 0 via a `with:` input (see runs.py).
-            temperature=_llm_float(table, cli, "REBAR_LLM_TEMPERATURE", "temperature", None),
-            llm_retry_max_attempts=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_RETRY_MAX_ATTEMPTS",
-                "llm_retry_max_attempts",
-                DEFAULT_LLM_RETRY_MAX_ATTEMPTS,
-            ),
-            llm_retry_max_wait_s=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_RETRY_MAX_WAIT_S",
-                "llm_retry_max_wait_s",
-                DEFAULT_LLM_RETRY_MAX_WAIT_S,
-            ),
-            llm_tool_timeout_s=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_TOOL_TIMEOUT_S",
-                "llm_tool_timeout_s",
-                DEFAULT_LLM_TOOL_TIMEOUT_S,
-            ),
             repo_path=repo_path,
             tickets_path=tickets_path,
             mcp_servers=mcp_servers,
@@ -572,89 +534,9 @@ class LLMConfig:
                 table, cli, env_json=os.environ.get("REBAR_LLM_HEADERS"), env=os.environ
             ),
             langfuse=LangfuseConfig.from_env(),
-            overlap_propositions_min=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_PROPOSITIONS_MIN",
-                "overlap_propositions_min",
-                DEFAULT_OVERLAP_PROPOSITIONS_MIN,
-            ),
-            overlap_propositions_max=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_PROPOSITIONS_MAX",
-                "overlap_propositions_max",
-                DEFAULT_OVERLAP_PROPOSITIONS_MAX,
-            ),
-            overlap_k=_llm_int(table, cli, "REBAR_LLM_OVERLAP_K", "overlap_k", DEFAULT_OVERLAP_K),
-            overlap_max_doc_freq=_llm_float(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_MAX_DOC_FREQ",
-                "overlap_max_doc_freq",
-                DEFAULT_OVERLAP_MAX_DOC_FREQ,
-            ),
-            overlap_min_should_match=_llm_float(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_MIN_SHOULD_MATCH",
-                "overlap_min_should_match",
-                DEFAULT_OVERLAP_MIN_SHOULD_MATCH,
-            ),
-            overlap_soak_min=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_SOAK_MIN",
-                "overlap_soak_min",
-                DEFAULT_OVERLAP_SOAK_MIN,
-            ),
-            overlap_lease_ttl_min=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_LEASE_TTL_MIN",
-                "overlap_lease_ttl_min",
-                DEFAULT_OVERLAP_LEASE_TTL_MIN,
-            ),
-            overlap_reenrich_debounce_min=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_REENRICH_DEBOUNCE_MIN",
-                "overlap_reenrich_debounce_min",
-                DEFAULT_OVERLAP_REENRICH_DEBOUNCE_MIN,
-            ),
-            overlap_conf_threshold=_llm_float(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_CONF_THRESHOLD",
-                "overlap_conf_threshold",
-                DEFAULT_OVERLAP_CONF_THRESHOLD,
-            ),
-            overlap_surface_cap=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_SURFACE_CAP",
-                "overlap_surface_cap",
-                DEFAULT_OVERLAP_SURFACE_CAP,
-            ),
-            overlap_drain=_llm_drain_mode(
-                _llm_str(
-                    table, cli, "REBAR_LLM_OVERLAP_DRAIN", "overlap_drain", DEFAULT_OVERLAP_DRAIN
-                )
-            ),
-            overlap_drain_batch=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_DRAIN_BATCH",
-                "overlap_drain_batch",
-                DEFAULT_OVERLAP_DRAIN_BATCH,
-            ),
-            overlap_drain_gate_budget_ms=_llm_int(
-                table,
-                cli,
-                "REBAR_LLM_OVERLAP_DRAIN_GATE_BUDGET_MS",
-                "overlap_drain_gate_budget_ms",
-                DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS,
-            ),
+            **core_settings,
+            **limit_settings,
+            **overlap_settings,
         )
 
 
