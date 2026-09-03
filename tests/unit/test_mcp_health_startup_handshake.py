@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -455,3 +456,25 @@ def test_run_http_with_grace_hands_uvicorn_an_app_that_runs_the_handshake(
 
     record = handshake_status(mcp)
     assert record["ok"] is True and record["status"] == 200, record
+
+
+def test_handshake_leaf_exists_without_back_imports() -> None:
+    import rebar._mcp_startup_handshake as leaf
+
+    source = Path(leaf.__file__).read_text(encoding="utf-8")
+    assert "from rebar._mcp_health import" not in source
+    assert "from rebar._mcp_serving import" not in source
+
+
+def test_mcp_health_reexports_the_handshake_leaf_symbols() -> None:
+    import rebar._mcp_health as health
+    import rebar._mcp_startup_handshake as leaf
+
+    for name in (
+        "select_probe_host",
+        "drive_initialize",
+        "run_startup_handshake",
+        "handshake_status",
+        "install_startup_handshake",
+    ):
+        assert getattr(health, name) is getattr(leaf, name)
