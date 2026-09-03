@@ -685,10 +685,10 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         """Explicitly unassign a Jira issue via REST v3 PUT.
 
         Uses direct REST v3 (not ACLI binary) because the /assignee endpoint
-        requires body {"accountId": null} at root level — ACLI's _direct_rest_put
-        wraps body as {"value": data} which is rejected by the assignee endpoint.
-        Empirically verified: direct REST PUT is the de-facto pattern used by
-        pycontribs/jira and atlassian-python-api for null-accountId unassign.
+        requires body {"accountId": null} at root level — the issue-property
+        write shape is rejected here. Empirically verified: direct REST PUT is
+        the de-facto pattern used by pycontribs/jira and atlassian-python-api
+        for null-accountId unassign.
         """
         path = f"/rest/api/3/issue/{jira_key}/assignee"
         url = f"{self.jira_url.rstrip('/')}{path}"

@@ -47,7 +47,6 @@ def _make_client_mock(
     client.get_issue_property.return_value = property_value
     client.set_issue_property.return_value = None
     client.delete_issue.return_value = {"status": "deleted", "key": issue_key}
-    client._direct_rest_put.return_value = None
     return client
 
 

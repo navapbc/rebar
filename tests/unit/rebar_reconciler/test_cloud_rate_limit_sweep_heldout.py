@@ -421,6 +421,11 @@ def test_subprocess_member_retries_a_429_with_bounded_retry_after_backoff(
     )
 
 
+def test_cloud_transport_no_longer_exposes_wrapped_put_helper() -> None:
+    """The dead issue-property-only PUT wrapper was removed; callers use concrete writes."""
+    assert not hasattr(acli_mod.AcliClient, "_direct_rest_put")
+
+
 # ---------------------------------------------------------------------------
 # AC2 completeness: run the Step-0 enumeration command and account for EVERY name it
 # returns — either it is a mutating member classified in the table above, or it is marked
@@ -451,7 +456,6 @@ _CLASSIFIED_MUTATING = {
     "set_issue_property",
     "set_reporter",
     "set_entity_property",
-    "_direct_rest_put",
     "_direct_rest_put_raw",
     "_direct_rest_post_raw",
     "_direct_rest_delete",

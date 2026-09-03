@@ -42,11 +42,11 @@ def _sanitize_description(description: str) -> str:
     ``RichTextCodec`` contract — the same underlying ADF-limit logic, now reached
     through the codec rather than imported directly), injected into
     ``jira_family.sanitize_description`` as Cloud's rich-text contract — FIT ONLY,
-    no normalization, so this stays the distinct primitive the send path's
-    ``_fit_description`` composes with normalization on top of. The differ's
-    description comparison applies the IDENTICAL transform and the diff converges.
-    Send-side only — the local store is never mutated; a warning is emitted so an
-    operator can investigate.
+    no normalization, so this stays the distinct primitive the Cloud outbound
+    mapper composes with normalization on top of. The differ's description
+    comparison applies the IDENTICAL transform and the diff converges. Send-side
+    only — the local store is never mutated; a warning is emitted so an operator
+    can investigate.
     """
     return _shared_sanitize_description(
         description, fit=AdfCodec(rich="cloud" in cutover_clients()).fit_outbound

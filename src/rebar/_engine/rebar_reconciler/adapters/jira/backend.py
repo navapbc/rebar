@@ -37,22 +37,6 @@ from rebar_reconciler.adapters.jira_family.outbound_mapper import OutboundFieldM
 from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
 
 
-def _fit_description(value: str) -> str:
-    """Fit to Jira's ADF length limit, then normalize soft wraps.
-
-    Order is load-bearing: ``fit_outbound`` measures the ADF the send path
-    actually serializes, and the body Jira stores is then read back through
-    ``decode_inbound`` — i.e. normalized. Composing them in this order makes the
-    result its own fixed point (both halves are idempotent and normalization only
-    shrinks the ADF), so the send value and every description comparison converge.
-    Reached through the ``RichTextCodec`` contract (story J3) rather than the
-    pinned ``adf`` module directly, so a Data Center backend can supply its own
-    codec without touching this call site.
-    """
-    codec = AdfCodec(rich="cloud" in cutover_clients())
-    return codec.normalize_outbound(codec.fit_outbound(value))
-
-
 class _JiraOutbound:
     """Delegates outbound mapping to ``outbound_fields._map_local_to_jira_fields``."""
 
@@ -173,8 +157,8 @@ class _JiraSanitizer:
         ``AdfCodec.fit_outbound`` (which sizes the SERIALIZED ADF, not the raw text,
         and additionally reserves budget for ``RECONCILER_MARKER``) — and strips the
         decoration back off. A plain character cap could not agree with it. The codec
-        is built with the same flag-governed constructor :func:`_fit_description`
-        uses, so ``reconciler.rich_text_cutover`` governs both alike.
+        is built with the same flag-governed constructor the outbound mapper uses, so
+        ``reconciler.rich_text_cutover`` governs both alike.
 
         Deliberately NOT hoisted into the shared differ: Data Center keeps its comment
         ceiling distinct from its description fitter (bug 049e), so the convergence is
