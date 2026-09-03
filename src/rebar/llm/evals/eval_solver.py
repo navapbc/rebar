@@ -21,7 +21,15 @@ from dataclasses import replace
 import rebar
 from rebar.llm.runner import Runner
 
-__all__ = ["case_store", "run_case"]
+__all__ = ["INLINE_UNADMISSIBLE_CRITERIA", "case_store", "run_case"]
+
+# Plan-review criteria that CANNOT be scored over an inline sidecar-replay fixture: an ISF
+# finder needs a real session log, not inline plan text, so `_run_criterion_case` raises for
+# it. The fixture-admission runner consults this set to SKIP such criteria the way it skips
+# packaged ones, rather than dispatching a case that can only raise (bug filed during the
+# 67aa AC10 admission run). Container criteria (G3/G4/decomp-shape) ARE admissible — they run
+# over a (parent, children, roster) decomposition — so they are deliberately NOT listed here.
+INLINE_UNADMISSIBLE_CRITERIA = frozenset({"ISF"})
 
 
 # raw-git-ok: disposable sandbox repo, not the tracker
@@ -130,7 +138,7 @@ def _run_criterion_case(cid: str, case: dict, *, runner: Runner, repo_root: str 
         return {"findings": list(findings)}
     # ISF finders need a session log, not inline text — out of scope for the inline-fixture
     # eval; fail with a clear message, never silently.
-    if cid == "ISF":
+    if cid in INLINE_UNADMISSIBLE_CRITERIA:
         raise ValueError(
             f"criterion {cid!r} is an ISF finder (needs a session log), "
             "not runnable over an inline eval fixture"

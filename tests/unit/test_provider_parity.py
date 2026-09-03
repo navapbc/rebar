@@ -442,6 +442,9 @@ def test_container_cases_without_a_children_payload_are_excluded() -> None:
     assert not pp._runnable("G3", {"children": []})
     assert pp._runnable("G3", {"children": [{"ticket_id": "t"}]})
     assert pp._runnable("T2", {"input": "inline text"})  # non-container arms are unaffected
+    # An ISF finder is inline-unadmissible (needs a session log) — never runnable here, so it
+    # is excluded from the parity corpus instead of burning an epoch raising on both arms.
+    assert not pp._runnable("ISF", {"input": "inline plan text"})
 
 
 def test_container_spec_is_eligible_now_that_its_fixtures_carry_children() -> None:

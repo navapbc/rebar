@@ -86,6 +86,8 @@ def run_admission(
     if epochs < 1:
         raise ValueError("epochs must be >= 1")
 
+    from rebar.llm.evals import eval_solver
+
     manifest = Path(manifest_path)
     out = Path(out_dir)
     drift = Path(drift_path)
@@ -103,6 +105,26 @@ def run_admission(
     for criterion in sorted(criteria):
         prompt_id = criterion_prompt_id(criterion)
         if criterion in packaged or prompt_id in packaged:
+            continue
+        if criterion in eval_solver.INLINE_UNADMISSIBLE_CRITERIA:
+            # Not scorable over an inline sidecar-replay fixture (an ISF finder needs a real
+            # session log, so the solver can only raise). Skip like a packaged criterion, but
+            # record it in the drift report so the run stays auditable instead of silently
+            # dropping the candidate or crashing on the first ISF case. Mark it processed so a
+            # resume run REPLACES this row rather than appending a duplicate.
+            processed.add(criterion)
+            drift_entries.append(
+                DriftEntry(
+                    criterion=criterion,
+                    case_id=prompt_id,
+                    direction="",
+                    predicted="",
+                    observed="skipped",
+                    reason="not-inline-admissible",
+                    ticket_id=None,
+                    review_event_uuid="",
+                )
+            )
             continue
         if f"admission-{prompt_id}" in ledger_run_ids:
             admitted.append(criterion)

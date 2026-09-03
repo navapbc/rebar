@@ -188,9 +188,13 @@ def _runnable(solver_id: str, case: dict[str, Any]) -> bool:
     ``_run_criterion_case`` raises unless the case carries a non-empty ``children`` list; the
     parent plan alone is not enough. Some container fixtures supply one and some do not, and a
     case that can only raise is not corpus: it would burn an epoch on both arms and land in the
-    error counts rather than producing a verdict."""
+    error counts rather than producing a verdict. An ISF finder is inline-unadmissible for the
+    same reason — it needs a session log, not inline text, so it can only raise here."""
+    from rebar.llm.evals import eval_solver
     from rebar.llm.plan_review.pass1 import CONTAINER_CRITERIA
 
+    if solver_id in eval_solver.INLINE_UNADMISSIBLE_CRITERIA:
+        return False
     if solver_id in CONTAINER_CRITERIA:
         children = case.get("children")
         return isinstance(children, list) and bool(children)
