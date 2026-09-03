@@ -4419,6 +4419,15 @@
       "source_id": "1a51-b170-5168-46d2",
       "target_id": "dc09-6565-cf85-4aea"
     },
+    "1a63-056e-98b9-4ab7|7370-0274-9f80-437d|depends_on": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788431833941020269,
+      "link_id": "50845",
+      "relation": "depends_on",
+      "source": "snapshot",
+      "source_id": "1a63-056e-98b9-4ab7",
+      "target_id": "7370-0274-9f80-437d"
+    },
     "1a9f-50c0-e7a5-4fda|18a5-2bd8-3e56-4bd8|relates_to": {
       "confirmed_at": 1787208477529499754,
       "confirmed_pass": "2026-08-20T06-36-13",
@@ -18706,6 +18715,24 @@
       "source_id": "735b-cec9-fd08-4851",
       "target_id": "29a9-3cf7-3ded-42d8"
     },
+    "7370-0274-9f80-437d|1a63-056e-98b9-4ab7|blocks": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788431833941024768,
+      "link_id": "50845",
+      "relation": "blocks",
+      "source": "snapshot",
+      "source_id": "7370-0274-9f80-437d",
+      "target_id": "1a63-056e-98b9-4ab7"
+    },
+    "7370-0274-9f80-437d|8ca7-28c5-c5c4-4f32|depends_on": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788431833941027949,
+      "link_id": "50846",
+      "relation": "depends_on",
+      "source": "snapshot",
+      "source_id": "7370-0274-9f80-437d",
+      "target_id": "8ca7-28c5-c5c4-4f32"
+    },
     "738a-376e-4829-42ca|bf31-fd55-d28d-4b7a|relates_to": {
       "confirmed_at": 1787301563783206704,
       "confirmed_pass": "2026-08-21T08-36-33",
@@ -22100,6 +22127,15 @@
       "source": "backfill",
       "source_id": "8c35-1a5e-927b-4644",
       "target_id": "e369-a449-4773-48fb"
+    },
+    "8ca7-28c5-c5c4-4f32|7370-0274-9f80-437d|blocks": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788431833941031441,
+      "link_id": "50846",
+      "relation": "blocks",
+      "source": "snapshot",
+      "source_id": "8ca7-28c5-c5c4-4f32",
+      "target_id": "7370-0274-9f80-437d"
     },
     "8d01-5de0-5bd7-4ed0|0ec1-bb62-2fd8-4350|blocks": {
       "direction": "snapshot",
