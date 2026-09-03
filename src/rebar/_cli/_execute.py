@@ -19,25 +19,6 @@ from typing import Protocol
 
 from rebar._cli import _registry
 
-_CROSS_SESSION_WARN_COMMANDS = frozenset(
-    {
-        "show",
-        "comment",
-        "edit",
-        "transition",
-        "reopen",
-        "tag",
-        "untag",
-        "set-file-impact",
-        "deps",
-        "archive",
-        "check-ac",
-        "clarity-check",
-        "link",
-        "unlink",
-    }
-)
-
 
 class _Handler(Protocol):
     """A resolved CLI handler: called through an adapter, returns an exit code."""
@@ -71,7 +52,9 @@ def _maybe_warn_cross_session(name: str, rest: list[str]) -> None:
     Only single-ticket commands warn; the emit never alters stdout or the exit code
     and any detector error is swallowed so the command always proceeds.
     """
-    if name not in _CROSS_SESSION_WARN_COMMANDS:
+    # Derived from the route table, so a route rename carries its warning instead of
+    # leaving a stale spelling that silently never matches again (mirror F11).
+    if name not in _registry.derive_policy_sets()["_WARN_CROSS_SESSION"]:
         return
     try:
         token = next((arg for arg in rest if not arg.startswith("-")), None)

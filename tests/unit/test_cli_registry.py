@@ -42,6 +42,7 @@ _CENSUS_SETS = (
     "_IO",
     "_WRITES_FULL",
     "_CONFIRM_SCOPE",
+    "_WARN_CROSS_SESSION",
     "_LEGACY_OUTPUT",
 )
 
@@ -72,7 +73,7 @@ def _all_current_spellings() -> frozenset[str]:
     derived = _registry.derive_policy_sets()
     grouped: frozenset[str] = frozenset()
     for name in _CENSUS_SETS:
-        if name in ("_CONFIRM_SCOPE", "_LEGACY_OUTPUT", "_NO_AUTO_MOUNT"):
+        if name in ("_CONFIRM_SCOPE", "_LEGACY_OUTPUT", "_NO_AUTO_MOUNT", "_WARN_CROSS_SESSION"):
             # derived/overlay sets — their members already appear in a base set
             continue
         grouped |= derived[name]
