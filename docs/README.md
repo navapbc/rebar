@@ -115,6 +115,7 @@ These pages support deployment, release, incident response, and recurring mainte
 - **[gerrit-aws-setup.md](gerrit-aws-setup.md)**. Deployment of Gerrit and the review bot on AWS.
 - **[jira-dc-capability-map.md](jira-dc-capability-map.md)**. Measured Jira Data Center behavior and regeneration workflow.
 - **[maintenance-audit-runbook.md](maintenance-audit-runbook.md)**. Repeatable principal-engineer maintenance audit.
+- **[orphaned-processes.md](orphaned-processes.md)**. Prevention, detection, and recovery procedure for orphaned helper processes.
 - **[releasing.md](releasing.md)**. Release procedure for PyPI, Homebrew, and the MCP Registry.
 
 The generated [security reference](security.md) also provides credential and process environment information for operators.
