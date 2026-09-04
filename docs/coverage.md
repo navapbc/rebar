@@ -47,6 +47,12 @@ pytest -m "not integration and not external" -n 4 --dist worksteal \
   --cov=rebar --cov-report=term-missing:skip-covered -q
 ```
 
+`make test` now runs that same **scheduler** by default (`-n $(PYTEST_WORKERS) --dist
+worksteal`, `PYTEST_WORKERS ?= 4`), so the parallelism above is no longer something you have
+to add by hand; override it for a bigger box with `make test PYTEST_WORKERS=8`. It is still
+not the same command: `make test` carries no `--cov` flags, so use the invocation above when
+you want the coverage report as well.
+
 ### CI collects coverage on the primary **ubuntu / Python 3.13** cell only
 
 The `test` matrix in `.github/workflows/_build-and-test.yml` keeps all four supported

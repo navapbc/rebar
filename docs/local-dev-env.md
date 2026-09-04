@@ -462,10 +462,28 @@ Verify with `command -v scc` and `command -v jscpd`.
 ## Day-to-day gates
 
 ```sh
-make check     # lint + typecheck (check-only, never mutates)
-make test      # default test suite (excludes integration + external)
+make check     # lint + typecheck — the tight loop (~40 s); NOT the pre-push gate
+make verify    # THE PRE-PUSH GATE: lint + typecheck + the default suite (20-25 min)
+make test      # default test suite (excludes integration + external), -n 4 --dist worksteal
 make format    # the ONLY target that rewrites files
 ```
+
+**`make verify` is what must pass before `git push gerrit`, and it costs minutes, not
+seconds.** `make check` and `make lint` are check-only gates over the *source text*; a large
+family of this repo's invariants — the ratchets' baseline-vs-tree comparisons, the public-API
+surface census, CI-workflow parity, generated-artifact and docs drift, whole-tree AST policy
+scans — is enforced by **pytest** instead, and none of it is reachable from `make lint`. Three
+changes were pushed red by exactly those tests on 2026-09-04 after their authors ran `make
+lint` and `make typecheck` and saw green (bug `1035-bed7-c855-4732`). Budget for `make verify`
+deliberately: it is cheaper than a 15–20 minute `Verified -1` round trip, and it is the only
+local command that can honestly be called "I verified this".
+
+Measured twice on one six-performance-core host at the default `PYTEST_WORKERS=4`: 22 min 25 s
+and 26 min 04 s wall (lint ~27 s, typecheck ~10 s, ~19.2k tests). The spread is host load, so
+plan for the top of the range rather than the faster figure. Raise it for a bigger box
+(`make test PYTEST_WORKERS=8`); do **not** reach for `-n auto`, which resolves to the logical
+CPU count and over-subscribes badly — on that same host `auto` (18 workers) was still at 7%
+after eight minutes, because much of this suite forks git/bash/pytest subprocesses of its own.
 
 ### The per-test hang budget (300 s) and how to override it
 
