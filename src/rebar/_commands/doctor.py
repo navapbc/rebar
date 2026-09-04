@@ -49,7 +49,12 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from rebar._commands import doctor_locks, doctor_mapping, doctor_mcp_client
+from rebar._commands import (
+    doctor_build_freshness,
+    doctor_locks,
+    doctor_mapping,
+    doctor_mcp_client,
+)
 from rebar._commands._repair_pause import owned_repair_pause
 from rebar._commands._seam import CommandError, tracker_dir
 from rebar._engine_support.output import OutputFormatError, parse_output
@@ -416,6 +421,7 @@ def _print_text(
     lock_faults: list[dict[str, Any]],
     mapping_findings: list[dict[str, Any]],
     mcp_client_findings: list[dict[str, Any]],
+    build_freshness_findings: list[dict[str, Any]],
 ) -> None:
     if pre_oid:
         print(f"doctor: pre-tag {PRE_REPAIR_TAG} @ {pre_oid[:12]}")
@@ -449,6 +455,11 @@ def _print_text(
     # the store, so there is nothing here for --repair to convert. Joined rather than
     # looped: render_text always emits its header line, so this never prints a blank.
     print("\n".join(doctor_mcp_client.render_text(mcp_client_findings)))
+    # Build-freshness findings render in their own section on the same terms: read from
+    # the host's updater state rather than the store, so outside the repair loop AND
+    # outside the exit code. Joined rather than looped — render_text always emits its
+    # header, so this never prints a blank line.
+    print("\n".join(doctor_build_freshness.render_text(build_freshness_findings)))
 
 
 def doctor_cli(argv: list[str], *, repo_root=None) -> int:
@@ -496,6 +507,11 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
     # rather than the store, so they too stay outside `findings` / the repair loop.
     mcp_client_findings = doctor_mcp_client.scan_mcp_clients()
 
+    # Is the rebar on this box current, and is whatever keeps it current still working?
+    # Read from the host's main-tracking updater state on local disk — no network, no
+    # alert sink — because the sink is exactly what went silent in bug ae97-a37b-9fa3-413a.
+    build_freshness_findings = doctor_build_freshness.scan_build_freshness(repo_root=repo_root)
+
     pre_oid = ""
     if do_repair and not dry_run and findings:
         try:
@@ -515,6 +531,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
                     "lock_findings": lock_faults,
                     "mapping_findings": mapping_findings,
                     "mcp_client_findings": mcp_client_findings,
+                    "build_freshness_findings": build_freshness_findings,
                 }
             )
         )
@@ -527,6 +544,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
             lock_faults=lock_faults,
             mapping_findings=mapping_findings,
             mcp_client_findings=mcp_client_findings,
+            build_freshness_findings=build_freshness_findings,
         )
 
     outstanding = _outstanding(findings)

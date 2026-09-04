@@ -530,6 +530,32 @@ byte-identical; inspect and remove them by hand only when you know the append th
 them is dead. On a clean tracker `doctor --repair` makes zero changes and records no
 backup ref.
 
+## `doctor` also tells you whether this box's rebar is stale
+
+Some hosts keep their **global** `rebar` / `rebar-mcp` aligned to `origin/main` with a
+scheduled updater that builds each candidate commit and publishes it through an atomic
+`current` pointer. When that updater breaks it breaks **silently** — the build simply
+stops moving — and every gate run on the box keeps producing verdicts from old code.
+`rebar doctor` reports on it, reading only local disk (no network, no alert sink, no CI
+provider), in its own `doctor: build freshness` section:
+
+- **`reject-streak`** — the updater's own consecutive-rejection counter is at or above
+  its alert threshold, i.e. the updater is running and failing every time.
+- **`build-stale`** — the build behind `current` is more than 25 commits behind
+  `origin/main`. This fires independently of the counter, so it still catches an updater
+  that stopped running altogether rather than failing.
+
+Both are **advisory**: like the MCP-client section they describe the HOST rather than the
+store, so they are printed (text and JSON) but never folded into `doctor`'s exit code and
+never touched by `--repair`. On a box that runs no such updater the section prints one
+`unavailable` line and nothing else — absent state is "not applicable", not a fault.
+
+Why it is local: on 2026-09 an updater rejected **120 consecutive** candidates on a uv
+`required-version` mismatch and left the global build ~195 commits and five days stale.
+The only detector was a remote alert sink, and every publish to it failed authorization,
+so the streak ran to 120 against a threshold of 3 with no operator signal at all. A
+detector that can only speak through a remote sink can go quiet without saying so.
+
 ## `doctor` also audits your `[mapping]` config
 
 `rebar doctor` diagnoses the hand-edited `[mapping]` seam so a misconfigured mapping can't
