@@ -447,6 +447,35 @@ high-confidence trend. The library/registry side of this surface is documented i
 [reuse-surface.md](reuse-surface.md); the exact CLI syntax is in
 [cli-reference.md](cli-reference.md).
 
+### Module-size trend and cap-change events
+
+`module_size_trend` and `cap_change_events` (`code_health`/`git`/`high`) derive the
+module-size history straight from Git, independent of the scc-backed
+`module_size_distribution`/`oversized_module_count` analyzer metrics above. Both walk the
+commits reachable from `HEAD`, filter them inclusively by `--since`/`--until` on committer
+date, and keep only **qualified** revisions — a commit whose tree has a positive-integer
+`.github/module-size-limit.txt` blob AND at least one tracked `src/rebar/**/*.py` blob.
+Qualified revisions are sorted oldest-to-newest by `(committer_timestamp, sha)`.
+
+- `module_size_trend` reports every qualified revision when there are at most 50; beyond
+  that it reports 50 evenly spaced samples, always including the first and last, plus the
+  total `qualified_revisions` count and the `sampled_revisions` count actually returned.
+  Each sample carries its commit `sha`, committer `timestamp`, the module-size cap **read
+  from that same revision** (a later cap change never reinterprets an older sample), the
+  tracked module `count`, and `max_loc` — the largest module's raw newline count from its
+  historical Git blob (the `wc -l` equivalent the CI gate uses), not a working-tree or
+  analyzer measurement.
+- `cap_change_events` compares the cap of every adjacent qualified revision **before**
+  sampling and returns the ordered list of changes (`from`, `to`, `sha`, `timestamp` of the
+  revision the cap changed to) plus `qualified_revisions`. A qualifying history with no cap
+  change reports an empty `events` list — that is a real value, not `unavailable`.
+
+Both report the standard `unavailable` shape, never a zero or empty placeholder, for: a
+non-Git repository or a git failure, a date range with no commits, no positive-integer cap
+blob found anywhere in range, no qualifying `src/rebar/**/*.py` modules found anywhere in
+range, or fewer than two qualified revisions overall. Each reason names its category so an
+`unavailable` result is diagnosable without re-running the command.
+
 ### Code-health analyzer installation and fallback
 
 Analyzer-backed code-health metrics need all three parts of this installation:
