@@ -249,9 +249,23 @@ def test_openai_responses_is_resolvable_without_a_rebar_builder():
         assert session.supports("openai-responses") is False, (
             "rebar must register no builder for openai-responses; it resolves via pydantic-ai"
         )
-        # parity with the deprecated Chat fallback, which is resolvable the same way
-        assert session.is_resolvable("openai-chat") is True
+        # Hosted Chat fallback is removed; custom endpoints still register the Chat builder.
+        assert session.is_resolvable("openai-chat") is False
         assert session.supports("openai-chat") is False
+
+
+def test_hosted_openai_chat_provider_factory_is_removed():
+    from rebar.llm.providers import ProviderSession
+
+    cfg = _cfg()  # no base_url → hosted OpenAI
+    with ProviderSession(cfg) as session:
+        with pytest.raises(LLMConfigError) as excinfo:
+            session.provider_factory("openai-chat")
+
+    message = str(excinfo.value)
+    assert "openai-chat" in message
+    assert "openai-responses" in message
+    assert "base_url" in message or "endpoint" in message
 
 
 def test_provider_session_factory_rejects_an_unknown_provider_by_name():

@@ -180,7 +180,7 @@ def test_force_close_bypasses_precheck(rebar_repo: Path, monkeypatch) -> None:
     desc = "## Acceptance Criteria\n- [ ] not done yet\n"
     tid = _make(rebar_repo, desc)
     rebar.transition(
-        tid, "in_progress", "closed", force_close="operator override", repo_root=str(rebar_repo)
+        tid, "in_progress", "closed", force="operator override", repo_root=str(rebar_repo)
     )
     assert _status(tid, rebar_repo) == "closed"
 
