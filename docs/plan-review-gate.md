@@ -726,6 +726,34 @@ Never wrap either gate in a shell `timeout` (see AGENTS.md's bounding section): 
 bounded workloads that terminate with a verdict — background them if you must keep working,
 but let them finish.
 
+### A congestion refusal is an expected outcome, not a gate failure
+
+A review host bounds how many plan-review and completion-verifier runs may execute at once
+(`[snapshot].max_concurrent_gates`, default 4 — see
+[config.md](config.md#repo-snapshot-gates-snapshot--optional-env-first-see-repo-snapshot-gatesmd)).
+**At capacity a gate is refused immediately rather than queued.** A queued gate would still hold
+its thread and its ~739 MB resident while waiting, converting disk pressure into memory
+pressure, and would hold the MCP client's request past its deadline.
+
+The refusal is **not a verdict**. It is never `INDETERMINATE`, never a `BLOCK`, and on the
+review-bot path never an `LLM-Review -1`: nothing about the ticket was judged, because the gate
+never started. Recognise it by shape:
+
+| Surface | What a congestion refusal looks like |
+|---|---|
+| MCP | `{"error": "gate_congested", "retryable": true, "resolution_class": "WAIT_AND_RETRY", ...}` — no `verdict` key |
+| CLI | exit **11** ("transient — retry"), with an `Error:` line naming host congestion |
+| host logs | one `GATE_CONGESTED {json}` marker naming the gate, ticket and limit |
+
+If the cap's own plumbing is locally unusable the gate is admitted and a
+`GATE_ADMISSION_DISARMED` marker is emitted instead — worth alerting on, since the bound was not
+in force. If the scratch volume itself is unreachable the gate is refused with
+`gate_scratch_unavailable`, which is a host fault to fix, not a review outcome.
+
+The correct response is to **back off and retry**, not to re-run immediately, escalate, or record
+a result. Persistent congestion means the host is oversubscribed: either reduce parallelism, or
+raise the cap if the box genuinely has the memory and scratch space for it.
+
 ### Resuming exactly the latest review — `review-plan --retry`
 
 A plan review can land on **INDETERMINATE** without failing on the merits: an LLM call for a

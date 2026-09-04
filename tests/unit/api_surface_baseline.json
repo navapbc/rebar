@@ -60,6 +60,8 @@
         "'criterion_registry_malformed'",
         "'criterion_unknown_id'",
         "'deps_failed'",
+        "'gate_congested'",
+        "'gate_scratch_unavailable'",
         "'invalid_input'",
         "'invalid_ticket_type'",
         "'llm_unavailable'",
