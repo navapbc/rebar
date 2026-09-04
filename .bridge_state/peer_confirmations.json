@@ -24065,6 +24065,15 @@
       "source_id": "95a5-41eb-cffd-477b",
       "target_id": "jira-reb-687"
     },
+    "95c1-f6eb-0fa9-402e|d8a3-ff71-8112-4e55|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788562431122082907,
+      "link_id": "50891",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "95c1-f6eb-0fa9-402e",
+      "target_id": "d8a3-ff71-8112-4e55"
+    },
     "95dc-cbe7-ed1d-48dc|b02d-10bc-07ee-49e7|parent": {
       "confirmed_at": 1786807014033237996,
       "confirmed_pass": "2026-08-15T14-49-02",
@@ -25427,6 +25436,15 @@
       "source": "backfill",
       "source_id": "9e9e-3481-f08e-4c2c",
       "target_id": "3c09-9176-9305-4033"
+    },
+    "9ea3-7d07-ea55-4496|d8a3-ff71-8112-4e55|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788562431125582214,
+      "link_id": "50892",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "9ea3-7d07-ea55-4496",
+      "target_id": "d8a3-ff71-8112-4e55"
     },
     "9ed2-e0a1-c69c-44d4|2711-21bf-ab71-4136|depends_on": {
       "confirmed_at": 1786970765371960396,
@@ -33401,6 +33419,24 @@
       "source": "snapshot",
       "source_id": "d7b9-ac42-ad6f-4608",
       "target_id": "3350-90b1-2651-4c50"
+    },
+    "d8a3-ff71-8112-4e55|95c1-f6eb-0fa9-402e|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788562431125779343,
+      "link_id": "50891",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "d8a3-ff71-8112-4e55",
+      "target_id": "95c1-f6eb-0fa9-402e"
+    },
+    "d8a3-ff71-8112-4e55|9ea3-7d07-ea55-4496|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788562431125782197,
+      "link_id": "50892",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "d8a3-ff71-8112-4e55",
+      "target_id": "9ea3-7d07-ea55-4496"
     },
     "d8a5-7a66-8b15-42a1|6982-2e75-f8fa-43b9|parent": {
       "confirmed_at": 1786807014035029551,
