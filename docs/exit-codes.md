@@ -52,14 +52,13 @@ Canonical benign states return 0 with one stable stderr line:
 | reschedule requested | `BRIDGE_STATE: reschedule` |
 | historical phase gate | `BRIDGE_STATE: legacy-gated` |
 
-The rolling-migration compatibility routes — `rebar reconcile --mode ...`, direct-engine
-`--mode`, argument-less direct-engine invocation, and the library/MCP reconcile adapters that
-launch them — retain their historical results and defaults. Converged and paused remain 0;
-another pass in flight remains **3**; the phase gate remains **4**; and reschedule remains
-**75**. Their established messages remain unchanged (`reconcile: ... another pass in flight`,
-`reconcile: ... gate blocks advancement ...`, and `RESCHEDULE: ...`). This lets older
-systemd units, Jenkins jobs, checked-out workflows, scripts, and environments migrate without
-a flag day. New automation should use the canonical bridge routes and ordinary 0/1/2 handling.
+The remaining rolling-migration compatibility routes — `rebar reconcile --mode ...`,
+direct-engine `--mode`, and argument-less direct-engine invocation — retain their historical
+results and defaults. Converged and paused remain 0; another pass in flight remains **3**;
+the phase gate remains **4**; and reschedule remains **75**. Their established messages remain
+unchanged (`reconcile: ... another pass in flight`, `reconcile: ... gate blocks advancement ...`,
+and `RESCHEDULE: ...`). The former Python and MCP `reconcile(mode=...)` adapters are removed;
+new automation should use the canonical bridge routes and ordinary 0/1/2 handling.
 
 ### Cross-cutting rules
 

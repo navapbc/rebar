@@ -14,10 +14,10 @@ unaffected, but flipping them keeps the enumeration environment unambiguous.
 
 Classification: three gate-tier sections — Read-only (always) / LLM-gated
 (``REBAR_MCP_ALLOW_LLM``) / Write-gated (``REBAR_MCP_READONLY``). The default gate is the
-registrar, with a closed set of hybrid special-cases annotated inline (``reconcile`` /
-``fsck`` in the read section, ``run_workflow`` in the write section, ``sign_review``
-which lives in the LLM registrar but is write-gated, and the bridge run/control/sync
-tools which live in the read registrar but are write-gated).
+registrar, with a closed set of hybrid special-cases annotated inline (``fsck``
+in the read section, ``run_workflow`` in the write section, ``sign_review`` which
+lives in the LLM registrar but is write-gated, and the bridge run/control/sync tools
+which live in the read registrar but are write-gated).
 
 Usage:
     python scripts/gen_mcp_reference.py           # regenerate docs/mcp-reference.md
@@ -43,12 +43,8 @@ _READ_REGISTRAR_BUT_WRITE_GATED = frozenset(
 )
 
 # Inline annotations for the closed set of hybrid special-cases (verified against the
-# registrar source: _mcp_reads.reconcile/fsck, _mcp_llm.sign_review, _mcp_writes.run_workflow).
+# registrar source: _mcp_reads.fsck, _mcp_llm.sign_review, _mcp_writes.run_workflow).
 _ANNOTATIONS: dict[str, str] = {
-    "reconcile": (
-        "live/mutating modes are blocked by `REBAR_MCP_READONLY` first, then require "
-        "`REBAR_MCP_ALLOW_JIRA_SYNC`; dry-run/check are always available"
-    ),
     "bridge_run": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
     "bridge_sync": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
     "bridge_pause": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
@@ -127,10 +123,15 @@ def enumerate_by_registrar() -> dict[str, list[str]]:
 
 
 def _gate_env_descriptions() -> dict[str, str]:
-    """Pull the three gate env-var descriptions from the server's canonical contract."""
+    """Pull gate env-var descriptions and adapt removed compatibility wording."""
     from rebar.mcp_server import MCP_ENV_VARS
 
-    return {v["name"]: v["description"] for v in MCP_ENV_VARS}
+    descriptions = {v["name"]: v["description"] for v in MCP_ENV_VARS}
+    descriptions["REBAR_MCP_ALLOW_JIRA_SYNC"] = (
+        "Set to 1 to enable MCP bridge tools that mutate Jira or bridge state "
+        "(bridge_run / bridge_sync / bridge_pause / bridge_resume); off by default."
+    )
+    return descriptions
 
 
 def _render_row(name: str, summary: str) -> str:

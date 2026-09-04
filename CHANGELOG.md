@@ -38,6 +38,12 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): Python and MCP `reconcile(mode=...)` compatibility APIs have been removed.**
+  The CLI `rebar reconcile --mode ...` and direct reconciler routes remain available, but
+  programmatic callers should use `bridge_preview`, `bridge_sync`, `bridge_run`,
+  `bridge_fsck`, and `bridge_status` explicitly. Stale Python/MCP reconcile callers now fail
+  before any reconciler subprocess or bridge work starts.
+
 - **BREAKING (pre-1.0): `rebar.create_placeholder()` has been removed from the Python API.**
   Use `rebar.ensure_identity_for(provider, external_id, display_name)` instead. The
   canonical function still resolves an existing mapping first and otherwise mints the

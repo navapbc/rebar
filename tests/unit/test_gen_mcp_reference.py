@@ -3,7 +3,7 @@
 The generator (scripts/gen_mcp_reference.py) emits docs/mcp-reference.md from the MCP
 server's own registrars, classified into three gate-tier sections (Read-only / LLM-gated
 / Write-gated) with inline annotations for the closed set of hybrid special cases
-(reconcile, fsck, sign_review, run_workflow).
+(fsck, sign_review, run_workflow, and bridge mutations).
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def test_render_lists_representative_tools():
         "show_ticket",
         "review_plan",
         "sign_review",
-        "reconcile",
+        "bridge_preview",
         "run_workflow",
     ):
         assert f"`{tool}`" in doc, f"tool {tool!r} missing from mcp reference"
@@ -167,15 +167,14 @@ def test_sign_review_in_write_section_not_llm_section():
     assert "sign_review" not in llm_sec
 
 
-def test_reconcile_annotated_with_both_gates():
-    """reconcile's live-mode annotation names BOTH REBAR_MCP_READONLY and
-    REBAR_MCP_ALLOW_JIRA_SYNC (readonly blocks first, then jira-sync required)."""
+def test_bridge_mutations_annotated_with_jira_sync_gate():
+    """Bridge mutating tool annotations name the Jira-sync opt-in gate."""
     doc = gen.render()
-    read_sec = _section(doc, "Read-only")
-    # find the reconcile row/line
-    recon_line = next((ln for ln in read_sec.splitlines() if "reconcile" in ln), "")
-    assert "REBAR_MCP_READONLY" in recon_line
-    assert "REBAR_MCP_ALLOW_JIRA_SYNC" in recon_line
+    write_sec = _section(doc, "Write-gated")
+    for name in ("bridge_run", "bridge_sync", "bridge_pause", "bridge_resume"):
+        line = next((ln for ln in write_sec.splitlines() if name in ln), "")
+        assert "REBAR_MCP_ALLOW_JIRA_SYNC" in line
+        assert "read-only" in line
 
 
 def test_run_workflow_annotated_with_allow_llm():

@@ -1,6 +1,6 @@
 """MCP-server-specific behaviors (FastMCP).
 
-Covers the read-only gate, the live-reconcile gate, and the lazy-import error
+Covers the read-only gate, removed reconcile tool, and the lazy-import error
 when the optional `mcp` extra is absent. Skipped wholesale if `mcp` is not
 installed.
 """
@@ -102,169 +102,22 @@ def test_readonly_truthy_parse_is_case_insensitive(
         assert write_present, f"{val!r} must NOT enable readonly (write tools present)"
 
 
-def test_live_reconcile_refused_without_optin(monkeypatch: pytest.MonkeyPatch, rebar_repo) -> None:
-    monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC", raising=False)
+def test_mcp_reconcile_tool_is_removed_before_library_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The legacy MCP reconcile(mode=...) tool is absent, so stale callers fail
+    at tool dispatch before any library or reconciler work can begin."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        rebar,
+        "reconcile",
+        lambda mode="dry-run": calls.append(mode) or {"mode": mode},
+        raising=False,
+    )
     srv = build_server()
+    assert "reconcile" not in _tool_names(srv)
     with pytest.raises(Exception) as exc:
         asyncio.run(srv.call_tool("reconcile", {"mode": "live"}))
-    assert "live reconcile is disabled" in str(exc.value).lower()
-
-
-# ── reconcile mode-gate matrix (BUG 9d7c) ──────────────────────────────────────
-# cap-0 modes are non-mutating and always allowed; the rest mutate Jira and must
-# be gated by both readonly and the live-opt-in env. A fake acli on PATH fails
-# loudly if reconcile ever shells out — proving the gate refuses BEFORE any
-# Jira-touching work for the cases that must be refused.
-_CAP0_MODES = ["reconcile-check", "dry-run"]
-_MUTATING_MODES = ["bootstrap-strict", "bootstrap-throttle", "live"]
-
-
-@pytest.fixture
-def _loud_acli(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    """Put a fake `acli` (and python3 shim is untouched) on PATH that errors if
-    executed, so an ungated mutating reconcile would crash visibly."""
-    import os
-    import stat
-
-    bindir = tmp_path / "loud-bin"
-    bindir.mkdir()
-    acli = bindir / "acli"
-    acli.write_text("#!/bin/sh\necho 'FAKE ACLI INVOKED' >&2\nexit 99\n")
-    acli.chmod(acli.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ.get("PATH", ""))
-    return bindir
-
-
-@pytest.mark.parametrize("mode", _CAP0_MODES)
-def test_reconcile_cap0_modes_allowed_in_both_gates(
-    monkeypatch: pytest.MonkeyPatch, rebar_repo, mode, _loud_acli
-) -> None:
-    """Non-mutating (cap-0) modes run regardless of readonly/opt-in — the gate
-    must not refuse them. (They may legitimately fail for lack of Jira creds; we
-    only assert they are NOT refused by the gate.)"""
-    for readonly in ("", "1"):
-        monkeypatch.setenv("REBAR_MCP_READONLY", readonly) if readonly else monkeypatch.delenv(
-            "REBAR_MCP_READONLY", raising=False
-        )
-        monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC", raising=False)
-        srv = build_server()
-        try:
-            asyncio.run(srv.call_tool("reconcile", {"mode": mode}))
-        except Exception as exc:  # noqa: BLE001
-            # PT017 is excluded here: a cap-0 mode may legitimately SUCCEED or fail for lack of
-            # creds. The oracle is "not refused by the gate", not "raises".
-            assert "disabled" not in str(exc).lower(), (mode, readonly, exc)  # noqa: PT017
-
-
-@pytest.fixture
-def _empty_acli(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    """Put a fake `acli` on PATH that returns an EMPTY but valid issue list for
-    any search (`[]`). This lets a dry-run reconcile complete a real pass —
-    fetch → diff → (no-write) report — without touching real Jira, so the test
-    can assert the no-write contract end-to-end."""
-    import os
-    import stat
-
-    bindir = tmp_path / "empty-bin"
-    bindir.mkdir()
-    acli = bindir / "acli"
-    acli.write_text("#!/bin/sh\necho '[]'\nexit 0\n")
-    acli.chmod(acli.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ.get("PATH", ""))
-    # Ensure no JIRA_* creds leak in → parent/comment REST enrichment degrades
-    # to {} (it never writes), keeping the pass fully offline.
-    for var in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN"):
-        monkeypatch.delenv(var, raising=False)
-    return bindir
-
-
-def _store_write_tree(repo) -> set[str]:
-    """Set of files under the reconciler's store-write locations."""
-    import pathlib
-
-    roots = [
-        pathlib.Path(repo) / "bridge_state",
-        pathlib.Path(repo) / ".tickets-tracker" / ".bridge_state",
-    ]
-    out: set[str] = set()
-    for r in roots:
-        if r.exists():
-            out |= {str(p.relative_to(repo)) for p in r.rglob("*") if p.is_file()}
-    return out
-
-
-def test_readonly_dry_run_reconcile_performs_zero_store_writes(
-    monkeypatch: pytest.MonkeyPatch, rebar_repo, _empty_acli
-) -> None:
-    """A REBAR_MCP_READONLY=1 server running reconcile(mode='dry-run') must
-    perform ZERO local-store writes — no snapshot / manifest / health /
-    sync-log / bindings / prev_snapshot file (ticket yaw-plait-doe). The
-    no-write contract holds universally, not only because of the readonly gate
-    (cap-0 dry-run is allowed under readonly), so the differ runs but nothing
-    is persisted."""
-    monkeypatch.setenv("REBAR_MCP_READONLY", "1")
-    monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC", raising=False)
-    # bug 626d: the inbound fetch is scoped to jira.project and fails closed on an
-    # empty key; configure one so the dry-run reaches the (empty) acli fetch.
-    monkeypatch.setenv("JIRA_PROJECT", "DIG")
-    # bug ad85: building the (default Cloud) backend now fails loudly on absent
-    # credentials — even a dry-run reads select_backend(...).project — so pin
-    # hermetic, valid creds; this test asserts zero store writes, not auth.
-    monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")
-    monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
-    monkeypatch.setenv("JIRA_API_TOKEN", "test-api-token")
-    srv = build_server()
-
-    before = _store_write_tree(rebar_repo)
-    result = asyncio.run(srv.call_tool("reconcile", {"mode": "dry-run"}))
-    after = _store_write_tree(rebar_repo)
-
-    new_files = sorted(after - before)
-    assert new_files == [], (
-        f"readonly dry-run reconcile must write NOTHING to the store, "
-        f"but created: {new_files} (result={result})"
-    )
-
-
-@pytest.mark.parametrize("mode", _MUTATING_MODES)
-def test_reconcile_mutating_refused_under_readonly(
-    monkeypatch: pytest.MonkeyPatch, rebar_repo, mode, _loud_acli
-) -> None:
-    """Readonly blocks ALL mutating modes — even with the live opt-in set."""
-    monkeypatch.setenv("REBAR_MCP_READONLY", "1")
-    monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "1")
-    srv = build_server()
-    with pytest.raises(Exception) as exc:
-        asyncio.run(srv.call_tool("reconcile", {"mode": mode}))
-    msg = str(exc.value).lower()
-    assert "disabled" in msg and "read-only" in msg, (mode, exc.value)
-
-
-@pytest.mark.parametrize("mode", _MUTATING_MODES)
-def test_reconcile_mutating_refused_without_optin(
-    monkeypatch: pytest.MonkeyPatch, rebar_repo, mode, _loud_acli
-) -> None:
-    """Non-readonly but missing the live opt-in refuses all mutating modes."""
-    monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
-    monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC", raising=False)
-    srv = build_server()
-    with pytest.raises(Exception) as exc:
-        asyncio.run(srv.call_tool("reconcile", {"mode": mode}))
-    msg = str(exc.value).lower()
-    assert f"{mode} reconcile is disabled" in msg, (mode, exc.value)
-
-
-def test_reconcile_bogus_mode_clean_error(
-    monkeypatch: pytest.MonkeyPatch, rebar_repo, _loud_acli
-) -> None:
-    """An unknown mode is a clean tool error (ValueError listing allowed modes),
-    raised before any acli invocation — not a crash."""
-    monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
-    srv = build_server()
-    with pytest.raises(Exception) as exc:
-        asyncio.run(srv.call_tool("reconcile", {"mode": "bogus"}))
-    assert "FAKE ACLI" not in str(exc.value)
-    assert "unknown mode" in str(exc.value).lower() or "bogus" in str(exc.value).lower()
+    assert "reconcile" in str(exc.value).lower()
+    assert calls == []
 
 
 # ── fsck recover-gate (BUG f6f6) ────────────────────────────────────────────────

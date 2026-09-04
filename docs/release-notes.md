@@ -8,6 +8,18 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — Python/MCP `reconcile(mode=...)` compatibility is removed
+
+The public Python facade no longer exports `rebar.reconcile`, and the MCP server no longer
+registers a `reconcile` tool. Stale programmatic callers now fail at attribute lookup or MCP
+tool dispatch before any reconciler subprocess or bridge operation can start.
+
+Use `rebar.bridge_preview(...)` for former dry-run programmatic callers,
+`rebar.bridge_sync(...)` or `rebar.bridge_run(profile=...)` for mutating synchronization, and
+`rebar.bridge_fsck(...)` / `rebar.bridge_status(...)` for bridge diagnostics. The CLI
+`rebar reconcile --mode ...` and direct `python -m rebar_reconciler` routes remain available for
+operators and scheduled compatibility jobs, including the distinct `reconcile-check` report.
+
 ## `severity` is now OPTIONAL on `review_result` findings (epic `pink-complex-xenurine`)
 
 The review-kernel (`pass3_decide`, shared by code-review and plan-review) no longer stamps a
@@ -520,9 +532,10 @@ Preview remains strictly non-mutating; run and sync are explicitly mutating. MCP
 sync, pause, and resume through both the read-only policy and `mcp.allow_jira_sync`, while status,
 preview, fsck, and access checking remain available without that sync authorization.
 
-This is additive. `rebar.reconcile(mode=...)`, MCP `reconcile(mode=...)`, and
-`bridge_fsck` retain their names, defaults, schemas, return values, and error behavior.
-The interactive setup wizard remains a CLI-only operator flow.
+`bridge_fsck` retains its name, schema, return value, and error behavior. The former
+Python and MCP `reconcile(mode=...)` compatibility adapters were later removed; use the
+explicit bridge operations for programmatic callers. The interactive setup wizard remains a
+CLI-only operator flow.
 
 ## `bridge fsck` audits real offline state
 
@@ -589,12 +602,11 @@ are benign canonical exit 0 states with a stable one-line state marker. The engi
 classifies and executes a single pass; route adapters translate only the final status/message,
 so repository and ref effects are identical.
 
-This is a rolling migration, not removal of compatibility. `rebar reconcile --mode ...`,
-direct-engine `--mode`, argument-less direct-engine invocation, and the existing library/MCP
-reconcile adapters retain their historical defaults, messages, and 3 (pass in flight), 4
-(phase gate), and 75 (reschedule) sentinels. Existing systemd units, Jenkins jobs, scripts,
-checked-out workflows, and older environments therefore continue unchanged while new
-automation moves to canonical 0/1/2. The production workflow no longer carries a 3/75
+The remaining rolling-migration compatibility routes — `rebar reconcile --mode ...`,
+direct-engine `--mode`, and argument-less direct-engine invocation — retain their historical
+defaults, messages, and 3 (pass in flight), 4 (phase gate), and 75 (reschedule) sentinels.
+The Python and MCP `reconcile(mode=...)` adapters are removed; programmatic automation should
+move to the explicit bridge operations. The production workflow no longer carries a 3/75
 whitelist; its paused-marker commit-skip remains unchanged.
 
 ## Durable reconciler status and last-pass witness

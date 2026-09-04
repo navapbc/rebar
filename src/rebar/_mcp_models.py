@@ -595,9 +595,8 @@ def tool_annotation_presets() -> dict:
     - ``MUTATE_IDEMPOTENT`` — modifies the store but repeating with the same args is
       a no-op (tag/untag, set-* replace-semantics, fsck's stale-lock cleanup).
     - ``DESTRUCTIVE`` — modifies the store irreversibly (archive/compact).
-    - ``MUTATE_OPEN_WORLD`` — may mutate AND reach an external system (run_workflow;
-      reconcile in its live/bootstrap modes — annotated conservatively even though
-      its default mode is a local dry run).
+    - ``MUTATE_OPEN_WORLD`` — may mutate AND reach an external system (bridge
+      run/sync/control operations and run_workflow).
     """
     from mcp.types import ToolAnnotations
 
