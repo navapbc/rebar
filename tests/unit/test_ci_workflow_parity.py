@@ -1456,7 +1456,7 @@ def test_optionality_loop_covers_every_declared_extra() -> None:
     run = _optionality_loop_step_run()
     # Entries are "<label>:<pip extras>"; the union entry's label is not an extra name.
     # Extra/pip-extra names may contain digits (e.g. `s3`), so allow them in both groups.
-    labels = {m.group(1) for m in re.finditer(r'"([a-z0-9_]+):([a-z0-9_,]+)"', run)}
+    labels = {m.group(1) for m in re.finditer(r'"([a-z0-9_-]+):([a-z0-9_,-]+)"', run)}
     missing = set(_optional.EXTRAS) - labels
     assert not missing, (
         f"optional extra(s) {sorted(missing)} are declared in rebar._optional.EXTRAS but are not "
@@ -1490,7 +1490,7 @@ def test_every_optionality_spec_is_a_declared_extra() -> None:
     pyproject = tomllib.loads(_read(_ROOT / "pyproject.toml"))
     declared = set(pyproject["project"]["optional-dependencies"])
     run = _optionality_loop_step_run()
-    specs = {m.group(1): m.group(2) for m in re.finditer(r'"([a-z0-9_]+):([a-z0-9_,]+)"', run)}
+    specs = {m.group(1): m.group(2) for m in re.finditer(r'"([a-z0-9_-]+):([a-z0-9_,-]+)"', run)}
 
     unknown = {
         label: target
