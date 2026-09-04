@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": true,
+      "key": {
+        "uuid": "f02f1733_ce201858",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 4
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1000007
+      },
+      "writtenOn": "2026-09-04T10:02:26Z",
+      "side": 1,
+      "message": "This change is rejected by the user. This contaminates rebar documentation with local environment setup relevant only to a specific user.",
+      "revId": "da856e406a672ec89a24771e1a8096b661864990",
+      "serverId": "fc71b410-f5b3-4446-8e2c-e56c4676521b"
+    }
+  ]
+}
