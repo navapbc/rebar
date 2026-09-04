@@ -146,4 +146,5 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0106 — Remote-anchored below-horizon history reclamation for the `tickets` branch](0106-remote-anchored-history-reclamation.md)
 - [0108 — Retire the severity label; priority + blocking/advisory is the canonical signal](0108-retire-severity-label.md)
 - [0110 — Change shape enters the floor as an advisory on file surface, not as a blocking size rule](0110-change-shape-advisory-not-blocking.md)
+- [0111 — Terraform structural grounding is in-process, refutation-only hcl2 parsing](0111-terraform-structural-grounding.md)
 - [0113 — Fixture mining and admission protocol: what asserts a criterion's required behavior](0113-fixture-mining-and-admission-protocol.md)
