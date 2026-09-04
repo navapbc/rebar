@@ -4,20 +4,16 @@
 The wire-level behavioural diff between ``openai-chat:`` and ``openai-responses:`` is proven by
 ``tests/unit/test_openai_responses_contract.py`` (landed with the blocking research ticket). This
 module pins the MIGRATION itself: the default flip of hosted OpenAI to the Responses API, the
-custom-endpoint carve-out that keeps Chat Completions, and the once-per-run deprecation notice the
-runner emits for the hosted ``openai-chat:`` fallback.
+custom-endpoint carve-out that keeps Chat Completions, and the pre-1.0 removal of the hosted
+``openai-chat:`` opt-in fallback.
 """
 
 from __future__ import annotations
-
-import logging
 
 import pytest
 
 from rebar.llm.config import LLMConfig
 from rebar.llm.model_classes import _resolve_target
-
-_DEPRECATION_KEY = "cfg:the hosted-OpenAI 'openai-chat:' provider prefix"
 
 
 # ── the cutover: hosted OpenAI defaults to the Responses API ──────────────────────────────────
@@ -47,22 +43,24 @@ def test_a_custom_endpoint_keeps_chat_completions(provider):
         ("gpt-4o", "openai-chat"),
     ],
 )
-def test_explicit_openai_chat_is_preserved_as_the_fallback(model, provider):
-    assert _resolve_target(model, provider) == "openai-chat:gpt-4o"
+def test_hosted_explicit_openai_chat_resolves_to_responses(model, provider):
+    assert _resolve_target(model, provider) == "openai-responses:gpt-4o"
 
 
-# ── the fallback deprecation is registered with a pre-v1 removal target ───────────────────────
-def test_openai_chat_fallback_is_a_registered_scheduled_deprecation():
+def test_custom_endpoint_explicit_openai_chat_keeps_chat_completions():
+    endpoint = "http://local:1234/v1"
+    assert _resolve_target("openai-chat:gpt-4o", None, endpoint=endpoint) == "openai-chat:gpt-4o"
+    assert _resolve_target("gpt-4o", "openai-chat", endpoint=endpoint) == "openai-chat:gpt-4o"
+
+
+# ── the fallback deprecation was removed with the hosted fallback itself ─────────────────────
+def test_openai_chat_fallback_is_no_longer_a_registered_scheduled_deprecation():
     from rebar._deprecations import REGISTRY
 
-    dep = REGISTRY[_DEPRECATION_KEY]
-    assert dep.kind == "cfg"
-    assert dep.permanent is False
-    assert dep.remove_in == "v1.0.0"
-    assert "openai-responses:" in dep.replacement
+    assert "cfg:the hosted-OpenAI 'openai-chat:' provider prefix" not in REGISTRY
 
 
-# ── the runner emits the notice once for HOSTED chat, and NOT for a custom endpoint ───────────
+# ── runner/provider integration keeps custom endpoint Chat and hosted Responses ──────────────
 def _offline_runner(cfg):
     """A runner whose model is a FunctionModel, so ``run`` makes no provider call but the model
     string is still resolved (and the deprecation check still runs)."""
@@ -92,36 +90,23 @@ def _run(runner):
     )
 
 
-def test_hosted_openai_chat_emits_the_deprecation_notice(caplog):
+def test_hosted_openai_chat_uses_responses_without_a_deprecation_notice(caplog):
     pytest.importorskip("pydantic_ai")
     cfg = LLMConfig(model="openai-chat:gpt-4o", repo_path=".")
-    with caplog.at_level(logging.WARNING, logger="rebar.llm.runner"):
-        _run(_offline_runner(cfg))
-    hits = [r for r in caplog.records if _DEPRECATION_KEY.split(":", 1)[1] in r.getMessage()]
-    assert len(hits) == 1, f"expected exactly one deprecation notice, got {len(hits)}"
-    assert "openai-responses:" in hits[0].getMessage()
-
-
-def test_custom_endpoint_chat_does_not_emit_the_deprecation_notice(caplog):
-    pytest.importorskip("pydantic_ai")
-    # bare openai + custom base_url resolves to openai-chat by construction, not opt-in → no notice
-    cfg = LLMConfig(model="openai:gpt-4o", base_url="http://localhost:1234/v1", repo_path=".")
-    with caplog.at_level(logging.WARNING, logger="rebar.llm.runner"):
-        _run(_offline_runner(cfg))
-    hits = [r for r in caplog.records if _DEPRECATION_KEY.split(":", 1)[1] in r.getMessage()]
-    assert hits == []
+    runner = _offline_runner(cfg)
+    assert runner._config.model == "openai-chat:gpt-4o"
+    _run(runner)
+    assert "hosted-OpenAI" not in caplog.text
 
 
 def test_responses_default_does_not_emit_the_deprecation_notice(caplog):
     pytest.importorskip("pydantic_ai")
     cfg = LLMConfig(model="gpt-4o", repo_path=".")
-    with caplog.at_level(logging.WARNING, logger="rebar.llm.runner"):
-        _run(_offline_runner(cfg))
-    hits = [r for r in caplog.records if _DEPRECATION_KEY.split(":", 1)[1] in r.getMessage()]
-    assert hits == []
+    _run(_offline_runner(cfg))
+    assert "hosted-OpenAI" not in caplog.text
 
 
-def test_a_slot_endpoint_is_recovered_and_suppresses_the_deprecation(caplog, monkeypatch):
+def test_a_slot_endpoint_is_recovered_and_keeps_chat(caplog, monkeypatch):
     """A model-class SLOT ``endpoint`` (no top-level ``base_url``) forces Chat by construction:
     the runner must fold it into ``cfg.base_url`` AND stay silent — the hosted-chat deprecation is
     for an opt-in ``openai-chat:``, not for an endpoint-forced one (ticket 155c). Drives the
@@ -135,8 +120,6 @@ def test_a_slot_endpoint_is_recovered_and_suppresses_the_deprecation(caplog, mon
         runner_mod, "primary_endpoint_for", lambda resolved, repo_root=None: "http://slot:9/v1"
     )
     runner = PydanticAIRunner(LLMConfig(model="openai-chat:gpt-4o", repo_path="."))
-    with caplog.at_level(logging.WARNING, logger="rebar.llm.runner"):
-        recovered = runner._recover_slot_endpoint(runner._config, "openai-chat:gpt-4o")
+    recovered = runner._recover_slot_endpoint(runner._config, "openai-chat:gpt-4o")
     assert recovered.base_url == "http://slot:9/v1"
-    hits = [r for r in caplog.records if _DEPRECATION_KEY.split(":", 1)[1] in r.getMessage()]
-    assert hits == []
+    assert "hosted-OpenAI" not in caplog.text

@@ -109,7 +109,7 @@
         },
         "model": {
           "type": "string",
-          "description": "Agent step: per-step model override, e.g. `anthropic:claude-opus-4-8` or `openai-chat:gpt-4o` (highest precedence)."
+          "description": "Agent step: per-step model override, e.g. `anthropic:claude-opus-4-8` or `openai-responses:gpt-4o` (highest precedence)."
         },
         "if": {
           "type": "string",

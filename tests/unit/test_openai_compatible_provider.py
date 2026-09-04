@@ -287,8 +287,8 @@ def test_bare_openai_string_without_base_url_builds_no_provider():
         assert session.supports("openai-chat") is False, (
             "without base_url the openai-chat builder must not be registered"
         )
-        assert session.is_resolvable("openai-chat") is True, (
-            "it must still be resolvable, so it keeps S1's lazy model-string path"
+        assert session.is_resolvable("openai-chat") is False, (
+            "hosted openai-chat must not delegate to pydantic-ai's Chat provider after removal"
         )
     assert list(getattr(session, "_closeables", [])) == []
 

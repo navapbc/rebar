@@ -817,16 +817,11 @@
     },
     "transition_ticket": {
       "correspondence": "co_names",
-      "divergence": {
-        "kind": "deprecated_alias",
-        "reason": "`force_close` is a DEPRECATED alias on the library: rebar.transition's docstring (src/rebar/_lib_writes.py:273) records that \"The boolean `force=True` and the separate `force_close=\\\"<reason>\\\"` parameter are DEPRECATED aliases (they WARN and map onto `force`)\". The tool exposes only the single current force surface, `force`, which it forwards; a newer surface must not re-publish a warned-on alias. If `force_close` is ever removed from the library this divergence disappears and the gate will report it as STALE."
-      },
       "library_params": [
         "caused_by",
         "close_class",
         "current_status",
         "force",
-        "force_close",
         "reason",
         "ref",
         "repo_root",

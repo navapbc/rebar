@@ -69,8 +69,8 @@ _CLASSES = ("trivial", "standard", "frontier")
 _PROVIDER_KEY_ENV = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
 
 # The matrix dimension names the provider family; Pydantic AI's OpenAI provider has
-# protocol-specific model qualifiers. Rebar deliberately selects Chat Completions.
-_MODEL_QUALIFIER_BY_PROVIDER = {"openai": "openai-chat"}
+# protocol-specific model qualifiers. Hosted OpenAI now deliberately selects Responses.
+_MODEL_QUALIFIER_BY_PROVIDER = {"openai": "openai-responses"}
 
 
 def _model_qualifier(provider: str) -> str:

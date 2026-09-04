@@ -58,7 +58,7 @@ package.
 ```toml
 [tool.rebar.llm.model_classes]
 frontier = { model = "anthropic:claude-opus-4-8" }
-standard = { model = "openai-chat:gpt-4o" }
+standard = { model = "openai-responses:gpt-4o" }
 trivial  = { model = "google:gemini-2.5-flash" }
 ```
 
@@ -91,7 +91,7 @@ Every slot field has a matching variable — `REBAR_LLM_<CLASS>_MODEL`,
 one field never clears its siblings:
 
 ```bash
-REBAR_LLM_STANDARD_MODEL=openai-chat:gpt-4o rebar review-plan <id>
+REBAR_LLM_STANDARD_MODEL=openai-responses:gpt-4o rebar review-plan <id>
 ```
 
 Resolution order, per field: `rebar -c llm.<class>.<field>=…` > `REBAR_LLM_<CLASS>_<FIELD>` >
