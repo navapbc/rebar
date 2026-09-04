@@ -497,7 +497,7 @@ test:  ## Run the default test suite (excludes integration + external).
 
 # mechanism-ok: ci_gate scanner-integration — aa9e-3d35 explicit native-scanner Verified lane.
 scanner-integration:  ## Install pinned native review scanners, then run the nine real scanner contracts.
-	@set -euo pipefail; \
+	@set -eu; \
 	platform_arg=""; \
 	if [ -n "$${REBAR_SCANNER_PLATFORM:-}" ]; then platform_arg="--platform $${REBAR_SCANNER_PLATFORM}"; fi; \
 	python scripts/install_review_scanners.py install $$platform_arg --prefix "$(REVIEW_SCANNER_PREFIX)"; \
