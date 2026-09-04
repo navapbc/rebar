@@ -127,7 +127,7 @@ library-arg-only, off the public env surface).
 ## Model providers (not Anthropic-only)
 
 Models are named in `provider:model` form (e.g. `anthropic:claude-opus-4-8`,
-`bedrock:us.anthropic.claude-sonnet-4-6`, `openai-chat:gpt-4o`). The provider can also be
+`bedrock:us.anthropic.claude-sonnet-4-6`, `openai-responses:gpt-4o`). The provider can also be
 inferred from a bare model name or set explicitly with `REBAR_LLM_MODEL_PROVIDER`.
 
 **rebar owns provider resolution; pydantic-ai is the fallback.** `ProviderSession.provider_factory`
@@ -153,7 +153,7 @@ The hosted OpenAI family is named with two provider prefixes that select the **w
 | Prefix | Wire protocol | When it is used |
 |---|---|---|
 | `openai-responses:` | OpenAI **Responses** API (`/v1/responses`) | the **default** for hosted OpenAI — a bare `openai:` qualifier, an inferred OpenAI model (`gpt-4o`), or `REBAR_LLM_MODEL_PROVIDER=openai`, all with **no** custom `base_url` |
-| `openai-chat:` | OpenAI **Chat Completions** API (`/v1/chat/completions`) | the **deprecated fallback** — selected only by an **explicit** `openai-chat:` qualifier / `provider = "openai-chat"`, or forced automatically whenever a custom OpenAI-compatible `base_url`/slot `endpoint` is set |
+| `openai-chat:` | OpenAI **Chat Completions** API (`/v1/chat/completions`) | only when a custom OpenAI-compatible `base_url`/slot `endpoint` is set |
 
 So `model = "gpt-4o"`, `model = "openai:gpt-4o"`, and `model_provider = "openai"` now all resolve
 to `openai-responses:gpt-4o`. The two prefixes are capability-equivalent (same `ModelProfile`, same
@@ -166,12 +166,10 @@ to `openai-responses:gpt-4o`. The two prefixes are capability-equivalent (same `
 default flip is suppressed and the OpenAI family stays on `openai-chat:` — no deprecation notice is
 emitted for that endpoint-forced path.
 
-**`openai-chat:` is a deprecated pre-v1 fallback.** Explicitly selecting hosted `openai-chat:`
-(with no custom `base_url`) still works but logs a one-time deprecation notice per run pointing at
-`openai-responses:`; it is **scheduled for removal in v1.0.0** (registered in
-`rebar._deprecations`). To keep exercising Chat Completions during the deprecation window, set the
-model/provider to the explicit `openai-chat:` prefix, or point at a custom endpoint. After v1.0.0
-the hosted OpenAI family will be Responses-only.
+**Hosted `openai-chat:` was removed before v1.0.0.** Explicitly selecting hosted
+`openai-chat:` (with no custom `base_url`) now resolves to `openai-responses:` rather than
+logging a deprecation warning or forcing Chat Completions. To exercise Chat Completions, point
+at a custom endpoint; hosted OpenAI is Responses-only.
 
 ### Provider support tiers
 
@@ -235,7 +233,7 @@ model can serve the decisive checks while a frontier model does the open-ended w
 
 ```toml
 [tool.rebar.llm.model_classes]
-frontier = { model = "openai-chat:gpt-4o" }
+frontier = { model = "openai-responses:gpt-4o" }
 standard = { model = "google:gemini-2.5-pro" }
 # A per-class `endpoint` points that class's model at a local OpenAI-compatible server; rebar
 # routes it through its own builder (no key required) and records `tier=best_effort`.
@@ -254,7 +252,7 @@ The same slots are settable from the environment, one variable per class and fie
 
 ```bash
 # `frontier` drives the code-review Pass-1 finder (`gates/code-review.yaml`):
-REBAR_LLM_FRONTIER_MODEL=openai-chat:gpt-4o rebar review-code
+REBAR_LLM_FRONTIER_MODEL=openai-responses:gpt-4o rebar review-code
 # `standard` drives plan-review, the completion verifier, the code-review verify passes
 # and the overlap judge:
 REBAR_LLM_STANDARD_MODEL=google:gemini-2.5-pro rebar review-plan <id>
@@ -271,11 +269,11 @@ A class slot only takes effect for an operation that **declares** that class —
 workflows do so with a step-level `model: frontier` / `model: standard`. An operation that
 declares none resolves the **top-level** model instead
 (`[tool.rebar.llm].model`, else `DEFAULT_MODEL`), so a
-per-class variable does not change it. MEASURED: with `REBAR_LLM_FRONTIER_MODEL=openai-chat:gpt-4o`
+per-class variable does not change it. MEASURED: with `REBAR_LLM_FRONTIER_MODEL=openai-responses:gpt-4o`
 set and this repo's own `[tool.rebar.llm].model` pinned to Bedrock,
 a classless op still ran — and stamped its provenance — as
 `bedrock:us.anthropic.claude-opus-4-8`, while `resolve_model(cfg, step="frontier")` returned
-`openai-chat:gpt-4o`. Set the top-level `model` (or the matching `REBAR_LLM_<CLASS>_MODEL` for the
+`openai-responses:gpt-4o`. Set the top-level `model` (or the matching `REBAR_LLM_<CLASS>_MODEL` for the
 class the operation declares) to move a classless operation.
 
 > **`REBAR_LLM_MODEL` was REMOVED** (pre-1.0 breaking pass #3). Setting it now fails loud

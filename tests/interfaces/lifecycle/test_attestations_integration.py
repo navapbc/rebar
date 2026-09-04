@@ -124,9 +124,7 @@ def test_different_kind_signs_survive_regardless_of_order(store: Path, order) ->
 # ── completion validity: material edit invalidates, a tag edit does NOT ──────────
 def test_completion_validity_material_vs_tag_edit(store: Path) -> None:
     tid = rebar.create_ticket("task", "matedit", description="x" * 60, repo_root=str(store))
-    rebar.transition(
-        tid, "open", "closed", reason="Fixed: x", force_close="x", repo_root=str(store)
-    )
+    rebar.transition(tid, "open", "closed", reason="Fixed: x", force="x", repo_root=str(store))
     # Sign a completion attestation binding the CURRENT material fingerprint.
     from rebar.llm.plan_review.attest import current_material_fingerprint
 

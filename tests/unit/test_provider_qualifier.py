@@ -74,10 +74,11 @@ def test_the_class_table_end_to_end_qualifies_a_bedrock_id(model):
 )
 def test_an_already_qualified_string_is_returned_unchanged(already):
     provider = already.split(":", 1)[0]
-    # Bare hosted ``openai:`` normalizes to the Responses API default (ticket 155c); every other
-    # qualifier — including the explicit ``openai-chat:`` fallback — is returned unchanged.
+    # Hosted OpenAI-family qualifiers normalize to the Responses API default.
     expected = (
-        already.replace("openai:", "openai-responses:", 1) if provider == "openai" else already
+        f"openai-responses:{already.split(':', 1)[1]}"
+        if provider in {"openai", "openai-chat"}
+        else already
     )
     assert _resolve_target(already, provider) == expected
     # …and also when NO provider is configured, so inference cannot double-prefix either.
@@ -164,12 +165,11 @@ def test_a_matching_inline_qualifier_is_not_a_conflict():
         # Bare hosted ``openai`` (qualifier and/or provider) now defaults to the Responses API…
         ("openai:gpt-4o", "openai", "openai-responses:gpt-4o"),
         ("gpt-4o", "openai", "openai-responses:gpt-4o"),
-        # …while the explicit ``openai-chat`` fallback — as a qualifier or a configured provider,
-        # in any combination with the ``openai`` family — stays on Chat Completions (ticket 155c).
-        ("openai-chat:gpt-4o", "openai-chat", "openai-chat:gpt-4o"),
-        ("openai-chat:gpt-4o", "openai", "openai-chat:gpt-4o"),
-        ("openai:gpt-4o", "openai-chat", "openai-chat:gpt-4o"),
-        ("gpt-4o", "openai-chat", "openai-chat:gpt-4o"),
+        # …and the hosted ``openai-chat`` compatibility spelling now follows the same default.
+        ("openai-chat:gpt-4o", "openai-chat", "openai-responses:gpt-4o"),
+        ("openai-chat:gpt-4o", "openai", "openai-responses:gpt-4o"),
+        ("openai:gpt-4o", "openai-chat", "openai-responses:gpt-4o"),
+        ("gpt-4o", "openai-chat", "openai-responses:gpt-4o"),
     ],
 )
 def test_openai_family_default_flips_to_responses_but_explicit_chat_stays(
@@ -186,6 +186,9 @@ def test_a_custom_endpoint_keeps_the_openai_family_on_chat_completions(provider)
     endpoint = "http://local:1234/v1"
     assert _resolve_target("gpt-4o", provider, endpoint=endpoint) == "openai-chat:gpt-4o"
     assert _resolve_target("openai:gpt-4o", provider, endpoint=endpoint) == "openai-chat:gpt-4o"
+    assert (
+        _resolve_target("openai-chat:gpt-4o", provider, endpoint=endpoint) == "openai-chat:gpt-4o"
+    )
 
 
 def test_the_conflict_is_raised_not_silently_resolved():

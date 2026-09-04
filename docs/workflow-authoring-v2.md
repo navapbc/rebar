@@ -141,7 +141,7 @@ independent of the rest of the workflow:
 ```
 
 The value is any runner-consumable model id (`provider:model`, e.g.
-`anthropic:claude-opus-4-8` / `openai-chat:gpt-4o`, or a bare id whose provider is inferred).
+`anthropic:claude-opus-4-8` / `openai-responses:gpt-4o`, or a bare id whose provider is inferred).
 Resolution follows the **WS-D3 precedence** (`resolve_model`):
 
 > **step `model:` > workflow `model:` > config (a `model_classes` slot, or the DEPRECATED
