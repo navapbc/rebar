@@ -55,7 +55,11 @@ LOCAL_BIN := .tools/bin
 # fails a test instead of silently leaving every fresh venv on an interpreter nothing tests.
 PYTHON_VERSION_FILE := .github/python-version.txt
 
-.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check test e2e-deps jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
+# Default-suite parallelism (bug 1035-bed7-c855-4732). See the `test` target for why the
+# default is 4 and not `auto`; override per invocation with `make test PYTEST_WORKERS=8`.
+PYTEST_WORKERS ?= 4
+
+.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check verify test e2e-deps jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -453,7 +457,51 @@ import-walk:  ## ERRORS ONLY: deterministic import walk — every rebar.* module
 config-check:  ## ERRORS ONLY: validate every infra config (fails CI on a malformed config -> can't reach main).
 	bash infra/scripts/config-check.sh
 
-check: lint typecheck  ## Run every check-only gate (no mutation).
+check: lint typecheck  ## The tight loop: lint + typecheck only (~40 s). NOT the pre-push gate — see `verify`.
+	@# This target used to advertise itself as "run every check-only gate", which it never
+	@# was, and that over-claim is part of how the false green got its authority (bug
+	@# 1035-bed7-c855-4732): a large family of this repo's invariants is enforced by pytest,
+	@# not by a lint script, and none of it is reachable from here. Kept deliberately as the
+	@# fast tight-loop subset — but it now says so, and says what to run before pushing.
+
+verify: lint typecheck test  ## THE PRE-PUSH GATE: lint + typecheck + the default suite. Costs 20-25 min, not seconds.
+	@# Bug 1035-bed7-c855-4732. `make lint` is what AGENTS.md names, what the pre-commit hook
+	@# runs, and what every contributor treats as the local proxy for CI — but it is only the
+	@# check-only half. Three gates enforced solely by pytest (test_mechanism_delta,
+	@# test_predates_gate_guard_parity, test_api_surface_gate) each pushed a change red on
+	@# 2026-09-04 whose author had run `make lint` and `make typecheck` and seen them pass.
+	@#
+	@# A survey put the pytest-only repo-invariant class at ~70 modules — ratchets,
+	@# baselines, public-surface censuses, workflow-parity checks, docs-drift gates,
+	@# whole-tree AST scans — so ENUMERATING them here would be a second list to keep in sync
+	@# with that population: the same drift defect one level up, and exactly the shape
+	@# check_deploy_manifest.py exists to catch.
+	@#
+	@# Instead this is complete by construction. `test` runs `-m "not integration and not
+	@# external"`, which is EXACTLY what CI's gating cell selects: DEFAULT_SUITE_MARKS
+	@# (_build-and-test.yml) is matrix-conditional, and the ubuntu-latest/py3.13 cell — the
+	@# one that also collects coverage — resolves to that same string. The other two Ubuntu
+	@# cells run a strict subset (`... and not repo_policy`) and macOS runs the
+	@# platform_compat subset, so this is a superset of every cell. Nothing to enumerate,
+	@# nothing to drift.
+	@#
+	@# It is SEPARATE from `lint` and from the pre-commit hook on purpose: the suite is far
+	@# too slow for a commit gate, which is why these gates live in pytest in the first
+	@# place. The defect was the contract, not the placement — so the contract gets a name.
+	@#
+	@# COST IS PART OF THE CONTRACT. Measured twice on one 6-performance-core host at the
+	@# default PYTEST_WORKERS=4: 22 min 25 s and 26 min 04 s wall (lint ~27 s + typecheck
+	@# ~10 s + ~19.2k tests). The spread is host load, which is why this quotes a RANGE
+	@# rather than the faster number — under-promising the cost is how a target gets killed
+	@# mid-run. Stated here, in `make help`, in AGENTS.md and in
+	@# docs/local-dev-env.md, because a contributor who expects `make lint`'s 27 s and gets
+	@# 22 minutes kills it and stops trusting the target — and a contract nobody runs fails
+	@# exactly as badly as a green that lies. It is still cheaper than a 15-20 minute
+	@# `Verified -1` round trip, and it is the only local command that can honestly be
+	@# called "I verified this".
+	@#
+	@# make + ruff + mypy + pytest over this checkout only: no CI provider required
+	@# (project.portability).
 
 e2e-deps:  ## Provision the e2e Node toolchain (npm ci + esbuild bundle) BEFORE pytest.
 	@# A toolchain install is the build's work, not a test's. Doing it inside the first
@@ -480,8 +528,19 @@ e2e-deps:  ## Provision the e2e Node toolchain (npm ci + esbuild bundle) BEFORE 
 	fi; \
 	cd tests/e2e/js && npm ci && npm run build
 
-test:  ## Run the default test suite (excludes integration + external).
-	pytest -m "not integration and not external" -q
+test:  ## Run the default test suite (excludes integration + external), parallelised like CI.
+	@# Bug 1035-bed7-c855-4732. CI runs this tier under `-n 4 --dist worksteal` while a local
+	@# run was SERIAL — a local/CI divergence of the same class as the one this bug is about,
+	@# and the reason a full local suite cost ~29 min and so went unrun.
+	@#
+	@# 4 is not invented here: it is CI's own ubuntu pin AND the value docs/coverage.md
+	@# already tells contributors to use locally. `auto` is deliberately NOT the default —
+	@# _build-and-test.yml records that it "over-subscribes on larger local hosts", and a
+	@# measurement on a 6-performance-core/18-logical host confirms it: `-n auto` (18
+	@# workers) reached 7% in ~8 min, extrapolating past 100 min, because a large share of
+	@# this suite forks git/bash/pytest subprocesses of its own. The same tree at `-n 4`
+	@# finished in 22 min 13 s. Override for a bigger box: `make test PYTEST_WORKERS=8`.
+	pytest -m "not integration and not external" -n $(PYTEST_WORKERS) --dist worksteal -q
 
 jira-dc-up:  ## Build + start the Jira DC verification harness (fresh instance; see tests/external/live_jira_dc/README.md).
 	cd tests/external/live_jira_dc && docker compose up -d --build --force-recreate

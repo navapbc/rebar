@@ -22,6 +22,30 @@ itself — running the gates/LLM ops or testing config — run the **repo checko
 a stale global install (which silently ignores newer config keys and may lack the `[agents]`
 extra): see `docs/local-dev-env.md`.
 
+**Before you PUSH, run `make verify` — `make lint` is NOT the CI contract.** `make lint`
+(+ `make typecheck`, together `make check`) is the **commit** gate: fast, check-only, wired
+into the pre-commit hook. It cannot be the whole story, because a large family of this repo's
+invariants is enforced by **pytest** rather than by a lint script — the ratchets' own
+baseline-vs-tree comparisons, the public-API surface census, CI-workflow parity, generated-
+artifact and docs drift, whole-tree AST policy scans (roughly seventy modules). On 2026-09-04
+three separate changes were pushed red by exactly those tests after their authors ran
+`make lint` and `make typecheck` and saw green (bug `1035-bed7-c855-4732`). **`make verify`**
+= `lint` + `typecheck` + `test`, and `make test` selects exactly what CI's gating
+`ubuntu-latest, py3.13` cell selects (`not integration and not external`) — a superset of
+every other matrix cell — so it is the locally checkable half of `Verified`, with nothing to
+enumerate and nothing to drift.
+
+**It costs 20-25 minutes** (measured twice on one six-performance-core host at the default
+`PYTEST_WORKERS=4`: 22 min 25 s and 26 min 04 s wall for lint + typecheck + ~19.2k tests --
+the spread is host load, so plan for the top of the range; `make test PYTEST_WORKERS=8` on a
+bigger box).
+That is the price of the contract, and it is stated here so you can plan for it rather than
+kill it: it is still cheaper than a 15–20 minute `Verified -1` round trip, and it is the only
+local command that lets you say "I verified this" and be right. Run it once before
+`git push gerrit`, not on every commit — that is why it is a separate target and not part of
+the hook. Do **not** wrap it in a `timeout` (see the bounding section: it is a bounded
+workload that terminates with a verdict).
+
 **Codex environment rule:** use the current worktree's virtualenv for every development
 command. A prior `source .venv/bin/activate` does not persist across separate Codex shell-tool
 calls, so prepend it explicitly, for example
