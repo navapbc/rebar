@@ -538,6 +538,7 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     import time
 
     from rebar.llm import gate_source, review_kernel
+    from rebar.llm.code_review import terraform_grounding as _tfg
     from rebar.llm.code_review.batch_runner import CodeReviewBatchRunner
     from rebar.llm.runner import get_runner
     from rebar.llm.step_failures import collect_step_failures
@@ -558,6 +559,12 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     # Rebuild the runner from the RE-ROOTED cfg (bug pelt-mead-aeon): the preflight runner baked the
     # pre-snapshot cfg; reusing it hits the bare clone (missing .tickets-tracker); injected kept.
     runner_sel = request.runner or get_runner(cfg)
+    tf_provider, tf_usage_sink = _tfg.build_provider_and_sink(
+        execution_repo_root, prep.dc.changed_files
+    )
+    agent_step = RunnerAgentStep(
+        runner=runner_sel, repo_root=request.repo_root, config=cfg, tool_provider=tf_provider
+    )
     try:
         with (
             gate_source.gate_read_root(handle),
@@ -571,9 +578,7 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
                 prep.inputs,
                 target_ticket=request.target_ticket,
                 repo_root=execution_repo_root,
-                agent_runner=RunnerAgentStep(
-                    runner=runner_sel, repo_root=request.repo_root, config=cfg
-                ),
+                agent_runner=agent_step,
                 batch_runner=CodeReviewBatchRunner(
                     context=prep.dc.context,
                     context_overrides=prep.context_overrides,
@@ -610,6 +615,7 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     total_ms = round((time.monotonic() - prep.t_total) * 1000, 1)
     verdict = res.terminal_output
     if res.status == "succeeded" and isinstance(verdict, dict) and "verdict" in verdict:
+        _tfg.fold_tf_grounding_usage(verdict, tf_usage_sink)
         # Delegate the whole post-verdict finalization tail (metrics + WS5 fail-closed + deps +
         # region floor + durable emit) to the code_review/finalize.py strict leaf. Lazy import
         # matches this module's all-lazy cross-module import style.
