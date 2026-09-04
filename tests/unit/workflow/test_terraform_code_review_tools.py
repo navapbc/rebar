@@ -276,6 +276,7 @@ def test_ac1_round_a_iac_overlay_routing_gets_tools_and_base_disjoint(
 def test_ac2_round_b_iac_recommendation_routing_gets_tools_once_whole_module(
     repo_with_origin: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    pytest.importorskip("hcl2")
     repo, _tid = repo_with_origin
     from rebar.llm.code_review import registry
 
@@ -434,6 +435,7 @@ def test_ac5_tfvars_is_direct_evidence_but_not_variable_resolution(tmp_path: Pat
 def test_ac6_sidecar_deps_include_terraform_reads_and_hash_only_changes_when_they_change(
     repo_with_origin: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    pytest.importorskip("hcl2")
     repo, target = repo_with_origin
     emitted: list[dict[str, Any]] = []
     from rebar.llm.code_review import sidecar
