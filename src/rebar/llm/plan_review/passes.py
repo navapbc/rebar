@@ -260,6 +260,22 @@ def _resolve_system(prompt_id: str, plan: str, cfg: LLMConfig) -> str:
 
 
 # ── Pass 1: find ─────────────────────────────────────────────────────────────────
+def _tf_extra_tools(tf_provider: Any, ids: list[str], agentic: bool) -> tuple[list | None, Any]:
+    """The Terraform ``(extra_tools, finalize)`` for one Pass-1 call, or ``(None, None)``.
+
+    ``(None, None)`` — byte-identical to the pre-REB-640 request — when there is no hook OR
+    the hook declines (a non-T10 or single-turn call). Otherwise the hook's minted
+    ``(tools, finalize)`` (a fresh grounding session) is returned verbatim; the caller runs
+    ``finalize`` in a ``finally`` so the session is freed even on a runner exception."""
+    if tf_provider is None:
+        return None, None
+    hook = tf_provider(ids, agentic)
+    if hook is None:
+        return None, None
+    tools, finalize = hook
+    return tools, finalize
+
+
 def pass1_chunk(
     runner: Runner,
     cfg: LLMConfig,
@@ -268,6 +284,7 @@ def pass1_chunk(
     chunk: list[dict[str, Any]],
     agentic: bool = False,
     extra_context: str = "",
+    tf_provider: Any = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Run one Pass-1 finder call over a chunk of criteria. Returns
     ``(findings, usage)`` — the findings (each tagged with the criteria it maps
@@ -279,10 +296,18 @@ def pass1_chunk(
     instructions (currently the G5 DECOMPOSITION STATE block — see
     :func:`rebar.llm.plan_review.det_floor.decomposition_state_block`). The caller
     populates it ONLY for chunks whose criteria need it, so co-chunked criteria that
-    don't are unaffected; empty by default (byte-identical to the prior instructions)."""
+    don't are unaffected; empty by default (byte-identical to the prior instructions).
+
+    ``tf_provider`` (REB-640) is the Terraform Pass-1 tool hook
+    (:func:`rebar.llm.plan_review.terraform_seam.pass1_tool_hook`). When given and the
+    call is a T10 AGENTIC finder, it mints a fresh grounding session whose refutation tools
+    ride this call's ``extra_tools``; the session is ALWAYS finalized after the call (a
+    ``try/finally`` so a runner exception still frees it). ``None`` (the default) OR a
+    non-T10/single-turn call is BYTE-IDENTICAL to before — no ``extra_tools``, no session."""
     ids = [c["id"] for c in chunk]
     rubric = "\n\n".join(_criterion_block(c) for c in chunk)
     context_block = f"{extra_context}\n\n" if extra_context else ""
+    extra_tools, tf_finalize = _tf_extra_tools(tf_provider, ids, agentic)
     req = RunRequest(
         system_prompt=_resolve_system(PASS_FINDER, plan, cfg),
         # Bug 1dbe: put the cache breakpoint at the END of the byte-identical
@@ -302,8 +327,15 @@ def pass1_chunk(
         execution_mode="agentic" if agentic else "single_turn",
         # ff64: routing `"web": true` rides AGENT chunks only (anthropic-gated in runner).
         web=agentic and any(bool(c.get("web")) for c in chunk),
+        # REB-640: T10-scoped grounding tools ride the SAME per-criterion extra_tools seam as
+        # `web`; `None` off the Terraform path (byte-identical to the pre-REB-640 request).
+        extra_tools=extra_tools,
     )
-    result = runner.run(req)
+    try:
+        result = runner.run(req)
+    finally:
+        if tf_finalize is not None:
+            tf_finalize()
     out: list[dict[str, Any]] = []
     for f in result.get("findings", []) or []:
         # Keep ONLY criteria in this chunk's rubric. A finding that maps to no

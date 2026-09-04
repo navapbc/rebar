@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "terraform_grounding_receipt.schema.json",
+  "title": "Terraform structural grounding receipt",
+  "description": "The canonical, credential-redacting RECEIPT a Terraform structural grounding query (lookup_declaration / resolve_reference) emits alongside its three-valued grounding evidence (REB-640, slice forcible-diminished-lamb). It records the provenance of the query — the normalized query, the bounded snapshot + module content digests, the parser/analyzer backend and its config digest, the enforced limits, the outcome, the generic + closed structured reason, and a result digest — so a verifier can reproduce and check the answer WITHOUT re-parsing. It carries only safe classes, hashes, and repo-relative locations: NEVER credentials, attribute literal values, or `default` values. Closed (`additionalProperties: false`) at every level, validated directly via schemas.validator('terraform_grounding_receipt').",
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "A `sha256:`-prefixed lowercase-hex SHA-256 digest."
+    },
+    "operation": {
+      "type": "string",
+      "enum": ["lookup_declaration", "resolve_reference"],
+      "description": "Which per-call session operation produced this receipt."
+    },
+    "reason_detail": {
+      "type": ["string", "null"],
+      "description": "The CLOSED, sub-reason detail for an abstention (null for a refuted outcome). Paired one-to-one with the generic evidence `reason` via the slice's abstention-translation table.",
+      "enum": [
+        "missing_extra",
+        "parser_version",
+        "not_terraform",
+        "invalid_input",
+        "unreadable_file",
+        "worker_timeout",
+        "worker_failure",
+        "duplicate_address",
+        "no_unique_address",
+        "dynamic_source",
+        "dynamic_expression",
+        "computed_value",
+        "provider_attribute",
+        "splat_index",
+        "unknown_tfvars",
+        "path_outside_snapshot",
+        "module_limit",
+        "file_limit",
+        "byte_limit",
+        null
+      ]
+    },
+    "backend": {
+      "type": "object",
+      "description": "The parser/analyzer backend that produced this receipt and its configuration digest.",
+      "additionalProperties": false,
+      "required": ["parser", "parser_version", "analyzer", "analyzer_version", "config_digest"],
+      "properties": {
+        "parser": { "type": "string", "description": "The HCL parser library, always `python-hcl2` in this slice." },
+        "parser_version": { "type": "string", "description": "The pinned parser version (`8.1.3`)." },
+        "analyzer": { "type": "string", "description": "The structural analyzer identity." },
+        "analyzer_version": { "type": "integer", "description": "The structural analyzer version." },
+        "config_digest": { "$ref": "terraform_grounding_receipt.schema.json#/$defs/digest" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "description": "The bounds enforced before any fact was returned (module / file / byte / timeout).",
+      "additionalProperties": false,
+      "required": ["modules", "files", "bytes", "timeout_ms"],
+      "properties": {
+        "modules": { "type": "integer" },
+        "files": { "type": "integer" },
+        "bytes": { "type": "integer" },
+        "timeout_ms": { "type": "integer" }
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "operation",
+    "query",
+    "snapshot_digest",
+    "module_digest",
+    "backend",
+    "limits",
+    "outcome",
+    "reason",
+    "reason_detail",
+    "result_digest"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "operation": { "$ref": "terraform_grounding_receipt.schema.json#/$defs/operation" },
+    "query": {
+      "type": "object",
+      "description": "The NORMALIZED query (repo-relative POSIX paths, trimmed/canonical address or reference). Structural keys only — never literal attribute values.",
+      "additionalProperties": true
+    },
+    "snapshot_digest": { "$ref": "terraform_grounding_receipt.schema.json#/$defs/digest" },
+    "module_digest": { "$ref": "terraform_grounding_receipt.schema.json#/$defs/digest" },
+    "backend": { "$ref": "terraform_grounding_receipt.schema.json#/$defs/backend" },
+    "limits": { "$ref": "terraform_grounding_receipt.schema.json#/$defs/limits" },
+    "outcome": {
+      "type": "string",
+      "enum": ["refuted", "abstain"],
+      "description": "The three-valued grounding outcome, restricted to the two a refutation-only Terraform query can emit: `refuted` (a real declaration disproves an asserted absence) or `abstain` (a closed reason). Never `match`, never an asserted absence."
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unsupported_lang",
+            "no_tool",
+            "parse_error",
+            "timeout",
+            "ambiguous",
+            "private_or_internal_suspected",
+            "network_error",
+            "rate_limited",
+            "version_skew",
+            "invalid_detector",
+            "other"
+          ]
+        },
+        { "type": "null" }
+      ],
+      "description": "The GENERIC grounding abstention reason (mirrors grounding.schema.json's closed enum); null for a refuted outcome."
+    },
+    "reason_detail": { "$ref": "terraform_grounding_receipt.schema.json#/$defs/reason_detail" },
+    "result_digest": { "$ref": "terraform_grounding_receipt.schema.json#/$defs/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "const": "abstain" } } },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": ["reason"]
+      },
+      "else": {
+        "properties": {
+          "reason": { "type": "null" },
+          "reason_detail": { "type": "null" }
+        }
+      }
+    }
+  ]
+}
