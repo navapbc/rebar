@@ -24,6 +24,26 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "infra" / "scripts" / "autodeploy.sh"
+CAP_SCRIPT = REPO_ROOT / "infra" / "scripts" / "docker-storage-cap.sh"
+
+
+def _buildkit_cap() -> str:
+    """The BuildKit share as ``docker-storage-cap.sh`` states it — never a literal here.
+
+    Reading the cap from the same single source of truth the script reads is the point: a
+    test that hard-coded the number would keep passing while the prune and the daemon's own
+    ``builder.gc`` policy drifted apart, which is the failure this indirection removes.
+    """
+    out = subprocess.run(
+        ["bash", str(CAP_SCRIPT), "--print-env"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    for line in out.splitlines():
+        if line.startswith("DOCKER_BUILDKIT_CACHE_BYTES="):
+            return line.split("=", 1)[1]
+    raise AssertionError(f"docker-storage-cap.sh --print-env stated no BuildKit share:\n{out}")
 
 
 def _write_stub(bindir: Path, name: str, body: str) -> None:
@@ -39,6 +59,9 @@ def _run_helpers(
     drive: str,
     free_kb: tuple[int, int] | None = (1000, 1000),
     used_pct: int = 50,
+    extra_funcs: str = "",
+    cap_script: Path | None = CAP_SCRIPT,
+    env_extra: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Source autodeploy.sh's function definitions (guarded from executing the
     deploy flow by an early no-op environment) and drive one helper."""
@@ -84,7 +107,7 @@ def _run_helpers(
         for m in re.finditer(
             (
                 r"^(?:prune_docker_caches|record_backoff_failure|root_disk_free_kb|"
-                r"root_disk_pct)\(\) \{.*?^\}"
+                rf"root_disk_pct{extra_funcs})\(\) \{{.*?^\}}"
             ),
             src,
             re.S | re.M,
@@ -112,6 +135,12 @@ bo_cnt=3
             "PATH": f"{bindir}:/usr/bin:/bin",
             "HOME": str(tmp_path),
             "REBAR_ROOT": str(tmp_path),
+            # autodeploy.sh reads its BuildKit cap from docker-storage-cap.sh rather than
+            # spelling a number. `bash -c` leaves BASH_SOURCE unset, so the script's own
+            # sibling-path derivation cannot fire here; point it at the real script (or, for
+            # the broken-install case, at nothing) explicitly.
+            **({"DOCKER_CAP_SH": str(cap_script)} if cap_script is not None else {}),
+            **(env_extra or {}),
         },
         check=False,
     )
@@ -127,7 +156,7 @@ def test_failure_path_prunes_and_records_backoff(tmp_path):
     assert res.returncode == 0, res.stderr
     calls = _calls(tmp_path)
     assert calls == [
-        "docker builder prune -f --keep-storage 5GB",
+        f"docker builder prune -f --keep-storage {_buildkit_cap()}",
         "docker image prune -f",
     ]
     backoff = (tmp_path / "state" / "deploy-backoff").read_text().split()
@@ -146,7 +175,7 @@ def test_success_path_uses_the_helper(tmp_path):
     res = _run_helpers(tmp_path, docker_exit=0, drive="prune_docker_caches")
     assert res.returncode == 0, res.stderr
     assert _calls(tmp_path) == [
-        "docker builder prune -f --keep-storage 5GB",
+        f"docker builder prune -f --keep-storage {_buildkit_cap()}",
         "docker image prune -f",
     ]
 
@@ -181,7 +210,7 @@ def test_an_unreadable_df_degrades_to_zero_rather_than_breaking_the_prune(tmp_pa
     res = _run_helpers(tmp_path, docker_exit=0, drive="prune_docker_caches", free_kb=None)
     assert res.returncode == 0, res.stderr
     assert _calls(tmp_path) == [
-        "docker builder prune -f --keep-storage 5GB",
+        f"docker builder prune -f --keep-storage {_buildkit_cap()}",
         "docker image prune -f",
     ], "the prune still runs when the free-space probe is unreadable"
     assert "before=0kB after=0kB freed=0kB" in res.stdout, res.stdout
@@ -217,7 +246,7 @@ def test_normal_pressure_prune_keeps_warm_build_cache(tmp_path):
 
     assert res.returncode == 0, res.stderr
     assert _calls(tmp_path) == [
-        "docker builder prune -f --keep-storage 5GB",
+        f"docker builder prune -f --keep-storage {_buildkit_cap()}",
         "docker image prune -f",
     ]
 
@@ -240,3 +269,135 @@ def test_no_uncapped_or_stray_prunes_in_script():
     assert len([ln for ln in code if "docker image prune" in ln]) == 1
     # both paths call the helper: the failure seam and the success path.
     assert src.count("prune_docker_caches") >= 3  # def + 2 call sites
+
+
+# --------------------------------------------------------------------------------------
+# One budget, read from one place (ADR 0112 decision 1, story 9183)
+# --------------------------------------------------------------------------------------
+
+
+def test_the_keep_storage_cap_comes_from_the_shared_budget(tmp_path):
+    """The prune's ceiling and the daemon's own builder.gc ceiling must be ONE number.
+
+    They bound the same bytes from two directions — an on-demand prune and the daemon's own
+    garbage collector — so two independently edited literals would let the box enforce two
+    different BuildKit caps at once and neither would be the documented one. Moving the budget
+    (which is what ``docker-storage-cap.sh`` renders into ``daemon.json``) must move the
+    prune's flag with it; if it does not, the value was baked into ``autodeploy.sh``.
+    """
+    override = str(3 * 1024**3)
+    res = _run_helpers(
+        tmp_path,
+        docker_exit=0,
+        drive="prune_docker_caches",
+        env_extra={"DOCKER_BUILDKIT_CACHE_BYTES": override},
+    )
+    assert res.returncode == 0, res.stderr
+    assert _calls(tmp_path) == [
+        f"docker builder prune -f --keep-storage {override}",
+        "docker image prune -f",
+    ]
+
+
+def test_the_buildkit_cap_is_not_re_spelled_in_autodeploy(tmp_path):
+    """A second copy of the number is the drift this indirection exists to remove."""
+    cap = _buildkit_cap()
+    src = SCRIPT.read_text()
+    assert cap not in src, (
+        f"autodeploy.sh spells the BuildKit cap ({cap}) itself; it must come from "
+        "docker-storage-cap.sh --print-env so the prune and the daemon's builder.gc policy "
+        "cannot disagree"
+    )
+    assert "docker-storage-cap.sh" in src
+
+
+def test_an_unreadable_budget_skips_the_capped_prune_rather_than_guessing(tmp_path):
+    """A broken install must not invent a ceiling — losing a warm cache is the cheap failure.
+
+    Falling back to a hard-coded number here would silently re-create the second copy of the
+    cap; guessing a *smaller* one would throw away a warm build cache on every tick. Skipping
+    is the only option that neither lies nor destroys, and the uncapped state is not invisible:
+    ``rebar-docker-buildkit-cache-high`` alarms on the BuildKit generator directly.
+    """
+    res = _run_helpers(
+        tmp_path,
+        docker_exit=0,
+        drive="prune_docker_caches",
+        cap_script=tmp_path / "does-not-exist.sh",
+    )
+    assert res.returncode == 0, res.stderr
+    assert _calls(tmp_path) == ["docker image prune -f"], (
+        "with no readable budget the capped builder prune is skipped, not guessed"
+    )
+    assert "BuildKit cap unavailable" in res.stdout
+
+
+# --------------------------------------------------------------------------------------
+# The image/layer share is held by RETENTION, and retention must not eat the rollback
+# --------------------------------------------------------------------------------------
+
+
+def _orphan_sweep(tmp_path, *, tags: list[str], live: str, prev_sha: str):
+    """Drive ``mcp_reconcile_orphans`` with its collaborators stubbed at the shell level."""
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "state" / "mcp-previous-sha").write_text(prev_sha)
+    tag_list = "\n".join(tags)
+    drive = f"""
+mcp_live_port() {{ echo 8092; }}
+mcp_image_on_port() {{ echo '{live}'; }}
+mcp_image_tags() {{ printf '%s\\n' '{tag_list}'; }}
+mcp_reconcile_orphans
+"""
+    return _run_helpers(tmp_path, docker_exit=0, drive=drive, extra_funcs="|mcp_reconcile_orphans")
+
+
+def test_the_retention_sweep_spares_the_serving_release_and_the_rollback(tmp_path):
+    """Docker has no image-store ceiling, so the image share is held by retention — and a
+    retention pass that removed the live or previous release would turn a disk cap into a
+    deploy outage. Both are preserved by name; everything else is surplus."""
+    live_sha, prev_sha, stale_sha = "a" * 40, "b" * 40, "c" * 40
+    res = _orphan_sweep(
+        tmp_path,
+        tags=[f"compose-mcp:{sha}" for sha in (live_sha, prev_sha, stale_sha)],
+        live=f"compose-mcp:{live_sha}",
+        prev_sha=prev_sha,
+    )
+    assert res.returncode == 0, res.stderr
+    removals = [ln for ln in _calls(tmp_path) if ln.startswith("docker image rm")]
+    assert removals == [f"docker image rm compose-mcp:{stale_sha}"]
+
+
+def test_the_retention_sweep_never_forces_a_removal(tmp_path):
+    """``docker image rm`` WITHOUT ``-f``: the daemon itself refuses while any container
+    references the image, which is the guard that holds even if every other one is wrong."""
+    live_sha, prev_sha = "a" * 40, "b" * 40
+    res = _orphan_sweep(
+        tmp_path,
+        tags=[f"compose-mcp:{sha}" for sha in (live_sha, prev_sha, "d" * 40)],
+        live=f"compose-mcp:{live_sha}",
+        prev_sha=prev_sha,
+    )
+    assert res.returncode == 0, res.stderr
+    for line in _calls(tmp_path):
+        assert not line.startswith("docker image rm -f"), line
+    code = [ln.split("#")[0] for ln in SCRIPT.read_text().splitlines()]
+    assert not [ln for ln in code if "image rm" in ln and " -f" in ln]
+
+
+def test_the_retention_sweep_ignores_non_release_tags(tmp_path):
+    """``:prev``, ``:latest``, the bare build tag and ``<none>`` rows are never candidates."""
+    live_sha, prev_sha = "a" * 40, "b" * 40
+    res = _orphan_sweep(
+        tmp_path,
+        tags=[
+            f"compose-mcp:{live_sha}",
+            f"compose-mcp:{prev_sha}",
+            "compose-mcp:prev",
+            "compose-mcp:latest",
+            "compose-mcp:<none>",
+        ],
+        live=f"compose-mcp:{live_sha}",
+        prev_sha=prev_sha,
+    )
+    assert res.returncode == 0, res.stderr
+    assert [ln for ln in _calls(tmp_path) if ln.startswith("docker image rm")] == []
