@@ -478,7 +478,7 @@ jobs:
       - name: Install rebar from the committed lock (dev + reviewbot + ui extras)
         shell: bash
         run: |
-          uv sync --locked --extra dev --extra reviewbot --extra ui --python '${{ matrix.python-version }}'
+          uv sync --locked --extra dev --extra reviewbot --extra ui --extra grounding-terraform --python '${{ matrix.python-version }}'
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           # `make e2e-deps` (not an inline npm invocation) is deliberate: the same
           # portable target provisions a checkout with no CI provider at all, and the e2e

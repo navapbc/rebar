@@ -251,12 +251,13 @@ jobs:
             "agents:agents"
             "tracing:tracing"
             "grounding:grounding"
+            "grounding-terraform:grounding-terraform"
             "metrics:metrics"
             "s3:s3"
             "adf:adf"
             "wiki:wiki"
             "mcp:mcp"
-            "union:agents,tracing,wiki"
+            "union:agents,tracing,wiki,grounding-terraform"
           )
           for spec in "${specs[@]}"; do
             label="${spec%%:*}"
