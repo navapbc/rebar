@@ -329,54 +329,61 @@ def verify_completion(
     owns_ticket_view = False
     _record_elapsed(phase_metrics, "verifier_attempt_setup_ms", phase_started_ns)
     phase_started_ns = monotonic_ns()
-    handle = gate_source.resolve_gate_handle(
-        ref,
-        source,
-        repo_root,
-        fetch=fetch,
-        phase_metrics=phase_metrics,
-        materialize_ticket_store=not lazy_requested,
-    )
-    _record_elapsed(phase_metrics, "verifier_handle_resolution_ms", phase_started_ns)
-    phase_started_ns = monotonic_ns()
-    if ticket_view is None:
-        handle, ticket_view, ticket_read_mode = _resolve_completion_ticket_view(
-            handle,
-            lazy_requested=lazy_requested,
-            ticket_read_mode=ticket_read_mode,
-            ticket_id=ticket_id,
-            repo_root=repo_root,
+    from rebar.llm.gate_admission import gate_admission
+
+    # Concurrency admission (ADR 0112 decision 5) is taken BEFORE resolve_gate_handle,
+    # because materializing the snapshot is what spends the bytes the cap bounds. ONE
+    # counter is shared with review_plan: both copy the repo at a ref, and two caps of N
+    # each would admit 2N holders. At capacity this RAISES GateCongestedError.
+    with gate_admission("verify_completion", ticket_id, repo_root):
+        handle = gate_source.resolve_gate_handle(
+            ref,
+            source,
+            repo_root,
             fetch=fetch,
             phase_metrics=phase_metrics,
+            materialize_ticket_store=not lazy_requested,
         )
-        owns_ticket_view = ticket_view is not None
-    elif handle.source != gate_source.SOURCE_ATTESTED:
-        raise ValueError("a pinned ticket session requires an attested completion source")
-    else:
-        ticket_read_mode = "lazy_pinned"
-    if lazy_requested:
-        _record_elapsed(phase_metrics, "verifier_ticket_view_setup_ms", phase_started_ns)
-    from rebar.llm.peak_rss import gate_peak_rss
-
-    try:
-        # Measurement only (bug 9ea3): emits the GATE_PEAK_RSS marker on completion,
-        # including on the raising paths. Wrapping HERE covers both the MCP daemon and
-        # the CLI, which both reach the gate through this function.
-        with gate_peak_rss("verify_completion", ticket_id):
-            return _run_completion_at_handle(
-                ticket_id,
-                graph=graph,
-                repo_root=repo_root,
-                config=config,
-                runner=runner,
-                phase_metrics=phase_metrics,
-                handle=handle,
-                ticket_view=ticket_view,
+        _record_elapsed(phase_metrics, "verifier_handle_resolution_ms", phase_started_ns)
+        phase_started_ns = monotonic_ns()
+        if ticket_view is None:
+            handle, ticket_view, ticket_read_mode = _resolve_completion_ticket_view(
+                handle,
+                lazy_requested=lazy_requested,
                 ticket_read_mode=ticket_read_mode,
+                ticket_id=ticket_id,
+                repo_root=repo_root,
+                fetch=fetch,
+                phase_metrics=phase_metrics,
             )
-    finally:
-        if owns_ticket_view and ticket_view is not None:
-            ticket_view.close()
+            owns_ticket_view = ticket_view is not None
+        elif handle.source != gate_source.SOURCE_ATTESTED:
+            raise ValueError("a pinned ticket session requires an attested completion source")
+        else:
+            ticket_read_mode = "lazy_pinned"
+        if lazy_requested:
+            _record_elapsed(phase_metrics, "verifier_ticket_view_setup_ms", phase_started_ns)
+        from rebar.llm.peak_rss import gate_peak_rss
+
+        try:
+            # Measurement only (bug 9ea3): emits the GATE_PEAK_RSS marker on completion,
+            # including on the raising paths. Wrapping HERE covers both the MCP daemon and
+            # the CLI, which both reach the gate through this function.
+            with gate_peak_rss("verify_completion", ticket_id):
+                return _run_completion_at_handle(
+                    ticket_id,
+                    graph=graph,
+                    repo_root=repo_root,
+                    config=config,
+                    runner=runner,
+                    phase_metrics=phase_metrics,
+                    handle=handle,
+                    ticket_view=ticket_view,
+                    ticket_read_mode=ticket_read_mode,
+                )
+        finally:
+            if owns_ticket_view and ticket_view is not None:
+                ticket_view.close()
 
 
 def _verify_completion_inner(
