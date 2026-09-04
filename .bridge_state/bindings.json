@@ -6063,6 +6063,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:52Z"
     },
+    "1738-3816-caca-44a2": {
+      "created_at": "2026-09-04T18:38:30Z",
+      "jira_id": "4591853",
+      "jira_key": "REB-4625",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T18:38:33Z"
+    },
     "1762-9641-993a-464f": {
       "baseline": {
         "assignee": null,
@@ -8604,10 +8611,24 @@
     },
     "2164-97a8-ca89-4546": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nPrivate aliases remain across plan-review orchestrator sizing/context/move registries, runner Anthropic/tool/structured-run names, workflow gate-dispatch recovery names, and `llm.config` gate-context names. `llm.usage_log.failure_usage` also misnames the neutral `run_shape` record and has live callers. The governing private-shim policy is the direct prerequisite ADR `earthen-wheat-chick`; the parent container is ordered after the LLM configuration-reader extraction.\n\n## Approach\n\nAfter the prerequisite ADR and configuration-reader extraction complete, migrate every consumer to `plan_review.sizing`, `context_assembly`, `passes`, `anthropic_model`, `runner_support`, `structured_run`, `workflow.plan_review_recovery`, and `llm.gate_context`. Rename `failure_usage` completely to `run_shape` and prove emitted dictionaries and durable JSONL rows are byte/field identical. Remove each old private binding only after semantic and raw dynamic/monkeypatch census is empty.\n\n## Scope\n\n- plan-review, runner, workflow-dispatch, and gate-context private re-exports\n- usage-log implementation, callers, docs, experiment prose, and JSONL tests\n- all source/test/string/dynamic/monkeypatch consumers\n\n## Testing\n\nRun focused plan-review/workflow/runner suites; compare old/new usage record dictionaries and JSONL rows across success and failure paths; run semantic and raw reference scans.\n\n## Acceptance Criteria\n\n- [ ] Every enumerated old LLM/workflow private binding has no repository consumer and its named canonical owner is the sole binding.\n- [ ] `failure_usage` is absent and `run_shape` owns all former behavior.\n- [ ] Success and failure records retain byte/field-identical dictionaries and durable JSONL rows after the rename.\n- [ ] Gate-context, plan-review recovery, runner, and workflow behavior remain covered by focused tests.\n- [ ] Static, string, dynamic-import, `getattr`, and monkeypatch census proves old paths absent.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Migrate and remove LLM, plan-review, and workflow internal shims"
       },
       "created_at": "2026-09-02T02:59:00Z",
@@ -11077,6 +11098,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-28T12:17:25Z"
     },
+    "2a21-112a-538f-46fb": {
+      "created_at": "2026-09-04T18:38:37Z",
+      "jira_id": "4591854",
+      "jira_key": "REB-4626",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T18:38:40Z"
+    },
     "2a3e-e022-1f80-4c5f": {
       "baseline": {
         "assignee": {
@@ -11277,9 +11305,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n`AGENTS.md` says launch-loaded guidance must stay lean and point to maintained documentation (`AGENTS.md:10-15`), but its background-process section embeds a dated incident narrative, operator recovery procedure, and detector explanation across lines 252-330. Every agent pays that context cost even when it only needs the prevention contract.\n\n## Approach\n- Replace the long `AGENTS.md` section with a compact, imperative prevention contract that retains the safety invariants, spawn-time bound and process-group cleanup example, explicit exemption for bounded LLM gate operations, and a pointer to detailed documentation.\n- Move the incident evidence, detector usage, false-positive interpretation, and operator recovery procedure into a new maintained operations page at `docs/orphaned-processes.md`.\n- Add the new page to the Operations section of `docs/README.md`.\n- Preserve commands and facts needed to prevent, detect, and reclaim orphaned processes. Do not copy unrelated tracker or implementation history.\n\n## Scope\n- `AGENTS.md`: compress the launch-loaded background-process rule.\n- `docs/orphaned-processes.md`: own the detailed incident evidence, prevention rationale, detector interpretation, and operator recovery steps.\n- `docs/README.md`: index the new operations page.\n\n## Testing\n- Run `python scripts/check_docs_index.py`.\n- Run the repository documentation checks and `make lint` with the worktree virtualenv first on PATH.\n- Inspect the rendered Markdown structure and verify every moved command and safety invariant remains reachable.\n\n## Acceptance Criteria\n- [ ] The `AGENTS.md` background-process section contains no more than 35 logical lines.\n- [ ] The compact section includes a wall-clock-bounded spawn plus process-group cleanup example.\n- [ ] The compact section states that no spawned process may reach PPID 1 and that each subagent must reap its own helpers.\n- [ ] The compact section prohibits unbounded busy loops without a wall-clock bound.\n- [ ] The compact section explicitly forbids applying timeouts to bounded LLM gate operations.\n- [ ] Dated incident evidence is absent from `AGENTS.md` and present in `docs/orphaned-processes.md`.\n- [ ] Orphan-detector interpretation and operator reclamation steps are absent from `AGENTS.md` and present in `docs/orphaned-processes.md`.\n- [ ] The Operations section of `docs/README.md` links `orphaned-processes.md` and describes it as the prevention, detection, and recovery procedure for orphaned processes.\n- [ ] The detailed page documents the bounded-spawn, process-group-cleanup, read-only-detection, and confirmed-reclamation commands.\n- [ ] `python scripts/check_docs_index.py` passes.\n- [ ] `make lint` passes with the worktree virtualenv first on PATH.\n- [ ] Gerrit reports `LLM-Review +1`.\n- [ ] Gerrit reports `Verified +1`.\n- [ ] Gerrit reports no unresolved comments.\n- [ ] The change is submitted to `main`.\n\n## Verification\nCompare the pre-change and post-change section line counts, search both files for each preserved invariant and command, run the documentation index/link checker, run `make lint`, then confirm Gerrit labels and merged status before closing the ticket.",
+        "description": "## Context / Problem\n`AGENTS.md` says launch-loaded guidance must stay lean and point to maintained documentation, but its background-process section embeds a dated incident narrative, operator recovery procedure, and detector explanation. Every agent pays that context cost even when it only needs the prevention contract.\n\n## Approach\n- Replace the long `AGENTS.md` section with a compact prevention contract retaining the safety invariants, bounded-spawn and process-group cleanup example, bounded-LLM-gate exemption, and a detailed-documentation pointer.\n- Move incident evidence, detector interpretation, and operator recovery into `docs/orphaned-processes.md`; index it from `docs/README.md`.\n- Update both the module docstring and runtime report in `scripts/check_orphaned_load.py` to name `docs/orphaned-processes.md`.\n- Assert that flagged-process runtime output contains `docs/orphaned-processes.md`.\n- Preserve the commands and facts needed to prevent, detect, and reclaim orphaned processes.\n\n## Scope\n- `AGENTS.md`: compress the launch-loaded background-process rule.\n- `docs/orphaned-processes.md`: own incident evidence, prevention rationale, detector interpretation, and operator recovery.\n- `docs/README.md`: index the operations page.\n- `scripts/check_orphaned_load.py`: replace both stale `AGENTS.md` recovery pointers.\n- `tests/scripts/test_check_orphaned_load.py`: protect the runtime runbook reference.\n\n## Testing\n- Run `python scripts/check_docs_index.py`.\n- Run focused documentation and orphan-detector tests.\n- Run `make lint` with the worktree virtualenv first on PATH.\n- Verify every moved invariant, command, and runbook reference remains reachable.\n\n## Acceptance Criteria\n- [ ] The `AGENTS.md` background-process section contains no more than 35 physical source lines.\n- [ ] The compact section includes a wall-clock-bounded spawn plus process-group cleanup example.\n- [ ] The compact section states that no spawned process may reach PPID 1 and that each subagent must reap its own helpers.\n- [ ] The compact section prohibits unbounded busy loops without a wall-clock bound.\n- [ ] The compact section explicitly forbids applying timeouts to bounded LLM gate operations.\n- [ ] Dated incident evidence is absent from `AGENTS.md` and present in `docs/orphaned-processes.md`.\n- [ ] Orphan-detector interpretation and operator reclamation steps are absent from `AGENTS.md` and present in `docs/orphaned-processes.md`.\n- [ ] The Operations section of `docs/README.md` links `orphaned-processes.md` as the prevention, detection, and recovery procedure.\n- [ ] The detailed page documents bounded spawn, process-group cleanup, read-only detection, and confirmed reclamation commands.\n- [ ] Both recovery pointers in `scripts/check_orphaned_load.py` name `docs/orphaned-processes.md`.\n- [ ] A regression test proves flagged-process runtime output contains `docs/orphaned-processes.md`.\n- [ ] Documentation checks and focused tests pass.\n- [ ] `make lint` passes with the worktree virtualenv first on PATH.\n- [ ] Gerrit reports `LLM-Review +1`, `Verified +1`, and no unresolved comments.\n- [ ] The change is submitted to `main`.\n\n## Verification\nCount physical source lines from the background-process H2 heading through the line before the next H2; search for every preserved invariant, command, and runbook reference; run focused tests and lint; then confirm Gerrit labels and merged status before closing the ticket.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Move orphan-process incident detail out of AGENTS.md"
       },
       "created_at": "2026-09-04T16:36:37Z",
@@ -15240,10 +15268,24 @@
     },
     "374a-780a-390e-4c39": {
       "baseline": {
-        "assignee": null,
-        "description": "## Goal\n\nPrevent a repeat of incident `90c7-c465-4037-42d5` (the scanner-integration hard lock): a NEW blocking CI check (`scanner-integration`) was wired directly into the required Verified vote aggregate in `.github/workflows/gerrit-verify.yaml`, failed on every full-route change, and produced a fleet-wide CI lock that only a human force-submit could break. Establish a durable policy \u2014 as an Accepted ADR plus lean agent guidance \u2014 that a new gate may only join the required \"hot path\" AFTER it has demonstrated a passing CI run running independently (advisory / non-blocking) on `main`.\n\n## Policy (the decision to record)\n\n- Before any new check is added to \u2014 or promoted into \u2014 the required Verified vote aggregate (the \"hot path\") in `.github/workflows/gerrit-verify.yaml`, it MUST first run as an ADVISORY (non-voting, non-blocking) job and show at least one passing CI run on `main` independent of the hot path.\n- Only after that independent green run may a separate, subsequent change promote it into the vote aggregate's blocking `needs`/route conditions.\n- SCOPE: this applies ONLY to modifications of `.github/workflows/**` that add or promote a REQUIRED gate into the Verified vote aggregate. It does NOT apply to ordinary test-suite additions (new tests under `tests/` run by the existing suite are unaffected).\n- Rationale: a gate wired straight into the aggregate that fails self-referentially locks the fleet, because the fix itself is full-route and cannot earn Verified +1 \u2014 exactly what happened in 90c7. Sibling precedent: ADR 0110 (change shape enters the floor as an advisory first).\n\n## Scope / Deliverables\n\n- `docs/adr/0114-<slug>.md`: NEW ADR, `Status: Accepted`, dated, with Context (cite incident 90c7 and the `gerrit-verify.yaml` vote aggregate self-lock), Decision (advisory-first + independent passing run before hot-path promotion; scope limited to GHA workflow gate additions; excludes test-suite additions), and Consequences.\n- `docs/adr/README.md`: regenerate the ADR index to include 0114 via `scripts/gen_adr_index.py` (do NOT hand-edit the generated index).\n- `AGENTS.md`: add a ONE-LINE pointer to ADR 0114 in the Git-workflow / CI section (keep the file lean per its own policy; do not restate the ADR).\n\n## Design Decisions\n\n1. ADR number is 0114 (main's highest is 0113). If a concurrent change takes 0114, use the next free integer and rerun the generator.\n2. The ADR index in `docs/adr/README.md` is GENERATED; edit it only via `scripts/gen_adr_index.py`, then validate with `scripts/check_adr_numbers.py` and `scripts/check_docs_index.py`.\n3. AGENTS.md guidance is a lean pointer only (the repo's AGENTS.md policy forbids restating documented content); the authoritative text lives in the ADR.\n4. This is a docs/guidance change: no source or workflow behavior is modified (the policy is process guidance, not a new gate).\n\n## Acceptance Criteria\n\n- [ ] `docs/adr/0114-<slug>.md` exists with `**Status:** Accepted`, a date, and Context/Decision/Consequences sections; Context cites incident `90c7` and the `gerrit-verify.yaml` Verified vote aggregate; Decision states advisory-first + an independent passing CI run before hot-path promotion.\n- [ ] The Decision explicitly scopes the rule to `.github/workflows/**` changes that add/promote a REQUIRED gate into the Verified vote aggregate, and explicitly EXCLUDES ordinary test-suite additions.\n- [ ] `docs/adr/README.md` lists ADR 0114, produced by re-running `scripts/gen_adr_index.py` (not hand-edited).\n- [ ] `AGENTS.md` contains a single-line pointer to ADR 0114 in the CI/Git-workflow guidance.\n- [ ] `env PATH=\"$PWD/.venv/bin:$PATH\" python scripts/check_adr_numbers.py` passes.\n- [ ] `env PATH=\"$PWD/.venv/bin:$PATH\" python scripts/check_docs_index.py` passes.\n- [ ] `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` passes.\n\n## Testing\n\n- `env PATH=\"$PWD/.venv/bin:$PATH\" python scripts/check_adr_numbers.py`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" python scripts/check_docs_index.py`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n\n## Out of scope\n\n- Do NOT modify `.github/workflows/**` or add/change any actual CI gate; this ticket only records the policy and guidance.\n- Do NOT restate ADR content in AGENTS.md beyond a one-line pointer.\n- Do NOT re-add the reverted scanner-integration work (that redo is tracked under `b973`).",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Goal\n\nPrevent a repeat of incident `90c7-c465-4037-42d5` (the scanner-integration hard lock): a NEW blocking CI check (`scanner-integration`) was wired directly into the required Verified vote aggregate in `.github/workflows/gerrit-verify.yaml`, failed on every full-route change, and produced a fleet-wide CI lock that only a human force-submit could break. Establish a durable policy \u2014 as an Accepted ADR plus lean agent guidance \u2014 that a new gate may only join the required \"hot path\" AFTER it has demonstrated a passing CI run running independently (advisory / non-blocking) on `main`.\n\n## Policy (the decision to record)\n\n- Before any new check is added to \u2014 or promoted into \u2014 the required Verified vote aggregate (the \"hot path\") in `.github/workflows/gerrit-verify.yaml`, it MUST first run as an ADVISORY (non-voting, non-blocking) job and show at least one passing CI run on `main` independent of the hot path.\n- Only after that independent green run may a separate, subsequent change promote it into the vote aggregate's blocking `needs`/route conditions.\n- SCOPE: this applies ONLY to modifications of `.github/workflows/**` that add or promote a REQUIRED gate into the Verified vote aggregate. It does NOT apply to ordinary test-suite additions (new tests under `tests/` run by the existing suite are unaffected).\n- Rationale: a gate wired straight into the aggregate that fails self-referentially locks the fleet, because the fix itself is full-route and cannot earn Verified +1 \u2014 exactly what happened in 90c7. Sibling precedent: ADR 0110 (change shape enters the floor as an advisory first).\n\n## Scope / Deliverables\n\n- `docs/adr/0114-<slug>.md`: NEW ADR, `Status: Accepted`, dated, with Context (cite incident 90c7 and the `gerrit-verify.yaml` vote aggregate self-lock), Decision (advisory-first + independent passing run before hot-path promotion; scope limited to GHA workflow gate additions; excludes test-suite additions), and Consequences.\n- `docs/adr/README.md`: regenerate the ADR index to include 0114 via `scripts/gen_adr_index.py` (do NOT hand-edit the generated index).\n- `AGENTS.md`: add a ONE-LINE pointer to ADR 0114 in the Git-workflow / CI section (keep the file lean per its own policy; do not restate the ADR).\n\n## Design Decisions\n\n1. ADR number is 0114 (main's highest is 0113). If a concurrent change takes 0114, use the next free integer and rerun the generator.\n2. The ADR index in `docs/adr/README.md` is GENERATED; edit it only via `scripts/gen_adr_index.py`, then validate with `scripts/check_adr_numbers.py` and `scripts/check_docs_index.py`.\n3. AGENTS.md guidance is a lean pointer only (the repo's AGENTS.md policy forbids restating documented content); the authoritative text lives in the ADR.\n4. This is a docs/guidance change: no source or workflow behavior is modified (the policy is process guidance, not a new gate).\n\n## Acceptance Criteria\n\n- [x] `docs/adr/0114-<slug>.md` exists with `**Status:** Accepted`, a date, and Context/Decision/Consequences sections; Context cites incident `90c7` and the `gerrit-verify.yaml` Verified vote aggregate; Decision states advisory-first + an independent passing CI run before hot-path promotion.\n- [x] The Decision explicitly scopes the rule to `.github/workflows/**` changes that add/promote a REQUIRED gate into the Verified vote aggregate, and explicitly EXCLUDES ordinary test-suite additions.\n- [x] `docs/adr/README.md` lists ADR 0114, produced by re-running `scripts/gen_adr_index.py` (not hand-edited).\n- [x] `AGENTS.md` contains a single-line pointer to ADR 0114 in the CI/Git-workflow guidance.\n- [x] `env PATH=\"$PWD/.venv/bin:$PATH\" python scripts/check_adr_numbers.py` passes.\n- [x] `env PATH=\"$PWD/.venv/bin:$PATH\" python scripts/check_docs_index.py` passes.\n- [x] `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` passes.\n\n## Testing\n\n- `env PATH=\"$PWD/.venv/bin:$PATH\" python scripts/check_adr_numbers.py`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" python scripts/check_docs_index.py`\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint`\n\n## Out of scope\n\n- Do NOT modify `.github/workflows/**` or add/change any actual CI gate; this ticket only records the policy and guidance.\n- Do NOT restate ADR content in AGENTS.md beyond a one-line pointer.\n- Do NOT re-add the reverted scanner-integration work (that redo is tracked under `b973`).",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "ADR + agent guidance: new CI gates must pass independently before joining the Verified hot path"
       },
       "created_at": "2026-09-04T16:36:44Z",
@@ -36519,6 +36561,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:35Z"
     },
+    "87b8-1339-383f-43f6": {
+      "created_at": "2026-09-04T18:38:41Z",
+      "jira_id": "4591855",
+      "jira_key": "REB-4627",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T18:38:44Z"
+    },
     "87cb-7121-a3b6-4606": {
       "baseline": {
         "assignee": {
@@ -38559,9 +38608,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\n`docs/api-stability.md:24,41-46` defines underscore-prefixed modules/functions as private, while ADR 0083 already requires one canonical binding for reconciler moves. Contrary decisions remain: ADR 0016 retains `run_security_detectors`, ADR 0092 retains reconcile compatibility, and past split documentation retained private shims to avoid consumer migration.\n\n## Approach\n\nComplete the prescribed ADR lifecycle. In RESEARCH, catalog the cited contrary decisions and write a numbered critique covering public-versus-private boundaries, dynamic/monkeypatch consumers, persisted/wire exceptions, and enforcement. Record maintainer resolution for every critique item. Then DRAFT, HOLD for review, and MERGE an ADR that mandates one canonical private binding and atomic consumer migration.\n\n## Scope\n\n- new ADR allocated through `docs/adr/.numbers`\n- `docs/api-stability.md` and architecture/reuse guidance\n- enforcement/review guidance or a mechanical guard identified by the ADR\n\n## Testing\n\nAdd a policy/documentation check or deterministic enforcement test specified by the ADR; verify existing public facade, wire-schema, and persisted-event contract tests remain unaffected.\n\n## Acceptance Criteria\n\n- [ ] RESEARCH contains a numbered critique of ADR 0016, ADR 0083, ADR 0092, and prior split-shim guidance; each item has a recorded maintainer resolution.\n- [ ] The merged ADR defines one canonical binding after private moves and atomic source/test/string/dynamic/monkeypatch migration.\n- [ ] The ADR distinguishes valid public facades, MCP wire schemas, event readers, and persisted-data migrations from internal-only shims.\n- [ ] The ADR requires a durable review or mechanical recurrence-prevention mechanism and names its evidence.\n- [ ] The policy check/enforcement evidence passes without breaking the preserved public/wire/event contracts.",
+        "description": "## Context / Problem\n\n`docs/api-stability.md:24,41-46` defines underscore-prefixed modules/functions as private, while ADR 0083 already requires one canonical binding for reconciler moves. Contrary decisions remain: ADR 0016 retains `run_security_detectors`, ADR 0092 retains reconcile compatibility, and past split documentation retained private shims to avoid consumer migration.\n\n## Approach\n\nComplete the prescribed ADR lifecycle. In RESEARCH, catalog the cited contrary decisions and write a numbered critique covering public-versus-private boundaries, dynamic/monkeypatch consumers, persisted/wire exceptions, and enforcement. Record maintainer resolution for every critique item. Then DRAFT, HOLD for review, and MERGE an ADR that mandates one canonical private binding and atomic consumer migration.\n\n## Scope\n\n- new ADR allocated through `docs/adr/.numbers`\n- `docs/api-stability.md` and architecture/reuse guidance\n- enforcement/review guidance or a mechanical guard identified by the ADR\n\n## Testing\n\nAdd a policy/documentation check or deterministic enforcement test specified by the ADR; verify existing public facade, wire-schema, and persisted-event contract tests remain unaffected.\n\n## Acceptance Criteria\n\n- [x] RESEARCH contains a numbered critique of ADR 0016, ADR 0083, ADR 0092, and prior split-shim guidance; each item has a recorded maintainer resolution.\n- [x] The merged ADR defines one canonical binding after private moves and atomic source/test/string/dynamic/monkeypatch migration.\n- [x] The ADR distinguishes valid public facades, MCP wire schemas, event readers, and persisted-data migrations from internal-only shims.\n- [x] The ADR requires a durable review or mechanical recurrence-prevention mechanism and names its evidence.\n- [x] The policy check/enforcement evidence passes without breaking the preserved public/wire/event contracts.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "ADR: prohibit internal-only compatibility shims"
       },
       "created_at": "2026-09-02T03:01:12Z",
@@ -68728,6 +68777,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:13Z"
     },
+    "fd2b-7af3-3d6e-48cf": {
+      "created_at": "2026-09-04T18:38:45Z",
+      "jira_id": "4591856",
+      "jira_key": "REB-4628",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T18:38:48Z"
+    },
     "fd2b-b26e-9fef-4bae": {
       "baseline": {
         "assignee": null,
@@ -71988,7 +72044,14 @@
     "1788541558306917370": "__rebar_unknown_comment_id__",
     "1788542287451942166": "__rebar_unknown_comment_id__",
     "1788542584476061345": "__rebar_unknown_comment_id__",
-    "1788542741411940399": "__rebar_unknown_comment_id__"
+    "1788542741411940399": "__rebar_unknown_comment_id__",
+    "1788543595990648453": "__rebar_unknown_comment_id__",
+    "1788543615674028325": "__rebar_unknown_comment_id__",
+    "1788546231084564001": "__rebar_unknown_comment_id__",
+    "1788546331005362001": "__rebar_unknown_comment_id__",
+    "1788546380501981001": "__rebar_unknown_comment_id__",
+    "1788546448635592792": "__rebar_unknown_comment_id__",
+    "1788546571827677284": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -75040,6 +75103,10 @@
     "REB-4622": "17e5-d776-31b8-40ba",
     "REB-4623": "2af9-0769-6f23-41a8",
     "REB-4624": "374a-780a-390e-4c39",
+    "REB-4625": "1738-3816-caca-44a2",
+    "REB-4626": "2a21-112a-538f-46fb",
+    "REB-4627": "87b8-1339-383f-43f6",
+    "REB-4628": "fd2b-7af3-3d6e-48cf",
     "REB-463": "da34-ac98-e375-4af0",
     "REB-467": "9af8-8d59-c940-4e41",
     "REB-468": "d6cc-e0f2-75a1-4875",
