@@ -77,7 +77,7 @@ def test_step_budget_stop_becomes_a_runner_error():
 
 def test_step_budget_stop_raises_the_typed_budget_subclass():
     """fd84: the budget stop must be identifiable PURELY BY TYPE. interpret_failure attaches
-    the same failure_usage() dict (same key set) to every exception it raises, so diagnostic-
+    the same run_shape() dict (same key set) to every exception it raises, so diagnostic-
     shape sniffing cannot tell the budget branch from a sampling rejection or an outage; the
     subclass is the only reliable discriminator, and it is what routes the completion gate
     into bounded recovery instead of propagating verdict-less."""

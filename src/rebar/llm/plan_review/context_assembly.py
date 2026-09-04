@@ -23,15 +23,11 @@ import time
 from collections.abc import Iterator
 from typing import Any
 
-from rebar.llm.config import (
-    LLMConfig,
-    current_code_root,
-    current_tickets_root,
-    resolve_code_root,
-)
+from rebar.llm.config import LLMConfig
+from rebar.llm.gate_context import current_code_root, current_tickets_root, resolve_code_root
 
+from .budget import centrality as _centrality
 from .det_floor import PlanContext
-from .sizing import centrality as _centrality
 from .sizing import largest_window_tokens
 
 logger = logging.getLogger(__name__)

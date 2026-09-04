@@ -26,6 +26,8 @@ from dataclasses import replace
 
 import pytest
 
+from rebar.llm import anthropic_model as anthropic_model_mod
+
 pytest.importorskip("pydantic_ai")
 
 import pydantic_ai.models
@@ -52,18 +54,17 @@ def _resolved_model(runner_cfg: LLMConfig, req_cfg: LLMConfig | None = None) -> 
     ``_pai_model`` is spied rather than replaced — it records and then delegates — so resolution
     keeps its real behaviour and the run proceeds to completion instead of aborting at the probe.
     """
-    import rebar.llm.runner as runner_mod
     from rebar.llm.runner import PydanticAIRunner, RunRequest
 
     seen: list[str] = []
-    real_pai_model = runner_mod._pai_model
+    real_pai_model = anthropic_model_mod._pai_model
 
     def _spy(cfg):
         seen.append(cfg.model)
         return real_pai_model(cfg)
 
     mp = pytest.MonkeyPatch()
-    mp.setattr(runner_mod, "_pai_model", _spy)
+    mp.setattr(anthropic_model_mod, "_pai_model", _spy)
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
 
     def gen(messages, info):
@@ -101,7 +102,6 @@ def test_a_per_request_model_does_not_mutate_the_shared_runner_config():
     """The reason this is an override and not an assignment: the runner is shared across every
     step of a gate run, so honouring one step's model must not change the floor for the next.
     """
-    import rebar.llm.runner as runner_mod
     from rebar.llm.runner import PydanticAIRunner, RunRequest
 
     runner_cfg = _cfg()
@@ -110,10 +110,12 @@ def test_a_per_request_model_does_not_mutate_the_shared_runner_config():
     )
 
     seen: list[str] = []
-    real_pai_model = runner_mod._pai_model
+    real_pai_model = anthropic_model_mod._pai_model
     mp = pytest.MonkeyPatch()
     mp.setattr(
-        runner_mod, "_pai_model", lambda cfg: (seen.append(cfg.model), real_pai_model(cfg))[1]
+        anthropic_model_mod,
+        "_pai_model",
+        lambda cfg: (seen.append(cfg.model), real_pai_model(cfg))[1],
     )
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
     try:

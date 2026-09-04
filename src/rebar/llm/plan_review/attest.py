@@ -133,7 +133,7 @@ def sign_plan_review(
         )
 
     from rebar import signing
-    from rebar.llm.config import current_code_sha
+    from rebar.llm.gate_context import current_code_sha
 
     if not current_code_sha():
         raise SigningError(
@@ -325,7 +325,7 @@ def refresh_attestation(
     new_deps = _rehash(manifest_deps(prior_manifest).keys(), repo_root=repo_root)
     # Same no-null-pin invariant as sign_plan_review (bug 5128-0856): a refresh re-signs
     # against CURRENT hashes, so refuse outside an attested session (no unpinned mints).
-    from rebar.llm.config import current_code_sha as _current_code_sha
+    from rebar.llm.gate_context import current_code_sha as _current_code_sha
 
     refreshed_at_sha = _current_code_sha()
     if not refreshed_at_sha:

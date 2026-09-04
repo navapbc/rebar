@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import pytest
 
+from rebar.llm.plan_review import context_assembly
+
 from .test_plan_review_workflow import (
     _GOOD_AC,
     _TARGET,
@@ -61,7 +63,7 @@ def test_short_circuit_verdict_carries_every_det_blocking_finding(monkeypatch):
 
     state = _state(description=_NO_AC_PLAN)
     _patch_reads(monkeypatch, state)
-    pctx = orchestrator.assemble_context(_TARGET, repo_root=None)
+    pctx = context_assembly.assemble_context(_TARGET, repo_root=None)
     det_results = det_floor.run_det_floor(pctx)
     expected = orchestrator.partition_findings(
         det_floor.det_blocking_findings(det_results),

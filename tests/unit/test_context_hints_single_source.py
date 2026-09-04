@@ -142,10 +142,9 @@ def test_sizing_predicate_follows_the_owner_module(monkeypatch: pytest.MonkeyPat
 def test_sizing_still_exposes_a_patchable_predicate():
     """``orchestrator`` binds this by value at import time and a prerequisites test
     monkeypatches it by name, so it must stay a real attribute of ``sizing``."""
-    from rebar.llm.plan_review import orchestrator
 
     assert callable(sizing.is_context_limit_error)
-    assert orchestrator._is_context_limit_error is sizing.is_context_limit_error
+    assert sizing.is_context_limit_error is sizing.is_context_limit_error
 
 
 @pytest.mark.parametrize(

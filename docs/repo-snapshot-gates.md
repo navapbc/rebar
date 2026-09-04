@@ -157,7 +157,7 @@ Before the asymmetric operation-certificate migration, `plan-review` and `comple
 
 Anything that runs a TOOL-USING agent (file-reading tools) MUST follow this process — it is
 enforced at runtime, not by convention. When the runner wires an agent's read-only file
-tools, `rebar.llm.config.assert_gated()` fails closed unless execution is inside a gate
+tools, `rebar.llm.gate_context.assert_gated()` fails closed unless execution is inside a gate
 **session** (`gate_source.gate_read_root`, which both the five gates and `run_workflow` enter).
 So a new agent op that forgets to route through `gate_source` raises immediately rather than
 silently reading the server's mutable checkout.

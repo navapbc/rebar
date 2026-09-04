@@ -35,7 +35,7 @@ def _cfg(tmp_path) -> LLMConfig:
 
 
 def _run_assemble_failure(monkeypatch, tmp_path, exc: Exception, *, ctx: PlanContext | None = None):
-    from rebar.llm.plan_review import orchestrator, production_batch_runner
+    from rebar.llm.plan_review import context_assembly, orchestrator, production_batch_runner
     from rebar.llm.workflow import gate_dispatch, recorder
 
     # Preload the batch runner before installing the fault. It binds route_criteria at module
@@ -44,7 +44,7 @@ def _run_assemble_failure(monkeypatch, tmp_path, exc: Exception, *, ctx: PlanCon
     ctx = ctx or _ctx()
     rec = recorder.MemoryRecorder()
     monkeypatch.setattr(recorder, "MemoryRecorder", lambda: rec)
-    monkeypatch.setattr(orchestrator, "assemble_context", lambda *args, **kwargs: ctx)
+    monkeypatch.setattr(context_assembly, "assemble_context", lambda *args, **kwargs: ctx)
     monkeypatch.setattr(
         orchestrator,
         "route_criteria",
@@ -61,7 +61,7 @@ def _run_assemble_failure(monkeypatch, tmp_path, exc: Exception, *, ctx: PlanCon
 
 
 def test_criteria_error_is_a_config_fault_not_an_llm_outage(monkeypatch, tmp_path) -> None:
-    from rebar.llm.workflow import gate_dispatch
+    from rebar.llm.workflow import plan_review_recovery
 
     sentinel = "malformed-overlay sentinel"
     ctx, rec, verdict = _run_assemble_failure(monkeypatch, tmp_path, CriteriaError(sentinel))
@@ -90,7 +90,7 @@ def test_criteria_error_is_a_config_fault_not_an_llm_outage(monkeypatch, tmp_pat
     assert "installed rebar build" in coverage["config_error"]
     assert "repository checkout" in coverage["config_error"]
 
-    degraded = gate_dispatch._degraded_plan_review_verdict(
+    degraded = plan_review_recovery._degraded_plan_review_verdict(
         ctx,
         _cfg(tmp_path),
         error=CriteriaError(sentinel),

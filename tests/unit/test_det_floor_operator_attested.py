@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm.plan_review import registry, workflow_ops
+from rebar.llm.plan_review import decide_ops, registry
 from rebar.llm.plan_review.det_floor import DET_CHECKS, PlanContext, p6_ac_quality
 from rebar.llm.plan_review.det_operator_attested import (
     _OPERATOR_ATTESTED_TAG_RE,
@@ -150,7 +150,7 @@ def test_canonical_det_matches_floor_and_no_routing_orphan() -> None:
 
 def test_tag_regex_single_source() -> None:
     """det_operator_attested OWNS the [operator-attested] matcher; workflow_ops re-exports it."""
-    assert workflow_ops._OPERATOR_ATTESTED_AC_RE is _OPERATOR_ATTESTED_TAG_RE
+    assert decide_ops._OPERATOR_ATTESTED_AC_RE is _OPERATOR_ATTESTED_TAG_RE
 
 
 def test_agreement_with_workflow_ops() -> None:
@@ -160,5 +160,5 @@ def test_agreement_with_workflow_ops() -> None:
         "- [ ] [operator-attested] the fix is deployed to prod",
         "- [ ] [OPERATOR-ATTESTED] the change is merged to main via Gerrit",
     ):
-        assert workflow_ops.operator_attested_ac_texts(line)
+        assert decide_ops.operator_attested_ac_texts(line)
         assert _gaps(_ac(line)) == []

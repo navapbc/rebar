@@ -77,7 +77,7 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
         # Computed BEFORE the log line so the repetition summary can be reported alongside the
         # budget numbers — a runaway that burned its budget on one repeated tool call reads very
         # differently from one that made steady progress.
-        budget_diag = usage_log.failure_usage(
+        budget_diag = usage_log.run_shape(
             run_messages,
             request_limit=ctx.req_limit,
             tool_calls_limit=tool_calls_limit,
@@ -105,7 +105,7 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
         # raise-time keys: those are the ground truth of what tripped, so they win on
         # conflict over the message-derived recomputation.
         merged: dict[str, Any] = {
-            **usage_log.failure_usage(
+            **usage_log.run_shape(
                 run_messages, request_limit=ctx.req_limit, tool_calls_limit=tool_calls_limit
             ),
             **exc.diagnostic,
@@ -123,7 +123,7 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
     if isinstance(exc, LLMError):
         # Preserve the typed failure while attaching bounded counters from
         # the failed run (no prompt/tool content).
-        exc.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
+        exc.diagnostic = usage_log.run_shape(  # type: ignore[attr-defined]
             run_messages,
             request_limit=ctx.req_limit,
             tool_calls_limit=tool_calls_limit,
@@ -143,7 +143,7 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
 
     sampling_err = translate_sampling_parameter_rejection(exc, ctx.ran_model)
     if sampling_err is not None:
-        sampling_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
+        sampling_err.diagnostic = usage_log.run_shape(  # type: ignore[attr-defined]
             run_messages,
             request_limit=ctx.req_limit,
             tool_calls_limit=tool_calls_limit,
@@ -164,7 +164,7 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
 
     outcome = classify_llm_failure(exc, ClassifyContext(model=ctx.ran_model))
     provider_err = _generic_failure_error(exc, outcome.resolution_class)
-    provider_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
+    provider_err.diagnostic = usage_log.run_shape(  # type: ignore[attr-defined]
         run_messages,
         request_limit=ctx.req_limit,
         tool_calls_limit=tool_calls_limit,

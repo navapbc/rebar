@@ -22,6 +22,7 @@ from typing import ClassVar
 
 import pytest
 
+from rebar.llm import structured_run as structured_run_mod
 from rebar.llm.capabilities import (
     ModelCapabilities,
     capabilities_for,
@@ -218,9 +219,8 @@ class _CaptureAgent:
 def _agent_kwargs(monkeypatch, tmp_path, *, model: str, web: bool) -> dict:
     """Run a single-turn text request through PydanticAIRunner with the Agent class
     swapped for the capture double; return the Agent construction kwargs."""
-    import rebar.llm.runner as runner_mod
 
-    monkeypatch.setattr(runner_mod, "_import_pydantic_ai", lambda: _CaptureAgent)
+    monkeypatch.setattr(structured_run_mod, "_import_pydantic_ai", lambda: _CaptureAgent)
     # The real anthropic-path model construction needs a key present (never called).
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-never-used")
     # The bedrock path builds a real BedrockProvider (only the Agent is doubled), and that

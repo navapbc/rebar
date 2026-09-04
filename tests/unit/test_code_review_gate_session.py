@@ -24,8 +24,9 @@ from typing import ClassVar
 import pytest
 
 import rebar
-from rebar.llm import config as llmcfg
-from rebar.llm.config import LLMConfig, current_code_root, current_tickets_root
+from rebar.llm import gate_context as llmcfg
+from rebar.llm.config import LLMConfig
+from rebar.llm.gate_context import current_code_root, current_tickets_root
 from rebar.llm.runner import FakeRunner
 from rebar.llm.workflow import gate_dispatch
 

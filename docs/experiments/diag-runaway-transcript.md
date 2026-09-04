@@ -15,7 +15,7 @@ verifier tools with a local (uncommitted) transcript logger and drives the real
 - Tools wrapped: `filesystem_tools` / `grounding_tools` / `rebar_tools`, logging
   `(tool, args, result-preview, is_error, is_empty_sentinel, len)` to a LOCAL JSONL
   outside the repo. Raw results are **not** committed (they contain repo content) — this
-  file records only content-free aggregates, mirroring `failure_usage`'s privacy contract.
+  file records only content-free aggregates, mirroring `run_shape`'s privacy contract.
 - Greedy decoding (temperature 0.0, the verifier's pinned default).
 - Induced-exhaustion knob: `completion._VERIFY_MIN_STEPS` lowered to 50 (the sanctioned
   "lower the iteration limit" pattern) so the run is bounded and cheap.

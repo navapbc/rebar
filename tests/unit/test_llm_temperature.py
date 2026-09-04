@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from rebar.llm import structured_run as structured_run_mod
+
 pytest.importorskip("pydantic_ai")
 
 import pydantic_ai.models
@@ -48,11 +50,10 @@ def test_temperature_config_env_unparseable_falls_back_to_none(monkeypatch):
 def _capture_model_settings(cfg, req_cfg=None):
     """Run a text request through the runner with an Agent spy; return the model_settings dict the
     Agent was constructed with (None if none were passed)."""
-    import rebar.llm.runner as runner_mod
     from rebar.llm.runner import PydanticAIRunner, RunRequest
 
     captured: dict = {}
-    real_import = runner_mod._import_pydantic_ai
+    real_import = structured_run_mod._import_pydantic_ai
 
     def _spy_import():
         RealAgent = real_import()
@@ -65,7 +66,7 @@ def _capture_model_settings(cfg, req_cfg=None):
         return _SpyAgent
 
     mp = pytest.MonkeyPatch()
-    mp.setattr(runner_mod, "_import_pydantic_ai", _spy_import)
+    mp.setattr(structured_run_mod, "_import_pydantic_ai", _spy_import)
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
 
     def gen(messages, info):

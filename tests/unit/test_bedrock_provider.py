@@ -383,12 +383,12 @@ def _model_settings_for(model_string: str) -> dict | None:
     from pydantic_ai.messages import ModelResponse, TextPart
     from pydantic_ai.models.function import FunctionModel
 
-    from rebar.llm import runner as runner_mod
+    from rebar.llm import structured_run as structured_run_mod
     from rebar.llm.config import LLMConfig
     from rebar.llm.runner import PydanticAIRunner, RunRequest
 
     captured: dict = {}
-    real_import = runner_mod._import_pydantic_ai
+    real_import = structured_run_mod._import_pydantic_ai
 
     def _spy_import():
         real_agent = real_import()
@@ -401,7 +401,7 @@ def _model_settings_for(model_string: str) -> dict | None:
         return _SpyAgent
 
     mp = pytest.MonkeyPatch()
-    mp.setattr(runner_mod, "_import_pydantic_ai", _spy_import)
+    mp.setattr(structured_run_mod, "_import_pydantic_ai", _spy_import)
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
     cfg = LLMConfig(repo_path=".", model=model_string, temperature=0.0)
     try:

@@ -119,7 +119,7 @@ def test_documented_local_server_recipe_returns_a_structured_verdict(stub_openai
 
 def test_check_config_accepts_a_valid_base_url():
     """AC3a — the loud refusal is gone: a well-formed base_url no longer raises."""
-    from rebar.llm.runner import _pai_check_config
+    from rebar.llm.structured_run import _pai_check_config
 
     _pai_check_config(
         _cfg(model_provider="openai", base_url="http://localhost:1234/v1", api_key="k")
@@ -186,7 +186,7 @@ def test_base_url_does_not_hijack_provider_selection(stub_openai_server):
 def test_api_key_without_base_url_is_a_config_error():
     """AC3b — ambiguous: the direct OpenAI path reads OPENAI_API_KEY, so a bare api_key with
     no endpoint is a mistake rather than a silent no-op."""
-    from rebar.llm.runner import _pai_check_config
+    from rebar.llm.structured_run import _pai_check_config
 
     with pytest.raises(LLMConfigError) as excinfo:
         _pai_check_config(_cfg(api_key="sk-orphan"))
@@ -196,7 +196,7 @@ def test_api_key_without_base_url_is_a_config_error():
 def test_non_absolute_base_url_is_a_config_error():
     """AC3c — a relative URL cannot be dialled; the error must name the variable so the
     operator knows which knob is wrong."""
-    from rebar.llm.runner import _pai_check_config
+    from rebar.llm.structured_run import _pai_check_config
 
     with pytest.raises(LLMConfigError) as excinfo:
         _pai_check_config(_cfg(model_provider="openai", base_url="localhost:1234/v1"))

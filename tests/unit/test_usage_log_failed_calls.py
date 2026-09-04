@@ -8,7 +8,7 @@ clean five-call review.
 
 Every test here drives the real runner with a model that RAISES and then READS the file,
 because the defect is about what reaches the FILE — reading ``usage_log.py``, or exercising
-``failure_usage()`` in isolation, cannot show it. Offline throughout: a ``FunctionModel``
+``run_shape()`` in isolation, cannot show it. Offline throughout: a ``FunctionModel``
 override with ``ALLOW_MODEL_REQUESTS = False`` (the seam
 ``tests/unit/test_usage_log.py::test_runner_records_usage_at_seam`` already uses).
 """

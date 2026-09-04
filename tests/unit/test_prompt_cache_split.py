@@ -134,7 +134,7 @@ def _ctx(step: dict, inputs: dict) -> StepContext:
 def test_runner_agent_step_resolves_prompt_from_active_snapshot(
     tmp_path,
 ) -> None:
-    from rebar.llm.config import use_code_root
+    from rebar.llm.gate_context import use_code_root
 
     prompt_id = "code-review-project-snapshot"
     live_root = tmp_path / "live"

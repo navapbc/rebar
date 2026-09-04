@@ -40,7 +40,7 @@ def test_signing_emits_identical_complete_pins_across_enforcement_toggle(
     monkeypatch.setattr(attest, "dependency_hashes", lambda *a, **k: {})
     monkeypatch.setattr(attest, "registry_version", lambda *a, **k: "registry")
     monkeypatch.setattr(registry, "disabled_builtins", lambda *a, **k: [])
-    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: "a" * 40)
+    monkeypatch.setattr("rebar.llm.gate_context.current_code_sha", lambda: "a" * 40)
     monkeypatch.setattr(
         "rebar.signing.sign_manifest",
         lambda ticket_id, manifest, **kwargs: manifests.append(manifest) or {"signed": True},

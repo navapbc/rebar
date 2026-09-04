@@ -35,8 +35,8 @@ from rebar.llm.workflow.completion_metrics import (
     _WORKFLOW_STEP_FIELDS,
     WORKFLOW_STEP_IDS,
 )
-from rebar.llm.workflow.gate_dispatch import _gate_doc, _validate_gate_step_ids
-from rebar.llm.workflow.plan_review_recovery import GateContractError
+from rebar.llm.workflow.gate_dispatch import _gate_doc
+from rebar.llm.workflow.plan_review_recovery import GateContractError, _validate_gate_step_ids
 
 pytestmark = pytest.mark.unit
 

@@ -362,7 +362,7 @@ def assemble_prefetch(spec: PrefetchSpec, *, repo_root) -> tuple[str, list[dict]
     ``(section_text, manifest)``. An empty result (no readable paths, no diffs) yields an empty
     section string so the caller appends nothing."""
     from rebar import _reads
-    from rebar.llm.config import resolve_code_root
+    from rebar.llm.gate_context import resolve_code_root
 
     try:
         ticket = _reads.show_ticket(spec.ticket_id, repo_root=repo_root)

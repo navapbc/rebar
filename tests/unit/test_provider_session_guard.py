@@ -29,6 +29,7 @@ from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
 
 from rebar.llm import runner as runner_mod
+from rebar.llm import structured_run as structured_run_mod
 from rebar.llm.config import LLMConfig
 from rebar.llm.runner import PydanticAIRunner, RunRequest
 
@@ -93,7 +94,7 @@ def _run(*, boom_in_pre_call: bool = False, monkeypatch=None):
         def _explode(*_a, **_kw):
             raise RuntimeError("pre-call window failure")
 
-        monkeypatch.setattr(runner_mod, "build_usage_limits", _explode)
+        monkeypatch.setattr(structured_run_mod, "build_usage_limits", _explode)
     return PydanticAIRunner(cfg, model_override=FunctionModel(_ok)).run(
         RunRequest(system_prompt="s", instructions="i", config=cfg, reviewers=["v"], mode="text")
     )
@@ -166,13 +167,13 @@ def test_the_gate_refusal_runs_before_any_provider_client_is_built(monkeypatch):
     check and MUST stay ahead of provider construction at :294. If a refactor moved construction
     above it, a refused call would still have opened a client — the exact ordering ADR 0056
     decision 4 pins. Asserted by observation: on refusal, NO session is ever constructed."""
-    from rebar.llm import config as llm_config
+    from rebar.llm import gate_context
     from rebar.llm.errors import LLMConfigError
 
     def _refuse(_what):
         raise LLMConfigError("no gate session is active")
 
-    monkeypatch.setattr(llm_config, "assert_gated", _refuse)
+    monkeypatch.setattr(gate_context, "assert_gated", _refuse)
     cfg = LLMConfig(repo_path=".", model=_MODEL)
     # Asserting the GATE's own error, not merely "something raised" — otherwise an unrelated
     # early failure would satisfy this test without the refusal path ever running.

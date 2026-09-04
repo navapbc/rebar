@@ -13,18 +13,8 @@ room. The ADR-0056-correct follow-up is the verb cut inside it — lifting the p
 normalisation into `prerequisites.py` — which is deliberately NOT bundled here because it is
 behaviour-adjacent and needs its own RED-first test.
 
-THE RELOCATION MUST COST ZERO TEST EDITS. Nine test modules reference the moved names, and
-unusually for this codebase NONE of them monkeypatches into this module — so a re-export is
-sufficient and any forced test edit means the cut is wrong. Two pins are load-bearing and are
-asserted here rather than trusted:
-
-  * `_OPERATOR_ATTESTED_AC_RE` must survive by OBJECT IDENTITY —
-    `tests/unit/test_det_floor_operator_attested.py:153` asserts `is` against the det-floor regex.
-  * `decide_ops` must reach `orchestrator` by MODULE FORM plus attribute access. Flattening to
-    bare-name imports silently defeats
-    `tests/interfaces/lifecycle/test_plan_review_execution_floor_lifecycle.py`'s monkeypatch of
-    `orchestrator.pass3_over_findings` — the patch still applies to the module while the flattened
-    name holds the original function, so that test passes while exercising unpatched code.
+ADR 0111 removes the old internal-only `workflow_ops.<name>` shim surface. Tests and
+monkeypatches must import these helpers from their canonical owner, `decide_ops`, instead.
 """
 
 from __future__ import annotations
@@ -66,21 +56,19 @@ def test_the_extracted_module_exists_and_clears_the_split_floor() -> None:
     )
 
 
-def test_every_moved_name_is_still_reachable_from_workflow_ops() -> None:
-    """Nine test modules import these from `workflow_ops`. The re-export is what makes this a
-    zero-test-edit relocation; a missing name is an ImportError at collection."""
+def test_moved_names_are_no_longer_reachable_from_workflow_ops() -> None:
+    """ADR 0111: internal-only compatibility shims are removed after consumer migration."""
     from rebar.llm.plan_review import workflow_ops
 
-    missing = [n for n in _MOVED if not hasattr(workflow_ops, n)]
-    assert missing == [], f"no longer reachable as workflow_ops.<name>: {missing}"
+    leaked = [n for n in _MOVED if hasattr(workflow_ops, n)]
+    assert leaked == [], f"internal shim still reachable as workflow_ops.<name>: {leaked}"
 
 
 def test_the_operator_attested_regex_survives_by_object_identity() -> None:
-    """`tests/unit/test_det_floor_operator_attested.py:153` asserts `is`, not equality. A re-export
-    that rebuilt the pattern would satisfy `==` and fail that test."""
-    from rebar.llm.plan_review import det_operator_attested, workflow_ops
+    """The canonical decide_ops import preserves identity with the det-floor matcher."""
+    from rebar.llm.plan_review import decide_ops, det_operator_attested
 
-    assert workflow_ops._OPERATOR_ATTESTED_AC_RE is det_operator_attested._OPERATOR_ATTESTED_TAG_RE
+    assert decide_ops._OPERATOR_ATTESTED_AC_RE is det_operator_attested._OPERATOR_ATTESTED_TAG_RE
 
 
 # ══ HELD OUT ══════════════════════════════════════════════════════════════════════════

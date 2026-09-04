@@ -76,10 +76,10 @@ def test_live_verify_inputs_emits_the_empty_batch_contract(monkeypatch) -> None:
     """The producer that runs live (`plan_review_verify_inputs`) emits exactly one instruction
     for a zero-finding review, and it carries the empty-batch contract."""
     import rebar.llm.plan_review as pr
-    from rebar.llm.plan_review import workflow_ops
+    from rebar.llm.plan_review import context_assembly, workflow_ops
 
     monkeypatch.setattr(
-        pr.orchestrator,
+        context_assembly,
         "assemble_context",
         lambda tid, repo_root=None: SimpleNamespace(plan_text="PLAN-TEXT"),
     )

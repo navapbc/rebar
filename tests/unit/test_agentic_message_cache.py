@@ -41,6 +41,9 @@ from typing import Any
 
 import pytest
 
+from rebar.llm import anthropic_model as anthropic_model_mod
+from rebar.llm import structured_run as structured_run_mod
+
 pytest.importorskip("pydantic_ai")
 
 import httpx
@@ -432,10 +435,14 @@ def test_runner_passes_the_requests_execution_mode_to_the_cache_seam(monkeypatch
         return None
 
     monkeypatch.setattr(runner_mod, "cache_settings_for", _spy)
-    monkeypatch.setattr(runner_mod, "_pai_structured", lambda *a, **kw: ({"verdict": "PASS"}, {}))
-    monkeypatch.setattr(runner_mod, "_import_pydantic_ai", lambda: lambda *a, **kw: object())
-    monkeypatch.setattr(runner_mod, "_pai_model", lambda cfg: "anthropic:fake")
-    monkeypatch.setattr(runner_mod, "_local_proxy_bypass_base_url", lambda: None)
+    monkeypatch.setattr(
+        structured_run_mod, "_pai_structured", lambda *a, **kw: ({"verdict": "PASS"}, {})
+    )
+    monkeypatch.setattr(
+        structured_run_mod, "_import_pydantic_ai", lambda: lambda *a, **kw: object()
+    )
+    monkeypatch.setattr(anthropic_model_mod, "_pai_model", lambda cfg: "anthropic:fake")
+    monkeypatch.setattr(anthropic_model_mod, "_local_proxy_bypass_base_url", lambda: None)
     monkeypatch.setattr(
         runner_mod._findings,
         "finalize_outcome",

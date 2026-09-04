@@ -14,10 +14,15 @@ WS1 — the Pass-3 deterministic decision core (:mod:`rebar.llm.review_kernel.de
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 from rebar.llm import review_kernel
+from rebar.llm.plan_review import coach_moves
 from rebar.llm.review_kernel import decide as kdecide
+
+kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
 
 pytestmark = pytest.mark.unit
 
@@ -191,14 +196,13 @@ def test_pass3_over_findings_uses_the_threshold_resolver() -> None:
 
 # ── no second copy: the plan-review re-exports ARE the kernel objects (AC #3) ──
 def test_plan_review_reexports_are_the_kernel_objects() -> None:
-    from rebar.llm.plan_review import passes
 
-    assert passes.pass3_decide is kdecide.pass3_decide
-    assert passes.validity is kdecide.validity
-    assert passes.impact is kdecide.impact
-    assert passes.severity_label is kdecide.severity_label
-    assert passes.GRADED_BINARY is kdecide.GRADED_BINARY
-    assert passes.DEFAULT_BLOCK_THRESHOLD == kdecide.DEFAULT_BLOCK_THRESHOLD
+    assert kdecide.pass3_decide is kdecide.pass3_decide
+    assert kdecide.validity is kdecide.validity
+    assert kdecide.impact is kdecide.impact
+    assert kdecide.severity_label is kdecide.severity_label
+    assert kdecide.GRADED_BINARY is kdecide.GRADED_BINARY
+    assert kdecide.DEFAULT_BLOCK_THRESHOLD == kdecide.DEFAULT_BLOCK_THRESHOLD
 
 
 # ── WS2: Pass-2 finding-verifier + the `verification` contract ─────────────────
@@ -739,16 +743,15 @@ def test_validate_move_registry_strict_raises_lenient_drops() -> None:
 
 
 def test_plan_review_coach_reexports_are_the_kernel_objects() -> None:
-    from rebar.llm.plan_review import passes
 
-    assert passes.render_coach_notes is kcoach.render_coach_notes
-    assert passes._validate_subject is kcoach.validate_subject
-    assert passes.coach_instructions is kcoach.coach_listing
-    assert passes.applicable_moves is kcoach.applicable_moves
+    assert kcoach.render_coach_notes is kcoach.render_coach_notes
+    assert kcoach.validate_subject is kcoach.validate_subject
+    assert kcoach.coach_listing is kcoach.coach_listing
+    assert kcoach.applicable_moves is kcoach.applicable_moves
     # plan-review's MOVE_REGISTRY moves are always-applicable EXCEPT the scoped
     # foundation/enhancement move (epic cite-stone-sea / WS8), offered only for the
     # sizing/complexity/risk criteria in its applies_when.
-    for move in passes.MOVE_REGISTRY.values():
+    for move in coach_moves.MOVE_REGISTRY.values():
         if move.get("applies_when"):
             # scoped: off with no trigger, on for its own triggers
             assert not kcoach.move_applies(move, active_triggers=[])

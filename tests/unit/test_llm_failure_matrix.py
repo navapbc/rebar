@@ -70,7 +70,8 @@ from rebar.llm.errors import (
     StructuredOutputError,
     UnretryableOutputError,
 )
-from rebar.llm.runner import PydanticAIRunner, RunRequest, effective_max_iterations
+from rebar.llm.runner import PydanticAIRunner, RunRequest
+from rebar.llm.structured_run import effective_max_iterations
 
 pytestmark = pytest.mark.unit
 

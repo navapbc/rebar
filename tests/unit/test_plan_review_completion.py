@@ -22,7 +22,7 @@ import pytest
 
 from rebar.llm import contracts
 from rebar.llm.config import LLMConfig
-from rebar.llm.plan_review import attest, orchestrator, passes
+from rebar.llm.plan_review import attest, completion_subcall, orchestrator
 from rebar.llm.runner import FakeRunner
 
 pytestmark = pytest.mark.unit
@@ -39,7 +39,7 @@ def _cfg() -> LLMConfig:
 
 
 def _run(fr, findings, manifest):
-    return passes.pass2_completion(
+    return completion_subcall.pass2_completion(
         fr, _cfg(), plan="p", findings=findings, delivered_manifest=manifest
     )
 
@@ -71,9 +71,17 @@ def test_completion_contract_registered_distinctly() -> None:
 
 def test_closed_vocabulary_constants() -> None:
     # The closed enums the coercion enforces (frozen wording — shared with the prompt).
-    assert passes.COMPLETION_CONTAINMENT == ("limited-to-closed", "spans-open-or-system", "n-a")
-    assert passes.COMPLETION_LAYER == ("plan-semantics", "delivered-functionality", "n-a")
-    assert passes.COMPLETION_ATTRIBUTION_NONE == "none"
+    assert completion_subcall.COMPLETION_CONTAINMENT == (
+        "limited-to-closed",
+        "spans-open-or-system",
+        "n-a",
+    )
+    assert completion_subcall.COMPLETION_LAYER == (
+        "plan-semantics",
+        "delivered-functionality",
+        "n-a",
+    )
+    assert completion_subcall.COMPLETION_ATTRIBUTION_NONE == "none"
 
 
 # ── pass2_completion: enum coercion + fail-safe ────────────────────────────────────────────────
@@ -162,7 +170,7 @@ def test_listing_prestates_structural_and_asks_model_for_nonstructural() -> None
         {"finding": "structural", "criteria": ["G3"], "_container_child": "c1"},
         {"finding": "free", "criteria": ["E2"]},
     ]
-    listing = passes._completion_finding_listing(findings)
+    listing = completion_subcall._completion_finding_listing(findings)
     assert "attribution: c1 (PRE-ATTRIBUTED" in listing
     assert "answer only containment + layer" in listing
     # the non-structural finding asks the model for the attribution

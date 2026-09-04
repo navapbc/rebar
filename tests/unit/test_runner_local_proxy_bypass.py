@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm.runner import _DIRECT_ANTHROPIC_BASE_URL, _local_proxy_bypass_base_url
+from rebar.llm.anthropic_model import _DIRECT_ANTHROPIC_BASE_URL, _local_proxy_bypass_base_url
 
 
 @pytest.fixture(autouse=True)

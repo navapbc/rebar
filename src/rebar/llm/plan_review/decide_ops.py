@@ -142,7 +142,7 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
     merge DET findings → cap → the verdict partition (blocking/surfaced/overflow/...)."""
     from rebar.llm import review_kernel
 
-    from . import orchestrator
+    from . import context_assembly, orchestrator
 
     findings = list(ctx.inputs.get("findings") or [])
     raw_verifs = list(ctx.inputs.get("verifications") or [])
@@ -189,13 +189,15 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
             "INDETERMINATE; verdict unchanged): %s",
             reshape.summary(),
         )
-        orchestrator.record_contract_violation(reshape.summary())
+        review_kernel.record_contract_violation(reshape.summary())
 
     # a8e5 Component 3: operator-attested AC awareness. Clear ac_unverifiable on a finding that
     # flags an operator-attested AC as in-session-unverifiable BEFORE Pass-3 reads it (fail-open:
     # any read failure skips enrichment, never breaks the decide step).
     try:
-        _desc = orchestrator.assemble_context(_ticket_id(ctx), repo_root=ctx.repo_root).description
+        _desc = context_assembly.assemble_context(
+            _ticket_id(ctx), repo_root=ctx.repo_root
+        ).description
         enrich_operator_attested(findings, verifs, _desc)
     except Exception:
         logger.debug("operator-attested enrichment skipped", exc_info=True)

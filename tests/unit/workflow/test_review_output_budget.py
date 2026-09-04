@@ -29,8 +29,9 @@ import pytest
 
 from rebar.llm.config import DEFAULT_MAX_TOKENS, LLMConfig
 from rebar.llm.errors import UnretryableOutputError
-from rebar.llm.plan_review import passes, prerequisites, sizing
+from rebar.llm.plan_review import completion_subcall, passes, prerequisites
 from rebar.llm.prompting import prompts
+from rebar.llm.review_kernel import verify as review_verify
 from rebar.llm.workflow.executor import StepContext
 from rebar.llm.workflow.runs import RunnerAgentStep
 
@@ -82,17 +83,17 @@ def _cfg(model: str = "claude-sonnet-4-6") -> LLMConfig:
 
 
 def test_model_max_output_lookup_known_models() -> None:
-    assert sizing.model_max_output_tokens("claude-haiku-4-5") == _HAIKU_MAX
-    assert sizing.model_max_output_tokens("claude-sonnet-4-6") == _SONNET_MAX
-    assert sizing.model_max_output_tokens("claude-opus-4-8") == _SONNET_MAX
+    assert review_verify.model_max_output_tokens("claude-haiku-4-5") == _HAIKU_MAX
+    assert review_verify.model_max_output_tokens("claude-sonnet-4-6") == _SONNET_MAX
+    assert review_verify.model_max_output_tokens("claude-opus-4-8") == _SONNET_MAX
     # Provider-qualified strings still match (substring, like largest_window_tokens).
-    assert sizing.model_max_output_tokens("anthropic:claude-haiku-4-5") == _HAIKU_MAX
+    assert review_verify.model_max_output_tokens("anthropic:claude-haiku-4-5") == _HAIKU_MAX
 
 
 def test_model_max_output_lookup_unknown_falls_back_to_default() -> None:
-    assert sizing.model_max_output_tokens("gpt-x-unknown") == DEFAULT_MAX_TOKENS
-    assert sizing.model_max_output_tokens(None) == DEFAULT_MAX_TOKENS
-    assert sizing.model_max_output_tokens("") == DEFAULT_MAX_TOKENS
+    assert review_verify.model_max_output_tokens("gpt-x-unknown") == DEFAULT_MAX_TOKENS
+    assert review_verify.model_max_output_tokens(None) == DEFAULT_MAX_TOKENS
+    assert review_verify.model_max_output_tokens("") == DEFAULT_MAX_TOKENS
 
 
 def test_max_output_cfg_never_lowers_an_operator_raise() -> None:
@@ -158,7 +159,7 @@ def test_summarize_for_isf_carries_model_max_output() -> None:
 
 def test_pass2_completion_carries_model_max_output() -> None:
     runner = _Recorder({"completions": []})
-    passes.pass2_completion(
+    completion_subcall.pass2_completion(
         runner,
         _cfg(),
         plan="## Plan\nBuild X.",
@@ -323,8 +324,8 @@ def test_lookup_is_single_sourced_in_the_review_kernel() -> None:
     """One shared lookup: sizing re-exports the kernel's, byte-identical objects."""
     from rebar.llm import review_kernel
 
-    assert sizing.model_max_output_tokens is review_kernel.model_max_output_tokens
-    assert sizing.max_output_cfg is review_kernel.max_output_cfg
+    assert review_verify.model_max_output_tokens is review_kernel.model_max_output_tokens
+    assert review_verify.max_output_cfg is review_kernel.max_output_cfg
 
 
 def test_plan_review_verifier_cfg_carries_model_max() -> None:

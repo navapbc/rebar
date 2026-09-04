@@ -23,6 +23,7 @@ from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.runner import Runner
 
+from . import budget as _budget
 from . import det_floor, passes, sizing
 from .det_floor import PlanContext
 from .generation import _submit_ctx
@@ -164,7 +165,7 @@ def _run_container(
     out so they READ the warmed prefix. The aggregate finding set equals the sequential
     baseline — each in-budget pairing runs exactly once (no dup/drop)."""
     roster = build_sibling_roster(ctx.children)
-    budget = sizing.container_budget(ctx.largest_window_tokens)
+    budget = _budget.container_budget(ctx.largest_window_tokens)
     # The roster rides the CACHED PREFIX (passes.pass1_container puts it in the system
     # prompt), so it is part of every pairing's prefix: count it here or pack_container_bins
     # under-estimates the prefix and can pack a bin over the window budget.
@@ -179,7 +180,7 @@ def _run_container(
     # up to the window budget (parent + all packed children, each WHOLE — never chunked).
     # A child whose parent+child ALONE exceeds budget is oversized → the single-child
     # too-big failure finding (NO LLM call, kept out of the fan-out).
-    pairings, oversized = sizing.pack_container_bins(ctx.children, parent_tokens, budget)
+    pairings, oversized = _budget.pack_container_bins(ctx.children, parent_tokens, budget)
     for child in oversized:
         pair_tokens = parent_tokens + det_floor.est_tokens(
             f"{child.get('title', '')}\n{child.get('description', '')}"

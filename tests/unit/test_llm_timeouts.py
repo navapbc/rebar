@@ -22,6 +22,8 @@ from collections.abc import Iterator
 import httpx
 import pytest
 
+from rebar.llm import structured_run as structured_run_mod
+
 pytest.importorskip("pydantic_ai")
 
 import pydantic_ai.models
@@ -305,11 +307,10 @@ def test_tool_timeout_config_env_override(monkeypatch):
 def test_runner_sets_tool_timeout_on_the_agent(monkeypatch):
     """A model_override run still builds the Agent with tool_timeout in its kwargs — the
     liveness bound is applied on every agentic construction."""
-    import rebar.llm.runner as runner_mod
     from rebar.llm.runner import PydanticAIRunner, RunRequest
 
     captured: dict = {}
-    real_import = runner_mod._import_pydantic_ai
+    real_import = structured_run_mod._import_pydantic_ai
 
     def _spy_import():
         RealAgent = real_import()
@@ -321,7 +322,7 @@ def test_runner_sets_tool_timeout_on_the_agent(monkeypatch):
 
         return _SpyAgent
 
-    monkeypatch.setattr(runner_mod, "_import_pydantic_ai", _spy_import)
+    monkeypatch.setattr(structured_run_mod, "_import_pydantic_ai", _spy_import)
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
 
     def gen(messages, info):

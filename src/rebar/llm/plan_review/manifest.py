@@ -301,7 +301,7 @@ def _hash_basis(repo_root=None, *, at_current_gate_ref: bool = False) -> str:
 
     if at_current_gate_ref:
         return gate_ref_hash_basis(repo_root).path
-    from rebar.llm.config import current_code_root
+    from rebar.llm.gate_context import current_code_root
 
     active = current_code_root()
     return active if active else str(_config.repo_root(repo_root))

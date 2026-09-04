@@ -16,8 +16,7 @@ import pytest
 
 import rebar.signing as signing
 from rebar import config as core_config
-from rebar.llm import config as llm_config
-from rebar.llm import plan_review
+from rebar.llm import gate_context, plan_review
 from rebar.llm.config import LLMConfig
 from rebar.llm.plan_review import attest, sidecar
 from rebar.llm.review_kernel.verify import score_novelty
@@ -165,7 +164,7 @@ def _eligible_setup(monkeypatch, **overrides):
     monkeypatch.setattr(
         attest, "current_material_fingerprint", lambda tid, repo_root=None: cfg["cur_material"]
     )
-    monkeypatch.setattr(llm_config, "current_code_sha", lambda: cfg["cur_sha"])
+    monkeypatch.setattr(gate_context, "current_code_sha", lambda: cfg["cur_sha"])
     monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: cfg["cur_regver"])
     monkeypatch.setattr(
         sidecar,

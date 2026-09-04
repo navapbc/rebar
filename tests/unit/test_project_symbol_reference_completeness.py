@@ -21,7 +21,7 @@ import pytest
 
 from rebar.llm.criteria.ids import criterion_prompt_id
 from rebar.llm.criteria.model import threshold_for
-from rebar.llm.plan_review import orchestrator, registry
+from rebar.llm.plan_review import coach_moves, registry
 from rebar.llm.review_kernel.coach import applicable_moves
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -36,7 +36,7 @@ def _routing() -> dict:
 
 
 def _moves() -> dict:
-    return orchestrator.load_move_registry(repo_root=str(REPO_ROOT))
+    return coach_moves.load_move_registry(repo_root=str(REPO_ROOT))
 
 
 # ── happy path ──────────────────────────────────────────────────────────────────────

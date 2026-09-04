@@ -35,7 +35,7 @@ _RESERVE = 16000
 
 def _candidate_window(cfg):
     from rebar.llm import model_classes
-    from rebar.llm.runner import _pai_model
+    from rebar.llm.anthropic_model import _pai_model
 
     return model_classes.own_window_tokens(_pai_model(cfg))
 
@@ -48,8 +48,8 @@ def _offline(monkeypatch):
 
 
 def _proc(cfg, reserve=_RESERVE):
+    from rebar.llm.anthropic_model import _pai_model
     from rebar.llm.pai_retry import wire_history_processor
-    from rebar.llm.runner import _pai_model
 
     return wire_history_processor([_pai_model(cfg)], reserve).processor
 

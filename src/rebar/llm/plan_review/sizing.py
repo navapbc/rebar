@@ -12,14 +12,8 @@ context window" cluster). Owns:
 * :func:`pass1_with_ladder` — the runtime size ladder (batch → one-criterion-per-call
   → escalate model → too-big failure finding; content never chunked).
 
-Two clusters that already formed their own call-graph seams live in siblings and are
-RE-EXPORTED here so every historical ``sizing.<name>`` call site is unchanged:
-
-* :mod:`.budget` — the cost model, :func:`centrality` / :func:`plan_budget_cap`, the
-  container bin-packer, and :func:`shed_to_budget`;
-* :mod:`.checkpoints` — :func:`checkpoint_identity` / :func:`load_checkpoint` /
-  :func:`save_checkpoint`, the envelope-based chunk-atomic checkpointing that lets an
-  interrupted/restarted review RESUME completed Pass-1 chunks.
+Budget and checkpoint helpers now live only in their canonical sibling modules; this module
+imports those siblings directly where needed instead of re-exporting their private names.
 """
 
 from __future__ import annotations
@@ -31,27 +25,10 @@ from rebar.llm import failure
 from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.model_classes import MODEL_WINDOW_LADDER as MODEL_LADDER
+from rebar.llm.review_kernel import verify as _verify
 from rebar.llm.runner import Runner
 
 from . import det_floor, passes
-from .budget import (
-    COST_AGENT_USD,
-    COST_SINGLE_TURN_USD,
-    DEFAULT_BUDGET_CAP_USD,
-    centrality,
-    container_budget,
-    pack_container_bins,
-    plan_budget_cap,
-    shed_to_budget,
-)
-from .checkpoints import (  # noqa: F401 — private re-exports: `pass1` and the tests reach them as `sizing.<name>`
-    _checkpoint_dir,
-    _discovery_unit_plan,
-    _unit_id,
-    checkpoint_identity,
-    load_checkpoint,
-    save_checkpoint,
-)
 
 
 @dataclass(frozen=True)
@@ -103,35 +80,14 @@ def largest_window_tokens(model: str | None) -> int:
 
 
 # ── Pass-2 verify token-budget chunking + the model-max output-budget rule ─────────
-# The model-max output-budget rule (bug 30a2) is SHARED across every review workflow, so
-# its single source is the review kernel (`rebar.llm.review_kernel.verify`, beside the
-# analogous cross-gate `resolve_verifier_model` rule); it is re-exported here for the
-# historical `sizing.<name>` call sites, exactly like the chunking constants below.
-# The chunking ALGORITHM + constants are owned by the shared review kernel
-# (`rebar.llm.review_kernel.verify`) as the single source (epic vivid-gang-day WS2). The
-# constants are re-exported here for the historical `sizing.<name>` call sites;
-# `verify_request_chunks` is a thin plan-review wrapper that supplies the model WINDOW
-# (`largest_window_tokens(model)` — model escalation baked in) + the token ESTIMATOR
-# (`det_floor.est_tokens`), the two infra inputs the kernel chunker injects.
-from rebar.llm.review_kernel.verify import (  # noqa: E402,F401
-    DEFAULT_VERIFY_WINDOW_HEADROOM,
-    MODEL_MAX_OUTPUT_TOKENS,
-    PER_FINDING_VERIFY_TOKENS,
-    VERIFY_SYSTEM_RESERVE_TOKENS,
-    max_output_cfg,
-    model_max_output_tokens,
-)
-from rebar.llm.review_kernel.verify import (  # noqa: E402
-    verify_request_chunks as _kernel_verify_request_chunks,
-)
 
 
 def verify_request_chunks(
     findings: list[dict[str, Any]],
     *,
     model: str | None,
-    headroom: float = DEFAULT_VERIFY_WINDOW_HEADROOM,
-    per_finding_out_tokens: int = PER_FINDING_VERIFY_TOKENS,
+    headroom: float = _verify.DEFAULT_VERIFY_WINDOW_HEADROOM,
+    per_finding_out_tokens: int = _verify.PER_FINDING_VERIFY_TOKENS,
 ) -> tuple[list[list[tuple[int, dict[str, Any]]]], list[int]]:
     """Split ``findings`` into token-budgeted Pass-2 verify chunks (the plan-review wrapper
     over :func:`rebar.llm.review_kernel.verify.verify_request_chunks`). Supplies the model
@@ -140,7 +96,7 @@ def verify_request_chunks(
     returns ONE chunk == the whole enumerated list (no behavior change); a finding too big to
     verify even alone is returned in ``omitted_indices`` → ``pass3_decide(None)`` →
     INDETERMINATE. See the kernel for the fit-test math."""
-    return _kernel_verify_request_chunks(
+    return _verify.verify_request_chunks(
         findings,
         window_tokens=largest_window_tokens(model),
         est_tokens=det_floor.est_tokens,
@@ -155,15 +111,15 @@ def pack_prerequisite_bins(
     subject_plan: str,
     system_prompt: str,
     model: str | None,
-    per_block_output_tokens: int = PER_FINDING_VERIFY_TOKENS,
-    headroom: float = DEFAULT_VERIFY_WINDOW_HEADROOM,
+    per_block_output_tokens: int = _verify.PER_FINDING_VERIFY_TOKENS,
+    headroom: float = _verify.DEFAULT_VERIFY_WINDOW_HEADROOM,
 ) -> tuple[list[list[PrerequisiteBlock]], list[PrerequisiteBlock]]:
     """Greedily pack stable, whole prerequisite blocks within the actual prompt budget."""
     limit = int(largest_window_tokens(model) * headroom)
     fixed = (
         det_floor.est_tokens(system_prompt)
         + det_floor.est_tokens(subject_plan)
-        + VERIFY_SYSTEM_RESERVE_TOKENS
+        + _verify.VERIFY_SYSTEM_RESERVE_TOKENS
     )
     bins: list[list[PrerequisiteBlock]] = []
     oversized: list[PrerequisiteBlock] = []
@@ -190,15 +146,15 @@ def pack_prerequisite_verifier_bins(
     subject_plan: str,
     system_prompt: str,
     model: str | None,
-    per_finding_output_tokens: int = PER_FINDING_VERIFY_TOKENS,
-    headroom: float = DEFAULT_VERIFY_WINDOW_HEADROOM,
+    per_finding_output_tokens: int = _verify.PER_FINDING_VERIFY_TOKENS,
+    headroom: float = _verify.DEFAULT_VERIFY_WINDOW_HEADROOM,
 ) -> tuple[list[list[PrerequisiteVerificationBlock]], list[PrerequisiteVerificationBlock]]:
     """Pack whole focused verification records; plan text and records are indivisible."""
     limit = int(largest_window_tokens(model) * headroom)
     fixed = (
         det_floor.est_tokens(system_prompt)
         + det_floor.est_tokens(subject_plan)
-        + VERIFY_SYSTEM_RESERVE_TOKENS
+        + _verify.VERIFY_SYSTEM_RESERVE_TOKENS
     )
     bins: list[list[PrerequisiteVerificationBlock]] = []
     oversized: list[PrerequisiteVerificationBlock] = []
@@ -533,23 +489,12 @@ def pass1_with_ladder(
 
 
 __all__ = [
-    "COST_AGENT_USD",
-    "COST_SINGLE_TURN_USD",
-    "DEFAULT_BUDGET_CAP_USD",
     "MODEL_LADDER",
     "USAGE_TOKEN_FIELDS",
-    "centrality",
-    "checkpoint_identity",
-    "container_budget",
     "escalation_rungs",
     "is_context_limit_error",
     "largest_window_tokens",
-    "load_checkpoint",
     "models_at_or_above",
-    "pack_container_bins",
     "pass1_with_ladder",
-    "plan_budget_cap",
-    "save_checkpoint",
-    "shed_to_budget",
     "usage_record",
 ]

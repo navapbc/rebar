@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import pytest
 
+from rebar.llm import anthropic_model as anthropic_model_mod
+from rebar.llm import structured_run as structured_run_mod
+
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.usage import UsageLimits
@@ -268,8 +271,8 @@ def test_request_transport_limits_reach_model_and_provider_construction(monkeypa
         captured["model"] = cfg
         return _MODEL
 
-    monkeypatch.setattr(runner_mod, "_pai_check_config", lambda cfg: None)
-    monkeypatch.setattr(runner_mod, "_pai_model", _capture_model)
+    monkeypatch.setattr(structured_run_mod, "_pai_check_config", lambda cfg: None)
+    monkeypatch.setattr(anthropic_model_mod, "_pai_model", _capture_model)
     monkeypatch.setattr(runner_mod, "primary_endpoint_for", lambda *args, **kwargs: None)
     monkeypatch.setattr(runner_mod, "ProviderSession", _CapturingProviderSession)
 

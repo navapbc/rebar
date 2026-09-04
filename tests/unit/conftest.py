@@ -105,7 +105,7 @@ def _no_real_session_log_writes(monkeypatch):
     ``tickets`` branch AND writes the ``.rebar/current_session_log`` pointer into the
     repo root. Several best-effort telemetry paths reach it WITHOUT the caller opting
     in — notably the degraded-gate verdicts
-    (``llm.workflow.gate_dispatch._degraded_plan_review_verdict`` /
+    (``llm.workflow.plan_review_recovery._degraded_plan_review_verdict`` /
     ``_degraded_code_review_verdict`` -> ``llm.failure.log_degrade`` ->
     ``append_session_log``). So a unit test that merely exercises a degraded verdict
     silently pollutes the shared store and, in a fresh worktree, trips the

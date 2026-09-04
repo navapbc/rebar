@@ -77,6 +77,7 @@ def test_defaults(tmp_path: Path) -> None:
 
 def test_from_env_uses_grouped_reader_assemblers(tmp_path: Path, monkeypatch) -> None:
     from rebar.llm import config as llm_config
+    from rebar.llm import gate_context
 
     def _cli_overrides(section: str) -> dict:
         return {"source": "cli"} if section == "llm" else {}
@@ -87,8 +88,8 @@ def test_from_env_uses_grouped_reader_assemblers(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr(llm_config, "_read_llm_file_table", lambda repo_root: {"source": "table"})
     monkeypatch.setattr(cfg, "cli_overrides_for", _cli_overrides)
     monkeypatch.setattr(llm_config, "resolve_headers", lambda table, cli, env_json, env: {})
-    monkeypatch.setattr(llm_config, "current_code_root", lambda: None)
-    monkeypatch.setattr(llm_config, "current_tickets_root", lambda: "/tmp/tickets-root")
+    monkeypatch.setattr(gate_context, "current_code_root", lambda: None)
+    monkeypatch.setattr(gate_context, "current_tickets_root", lambda: "/tmp/tickets-root")
     monkeypatch.setattr(
         llm_config.LangfuseConfig,
         "from_env",
@@ -317,25 +318,25 @@ def test_resolve_code_root_cascade(tmp_path: Path) -> None:
     """The authoritative code-read-root resolver: explicit > cfg.repo_path > active gate
     snapshot > live checkout, and NEVER None — the contract that kills the no_repo_root
     class of bug (a gate consumer handed None silently degrading)."""
-    from rebar.llm import config as llm_config
+    from rebar.llm import gate_context
 
     # 1. An explicit repo_root wins over everything.
-    assert llm_config.resolve_code_root("/explicit", cfg_repo_path="/snap") == "/explicit"
+    assert gate_context.resolve_code_root("/explicit", cfg_repo_path="/snap") == "/explicit"
     # 2. A pinned cfg.repo_path is next.
-    assert llm_config.resolve_code_root(None, cfg_repo_path="/snap") == "/snap"
+    assert gate_context.resolve_code_root(None, cfg_repo_path="/snap") == "/snap"
     # 3. The ACTIVE attested-gate snapshot (origin/main HEAD by default) is next.
-    token = llm_config._active_code_root.set(str(tmp_path))
+    token = gate_context._active_code_root.set(str(tmp_path))
     try:
-        assert llm_config.resolve_code_root() == str(tmp_path)
-        assert llm_config.resolve_code_root(cfg_repo_path="/snap") == "/snap"  # still below cfg
+        assert gate_context.resolve_code_root() == str(tmp_path)
+        assert gate_context.resolve_code_root(cfg_repo_path="/snap") == "/snap"  # still below cfg
     finally:
-        llm_config._active_code_root.reset(token)
+        gate_context._active_code_root.reset(token)
     # 4. Nothing specified, no gate active → the live checkout, a real path string, NEVER None.
-    fallback = llm_config.resolve_code_root()
+    fallback = gate_context.resolve_code_root()
     assert isinstance(fallback, str) and fallback
     # 5. With the checkout fallback OPTED OUT (the lightweight-builder mode), the same
     #    no-context call returns None instead of forcing a checkout root.
-    assert llm_config.resolve_code_root(allow_checkout_fallback=False) is None
+    assert gate_context.resolve_code_root(allow_checkout_fallback=False) is None
 
 
 def test_resolve_code_root_require_raises_on_unresolved(tmp_path: Path) -> None:
@@ -344,25 +345,25 @@ def test_resolve_code_root_require_raises_on_unresolved(tmp_path: Path) -> None:
     asserted by exception TYPE (no string heuristics) — while a resolvable root (an active
     snapshot, or an explicit root) satisfies it without raising, and ``require=False`` preserves
     the snapshot-or-None behavior."""
-    from rebar.llm import config as llm_config
+    from rebar.llm import gate_context
     from rebar.llm.errors import LLMConfigError
 
     # Unresolved + require=True (only reachable with the checkout fallback opted out) → loud.
     with pytest.raises(LLMConfigError):
-        llm_config.resolve_code_root(allow_checkout_fallback=False, require=True)
+        gate_context.resolve_code_root(allow_checkout_fallback=False, require=True)
     # Unresolved + require=False → the prior snapshot-or-None behavior (no raise).
-    assert llm_config.resolve_code_root(allow_checkout_fallback=False, require=False) is None
+    assert gate_context.resolve_code_root(allow_checkout_fallback=False, require=False) is None
     # An ACTIVE snapshot satisfies require=True without raising (the #71 cascade grounds it).
-    token = llm_config._active_code_root.set(str(tmp_path))
+    token = gate_context._active_code_root.set(str(tmp_path))
     try:
-        assert llm_config.resolve_code_root(allow_checkout_fallback=False, require=True) == str(
+        assert gate_context.resolve_code_root(allow_checkout_fallback=False, require=True) == str(
             tmp_path
         )
     finally:
-        llm_config._active_code_root.reset(token)
+        gate_context._active_code_root.reset(token)
     # An explicit root also satisfies it (no raise even with the fallback opted out).
     assert (
-        llm_config.resolve_code_root("/explicit", allow_checkout_fallback=False, require=True)
+        gate_context.resolve_code_root("/explicit", allow_checkout_fallback=False, require=True)
         == "/explicit"
     )
 

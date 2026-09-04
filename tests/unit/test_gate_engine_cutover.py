@@ -109,7 +109,7 @@ def test_plan_review_coach_failure_recovers_verdict_without_coaching() -> None:
     # Pass-4 coach is advisory polish — the verdict is emitted even when the coach
     # fails. The workflow path reconstructs the verdict from the recorded Pass-3 `decide`
     # partition with EMPTY coaching, rather than degrading a valid PASS to INDETERMINATE.
-    from rebar.llm.workflow import gate_dispatch
+    from rebar.llm.workflow import plan_review_recovery
     from rebar.llm.workflow.recorder import MemoryRecorder
 
     rec = MemoryRecorder()
@@ -142,7 +142,7 @@ def test_plan_review_coach_failure_recovers_verdict_without_coaching() -> None:
         },
     ]
     cfg = dataclasses.replace(LLMConfig(runner="fake"), model="claude-haiku-4-5")
-    verdict = gate_dispatch._recover_plan_review_coach_failure(rec, cfg, error="coach boom")
+    verdict = plan_review_recovery._recover_plan_review_coach_failure(rec, cfg, error="coach boom")
     assert verdict is not None
     assert verdict["verdict"] == "PASS"  # no blocking → PASS even though the coach failed
     assert verdict["coaching"] == []  # coaching dropped, not the whole verdict
@@ -154,13 +154,13 @@ def test_plan_review_coach_failure_recovers_verdict_without_coaching() -> None:
 def test_plan_review_coach_recovery_returns_none_when_decide_absent() -> None:
     # If Pass-3 `decide` did NOT succeed, the LLM tier genuinely failed (not just the coach) —
     # the recovery declines so the caller degrades to INDETERMINATE.
-    from rebar.llm.workflow import gate_dispatch
+    from rebar.llm.workflow import plan_review_recovery
     from rebar.llm.workflow.recorder import MemoryRecorder
 
     rec = MemoryRecorder()
     rec.steps = [{"frame_key": "precheck", "status": "succeeded", "outputs": {"canonical_id": "T"}}]
     cfg = dataclasses.replace(LLMConfig(runner="fake"), model="claude-haiku-4-5")
-    assert gate_dispatch._recover_plan_review_coach_failure(rec, cfg, error="x") is None
+    assert plan_review_recovery._recover_plan_review_coach_failure(rec, cfg, error="x") is None
 
 
 # ── code-read-root vs ticket-store-root (epic 5ca8 / joe-debug: the no_repo_root class) ─
@@ -176,7 +176,7 @@ def test_precheck_grounds_code_root_without_hijacking_ticket_root(monkeypatch, t
     fix that threaded the CODE snapshot as the op's `repo_root` then broke ticket reads
     ('Ticket not found'), because the ticket store is NOT under the .git-less code snapshot.
     Both must hold at once."""
-    from rebar.llm import config as llm_config
+    from rebar.llm import gate_context
     from rebar.llm.plan_review import workflow_ops
     from rebar.llm.workflow.executor import StepContext
 
@@ -205,11 +205,11 @@ def test_precheck_grounds_code_root_without_hijacking_ticket_root(monkeypatch, t
         target_ticket="T-1",
         repo_root=None,  # the TICKET-store read-root the workflow threads (live/ticket store)
     )
-    token = llm_config._active_code_root.set(code_snap)
+    token = gate_context._active_code_root.set(code_snap)
     try:
         out = workflow_ops.plan_review_precheck(sc)
     finally:
-        llm_config._active_code_root.reset(token)
+        gate_context._active_code_root.reset(token)
     # Ticket reads used the workflow's ticket-store root (None → live/ticket store), NOT the
     # code snapshot — so a real ticket would still resolve.
     assert seen_ticket_root["v"] is None, seen_ticket_root
@@ -226,7 +226,7 @@ def test_produce_plan_review_does_not_thread_code_snapshot_as_ticket_root(monkey
     them look for the store under the .git-less code snapshot ('Ticket not found')."""
     from rebar.llm.runner import FakeRunner
     from rebar.llm.workflow import executor as _ex
-    from rebar.llm.workflow import gate_dispatch
+    from rebar.llm.workflow import gate_dispatch, plan_review_recovery
 
     captured: dict = {}
 
@@ -247,7 +247,7 @@ def test_produce_plan_review_does_not_thread_code_snapshot_as_ticket_root(monkey
         "_gate_doc",
         lambda name, repo_root: {
             "id": "g",
-            "steps": [{"id": sid} for sid in gate_dispatch._PLAN_REVIEW_REQUIRED_STEP_IDS],
+            "steps": [{"id": sid} for sid in plan_review_recovery._PLAN_REVIEW_REQUIRED_STEP_IDS],
         },
     )
 

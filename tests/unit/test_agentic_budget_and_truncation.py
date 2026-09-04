@@ -21,7 +21,7 @@ import pytest
 from rebar.llm import structured
 from rebar.llm.config import DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_TOKENS, LLMConfig
 from rebar.llm.errors import StructuredOutputError, UnretryableOutputError
-from rebar.llm.runner import effective_max_iterations
+from rebar.llm.structured_run import effective_max_iterations
 
 
 # ── RC-A: the framework step budget is review-appropriate by default ──────────────────

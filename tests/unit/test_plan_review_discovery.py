@@ -20,7 +20,7 @@ import re
 import pytest
 
 from rebar.llm.config import LLMConfig
-from rebar.llm.plan_review import registry, sidecar, sizing
+from rebar.llm.plan_review import checkpoints, registry, sidecar
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.plan_review.pass1 import run_pass1
 from rebar.llm.review_kernel import (
@@ -89,7 +89,7 @@ def _healthy() -> FakeRunner:
 def _identity(chunk, **kw) -> str:
     base = dict(material="MAT", model="m", agentic=False)
     base.update(kw)
-    return sizing.checkpoint_identity(chunk=chunk, **base)
+    return checkpoints.checkpoint_identity(chunk=chunk, **base)
 
 
 def test_checkpoint_identity_stable_and_material_sensitive():
@@ -105,7 +105,7 @@ def test_success_envelope_roundtrips_and_only_success_reuses(tmp_path):
     ctx = _ctx(repo_root=str(tmp_path))
     chunk = [{"id": "E2"}]
     digest = _identity(chunk)
-    assert sizing.load_checkpoint(ctx, digest) is None, "cold cache must miss"
+    assert checkpoints.load_checkpoint(ctx, digest) is None, "cold cache must miss"
 
     success = CheckpointEnvelope(
         unit_id="single:E2",
@@ -115,15 +115,17 @@ def test_success_envelope_roundtrips_and_only_success_reuses(tmp_path):
         content=[{"finding": "x", "criteria": ["E2"]}],
         usage=Usage(input_tokens=1, output_tokens=1, requests=1),
     )
-    assert sizing.save_checkpoint(ctx, success) is True
-    got = sizing.load_checkpoint(ctx, digest)
+    assert checkpoints.save_checkpoint(ctx, success) is True
+    got = checkpoints.load_checkpoint(ctx, digest)
     assert got is not None and got.content[0]["finding"] == "x", "a success must resume"
 
     # A non-reusable (failed) envelope stored at its digest must NOT seed reuse.
     failed_digest = _identity([{"id": "E4"}], agentic=True)
     failed = dataclasses.replace(success, unit_id="agent:E4", kind="failed", digest=failed_digest)
-    sizing.save_checkpoint(ctx, failed)
-    assert sizing.load_checkpoint(ctx, failed_digest) is None, "a failed envelope is never reused"
+    checkpoints.save_checkpoint(ctx, failed)
+    assert checkpoints.load_checkpoint(ctx, failed_digest) is None, (
+        "a failed envelope is never reused"
+    )
 
 
 # ── AC3 (core): a failed local unit is NEVER serialized as a clean checkpoint ──
@@ -185,13 +187,13 @@ def test_corrupt_and_legacy_checkpoints_zero_reuse(tmp_path):
     ctx = _ctx(repo_root=str(tmp_path))
     chunk = [{"id": "E2"}]
     digest = _identity(chunk)
-    cache_dir = sizing._checkpoint_dir(ctx)
+    cache_dir = checkpoints._checkpoint_dir(ctx)
     assert cache_dir is not None
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Corrupt JSON at the digest path → miss (recompute), never a crash.
     (cache_dir / f"{digest}.json").write_text("{not json", encoding="utf-8")
-    assert sizing.load_checkpoint(ctx, digest) is None
+    assert checkpoints.load_checkpoint(ctx, digest) is None
 
     # A legacy namespace_version envelope → miss (ignored, not translated).
     legacy = {
@@ -205,7 +207,7 @@ def test_corrupt_and_legacy_checkpoints_zero_reuse(tmp_path):
     import json as _json
 
     (cache_dir / f"{digest}.json").write_text(_json.dumps(legacy), encoding="utf-8")
-    assert sizing.load_checkpoint(ctx, digest) is None
+    assert checkpoints.load_checkpoint(ctx, digest) is None
 
 
 def test_digest_changes_on_every_identity_axis():
@@ -309,5 +311,5 @@ def test_shed_and_cancel_units_are_not_reusable(tmp_path):
             content=[{"finding": "x"}],
             usage=Usage(),
         )
-        sizing.save_checkpoint(ctx, env)
-        assert sizing.load_checkpoint(ctx, digest) is None, f"{kind} must not be reused"
+        checkpoints.save_checkpoint(ctx, env)
+        assert checkpoints.load_checkpoint(ctx, digest) is None, f"{kind} must not be reused"

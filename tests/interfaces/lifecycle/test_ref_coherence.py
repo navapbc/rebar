@@ -171,7 +171,7 @@ def test_local_gate_config_uses_working_tree_basis_on_both_sides(tmp_path, monke
 # --------------------------------------------------------------------------------------
 def test_hash_basis_resolution(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
-    from rebar.llm.config import use_code_root
+    from rebar.llm.gate_context import use_code_root
 
     # default → the working tree (checkout)
     assert attest._hash_basis(str(repo)) == str(rebar.config.repo_root(str(repo)))

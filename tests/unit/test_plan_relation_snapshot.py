@@ -433,7 +433,7 @@ def _resign_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     code_head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
     ).stdout.strip()
-    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: code_head)
+    monkeypatch.setattr("rebar.llm.gate_context.current_code_sha", lambda: code_head)
     monkeypatch.setenv("REBAR_SIGNING_KEY", "test-signing-key-c083")
     return resign, ticket_id, str(root)
 

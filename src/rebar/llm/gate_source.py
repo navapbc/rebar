@@ -35,8 +35,8 @@ from rebar._snapshot import (
 )
 from rebar._snapshot.repo_snapshot import DEFAULT_REF, materialize_tickets
 from rebar.llm import build_drift
-from rebar.llm.config import (
-    LLMConfig,
+from rebar.llm.config import LLMConfig
+from rebar.llm.gate_context import (
     gate_session,
     use_code_root,
     use_ticket_view,

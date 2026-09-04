@@ -20,6 +20,8 @@ from urllib.parse import urlsplit
 import httpx
 import pytest
 
+from rebar.llm import structured_run as structured_run_mod
+
 pytest.importorskip("pydantic_ai")
 
 import pydantic_ai.models
@@ -152,10 +154,8 @@ def seam(monkeypatch):
         lambda *a, **kw: transport_http.MockTransport(_handler),
     )
 
-    import rebar.llm.runner as runner_mod
-
     captured: dict = {}
-    real_import = runner_mod._import_pydantic_ai
+    real_import = structured_run_mod._import_pydantic_ai
 
     def _capturing_import():
         real_agent = real_import()
@@ -168,7 +168,7 @@ def seam(monkeypatch):
 
         return _agent
 
-    monkeypatch.setattr(runner_mod, "_import_pydantic_ai", _capturing_import)
+    monkeypatch.setattr(structured_run_mod, "_import_pydantic_ai", _capturing_import)
 
     class _RecordingFallbackModel(FallbackModel):
         """Records the async-context-manager protocol the runner must drive, without changing

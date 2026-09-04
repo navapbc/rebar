@@ -21,7 +21,7 @@ import pytest
 from rebar import config as core_config
 from rebar.llm import plan_review
 from rebar.llm.plan_review import orchestrator
-from rebar.llm.plan_review.passes import (
+from rebar.llm.plan_review.completion_subcall import (
     COMPLETION_ATTRIBUTION_NONE,
     COMPLETION_CONTAINMENT_CLOSED,
     COMPLETION_LAYER_PLAN,

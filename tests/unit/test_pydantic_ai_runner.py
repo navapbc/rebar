@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import pytest
 
+from rebar.llm import anthropic_model as anthropic_model_mod
 from rebar.llm import pai_tools
+from rebar.llm import structured_run as structured_run_mod
 from rebar.llm.capabilities import cache_settings_for, capabilities_for
 from rebar.llm.config import RUNNERS, LLMConfig
 from rebar.llm.errors import LLMConfigError, LLMRunnerError
@@ -15,8 +17,6 @@ from rebar.llm.runner import (
     FakeRunner,
     PydanticAIRunner,
     RunRequest,
-    _extract_usage,
-    _pai_model,
     get_runner,
 )
 
@@ -60,12 +60,20 @@ def _cfg(**kw):
 
 
 def test_model_string_provider_inference():
-    assert _pai_model(_cfg(model="claude-opus-4-8")) == "anthropic:claude-opus-4-8"
+    assert (
+        anthropic_model_mod._pai_model(_cfg(model="claude-opus-4-8")) == "anthropic:claude-opus-4-8"
+    )
     # Hosted OpenAI now defaults to the Responses API (ticket 155c cutover).
-    assert _pai_model(_cfg(model="gpt-4o")) == "openai-responses:gpt-4o"
+    assert anthropic_model_mod._pai_model(_cfg(model="gpt-4o")) == "openai-responses:gpt-4o"
     # an explicit provider-qualified string is used verbatim
-    assert _pai_model(_cfg(model="anthropic:claude-sonnet-4-6")) == "anthropic:claude-sonnet-4-6"
-    assert _pai_model(_cfg(model="google-gla:gemini-2.5-flash")) == "google-gla:gemini-2.5-flash"
+    assert (
+        anthropic_model_mod._pai_model(_cfg(model="anthropic:claude-sonnet-4-6"))
+        == "anthropic:claude-sonnet-4-6"
+    )
+    assert (
+        anthropic_model_mod._pai_model(_cfg(model="google-gla:gemini-2.5-flash"))
+        == "google-gla:gemini-2.5-flash"
+    )
 
 
 @pytest.mark.parametrize(
@@ -89,7 +97,7 @@ def test_openai_targets_keep_chat_completions_for_a_custom_endpoint(model, provi
         base_url="http://localhost:1234/v1",
         api_key="not-needed",
     )
-    target = _pai_model(cfg)
+    target = anthropic_model_mod._pai_model(cfg)
     with warnings.catch_warnings():
         warnings.simplefilter("error", PydanticAIDeprecationWarning)
         with ProviderSession(cfg) as session:
@@ -395,7 +403,7 @@ def test_extract_usage_reads_normalized_cache_tokens():
         def usage(self):
             return _U()
 
-    u = _extract_usage(_Res())
+    u = structured_run_mod._extract_usage(_Res())
     assert u == {
         "input_tokens": 1200,
         "output_tokens": 50,
@@ -410,7 +418,7 @@ def test_extract_usage_is_defensive_on_missing_usage():
         def usage(self):
             raise RuntimeError("no usage available")
 
-    assert _extract_usage(_NoUsage()) == {}
+    assert structured_run_mod._extract_usage(_NoUsage()) == {}
 
 
 @pytest.mark.parametrize(
@@ -433,9 +441,9 @@ def test_cache_model_settings_attached_only_for_anthropic(monkeypatch, resolved)
         captured["model_settings"] = kwargs.get("model_settings")
         return {"verdict": "PASS", "findings": [], "summary": "s"}, {}
 
-    monkeypatch.setattr(runner_mod, "_pai_structured", _fake_structured)
-    monkeypatch.setattr(runner_mod, "_import_pydantic_ai", lambda: object)
-    monkeypatch.setattr(runner_mod, "_pai_model", lambda cfg: resolved)
+    monkeypatch.setattr(structured_run_mod, "_pai_structured", _fake_structured)
+    monkeypatch.setattr(structured_run_mod, "_import_pydantic_ai", lambda: object)
+    monkeypatch.setattr(anthropic_model_mod, "_pai_model", lambda cfg: resolved)
     monkeypatch.setattr(
         runner_mod._findings,
         "finalize_outcome",
@@ -476,9 +484,9 @@ def _capture_model_settings(monkeypatch, cfg):
         captured["model_settings"] = kwargs.get("model_settings")
         return {"verdict": "PASS", "findings": [], "summary": "s"}, {}
 
-    monkeypatch.setattr(runner_mod, "_pai_structured", _fake_structured)
-    monkeypatch.setattr(runner_mod, "_import_pydantic_ai", lambda: object)
-    monkeypatch.setattr(runner_mod, "_pai_model", lambda c: "anthropic:claude-opus-4-8")
+    monkeypatch.setattr(structured_run_mod, "_pai_structured", _fake_structured)
+    monkeypatch.setattr(structured_run_mod, "_import_pydantic_ai", lambda: object)
+    monkeypatch.setattr(anthropic_model_mod, "_pai_model", lambda c: "anthropic:claude-opus-4-8")
     monkeypatch.setattr(
         runner_mod._findings,
         "finalize_outcome",
@@ -625,7 +633,7 @@ def _write_mcp_readonly_config(tmp_path, monkeypatch, *, readonly: bool) -> None
 
 
 def test_readonly_gate_honors_config_file(tmp_path, monkeypatch):
-    from rebar.llm.runner import _readonly_gate
+    from rebar.llm.runner_support import _readonly_gate
 
     # File says readonly=true, env UNSET → gate must be True (comment tool withheld).
     _write_mcp_readonly_config(tmp_path, monkeypatch, readonly=True)
@@ -637,7 +645,7 @@ def test_readonly_gate_honors_config_file(tmp_path, monkeypatch):
 
 
 def test_readonly_gate_env_still_forces_readonly(tmp_path, monkeypatch):
-    from rebar.llm.runner import _readonly_gate
+    from rebar.llm.runner_support import _readonly_gate
 
     # Env wins over the file: file says readonly=false but REBAR_MCP_READONLY=1 → True.
     _write_mcp_readonly_config(tmp_path, monkeypatch, readonly=False)

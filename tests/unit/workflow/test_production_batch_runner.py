@@ -18,8 +18,9 @@ from types import SimpleNamespace
 import pytest
 
 from rebar.llm.config import LLMConfig
-from rebar.llm.plan_review import registry
-from rebar.llm.plan_review.orchestrator import assemble_context, route_criteria
+from rebar.llm.plan_review import budget, registry
+from rebar.llm.plan_review.context_assembly import assemble_context
+from rebar.llm.plan_review.orchestrator import route_criteria
 from rebar.llm.plan_review.pass1 import run_pass1
 from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
 from rebar.llm.runner import FakeRunner
@@ -166,10 +167,9 @@ def test_target_ticket_required():
 
 # ── budget: default computed cap; an explicit req.usd_budget overrides it ────────
 def test_budget_default_computed_cap(_stub_reads):
-    from rebar.llm.plan_review import sizing
 
     ctx = assemble_context(_TARGET, repo_root=None)
-    expected_cap = sizing.plan_budget_cap(ctx)
+    expected_cap = budget.plan_budget_cap(ctx)
 
     fake = FakeRunner(structured={"analysis": "", "findings": []})
     req = _make_req([{"prompt": "E2"}, {"prompt": "E4"}])  # usd_budget=None
@@ -185,10 +185,9 @@ def test_budget_override_is_applied_through_the_cap_override_seam(_stub_reads):
     """req.usd_budget now REACHES the cap via run_pass1 -> shed_to_budget's `cap_override`
     (ticket e907). Previously it was journaled with budget_override_applied=False and the
     computed cap was used regardless."""
-    from rebar.llm.plan_review import sizing
 
     ctx = assemble_context(_TARGET, repo_root=None)
-    computed_cap = sizing.plan_budget_cap(ctx)
+    computed_cap = budget.plan_budget_cap(ctx)
     assert computed_cap != 0.01, "override must differ from the computed cap to be observable"
 
     fake = FakeRunner(structured={"analysis": "", "findings": []})

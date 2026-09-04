@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 
 import rebar
+from rebar.llm import anthropic_model as anthropic_model_mod
+from rebar.llm import structured_run as structured_run_mod
 from rebar.llm.runner import FakeRunner
 from rebar.llm.workflow import runs
 
@@ -84,7 +86,7 @@ def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeyp
         captured["toolsets"] = kwargs.get("toolsets")
         return {"verdict": "PASS", "findings": [], "summary": "s"}, {}
 
-    monkeypatch.setattr(runner_mod, "_pai_structured", _fake_structured)
+    monkeypatch.setattr(structured_run_mod, "_pai_structured", _fake_structured)
     # Caching is orthogonal here; stub it off at the capabilities seam so we don't import
     # the real anthropic settings module (pydantic_ai is stubbed empty below). Story S2
     # replaced the provider-name-string cache-settings helper with the
@@ -94,14 +96,14 @@ def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeyp
     # `execution_mode` is keyword-only and REQUIRED since bug dd27 (the agentic arm caches the
     # message tail), so the stub must accept it or the runner's call raises TypeError.
     monkeypatch.setattr(runner_mod, "cache_settings_for", lambda caps, *, execution_mode: None)
-    monkeypatch.setattr(runner_mod, "_import_pydantic_ai", lambda: object)
-    monkeypatch.setattr(runner_mod, "_pai_model", lambda cfg: "anthropic:fake")
+    monkeypatch.setattr(structured_run_mod, "_import_pydantic_ai", lambda: object)
+    monkeypatch.setattr(anthropic_model_mod, "_pai_model", lambda cfg: "anthropic:fake")
     # Env-independence: the loopback-proxy bypass (story 454a-9266-ada6-43cc) fires inside run()
     # when ANTHROPIC_BASE_URL is a loopback host and imports the REAL
     # pydantic_ai.models.anthropic — which explodes against the empty pydantic_ai stub
     # below. Stub the bypass off so this test builds the agent regardless of the local
     # ANTHROPIC_BASE_URL (e.g. a dev machine running a headroom proxy on 127.0.0.1).
-    monkeypatch.setattr(runner_mod, "_local_proxy_bypass_base_url", lambda: None)
+    monkeypatch.setattr(anthropic_model_mod, "_local_proxy_bypass_base_url", lambda: None)
 
     # story arcticproxy/arcticduck: the runner wraps ANY anthropic model in the retrying
     # transport (real pydantic_ai import). Since story S1 that construction lives behind

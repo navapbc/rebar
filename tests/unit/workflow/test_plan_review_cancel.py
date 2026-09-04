@@ -17,11 +17,11 @@ from typing import Any
 import pytest
 
 from rebar.llm.config import LLMConfig
-from rebar.llm.plan_review import attest, generation
+from rebar.llm.plan_review import attest, context_assembly, generation
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.runner import FakeRunner
 from rebar.llm.workflow import executor as _ex
-from rebar.llm.workflow import gate_dispatch
+from rebar.llm.workflow import gate_dispatch, plan_review_recovery
 from rebar.llm.workflow import steps as _steps  # noqa: F401 — registers the plan-review `uses` ops
 from rebar.llm.workflow.executor import AgentStepRunner, StepResult
 
@@ -276,7 +276,7 @@ def test_chunk_funnel_short_circuits_when_cancelled(monkeypatch):
 
     state = _state()
     _patch_reads(monkeypatch, state)
-    ctx = orchestrator.assemble_context(_TARGET, repo_root=None)
+    ctx = context_assembly.assemble_context(_TARGET, repo_root=None)
     single, agent_criteria = orchestrator.route_criteria(ctx)
     finder = _finder()
     cfg = dataclasses.replace(LLMConfig(runner="fake"), model="claude-haiku-4-5")
@@ -349,7 +349,7 @@ def test_run_plan_review_returns_cancelled_verdict_verbatim(monkeypatch):
     cancelled verdict — no sidecar write, no attestation (monotone: withhold-only)."""
     from rebar.llm import plan_review as pr
 
-    cancelled = gate_dispatch._cancelled_plan_review_verdict(
+    cancelled = plan_review_recovery._cancelled_plan_review_verdict(
         _plan_ctx(),
         dataclasses.replace(LLMConfig(runner="fake"), model="claude-haiku-4-5"),
         scope=SimpleNamespace(seam="post-finders"),
@@ -375,7 +375,7 @@ def test_run_plan_review_returns_cancelled_verdict_verbatim(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "rebar.llm.plan_review.orchestrator.assemble_context",
+        "rebar.llm.plan_review.context_assembly.assemble_context",
         lambda tid, repo_root=None, cfg=None: _plan_ctx(),
     )
     signed: list = []

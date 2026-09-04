@@ -77,14 +77,14 @@ _OA_DESC = (
 
 
 def _enriched_axis(grade: str) -> str:
-    from rebar.llm.plan_review import workflow_ops
+    from rebar.llm.plan_review import decide_ops
 
     finding = {
         "checklist_item": "[operator-attested] the fix is deployed to prod and the gate passes",
         "evidence": [],
     }
     verification = {"severity_attributes": {"ac_unverifiable": grade}}
-    workflow_ops.enrich_operator_attested([finding], {0: verification}, _OA_DESC)
+    decide_ops.enrich_operator_attested([finding], {0: verification}, _OA_DESC)
     return verification["severity_attributes"]["ac_unverifiable"]
 
 

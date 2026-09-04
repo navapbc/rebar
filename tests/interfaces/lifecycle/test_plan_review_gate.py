@@ -30,6 +30,7 @@ import rebar
 import rebar.llm
 from rebar import _cli
 from rebar import config as _config
+from rebar.llm.plan_review import context_assembly
 from rebar.llm.runner import FakeRunner
 
 
@@ -902,7 +903,7 @@ def test_drift_refresh_escalates_on_probe_finding(rebar_repo: Path, monkeypatch)
     (rebar_repo / "dep.py").write_text("v = 42  # material change\n")  # dep.py now drifted
     _commit_all(rebar_repo)  # drift is what LANDED — the attested basis moved
     cfg = LLMConfig.from_env(repo_root=str(rebar_repo))
-    ctx = orchestrator.assemble_context(tid, repo_root=str(rebar_repo), cfg=cfg)
+    ctx = context_assembly.assemble_context(tid, repo_root=str(rebar_repo), cfg=cfg)
     # A refresh RE-SIGNS, and signing requires an attested session (the no-null-pin
     # invariant, bug 5128-0856) — enter one the way review_plan would.
     from rebar.llm import gate_source

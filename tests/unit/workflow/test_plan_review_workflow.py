@@ -23,6 +23,7 @@ import pathlib
 import pytest
 import yaml
 
+from rebar.llm import review_kernel
 from rebar.llm.runner import FakeRunner
 from rebar.llm.workflow import executor as _ex
 from rebar.llm.workflow import lint as _lint
@@ -290,7 +291,8 @@ def test_assemble_criteria_probe_mode_restricts_to_allowlist(monkeypatch):
 # ── end-to-end OFFLINE run → a plan_review_verdict-shaped PASS ────────────────
 def test_e2e_offline_produces_verdict(monkeypatch):
     from rebar import schemas
-    from rebar.llm.plan_review.orchestrator import assemble_context, route_criteria
+    from rebar.llm.plan_review.context_assembly import assemble_context
+    from rebar.llm.plan_review.orchestrator import route_criteria
 
     state = _state()
     _patch_reads(monkeypatch, state)
@@ -397,7 +399,8 @@ def test_review_run_emits_lossless_v2_sidecar_via_real_emit_path(monkeypatch, tm
     state = _state()
     state["ticket_id"] = tid
     _patch_reads(monkeypatch, state)
-    from rebar.llm.plan_review.orchestrator import assemble_context, route_criteria
+    from rebar.llm.plan_review.context_assembly import assemble_context
+    from rebar.llm.plan_review.orchestrator import route_criteria
 
     ctx = assemble_context(tid, repo_root=None)
     single, agent = route_criteria(ctx)
@@ -583,16 +586,15 @@ def _high_validity_verif(i: int) -> dict:
 def test_contract_violation_sink_is_run_scoped():
     """The run-scoped sink (epic drag-gripe-brake): record is a no-op outside a scope (no crash,
     no leak), drains-and-clears inside one, and never leaks across scopes."""
-    from rebar.llm.plan_review import orchestrator
 
     # Outside any scope: record is a no-op, drain is empty.
-    orchestrator.record_contract_violation({"duplicates": [0]})
-    assert orchestrator.drain_contract_violations() == []
-    with orchestrator.collect_contract_violations():
-        orchestrator.record_contract_violation({"duplicates": [1]})
-        assert orchestrator.drain_contract_violations() == [{"duplicates": [1]}]
-        assert orchestrator.drain_contract_violations() == []  # drain cleared it
-    assert orchestrator.drain_contract_violations() == []  # scope exited → empty again
+    review_kernel.record_contract_violation({"duplicates": [0]})
+    assert review_kernel.drain_contract_violations() == []
+    with review_kernel.collect_contract_violations():
+        review_kernel.record_contract_violation({"duplicates": [1]})
+        assert review_kernel.drain_contract_violations() == [{"duplicates": [1]}]
+        assert review_kernel.drain_contract_violations() == []  # drain cleared it
+    assert review_kernel.drain_contract_violations() == []  # scope exited → empty again
 
 
 def test_decide_op_records_contract_violation_without_changing_outcome(monkeypatch):
@@ -600,7 +602,6 @@ def test_decide_op_records_contract_violation_without_changing_outcome(monkeypat
     duplicate / out-of-range index is RECORDED as a contract violation in the run-scoped sink
     (→ verdict coverage) but the partition is UNCHANGED (expand-contract: observability only,
     the conforming findings still decide normally)."""
-    from rebar.llm.plan_review import orchestrator
     from rebar.llm.workflow.executor import STEP_REGISTRY, StepContext
 
     _patch_reads(monkeypatch, _state())
@@ -628,9 +629,9 @@ def test_decide_op_records_contract_violation_without_changing_outcome(monkeypat
         target_ticket=_TARGET,
         repo_root=None,
     )
-    with orchestrator.collect_contract_violations():
+    with review_kernel.collect_contract_violations():
         out = op(ctx)
-        recorded = orchestrator.drain_contract_violations()
+        recorded = review_kernel.drain_contract_violations()
     # Outcome UNCHANGED: both findings had a conforming verification (idx 0 + 1) → both advisory.
     assert len(out["surfaced"]) == 2
     assert out["blocking"] == []

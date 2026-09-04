@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests" / "unit"
 from gold_set_completion import CATEGORIES, DELIVERED_CHILD_IDS, GOLD_SET
 
 from rebar.llm.config import LLMConfig
-from rebar.llm.plan_review import passes
+from rebar.llm.plan_review import completion_subcall
 from rebar.llm.runner import get_runner
 
 PROMPT_FILE = Path("src/rebar/llm/reviewers/plan_review_completion.md")
@@ -64,7 +64,7 @@ def main() -> int:
     print(f"prompt: {PROMPT_FILE} sha256:{prompt_hash}")
     print(f"model: {cfg.model}  cases: {len(GOLD_SET)}\n")
 
-    out = passes.pass2_completion(
+    out = completion_subcall.pass2_completion(
         runner, cfg, plan=PLAN, findings=findings, delivered_manifest=MANIFEST
     )
     if not out:
@@ -79,7 +79,7 @@ def main() -> int:
         ans = out.get(i, {})
         cont_ok += ans.get("containment") == case.gold["containment"]
         layer_ok += ans.get("layer") == case.gold["layer"]
-        model_drop = passes.completion_floor_drop(
+        model_drop = completion_subcall.completion_floor_drop(
             ans,
             0.1,
             case.finding["criteria"],

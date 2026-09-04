@@ -14,7 +14,7 @@ import pytest
 
 import rebar.signing as signing
 from rebar import config as core_config
-from rebar.llm import config as llm_config
+from rebar.llm import gate_context
 from rebar.llm.plan_review import attest, sidecar
 
 pytestmark = pytest.mark.unit
@@ -58,7 +58,7 @@ def _setup(
     monkeypatch.setattr(
         attest, "current_material_fingerprint", lambda tid, repo_root=None: cur_material
     )
-    monkeypatch.setattr(llm_config, "current_code_sha", lambda: cur_sha)
+    monkeypatch.setattr(gate_context, "current_code_sha", lambda: cur_sha)
     monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: cur_regver)
     monkeypatch.setattr(
         sidecar,
@@ -245,7 +245,7 @@ def test_candidate_never_raises_on_any_precondition_error(monkeypatch, victim) -
     if victim == "registry_version":
         monkeypatch.setattr(attest, "registry_version", boom)
     else:
-        monkeypatch.setattr(llm_config, "current_code_sha", boom)
+        monkeypatch.setattr(gate_context, "current_code_sha", boom)
     d = attest.remediation_mode_candidate("T", window_minutes=_WINDOW, now_ns=_MIN_NS)
     assert d["eligible"] is False
 

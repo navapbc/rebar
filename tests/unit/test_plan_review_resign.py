@@ -60,7 +60,7 @@ def _capture_sign(monkeypatch):
     monkeypatch.setattr("rebar.llm.plan_review.registry.disabled_builtins", lambda *a, **k: [])
     # Simulate an active attested session: the sign seam's no-null-pin invariant
     # (bug 5128-0856) refuses to sign with no snapshot SHA at all.
-    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: "c" * 40)
+    monkeypatch.setattr("rebar.llm.gate_context.current_code_sha", lambda: "c" * 40)
     monkeypatch.setattr("rebar.llm.overlap.queue.enqueue", lambda *a, **k: None)
     return captured
 
@@ -246,7 +246,7 @@ def test_public_resign_preserves_authenticated_none_scope(
         capture_output=True,
         text=True,
     ).stdout.strip()
-    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: code_head)
+    monkeypatch.setattr("rebar.llm.gate_context.current_code_sha", lambda: code_head)
 
     result = resign.resign_plan_review(ticket_id, repo_root=str(repo))
     verified = signing.verify_signature(ticket_id, kind="plan-review", repo_root=str(repo))
@@ -315,7 +315,7 @@ def test_public_resign_preserves_mixed_child_scope_and_validity(
         capture_output=True,
         text=True,
     ).stdout.strip()
-    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: code_head)
+    monkeypatch.setattr("rebar.llm.gate_context.current_code_sha", lambda: code_head)
 
     result = resign.resign_plan_review(parent, repo_root=str(repo))
     verified = signing.verify_signature(parent, kind="plan-review", repo_root=str(repo))
@@ -406,7 +406,7 @@ def test_public_resign_promotes_all_none_container_scope(
         capture_output=True,
         text=True,
     ).stdout.strip()
-    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: code_head)
+    monkeypatch.setattr("rebar.llm.gate_context.current_code_sha", lambda: code_head)
 
     result = resign.resign_plan_review(parent, repo_root=str(repo))
     verified = signing.verify_signature(parent, kind="plan-review", repo_root=str(repo))
