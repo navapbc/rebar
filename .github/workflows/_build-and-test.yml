@@ -52,7 +52,7 @@ jobs:
           persist-credentials: false
       - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
         if: inputs.gerrit-refspec != ''
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -253,7 +253,7 @@ jobs:
           persist-credentials: false
       - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
         if: inputs.gerrit-refspec != ''
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -323,7 +323,7 @@ jobs:
           persist-credentials: false
       - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
         if: inputs.gerrit-refspec != ''
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -411,7 +411,7 @@ jobs:
           persist-credentials: false
       - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
         if: inputs.gerrit-refspec != ''
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@298f53bbbc1d5f9e54df9feb484d110dc2b33197  # v1.1.0
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -460,7 +460,7 @@ jobs:
       - name: Pin the Node toolchain for the e2e tier
         id: e2e-node
         if: matrix.os != 'macos-latest'
-        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903  # v6.0.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '22'
 
