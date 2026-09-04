@@ -273,85 +273,26 @@ restated here:
   environment, the safe fallback ticket payload, and the sanctioned exceptional import path →
   `docs/chatgpt-agent-guide.md`.
 
-## Bound every background process you spawn — never leave a PPID-1 orphan
+## Bound background helpers at spawn
 
-Spawning a background helper is legitimate: saturating the CPU to reproduce a
-timing-dependent failure, tailing a log while a gate runs, holding a server up for a probe.
-What is not legitimate is letting it outlive the investigation. On 2026-08-22 three agent
-sessions each spawned `python -c "while True: pass"` load generators to reproduce a CI
-timing failure. Nothing reaped them: **38 orphaned to PID 1 and ran for four days** at
-~1341% combined CPU on a six-performance-core host, pushing load average to 58 until
-applications could no longer launch — and silently poisoning every timing-sensitive
-measurement taken in that window, including the very investigations that spawned them.
-
-**Bound it AT SPAWN, in wall-clock time — not merely at the end of your work.** A cleanup
-step at the end of a task only runs if the task reaches its end. An agent harness that is
-interrupted, times out, errors, or is killed never executes it, and an unbounded loop has
-no reason to stop: it is reparented to PID 1 and runs until the machine is rebooted.
-A wall-clock bound is the only teardown that survives the death of whatever set it.
+Give every unbounded background helper a wall-clock limit when you start it. Install process-group cleanup in the spawning shell so interruption and error paths also reap helpers.
 
 ```sh
-# Bound at spawn: the helper dies on its own even if this shell never returns.
+# Stop the helper even if the shell never returns normally.
 timeout 120 python -c 'while True: pass' &
-
-# Belt and braces: tear the whole process group down on exit, interrupt, or error.
+# Reap every helper in this process group when the shell exits.
 trap 'kill 0' EXIT INT TERM
 ```
 
-`timeout` is the bound; the `trap` is the sweep. Use both — `trap 'kill 0' EXIT INT TERM`
-signals the entire process group, so it reaps helpers you forgot about, and it fires on the
-error paths as well as the happy path.
+These rules are mandatory:
 
-**This rule is about UNBOUNDED work, not slow work — gate runs are explicitly out of scope.**
-Do NOT put a `timeout` on `review-plan`, `verify-completion`, a completion-verifier-gated
-close, or any other long-running LLM/gate operation. Those are BOUNDED workloads: they
-terminate on their own with a verdict, which is exactly the "prefer a bounded workload"
-case below. Truncating one wastes a billable multi-call LLM run, produces no verdict, and —
-the expensive part — the truncation reads as a GATE FAILURE rather than as a limit the agent
-imposed on itself, so the next reader debugs the wrong thing. Run gates unbounded; background
-them if you need to keep working, and let them finish.
+- A subagent must reap every process it starts before returning, including on error paths.
+- No process you start may reach PPID 1.
+- Never start an unbounded busy loop such as `while True: pass`, `yes > /dev/null`, or `while :; do :; done` without a wall-clock bound. `nice` is not a bound.
+- Prefer a workload with a fixed end condition.
+- Do not put a timeout on `review-plan`, `verify-completion`, a completion-verifier-gated close, or another bounded LLM gate operation. Let the gate produce its verdict.
 
-**Rules, not suggestions:**
-
-- **A subagent reaps what it spawned before it returns — including on error paths.** Wrap
-  the spawn/teardown pair so an exception or an early return still tears down. Never return
-  from a task leaving a process whose parent is about to exit.
-- **No process you start may end up with PPID 1.** That is the defect signature: a PID-1
-  parent means nothing associates the process with the finished work that created it, so
-  nothing will ever clean it up.
-- **Never write an unbounded busy loop** (`while True: pass`, `yes > /dev/null`, a bare
-  `while :; do :; done`) without a `timeout` in front of it. `nice` is not a substitute —
-  the leaked workers were `nice`d, which is exactly why the degradation read as "the machine
-  feels slow" for four days instead of failing loudly.
-- **Prefer a bounded workload to an unbounded one.** A loop that counts to a fixed bound and
-  exits cannot leak; only an infinite one can.
-
-**Operator note — reclaiming an already-leaked batch.** Orphans are found by their command
-line, since PID 1 tells you nothing about who started them. Confirm the owning investigation
-is over, then match and kill:
-
-```sh
-pgrep -fl 'while True: pass'          # look first — confirm the match set
-pkill -f 'while True: pass'           # this cleared this host's 38 (load 58 -> 10)
-```
-
-To find leaks generally — before they cost you four days — run the on-demand detector, which
-reports processes whose parent is PID 1 and whose accumulated CPU time exceeds one hour. It
-is read-only (it never signals anything), needs no CI provider, and is deliberately **not**
-wired into `make lint`: it reports on live host state, not on the tree under review.
-
-```sh
-python scripts/check_orphaned_load.py                      # default: > 3600 CPU-seconds
-python scripts/check_orphaned_load.py --min-cpu-seconds 600
-python scripts/check_orphaned_load.py --include-system     # incl. launchd/init daemons
-```
-
-OS-vendor and endpoint-management executables are suppressed by default, and the count of
-what was suppressed is always printed. `launchd`/`init` parents its daemons to PID 1 by
-design, so on this host the unfiltered check flagged 33 processes of which 29 were system
-daemons; the four survivors included a real orphaned agent-job script that the noise had
-buried. Read the command lines rather than the count — an ad-hoc `python -c`, or a helper
-from an investigation that has finished, is what a leak looks like.
+The incident evidence, detector instructions, output interpretation, and operator recovery procedure live in [docs/orphaned-processes.md](docs/orphaned-processes.md).
 
 ## Module-size policy (when editing rebar itself)
 
