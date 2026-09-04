@@ -51,7 +51,7 @@ _TF_DIR = Path(__file__).resolve().parents[2] / "infra" / "terraform"
 # loudly instead of passing vacuously. A vacuous guard is the failure mode this guard exists
 # to prevent, so it must not be able to fall to it itself. Raise this floor when alarms are
 # added; never lower it without deleting alarms.
-_MIN_EXPECTED_ALARMS = 21
+_MIN_EXPECTED_ALARMS = 24
 
 _ALARM_RE = re.compile(
     r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{',
@@ -67,7 +67,7 @@ _MISSING_DATA_OPT_OUT_RE = re.compile(r"#\s*rebar:allow-missing-data-notbreachin
 # Host-published alarms had 13 rebar/host blocks when this guard was written. Same
 # anti-vacuity role as _MIN_EXPECTED_ALARMS: a scope filter that silently matches nothing
 # makes the guard below pass for free.
-_MIN_EXPECTED_HOST_ALARMS = 16
+_MIN_EXPECTED_HOST_ALARMS = 19
 
 
 def _quoted_attr(raw: str, masked: str, attr: str) -> str | None:
@@ -256,6 +256,16 @@ def test_host_published_disk_alarms_treat_missing_data_as_breaching() -> None:
         # named set is that pin, so a later edit to either alarm fails here by name.
         ("monitoring_autodeploy.tf", "gate_scratch_disk_high"),
         ("monitoring_autodeploy.tf", "gate_scratch_unmounted"),
+        # The Docker generator trio (story 9183-aaae-667d-45e6). Same ADR 0112 obligation,
+        # and the same reason to PIN rather than trust the copy-paste — but with one extra
+        # edge these three have and the others do not: observability.sh 2f publishes them
+        # ONLY on a successful measurement, so their missing-data state is a real, reachable
+        # runtime condition (a `du` that could not run, a wedged docker daemon) rather than
+        # only the dead-host case. `notBreaching` here would render exactly "the probe can no
+        # longer see the disk" as health.
+        ("monitoring_autodeploy.tf", "docker_storage_cap_high"),
+        ("monitoring_autodeploy.tf", "docker_buildkit_cache_high"),
+        ("monitoring_autodeploy.tf", "docker_unaccounted_overlay2"),
     }
     found: set[tuple[str, str]] = set()
     offenders: list[str] = []
@@ -478,8 +488,8 @@ def test_alarm_descriptions_fit_the_aws_limit() -> None:
     # Anti-vacuity floor: if the regexes stop matching (an HCL reformat, a regex
     # slip), every block would `continue` and this test would pass having checked
     # nothing — which is how the defect it guards against reached main in the first
-    # place. The tree has 15 heredoc and 3 quoted descriptions today.
-    assert measured >= 15, (
+    # place. The tree has 18 heredoc and 3 quoted descriptions today.
+    assert measured >= 18, (
         f"only {measured} alarm_description values were measured; the regexes have "
         "stopped matching and this guard is passing vacuously"
     )

@@ -52,6 +52,22 @@ if ! command -v docker >/dev/null 2>&1; then
   echo "compose-up: installing docker..." >&2
   dnf install -y docker
 fi
+
+# Install the daemon's OWN BuildKit GC policy BEFORE the daemon is started (ADR 0112
+# decision 1, story 9183). Ordering is the whole point: on a first boot `systemctl enable
+# --now docker` below is what reads /etc/docker/daemon.json, so writing the cap here means
+# the daemon comes up already bounded rather than bounded on some later restart. On a re-run
+# against an ALREADY-RUNNING daemon the script backs up and validates before replacing
+# anything, and then attempts a SIGHUP reload — it never restarts Docker, because that would
+# take Gerrit, the review-bot and the MCP server down mid-boot-orchestration.
+#
+# NON-FATAL, following the materialize-* steps below: a box without a BuildKit cap is a
+# capacity problem that rebar-docker-buildkit-cache-high alarms on, not a reason to refuse to
+# boot the stack at all.
+if ! bash "${SCRIPT_DIR}/docker-storage-cap.sh" --install; then
+  echo "compose-up: WARN — the Docker storage cap was not installed; BuildKit build cache is UNBOUNDED until fixed (see infra/runbooks/review-bot-ops.md)" >&2
+fi
+
 systemctl enable --now docker
 
 # The compose v2 plugin (`docker compose`). On AL2023 it is the docker-compose-plugin

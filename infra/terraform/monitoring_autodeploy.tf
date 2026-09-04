@@ -211,7 +211,7 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_signal_unavailable" {
 }
 
 # ---------------------------------------------------------------------------
-# Root-filesystem disk pressure (incident 2731). The box's 30G ROOT disk holds
+# Root-filesystem disk pressure (incident 2731). The box's 60G ROOT disk holds
 # docker's image/build-cache storage and the review-bot's working tmp; when it
 # filled, every LLM-Review fail-closed (clone/pip ENOSPC) — yet the only disk
 # metric published was the /var/gerrit EBS data volume, and NO alarm watched
@@ -230,11 +230,13 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_signal_unavailable" {
 resource "aws_cloudwatch_metric_alarm" "root_disk_pressure" {
   alarm_name        = "rebar-root-disk-pressure"
   alarm_description = <<-EOT
-    The rebar box's ROOT filesystem is above 85% used. Docker image/build-cache
-    storage and the review-bot's clone tmp live here: exhaustion fail-closes every
-    LLM-Review vote (incident 2731). Reclaim with the autodeploy prune helper /
-    `docker builder prune` and check /tmp/rebar-gate-snapshots; published as
-    rebar/host:root_disk_used_percent by observability.sh §2 (5-min cadence).
+    The rebar box's 60G ROOT filesystem is above 85% used. This is the BACKSTOP
+    (ADR 0112 decision 2): it says "root disk high" and cannot name which of the four
+    accumulators grew, so read the per-generator alarms FIRST —
+    rebar-docker-storage-cap-high, rebar-docker-buildkit-cache-high and
+    rebar-docker-unaccounted-overlay2 — before reaching for `du`. Gate scratch has its own
+    volume and its own alarms. Published as rebar/host:root_disk_used_percent by
+    observability.sh §2b (5-min cadence).
   EOT
 
   namespace   = "rebar/host"
@@ -351,5 +353,152 @@ resource "aws_cloudwatch_metric_alarm" "gate_scratch_unmounted" {
   tags = {
     Project = "rebar"
     Ticket  = "aa40"
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Docker storage generators (ADR 0112 decisions 1+2, story 9183-aaae-667d-45e6)
+# ---------------------------------------------------------------------------
+# rebar-root-disk-pressure above says "root disk high" and nothing more. On 2026-09-02 that
+# cost five hours: /var/lib/docker was 17G of a 28G working set, overlay2 alone 16G across 67
+# layer directories, and naming the generator took a `du` under time pressure.
+#
+# THREE alarms, because each answers a question the other two structurally cannot, which is the
+# rebar-gerrit-data-disk-debris (task 3e92) argument generalised from the data volume to root:
+#
+#   1. storage-cap-high      — is the whole /var/lib/docker budget saturating?
+#   2. buildkit-cache-high   — is the BUILDKIT GENERATOR at ITS OWN cap? BuildKit sitting at
+#                              100% of its 5 GiB share is invisible inside a 20 GiB budget
+#                              reading 60%; conversely a runaway image set saturates the
+#                              budget while BuildKit sits at 10%. Neither implies the other.
+#   3. unaccounted-overlay2  — how much of overlay2 does DOCKER ITSELF NOT KNOW ABOUT? This is
+#                              the one the incident turned on. `docker system df` reported
+#                              ~9.5 GB with ZERO dangling images against 16G of real overlay2,
+#                              so ~6.5 GB was unreachable by any prune — four rounds recovered
+#                              ~1.06 GB against a 29 GB problem. Alarms 1 and 2 say "how full";
+#                              only this one says "full of what prune cannot touch", and it is
+#                              what changes the remediation from "prune harder" (which is
+#                              measured to fail) to a daemon-level reclaim.
+#
+# Published dimensionless by observability.sh 2f on the 5-minute cadence, following
+# root_disk_used_percent: CloudWatch keys a metric by namespace+name+dimensions, so a
+# dimension on only one side silently never matches. The caps behind the two percent metrics
+# come from infra/scripts/docker-storage-cap.sh, the same file that renders the daemon's own
+# builder.gc policy, so "percent of cap" can never mean a different cap than the one enforced.
+
+resource "aws_cloudwatch_metric_alarm" "docker_storage_cap_high" {
+  alarm_name        = "rebar-docker-storage-cap-high"
+  alarm_description = <<-EOT
+    /var/lib/docker is above 85% of its configured budget (ADR 0112 decision 1; the budget and
+    its BuildKit/image split live in infra/scripts/docker-storage-cap.sh). This is the whole
+    Docker accumulator, measured from the FILESYSTEM (`du`), not from `docker system df` —
+    so it rises with bytes Docker's own accounting cannot see. Check
+    rebar-docker-buildkit-cache-high and rebar-docker-unaccounted-overlay2 FIRST: they name
+    which generator grew, and the second one decides whether pruning can help at all. Never
+    delete under /var/lib/docker by hand. Published as rebar/host:docker_storage_used_percent
+    by observability.sh 2f (5-min cadence). Runbook: infra/runbooks/review-bot-ops.md.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "docker_storage_used_percent"
+  statistic   = "Maximum"
+
+  # The house 300/3/2 shape (root_disk_pressure above): 2 breaching datapoints in a 3-period
+  # window absorbs the ordinary timer jitter that makes ~2 of 24 periods absent on this box.
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 85
+  comparison_operator = "GreaterThanThreshold"
+
+  # observability.sh 2f publishes ONLY on a successful measurement, so absence means the probe
+  # could not read the disk — which is exactly when this must page rather than clear to OK
+  # (bug 3276 defect 2). Pinned by tests/unit/test_alarm_actions_terraform.py.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "9183"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "docker_buildkit_cache_high" {
+  alarm_name        = "rebar-docker-buildkit-cache-high"
+  alarm_description = <<-EOT
+    The BuildKit build cache is above 85% of ITS OWN share of the Docker budget. This is a
+    GENERATOR alarm, not a capacity alarm: it fires while the volume is still comfortable,
+    which is the point — at 85% of the root disk the box is already an incident. The cache is
+    capped by the daemon's own builder.gc policy (/etc/docker/daemon.json, installed by
+    infra/scripts/docker-storage-cap.sh), so a cache ABOVE its cap means the policy did not
+    take effect: check that daemon.json carries the key this engine honours (maxUsedSpace at
+    Engine >= 25.0, defaultKeepStorage below) and that the daemon reloaded. Published as
+    rebar/host:docker_buildkit_cache_used_percent by observability.sh 2f.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "docker_buildkit_cache_used_percent"
+  statistic   = "Maximum"
+
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 85
+  comparison_operator = "GreaterThanThreshold"
+
+  # Silence here means `docker system df` did not answer — a wedged or dead daemon, which is
+  # never the healthy reading it would otherwise be mistaken for.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "9183"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "docker_unaccounted_overlay2" {
+  alarm_name        = "rebar-docker-unaccounted-overlay2"
+  alarm_description = <<-EOT
+    More than 2 GiB of /var/lib/docker/overlay2 exists on disk that `docker system df` does
+    NOT account for. MEANING: these bytes are unreachable by `docker prune` — the daemon does
+    not know they are there. At the 2026-09-02 outage this was ~6.5 GB and four prune rounds
+    recovered ~1.06 GB against a 29 GB problem, so "prune harder" is the WRONG response here.
+    REMEDIATION: stop the build path, then a daemon-level reclaim (`docker system prune -a`
+    with the serving containers up, or a daemon restart scheduled per the runbook). NEVER rm
+    anything under /var/lib/docker: the layer metadata is the daemon's, and deleting behind
+    its back desynchronises it from the tree. Published as rebar/host:docker_unaccounted_bytes
+    by observability.sh 2f. Runbook: infra/runbooks/review-bot-ops.md.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "docker_unaccounted_bytes"
+  statistic   = "Maximum"
+
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  # 2 GiB. Some divergence between `du` and the ledger is NORMAL — `du` counts allocated
+  # blocks including per-layer directory and whiteout overhead, while the ledger reports layer
+  # sizes with sharing accounted differently — so this is deliberately not "any divergence":
+  # far above that overhead on a 16 GiB tree, and far below the 6.5 GB that went unnoticed.
+  threshold           = 2147483648
+  comparison_operator = "GreaterThanThreshold"
+
+  # The residue needs BOTH the filesystem read and the ledger read to succeed, so silence here
+  # means one of them failed — and an unmeasured orphan mass is the state this alarm exists
+  # for, not a state it may report as healthy.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "9183"
   }
 }

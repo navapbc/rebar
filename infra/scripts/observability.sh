@@ -17,6 +17,12 @@
 #       per-container resident set (container_memory_rss_bytes, `container` dimension, plus
 #       the container_stats_ok census heartbeat) -> rebar/host (bug 9ea3; measurement only,
 #       no alarm yet).
+#   2f. Docker storage generators -> rebar/host:docker_storage_bytes,
+#       docker_storage_used_percent, docker_buildkit_cache_bytes,
+#       docker_buildkit_cache_used_percent and docker_unaccounted_bytes (ADR 0112 / story
+#       9183; three alarms in monitoring_autodeploy.tf). The last one is the point: it is
+#       overlay2 measured from the FILESYSTEM minus what `docker system df` accounts for, i.e.
+#       the bytes no `docker prune` can reach.
 #   3. Gerrit->GitHub replication failures (replication_log) -> rebar/host:replication_errors (S5 alarm).
 #   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
 #   4c. review-bot merge-change failures (MERGE_CHANGE_ERROR) -> rebar/host:review_bot_merge_change_errors (epic 88ab/S2 alarm).
@@ -199,6 +205,147 @@ if [ -n "$scratch_pct" ]; then
     --metric-name disk_used_percent --unit Percent --value "$scratch_pct" \
     --dimensions InstanceId="$IID",mount="$GATE_SCRATCH_MOUNT" 2>/dev/null || true
   logger -t rebar-health "disk ${GATE_SCRATCH_MOUNT} used_percent=${scratch_pct}"
+fi
+
+# --- 2f. Docker storage GENERATORS (ADR 0112 decisions 1+2, story 9183) ------
+# §2b answers "how full is root". It cannot answer "full OF WHAT", and on 2026-09-02 that
+# gap cost five hours: `/var/lib/docker` was 17G of a 28G working set, `overlay2` alone 16G
+# across 67 layer directories, and the only signal was "root disk high".
+#
+# THE DECISIVE PROBLEM, and why this section takes TWO measurements rather than one.
+# `docker system df` reported ~9.5 GB with ZERO dangling images against that 16G of real
+# overlay2 — roughly 6.5 GB was invisible to Docker's own accounting, so no `docker prune`
+# could reach it (four rounds recovered ~1.06 GB against a 29 GB problem). A metric derived
+# from the DAEMON'S LEDGER alone is therefore blind to exactly the bytes that caused the
+# incident. So this publishes both halves and their difference:
+#
+#   filesystem truth  `du -sx` over /var/lib/docker and over .../overlay2. `-x` will not
+#                     cross into a mounted overlay2/*/merged, and ONE `du` run counts a file
+#                     hardlinked across layers once, so this is blocks actually consumed.
+#   Docker's ledger   `docker system df` Images + Containers + Build Cache. (Local Volumes
+#                     are excluded: they live in .../volumes, not in overlay2, so counting
+#                     them would understate the residue.)
+#   the residue       docker_unaccounted_bytes = overlay2 truth - ledger, clamped at 0.
+#
+# Some divergence is NORMAL — `du` counts allocated blocks including per-layer directory and
+# whiteout overhead, while the ledger reports layer sizes with sharing accounted differently —
+# so the alarm threshold (monitoring_autodeploy.tf) is 2 GiB, far above that overhead on a
+# 16 GiB tree and far below the 6.5 GB that went unnoticed.
+#
+# EVERY reading is GATED ON ITS OWN MEASUREMENT SUCCEEDING, the §2e rule: a probe that could
+# not measure publishes NOTHING rather than a plausible 0. All three alarms are
+# treat_missing_data = "breaching" (bug 3276 defect 2), so silence PAGES — while a fabricated
+# 0 would read as a healthy, empty Docker root on a box that is filling. The two `du` reads
+# answer different questions, so one failing never mutes the other.
+#
+# DIMENSIONLESS on both sides, following root_disk_used_percent (§2b): CloudWatch keys a
+# metric by namespace+name+dimensions, so a dimension on only one side silently never matches.
+#
+# The caps come from infra/scripts/docker-storage-cap.sh, the single source of truth that also
+# renders the daemon's own builder.gc policy — so the published "percent of cap" and the cap
+# the daemon actually enforces can never drift apart.
+DOCKER_CAP_SH="${DOCKER_CAP_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-storage-cap.sh}"
+eval "$(bash "$DOCKER_CAP_SH" --print-env 2>/dev/null)" || true
+DOCKER_ROOT="${DOCKER_ROOT:-/var/lib/docker}"
+# Both docker calls are BOUNDED, the §2d rule: a wedged daemon under disk pressure must not
+# hold the 5-minute timer open. `du` over a large overlay2 is a stat walk, hence the longer
+# ceiling; exceeding it is indistinguishable from a failed read and is reported as silence.
+DOCKER_DU_TIMEOUT="${DOCKER_DU_TIMEOUT:-120}"
+DOCKER_DF_TIMEOUT="${DOCKER_DF_TIMEOUT:-20}"
+
+# Blocks actually consumed under $1, or non-zero when nothing parseable came back.
+docker_du_bytes() {
+  local raw
+  raw="$(timeout "$DOCKER_DU_TIMEOUT" du -sx --block-size=1 "$1" 2>/dev/null | tail -1 | awk '{print $1}')"
+  case "$raw" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$raw"
+}
+
+# "<accounted_total> <build_cache>" in bytes from the daemon's ledger, or non-zero.
+# `docker system df` renders HUMAN sizes through go-units, which emits SI suffixes (kB/MB/GB)
+# in some paths and binary ones (KiB/MiB/GiB) in others, so both families are parsed. An
+# unrecognised suffix fails the whole read rather than silently contributing 0 — a ledger that
+# under-reports would inflate the residue and page for bytes that are accounted for.
+docker_ledger_bytes() {
+  local rows out
+  rows="$(timeout "$DOCKER_DF_TIMEOUT" docker system df --format '{{.Type}}|{{.Size}}' 2>/dev/null)" || return 1
+  [ -n "$rows" ] || return 1
+  out="$(printf '%s\n' "$rows" | awk -F'|' '
+    function tobytes(s,   n, u, m) {
+      gsub(/^[ \t]+|[ \t]+$/, "", s)
+      if (s ~ /^[0-9.]+$/) return s + 0
+      if (s !~ /^[0-9.]+[A-Za-z]+$/) return -1
+      n = s; sub(/[A-Za-z]+$/, "", n); n = n + 0
+      u = s; sub(/^[0-9.]+/, "", u)
+      if (u == "B") m = 1
+      else if (u == "kB" || u == "KB") m = 1000
+      else if (u == "MB") m = 1000000
+      else if (u == "GB") m = 1000000000
+      else if (u == "TB") m = 1000000000000
+      else if (u == "KiB") m = 1024
+      else if (u == "MiB") m = 1048576
+      else if (u == "GiB") m = 1073741824
+      else if (u == "TiB") m = 1099511627776
+      else return -1
+      return int(n * m + 0.5)
+    }
+    {
+      type = $1; gsub(/^[ \t]+|[ \t]+$/, "", type)
+      value = tobytes($2)
+      if (value < 0) { bad = 1; next }
+      if (type == "Images" || type == "Containers" || type == "Build Cache") total += value
+      if (type == "Build Cache") cache = value
+      seen = 1
+    }
+    END { if (!seen || bad) exit 1; printf "%d %d\n", total, cache }
+  ')" || return 1
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+docker_total_bytes=""
+docker_overlay2_bytes=""
+docker_total_bytes="$(docker_du_bytes "$DOCKER_ROOT")" || docker_total_bytes=""
+docker_overlay2_bytes="$(docker_du_bytes "$DOCKER_ROOT/overlay2")" || docker_overlay2_bytes=""
+
+if [ -n "$docker_total_bytes" ]; then
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name docker_storage_bytes --unit Bytes --value "$docker_total_bytes" 2>/dev/null || true
+  logger -t rebar-health "docker ${DOCKER_ROOT} bytes=${docker_total_bytes}"
+  if [ -n "${DOCKER_BUDGET_BYTES:-}" ] && [ "${DOCKER_BUDGET_BYTES:-0}" -gt 0 ]; then
+    aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+      --metric-name docker_storage_used_percent --unit Percent \
+      --value "$(( docker_total_bytes * 100 / DOCKER_BUDGET_BYTES ))" 2>/dev/null || true
+  fi
+fi
+
+docker_ledger=""
+docker_ledger="$(docker_ledger_bytes)" || docker_ledger=""
+if [ -n "$docker_ledger" ]; then
+  docker_accounted_bytes="${docker_ledger%% *}"
+  docker_cache_bytes="${docker_ledger##* }"
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name docker_buildkit_cache_bytes --unit Bytes --value "$docker_cache_bytes" 2>/dev/null || true
+  logger -t rebar-health "docker buildkit cache bytes=${docker_cache_bytes} accounted=${docker_accounted_bytes}"
+  if [ -n "${DOCKER_BUILDKIT_CACHE_BYTES:-}" ] && [ "${DOCKER_BUILDKIT_CACHE_BYTES:-0}" -gt 0 ]; then
+    aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+      --metric-name docker_buildkit_cache_used_percent --unit Percent \
+      --value "$(( docker_cache_bytes * 100 / DOCKER_BUILDKIT_CACHE_BYTES ))" 2>/dev/null || true
+  fi
+  # The residue needs BOTH halves. Without either one there is no defensible number, so none
+  # is invented — this is the one metric whose whole value is that it is not derivable from
+  # Docker's own accounting.
+  if [ -n "$docker_overlay2_bytes" ]; then
+    docker_unaccounted=$(( docker_overlay2_bytes - docker_accounted_bytes ))
+    # Clamped: the ledger may legitimately exceed a `du` of overlay2 alone (shared layers,
+    # volumes, the buildkit worker's own directory), and a negative datapoint against a
+    # GreaterThanThreshold alarm reads as reassuring, which is worse than nonsense.
+    [ "$docker_unaccounted" -lt 0 ] && docker_unaccounted=0
+    aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+      --metric-name docker_unaccounted_bytes --unit Bytes --value "$docker_unaccounted" 2>/dev/null || true
+    logger -t rebar-health \
+      "docker overlay2 bytes=${docker_overlay2_bytes} ledger=${docker_accounted_bytes} unaccounted=${docker_unaccounted} (bytes docker prune cannot reach)"
+  fi
 fi
 
 # --- 2c. Non-`site/` debris on the Gerrit DATA volume (task 3e92) ------------
