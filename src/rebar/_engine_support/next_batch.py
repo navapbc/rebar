@@ -248,7 +248,10 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
     skipped_design_awaiting = []
     skipped_manual_awaiting = []
     skipped_in_progress = []
-    skipped_needs_planning = []
+    # Retained (always empty) for output/schema compatibility: ADR 0078 keys
+    # schedulability on container-vs-leaf structure, never on ticket type, so
+    # nothing populates this bucket. See NextBatchResult / next_batch.schema.json.
+    skipped_needs_planning: list[tuple[str, str]] = []
     candidates_raw = []
 
     for raw in ready_tasks:
@@ -260,10 +263,6 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             skipped_in_progress.append((tid, title))
             continue
         if tid in parent_ids_with_children:
-            continue
-        ttype = raw.get("issue_type", raw.get("ticket_type", "task")).lower()
-        if ttype == "story" and tid not in parent_ids_with_children:
-            skipped_needs_planning.append((tid, title))
             continue
         blocked_parent = is_parent_story_blocked(tid)
         if blocked_parent:
