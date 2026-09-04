@@ -124,10 +124,27 @@ def _run_steps(path: str) -> list[tuple[str, str, str]]:
     return steps
 
 
-def _tracked_paths() -> set[str]:
+#: The git listing that answers "which gate files does this tree have?". ``--cached
+#: --others --exclude-standard`` is load-bearing (bug ``1035-bed7-c855-4732``): a
+#: tracked-only listing cannot see a gate file that has been WRITTEN but not yet
+#: ``git add``ed, so this check reported green before staging and red after — on one
+#: unchanged working tree. That is a second way the local signal disagrees with CI, and
+#: it is the more dangerous way, because the green arrives first.
+_LS_FILES = ("git", "ls-files", "--cached", "--others", "--exclude-standard", "--")
+_GATE_DIRS = ("scripts", "tests", "docs", ".github")
+
+
+def _existing_paths(root: Path) -> set[str]:
+    """Repo-local gate files in ``root``, as CI will see them once the tree is committed.
+
+    Widening from tracked-only to tracked-plus-untracked can only turn a FALSE GREEN red:
+    every path it adds is one more step that must carry a guard, never one fewer.
+    ``--exclude-standard`` keeps ``.gitignore``d build output (``.venv``, ``.tools``,
+    caches) out, so the set stays the files a commit would actually carry.
+    """
     listing = subprocess.run(
-        ["git", "ls-files", "scripts", "tests", "docs", ".github"],
-        cwd=_ROOT,
+        [*_LS_FILES, *_GATE_DIRS],
+        cwd=root,
         capture_output=True,
         text=True,
         check=True,
@@ -137,7 +154,7 @@ def _tracked_paths() -> set[str]:
 
 def test_completeness_every_gate_step_is_guarded_or_marked() -> None:
     """No step runs a repo-local gate file unguarded and unexplained."""
-    existing = _tracked_paths()
+    existing = _existing_paths(_ROOT)
     violations = [
         f"{path} :: [{job}] {name!r} {problem}"
         for path in GUARDED_WORKFLOWS
@@ -236,3 +253,38 @@ def test_golden_path_guards_match_the_verified_lane() -> None:
                 assert SKIP_MESSAGE in body, (
                     f"{lane}'s guard for {script} does not use the canonical skip message"
                 )
+
+
+def test_a_written_but_unstaged_gate_file_is_already_visible(tmp_path: Path) -> None:
+    """The guard's verdict is a property of the TREE, not of the index (bug ``1035``).
+
+    The completeness check only asks about paths that EXIST, so what counts as existing
+    decides the verdict. While that was a tracked-only listing, an author who wrote a new
+    gate script and ran the check before ``git add`` got a green that flipped red the
+    moment they staged the very same file — a locally-green tree that CI rejects, which is
+    the defect class this module already exists to prevent, arriving through the index
+    instead of through a missing guard.
+    """
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "."], cwd=repo, check=True)
+    (repo / "scripts" / "check_tracked.py").write_text("", encoding="utf-8")
+    subprocess.run(["git", "add", "scripts/check_tracked.py"], cwd=repo, check=True)
+    (repo / "scripts" / "check_unstaged.py").write_text("", encoding="utf-8")
+    (repo / ".gitignore").write_text("scripts/check_ignored.py\n", encoding="utf-8")
+    (repo / "scripts" / "check_ignored.py").write_text("", encoding="utf-8")
+
+    before_staging = _existing_paths(repo)
+    assert "scripts/check_unstaged.py" in before_staging, (
+        "a written-but-unstaged gate file must already count as present, or running this "
+        "check before `git add` reports a green that staging turns red"
+    )
+    assert "scripts/check_ignored.py" not in before_staging, (
+        "a .gitignore'd path is not in the tree a commit carries, so it must not be "
+        "demanded of a guard"
+    )
+
+    subprocess.run(["git", "add", "scripts/check_unstaged.py"], cwd=repo, check=True)
+    assert _existing_paths(repo) == before_staging, (
+        "staging changed the verdict — the tracked-only skew this test pins is back"
+    )

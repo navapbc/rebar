@@ -47,6 +47,10 @@ pytest -m "not integration and not external" -n 4 --dist worksteal \
   --cov=rebar --cov-report=term-missing:skip-covered -q
 ```
 
+`make test` runs that scheduler by default (`-n $(PYTEST_WORKERS) --dist worksteal`,
+`PYTEST_WORKERS ?= 4`), so the target and the hand-written invocation above no longer differ;
+override it for a bigger box with `make test PYTEST_WORKERS=8`.
+
 ### CI collects coverage on the primary **ubuntu / Python 3.13** cell only
 
 The `test` matrix in `.github/workflows/_build-and-test.yml` keeps all four supported
