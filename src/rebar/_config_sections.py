@@ -75,6 +75,9 @@ _SECTIONS: dict[str, dict] = {
     "reclaim": {
         "horizon_days": lambda v, k: _as_int(v, k, minimum=1),
     },
+    "fixture_heal": {
+        "interval_days": lambda v, k: _as_int(v, k, minimum=1),
+    },
     "sync": {
         "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),
         "pull": lambda v, k: _as_choice(v, k, {"on", "off"}),
