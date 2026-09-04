@@ -71,6 +71,12 @@ EXCLUDED_JOBS = frozenset(
         # and non-blocking (continue-on-error). The blocking eval DISCIPLINE runs in
         # `eval-discipline`, which IS required in vote.needs.
         "eval-live",
+        # prompt-eval.yml: live paid changed-rubric eval tier (story 5169). Runs on same-repo
+        # PR/push but is non-blocking (continue-on-error: true), so it can never redden main —
+        # a rubric-eval regression is a visible advisory finding, not a merge gate. The
+        # blocking eval DISCIPLINE (offline, deterministic) runs in `eval-discipline`, which
+        # IS required in vote.needs.
+        "eval-changed-rubrics",
         # test.yml: the branch-health report (last known-green SHA + bisect recipe). It runs
         # ONLY on the 6-hourly schedule and on manual dispatch, never on the push/PR critical
         # path, and it GATES NOTHING — it describes a run that has already finished. Its whole
