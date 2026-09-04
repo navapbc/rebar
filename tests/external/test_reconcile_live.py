@@ -1,4 +1,4 @@
-"""Live-runtime validation of the Jira reconciler DRY-RUN plan (task c).
+"""Live-runtime validation of the Jira bridge preview plan (task c).
 
 The reconciler counterpart to ``test_llm_live.py`` in the external-integration
 tier (``tests/external/``): it hits the REAL Jira instance, so it is marked
@@ -7,7 +7,7 @@ and not external"``) and skips unless live Jira credentials AND the ``acli``
 binary are present.
 
 It validates the one runtime property that cannot be checked offline: a
-``dry-run`` reconcile against the real instance computes a WELL-FORMED plan and
+``bridge_preview`` against the real instance computes a WELL-FORMED plan and
 is NON-DESTRUCTIVE — it must apply ZERO mutations (``mutations_applied == 0``,
 ``no_write`` true) even though it fetches the live working set. The mock-tier
 round-trip tests (tests/integration/rebar_reconciler/test_reconcile_roundtrip.py)
@@ -48,29 +48,31 @@ _VALID_DIRECTIONS = {"outbound", "inbound", ""}
 
 
 @_skip
-def test_reconcile_dry_run_plan_is_non_destructive_and_well_formed(rebar_repo: Path) -> None:
-    result = rebar.reconcile("dry-run", repo_root=str(rebar_repo))
+def test_bridge_preview_plan_is_non_destructive_and_well_formed(rebar_repo: Path) -> None:
+    result = rebar.bridge_preview(repo_root=str(rebar_repo))
+    assert result["route"] == "preview"
+    details = result["details"]
 
-    # Non-destructive: a dry-run is cap-0, so it must apply nothing.
-    assert result.get("no_write") is True, f"dry-run did not report no_write: {result}"
-    assert result.get("mutations_applied", 0) == 0, (
-        f"dry-run APPLIED mutations — not non-destructive: {result}"
+    # Non-destructive: preview is cap-0, so it must apply nothing.
+    assert details.get("no_write") is True, f"preview did not report no_write: {result}"
+    assert details.get("mutations_applied", 0) == 0, (
+        f"preview APPLIED mutations — not non-destructive: {result}"
     )
-    assert result.get("manifest_path") is None, (
-        f"dry-run wrote a manifest (destructive side effect): {result}"
+    assert details.get("manifest_path") is None, (
+        f"preview wrote a manifest (destructive side effect): {result}"
     )
 
-    # Well-formed: the result envelope carries the documented keys.
-    assert _RESULT_KEYS <= set(result), f"dry-run result missing keys: {result}"
-    assert isinstance(result["mutation_count"], int)
+    # Well-formed: the details envelope carries the documented keys.
+    assert _RESULT_KEYS <= set(details), f"preview details missing keys: {result}"
+    assert isinstance(details["mutation_count"], int)
 
     # Well-formed plan: the field set matches what the differ produces — every
     # entry has the same {direction, action, target, local_id} shape the mock
     # differ's plan entries carry, with a recognised direction.
-    plan = result.get("plan", [])
+    plan = details.get("plan", [])
     assert isinstance(plan, list)
-    assert len(plan) == result["mutation_count"], (
-        f"plan length {len(plan)} != mutation_count {result['mutation_count']}"
+    assert len(plan) == details["mutation_count"], (
+        f"plan length {len(plan)} != mutation_count {details['mutation_count']}"
     )
     for entry in plan:
         assert _PLAN_ENTRY_KEYS <= set(entry), f"malformed plan entry: {entry}"
