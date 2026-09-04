@@ -292,14 +292,20 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   broken config still never enables writes, LLM calls, or Jira sync — but the fault now
   surfaces to be fixed instead of masquerading as configuration.
 
-- **Library `transition` now uses the same reason-carrying force shape as `claim`.** Pass
-  `force="<reason>"` to bypass whichever lifecycle gate the operation reaches; `None` alone
-  means no bypass, and an explicitly empty string records `(no reason given)`. The former
-  boolean `force=True` and close-only `force_close="<reason>"` spellings remain temporary
-  warning aliases, with an explicitly supplied canonical `force` taking precedence. The
-  free-text `reason` parameter is now only an administrative close reason. Automated NDJSON
-  replay remains an ordinary close and does not gain authority to bypass a target repository's
-  completion-verification gate.
+- **BREAKING (pre-1.0) — library `transition` now accepts only the reason-carrying force
+  shape shared with `claim`.** Pass `force="<reason>"` to bypass whichever lifecycle gate the
+  operation reaches; `None` alone means no bypass, and an explicitly empty string records
+  `(no reason given)`. The former boolean `force=True` and close-only
+  `force_close="<reason>"` library spellings have been removed and now raise `TypeError`
+  naming `force="<explicit reason>"`. The free-text `reason` parameter remains only an
+  administrative close reason. Automated NDJSON replay remains an ordinary close and does not
+  gain authority to bypass a target repository's completion-verification gate.
+
+- **BREAKING (pre-1.0) — hosted OpenAI no longer supports the explicit `openai-chat`
+  fallback.** Hosted `openai-chat:gpt-…` and `model_provider = "openai-chat"` now resolve to
+  `openai-responses:gpt-…` with no deprecation-warning path. Custom OpenAI-compatible
+  `base_url`/slot `endpoint` configurations still use Chat Completions because support for
+  `/v1/responses` on arbitrary compatible servers is unknown.
 
 ## [0.12.0] - 2026-08-15
 

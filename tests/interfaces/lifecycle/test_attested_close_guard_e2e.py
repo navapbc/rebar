@@ -115,7 +115,7 @@ def test_force_close_bypasses_the_laundering_guard(rebar_repo: Path, monkeypatch
     )
     tid = _make(rebar_repo, desc)
     rebar.transition(
-        tid, "in_progress", "closed", force_close="operator says so", repo_root=str(rebar_repo)
+        tid, "in_progress", "closed", force="operator says so", repo_root=str(rebar_repo)
     )
     assert _status(tid, rebar_repo) == "closed"
 

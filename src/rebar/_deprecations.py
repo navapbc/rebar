@@ -89,27 +89,6 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # Same shape as the env renames above, for a TOML key. `coerce_sparse` builds the
     # `cfg:<section>.<old>` key from rebar._config_schema._ALIASES, so the two must agree.
     _permanent("cfg", "verify.overlap_enabled", "verify.suggest_duplicate_tickets"),
-    # ── library aliases: the retired split force-bypass surface on transition ───
-    # Ticket blusterous-earthly-kitten unified the force-bypass surface so
-    # `rebar.transition(force="<reason>")` (a reason-carrying `str | None`, matching
-    # `rebar.claim`) is the single approved pattern. The two pre-unification spellings —
-    # the separate `force_close="<reason>"` close-bypass parameter and the boolean
-    # `force=True` start-work bypass — are honored as ALIASES (warn + map) rather than
-    # hard-removed: this is the sanctioned retirement path (there is no lib tombstone
-    # kind). `force_close="<r>"` maps to `force="<r>"`; `force=True` maps to
-    # `force="(no reason given)"`.
-    _scheduled("lib", "rebar.transition(force_close=...)", 'rebar.transition(force="<reason>")'),
-    _scheduled("lib", "rebar.transition(force=True)", 'rebar.transition(force="<reason>")'),
-    # ── provider prefix: the hosted-OpenAI Chat-Completions fallback (story 155c) ─
-    # The Responses-API cutover (ticket upbeat-illadvised-springtail) makes hosted
-    # OpenAI resolve to `openai-responses:` by default. The explicit `openai-chat:`
-    # qualifier (and `provider = "openai-chat"`) remains a SUPPORTED per-provider
-    # fallback to the Chat Completions wire contract during the compatibility window,
-    # but it is TEMPORARY: it is scheduled for removal before v1. Only HOSTED
-    # openai-chat warns (the runner emits this once per run); Chat forced by a custom
-    # OpenAI-compatible `base_url`/`endpoint` is a construction constraint, not a
-    # deprecated opt-in, and has no `openai-responses:` alternative, so it does NOT warn.
-    _scheduled("cfg", "the hosted-OpenAI 'openai-chat:' provider prefix", "'openai-responses:'"),
     # ── removed scheduled surfaces (historical record) ─────────────────────────
     # NOTE (DE7): the first pre-1.0 breaking removal dropped the scheduled env
     # aliases REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE, the
@@ -122,6 +101,10 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # backend is the only backend), the CLI list-epics subcommand + --no-sync alias
     # (use `list --type=epic …` / --no-pull), and the MCP list_epics tool (use
     # list_tickets(ticket_type='epic', …)).
+    # NOTE (this pass, ticket 828b): the fourth breaking removal dropped the library
+    # aliases `rebar.transition(force_close=...)` and `rebar.transition(force=True)`
+    # (use `force="<reason>"`) and the hosted OpenAI `openai-chat:` fallback (hosted
+    # OpenAI now resolves to `openai-responses:`; custom endpoints still use Chat).
     # NOTE (pre-1.0 pass #3, ticket 6cc4 — operator-approved early removal,
     # 2026-08-12): the same third breaking window dropped the deprecated bare env
     # REBAR_LLM_MODEL (use the [tool.rebar.llm.model_classes] slots, or the per-class

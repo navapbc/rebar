@@ -362,8 +362,8 @@ def test_model_string_selection_is_provider_agnostic() -> None:
         _pai_model(LLMConfig(model="gpt-4o", model_provider="openai")) == "openai-responses:gpt-4o"
     )
     assert _pai_model(LLMConfig(model="openai:gpt-4o")) == "openai-responses:gpt-4o"
-    # the explicit Chat fallback, and a custom endpoint, both stay on Chat Completions
-    assert _pai_model(LLMConfig(model="openai-chat:gpt-4o")) == "openai-chat:gpt-4o"
+    # the retired hosted Chat fallback now resolves to Responses; custom endpoints stay on Chat
+    assert _pai_model(LLMConfig(model="openai-chat:gpt-4o")) == "openai-responses:gpt-4o"
     assert (
         _pai_model(LLMConfig(model="openai:gpt-4o", base_url="http://local/v1"))
         == "openai-chat:gpt-4o"
