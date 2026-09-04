@@ -42,6 +42,10 @@ set -uo pipefail
 
 DOMAIN="${DOMAIN:-rebar.solutions.navateam.com}"
 DATA_MOUNT="${DATA_MOUNT:-/var/gerrit}"
+# Where the dedicated review-gate scratch volume mounts (ADR 0112 decision 3, story aa40).
+# Overridable for the tests exactly as DATA_MOUNT is; the production default is the
+# terraform `gate_scratch_mount` variable and must stay in step with it.
+GATE_SCRATCH_MOUNT="${GATE_SCRATCH_MOUNT:-/var/lib/rebar/gate-scratch}"
 NS="rebar/host"
 
 # IMDSv2 region.
@@ -149,6 +153,52 @@ if [ -n "$root_pct" ]; then
   aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
     --metric-name root_disk_used_percent --unit Percent --value "$root_pct" 2>/dev/null || true
   logger -t rebar-health "disk / used_percent=${root_pct}"
+fi
+
+# --- 2e. Review-gate SCRATCH volume (ADR 0112 decision 3, story aa40) --------
+# Gate snapshots and the review-bot's per-review clones moved off root onto their own
+# EBS volume, so root pressure no longer answers for them and they need their own
+# reading. TWO metrics, because they answer different questions and the second is not
+# implied by the first: a volume that failed to mount reads 0% used — indistinguishable
+# from healthy — while every gate on the box refuses.
+#
+# gate_scratch_mounted is a HEARTBEAT (ticket bff5): a value is published on EVERY tick,
+# including the unmounted path, so its ABSENCE means the probe/timer/host is dead rather
+# than "the volume was fine". Mountedness is decided by the SAME proof marker rebar's
+# gate admission reads — a file that lives ON the volume, so it disappears with it —
+# rather than by `mountpoint`, so the probe and the refusal cannot disagree about the
+# state of the same volume. DIMENSIONLESS, following root_disk_used_percent (2b) and the
+# dimensionless alarm in monitoring_autodeploy.tf.
+scratch_mounted=0
+[ -f "$GATE_SCRATCH_MOUNT/.gate-scratch-mounted" ] && scratch_mounted=1
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name gate_scratch_mounted --unit Count --value "$scratch_mounted" 2>/dev/null || true
+logger -t rebar-health "gate scratch ${GATE_SCRATCH_MOUNT} mounted=${scratch_mounted}"
+if [ "$scratch_mounted" -eq 0 ]; then
+  logger -t rebar-health \
+    "gate scratch volume ${GATE_SCRATCH_MOUNT} is NOT mounted — rebar gate admission refuses every plan-review and completion-verifier run rather than writing to the ROOT filesystem; see infra/runbooks/review-bot-ops.md"
+fi
+
+# Used-percent follows 2's convention: a READING, not a delta, published only when df
+# actually reported one. Dimensioned InstanceId+mount like disk_used_percent for the data
+# volume, so one metric name serves every mount and the alarm selects with `mount`.
+#
+# GATED ON MOUNTEDNESS, and that gate is not defensive tidiness. `df` on an unmounted mount
+# point silently answers for the filesystem CONTAINING it — root — so an unmounted scratch
+# volume would publish ROOT's usage under mount=<scratch>. rebar-gate-scratch-disk-high would
+# then read a number that is real but about the wrong volume: healthy while scratch is gone,
+# or paging "scratch is full" during a root incident. Silence is the honest reading here, and
+# it is not a blind spot — treat_missing_data = "breaching" pages on it, and
+# rebar-gate-scratch-unmounted above names the actual condition.
+scratch_pct=""
+if [ "$scratch_mounted" -eq 1 ]; then
+  scratch_pct=$(df --output=pcent "$GATE_SCRATCH_MOUNT" 2>/dev/null | tail -1 | tr -dc '0-9')
+fi
+if [ -n "$scratch_pct" ]; then
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name disk_used_percent --unit Percent --value "$scratch_pct" \
+    --dimensions InstanceId="$IID",mount="$GATE_SCRATCH_MOUNT" 2>/dev/null || true
+  logger -t rebar-health "disk ${GATE_SCRATCH_MOUNT} used_percent=${scratch_pct}"
 fi
 
 # --- 2c. Non-`site/` debris on the Gerrit DATA volume (task 3e92) ------------

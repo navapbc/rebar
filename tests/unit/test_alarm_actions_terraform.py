@@ -51,7 +51,7 @@ _TF_DIR = Path(__file__).resolve().parents[2] / "infra" / "terraform"
 # loudly instead of passing vacuously. A vacuous guard is the failure mode this guard exists
 # to prevent, so it must not be able to fall to it itself. Raise this floor when alarms are
 # added; never lower it without deleting alarms.
-_MIN_EXPECTED_ALARMS = 19
+_MIN_EXPECTED_ALARMS = 21
 
 _ALARM_RE = re.compile(
     r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{',
@@ -67,7 +67,7 @@ _MISSING_DATA_OPT_OUT_RE = re.compile(r"#\s*rebar:allow-missing-data-notbreachin
 # Host-published alarms had 13 rebar/host blocks when this guard was written. Same
 # anti-vacuity role as _MIN_EXPECTED_ALARMS: a scope filter that silently matches nothing
 # makes the guard below pass for free.
-_MIN_EXPECTED_HOST_ALARMS = 14
+_MIN_EXPECTED_HOST_ALARMS = 16
 
 
 def _quoted_attr(raw: str, masked: str, attr: str) -> str | None:
@@ -250,6 +250,12 @@ def test_host_published_disk_alarms_treat_missing_data_as_breaching() -> None:
     watched = {
         ("monitoring.tf", "gerrit_data_disk_high"),
         ("monitoring_autodeploy.tf", "root_disk_pressure"),
+        # The gate-scratch pair (story aa40-cbda-ee38-481c). ADR 0112 records the
+        # missing-data property as an obligation carried by the ADR rather than by any one
+        # story, and asks for a test that PINS it instead of trusting the copy-paste — this
+        # named set is that pin, so a later edit to either alarm fails here by name.
+        ("monitoring_autodeploy.tf", "gate_scratch_disk_high"),
+        ("monitoring_autodeploy.tf", "gate_scratch_unmounted"),
     }
     found: set[tuple[str, str]] = set()
     offenders: list[str] = []

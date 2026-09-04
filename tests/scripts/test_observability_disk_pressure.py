@@ -271,3 +271,97 @@ def test_no_persistence_markers_publishes_zero(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert _values(aws_log, METRIC) == [2]
     assert _values(aws_log, PERSIST_METRIC) == [0]
+
+
+# --- the review-gate SCRATCH volume (ADR 0112 decision 3, story aa40-cbda-ee38-481c) ---
+# Gate snapshots and reviewbot-* clones moved off the root filesystem onto their own EBS
+# volume. Root's used-percent therefore no longer answers for them, so the probe grew §2e.
+# Two metrics, because a volume that failed to mount reads 0% used — indistinguishable from
+# healthy — while every gate on the box refuses.
+
+
+def _dimensioned(log: Path, metric: str, mount: str) -> list[int]:
+    """Values published for ``metric`` carrying ``mount=<mount>``.
+
+    ``disk_used_percent`` is ONE metric name shared by every mount and selected by its
+    dimension (the convention §2 established for the data volume and the alarms match on),
+    so a test that ignored dimensions could not tell the two publishers apart.
+    """
+    values: list[int] = []
+    for line in log.read_text().splitlines() if log.exists() else []:
+        parts = line.split()
+        if "--metric-name" not in parts or parts[parts.index("--metric-name") + 1] != metric:
+            continue
+        if f"mount={mount}" not in line:
+            continue
+        values.append(int(parts[parts.index("--value") + 1]))
+    return values
+
+
+def _scratch_env(tmp_path: Path, *, mounted: bool) -> tuple[dict[str, str], Path, Path]:
+    env, aws_log, _paths = _environment(tmp_path, [])
+    # `df --output=pcent` is GNU-only and the suite also runs on macOS, so stub it the way
+    # `aws`/`curl`/`journalctl` are already stubbed. The probe's parse (`tail -1 | tr -dc`)
+    # is what is under test here, not the host df's flag support.
+    _stub(tmp_path / "bin", "df", "printf 'Use%%\\n 42%%\\n'; exit 0")
+    scratch = tmp_path / "gate-scratch"
+    scratch.mkdir()
+    if mounted:
+        (scratch / ".gate-scratch-mounted").write_text("")
+    env["GATE_SCRATCH_MOUNT"] = str(scratch)
+    return env, aws_log, scratch
+
+
+def test_a_mounted_scratch_volume_publishes_the_heartbeat_and_its_usage(tmp_path: Path) -> None:
+    env, aws_log, scratch = _scratch_env(tmp_path, mounted=True)
+
+    assert _run(env).returncode == 0
+
+    assert _values(aws_log, "gate_scratch_mounted") == [1]
+    assert _dimensioned(aws_log, "disk_used_percent", str(scratch)) == [42]
+
+
+def test_an_unmounted_scratch_volume_still_publishes_a_zero_heartbeat(tmp_path: Path) -> None:
+    """HEARTBEAT, NOT AN EVENT (ticket bff5). Publishing nothing on the bad path would leave
+    ``rebar-gate-scratch-unmounted`` with no datapoint to evaluate, and its
+    ``treat_missing_data = "breaching"`` would then page for the *dead publisher* reason —
+    right outcome, wrong story, and indistinguishable from a dead host."""
+    env, aws_log, _scratch = _scratch_env(tmp_path, mounted=False)
+
+    assert _run(env).returncode == 0
+
+    assert _values(aws_log, "gate_scratch_mounted") == [0]
+
+
+def test_the_probe_reads_the_same_marker_the_gate_refusal_reads(tmp_path: Path) -> None:
+    """The probe must not have its OWN idea of "mounted".
+
+    ``mountpoint -q`` and rebar's proof marker can disagree — a bind mount is a mount point
+    inside a container whether or not the host volume is mounted underneath it — and a
+    monitoring signal that disagrees with the enforcement is worse than none: the alarm says
+    healthy while every gate refuses. This pins them to one file.
+    """
+    from rebar.llm import gate_admission as ga
+
+    code = "\n".join(
+        line for line in SCRIPT.read_text().splitlines() if not line.lstrip().startswith("#")
+    )
+    assert ga._SCRATCH_MOUNTED_MARKER in code
+    assert "mountpoint" not in code
+
+
+def test_an_unmounted_scratch_volume_publishes_no_usage_reading(tmp_path: Path) -> None:
+    """`df` on an unmounted mount point answers for the filesystem CONTAINING it.
+
+    So an ungated publish would report ROOT's usage under `mount=<scratch>` — a real number
+    about the wrong volume. rebar-gate-scratch-disk-high would then read healthy while scratch
+    is gone, or page "scratch is full" during a root incident. Silence is the honest reading,
+    and it is not a blind spot: the alarm's treat_missing_data = "breaching" pages on it, and
+    rebar-gate-scratch-unmounted names the actual condition.
+    """
+    env, aws_log, scratch = _scratch_env(tmp_path, mounted=False)
+
+    assert _run(env).returncode == 0
+
+    assert _dimensioned(aws_log, "disk_used_percent", str(scratch)) == []
+    assert _values(aws_log, "gate_scratch_mounted") == [0]

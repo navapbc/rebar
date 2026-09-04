@@ -39,6 +39,31 @@ resource "aws_ebs_volume" "data" {
   }
 }
 
+# Dedicated scratch volume for review-gate work: the content-addressed snapshot
+# store and the review-bot's per-review `reviewbot-*` clones (ADR 0112 decision 3,
+# story aa40-cbda-ee38-481c). Both used to live on the OS/root filesystem, so a
+# review burst could fill root and fail-close Gerrit, the LLM-Review votes and the
+# MCP server together (bug 3276-2f81-8c75-4ddd, a five-hour outage).
+#
+# DELIBERATELY NOT prevent_destroy, unlike aws_ebs_volume.data above. This volume is
+# REBUILDABLE: every byte on it is either a snapshot that re-materialises from a git
+# ref or a working clone that re-clones. Nothing here is source-of-truth data, so
+# protecting it would only make an ordinary teardown need a manual override for a
+# volume no one needs to keep. The Name tag says so too, for whoever reads the
+# console rather than this file.
+resource "aws_ebs_volume" "gate_scratch" {
+  availability_zone = data.aws_subnet.selected.availability_zone
+  size              = var.gate_scratch_volume_size_gb
+  type              = "gp3"
+
+  tags = {
+    Name    = "rebar-gate-scratch"
+    Project = "rebar"
+    Data    = "rebuildable-scratch"
+    Ticket  = "aa40"
+  }
+}
+
 resource "aws_instance" "gerrit" {
   ami                  = data.aws_ssm_parameter.al2023_ami.insecure_value
   instance_type        = var.instance_type
@@ -61,7 +86,9 @@ resource "aws_instance" "gerrit" {
   # user_data resolves the data volume's NVMe device dynamically by volume id;
   # we pass the id in so the script doesn't have to guess /dev/sdf vs /dev/nvme*.
   user_data = templatefile("${path.module}/user_data.sh", {
-    data_volume_id = aws_ebs_volume.data.id
+    data_volume_id         = aws_ebs_volume.data.id
+    gate_scratch_volume_id = aws_ebs_volume.gate_scratch.id
+    gate_scratch_mount     = var.gate_scratch_mount
   })
 
   # Pin the AMI: a new SSM-published AMI id must NOT force-replace the running
@@ -83,6 +110,14 @@ resource "aws_instance" "gerrit" {
 resource "aws_volume_attachment" "data" {
   device_name = "/dev/sdf"
   volume_id   = aws_ebs_volume.data.id
+  instance_id = aws_instance.gerrit.id
+}
+
+# Attach the scratch volume. Same Nitro caveat as the data volume: /dev/sdg is what we
+# request, not what the kernel presents, so user_data.sh resolves it by volume id.
+resource "aws_volume_attachment" "gate_scratch" {
+  device_name = "/dev/sdg"
+  volume_id   = aws_ebs_volume.gate_scratch.id
   instance_id = aws_instance.gerrit.id
 }
 
@@ -114,4 +149,9 @@ output "public_ip" {
 output "data_volume_id" {
   description = "EBS volume id of the Gerrit data volume."
   value       = aws_ebs_volume.data.id
+}
+
+output "gate_scratch_volume_id" {
+  description = "EBS volume id of the review-gate scratch volume (rebuildable, not backed up)."
+  value       = aws_ebs_volume.gate_scratch.id
 }

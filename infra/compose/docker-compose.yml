@@ -247,6 +247,26 @@ services:
       # then runs on to 25% free (its fixed internal RECLAIM_TARGET_MARGIN_PCT) rather than
       # stopping on the trigger, so a pass does not re-fire every interval.
       REBAR_GATE_FREE_WATERMARK_PCT: "20"
+      # --- Review-gate scratch lives on its OWN EBS volume (ADR 0112 decision 3, story
+      # aa40-cbda-ee38-481c). The comment above describes the world before this: the store
+      # sat on the container's writable layer on the ROOT volume because REBAR_GATE_TMPDIR
+      # was unset. It is set now, and the watermark above still applies — relative to the
+      # scratch volume rather than to root, which is what it always wanted to measure.
+      #
+      # TWO variables, because the two consumers read two different names and setting only
+      # one leaves half the bytes on root:
+      #   REBAR_GATE_TMPDIR — the content-addressed snapshot store's base directory
+      #     (rebar._snapshot.repo_snapshot.peek_store_root), so rebar-gate-snapshots/ and
+      #     the admission slot files under locks/ both land on the volume.
+      #   TMPDIR — the system temp dir, which is what
+      #     tempfile.TemporaryDirectory(prefix="reviewbot-") in review_bot/voter.py follows.
+      #     That clone is PER REVIEW, so its bytes scale linearly with concurrency; it is
+      #     the larger of the two under load, and it is invisible to REBAR_GATE_TMPDIR.
+      #
+      # Both must equal terraform's `gate_scratch_mount` and observability.sh's
+      # GATE_SCRATCH_MOUNT; tests/unit/test_gate_scratch_volume_aa40.py pins the agreement.
+      REBAR_GATE_TMPDIR: "/var/lib/rebar/gate-scratch"
+      TMPDIR: "/var/lib/rebar/gate-scratch"
     ports:
       # Publish on host loopback for the HOST nginx /review/ proxy. Host port is
       # single-sourced from .env (REVIEW_BOT_PORT, default 8000); container port
@@ -270,6 +290,19 @@ services:
       # writes accumulate + auto-push (REBAR_SYNC_PUSH=always) instead of living in an ephemeral
       # /tmp dir. Materialized once by the entrypoint (see Dockerfile.reviewbot).
       - gerrit_reviewbot_tickets:/var/gerrit/site/reviewbot-tickets
+      # The gate-scratch EBS volume, bound at its PARENT rather than at the mount point.
+      # That is load-bearing, not tidiness: rebar's gate admission decides "is the volume
+      # mounted" from a declaration marker that lives on the ROOT filesystem BESIDE the
+      # mount point (so it survives an unmount) and a proof marker INSIDE it (so it does
+      # not). Binding only the mount point would show the container an empty directory in
+      # both states, and the guard could never fire — the exact silent fallback to root
+      # that ADR 0112 forbids.
+      #
+      # A plain host bind, deliberately NOT an `external:` named volume: those are
+      # provisioned from compose-up.sh's SITE_SUBDIRS list under /var/gerrit/site and
+      # paired by config-check.sh check 5. Scratch is on a different volume entirely and
+      # does not belong in that list.
+      - /var/lib/rebar:/var/lib/rebar
     # REBAR_MCP_ALLOW_LLM deliberately NOT set (gates only the stdio MCP server;
     # the receiver calls the rebar.llm library directly — S4b).
     #
