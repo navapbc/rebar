@@ -116,7 +116,7 @@ def produce_plan_review_verdict(
     import time
 
     from rebar.llm.config import gate_config
-    from rebar.llm.plan_review import generation
+    from rebar.llm.plan_review import generation, terraform_seam
     from rebar.llm.plan_review.orchestrator import (
         assemble_context_cache,
         collect_contract_violations,
@@ -190,6 +190,23 @@ def produce_plan_review_verdict(
                 ctx.ticket_id, material_fingerprint(ctx), repo_root=repo_root
             ) as cancel,
         ):
+            # Terraform structural grounding (REB-640): the T10-scoped grounding tools reach
+            # BOTH plan-review passes over ONE shared usage sink (in-process reads join the
+            # signed read-set once, deterministically). PASS-1 finder: the production batch step
+            # drives a Runner directly and DISCARDS agent_runner, so its tools ride
+            # RunRequest.extra_tools via pass1_tool_hook (run_pass1 → pass1_with_ladder →
+            # pass1_chunk, T10 AGENTIC only). PASS-2 verifier: an agent step whose per-call
+            # tool_provider mints its OWN session so it re-grounds with its own query (never
+            # trusting a Pass-1 receipt). Both decline off the Terraform path (byte-neutral). The
+            # code read-root is cfg.repo_path (the snapshot), not the ticket-store repo_root.
+            tf_usage_sink: dict[str, Any] = {}
+            tf_code_root = cfg.repo_path or repo_root
+            tf_pass1_hook = terraform_seam.pass1_tool_hook(
+                repo_root=tf_code_root, usage_sink=tf_usage_sink
+            )
+            tf_tool_provider = terraform_seam.build_tool_provider(
+                repo_root=tf_code_root, usage_sink=tf_usage_sink
+            )
             res = _ex.run_workflow(
                 doc,
                 {
@@ -200,8 +217,13 @@ def produce_plan_review_verdict(
                 },
                 target_ticket=ctx.ticket_id,
                 repo_root=repo_root,
-                agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
-                batch_runner=ProductionBatchRunner(runner=runner_sel),
+                agent_runner=RunnerAgentStep(
+                    runner=runner_sel,
+                    repo_root=repo_root,
+                    config=cfg,
+                    tool_provider=tf_tool_provider,
+                ),
+                batch_runner=ProductionBatchRunner(runner=runner_sel, tf_provider=tf_pass1_hook),
                 recorder=rec,
             )
     except (LLMUnavailableError, LLMInputRejectedError) as exc:
