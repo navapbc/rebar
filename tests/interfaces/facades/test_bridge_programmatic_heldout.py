@@ -32,7 +32,7 @@ class _Registrar:
         return register
 
 
-def test_new_library_signatures_are_explicit_and_legacy_signatures_are_unchanged() -> None:
+def test_new_library_signatures_are_explicit_and_legacy_reconcile_is_absent() -> None:
     assert str(inspect.signature(rebar.bridge_preview)) == (
         "(*, only: 'list[str] | None' = None, exclude: 'list[str] | None' = None, "
         "repo_root=None) -> 'BridgeRun'"
@@ -54,10 +54,7 @@ def test_new_library_signatures_are_explicit_and_legacy_signatures_are_unchanged
     assert str(inspect.signature(rebar.bridge_resume)) == "(*, repo_root=None) -> 'BridgeControl'"
     assert str(inspect.signature(rebar.bridge_check_access)) == "() -> 'BridgeAccessCheck'"
 
-    assert (
-        str(inspect.signature(rebar.reconcile))
-        == "(mode: 'str' = 'dry-run', *, repo_root=None) -> 'dict'"
-    )
+    assert not hasattr(rebar, "reconcile")
     assert str(inspect.signature(rebar.bridge_fsck)) == "(*, repo_root=None) -> 'BridgeFsck'"
 
 

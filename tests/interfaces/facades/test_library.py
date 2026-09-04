@@ -88,12 +88,10 @@ def test_link_docstring_lists_all_relations() -> None:
         assert rel in doc, f"library link doc missing relation {rel!r}"
 
 
-def test_reconcile_docstring_names_all_mutating_modes() -> None:
-    """The reconcile docstring must name every Jira-mutating mode, not just
-    'live' (bootstrap-strict/bootstrap-throttle mutate too)."""
-    doc = rebar.reconcile.__doc__ or ""
-    for mode in ("bootstrap-strict", "bootstrap-throttle", "live"):
-        assert mode in doc, f"reconcile doc missing mutating mode {mode!r}"
+def test_library_reconcile_public_facade_removed() -> None:
+    """The legacy programmatic reconcile(mode=...) contract is no longer exported."""
+    assert "reconcile" not in rebar.__all__
+    assert not hasattr(rebar, "reconcile")
 
 
 def test_native_reexports_importable() -> None:

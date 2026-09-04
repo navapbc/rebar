@@ -1,10 +1,9 @@
-"""rebar library — out-of-core engine operations (workflow runs, Jira reconcile,
-bridge-mapping audit).
+"""rebar library — out-of-core engine operations (workflow runs and bridge audit).
 
 The wrappers that reach beyond the plain in-process ticket store: the
 workflow-engine entrypoints (``run_workflow`` / ``get_workflow_status`` /
-``get_workflow_result``, epic a88f), the Jira ``reconcile`` subprocess launcher,
-and the ``bridge_fsck`` mapping audit — split out of the ``rebar`` package facade
+``get_workflow_result``, epic a88f), the explicit bridge operations, and the
+``bridge_fsck`` mapping audit — split out of the ``rebar`` package facade
 (``__init__.py``, ticket S3 / 4532) so it stays a thin re-export namespace. Every
 function is re-exported as ``rebar.<name>``; the three workflow entrypoints are
 public attributes but (as before) are deliberately NOT listed in ``rebar.__all__``.
@@ -15,14 +14,13 @@ from __future__ import annotations
 import datetime
 import importlib
 import importlib.util
-import json
 import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from rebar import config
-from rebar._engine import engine_dir, engine_env
+from rebar._engine import engine_dir
 from rebar._errors import RebarError
 
 if TYPE_CHECKING:
@@ -375,53 +373,3 @@ def bridge_check_access() -> BridgeAccessCheck:
         message = "bridge access check requires JIRA_URL, JIRA_USER, and JIRA_API_TOKEN"
         raise RebarError(message, returncode=2, stderr=message)
     return cast("BridgeAccessCheck", result)
-
-
-# ── Reconciler (Jira sync) ────────────────────────────────────────────────────
-def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
-    """Run the Jira reconciler. Defaults to a non-mutating ``dry-run``.
-
-    Modes: reconcile-check | dry-run | bootstrap-strict | bootstrap-throttle | live.
-    The Jira-mutating modes are ``bootstrap-strict``, ``bootstrap-throttle`` and
-    ``live`` (each requires the ``acli`` binary + credentials); ``reconcile-check``
-    and ``dry-run`` are non-mutating.
-    """
-    root = str(config.repo_root(repo_root))
-    # Launch under THIS interpreter (sys.executable), not a bare ``python3``: Tier E
-    # E5b rewired the reconciler onto in-package ``rebar.*`` imports, so it must run
-    # on the rebar-capable interpreter. engine_env still puts the engine dir on
-    # PYTHONPATH so the top-level ``rebar_reconciler`` package resolves.
-    cmd = [
-        sys.executable,
-        "-m",
-        "rebar_reconciler",
-        "--mode",
-        mode,
-        "--repo-root",
-        root,
-    ]
-    cp = subprocess.run(cmd, env=engine_env(root), text=True, capture_output=True, check=False)
-    # Intentionally consume the direct-engine --mode compatibility contract:
-    # 75 is its historical benign reschedule sentinel. Canonical bridge adapters
-    # use separate in-process adapters and deliberately do not change this public facade.
-    if cp.returncode not in (0, 75):
-        raise RebarError(
-            f"reconcile ({mode}) failed (exit {cp.returncode}): {cp.stderr.strip()}",
-            returncode=cp.returncode,
-            stderr=cp.stderr,
-        )
-    out = cp.stdout.strip()
-    try:
-        return json.loads(out)
-    except json.JSONDecodeError:
-        # No-write modes (dry-run / reconcile-check) emit the computed plan as
-        # a JSON object on the FINAL stdout line; any preceding diagnostic
-        # lines are informational. Fall back to parsing the last line so the
-        # plan still reaches the caller (ticket yaw-plait-doe).
-        lines = [ln for ln in out.splitlines() if ln.strip()]
-        if lines:
-            try:
-                return json.loads(lines[-1])
-            except json.JSONDecodeError:
-                pass
-        return {"mode": mode, "returncode": cp.returncode, "output": out, "stderr": cp.stderr}

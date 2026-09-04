@@ -5,9 +5,9 @@ Three interfaces over one implementation:
   * Library: this package — in-process reads and writes over the git-backed store
   * MCP:     the ``rebar-mcp`` console script (rebar.mcp_server)
 
-Ticket reads and writes run in-process against the event-sourced store (the Jira
-reconciler runs as a subprocess). The reducer and graph APIs (``rebar.reducer`` /
-``rebar.graph``) are re-exported for callers that want in-process bulk reads.
+Ticket reads, writes, and explicit bridge operations run through the package facade.
+The reducer and graph APIs (``rebar.reducer`` / ``rebar.graph``) are re-exported
+for callers that want in-process bulk reads.
 
 This module is a **thin public-API namespace** (ticket S3 / 4532): the wrapper
 bodies live in topical ``_lib_*`` submodules and are re-exported here, so the
@@ -16,7 +16,7 @@ cap. The split (all under the cap):
   * ``rebar._lib_writes`` — lifecycle + mutations + signing (holds ``_python_leaf``)
   * ``rebar._lib_gates``  — quality gates, file-impact/verify-commands, grounding
   * ``rebar._lib_reads``  — queries, export/import, fsck (holds ``_json_or``)
-  * ``rebar._lib_ops``    — workflow runs, Jira reconcile, bridge-mapping audit
+  * ``rebar._lib_ops``    — workflow runs, explicit bridge ops, bridge-mapping audit
 """
 
 from __future__ import annotations
@@ -69,7 +69,6 @@ from rebar._lib_ops import (
     bridge_run,
     bridge_status,
     bridge_sync,
-    reconcile,
 )
 from rebar._lib_ops import (
     get_workflow_result as get_workflow_result,
@@ -231,8 +230,6 @@ __all__ = [
     "quality_check",
     "ready",
     "recent_session_logs",
-    # reconciler
-    "reconcile",
     # native re-exports
     "reduce_all_tickets",
     "reduce_ticket",

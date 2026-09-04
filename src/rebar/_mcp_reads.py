@@ -6,9 +6,8 @@ FastMCP server. Split out of ``rebar.mcp_server.build_server`` (which was a sing
 docstrings, and outputSchemas are behaviour-identical to their in-line originals.
 
 The tools capture shared handles off ``ctx`` (a ``SimpleNamespace`` built in
-``build_server``): the ``_readonly`` / ``_allow_jira_sync`` gate helpers, the
-``MODE_CAPS`` / ``Mode`` reconcile tables, and the ``_cap_workflow_payload`` budget
-helper. They are rebound to their original local names below so the tool bodies are
+``build_server``): the ``_readonly`` gate helper plus the payload-budget helpers.
+They are rebound to their original local names below so the tool bodies are
 copied verbatim. Output models are imported at module level (FastMCP resolves a
 tool's return annotation against THIS module's globals).
 """
@@ -278,11 +277,8 @@ def _discovery_rows(rows, *, full: bool) -> list[dict]:
 def register_read_tools(mcp, ctx) -> None:
     """Register the always-available read tools on ``mcp`` (see module docstring)."""
     _readonly = partial(_context_gate, ctx, "readonly")
-    _allow_jira_sync = partial(_context_gate, ctx, "allow_jira_sync")
     _cap_workflow_payload = ctx.cap_workflow_payload
     _bound_list_payload = ctx.bound_list_payload
-    MODE_CAPS = ctx.MODE_CAPS
-    Mode = ctx.Mode
 
     # ── Read tools ────────────────────────────────────────────────────────────
     _ANN = tool_annotation_presets()
@@ -582,32 +578,6 @@ def register_read_tools(mcp, ctx) -> None:
         'completion-verifier') verifies that kind strictly. The full per-kind set is on the
         ticket-state `attestations` field via show_ticket."""
         return VerifySignatureResultOut.model_validate(rebar.verify_signature(ticket_id, kind=kind))
-
-    @mcp.tool(annotations=_ANN["MUTATE_OPEN_WORLD"])
-    def reconcile(mode: str = "dry-run") -> dict:
-        """Run the Jira reconciler. Defaults to a non-mutating dry-run.
-
-        The Jira-mutating modes (bootstrap-strict, bootstrap-throttle, live) each
-        require REBAR_MCP_ALLOW_JIRA_SYNC=1 and are blocked under REBAR_MCP_READONLY.
-        reconcile-check / dry-run are non-mutating.
-        """
-        # MODE_CAPS / Mode are imported once at module load (see top of file).
-        # Unknown mode -> ValueError -> clean tool error.
-        parsed = Mode.from_str(mode)
-        # Any cap != 0 mutates Jira (10/100/None — note LIVE's cap is None, so we
-        # gate on != 0, NOT > 0). cap-0 modes are non-mutating and always allowed.
-        if MODE_CAPS[parsed] != 0:
-            if _readonly():
-                raise ValueError(
-                    f"{parsed.value} reconcile is disabled: this server is "
-                    "read-only (REBAR_MCP_READONLY)"
-                )
-            if not _allow_jira_sync():
-                raise ValueError(
-                    f"{parsed.value} reconcile is disabled (mutating mode); "
-                    "set REBAR_MCP_ALLOW_JIRA_SYNC=1 to enable"
-                )
-        return rebar.reconcile(parsed.value)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def get_workflow_status(run_id: str, ticket_id: str | None = None) -> WorkflowRunOut:
