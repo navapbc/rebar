@@ -44,6 +44,12 @@ EXTRAS: dict[str, tuple[str, str]] = {
         "the contract + harness are stdlib-only; this extra adds the in-process binding "
         "run inside the fail-open worker boundary",
     ),
+    "grounding-terraform": (
+        "hcl2",
+        "the optional Terraform structural grounding tools (python-hcl2) — a per-call "
+        "refutation-only session over a bounded whole-module snapshot; absent it, the "
+        "Terraform grounding path abstains (no_tool) and non-Terraform paths pull nothing",
+    ),
     "metrics": ("lizard", "code-health metrics analyzers"),
     "wiki": (
         "pypandoc",

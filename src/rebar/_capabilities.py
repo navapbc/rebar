@@ -72,6 +72,7 @@ DECLARED_EXTRAS: frozenset[str] = frozenset(
         "pricing",
         "grounding",
         "grounding-t2",
+        "grounding-terraform",
         "adf",
         "wiki",
         "tracing",
@@ -154,6 +155,14 @@ CAPABILITIES: tuple[Capability, ...] = (
         probe="pyright",
         install_hint="pip install 'nava-rebar[grounding-t2]'",
         summary="the tier-2 type-aware grounding oracle",
+    ),
+    Capability(
+        key="grounding_terraform",
+        extra="grounding-terraform",
+        posture=Posture.ABSTAIN,
+        probe="hcl2",
+        install_hint="pip install 'nava-rebar[grounding-terraform]'",
+        summary="the optional Terraform structural grounding tools (python-hcl2)",
     ),
     Capability(
         key="cloud_adf",

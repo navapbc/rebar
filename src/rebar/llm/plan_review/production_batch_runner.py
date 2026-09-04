@@ -62,10 +62,15 @@ class ProductionBatchRunner(BatchRunner):
     ``coverage`` plan. A thin glue layer — all sizing/budget/ladder/checkpoint logic
     lives in the shared ``pass1``/``sizing`` units, not here."""
 
-    def __init__(self, *, runner: Runner | None = None) -> None:
+    def __init__(self, *, runner: Runner | None = None, tf_provider: Any = None) -> None:
         # The INJECTABLE rebar.llm.Runner (D3). None → constructed per-run via
         # get_runner(cfg); injection is the offline/parity-test seam.
         self._runner = runner
+        # REB-640: the Terraform Pass-1 tool hook (terraform_seam.pass1_tool_hook), threaded
+        # into run_pass1 so the T10 AGENTIC finder — which this runner drives directly, past
+        # the discarded ``agent_runner`` — gets its grounding tools via RunRequest.extra_tools.
+        # None for every non-Terraform review (byte-identical to before).
+        self._tf_provider = tf_provider
 
     def run(
         self, req: BatchRunRequest, agent_runner: AgentStepRunner | None = None
@@ -143,7 +148,9 @@ class ProductionBatchRunner(BatchRunner):
             coverage["requested_usd_budget"] = req.usd_budget
             coverage["budget_override_applied"] = True
 
-        findings = run_pass1(ctx, cfg, runner, single, agent, coverage, req.usd_budget)
+        findings = run_pass1(
+            ctx, cfg, runner, single, agent, coverage, req.usd_budget, self._tf_provider
+        )
         prerequisite_coverage: list[dict[str, Any]] = []
         prerequisite_findings: list[dict[str, Any]] = []
         snapshot_value = req.with_inputs.get("relation_snapshot")
