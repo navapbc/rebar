@@ -176,6 +176,41 @@ def finalize(
     return entry
 
 
+def charge_estimate(
+    run_id: str,
+    tier: str,
+    candidate: str,
+    estimate_usd: float,
+    *,
+    ledger_path: str = DEFAULT_LEDGER_PATH,
+) -> dict:
+    """Record the pre-flight ESTIMATE as consumed spend for a run whose actual usage
+    cannot be priced into billable rows.
+
+    :func:`finalize` needs priceable ``rows`` (a model ``genai_prices`` resolves) to record
+    spend; a caller that ran a live model but cannot surface such a row would otherwise
+    record nothing, leaving :func:`reserve`'s ``spent`` at zero so the budget cap never
+    trips (it fails OPEN). Appending the deterministic :func:`estimate` here keeps the cap
+    fail-CLOSED: ``spent`` accumulates by the estimate and a later :func:`reserve` refuses
+    the run that would exceed the cap. The entry is flagged ``estimated`` so a reader can
+    tell an estimate charge from a priced :func:`finalize` entry.
+    """
+    entry = {
+        "run_id": run_id,
+        "tier": tier,
+        "candidate": candidate,
+        "usd": float(estimate_usd),
+        "estimated": True,
+        "finished": datetime.now(UTC).isoformat(),
+    }
+    directory = os.path.dirname(ledger_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(ledger_path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry) + "\n")
+    return entry
+
+
 def reconcile(
     run_id: str,
     tier: str,
