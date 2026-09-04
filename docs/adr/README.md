@@ -148,3 +148,4 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0110 — Change shape enters the floor as an advisory on file surface, not as a blocking size rule](0110-change-shape-advisory-not-blocking.md)
 - [0111 — No internal-only compatibility shims after private moves](0111-no-internal-only-compatibility-shims.md)
 - [0113 — Fixture mining and admission protocol: what asserts a criterion's required behavior](0113-fixture-mining-and-admission-protocol.md)
+- [0114 — New required CI gates prove green advisory before entering the Verified hot path](0114-advisory-gate-before-hot-path.md)
