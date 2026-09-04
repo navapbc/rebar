@@ -4415,9 +4415,17 @@
       "updated_at": "2026-08-15T14:52:18Z"
     },
     "1035-bed7-c855-4732": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Symptom\n\nThree separate repo gates are enforced by pytest but **not** by `make lint`, so a contributor who runs the documented pre-flight gets a green result and learns otherwise only from a Gerrit `Verified -1`, 15\u201320 minutes later:\n\n| gate | what it catches | how it surfaced |\n|---|---|---|\n| `tests/unit/test_mechanism_delta.py` | a new mechanism that `--check` admitted via a `mechanism-ok` marker but the baseline does not contain | change 2601 pushed red; `make lint` was exit 0 |\n| `tests/unit/test_predates_gate_guard_parity.py` | a CI step that cannot run on a tree predating it | change 2600 pushed red; caught only in CI |\n| `tests/unit/test_api_surface_gate.py` | public API surface drift vs the committed baseline | change 2609 pushed red; `make lint` was exit 0 |\n\nAll three fired on real changes on 2026-09-04, and in each case the author had run `make lint` and `make typecheck` and seen them pass.\n\n## Why this matters more than the individual failures\n\nThe cost is not the CI round-trip alone. It is that **`make lint` is the documented contract**: AGENTS.md points contributors at it as the commit gate, the pre-commit hook runs it, and agents are briefed to treat it as the local proxy for CI. A proxy that returns green for a tree CI will reject is worse than no proxy, because it converts \"I verified locally\" into a false statement made in good faith. Three agents made exactly that statement tonight.\n\nThere is a related trap in the same family, worth fixing alongside: `test_predates_gate_guard_parity` considers only **git-tracked** paths. A change that adds a new file and runs the gate *before* `git add` gets a green that flips to red the moment the file is staged. That is a second way the local signal disagrees with CI on an unchanged tree.\n\n## Not a request to move everything into `make lint`\n\nSome of these are genuinely test-shaped and belong in the suite; `make lint` running the full pytest tier would be far too slow to be a commit gate, which is presumably why they live where they do. The defect is the **contract**, not the placement. Any of these resolves it:\n\n- a fast `make check-gates` (or an addition to `make lint`) that runs exactly these ratchet/parity\n  tests and nothing else \u2014 they are quick; the three together run in well under a minute; **or**\n- `make lint` invoking them directly, if that stays fast enough to remain a commit gate; **or**\n- if they must stay separate, AGENTS.md stating explicitly that `make lint` is NOT sufficient and\n  naming the full set a contributor must run before pushing.\n\nThe third is the weakest \u2014 documentation does not fail a build \u2014 but it is honest, and honest beats a green that lies.\n\n## Acceptance criteria\n\nDeterministic, verifiable in one run.\n\n1. A single documented command verifies everything CI will check that is checkable locally. Running\n   it on a tree that violates any of the three gates above fails; running it on a clean tree passes.\n2. Demonstrated per gate: introduce a violation of each of the three in turn, show the command going\n   RED, and revert. Three RED demonstrations, quoted.\n3. The `git add` skew is closed or documented: either the parity gate considers the working tree as\n   CI will see it, or the command's output states that untracked files are not covered and what to do.\n4. AGENTS.md names the command as the pre-push contract, replacing or supplementing the current\n   `make lint` guidance so a contributor is not left inferring the set.\n5. The command is portable \u2014 it must work in a checkout with no CI provider, per the blocking\n   `project.portability` criterion.\n\n## File impact\n\n`Makefile`, `AGENTS.md`, possibly `.pre-commit-config.yaml`, and `tests/unit/test_predates_gate_guard_parity.py` for AC3.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "make lint is a lying proxy for CI: three ratchet/parity gates are pytest-only, so a locally-green tree fails Verified"
+      },
       "created_at": "2026-09-04T08:45:30Z",
       "jira_id": "4591722",
       "jira_key": "REB-4614",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-04T08:45:33Z"
     },
@@ -35736,9 +35744,31 @@
       "updated_at": "2026-08-15T15:04:28Z"
     },
     "860b-28eb-10c0-4249": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Symptom\n\n`sweep (macos, full suite)` fails on `main` at `6b034b9f8224` (run `33846424069`). The job has no `continue-on-error` (`.github/workflows/test.yml:370-373`), so it reddens the branch head.\n\n```\n19243 passed, 72 skipped, 422 warnings, 1 error in 2687.89s (0:44:47)\nERROR tests/e2e/test_toolchain_provisioning.py::test_provisioning_installs_then_builds_and_leaves_the_bundle_in_place\n  - subprocess.TimeoutExpired: Command '['git', '-C', '/Users/runner/work/rebar/rebar', 'rev-parse', 'HEAD']'\n    timed out after 5 seconds\n```\n\nThe test itself PASSES. The error is in the autouse `_no_repo_commits` guard's post-test probe (`tests/conftest.py:774` -> `tests/_isolation.py:68,39`).\n\n## Root cause (established, not assumed)\n\nThe cause is **runner contention**, not a leaked process/handle, and not the named test.\n\n1. The premise that this test provisions a real Node toolchain is **false**. It drives a shell\n   **stub** `npm` (`_SUCCEEDS`: `mkdir -p node_modules; exit 0`) under `tmp_path`. It is one of the\n   cheapest tests in the file. There is no real `npm ci`/esbuild child to leak.\n2. `git rev-parse HEAD` reads `.git/HEAD` plus refs and takes **no lock**. No leaked handle or child\n   process can serialize against it, so the leaked-handle reading has no mechanism.\n3. A patched clock is ruled out: CPython binds `from time import monotonic as _time` in\n   `subprocess`, so `subprocess.run`'s timeout check is immune to a `time.monotonic` patch.\n4. A leaked `PATH` is ruled out experimentally: `monkeypatch` (function-scoped, non-autouse) is\n   finalized BEFORE the autouse guard's post-yield, so the probe runs with the session `PATH`.\n5. `Popen: returncode: -9` shows the child was alive and killed by the timeout -- it was running,\n   not wedged on a git-specific resource.\n6. The same run emitted **400** `[rebar-ci-timing]` warnings (threshold 1.0s), topping out at\n   `built_distributions fixture_setup elapsed=4.562s` on a different worker. Ordinary fixture setup\n   on this runner reaches **91% of the probe's fixed 5s bound**.\n\nSo the defect is the **bound**, not the test: `GIT_PROBE_TIMEOUT_SECONDS = 5` is a single-sample fixed bound on a read-only idempotent probe that runs ~19,000 times under `-n 3` on a 45-minute macOS runner. 5s sits inside that runner's observed latency distribution, so the guard reports an infrastructure stall as a test ERROR.\n\n## Approach\n\nMake the probe **resilient**, not lenient. `git rev-parse HEAD` and `git status --porcelain` are read-only and idempotent, so a `TimeoutExpired` may simply be re-sampled: retry the probe up to `GIT_PROBE_ATTEMPTS` times, with no sleep between attempts -- the elapsed per-attempt timeout is itself the backoff, and adding a sleep would re-introduce the patched-`time.sleep` hazard that `_stable_subprocess_time` exists to avoid.\n\nA **persistent** timeout still raises, unchanged. That is deliberate: `_isolation.head` already re-raises `TimeoutExpired` so the guard fails loudly rather than silently ceasing to detect a HEAD move, and that property must survive -- it is the \"absence of execution reported as success\" trap. The change absorbs a **transient** stall and leaves the **persistent** failure loud.\n\nExplicitly not doing: skipping or marking the test on macOS (the test is innocent, and a skip would hide it), and not merely raising the per-attempt timeout (a re-exec is strictly better than a longer wait on one possibly-starved process).\n\n## Scope\n\n- `tests/_isolation.py` -- `_run_git_probe` gains the bounded retry and `GIT_PROBE_ATTEMPTS`.\n- `tests/unit/test_repo_isolation_guard.py` -- the `_blocking_git` shim gains the ability to block\n  every probe from a given call onward (persistent) as well as exactly one (transient), plus the new\n  tests below.\n\nNo `src/` change. `tests/conftest.py` and `tests/e2e/test_toolchain_provisioning.py` are NOT modified: the guard's caller and the innocent test both stay as they are.\n\n## Testing\n\n- `pytest tests/unit/test_repo_isolation_guard.py` -- the guard's self-test suite, including:\n  - a NEW test that a **transient** probe stall (one blocked call, then a responsive git) is\n    absorbed and `head()` returns the correct sha -- RED before the fix (`TimeoutExpired`), green\n    after;\n  - the EXISTING `test_commit_guard_fails_explicitly_when_head_times_out` and\n    `test_session_finish_fails_explicitly_when_porcelain_times_out`, re-pointed at a **persistent**\n    block, proving the guard still fails loudly and has not been silently weakened;\n  - the EXISTING `test_head_detects_a_commit` and `test_guard_fails_a_test_that_commits`, proving a\n    real HEAD move is still detected.\n- `make lint` and `make typecheck`.\n- `pytest tests/unit/test_mechanism_delta.py tests/unit/test_predates_gate_guard_parity.py tests/unit/test_api_surface_gate.py`.\n- `workflow_dispatch` of `test.yml` on the fix branch, proving `sweep (macos, full suite)` passes.\n\n## Acceptance Criteria\n\n- [ ] The cause is established with quoted evidence that distinguishes contention from a leaked\n      process or handle, with the rejected reading ruled out by mechanism rather than by assumption.\n- [ ] A transient probe stall no longer errors the test that happens to be running: a defect-seeded\n      reproduction fails RED before the change and passes after.\n- [ ] The guard is not weakened -- a real HEAD move is still detected and still fails the test, and\n      a **persistent** probe timeout still raises loudly rather than silently passing, each proven by\n      a test that fails if the property is removed.\n- [ ] The failing e2e test is not skipped, marked, or excluded on macOS; it is left untouched.\n- [ ] `sweep (macos, full suite)` passes in a `workflow_dispatch` run of `test.yml` against the fix.\n- [ ] `make lint`, `make typecheck`, and the mechanism-delta, predates-gate-parity and api-surface\n      gate tests all pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "sweep (macos, full suite) fails on main: teardown git-HEAD probe errors after the e2e toolchain provisioning test added by 2600"
+      },
       "created_at": "2026-09-04T08:45:38Z",
       "jira_id": "4591723",
       "jira_key": "REB-4615",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-04T08:45:41Z"
     },
@@ -71668,7 +71698,15 @@
     "1788507660444646001": "__rebar_unknown_comment_id__",
     "1788507824855016730": "__rebar_unknown_comment_id__",
     "1788508748502856001": "__rebar_unknown_comment_id__",
-    "1788508928029403001": "__rebar_unknown_comment_id__"
+    "1788508928029403001": "__rebar_unknown_comment_id__",
+    "1788511918166679001": "__rebar_unknown_comment_id__",
+    "1788512466408447001": "__rebar_unknown_comment_id__",
+    "1788512845575775001": "__rebar_unknown_comment_id__",
+    "1788512913113483001": "__rebar_unknown_comment_id__",
+    "1788513618747208001": "__rebar_unknown_comment_id__",
+    "1788513814491058001": "__rebar_unknown_comment_id__",
+    "1788514091879342001": "__rebar_unknown_comment_id__",
+    "1788514442955256001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
