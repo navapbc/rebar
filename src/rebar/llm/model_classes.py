@@ -223,8 +223,7 @@ def _openai_target(tail: str, *, endpoint: str | None) -> str:
     ``openai-chat`` and an ``openai-responses:`` string never reaches it, and vendor-side
     ``/v1/responses`` support for a custom base URL is UNKNOWN under the pin — so flipping a
     custom endpoint to Responses would silently ignore its ``base_url`` (capability matrix rows
-    2-3). An EXPLICIT ``openai-chat:`` qualifier / ``provider = "openai-chat"`` is honored
-    separately and always stays Chat; only this bare/inferred path flips."""
+    2-3)."""
     return f"openai-chat:{tail}" if endpoint else f"openai-responses:{tail}"
 
 
@@ -251,9 +250,9 @@ def _resolve_target(model: str, provider: str | None, *, endpoint: str | None = 
     deliberately NOT rejected here; see :func:`split_provider_qualifier`.
 
     ``endpoint`` is the custom OpenAI-compatible base URL configured for this target (a model
-    class slot / fallback candidate ``endpoint``, or a top-level ``base_url``), if any. It only
-    affects the bare/inferred ``openai`` family: with an endpoint present that family stays
-    ``openai-chat:``; without one it becomes ``openai-responses:`` (ticket 155c). See
+    class slot / fallback candidate ``endpoint``, or a top-level ``base_url``), if any. It
+    affects the whole OpenAI family: with an endpoint present that family stays
+    ``openai-chat:``; without one it becomes ``openai-responses:``. See
     :func:`_openai_target`.
     """
     if provider:
@@ -264,13 +263,10 @@ def _resolve_target(model: str, provider: str | None, *, endpoint: str | None = 
             )
         qualifier, _ = split_provider_qualifier(model)
         if qualifier == provider or {qualifier, provider} <= {"openai", "openai-chat"}:
-            # ``openai`` and ``openai-chat`` name the same provider family. A bare ``openai``
-            # request flips to Responses by default (ticket 155c); an explicit ``openai-chat``
-            # on EITHER side freezes today's Chat Completions wire contract.
+            # ``openai`` and ``openai-chat`` name the same provider family. Hosted OpenAI is
+            # Responses-only after the pre-1.0 removal; Chat remains only for custom endpoints.
             if {qualifier, provider} <= {"openai", "openai-chat"}:
                 tail = model.split(":", 1)[1] if qualifier else model
-                if "openai-chat" in {qualifier, provider}:
-                    return f"openai-chat:{tail}"
                 return _openai_target(tail, endpoint=endpoint)
             return model  # already qualified with the SAME provider — never double-prefix
         if qualifier:
@@ -281,12 +277,12 @@ def _resolve_target(model: str, provider: str | None, *, endpoint: str | None = 
                 f"conflicting provider configuration: provider={provider!r} but the model id "
                 f"{model!r} is already qualified for {qualifier!r}. Remove one of them."
             )
-        if provider == "openai":
+        if provider in {"openai", "openai-chat"}:
             return _openai_target(model, endpoint=endpoint)
         return f"{provider}:{model}"
     qualifier, _ = split_provider_qualifier(model)
     if qualifier:
-        if qualifier == "openai":
+        if qualifier in {"openai", "openai-chat"}:
             return _openai_target(model.split(":", 1)[1], endpoint=endpoint)
         return model
     inferred = infer_provider(model)
@@ -465,10 +461,9 @@ def primary_endpoint_for(
     slots = load_class_slots(repo_root) if slots is None else slots
     for name in CLASS_NAMES:
         slot = slots.get(name)
-        if (
-            slot is not None
-            and _resolve_target(slot.model, slot.provider, endpoint=slot.endpoint) == resolved
-        ):
+        if slot is None:
+            continue
+        if _resolve_target(slot.model, slot.provider, endpoint=slot.endpoint) == resolved:
             return slot.endpoint
     return None
 

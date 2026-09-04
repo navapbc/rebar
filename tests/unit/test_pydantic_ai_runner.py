@@ -107,9 +107,12 @@ def test_model_class_openai_target_defaults_to_responses_but_endpoint_stays_chat
 
     assert _resolve_target("gpt-4o", "openai") == "openai-responses:gpt-4o"
     assert _resolve_target("openai:gpt-4o", None) == "openai-responses:gpt-4o"
-    # explicit fallback + custom endpoint both stay on Chat
-    assert _resolve_target("openai-chat:gpt-4o", None) == "openai-chat:gpt-4o"
+    assert _resolve_target("openai-chat:gpt-4o", None) == "openai-responses:gpt-4o"
     assert _resolve_target("gpt-4o", "openai", endpoint="http://local/v1") == "openai-chat:gpt-4o"
+    assert (
+        _resolve_target("openai-chat:gpt-4o", None, endpoint="http://local/v1")
+        == "openai-chat:gpt-4o"
+    )
 
 
 # ── Runner selection ───────────────────────────────────────────────────────────

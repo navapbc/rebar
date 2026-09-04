@@ -1578,11 +1578,6 @@
           "''"
         ],
         [
-          "force_close",
-          "KEYWORD_ONLY",
-          "None"
-        ],
-        [
           "close_class",
           "KEYWORD_ONLY",
           "''"
