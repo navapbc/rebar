@@ -247,15 +247,19 @@ def test_bridge_help_avoids_internal_vocabulary_and_numeric_exit_codes(
         assert re.search(r"\b(?:[0-9]+)\b", text) is None
 
 
-def test_legacy_reconcile_keeps_dry_run_default(rebar_repo: Path, monkeypatch) -> None:
+def test_top_level_reconcile_is_unknown_before_reconciler_launch(
+    rebar_repo: Path, monkeypatch, capsys
+) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(
         subprocess,
         "call",
         lambda argv, *, env=None: calls.append(argv) or 0,
     )
-    assert _cli.main(["reconcile"]) == 0
-    assert calls[0][-2:] == ["--mode", "dry-run"]
+    assert _cli.main(["reconcile"]) == 1
+    captured = capsys.readouterr()
+    assert "unknown subcommand 'reconcile'" in captured.err.lower()
+    assert calls == []
 
 
 def test_pause_and_resume_dispatch_happy_path(rebar_repo: Path, tmp_path: Path) -> None:
@@ -387,7 +391,7 @@ def test_real_paused_reconciler_is_benign_and_mutates_no_ticket_or_lock(
     assert _run_cli(rebar_repo, "bridge", "pause", "database cutover").returncode == 0
     before = _tracker_snapshot(rebar_repo)
 
-    completed = _run_cli(rebar_repo, "reconcile", "--mode", "live")
+    completed = _run_cli(rebar_repo, "bridge", "sync")
 
     assert completed.returncode == 0
     assert completed.stdout == ""
@@ -408,7 +412,7 @@ def test_real_corrupt_gate_has_stable_error_without_traceback_or_mutation(
     _plant_remote_blob(remote, b"{corrupt")
     before = _tracker_snapshot(rebar_repo)
 
-    completed = _run_cli(rebar_repo, "reconcile", "--mode", "live")
+    completed = _run_cli(rebar_repo, "bridge", "sync")
 
     assert completed.returncode == 1
     assert completed.stdout == ""
@@ -420,15 +424,18 @@ def test_real_corrupt_gate_has_stable_error_without_traceback_or_mutation(
     assert _remote_blob(remote, "refs/reconciler/lock") is None
 
 
-def test_real_legacy_gate_keeps_old_error_contract(rebar_repo: Path, tmp_path: Path) -> None:
+def test_removed_legacy_route_does_not_consult_legacy_gate(
+    rebar_repo: Path, tmp_path: Path
+) -> None:
     remote = _configure_origin(rebar_repo, tmp_path)
     _plant_remote_blob(remote, b'{"gated_mode":"reconcile-check"}\n')
     before = _tracker_snapshot(rebar_repo)
 
     completed = _run_cli(rebar_repo, "reconcile", "--mode", "live")
 
-    assert completed.returncode == 4
-    assert "blocks advancement" in completed.stderr
+    assert completed.returncode == 1
+    assert "unknown subcommand 'reconcile'" in completed.stderr.lower()
+    assert "blocks advancement" not in completed.stderr
     assert "BRIDGE_PAUSED" not in completed.stderr
     assert _tracker_snapshot(rebar_repo) == before
     assert _remote_blob(remote, "refs/reconciler/lock") is None
@@ -450,7 +457,7 @@ def test_real_canonical_gate_is_benign_while_legacy_stays_4(
     assert _remote_blob(remote, "refs/reconciler/lock") is None
 
     legacy = _run_cli(rebar_repo, "reconcile", "--mode", "live")
-    assert legacy.returncode == 4
-    assert "blocks advancement" in legacy.stderr
+    assert legacy.returncode == 1
+    assert "unknown subcommand 'reconcile'" in legacy.stderr.lower()
     assert _tracker_snapshot(rebar_repo) == before
     assert _remote_blob(remote, "refs/reconciler/lock") is None

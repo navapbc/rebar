@@ -420,7 +420,6 @@ def _intercepts() -> tuple[Route, ...]:
     # a ``"module:attr"`` string resolved only at build time, never at import.
     _P = "rebar._cli._parsers.advanced"
     factories: dict[str, str] = {
-        "reconcile": f"{_P}.reconcile:build",
         "review-code": f"{_P}.llm:build_review_code",
         "scan-spec": f"{_P}.llm:build_scan_spec",
         "verify-completion": f"{_P}.llm:build_verify_completion",
@@ -449,7 +448,6 @@ def _intercepts() -> tuple[Route, ...]:
     # inside their own ``rebar._cli`` wrapper.
     _LLM = "rebar._cli._llm_commands"
     handlers: dict[str, str] = {
-        "reconcile": "rebar._cli:_reconcile",
         "review-code": f"{_LLM}:_review_code",
         "scan-spec": f"{_LLM}:_scan_spec",
         "verify-completion": f"{_LLM}:_verify_completion",

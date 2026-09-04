@@ -38,11 +38,13 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
-- **BREAKING (pre-1.0): Python and MCP `reconcile(mode=...)` compatibility APIs have been removed.**
-  The CLI `rebar reconcile --mode ...` and direct reconciler routes remain available, but
-  programmatic callers should use `bridge_preview`, `bridge_sync`, `bridge_run`,
-  `bridge_fsck`, and `bridge_status` explicitly. Stale Python/MCP reconcile callers now fail
-  before any reconciler subprocess or bridge work starts.
+- **BREAKING (pre-1.0): legacy reconcile compatibility surfaces have been removed.**
+  The top-level CLI `rebar reconcile` route, direct-engine `--mode reconcile-check`, direct
+  `--filter-local-ids`, Python `rebar.reconcile`, MCP `reconcile`, and the persisted
+  `reconcile_diagnostics` status field are gone. Use `rebar bridge preview` for live
+  Jira-vs-local proposed changes, `rebar bridge fsck` for offline binding/integrity audit,
+  and `rebar bridge status` for operational state. The scheduled profile spelling
+  `reconcile-check` remains accepted by bridge runners and maps to canonical preview.
 
 - **BREAKING (pre-1.0): `rebar.create_placeholder()` has been removed from the Python API.**
   Use `rebar.ensure_identity_for(provider, external_id, display_name)` instead. The

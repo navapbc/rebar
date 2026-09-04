@@ -40,11 +40,11 @@ from rebar_reconciler._pass_lock_lifecycle import (
 )
 
 # Defensive rebar bootstrap (Tier E E5b): the reconciler now imports the
-# in-package ``rebar.*`` store/reducer at runtime. The supported launchers
-# (`rebar reconcile` / `rebar.reconcile()`) use ``sys.executable``, so ``rebar``
-# is already importable there. This fallback covers a bare ``python -m
-# rebar_reconciler`` launched with only the engine dir on PYTHONPATH (the historic
-# GHA shape): this file lives at <site>/rebar/_engine/rebar_reconciler/__main__.py,
+# in-package ``rebar.*`` store/reducer at runtime. The supported launchers use
+# ``sys.executable``, so ``rebar`` is already importable there. This fallback covers
+# a bare ``python -m rebar_reconciler`` launched with only the engine dir on PYTHONPATH
+# (the historic GHA shape): this file lives at
+# <site>/rebar/_engine/rebar_reconciler/__main__.py,
 # so parents[3] is the dir containing the ``rebar`` package.
 try:
     import rebar  # noqa: F401
@@ -211,70 +211,6 @@ def _post_pause_preflight(
     if advisory.check_phase_gate(target_mode, repo_root):
         return held, _Disposition.PHASE_GATE
     return held, None
-
-
-def _run_reconcile_check(repo_root: Path) -> int:
-    """Execute a read-only reconciliation check and report discrepancies.
-
-    Returns 0 on success, 1 on error.
-    """
-    rc_mod = _try_load_step("reconcile_check")
-    if rc_mod is None:
-        print("ERROR: reconcile_check.py not found", file=sys.stderr)
-        return 1
-
-    fetcher = _try_load_step("fetcher")
-    if fetcher is None:
-        print("ERROR: fetcher.py not found — cannot load Jira snapshot", file=sys.stderr)
-        return 1
-
-    try:
-        # Fetch current Jira snapshot. reconcile-check is read-only — use
-        # compute_snapshot (no bridge_state/snapshots/<pass>.json write) so the
-        # diagnostic does not mutate the local store (ticket yaw-plait-doe).
-        pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-
-        jira_snapshot = fetcher.compute_snapshot(pass_id, repo_root)
-
-        # Load local tickets from the RESOLVED store (it is RELOCATABLE, so composing
-        # the default name under repo_root would diagnose the wrong directory). Bug
-        # ad39: the event-sourced store has no per-ticket ticket.json — the compiled
-        # ticket lives in <id>/.cache.json["state"]. rc_mod.load_local_tickets reads
-        # that (the old ticket.json read loaded nothing → all bindings orphaned).
-        from rebar.config import tracker_dir as _resolve_store
-
-        tracker_dir = _resolve_store(repo_root)
-        local_tickets: list[dict] = rc_mod.load_local_tickets(tracker_dir)
-
-        # Load binding store. BindingStore lives in binding_store.py — not in
-        # applier.py (the previous lookup `hasattr(applier, "BindingStore")`
-        # always failed because applier.py never exported the class, falling
-        # through to a list-returning stub that crashed reconcile_check's
-        # `.items()` call). Bug 0776: load binding_store.py directly via the
-        # same factory reconcile.py uses.
-        binding_store_mod = _try_load_step("binding_store")
-        if binding_store_mod is None or not hasattr(binding_store_mod, "load_binding_store"):
-            # Minimal stub: no bindings. all_bindings() returns a dict to
-            # match the protocol reconcile_check expects.
-            class _EmptyBindings:
-                def all_bindings(self) -> dict:
-                    return {}
-
-            binding_store = _EmptyBindings()
-        else:
-            binding_store = binding_store_mod.load_binding_store(repo_root)
-
-        report = rc_mod.reconcile_check(local_tickets, jira_snapshot, binding_store)
-        print(rc_mod.format_report(report))
-
-        # Write JSON report
-        output_path = tracker_dir / ".bridge_state" / "reconcile-check.json"
-        rc_mod.write_report_json(report, output_path)
-        print(f"\nFull report written to {output_path}")
-        return 0
-    except Exception as exc:  # noqa: BLE001 — CLI top-level: log and return exit code 1
-        print(f"ERROR: reconcile-check failed: {exc}", file=sys.stderr)
-        return 1
 
 
 def _optional_request_kwargs(
@@ -609,10 +545,6 @@ def main(argv: list[str] | None = None) -> int:
             return enumeration_exit
 
         target_mode = request.target_mode
-
-        # Step 1b: reconcile-check mode — read-only diagnostic, no lock needed.
-        if target_mode == mode_mod.Mode.RECONCILE_CHECK:
-            return _run_reconcile_check(repo_root)
 
         selection_ids, selection_error = _resolve_request_selection(request)
         if selection_error is not None:

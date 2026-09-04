@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 TIMEOUT_SECONDS = 3600
 
 MODE_COMMANDS: Mapping[str, tuple[str, ...]] = {
-    "reconcile-check": ("rebar", "reconcile", "--mode", "reconcile-check"),
+    "reconcile-check": ("rebar", "bridge", "preview"),
     "dry-run": ("rebar", "bridge", "preview"),
     "bootstrap-strict": ("rebar", "bridge", "sync", "--max-changes", "10"),
     "bootstrap-throttle": ("rebar", "bridge", "sync", "--max-changes", "100"),

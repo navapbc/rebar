@@ -14,6 +14,7 @@ import json
 import sys
 import types
 from pathlib import Path
+from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
 # Load reconcile.py via importlib (same pattern as test_reconcile_main.py)
@@ -433,8 +434,8 @@ class TestReconcileOnceFiltered:
 # ---------------------------------------------------------------------------
 
 
-class TestFilterLocalIdsArgParsing:
-    """Verify the --filter-local-ids parsing logic used in __main__.main()."""
+class TestFilterLocalIdsCliRemoval:
+    """The CLI-only ``--filter-local-ids`` surface is removed; internal plumbing remains."""
 
     def _load_main(self):
         name = "rebar_reconciler_main_under_test"
@@ -447,20 +448,16 @@ class TestFilterLocalIdsArgParsing:
         spec.loader.exec_module(mod)
         return mod
 
-    def test_parse_comma_separated(self):
-        raw = "abc,def,ghi"
-        result = {s.strip() for s in raw.split(",") if s.strip()}
-        assert result == {"abc", "def", "ghi"}
+    def test_filter_local_ids_rejects_before_pass_work(self, tmp_path, monkeypatch, capsys):
+        main_mod = self._load_main()
+        run_pass = MagicMock(side_effect=AssertionError("removed CLI filter reached pass work"))
+        monkeypatch.setattr(main_mod, "run_pass", run_pass)
 
-    def test_parse_with_whitespace(self):
-        raw = " abc , def , ghi "
-        result = {s.strip() for s in raw.split(",") if s.strip()}
-        assert result == {"abc", "def", "ghi"}
+        rc = main_mod.main(["--filter-local-ids=abc", "--repo-root", str(tmp_path)])
 
-    def test_parse_none_produces_none(self):
-        raw = None
-        result = None if raw is None else {s.strip() for s in raw.split(",") if s.strip()}
-        assert result is None
+        assert rc == 2
+        assert "filter-local-ids" in capsys.readouterr().err
+        run_pass.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
