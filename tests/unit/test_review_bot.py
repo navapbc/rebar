@@ -19,9 +19,12 @@ import dataclasses
 import datetime
 import json
 import logging
+import pathlib
 import shutil
 import subprocess
+import tempfile
 import time
+from types import SimpleNamespace
 
 import pytest
 from _healthcheck_oracles import assert_socket_healthcheck_semantics, healthcheck_test_argv
@@ -2850,7 +2853,11 @@ def test_review_bot_low_disk_admission_defers_before_clone(monkeypatch, tmp_path
             raise AssertionError("clone must not start below the hard free-space floor")
 
     g = CloneCountingGerrit()
-    monkeypatch.setattr(voter, "_review_clone_has_room", lambda _cfg: False, raising=False)
+    # The free-space seam moved from a voter alias into low_disk.pre_clone_refusal, which is
+    # now the single owner of both pre-clone host-disk conditions (bug 1ef8). Patch the owner.
+    from rebar.review_bot import low_disk
+
+    monkeypatch.setattr(low_disk, "review_clone_has_room", lambda _cfg: False)
 
     res = asyncio.run(voter.review_and_vote(_event(), config=cfg, gerrit=g, dedup=store))
 
@@ -3338,3 +3345,281 @@ def test_worker_does_not_discard_a_forced_rerun(monkeypatch, tmp_path):
     _drive_worker(appmod, [ev], _cfg(tmp_path))
 
     assert reviewed == [True], "a forced rerun must bypass the staleness check"
+
+
+# ── the review-bot clone path shares the gate-scratch refusal (bug 1ef8) ─────
+#
+# S1 (story aa40, change 2620) put the unreachable-scratch refusal in gate_admission(),
+# which wraps plan-review and completion-verifier. The review-bot's per-review clone does
+# NOT pass through it: it is a plain tempfile.TemporaryDirectory(prefix="reviewbot-")
+# following TMPDIR. So on a declared-but-unmounted scratch volume the gates refused loudly
+# while the review-bot kept cloning onto the root filesystem, silently — and a partial
+# refusal is worse than none, because the loud half creates confidence the protection is in
+# force. These tests pin the clone path onto the SAME predicate, with the SAME ADR 0069
+# deferral treatment the low-disk floor already gets.
+
+
+@pytest.fixture
+def scratch_host(tmp_path, monkeypatch):
+    """An isolated 'host', modelled on tests/unit/test_gate_scratch_volume_aa40.py.
+
+    ``tmp_path/var`` stands in for the durable ROOT filesystem (it always exists) and
+    ``tmp_path/var/gate-scratch`` is the mount point. Mounting is simulated by writing the
+    proof marker inside it; unmounting, by never writing it — which is exactly what an
+    unmount does to a file that lived on the volume.
+
+    BOTH env vars are pointed at the mount point because the two consumers read two
+    different names: ``REBAR_GATE_TMPDIR`` moves the snapshot store (and is what the shared
+    predicate derives its markers from), while ``TMPDIR`` is what the ``reviewbot-*`` clone
+    follows. That pairing is the deployed shape (infra/compose/docker-compose.yml).
+    """
+    from rebar import _config_sources
+    from rebar.llm import gate_admission as ga
+
+    parent = tmp_path / "var"
+    base = parent / "gate-scratch"
+    base.mkdir(parents=True)
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(base))
+    monkeypatch.setenv("TMPDIR", str(base))
+    # ``tempfile.gettempdir()`` MEMOISES its answer in ``tempfile.tempdir`` on first use, so
+    # in a process that has already made a temp file the env var alone is inert and the clone
+    # would keep landing on the real system temp — which would make the AC3 absence assertion
+    # pass vacuously. Setting the module attribute is what actually points the clone here.
+    monkeypatch.setattr(tempfile, "tempdir", str(base))
+    monkeypatch.setattr(_config_sources, "user_config_path", lambda: tmp_path / "absent.toml")
+
+    def declare() -> None:
+        (parent / ga._SCRATCH_REQUIRED_MARKER).write_text("")
+
+    def mount() -> None:
+        (base / ga._SCRATCH_MOUNTED_MARKER).write_text("")
+
+    return SimpleNamespace(base=base, parent=parent, declare=declare, mount=mount)
+
+
+class _CloneWitnessGerrit(FakeGerrit):
+    """A FakeGerrit that records whether the clone ran and WHAT it put on the mount point.
+
+    The during-call capture is not belt-and-braces: ``tempfile.TemporaryDirectory`` removes
+    its tree on ``__exit__``, so a post-call listing alone would be satisfied even by a run
+    that did clone onto the unmounted mount point. Recording the live listing at clone time
+    is what makes the absence assertion non-vacuous.
+    """
+
+    def __init__(self, base):
+        super().__init__()
+        self._base = base
+        self.clone_calls = 0
+        self.seen_during_clone: list[str] = []
+
+    def clone_change_ref(self, change_number, revision_ref, dest):
+        self.clone_calls += 1
+        self.seen_during_clone.extend(sorted(p.name for p in self._base.glob("reviewbot-*")))
+
+
+def _run_review(gerrit, tmp_path, cfg=None):
+    store = DedupStore(str(tmp_path / "v.db"))
+    return (
+        asyncio.run(
+            voter.review_and_vote(
+                _event(), config=cfg or _cfg(tmp_path), gerrit=gerrit, dedup=store
+            )
+        ),
+        store,
+    )
+
+
+def test_unmounted_scratch_refuses_the_review_bot_clone(scratch_host, tmp_path, monkeypatch):
+    """AC1: declaration present + proof absent → the clone path REFUSES, vote-lessly.
+
+    Built from the real two-marker files rather than by monkeypatching the predicate, so it
+    proves the wiring and not just the branch.
+    """
+    _patch_review(monkeypatch, [])
+    scratch_host.declare()
+    g = _CloneWitnessGerrit(scratch_host.base)
+
+    res, _ = _run_review(g, tmp_path)
+
+    assert res["status"] == "deferred"
+    assert res["gap_reason"] == "low-disk"
+    assert g.clone_calls == 0
+    assert g.votes == []
+
+
+def test_the_refusal_creates_no_clone_on_the_underlying_directory(
+    scratch_host, tmp_path, monkeypatch
+):
+    """AC3: the ABSENCE assertion — nothing is created on the root filesystem.
+
+    Modelled on S1's ``test_the_refusal_creates_no_store_on_the_underlying_directory``: the
+    point is not that an error was raised but that the bytes never landed. Before the guard
+    existed this test showed a ``reviewbot-*`` directory materialising on the unmounted mount
+    point — on the very disk ADR 0112 provisioned the volume to protect.
+    """
+    _patch_review(monkeypatch, [])
+    scratch_host.declare()
+    g = _CloneWitnessGerrit(scratch_host.base)
+
+    _run_review(g, tmp_path)
+
+    assert g.seen_during_clone == [], "a clone directory was created on the unmounted path"
+    assert list(scratch_host.base.glob("reviewbot-*")) == []
+    assert sorted(p.name for p in scratch_host.base.iterdir()) == []
+
+
+def test_unmounted_scratch_defers_rather_than_voting_minus_one(
+    scratch_host, tmp_path, monkeypatch, caplog
+):
+    """AC2 (under budget): an ADR 0069 retryable deferral — no vote, nothing posted."""
+    _patch_review(monkeypatch, [])
+    scratch_host.declare()
+    g = _CloneWitnessGerrit(scratch_host.base)
+
+    with caplog.at_level(logging.WARNING, logger="rebar.review_bot.voter"):
+        res, store = _run_review(g, tmp_path)
+
+    assert res["status"] == "deferred"
+    assert g.votes == []  # genuinely vote-less: no LLM-Review -1, no LLM-Review +1
+    assert store.already_voted("rebar~main~Iabc", "rev1") is False
+    assert store.attempt_count("rebar~main~Iabc", "rev1") == 1
+    assert "REVIEW_RETRY_DEFERRED" in caplog.text
+
+
+def test_unmounted_scratch_exhaustion_is_terminal_no_vote_never_minus_one(
+    scratch_host, tmp_path, monkeypatch, capsys
+):
+    """AC2 (budget spent): still NO vote — the ADR 0069 low-disk carve-out, not the -1.
+
+    This is the criterion the whole fix turns on. Every other retryable gap reason escalates
+    to the fail-closed -1 once its budget is spent; converting an unmounted disk into a
+    negative code-review verdict against an innocent change is the same category error as a
+    vacuous Verified +1. Reusing the ``low-disk`` reason is what makes that structural.
+    """
+    _patch_review(monkeypatch, [])
+    scratch_host.declare()
+    cfg = dataclasses.replace(_cfg(tmp_path), retryable_gap_max_attempts=1)
+    g = _CloneWitnessGerrit(scratch_host.base)
+
+    res, store = _run_review(g, tmp_path, cfg=cfg)
+
+    assert res["status"] == "deferred-exhausted"
+    assert res["gap_reason"] == "low-disk"
+    assert g.votes == []
+    assert store.already_voted("rebar~main~Iabc", "rev1") is False
+    assert "VOTER_ERROR" not in capsys.readouterr().err
+
+
+def test_no_declaration_leaves_the_clone_path_untouched(scratch_host, tmp_path, monkeypatch):
+    """AC4: the no-op case — every developer machine and CI runner.
+
+    No declaration means no dedicated volume was ever provisioned, so the guard is off and
+    the review runs exactly as before. A fix that refused here would break every contributor.
+    """
+    _patch_review(monkeypatch, [])
+    g = _CloneWitnessGerrit(scratch_host.base)
+
+    res, _ = _run_review(g, tmp_path)
+
+    assert g.clone_calls == 1
+    assert res["status"] != "deferred"
+    assert g.votes  # a normal PASS vote was cast
+
+
+def test_proof_without_declaration_also_leaves_the_clone_path_untouched(
+    scratch_host, tmp_path, monkeypatch
+):
+    """AC4, fourth quadrant: proof present, declaration absent → today's behaviour.
+
+    Arises when the root-side write failed or an operator removed it during a recovery. The
+    declaration is the only thing that arms the check, so its absence can never REFUSE.
+    """
+    _patch_review(monkeypatch, [])
+    scratch_host.mount()
+    g = _CloneWitnessGerrit(scratch_host.base)
+
+    res, _ = _run_review(g, tmp_path)
+
+    assert g.clone_calls == 1
+    assert res["status"] != "deferred"
+
+
+def test_a_mounted_scratch_volume_admits_the_clone(scratch_host, tmp_path, monkeypatch):
+    """The happy path on a provisioned host: declaration AND proof present."""
+    _patch_review(monkeypatch, [])
+    scratch_host.declare()
+    scratch_host.mount()
+    g = _CloneWitnessGerrit(scratch_host.base)
+
+    res, _ = _run_review(g, tmp_path)
+
+    assert g.clone_calls == 1
+    assert res["status"] != "deferred"
+
+
+def test_the_refusal_says_UNMOUNTED_not_merely_low_disk(scratch_host, tmp_path, monkeypatch):
+    """The sub-condition an operator actually needs, asserted rather than assumed.
+
+    Routing deliberately reuses the ``low-disk`` gap reason (ADR 0069's one carve-out from
+    the fail-closed -1), so the gap reason ALONE cannot tell an operator whether the disk is
+    full or the volume is gone — two conditions with different remediations. The distinct
+    message and the ``scratch_unavailable``/``scratch_detail`` coverage fields are what carry
+    that, and an untested message is a message that silently reverts to the low-disk wording.
+    """
+    from rebar.review_bot import low_disk
+
+    scratch_host.declare()
+    decision = low_disk.pre_clone_refusal(_cfg(tmp_path))
+
+    assert decision is not None
+    assert decision["gap_reason"] == "low-disk"  # routing is unchanged, on purpose
+    assert "not mounted" in decision["message"]
+    assert "root filesystem" in decision["message"]
+    assert decision["message"].startswith(low_disk.tag_line())
+    cov = decision["verdict"]["coverage"]
+    assert cov["low_disk"] is True  # what adapter._coverage_gap_reason routes on
+    assert cov["scratch_unavailable"] is True
+    assert str(scratch_host.base) in cov["scratch_detail"]
+
+    # And the free-space floor keeps its own, distinct wording — the two are not interchangeable.
+    assert "scratch_unavailable" not in low_disk.decision()["verdict"]["coverage"]
+    assert "not mounted" not in low_disk.decision()["message"]
+
+
+def test_the_clone_guard_shares_the_gates_predicate_rather_than_reimplementing_it():
+    """AC5: one owner, so enforcement and monitoring cannot disagree.
+
+    Two assertions, because the risk has two shapes. First, the review-bot's helper IS the
+    gate's predicate (patching the owner changes the review-bot's answer) — a copy would keep
+    returning None. Second, no module under ``src/rebar/review_bot`` names either marker
+    literal, so a future edit cannot fork the pair by string.
+    """
+    from rebar.llm import gate_admission as ga
+    from rebar.review_bot import low_disk
+
+    original = ga.scratch_unavailable_detail
+    try:
+        ga.scratch_unavailable_detail = lambda: "sentinel"  # type: ignore[assignment]
+        assert low_disk.scratch_unavailable_detail() == "sentinel"
+    finally:
+        ga.scratch_unavailable_detail = original  # type: ignore[assignment]
+
+    review_bot_dir = pathlib.Path(voter.__file__).parent
+    for module in sorted(review_bot_dir.glob("*.py")):
+        text = module.read_text()
+        assert ga._SCRATCH_MOUNTED_MARKER not in text, module
+        assert ga._SCRATCH_REQUIRED_MARKER not in text, module
+
+
+def test_monitoring_reads_the_same_proof_marker_as_the_clone_guard():
+    """AC5: ``observability.sh`` anchors on the constant the clone guard now shares.
+
+    S1 established this property for the gates; a probe that watched a different marker than
+    the code enforces would report a healthy volume while the review-bot refused, or the
+    reverse.
+    """
+    from rebar.llm import gate_admission as ga
+
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    src = (repo_root / "infra" / "scripts" / "observability.sh").read_text()
+    assert ga._SCRATCH_MOUNTED_MARKER in src
