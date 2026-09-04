@@ -128,7 +128,6 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "reserved word, so it returns a plain dict (no pydantic "
     "model). CLI/library JSON pinned to transition_result.",
     "reopen_ticket": "same {…, from, …} shape as transition; reserved word.",
-    "reconcile": "no canonical schema for the reconcile plan/result shape.",
     "review_code": "rebar.llm code-review op: live LLM call(s) over a git range, "
     "returns an aggregated review_result as a plain dict (no outputSchema) — it must "
     "NOT be auto-driven on the fixture store in CI. The CLI/library --output json path "

@@ -587,18 +587,6 @@
       ],
       "registrar": "read"
     },
-    "reconcile": {
-      "correspondence": "exact",
-      "library_params": [
-        "mode",
-        "repo_root"
-      ],
-      "library_symbol": "reconcile",
-      "mcp_params": [
-        "mode"
-      ],
-      "registrar": "read"
-    },
     "render_workflow": {
       "correspondence": "mcp_only",
       "library_params": [],

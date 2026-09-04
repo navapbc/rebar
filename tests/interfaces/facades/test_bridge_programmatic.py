@@ -46,10 +46,12 @@ def _plant_blob(repo: Path, ref: str, payload: dict) -> None:
     )
 
 
-def test_public_library_exports_additive_bridge_operations() -> None:
-    for name in sorted(_NEW_TOOLS | {"bridge_fsck", "reconcile"}):
+def test_public_library_exports_explicit_bridge_operations_only() -> None:
+    for name in sorted(_NEW_TOOLS | {"bridge_fsck"}):
         assert callable(getattr(rebar, name)), name
     assert _NEW_TOOLS <= set(rebar.__all__)
+    assert "reconcile" not in rebar.__all__
+    assert not hasattr(rebar, "reconcile")
 
 
 def test_bridge_status_reads_the_durable_snapshot(rebar_repo: Path) -> None:
@@ -77,11 +79,12 @@ def test_bridge_status_reads_the_durable_snapshot(rebar_repo: Path) -> None:
     assert result["lock_fence"] == 4
 
 
-def test_mcp_registers_typed_bridge_tools_without_removing_compatibility() -> None:
+def test_mcp_registers_typed_bridge_tools_without_legacy_reconcile() -> None:
     from rebar.mcp_server import build_server
 
     tools = {tool.name: tool for tool in asyncio.run(build_server().list_tools())}
-    assert _NEW_TOOLS | {"bridge_fsck", "reconcile"} <= set(tools)
+    assert _NEW_TOOLS | {"bridge_fsck"} <= set(tools)
+    assert "reconcile" not in tools
     for name in _NEW_TOOLS:
         assert tools[name].outputSchema, name
     assert set(tools["bridge_run"].inputSchema.get("properties", {})) == {"profile"}

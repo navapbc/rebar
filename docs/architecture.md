@@ -35,7 +35,7 @@ over one git-backed store.
     `rebar._commands` / `rebar.reducer` / `rebar.graph`, mapping the write path's
     exit 10 to `ConcurrencyError`; in-process reads via `_native.py` / `_reads.py`.
   - **MCP server** (`src/rebar/mcp_server.py`) — FastMCP tools built on the library;
-    write tools gated by `REBAR_MCP_READONLY`; `reconcile` defaults to dry-run.
+    write tools gated by `REBAR_MCP_READONLY`; bridge preview is non-mutating.
   - The interface-parity tier (`tests/interfaces/`) asserts all three behave
     identically over one store, and that every structured output conforms to its
     canonical JSON Schema (`src/rebar/schemas/`) — the machine-readable **output

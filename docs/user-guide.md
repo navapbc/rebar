@@ -688,13 +688,15 @@ compatibility boundary instead.
 
 Python and MCP callers have the same noun-based machine operations:
 `bridge_preview`, `bridge_run`, `bridge_sync`, `bridge_status`, `bridge_pause`,
-`bridge_resume`, `bridge_check_access`, and the existing `bridge_fsck`. Their results are
+`bridge_resume`, `bridge_check_access`, and `bridge_fsck`. Their results are
 schema-backed dictionaries. `bridge_run(profile=...)` accepts the same compatibility profile as
 the installed CLI and returns captured streams without printing, so it is safe for MCP stdio.
 `bridge_preview` cannot write; `bridge_run` and `bridge_sync` are explicitly mutating. The
-legacy library and MCP `reconcile(mode=...)` interfaces remain supported with the dry-run
-default and historical mode/return/error contracts. Interactive `bridge setup` remains CLI-only.
-Setting up Jira is an operator task — see
+legacy library and MCP `reconcile(mode=...)` interfaces are removed; use `bridge_preview` for
+former dry-run callers, `bridge_sync` or `bridge_run` for mutating callers, and
+`bridge_fsck` / `bridge_status` for diagnostic observables. The CLI `rebar reconcile` remains
+available, including `--mode reconcile-check`, for operators that need the live check report.
+Interactive `bridge setup` remains CLI-only. Setting up Jira is an operator task — see
 [jira-sync-setup.md](jira-sync-setup.md).
 
 ### Jira Cloud vs. Jira Data Center
