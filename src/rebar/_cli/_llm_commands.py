@@ -23,6 +23,18 @@ from rebar._cli._parsers.advanced import llm as _llm_parsers
 from rebar._mcp_errors import js_safe_dumps
 
 
+def _admission_refusal() -> tuple[type[Exception], ...]:
+    """The gate-admission refusals to catch AHEAD of the generic ``LLMError`` arms.
+
+    Both are ``LLMError`` subclasses carrying a retryable outcome, so a handler that already
+    routes through :func:`_llm_error_exit_code` needs nothing; this exists for the handlers
+    that hardcode exit 1 for an ``LLMError`` and would otherwise report a refusal to START as
+    a plain failure. Imported in-body to keep this module's import light."""
+    from rebar.llm.errors import GateCongestedError, GateScratchUnavailableError
+
+    return (GateCongestedError, GateScratchUnavailableError)
+
+
 def _gate_source_error() -> type[Exception]:
     """The snapshot/ref-resolution error class to catch at the CLI boundary so an
     unresolvable/absent ref, a missing-credential fetch, or an unreachable object DB at
@@ -361,6 +373,13 @@ def _review_plan(argv: list[str]) -> int:
             force=args.force,
             retry=getattr(args, "retry", False),
         )
+    except _admission_refusal() as exc:
+        # Host congestion / unreachable gate scratch: the gate never RAN, so this is not a
+        # BLOCK and not an INDETERMINATE. Exit 11 ("transient — retry") via the shared
+        # classifier, which reads the retryable outcome the refusal carries. Its own arm
+        # because this handler — unlike verify-completion's — hardcodes 1 for an LLMError.
+        sys.stderr.write(f"Error: {exc}\n")
+        return _llm_error_exit_code(exc)
     except llm.LLMError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
