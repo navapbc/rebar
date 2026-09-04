@@ -290,7 +290,7 @@ def resolve_model(cfg: LLMConfig, *, step: str | None = None, workflow: str | No
 
     The first three are explicit here; ``cfg.model`` already folds the last
     (``[tool.rebar.llm].model``, else ``DEFAULT_MODEL``). So a per-step ``model:``
-    (e.g. ``anthropic:claude-opus-4-8`` or ``openai-chat:gpt-4o``) wins, then a
+    (e.g. ``anthropic:claude-opus-4-8`` or ``openai-responses:gpt-4o``) wins, then a
     workflow-level ``model:``, then whatever the config/env/default resolved to.
     Returns a model id consumable by the runner (``provider:model`` or a bare model
     whose provider is inferred).
