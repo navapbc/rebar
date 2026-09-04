@@ -52,7 +52,7 @@ running. It is a plain command with no CI-provider dependency
 Exit status is 0 when nothing is flagged and 1 when at least one process is. It
 is strictly READ-ONLY: it inspects the process table and never signals, kills, or
 spawns anything. Reclaiming a flagged batch is an operator decision — see
-``AGENTS.md`` for the teardown guidance and the ``pkill`` recipe.
+``docs/orphaned-processes.md`` for the teardown guidance and the ``pkill`` recipe.
 
 The process-inspection seam (``list_processes``) is injectable via ``main``'s
 ``lister`` argument precisely so tests can feed synthetic records: a test that
@@ -235,7 +235,8 @@ def _report(flagged: Sequence[ProcessRecord], min_cpu_seconds: float, suppressed
         "the owning investigation is over, then terminate them by matching their "
         "command line, e.g. `pkill -f 'while True: pass'`. Bounding helpers at "
         "spawn time (`timeout 120 ... &`) and tearing down the process group "
-        "(`trap 'kill 0' EXIT INT TERM`) prevents the leak — see AGENTS.md."
+        "(`trap 'kill 0' EXIT INT TERM`) prevents the leak — see "
+        "docs/orphaned-processes.md."
     )
     if suppressed:
         print(

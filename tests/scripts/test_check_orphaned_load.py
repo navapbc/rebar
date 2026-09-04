@@ -266,6 +266,7 @@ def test_main_suppresses_system_daemons_and_says_how_many(
     assert "26898" in out
     assert "WindowServer" not in out
     assert "1 system-owned" in out
+    assert "docs/orphaned-processes.md" in out
 
 
 def test_main_include_system_flag_reports_the_daemons(
