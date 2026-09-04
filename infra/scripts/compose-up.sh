@@ -70,6 +70,21 @@ if ! bash "${SCRIPT_DIR}/docker-storage-cap.sh" --install; then
   echo "compose-up: WARN — the Docker storage cap was not installed; BuildKit build cache is UNBOUNDED until fixed (see infra/runbooks/review-bot-ops.md)" >&2
 fi
 
+# Install the journald disk ceiling (ADR 0112 decisions 1+2, story e956). Unlike the Docker
+# policy above this one does NOT have to precede a start: journald is already running by the
+# time any of this executes, so the script writes the drop-in and then asks systemd to restart
+# the logger — safe because PID 1 owns journald's sockets and holds its per-service stdout
+# stream fds in the unit's file-descriptor store, which it hands back on the way up. That
+# precondition is PROBED rather than assumed, and the restart is refused if the fd store is
+# absent. Either way the script then OBSERVES whether the ceiling is in force instead of
+# inferring it from an exit status.
+#
+# NON-FATAL, like the Docker cap: a box without a journal ceiling is a capacity problem
+# rebar-journal-usage-high alarms on, not a reason to refuse to boot the stack.
+if ! bash "${SCRIPT_DIR}/journald-cap.sh" --install; then
+  echo "compose-up: WARN — the journald disk ceiling was not installed; the journal is bounded only by systemd's derived default (see infra/runbooks/review-bot-ops.md)" >&2
+fi
+
 systemctl enable --now docker
 
 # The compose v2 plugin (`docker compose`). On AL2023 it is the docker-compose-plugin
