@@ -39,7 +39,20 @@ def build_criteria(*, prog: str) -> argparse.ArgumentParser:
     p_eval = subparsers.add_parser("eval", help="run a criterion's calibration fixtures live")
     p_eval.add_argument(
         "criterion_id",
+        nargs="?",
+        default=None,
         help="criterion id (e.g. F1, project.no_print; code-review: project.foo)",
+    )
+    p_eval.add_argument(
+        "--changed-since",
+        metavar="REF",
+        help="print plan-review criterion ids whose rubric changed since REF",
+    )
+    p_eval.add_argument(
+        "--require-live",
+        action="store_true",
+        help="with --changed-since: fail (non-zero) instead of exiting 0 when selected "
+        "criteria cannot be run live because no LLM backend/credentials are available",
     )
     p_eval.add_argument(
         "--runs", type=int, default=1, help="N-run stability: runs per fixture (default 1)"
