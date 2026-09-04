@@ -101,7 +101,7 @@ Order matters — secrets before the instance, infra before compose.
    # …repeat for gerrit-admin-password, github-replication-deploy-key,
    #   mcp-hmac-signing-key, anthropic-api-key, gerrit-bot-token, ssh host key.
    ```
-3. **Apply infra** (instance, volume, EIP, DLM, IAM, monitoring):
+3. **Apply infra** (instance, volumes, EIP, DLM, IAM, monitoring):
    ```bash
    cd infra/terraform
    terraform init                       # S3 remote backend, state lock
@@ -118,6 +118,22 @@ Order matters — secrets before the instance, infra before compose.
      replication deploy key + plugin config so the GitHub mirror resumes.
    - `infra/scripts/install-observability.sh` — re-arm the 5-min probe timer.
    - `infra/scripts/install-certbot-timer.sh` — TLS renewal.
+4b. **Confirm the gate-scratch volume mounted** (ADR 0112 decision 3, story
+   `aa40-cbda-ee38-481c`). `user_data.sh` mounts `aws_ebs_volume.gate_scratch` at
+   `var.gate_scratch_mount` (`/var/lib/rebar/gate-scratch`) and exits non-zero if it did
+   not take, so a clean boot has already proved this — but a restore that reuses an
+   existing instance has not:
+   ```bash
+   mountpoint -q /var/lib/rebar/gate-scratch && \
+     ls /var/lib/rebar/.gate-scratch-required /var/lib/rebar/gate-scratch/.gate-scratch-mounted
+   ```
+   **This volume is REBUILDABLE scratch, not data.** It carries the review-gate snapshot
+   store and the review-bot's per-review clones; it has no `prevent_destroy`, takes no DLM
+   snapshots, and needs no restore step — a fresh empty volume is a correct one. If the
+   markers are missing, `touch` them (see `review-bot-ops.md`); until the proof marker
+   exists, every plan-review and completion-verifier run REFUSES rather than writing to the
+   root filesystem, which is the designed behaviour and not an outage to work around.
+
 5. **Restore data** if this is a recovery (not a clean build): follow the restore
    drill's create-volume path, but this time attach the restored volume as the
    real `/var/gerrit` data volume (and update the terraform state / volume id

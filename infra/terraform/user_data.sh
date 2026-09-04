@@ -17,59 +17,119 @@ set -euo pipefail
 dnf install -y nvme-cli || true
 
 # ---------------------------------------------------------------------------
-# 1) Resolve the data volume's NVMe device dynamically.
+# 1) Resolve an EBS volume's NVMe device dynamically, by volume id.
 # ---------------------------------------------------------------------------
-# Nitro/Graviton presents EBS volumes as /dev/nvme*n1, NOT the /dev/sdf we asked
-# for in the attachment. We match by the EBS volume id. AWS encodes the volume
-# id (minus dashes) in the NVMe controller serial number.
-# Terraform's templatefile() substitutes ${data_volume_id} before this script is
-# ever executed. ShellCheck lints the UNRENDERED template and cannot know that.
-# shellcheck disable=SC2154
-VOL_NODASH=$(echo "${data_volume_id}" | tr -d '-')
+# Nitro/Graviton presents EBS volumes as /dev/nvme*n1, NOT the /dev/sdf/sdg we ask
+# for in the attachment. We match by the EBS volume id, which AWS encodes (minus
+# dashes) in the NVMe controller serial number.
+#
+# ONE function, two callers (the Gerrit data volume and the review-gate scratch
+# volume added by story aa40-cbda-ee38-481c). A second inline copy of this loop is
+# how the two would drift: the by-id fallback below exists because the nvme-cli path
+# has been observed to miss, and a copy that lacks it fails on exactly the boot the
+# fallback was added for.
+#
+# Terraform's templatefile() substitutes the volume ids before this script is ever
+# executed. ShellCheck lints the UNRENDERED template and cannot know that.
+resolve_ebs_device() {
+  vol_nodash=$(echo "$1" | tr -d '-')
+  found=""
 
-DATA_DEV=""
-for d in /dev/nvme*n1; do
-  [ -e "$d" ] || continue
-  if nvme id-ctrl -v "$d" 2>/dev/null | grep -qi "$VOL_NODASH"; then
-    DATA_DEV="$d"
-    break
-  fi
-done
-
-# Fallback: the by-id symlinks also embed the volume id in the serial.
-if [ -z "$DATA_DEV" ]; then
-  for link in /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_*; do
-    [ -e "$link" ] || continue
-    case "$link" in
-      *"$VOL_NODASH"*)
-        DATA_DEV=$(readlink -f "$link")
-        break
-        ;;
-    esac
+  for d in /dev/nvme*n1; do
+    [ -e "$d" ] || continue
+    if nvme id-ctrl -v "$d" 2>/dev/null | grep -qi "$vol_nodash"; then
+      found="$d"
+      break
+    fi
   done
-fi
 
-if [ -z "$DATA_DEV" ]; then
+  # Fallback: the by-id symlinks also embed the volume id in the serial.
+  if [ -z "$found" ]; then
+    for link in /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_*; do
+      [ -e "$link" ] || continue
+      case "$link" in
+        *"$vol_nodash"*)
+          found=$(readlink -f "$link")
+          break
+          ;;
+      esac
+    done
+  fi
+
+  [ -n "$found" ] || return 1
+  printf '%s\n' "$found"
+}
+
+# Format (idempotent) + mount by UUID through fstab. Returns non-zero if the device
+# cannot be resolved; the CALLER decides how loud that is, because the two volumes
+# have different failure dispositions.
+mount_ebs_volume() {
+  volume_id="$1"
+  mount_point="$2"
+  device=$(resolve_ebs_device "$volume_id") || return 1
+
+  echo "Resolved volume $volume_id -> $device"
+  if ! blkid "$device" >/dev/null 2>&1; then
+    echo "No filesystem on $device — creating xfs"
+    mkfs.xfs "$device"
+  fi
+
+  mkdir -p "$mount_point"
+  uuid=$(blkid -s UUID -o value "$device")
+  if ! grep -q "$uuid" /etc/fstab; then
+    echo "UUID=$uuid $mount_point xfs defaults,nofail 0 2" >> /etc/fstab
+  fi
+  mount -a
+}
+
+# ---------------------------------------------------------------------------
+# 2) Mount the Gerrit data volume at /var/gerrit.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2154
+if ! mount_ebs_volume "${data_volume_id}" /var/gerrit; then
   echo "FATAL: could not resolve NVMe device for volume ${data_volume_id}" >&2
   exit 1
 fi
-echo "Resolved data volume ${data_volume_id} -> $DATA_DEV"
 
 # ---------------------------------------------------------------------------
-# 2) Format (idempotent) + mount at /var/gerrit, persisted in fstab by UUID.
+# 2b) Mount the review-gate SCRATCH volume (ADR 0112 decision 3, story aa40).
 # ---------------------------------------------------------------------------
-if ! blkid "$DATA_DEV" >/dev/null 2>&1; then
-  echo "No filesystem on $DATA_DEV — creating xfs"
-  mkfs.xfs "$DATA_DEV"
+# Snapshot store + review-bot clones live here instead of on the root filesystem,
+# so a review burst can no longer wedge the OS disk (bug 3276).
+#
+# FAILS LOUD, and that is the point. A bare mount point is an ordinary directory:
+# if the mount silently does not take, every consumer keeps working — on root —
+# and the volume's failure mode becomes exactly the outage it was built to
+# prevent. `mount -a` alone does not prove the mount happened (a `nofail` entry is
+# skipped quietly), so the mount is ASSERTED with `mountpoint` afterwards.
+# Both names are terraform template variables substituted before this ever runs, and
+# ShellCheck lints the UNRENDERED template — so each reference needs its own directive
+# (a disable comment covers only the line that follows it).
+# shellcheck disable=SC2154
+GATE_SCRATCH_MOUNT="${gate_scratch_mount}"
+# shellcheck disable=SC2154
+if ! mount_ebs_volume "${gate_scratch_volume_id}" "$GATE_SCRATCH_MOUNT"; then
+  echo "FATAL: could not resolve NVMe device for gate-scratch volume ${gate_scratch_volume_id}" >&2
+  exit 1
+fi
+if ! mountpoint -q "$GATE_SCRATCH_MOUNT"; then
+  echo "FATAL: $GATE_SCRATCH_MOUNT is not a mount point after mount -a — refusing to leave gate scratch on the ROOT filesystem" >&2
+  exit 1
 fi
 
-mkdir -p /var/gerrit
-
-DATA_UUID=$(blkid -s UUID -o value "$DATA_DEV")
-if ! grep -q "$DATA_UUID" /etc/fstab; then
-  echo "UUID=$DATA_UUID /var/gerrit xfs defaults,nofail 0 2" >> /etc/fstab
-fi
-mount -a
+# The two marker files rebar's gate admission reads (rebar.llm.gate_admission).
+# They are on DIFFERENT filesystems on purpose, which is what makes "mounted" and
+# "unmounted" tellable apart at all:
+#   .gate-scratch-required — beside the mount point, on ROOT: the DECLARATION that
+#     this host has a dedicated scratch volume. Survives an unmount.
+#   .gate-scratch-mounted  — inside the mount point, on the VOLUME: the PROOF.
+#     Disappears with the volume.
+# Declaration present + proof absent => gate admission refuses instead of quietly
+# repopulating the store on root.
+touch "$GATE_SCRATCH_MOUNT/../.gate-scratch-required"
+touch "$GATE_SCRATCH_MOUNT/.gate-scratch-mounted"
+chmod 0700 "$GATE_SCRATCH_MOUNT"
+echo "Gate scratch mounted at $GATE_SCRATCH_MOUNT and marked"
 
 # ---------------------------------------------------------------------------
 # 3) Fetch the SecureString secrets from SSM (instance role grants read on
