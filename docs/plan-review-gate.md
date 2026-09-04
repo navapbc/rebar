@@ -475,6 +475,16 @@ outcome is committed at
 `false_accept: 0.0`), and the offline CI proxy proves the corpus TP/TN shape and calibration
 arithmetic under an injected perfect solve.
 
+Per-criterion regression fixtures are **mined** from the persisted `REVIEW_RESULT` sidecar
+corpus rather than hand-authored, and admitted only under a written bar — admissible
+evidence, the escaped-defect positive-only rule, the vintage gate, tiered admission bars, a
+reproduction-consensus-plus-epoch-majority reproduce-before-admit rule, change-triggered
+execution off the weekly cron, and the gap-only heal loop with its `unreliable-criterion:`
+breaker. That protocol is recorded in
+[ADR 0113](adr/0113-fixture-mining-and-admission-protocol.md)
+(`docs/adr/0113-fixture-mining-and-admission-protocol.md`), which extends the ADR 0109 replay
+harness.
+
 ### The advisory cap
 
 The surfaced advisory findings are capped at the top-N by priority (default **20**,
