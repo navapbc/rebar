@@ -1279,16 +1279,17 @@ options:
 ### `criteria`
 
 ```
-Usage: rebar criteria [-h] {eval} ...
+Usage: rebar criteria [-h] {eval,heal} ...
 
 Evaluate + calibrate review criteria.
 
 positional arguments:
-  {eval}
-    eval      run a criterion's calibration fixtures live
+  {eval,heal}
+    eval       run a criterion's calibration fixtures live
+    heal       mine regression fixtures for gap criteria
 
 options:
-  -h, --help  show this help message and exit
+  -h, --help   show this help message and exit
 ```
 
 ### `identity`

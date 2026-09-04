@@ -109,8 +109,33 @@ def _criteria(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "eval":
         return _criteria_eval(args)
+    if args.cmd == "heal":
+        return _criteria_heal(args)
     parser.print_help()
     return 1
+
+
+def _criteria_heal(args: argparse.Namespace) -> int:
+    from rebar import config
+    from rebar.llm.errors import LLMError
+    from rebar.llm.evals.fixture_mining.heal import heal_fixtures, production_attempter
+
+    repo_root = _repo_root_or_none(config)
+    if repo_root is None:
+        repo_root = str(Path.cwd())
+    try:
+        if args.dry_run:
+            report = heal_fixtures(repo_root, dry_run=True)
+            for criterion_id in report.attempted:
+                sys.stdout.write(f"{criterion_id}\n")
+            return 0
+        ledger_path = Path(repo_root) / ".rebar" / "fixture_heal_ledger.jsonl"
+        attempter = production_attempter(repo_root, ledger_path=ledger_path, cap_usd=25.0)
+        heal_fixtures(repo_root, attempter=attempter, ledger_path=ledger_path)
+    except LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    return 0
 
 
 def _criteria_eval(args: argparse.Namespace) -> int:
