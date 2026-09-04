@@ -312,6 +312,7 @@ def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
     SHED does NOT make verify agentic — the verifier only re-grounds findings that actually
     ran (the same rule the shared `pass3_over_findings` site applies)."""
     from . import registry
+    from .terraform_seam import any_terraform_evidence
 
     findings = [
         f
@@ -321,6 +322,11 @@ def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
     grounded = any(
         any(c in registry.CODEBASE_GROUNDED for c in (f.get("criteria") or [])) for f in findings
     )
+    # Terraform-evidence findings (REB-640) also demand the AGENTIC Pass-2: the Terraform
+    # verifier must issue its OWN structural query (it may reuse the immutable parse cache but
+    # never accepts a Pass-1 receipt as verification), which only the agentic branch — carrying
+    # the per-call Terraform tool provider — can do. A single-turn verify cannot re-ground.
+    grounded = grounded or any_terraform_evidence(findings)
     return {"code_grounded": bool(grounded)}
 
 

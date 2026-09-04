@@ -237,11 +237,18 @@ def run_pass1(
     agent: list[dict],
     coverage: dict[str, Any],
     cap_override: float | None = None,
+    tf_provider: Any = None,
 ) -> list[dict[str, Any]]:
     """Pass-1 (parallel single-turn chunks + per-criterion agent finders + container
     + ISF). Returns the raw findings list (the too-big/shed routing + Pass-2/Pass-3
     are applied by the orchestrator). ``cap_override`` is the explicit per-plan cap passed to
-    :func:`sizing.shed_to_budget`, used verbatim rather than centrality-scaled."""
+    :func:`sizing.shed_to_budget`, used verbatim rather than centrality-scaled.
+
+    ``tf_provider`` (REB-640) is the Terraform Pass-1 tool hook
+    (:func:`rebar.llm.plan_review.terraform_seam.pass1_tool_hook`), threaded verbatim to every
+    :func:`sizing.pass1_with_ladder` call — the batch AND the per-criterion ladder-recovery
+    calls — so a T10 agentic finder gets the grounding tools on its ``extra_tools``. ``None``
+    (the default, and every non-Terraform review) is byte-identical to before."""
     plan = ctx.plan_text
     # G5 decomposition signal (spangly-beggarly-blackrhino): the authoritative,
     # store-derived child summary, injected into ONLY the chunk that carries G5 (below) so
@@ -340,7 +347,9 @@ def run_pass1(
             # A checkpoint-served chunk made NO LLM call this run — zero usage records.
             discovery_trace.append(_trace_record(unit_plan, "resumed", cached.usage, cached))
             return cached.content, []
-        out, calls = _pass1_with_ladder(runner, cfg, plan, chunk, agentic, ladder_events, extra)
+        out, calls = _pass1_with_ladder(
+            runner, cfg, plan, chunk, agentic, ladder_events, extra, tf_provider
+        )
         # FALSE-SUCCESS FIX: a unit that completed NO real LLM call AND produced NO
         # finding is a FAILURE — never checkpoint it (a resumable clean success).
         if (not calls) and (not out):

@@ -190,7 +190,7 @@ def _drive_the_real_ladder(monkeypatch, boom: BaseException) -> tuple[list, list
 
     calls: list[tuple[str, list[str]]] = []
 
-    def _always_fails(runner, cfg, *, plan, chunk, agentic, extra_context=""):
+    def _always_fails(runner, cfg, *, plan, chunk, agentic, extra_context="", tf_provider=None):
         calls.append((cfg.model, [c["id"] for c in chunk]))
         raise boom
 
