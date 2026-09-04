@@ -275,6 +275,16 @@ class ReclaimConfig:
 
 
 @dataclass
+class FixtureHealConfig:
+    # mechanism-ok: config_key fixture_heal.interval_days — 1cef fixture-heal interval
+    # read-via: config.py fixture_heal_interval_days()
+    interval_days: int = _documented(
+        30,
+        "Sets the scheduled fixture-mining heal loop interval in days.",
+    )
+
+
+@dataclass
 class SyncConfig:
     # read-via: config.py resolve_push_mode()
     push: str = _documented(
@@ -704,6 +714,8 @@ class Config:
     compact: CompactConfig = field(default_factory=CompactConfig)
     # read-via: config.py reclaim_horizon_days()
     reclaim: ReclaimConfig = field(default_factory=ReclaimConfig)
+    # read-via: config.py fixture_heal_interval_days()
+    fixture_heal: FixtureHealConfig = field(default_factory=FixtureHealConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
     ui: UiConfig = field(default_factory=UiConfig)
@@ -734,6 +746,7 @@ _SECTION_CLASSES: dict[str, type] = {
     "ticket_clarity": TicketClarityConfig,
     "compact": CompactConfig,
     "reclaim": ReclaimConfig,
+    "fixture_heal": FixtureHealConfig,
     "sync": SyncConfig,
     "mcp": McpConfig,
     "ui": UiConfig,
