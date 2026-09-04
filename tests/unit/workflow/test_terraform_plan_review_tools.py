@@ -113,6 +113,14 @@ def test_terraform_call_gets_tools_and_finalizer(tmp_path: Path) -> None:
     assert finalize is not None
     # Issue a real refutation query so the session ledger records reads, then finalize: the
     # finalizer frees the session AND folds its reads into the usage sink deterministically.
+    # A real parse needs the OPTIONAL `grounding-terraform` extra; without it every query is a
+    # closed `missing_extra` abstention, so only this assertion depends on it. Guarded per-TEST,
+    # not module-scope: the other tests in this module pin the seam's routing and its extra-less
+    # contract, which are exactly what a lean lane should still run. On the gating lane
+    # `tests/conftest.py` arms `tests/_extra_guard.py`, which rebinds `pytest.importorskip` to a
+    # strict variant under REBAR_REQUIRE_EXTRAS=1 — so this same call is a HARD ERROR there if
+    # the extra that lane installs ever silently vanishes (bug 599e-77da-29dd-482d).
+    pytest.importorskip("hcl2")
     lookup = next(t for t in tools if getattr(t, "__name__", "") == "terraform_lookup_declaration")
     result = lookup("aws_instance.web", module_path="infra")
     assert result["evidence"]["outcome"] == "refuted"
