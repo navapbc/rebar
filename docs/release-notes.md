@@ -367,12 +367,11 @@ string is the audit reason. An explicitly empty string is still a supplied force
 recorded as `(no reason given)`, matching a bare CLI `--force`. This applies to both
 `rebar.claim()` and `rebar.transition()`.
 
-For migration, `rebar.transition(force=True)` and
-`rebar.transition(force_close="<reason>")` still work temporarily, emit the registered
-deprecation warning, and map to the unified value. If a caller supplies both the canonical
-string `force` and deprecated `force_close`, the canonical value wins. `reason` no longer
-doubles as a force note; it is only the justification for a reason-required administrative
-close.
+The temporary migration aliases have now been removed before v1.0:
+`rebar.transition(force=True)` and `rebar.transition(force_close="<reason>")` raise
+`TypeError` naming the replacement `force="<explicit reason>"` spelling. `reason` no
+longer doubles as a force note; it is only the justification for a reason-required
+administrative close.
 
 This does not grant automated import a new bypass: an NDJSON replay close remains an ordinary
 close and respects the target repository's completion-verification policy. The durable reduced
@@ -657,8 +656,8 @@ gate. Update stored agent instructions and automation accordingly.
 
 That 0.12.0 release changed only the CLI: at that release the library kwarg
 `rebar.transition(..., force_close=...)` was unchanged, and no force bypass was exposed over
-MCP. The newer library-normalization note above supersedes the first statement for current
-callers.
+MCP. Current releases have also removed the library `force_close` kwarg; use the canonical
+reason-carrying `force` parameter.
 
 ## Project policy cutover — plan-review material pins and close reviews
 

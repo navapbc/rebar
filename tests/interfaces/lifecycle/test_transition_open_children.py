@@ -75,7 +75,9 @@ def test_library_transition_force_does_NOT_close_parent_with_open_child(
     rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
 
     with pytest.raises(RebarError, match="unresolved"):
-        rebar.transition(parent, "open", "closed", force=True, repo_root=str(rebar_repo))
+        rebar.transition(
+            parent, "open", "closed", force="operator override", repo_root=str(rebar_repo)
+        )
     assert _status(parent, rebar_repo) == "open"  # still not closed
 
 

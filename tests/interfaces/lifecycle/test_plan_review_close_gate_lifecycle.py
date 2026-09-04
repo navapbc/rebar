@@ -87,7 +87,7 @@ def test_force_close_bypasses_plan_gate_but_not_structural_children(
             parent,
             "in_progress",
             "closed",
-            force_close="approved",
+            force="approved",
             repo_root=str(rebar_repo),
         )
 
@@ -106,7 +106,7 @@ def test_force_close_bypasses_plan_gate(rebar_repo: Path, monkeypatch) -> None:
         tid,
         "in_progress",
         "closed",
-        force_close="approved",
+        force="approved",
         repo_root=str(rebar_repo),
     )
 

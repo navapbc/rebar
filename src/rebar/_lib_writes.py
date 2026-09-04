@@ -20,12 +20,13 @@ Both are re-exported below, so every pre-split import path still resolves:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import wraps
 from typing import TYPE_CHECKING, Literal, cast, overload
 
 from rebar import config
 from rebar._commands.gates import log_advisory_warning as _warn_advisory
 from rebar._commands.gates import log_description_cap_warning as _warn_description_cap
-from rebar._deprecations import warn_deprecated
 from rebar._errors import ConcurrencyError, RebarError
 
 # ── Re-exports of the concerns split out of this module ──────────────────────
@@ -241,34 +242,37 @@ def idea(
     }
 
 
-def _normalize_transition_force(force: str | bool | None, force_close: str | None) -> str | None:
-    """Collapse the retired split force-bypass surface onto the unified ``force``.
+def _normalize_transition_force(force: str | None) -> str | None:
+    """Validate the public transition force-bypass surface.
 
     The single approved shape is ``force: str | None`` — the audit reason — exactly like
     :func:`claim`: ``None`` means "not forcing"; any string forces, bypassing whichever gate
     this transition hits (start-work OR completion-verify close). An empty supplied string is
     still a present force and is rendered as ``"(no reason given)"`` by the command core.
 
-    The two pre-unification spellings are honored as deprecation ALIASES (ticket
-    blusterous-earthly-kitten): the boolean ``force=True`` maps to ``"(no reason given)"``,
-    and the separate ``force_close="<reason>"`` close-bypass parameter maps to
-    ``force="<reason>"`` only when no canonical string was supplied. Thus an explicit
-    canonical ``force`` — including ``""`` — wins over the deprecated alias. Both aliases
-    WARN through the central registry."""
-    canonical_force_supplied = isinstance(force, str)
-    result: str | None
+    The retired boolean ``force=True`` compatibility spelling is rejected at the library
+    boundary so stale callers do not silently bypass gates after the pre-1.0 removal."""
     if isinstance(force, bool):
-        warn_deprecated("lib:rebar.transition(force=True)", via="warning")
-        result = "(no reason given)" if force else None
-    else:
-        result = force
-    if force_close:
-        warn_deprecated("lib:rebar.transition(force_close=...)", via="warning")
-        if not canonical_force_supplied:
-            result = force_close
-    return result
+        message = f'rebar.transition(force={force}) was removed; use force="<explicit reason>"'
+        raise TypeError(message)
+    return force
 
 
+def _reject_removed_transition_kwargs(
+    func: Callable[..., TransitionResult],
+) -> Callable[..., TransitionResult]:
+    @wraps(func)
+    def wrapper(*args: object, **kwargs: object) -> TransitionResult:
+        if "force_close" in kwargs:
+            raise TypeError(
+                'rebar.transition(force_close=...) was removed; use force="<explicit reason>"'
+            )
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+@_reject_removed_transition_kwargs
 def transition(
     ticket_id: str,
     current_status: str,
@@ -276,7 +280,6 @@ def transition(
     *,
     force: str | None = None,
     reason: str = "",
-    force_close: str | None = None,
     close_class: str = "",
     caused_by: str = "",
     ref: str | None = None,
@@ -315,10 +318,6 @@ def transition(
     change/ticket, overriding git-blame auto-derivation; ignored for non-bug transitions.
     ``ref`` is the git ref whose committed tree the completion close gate verifies (and
     signs against); ``None`` means HEAD (today's behavior).
-
-    The boolean ``force=True`` and the separate ``force_close="<reason>"`` parameter are
-    DEPRECATED aliases (they WARN and map onto ``force``); see
-    :func:`_normalize_transition_force`.
     """
     # In-process (Tier E E3): resolve the id, then run the shared transition core
     # (ticket-transition.sh was retired from this path). The structured result
@@ -330,7 +329,7 @@ def transition(
     from rebar._engine_support.resolver import resolve_ticket_id
 
     emit_cross_session_warning(ticket_id, repo_root=repo_root)
-    force = _normalize_transition_force(force, force_close)
+    force = _normalize_transition_force(force)
 
     # Mirror the CLI's admission rule (tickets 3803 + fc20 + bug d54b): the free-text
     # ``reason`` is persisted as ``close_reason`` ONLY on a non-force close whose class can

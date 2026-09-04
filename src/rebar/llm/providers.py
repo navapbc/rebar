@@ -125,7 +125,11 @@ class ProviderSession:
         constructing (or importing the optional package behind) anything: a rebar
         builder is registered, OR pydantic-ai's own ``known_model_names()`` (cheap
         type introspection, see ``_pydantic_ai_known_providers``) recognizes the
-        name."""
+        name. Hosted ``openai-chat`` is intentionally not delegated after the
+        pre-1.0 Responses cutover; configure a custom ``base_url``/candidate
+        ``endpoint`` to keep Chat Completions."""
+        if provider_name == "openai-chat" and not (self._cfg.base_url or self._endpoint_override):
+            return False
         return provider_name in self._builders or provider_name in _pydantic_ai_known_providers()
 
     def provider_factory(self, provider_name: str) -> Any:
@@ -167,6 +171,13 @@ class ProviderSession:
             builder = self._build_openai
         if builder is not None:
             return builder(provider_name)
+
+        if provider_name == "openai-chat" and not self._cfg.base_url:
+            raise LLMConfigError(
+                "hosted openai-chat provider selection was removed; use "
+                "'openai-responses' for hosted OpenAI or configure base_url/endpoint "
+                "for an OpenAI-compatible Chat Completions server"
+            )
 
         if provider_name in _pydantic_ai_known_providers():
             from pydantic_ai.providers import infer_provider

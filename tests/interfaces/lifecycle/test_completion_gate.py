@@ -249,22 +249,20 @@ def test_force_close_skips_verify_and_sign(rebar_repo: Path, monkeypatch) -> Non
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "unsigned"
 
 
-def test_library_force_close_matches_cli(rebar_repo: Path, monkeypatch) -> None:
-    """clay-cake-act: the library ``rebar.transition(..., force_close=...)`` reaches the SAME
+def test_library_force_matches_cli(rebar_repo: Path, monkeypatch) -> None:
+    """clay-cake-act: the library ``rebar.transition(..., force=...)`` reaches the SAME
     completion-gate-bypass seam as the CLI ``--force`` — both close the ticket WITHOUT
-    running the verifier and leave it closed-WITHOUT-signature, identically. (Before the fix
-    the library wrapper exposed only ``force``, so a library consumer had no in-process bypass
-    and had to shell out to the CLI — the parity gap.)"""
+    running the verifier and leave it closed-WITHOUT-signature, identically."""
     import sys
 
     _commit(rebar_repo)
     _enable(rebar_repo)
     monkeypatch.setattr(rebar.llm, "verify_completion", _never)  # neither path may verify
 
-    # Library path: the new force_close= parameter.
+    # Library path: the canonical reason-carrying force parameter.
     tid_lib = _make(rebar_repo)
     out = rebar.transition(
-        tid_lib, "in_progress", "closed", force_close="lib override", repo_root=str(rebar_repo)
+        tid_lib, "in_progress", "closed", force="lib override", repo_root=str(rebar_repo)
     )
     assert out["to"] == "closed"
 
