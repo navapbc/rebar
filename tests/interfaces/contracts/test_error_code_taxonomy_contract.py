@@ -60,6 +60,9 @@ _materialize_llm_error_tree()
 EXPECTED_CODE: dict[str, str] = {
     # availability faults — the only members that keep ``llm_unavailable`` by their own type
     "LLMError": "command_failed",
+    # admission refusals: the gate never started, so neither a runner failure nor an outage
+    "GateCongestedError": "gate_congested",
+    "GateScratchUnavailableError": "gate_scratch_unavailable",
     "LLMUnavailableError": "llm_unavailable",
     "LLMConfigError": "llm_unavailable",
     "PromptError": "llm_unavailable",

@@ -240,6 +240,26 @@ def resolve_gate_min_free_bytes(
     return max(0, gib) * 1024 * 1024 * 1024
 
 
+def resolve_gate_max_concurrent(default: int, root: str | os.PathLike[str] | None = None) -> int:
+    """Concurrent-gate admission cap: ``[snapshot].max_concurrent_gates`` > ``default``.
+
+    ADR 0112 decision 5's knob. ``0`` DISABLES the bound — the same off-switch idiom
+    ``max_bytes`` and ``max_entries`` already use. A malformed value falls back through
+    :func:`_snapshot_int`, and a NEGATIVE one falls back here rather than being clamped to
+    zero: clamping would silently disarm the cap, and an unbounded host is precisely the
+    failure the cap exists to prevent, so a typo must not be a route to it.
+
+    No ``REBAR_GATE_*`` env tier yet, unlike every neighbouring gate knob. A new ``REBAR_*``
+    literal is a new ``env_var`` mechanism, and bug ``a1f1-a30d-2d50-4f5a`` records that a new
+    mechanism is currently unlandable (the ratchet's own suite asserts ``new == 0`` regardless
+    of a ``# mechanism-ok:`` marker). ``[snapshot]`` is a reserved section and so is absent
+    from the ``_SECTIONS`` the config detectors read, which is why the config tier lands; the
+    env tier is one line here once ``a1f1`` is fixed."""
+    key = "max_concurrent_gates"
+    value = _snapshot_int(None, _snapshot_table(root), key, {key: default})
+    return default if value < 0 else value
+
+
 # --------------------------------------------------------------------------- #
 # Below-seam CLI/command resolvers (RP-04 config-ownership cutover, ticket 9515).
 # These OWN the ambient env reads that previously sat BELOW the composition seam in
