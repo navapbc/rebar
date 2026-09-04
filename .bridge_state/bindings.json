@@ -143,6 +143,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:50:42Z"
     },
+    "00b4-b253-3052-4181": {
+      "created_at": "2026-09-04T01:06:28Z",
+      "jira_id": "4591636",
+      "jira_key": "REB-4529",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:06:31Z"
+    },
     "00c6-e96e-3f04-434d": {
       "baseline": {
         "assignee": {
@@ -227,6 +234,13 @@
       "peer_parent": "REB-4267",
       "state": "confirmed",
       "updated_at": "2026-09-01T01:20:55Z"
+    },
+    "0129-5710-c25f-4750": {
+      "created_at": "2026-09-04T01:06:33Z",
+      "jira_id": "4591637",
+      "jira_key": "REB-4530",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:06:36Z"
     },
     "012e-bd01-75c6-40a3": {
       "baseline": {
@@ -2303,7 +2317,7 @@
     "08ab-60d2-3082-4b47": {
       "baseline": {
         "assignee": null,
-        "description": "## Context\n\nThis slice prevents Terraform search gaps and runtime-expression overclaims in T10 Pass 1 and independent Pass 2.\n\n## Scope\n\n### Optional boundary\n\nAdd `grounding-terraform = [\"python-hcl2==8.1.3\"]` and the `hcl2` probe. In `_capabilities.py`, add `grounding-terraform` to `DECLARED_EXTRAS` and register ABSTAIN-posture `grounding_terraform`. It is sole opt-in; core/non-Terraform paths import/advertise nothing. Extend optionality CI.\n\n### Structural index\n\nAdd `terraform_index.py` and `terraform_tools.py`. A batch-owned immutable-byte cache is parsed by `run_in_worker` and freed at batch exit. Pass 2 only borrows it; ledgers die at call exit.\n\n- Trigger on impacted `.tf`/`.tf.json`, or a Terraform/OpenTofu plan plus repo Terraform. Index each affected directory as a module; follow repo-contained literal children/reverse callers; exclude VCS, virtualenv, and `.terraform/`.\n- Directly inspect a changed `.tfvars`, but never infer it is selected.\n- Reject absolute/out-of-repo sources and escaping symlinks. Enforce 64 modules, 5,000 files, 32 MiB, and the existing 60-second deadline before returning facts; any failure yields one abstention with no partial facts.\n- python-hcl2 v8.1.3 docs verify `SerializationOptions(with_meta=True)` and exact line-only keys `__start_line__`/`__end_line__`. Terraform JSON uses a line range only for an unambiguous key, else file-level.\n\n### Operations and schemas\n\n- `lookup_declaration(address, module_path=\"\")`: variable, local, output, module, provider, managed resource, data resource.\n- `resolve_reference(reference, from_file)`: direct module traversals/repo-local child outputs; resource bases may resolve, provider attributes never do.\n- Both are `job=refute`: static resolution returns `refuted` at T1; all non-proof is `abstain`; neither emits `match` or asserts absence.\n- Grounding references use `kind=\"symbol\"` for declarations and `kind=\"member\"` for dotted traversals, with canonical address as `name` and `language=\"terraform\"`. Closed `terraform_kind`: `variable|local|output|module|provider|managed_resource|data_resource`.\n- Normalize paths to NFC repo-relative POSIX (empty module `.`; collapse dots; preserve case; reject NUL/absolute/escaping `..`). Trim outer address whitespace, grammar-parse, and case-preserving dot-render; internal whitespace, splats, or computed indexes abstain.\n\nAdd `src/rebar/schemas/terraform_grounding_receipt.schema.json`. Validate evidence against `grounding.schema.json` and receipts against this closed schema. Required receipt fields: `schema_version`, `operation`, normalized `query`, `snapshot_digest`, `module_digest`, `backend` (parser/version, analyzer/version, config digest), `limits`, `outcome`, generic `reason`, closed `reason_detail`, and `result_digest`. Snapshot/module SHA-256 uses a sorted length-prefixed path+byte stream. Config/result reuse `\"sha256:\" + rebar._store.canonical.content_hash(float_free_object)`. Refuted hashes safe facts; abstain hashes exactly `{outcome,reason,reason_detail}`.\n\nWorked receipt (digests abbreviated only here):\n\n`{\"schema_version\":1,\"operation\":\"lookup_declaration\",\"query\":{\"address\":\"module.web\",\"module\":\"infra\"},\"snapshot_digest\":\"sha256:\u2026\",\"module_digest\":\"sha256:\u2026\",\"backend\":{\"parser\":\"python-hcl2\",\"parser_version\":\"8.1.3\",\"analyzer\":\"rebar-terraform-structural\",\"analyzer_version\":1,\"config_digest\":\"sha256:\u2026\"},\"limits\":{\"modules\":64,\"files\":5000,\"bytes\":33554432,\"timeout_ms\":60000},\"outcome\":\"refuted\",\"reason\":null,\"reason_detail\":null,\"result_digest\":\"sha256:\u2026\"}`\n\nWorked abstain (same required provenance): `{\"operation\":\"resolve_reference\",\"query\":{\"reference\":\"aws_instance.web.id\",\"from_file\":\"infra/main.tf\"},\"outcome\":\"abstain\",\"reason\":\"ambiguous\",\"reason_detail\":\"provider_attribute\",\"result_digest\":\"sha256:\u2026\"}`.\n\nExact abstention translation:\n\n- Missing extra \u2192 `no_tool/missing_extra`; wrong parser version \u2192 `version_skew/parser_version`; non-Terraform call \u2192 `unsupported_lang/not_terraform`.\n- Pre-worker invalid/undecodable input \u2192 `parse_error/invalid_input`; unreadable capture \u2192 `parse_error/unreadable_file`.\n- Harness `timeout` \u2192 `timeout/worker_timeout`; harness `parse_error` (including indistinguishable native signal death) \u2192 `parse_error/invalid_input`; harness `other` from raise/no-result/protocol failure \u2192 `other/worker_failure`.\n- Duplicate address \u2192 `ambiguous/duplicate_address`; no unique hit \u2192 `ambiguous/no_unique_address`; dynamic source/expression \u2192 `ambiguous/dynamic_source|dynamic_expression`; computed value \u2192 `ambiguous/computed_value`; provider attribute \u2192 `ambiguous/provider_attribute`; splat/index \u2192 `ambiguous/splat_index`; unknown tfvars selection \u2192 `ambiguous/unknown_tfvars`.\n- Absolute/out-of-repo/escaping symlink \u2192 `private_or_internal_suspected/path_outside_snapshot`.\n- Module/file/byte bound \u2192 `other/module_limit|file_limit|byte_limit`.\n\nReturn only safe classes, hashes, and repo-relative locations\u2014never credentials or literal payloads.\n\n### Plan-review integration\n\nInject tools only into Terraform T10 Pass 1. Terraform evidence selects Pass 2 with a fresh ledger and required independent query; inject no Pass-1 answer. Add a per-call tool provider/finalizer to `RunnerAgentStep`, preserving static `extra_tools`.\n\nRecord concrete reads as synthetic `read_file` usage and signed `**/*.tf`/`**/*.tf.json` membership, so sibling additions alter stdlib-only freshness. Missing extra exposes no tools; failures abstain.\n\n## Positive rationale\n\nReuse Rebar's worker/tool/usage/freshness seams; never scan or evaluate Terraform.\n\n## Out of scope\n\nRegistry/remote content, prompts, scanners, `terraform-config-inspect`, and all Terraform/OpenTofu/provider-related execution.\n\n## Acceptance Criteria\n\n- [ ] Lean-install tests pin `python-hcl2==8.1.3`; absent-extra/non-Terraform routes import/advertise nothing.\n- [ ] Index tests find sibling files, bounded child/reverse callers, and keep targeted `.tfvars` unselected.\n- [ ] `lookup_declaration` tests assert exact `symbol`/`terraform_kind`, T1 `refuted`, line range, safe facts, and receipt.\n- [ ] `resolve_reference` tests assert exact `member` mapping and child-output resolution; computed/provider/dynamic controls abstain.\n- [ ] Boundary tests assert exact reasons/digests, no partial facts, cache/ledger retirement, worker reaping, and below/at/above bounds.\n- [ ] Workflow integration captures T10 Pass-1/Pass-2 requests with distinct ledgers; non-T10/non-Terraform controls expose no tool.\n- [ ] Signed-read-set tests observe all parsed files/patterns, then add a sibling `.tf` and observe freshness change.\n- [ ] A subprocess spy observes no Terraform, OpenTofu, provider, tfparse, TFLint, Trivy, terraform-ls, terraform-docs, or other executable.\n- [ ] Schema tests validate evidence/receipt objects; `docs/grounding.md` documents tools, outcomes/reasons, posture, limits, and lifecycle.\n\n## Testing\n\nTest contract card:\n\n- Contract: REB-640, `docs/grounding.md`, both schemas, harness `RunResult`.\n- Preconditions: sibling/child/reverse declarations, dynamic input, escaping symlink, bounds, injected harness results.\n- Production: real capture \u2192 worker \u2192 response and real request construction; fake only the model.\n- Tiers: parser/evidence unit-contract; workflow integration; lean-install subprocess.\n- Oracles: exact evidence/receipt/tools; no partial facts; retired worker/cache; changed membership digest.\n- Controls: CloudFormation/Python expose no tools; literal traversal resolves, computed abstains.\n- CI: `make test`, `make docs-check`, and optionality CI.\n\n## Verification\n\n`env PATH=\"$PWD/.venv/bin:$PATH\" python -m pytest tests/unit/grounding/test_terraform_index.py tests/unit/grounding/test_terraform_tools.py tests/unit/workflow/test_terraform_plan_review_tools.py tests/unit/test_core_optionality.py tests/unit/test_capabilities.py && env PATH=\"$PWD/.venv/bin:$PATH\" make docs-check`",
+        "description": "## Context\n\nPurpose: conservative module-wide Terraform evidence for T10 Pass 1 and independent Pass 2.\n\n## Scope\n\n### Optional boundary\n\nAdd `grounding-terraform = [\"python-hcl2==8.1.3\"]` and the `hcl2` probe. In `_capabilities.py`, add `grounding-terraform` to `DECLARED_EXTRAS` and register ABSTAIN-posture `grounding_terraform`. It is sole opt-in; core/non-Terraform paths import/advertise nothing. Extend optionality CI.\n\n### Structural index\n\nAdd `terraform_index.py` and `terraform_tools.py`. Each call owns cache+ledger; its finalizer frees both. Pass 2 re-captures from the same frozen source; no cache crosses steps.\n\n- Trigger on impacted `.tf`/`.tf.json`, or a Terraform/OpenTofu plan plus repo Terraform. Index each affected directory as a module; follow repo-contained literal children/reverse callers; exclude VCS, virtualenv, and `.terraform/`.\n- Directly inspect a changed `.tfvars`, but never infer it is selected.\n- Reject absolute/out-of-repo sources and escaping symlinks. Enforce 64 modules, 5,000 files, 32 MiB, and the existing 60-second deadline before returning facts; any failure yields one abstention with no partial facts.\n- Pinned v8.1.3: `hcl2.api.parses_to_tree(text:str)->Tree`; `hcl2.parser` uses `propagate_positions=True`. Strict-UTF-8-decode bytes and read `Tree.meta` line/end-line/column/end-column (probe block 1:1\u20133:2, attribute 2:2\u20132:15). Serialized `with_meta` omits positions. JSON uses unambiguous key range, else file-level.\n\n### Operations and schemas\n\n- `lookup_declaration(address, module_path=\"\")`: variable, local, output, module, provider, managed resource, data resource.\n- `resolve_reference(reference, from_file)`: direct module traversals/repo-local child outputs; resource bases may resolve, provider attributes never do.\n- Both are `job=refute`: static resolution returns `refuted` at T1; all non-proof is `abstain`; neither emits `match` or asserts absence.\n- Grounding references use `kind=\"symbol\"` for declarations and `kind=\"member\"` for dotted traversals, with canonical address as `name` and `language=\"terraform\"`. Closed `terraform_kind`: `variable|local|output|module|provider|managed_resource|data_resource`.\n- Normalize paths to NFC repo-relative POSIX (empty module `.`; collapse dots; preserve case; reject NUL/absolute/escaping `..`). Trim outer address whitespace, grammar-parse, and case-preserving dot-render; internal whitespace, splats, or computed indexes abstain.\n\nAdd `src/rebar/schemas/terraform_grounding_receipt.schema.json`. Validate evidence against `grounding.schema.json` and receipts against this closed schema. Required receipt fields: `schema_version`, `operation`, normalized `query`, `snapshot_digest`, `module_digest`, `backend` (parser/version, analyzer/version, config digest), `limits`, `outcome`, generic `reason`, closed `reason_detail`, and `result_digest`. Snapshot/module SHA-256 uses a sorted length-prefixed path+byte stream. Config/result reuse `\"sha256:\" + rebar._store.canonical.content_hash(float_free_object)`. Refuted hashes safe facts; abstain hashes exactly `{outcome,reason,reason_detail}`.\n\nWorked receipt (digests abbreviated only here):\n\n`{\"schema_version\":1,\"operation\":\"lookup_declaration\",\"query\":{\"address\":\"module.web\",\"module\":\"infra\"},\"snapshot_digest\":\"sha256:\u2026\",\"module_digest\":\"sha256:\u2026\",\"backend\":{\"parser\":\"python-hcl2\",\"parser_version\":\"8.1.3\",\"analyzer\":\"rebar-terraform-structural\",\"analyzer_version\":1,\"config_digest\":\"sha256:\u2026\"},\"limits\":{\"modules\":64,\"files\":5000,\"bytes\":33554432,\"timeout_ms\":60000},\"outcome\":\"refuted\",\"reason\":null,\"reason_detail\":null,\"result_digest\":\"sha256:\u2026\"}`\n\nWorked abstain (same required provenance): `{\"operation\":\"resolve_reference\",\"query\":{\"reference\":\"aws_instance.web.id\",\"from_file\":\"infra/main.tf\"},\"outcome\":\"abstain\",\"reason\":\"ambiguous\",\"reason_detail\":\"provider_attribute\",\"result_digest\":\"sha256:\u2026\"}`.\n\nExact abstention translation:\n\n- Missing extra \u2192 `no_tool/missing_extra`; wrong parser version \u2192 `version_skew/parser_version`; non-Terraform call \u2192 `unsupported_lang/not_terraform`.\n- Pre-worker invalid/undecodable input \u2192 `parse_error/invalid_input`; unreadable capture \u2192 `parse_error/unreadable_file`.\n- Harness `timeout` \u2192 `timeout/worker_timeout`; harness `parse_error` (including indistinguishable native signal death) \u2192 `parse_error/invalid_input`; harness `other` from raise/no-result/protocol failure \u2192 `other/worker_failure`.\n- Duplicate address \u2192 `ambiguous/duplicate_address`; no unique hit \u2192 `ambiguous/no_unique_address`; dynamic source/expression \u2192 `ambiguous/dynamic_source|dynamic_expression`; computed value \u2192 `ambiguous/computed_value`; provider attribute \u2192 `ambiguous/provider_attribute`; splat/index \u2192 `ambiguous/splat_index`; unknown tfvars selection \u2192 `ambiguous/unknown_tfvars`.\n- Absolute/out-of-repo/escaping symlink \u2192 `private_or_internal_suspected/path_outside_snapshot`.\n- Module/file/byte bound \u2192 `other/module_limit|file_limit|byte_limit`.\n\nReturn only safe classes, hashes, and repo-relative locations\u2014never credentials or literal payloads.\n\n### Plan-review integration\n\nInject tools only into Terraform T10 Pass 1. Terraform evidence selects Pass 2 with a fresh ledger and required independent query; inject no Pass-1 answer. Add a per-call tool provider/finalizer to `RunnerAgentStep`, preserving static `extra_tools`.\n\nRecord concrete reads as synthetic `read_file` usage and signed `**/*.tf`/`**/*.tf.json` membership, so sibling additions alter stdlib-only freshness. Missing extra exposes no tools; failures abstain.\n\n## Positive rationale\n\nReuse Rebar's worker/tool/usage/freshness seams; never scan or evaluate Terraform.\n\n## Out of scope\n\nRegistry/remote content, prompts, scanners, `terraform-config-inspect`, and all Terraform/OpenTofu/provider-related execution.\n\n## Acceptance Criteria\n\n- [ ] Lean-install tests pin `python-hcl2==8.1.3`; absent-extra/non-Terraform routes import/advertise nothing.\n- [ ] Index tests find sibling files, bounded child/reverse callers, and keep targeted `.tfvars` unselected.\n- [ ] `lookup_declaration` tests assert exact `symbol`/`terraform_kind`, T1 `refuted`, line range, safe facts, and receipt.\n- [ ] `resolve_reference` tests assert exact `member` mapping and child-output resolution; computed/provider/dynamic controls abstain.\n- [ ] Boundary tests assert exact reasons/digests, no partial facts, cache/ledger retirement, worker reaping, and below/at/above bounds.\n- [ ] Workflow integration captures T10 Pass-1/Pass-2 requests with distinct ledgers; non-T10/non-Terraform controls expose no tool.\n- [ ] Signed-read-set tests observe all parsed files/patterns, then add a sibling `.tf` and observe freshness change.\n- [ ] `tests/unit/grounding/test_terraform_tools.py::test_no_forbidden_executables` observes no Terraform, OpenTofu, provider, tfparse, TFLint, Trivy, terraform-ls, terraform-docs, or other executable.\n- [ ] Schema tests validate evidence/receipts; `docs/grounding.md` and ADR 0111 document tools, trust boundary, outcomes/reasons, posture, limits, lifecycle, and prohibitions.\n\n## Testing\n\nTest contract card:\n\n- Contract: REB-640, `docs/grounding.md`, ADR 0111, both schemas, harness `RunResult`.\n- Preconditions: sibling/child/reverse, dynamic, escape, bound, and harness fixtures.\n- Production: real capture/worker/response/request; fake only the model.\n- Tiers: parser/evidence unit-contract; workflow integration; lean-install subprocess.\n- Oracles: exact evidence/receipt/tools; no partial facts; cleanup; membership-digest change.\n- Controls: non-Terraform has no tools; literal resolves, computed abstains.\n- CI: `make test`, `make docs-check`, and optionality CI.\n\n## Verification\n\n`env PATH=\"$PWD/.venv/bin:$PATH\" python -m pytest tests/unit/grounding/test_terraform_index.py tests/unit/grounding/test_terraform_tools.py tests/unit/workflow/test_terraform_plan_review_tools.py tests/unit/test_core_optionality.py tests/unit/test_capabilities.py && env PATH=\"$PWD/.venv/bin:$PATH\" make docs-check`",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Plan-review Terraform structural grounding vertical slice"
@@ -2440,6 +2454,13 @@
       "peer_parent": "REB-596",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:38Z"
+    },
+    "0916-4c75-ff51-471a": {
+      "created_at": "2026-09-04T01:06:38Z",
+      "jira_id": "4591638",
+      "jira_key": "REB-4531",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:06:41Z"
     },
     "0916-8c47-6205-4a37": {
       "created_at": "2026-08-15T14:51:38Z",
@@ -2633,9 +2654,17 @@
       "updated_at": "2026-08-15T14:51:42Z"
     },
     "09da-343c-1ee9-480c": {
+      "baseline": {
+        "assignee": null,
+        "description": "# S6 \u2014 Bounded concurrent gate executions, with fast-fail admission\n\n## Why this story exists (added 2026-09-03 on operator input)\n\nOperator: **~10 plan reviews run in parallel frequently**, plus code reviews and autodeploy contending for the same volume.\n\nThis invalidates an assumption the rest of the epic rests on. Option A caps each accumulator via a high-water-mark GC, and **a high-water-mark GC assumes evictable data exists.** Under ~10 concurrent gate runs it largely does not.\n\nThe mechanism is documented in the code itself. `src/rebar/_snapshot/janitor.py` relies on POSIX **delete-on-last-close** plus touch-on-read mtime recency, and deliberately takes **no per-reader lease** \u2014 a PID+heartbeat lease was spiked and REJECTED as unsound (N readers per entry, PID reuse, crash-stale leases), following Gitaly/Sourcegraph/Bazel/ccache. It also skips entries inside a grace window. So the janitor may UNLINK an in-flight snapshot, but the blocks are not returned until the last reader closes.\n\n**Consequence: during peak concurrency the held bytes are live, not garbage.** A cap set below peak concurrent hold cannot be honoured \u2014 the GC runs, finds nothing evictable, and the volume fills anyway. Same shape as the failure this epic exists to fix: bug 3276 measured prune's reclaimable ceiling at ~1.06 GB against a 29 GB problem.\n\nWithout this story, S2-S5's caps are aspirational under exactly the load that causes the incident.\n\n## Scope \u2014 operator-specified design\n\nBoth **plan-review** and **completion-verifier** executions create a copy of the repo at a specific ref, so both consume the bounded resource and **share one counter**.\n\n**At capacity the call FAST-FAILS.** It does not queue and does not block. The caller receives a 'try again later' style response that names congestion as the cause, so an agent can back off and retry rather than hang or interpret it as a gate failure.\n\nFast-fail rather than queueing is deliberate: a queued gate still holds its thread and its resident memory while waiting, so a queue converts disk pressure into memory pressure. Given bug 9ea3 measured ~739 MB resident per complete plan-review, queueing ten of them is the OOM this epic is adjacent to. Shedding load is the correct primitive.\n\nDesign considerations to settle in implementation, not prescribed here:\n- Gate work runs **in-process on a daemon thread** (`src/rebar/_mcp_llm.py` `_spawn_gate_daemon`), so an in-process counter covers MCP-driven gates \u2014 but **CLI gates run in separate processes**, so the counter must be cross-process (filesystem/lock-based) or the bound is partial. A bound covering one path is not a bound.\n- The rejection must be DISTINGUISHABLE from a gate verdict. An agent must not read congestion as INDETERMINATE or as a failed review, or it will burn a retry budget or mis-record a result.\n\n## Acceptance Criteria\n\n- [ ] AC1: a configurable limit bounds concurrent plan-review AND completion-verifier executions against ONE shared counter, with a default derived from measurement. Verified by a test that starts limit+1 executions and asserts the last is rejected while the others run.\n- [ ] AC2: at capacity the call FAST-FAILS immediately \u2014 it does not block, queue, or wait. Verified by a test asserting the rejected call returns within a small bound rather than after a holder releases.\n- [ ] AC3: the rejection is actionable and unambiguous \u2014 it names congestion, indicates the caller should retry later, and is distinguishable in type/shape from a gate verdict (not INDETERMINATE, not a FAIL). Verified by a test asserting the error shape over the MCP surface and the CLI.\n- [ ] AC4: the bound covers BOTH the in-process MCP daemon path and separate-process CLI runs against the same counter. Verified by a test exercising each path.\n- [ ] AC5: releasing is crash-safe \u2014 a gate process that dies does not permanently consume a slot. Verified by a test that kills a holder and asserts reclamation.\n- [ ] AC6: the limit is a documented config key with a stated default and rationale, not a hardcoded constant. Verified by reading the config schema and docs/config.md.\n- [ ] AC7: rejections publish a metric so congestion is visible rather than silent. Verified by a test asserting emission on a rejected admission.\n\n## Testing\n\n- `python -m pytest tests -k \"gate_admission or concurrency\" -q`\n- `make lint && make typecheck` (a new config key trips the shrink-only mechanism ratchet; justify it in-tree with a `# mechanism-ok:` marker naming this ticket, never by editing the baseline)\n- Contention shape: this composes a cross-process counter with gate execution, so route contention cases to the EXISTING shared suites per AGENTS.md rather than a bespoke harness.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "S6 \u2014 Fast-fail gate admission above a configurable concurrency cap"
+      },
       "created_at": "2026-09-03T23:31:40Z",
       "jira_id": "4591632",
       "jira_key": "REB-4528",
+      "peer_parent": "REB-4500",
       "state": "confirmed",
       "updated_at": "2026-09-03T23:31:43Z"
     },
@@ -3304,6 +3333,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-28T22:18:20Z"
     },
+    "0cb2-e79b-f7c2-4850": {
+      "created_at": "2026-09-04T01:06:44Z",
+      "jira_id": "4591639",
+      "jira_key": "REB-4532",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:06:46Z"
+    },
     "0cb5-0abd-c00f-4463": {
       "baseline": {
         "assignee": null,
@@ -3842,6 +3878,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-31T23:30:53Z"
     },
+    "0e9e-c5a5-367d-4eaf": {
+      "created_at": "2026-09-04T01:06:49Z",
+      "jira_id": "4591640",
+      "jira_key": "REB-4533",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:06:52Z"
+    },
     "0eb8-08bd-f9cb-4798": {
       "baseline": {
         "assignee": {
@@ -4173,6 +4216,20 @@
       "peer_parent": "REB-368",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:15Z"
+    },
+    "0fb9-b82e-ac69-44a2": {
+      "created_at": "2026-09-04T01:06:54Z",
+      "jira_id": "4591641",
+      "jira_key": "REB-4534",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:06:57Z"
+    },
+    "0fc4-018f-a391-4c72": {
+      "created_at": "2026-09-04T01:06:59Z",
+      "jira_id": "4591642",
+      "jira_key": "REB-4535",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:02Z"
     },
     "1008-c5fb-1286-4b11": {
       "baseline": {
@@ -4741,6 +4798,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:27Z"
     },
+    "1224-f202-2fcf-4725": {
+      "created_at": "2026-09-04T01:07:04Z",
+      "jira_id": "4591643",
+      "jira_key": "REB-4536",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:07Z"
+    },
     "1241-b83c-f8c7-40bf": {
       "baseline": {
         "assignee": {
@@ -4881,6 +4945,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:31Z"
+    },
+    "12d9-290f-c679-454c": {
+      "created_at": "2026-09-04T01:07:09Z",
+      "jira_id": "4591644",
+      "jira_key": "REB-4537",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:12Z"
     },
     "12e4-8c74-a738-4014": {
       "baseline": {
@@ -5363,6 +5434,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T02:02:13Z"
+    },
+    "1580-c516-6ce9-4c1f": {
+      "created_at": "2026-09-04T01:07:14Z",
+      "jira_id": "4591645",
+      "jira_key": "REB-4538",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:17Z"
     },
     "1598-f136-51bd-447d": {
       "baseline": {
@@ -5993,6 +6071,13 @@
       "jira_key": "REB-753",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:55Z"
+    },
+    "185b-2eef-4659-445c": {
+      "created_at": "2026-09-04T01:07:19Z",
+      "jira_id": "4591646",
+      "jira_key": "REB-4539",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:22Z"
     },
     "1868-2015-cadd-4456": {
       "baseline": {
@@ -8516,6 +8601,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:01Z"
     },
+    "2218-b05f-c205-4103": {
+      "created_at": "2026-09-04T01:07:24Z",
+      "jira_id": "4591647",
+      "jira_key": "REB-4540",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:27Z"
+    },
     "2220-ee4f-f03f-4771": {
       "baseline": {
         "assignee": null,
@@ -8578,6 +8670,13 @@
       "peer_parent": "REB-4232",
       "state": "confirmed",
       "updated_at": "2026-09-01T01:21:52Z"
+    },
+    "22b7-f3c2-1639-459c": {
+      "created_at": "2026-09-04T01:07:29Z",
+      "jira_id": "4591648",
+      "jira_key": "REB-4541",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:33Z"
     },
     "22bf-6af2-a9e8-4e3d": {
       "baseline": {
@@ -10460,6 +10559,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:45Z"
     },
+    "293e-73a0-584d-494b": {
+      "created_at": "2026-09-04T01:07:35Z",
+      "jira_id": "4591649",
+      "jira_key": "REB-4542",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:37Z"
+    },
     "2944-dd3f-e982-4359": {
       "baseline": {
         "assignee": {
@@ -10741,6 +10847,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T15:38:35Z"
+    },
+    "2a50-d624-ac51-43f3": {
+      "created_at": "2026-09-04T01:07:40Z",
+      "jira_id": "4591650",
+      "jira_key": "REB-4543",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:43Z"
     },
     "2a6f-fc43-ab3e-497f": {
       "baseline": {
@@ -11025,6 +11138,13 @@
       "peer_parent": "REB-4233",
       "state": "confirmed",
       "updated_at": "2026-09-01T01:22:33Z"
+    },
+    "2b2b-c312-510d-4746": {
+      "created_at": "2026-09-04T01:07:45Z",
+      "jira_id": "4591651",
+      "jira_key": "REB-4544",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:48Z"
     },
     "2b45-3c6f-0c13-442b": {
       "created_at": "2026-08-15T14:54:56Z",
@@ -12857,6 +12977,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:38Z"
     },
+    "311a-cc58-6394-4d24": {
+      "created_at": "2026-09-04T01:07:50Z",
+      "jira_id": "4591652",
+      "jira_key": "REB-4545",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:53Z"
+    },
     "3121-87f8-f3a0-4cf1": {
       "baseline": {
         "assignee": null,
@@ -13209,6 +13336,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:47Z"
     },
+    "31f9-e1f5-bd33-4b1e": {
+      "created_at": "2026-09-04T01:07:56Z",
+      "jira_id": "4591653",
+      "jira_key": "REB-4546",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:07:59Z"
+    },
     "3207-8725-0d4a-49ab": {
       "baseline": {
         "assignee": null,
@@ -13401,7 +13535,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Summary\n\nOn 2026-09-02 the `rebar-gerrit` host (`i-00880b2c7f13527c5`, us-east-1) filled its 30-GiB gp3 root volume and took **Gerrit fully offline for ~5 hours** (~02:05\u201307:10 PDT). This is the FOURTH root-disk-pressure incident in a month and the FIRST to cause a complete outage: previous incidents degraded the review bot, this one killed the service, the SSM agent, and the metrics publisher simultaneously.\n\nTwo distinct defects. The second is new and is the reason nobody was paged.\n\n## Defect 1 \u2014 root disk fills faster than reclaim frees it\n\nRoot reached **29 GiB used of 30 GiB**. Every prior mitigation has reduced the rate without bounding the ceiling, so the disk still reaches 100%.\n\n## Defect 2 (NEW, and the reason this became a 5-hour outage) \u2014 the disk alarm RESET ITSELF TO OK as the host died\n\n`rebar-root-disk-pressure` is configured:\n\n* metric `rebar/host` `root_disk_used_percent`, threshold **> 85%**\n* **EvaluationPeriods = 3**\n* **TreatMissingData = `notBreaching`**\n\nThe metric is published BY AN AGENT ON THE HOST THAT IS RUNNING OUT OF DISK. Observed series (30-min max):\n\n```\n2026-09-01T23:03  92\n2026-09-01T23:33  94      <- breaching (>85)\n2026-09-02T00:03  92\n2026-09-02T00:33  91\n2026-09-02T01:03  92\n2026-09-02T01:33  90      <- LAST DATAPOINT EVER\n(no data thereafter)\n```\n\n`GerritReachable` stops at the same timestamp. The publisher died with the host.\n\nBecause the disk was breaching but had not yet accumulated **3** breaching periods, and because missing data is treated as **notBreaching**, the alarm did not fire \u2014 it transitioned **to `OK` at 01:45:10**, i.e. it went GREEN at the exact moment the host became unreachable, and is STILL green now. The only thing that fired was `rebar-gerrit-gate-down` (a black-box reachability probe) at 02:05.\n\nThis is the classic dead-man's-switch inversion: for a metric published by the failing host, \"no data\" is the strongest possible evidence of the condition, and this configuration reads it as the absence of the condition. `rebar-gerrit-data-disk-high` has the SAME `notBreaching` setting and the same inversion.\n\n## Why the prior fixes did not hold\n\nChronology (all on this host, all root disk unless noted):\n\n* **2026-08-04/06** \u2014 `sour-plugugly-rhino` (28f9-535c-ce9c-4583): root 48% -> 95%, pinned 92\u201396% for ~39h. Fix: pressure-triggered `docker prune` on the autodeploy no-op tick.\n* **2026-08-17** \u2014 `masonic-abeyant-stagbeetle` (3a52-2d79-320d-4fed): root 71% -> 90%, review-bot unhealthy. Title records this as happening **\"after automated-reclaim mitigation\"** \u2014 the Aug-4 prune did not prevent it.\n* **2026-08-26** \u2014 `/var/gerrit` DATA volume fill; remediation task `scowlful-bovine-dragonfly` (3e92-b7f4-dede-4c17) is **still OPEN**.\n* **2026-08-29/30** \u2014 `beton-naval-eyas` (2f46-6871-796f-41c9): correlated autodeploy alarms on this host.\n* **2026-09-01 (yesterday)** \u2014 `preodorous-temporary-piglet` (3cef-c948-68ba-40fd): root 91\u201395%, review clones hit ENOSPC, change 2481 burned its retry budget into a **spurious `LLM-Review -1`**.\n* **2026-09-02 (today)** \u2014 full outage, ~5h.\n\nReclaim has been made *faster* and *more triggered* each round, but nothing has ever bounded the CEILING, and no alarm survives the host it monitors.\n\n## Recovery performed (an UNWEDGE, not a fix)\n\n1. Snapshot `snap-06f35ff3a20fe4a73` of root `vol-0270fcf13709cf472`.\n2. `modify-volume` root **30 -> 60 GiB**.\n3. Reboot; AL2023 cloud-init `growpart` expanded partition + filesystem at boot.\n4. Verified: `/dev/nvme0n1p1 60G 29G 32G 48% /`; Gerrit HTTP 200 and SSM `Online` at 07:10 PDT.\n\n**The 29 GiB of content is UNCHANGED \u2014 this only bought headroom.** At the observed fill rate the larger disk postpones recurrence, it does not prevent it. Growing the volume must not be recorded as the resolution.\n\n## Acceptance criteria\n\n- [ ] AC1 [non-codebase]: `rebar-root-disk-pressure` and `rebar-gerrit-data-disk-high` no longer treat missing data as healthy \u2014 `TreatMissingData` becomes `breaching` (or `missing`), so a host that stops publishing raises rather than clears. Verified by `aws cloudwatch describe-alarms` showing the new setting, and by an induced publish-stop raising the alarm.\n- [x] AC2 [non-codebase] [REWRITTEN 2026-09-02 \u2014 the original premise was refuted by measurement; see the correction comment on this ticket]: the disk alarm RE-ENTERS alarm when the publisher dies, instead of self-clearing to OK and staying there. Original AC2 asked for \"an alarm that would have fired on the 2026-09-01T23:33 94% datapoint\"; that is unsatisfiable, because the raw 300s series has no 23:33 datapoint (the 94 reading is at 23:40) and the alarm had ALREADY been in continuous ALARM since 22:32 PDT under BOTH the old and new configuration, so nothing \"fires on\" it. What the fix actually buys, and what this AC now requires, is that after the last real datapoint at 01:40 the alarm returns to ALARM on missing data rather than remaining OK through the outage. Verified by replaying the recorded series against the live configuration (Maximum / 300s / evaluation_periods 3 / datapoints_to_alarm 2 / threshold 85 / GreaterThanThreshold / treat_missing_data breaching): window [01:40 real 85 = not breaching, 01:45 missing -> breaching, 01:50 missing -> breaching] gives 2 of 3, so ALARM at ~01:55:10 PDT \u2014 versus never under the old configuration. The replay is validated against real alarm history, predicting the 01:45 OK (actual 01:45:10) and the 22:30 ALARM (actual 22:32).\n- [x] AC3: the top consumer of the 29 GiB root working set is identified and named with measured byte totals (the `du`/`docker system df` breakdown could not be captured during recovery because SSM invocations hung on the loaded box).\n- [ ] AC4: root usage has a bounded CEILING, not merely a faster reclaim \u2014 a mechanism that cannot exceed a configured high-water mark regardless of build burst rate. Verified by a test or simulation driving the documented fill rate and showing usage plateaus below the bound.\n- [x] AC5: the still-open `/var/gerrit` remediation `scowlful-bovine-dragonfly` is either completed or explicitly superseded by this ticket's fix, so the data volume is not left with the same unbounded shape.\n- [x] AC6 [non-codebase]: an operator runbook entry covers \"host is wedged and SSM is ConnectionLost\", recording the shell-free recovery path used here (snapshot -> modify-volume -> reboot -> cloud-init growpart) and stating explicitly that it is an unwedge requiring a follow-up reclaim.\n\n## Notes\n\n- The EC2 status checks stayed `ok` throughout: the hypervisor and instance networking were healthy, so instance-check alarms cannot detect this class.\n- The instance is `unlimited` burstable with ~440 CPU credits and 0 surplus, so CPU throttling was ruled out as a cause.\n- TCP 443 stayed OPEN while HTTP returned 504 then timed out \u2014 the reverse proxy survived while its upstream died, which is why black-box probes saw a slow failure rather than a refusal.\n\n## Completion evidence (2026-09-03)\n\n- **AC2** \u2014 MET. Replayed the recorded series against the live configuration (Maximum / 300s / evaluation_periods 3 / datapoints_to_alarm 2 / threshold 85 / GreaterThanThreshold / treat_missing_data breaching). Window [01:40 real 85 = not breaching, 01:45 missing -> breaching, 01:50 missing -> breaching] gives 2 of 3, so ALARM at ~01:55:10 PDT versus never under the old configuration. The replay model is validated against real alarm history: it predicts the 01:45 OK (actual 01:45:10) and the 22:30 ALARM (actual 22:32).\n- **AC3** \u2014 MET. Root 28G: /var 26G, of which /var/lib/docker 17G (overlay2 16G across 67 layer directories), /var/tmp 3.6G, /var/log 1.8G (journal 1.7G). Docker's own accounting claimed ~9.5 GB with ZERO dangling images, so ~6.5 GB was orphaned overlay2 layer state prune cannot reach \u2014 which is why four rounds of prune-based mitigation never held.\n- **AC5** \u2014 MET, by doing the work inside this ticket per the operator's decision. Gerrit change 2586 (MERGED) adds a `/var/gerrit` non-`site` debris census publishing `rebar/host:data_disk_debris_bytes`, and alarm `rebar-gerrit-data-disk-debris` (1 GiB, 2-of-3, breaching), **now APPLIED and live in production reading 0 bytes**. Plus runbook `infra/runbooks/gerrit-data-volume-reclaim.md` and a pointer from review-bot-ops.md. The enforceable half is detection; the evidence-location policy is advisory and labelled as such in the tree, because rebar cannot stop a shell on the box writing where it likes.\n- **AC6** \u2014 MET. Gerrit change 2549 (MERGED) adds `infra/runbooks/gerrit-host-wedged-ssm-lost.md`, leading with the UNWEDGE-not-a-fix framing and the 29-GiB-before/29-GiB-after argument, plus a cross-reference from review-bot-ops.md. The root volume id was verified against the live API before landing, since the data volume id is hardcoded in sibling runbooks and the two are dangerous to confuse.\n\n## The two ACs that remain, and why\n\n- **AC1** \u2014 HALF met. `describe-alarms` confirms both disk alarms are live at `treat_missing_data = breaching` (root_disk_pressure 300/3/2, gerrit_data_disk_high 300/3/2). The second half asks for an INDUCED publish-stop raising the alarm, which is a deliberate production test: stopping the publisher stops ALL host metrics, so it would drive roughly twelve alarms into ALARM and page for a non-incident. Awaiting an operator decision on whether to run it, or to accept the AC2 replay \u2014 which proves the missing-data semantics against real recorded data \u2014 as sufficient.\n- **AC4** \u2014 NOT met, and owned elsewhere by design. The bounded ceiling is Defect 1, which the operator-approved plan decomposed into epic `6202-e1c7-c57f-4897` (endowed-upset-scaup); that epic's own description states \"Defect 2 stays on that bug and was fixed/landed/applied live. This epic is Defect 1.\" The epic is open, linked, and still has NO CHILDREN. Awaiting an operator decision on whether this ticket closes on Defect 2 with AC4 recorded as epic-owned, or stays open until 6202 delivers.",
+        "description": "## Summary\n\nOn 2026-09-02 the `rebar-gerrit` host (`i-00880b2c7f13527c5`, us-east-1) filled its 30-GiB gp3 root volume and took **Gerrit fully offline for ~5 hours** (~02:05\u201307:10 PDT). This is the FOURTH root-disk-pressure incident in a month and the FIRST to cause a complete outage: previous incidents degraded the review bot, this one killed the service, the SSM agent, and the metrics publisher simultaneously.\n\nTwo distinct defects. The second is new and is the reason nobody was paged.\n\n## Defect 1 \u2014 root disk fills faster than reclaim frees it\n\nRoot reached **29 GiB used of 30 GiB**. Every prior mitigation has reduced the rate without bounding the ceiling, so the disk still reaches 100%.\n\n## Defect 2 (NEW, and the reason this became a 5-hour outage) \u2014 the disk alarm RESET ITSELF TO OK as the host died\n\n`rebar-root-disk-pressure` is configured:\n\n* metric `rebar/host` `root_disk_used_percent`, threshold **> 85%**\n* **EvaluationPeriods = 3**\n* **TreatMissingData = `notBreaching`**\n\nThe metric is published BY AN AGENT ON THE HOST THAT IS RUNNING OUT OF DISK. Observed series (30-min max):\n\n```\n2026-09-01T23:03  92\n2026-09-01T23:33  94      <- breaching (>85)\n2026-09-02T00:03  92\n2026-09-02T00:33  91\n2026-09-02T01:03  92\n2026-09-02T01:33  90      <- LAST DATAPOINT EVER\n(no data thereafter)\n```\n\n`GerritReachable` stops at the same timestamp. The publisher died with the host.\n\nBecause the disk was breaching but had not yet accumulated **3** breaching periods, and because missing data is treated as **notBreaching**, the alarm did not fire \u2014 it transitioned **to `OK` at 01:45:10**, i.e. it went GREEN at the exact moment the host became unreachable, and is STILL green now. The only thing that fired was `rebar-gerrit-gate-down` (a black-box reachability probe) at 02:05.\n\nThis is the classic dead-man's-switch inversion: for a metric published by the failing host, \"no data\" is the strongest possible evidence of the condition, and this configuration reads it as the absence of the condition. `rebar-gerrit-data-disk-high` has the SAME `notBreaching` setting and the same inversion.\n\n## Why the prior fixes did not hold\n\nChronology (all on this host, all root disk unless noted):\n\n* **2026-08-04/06** \u2014 `sour-plugugly-rhino` (28f9-535c-ce9c-4583): root 48% -> 95%, pinned 92\u201396% for ~39h. Fix: pressure-triggered `docker prune` on the autodeploy no-op tick.\n* **2026-08-17** \u2014 `masonic-abeyant-stagbeetle` (3a52-2d79-320d-4fed): root 71% -> 90%, review-bot unhealthy. Title records this as happening **\"after automated-reclaim mitigation\"** \u2014 the Aug-4 prune did not prevent it.\n* **2026-08-26** \u2014 `/var/gerrit` DATA volume fill; remediation task `scowlful-bovine-dragonfly` (3e92-b7f4-dede-4c17) is **still OPEN**.\n* **2026-08-29/30** \u2014 `beton-naval-eyas` (2f46-6871-796f-41c9): correlated autodeploy alarms on this host.\n* **2026-09-01 (yesterday)** \u2014 `preodorous-temporary-piglet` (3cef-c948-68ba-40fd): root 91\u201395%, review clones hit ENOSPC, change 2481 burned its retry budget into a **spurious `LLM-Review -1`**.\n* **2026-09-02 (today)** \u2014 full outage, ~5h.\n\nReclaim has been made *faster* and *more triggered* each round, but nothing has ever bounded the CEILING, and no alarm survives the host it monitors.\n\n## Recovery performed (an UNWEDGE, not a fix)\n\n1. Snapshot `snap-06f35ff3a20fe4a73` of root `vol-0270fcf13709cf472`.\n2. `modify-volume` root **30 -> 60 GiB**.\n3. Reboot; AL2023 cloud-init `growpart` expanded partition + filesystem at boot.\n4. Verified: `/dev/nvme0n1p1 60G 29G 32G 48% /`; Gerrit HTTP 200 and SSM `Online` at 07:10 PDT.\n\n**The 29 GiB of content is UNCHANGED \u2014 this only bought headroom.** At the observed fill rate the larger disk postpones recurrence, it does not prevent it. Growing the volume must not be recorded as the resolution.\n\n## Acceptance criteria\n\n- [x] AC1 [non-codebase]: `rebar-root-disk-pressure` and `rebar-gerrit-data-disk-high` no longer treat missing data as healthy \u2014 `TreatMissingData` becomes `breaching` (or `missing`), so a host that stops publishing raises rather than clears. Verified by `aws cloudwatch describe-alarms` showing the new setting, and by an induced publish-stop raising the alarm.\n- [x] AC2 [non-codebase] [REWRITTEN 2026-09-02 \u2014 the original premise was refuted by measurement; see the correction comment on this ticket]: the disk alarm RE-ENTERS alarm when the publisher dies, instead of self-clearing to OK and staying there. Original AC2 asked for \"an alarm that would have fired on the 2026-09-01T23:33 94% datapoint\"; that is unsatisfiable, because the raw 300s series has no 23:33 datapoint (the 94 reading is at 23:40) and the alarm had ALREADY been in continuous ALARM since 22:32 PDT under BOTH the old and new configuration, so nothing \"fires on\" it. What the fix actually buys, and what this AC now requires, is that after the last real datapoint at 01:40 the alarm returns to ALARM on missing data rather than remaining OK through the outage. Verified by replaying the recorded series against the live configuration (Maximum / 300s / evaluation_periods 3 / datapoints_to_alarm 2 / threshold 85 / GreaterThanThreshold / treat_missing_data breaching): window [01:40 real 85 = not breaching, 01:45 missing -> breaching, 01:50 missing -> breaching] gives 2 of 3, so ALARM at ~01:55:10 PDT \u2014 versus never under the old configuration. The replay is validated against real alarm history, predicting the 01:45 OK (actual 01:45:10) and the 22:30 ALARM (actual 22:32).\n- [x] AC3: the top consumer of the 29 GiB root working set is identified and named with measured byte totals (the `du`/`docker system df` breakdown could not be captured during recovery because SSM invocations hung on the loaded box).\n- [ ] AC4: root usage has a bounded CEILING, not merely a faster reclaim \u2014 a mechanism that cannot exceed a configured high-water mark regardless of build burst rate. Verified by a test or simulation driving the documented fill rate and showing usage plateaus below the bound.\n- [x] AC5: the still-open `/var/gerrit` remediation `scowlful-bovine-dragonfly` is either completed or explicitly superseded by this ticket's fix, so the data volume is not left with the same unbounded shape.\n- [x] AC6 [non-codebase]: an operator runbook entry covers \"host is wedged and SSM is ConnectionLost\", recording the shell-free recovery path used here (snapshot -> modify-volume -> reboot -> cloud-init growpart) and stating explicitly that it is an unwedge requiring a follow-up reclaim.\n\n## Notes\n\n- The EC2 status checks stayed `ok` throughout: the hypervisor and instance networking were healthy, so instance-check alarms cannot detect this class.\n- The instance is `unlimited` burstable with ~440 CPU credits and 0 surplus, so CPU throttling was ruled out as a cause.\n- TCP 443 stayed OPEN while HTTP returned 504 then timed out \u2014 the reverse proxy survived while its upstream died, which is why black-box probes saw a slow failure rather than a refusal.\n\n## Completion evidence (2026-09-03)\n\n- **AC2** \u2014 MET. Replayed the recorded series against the live configuration (Maximum / 300s / evaluation_periods 3 / datapoints_to_alarm 2 / threshold 85 / GreaterThanThreshold / treat_missing_data breaching). Window [01:40 real 85 = not breaching, 01:45 missing -> breaching, 01:50 missing -> breaching] gives 2 of 3, so ALARM at ~01:55:10 PDT versus never under the old configuration. The replay model is validated against real alarm history: it predicts the 01:45 OK (actual 01:45:10) and the 22:30 ALARM (actual 22:32).\n- **AC3** \u2014 MET. Root 28G: /var 26G, of which /var/lib/docker 17G (overlay2 16G across 67 layer directories), /var/tmp 3.6G, /var/log 1.8G (journal 1.7G). Docker's own accounting claimed ~9.5 GB with ZERO dangling images, so ~6.5 GB was orphaned overlay2 layer state prune cannot reach \u2014 which is why four rounds of prune-based mitigation never held.\n- **AC5** \u2014 MET, by doing the work inside this ticket per the operator's decision. Gerrit change 2586 (MERGED) adds a `/var/gerrit` non-`site` debris census publishing `rebar/host:data_disk_debris_bytes`, and alarm `rebar-gerrit-data-disk-debris` (1 GiB, 2-of-3, breaching), **now APPLIED and live in production reading 0 bytes**. Plus runbook `infra/runbooks/gerrit-data-volume-reclaim.md` and a pointer from review-bot-ops.md. The enforceable half is detection; the evidence-location policy is advisory and labelled as such in the tree, because rebar cannot stop a shell on the box writing where it likes.\n- **AC6** \u2014 MET. Gerrit change 2549 (MERGED) adds `infra/runbooks/gerrit-host-wedged-ssm-lost.md`, leading with the UNWEDGE-not-a-fix framing and the 29-GiB-before/29-GiB-after argument, plus a cross-reference from review-bot-ops.md. The root volume id was verified against the live API before landing, since the data volume id is hardcoded in sibling runbooks and the two are dangerous to confuse.\n\n## The two ACs that remain, and why\n\n- **AC1** \u2014 HALF met. `describe-alarms` confirms both disk alarms are live at `treat_missing_data = breaching` (root_disk_pressure 300/3/2, gerrit_data_disk_high 300/3/2). The second half asks for an INDUCED publish-stop raising the alarm, which is a deliberate production test: stopping the publisher stops ALL host metrics, so it would drive roughly twelve alarms into ALARM and page for a non-incident. Awaiting an operator decision on whether to run it, or to accept the AC2 replay \u2014 which proves the missing-data semantics against real recorded data \u2014 as sufficient.\n- **AC4** \u2014 NOT met, and owned elsewhere by design. The bounded ceiling is Defect 1, which the operator-approved plan decomposed into epic `6202-e1c7-c57f-4897` (endowed-upset-scaup); that epic's own description states \"Defect 2 stays on that bug and was fixed/landed/applied live. This epic is Defect 1.\" The epic is open, linked, and still has NO CHILDREN. Awaiting an operator decision on whether this ticket closes on Defect 2 with AC4 recorded as epic-owned, or stays open until 6202 delivers.\n\n## AC1 evidence \u2014 operator accepted replay in place of an induced publish-stop (2026-09-03)\n\nThe setting half was already confirmed live: `describe-alarms` shows `rebar-root-disk-pressure` and `rebar-gerrit-data-disk-high` both at `treat_missing_data = breaching`, 300s / 3 periods / 2 datapoints.\n\nThe behaviour half is proven by REPLAY rather than by inducing a publisher stop. Operator decision: replay accepted. The reasoning, recorded because it generalises:\n\n- An induced publish-stop stops ALL host metrics, so it drives roughly twelve alarms into ALARM and pages for a non-incident. The cost is real and the information gained is small.\n- The replay is deterministic, repeatable, and covers a window chosen to include the worst churn on record rather than whichever period happens to elapse.\n- Replaying 24h of each alarm's own recorded series against its live configuration produced **zero transitions caused by missing data** across all twelve, while correctly reproducing the three genuine breaching events (mirror_out_of_sync x3, review_interrupts_bound_exceeded x2, deploy_errors during the febd build failures). Every 300s alarm saw 27 missing periods in that window \u2014 the jitter is real, and it was absorbed.\n- For this ticket's own alarm specifically, the earlier replay showed `rebar-root-disk-pressure` re-entering ALARM at ~01:55:10 PDT on missing data under the new configuration, versus never under the old one \u2014 with the replay model validated against real history (it predicts the actual 01:45:10 OK and the actual 22:32 ALARM).\n\nThe operator's standing principle behind this: **an acceptance criterion that depends on time passing is defective.** Verifying that a fix is live and remediates behaviour should be designed as a real-time activity. Waiting samples whichever day elapses, proves nothing about a worse one, cannot be re-run, and \u2014 as the bff5 replay showed \u2014 would not even have distinguished a flap from a true positive without doing this analysis anyway.",
         "priority": "High",
         "status": "In Progress",
         "summary": "[root-disk-pressure] rebar-gerrit root disk fills to 100% and takes Gerrit fully offline; the disk alarm resets to OK when the publishing host dies"
@@ -14075,6 +14209,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:03Z"
+    },
+    "34e2-ba9d-afaa-4b7c": {
+      "created_at": "2026-09-04T01:08:01Z",
+      "jira_id": "4591654",
+      "jira_key": "REB-4547",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:04Z"
     },
     "34f2-8d32-029c-400b": {
       "baseline": {
@@ -15028,9 +15169,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\nThe current tests inspect replacement mechanics or final JSON rather than the write window (`test_applier_mapping.py:235-282`, `test_applier_provenance.py:155-185`), permit last-writer record loss (`test_bridge_state_atomic_write_concurrency.py:41-120`), and source-grep impossible-link durability (`test_impossible_links_cicada.py:467-493`). Live sidecars replace full snapshots in `peer_confirmations.py:192-217` and `impossible_links.py:376-401`. The repository already has sibling-file locked read-modify-write prior art in `_store/hlc.py::_hlc_lock` and `_commands/recent_creates.py::_journal_lock`, plus durable same-directory publication in `_store/fsutil.py::atomic_write`.\n\n## Approach\n\nGeneralize the established sibling-lock pattern in `rebar._store.fsutil` as a narrow reusable exclusive-path-lock context manager. Migrate HLC and recent-create callers to it so the project has one standard lock implementation. A lock lives at a stable sibling `.lock` path, never on the replaceable JSON inode, and remains an untracked local control artifact for the lifetime of its sidecar workspace; commit-back must not stage it. The context spans re-read, mutation, `fsutil.atomic_write(fsync=True)`, and unlock.\n\nAdd `sidecar_transactions.py` only for the reconciler-specific part that existing prior art does not provide: applying a domain mutation or record delta while the shared `fsutil` lock is held. It delegates all locking and atomic publication to the generalized `fsutil` seams. Mapping/provenance mutations load the current valid mapping under that lock, apply their key-level mutation, then publish it.\n\nFor peer-confirmation and impossible-link stores, take an independent deep copy of the records loaded at construction as the immutable baseline. At save, calculate upserts and deletions against that copy; while holding the shared lock, reload the latest valid record set and apply the delta. Different keys survive. The concrete same-key rule is last shared-lock holder wins, including a deletion, so the test can assert the later lock acquisition order.\n\nIf loading valid JSON, acquiring the lock, or publishing fails, preserve the target bytes, log a path-specific warning, skip persistence for that pass, and continue the reconciliation pass fail-open. This includes malformed/non-object JSON. Readers retain old-or-new complete-document visibility through `fsutil.atomic_write(fsync=True)`. Fresh-reader tests prove the existing commit-back path publishes valid state.\n\n## Scope\n\n- generalized sibling locking and durable publication reuse in `src/rebar/_store/fsutil.py`\n- HLC and recent-create adoption of that single lock seam\n- reconciler-specific `sidecar_transactions.py` delta application; mapping, peer-confirmation, and impossible-link callers\n- focused concurrency, mapping, provenance, malformed-state, and durability tests\n\n## Testing\n\nCharacterize HLC and recent-create lock migration against the prior behavior. Use barrier-controlled independent writers, same-key writers, a delete-versus-write pair, and an in-window reader for sidecars. Verify a deep baseline detects both in-place upserts and deletes, verify every lock/load/publish failure warns without overwriting, verify `.lock` files are not commit-back inputs, and prove durability through a fresh reader.\n\n## Acceptance Criteria\n\n- [ ] `fsutil` exposes the one sibling-path exclusive-lock primitive used by HLC, recent-create, and reconciler sidecar transactions; each caller holds it over its complete read-modify-write window.\n- [ ] The stable `.lock` file is never staged or published by commit-back and is intentionally retained for reuse while its sidecar workspace exists.\n- [ ] Reconciler sidecar publication delegates to `fsutil.atomic_write(fsync=True)` rather than reimplementing temp-file replacement.\n- [ ] Mapping/provenance updates load the latest valid mapping under the shared lock before applying their key-level mutation.\n- [ ] Peer-confirmation and impossible-link stores calculate their upserts and deletions from an independent deep copy of the load-time records.\n- [ ] Concurrent distinct-key updates retain both records; a same-key test proves the later shared-lock holder wins.\n- [ ] A delete-versus-write test proves a deliberate impossible-link deletion is propagated and a later shared-lock holder determines the same-key outcome.\n- [ ] An in-window reader sees only complete pre- or post-transaction JSON.\n- [ ] A malformed target, lock failure, or atomic-write failure logs the sidecar path, preserves its bytes, and allows the reconciliation pass to continue.\n- [ ] A fresh reader proves committed mapping and impossible-link state survives publication.",
+        "description": "## Context / Problem\n\nThe current tests inspect replacement mechanics or final JSON rather than the write window (`test_applier_mapping.py:235-282`, `test_applier_provenance.py:155-185`), permit last-writer record loss (`test_bridge_state_atomic_write_concurrency.py:41-120`), and source-grep impossible-link durability (`test_impossible_links_cicada.py:467-493`). Live sidecars replace full snapshots in `peer_confirmations.py:192-217` and `impossible_links.py:376-401`. The repository already has sibling-file locked read-modify-write prior art in `_store/hlc.py::_hlc_lock` and `_commands/recent_creates.py::_journal_lock`, plus durable same-directory publication in `_store/fsutil.py::atomic_write`.\n\n## Approach\n\nGeneralize the established sibling-lock pattern in `rebar._store.fsutil` as a narrow reusable exclusive-path-lock context manager. Migrate HLC and recent-create callers to it so the project has one standard lock implementation. A lock lives at a stable sibling `.lock` path, never on the replaceable JSON inode, and remains an untracked local control artifact for the lifetime of its sidecar workspace; commit-back must not stage it. The context spans re-read, mutation, `fsutil.atomic_write(fsync=True)`, and unlock.\n\nAdd `sidecar_transactions.py` only for the reconciler-specific part that existing prior art does not provide: applying a domain mutation or record delta while the shared `fsutil` lock is held. It delegates all locking and atomic publication to the generalized `fsutil` seams. Mapping/provenance mutations load the current valid mapping under that lock, apply their key-level mutation, then publish it.\n\nFor peer-confirmation and impossible-link stores, take an independent deep copy of the records loaded at construction as the immutable baseline. At save, calculate upserts and deletions against that copy; while holding the shared lock, reload the latest valid record set and apply the delta. Different keys survive. The concrete same-key rule is last shared-lock holder wins, including a deletion, so the test can assert the later lock acquisition order.\n\nIf loading valid JSON, acquiring the lock, or publishing fails, preserve the target bytes, log a path-specific warning, skip persistence for that pass, and continue the reconciliation pass fail-open. This includes malformed/non-object JSON. Readers retain old-or-new complete-document visibility through `fsutil.atomic_write(fsync=True)`. Fresh-reader tests prove the existing commit-back path publishes valid state.\n\n## Scope\n\n- generalized sibling locking and durable publication reuse in `src/rebar/_store/fsutil.py`\n- HLC and recent-create adoption of that single lock seam\n- reconciler-specific `sidecar_transactions.py` delta application; mapping, peer-confirmation, and impossible-link callers\n- focused concurrency, mapping, provenance, malformed-state, and durability tests\n\n## Testing\n\nCharacterize HLC and recent-create lock migration against the prior behavior. Use barrier-controlled independent writers, same-key writers, a delete-versus-write pair, and an in-window reader for sidecars. Verify a deep baseline detects both in-place upserts and deletes, verify every lock/load/publish failure warns without overwriting, verify `.lock` files are not commit-back inputs, and prove durability through a fresh reader.\n\n## Acceptance Criteria\n\n- [x] `fsutil` exposes the one sibling-path exclusive-lock primitive used by HLC, recent-create, and reconciler sidecar transactions; each caller holds it over its complete read-modify-write window.\n- [x] The stable `.lock` file is never staged or published by commit-back and is intentionally retained for reuse while its sidecar workspace exists.\n- [x] Reconciler sidecar publication delegates to `fsutil.atomic_write(fsync=True)` rather than reimplementing temp-file replacement.\n- [x] Mapping/provenance updates load the latest valid mapping under the shared lock before applying their key-level mutation.\n- [x] Peer-confirmation and impossible-link stores calculate their upserts and deletions from an independent deep copy of the load-time records.\n- [x] Concurrent distinct-key updates retain both records; a same-key test proves the later shared-lock holder wins.\n- [x] A delete-versus-write test proves a deliberate impossible-link deletion is propagated and a later shared-lock holder determines the same-key outcome.\n- [x] An in-window reader sees only complete pre- or post-transaction JSON.\n- [x] A malformed target, lock failure, or atomic-write failure logs the sidecar path, preserves its bytes, and allows the reconciliation pass to continue.\n- [x] A fresh reader proves committed mapping and impossible-link state survives publication.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Make reconciliation sidecar persistence conflict-safe and observationally proven"
       },
       "created_at": "2026-09-02T02:59:26Z",
@@ -15953,6 +16094,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:54Z"
+    },
+    "3be3-7f9f-3865-4e87": {
+      "created_at": "2026-09-04T01:08:06Z",
+      "jira_id": "4591655",
+      "jira_key": "REB-4548",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:09Z"
     },
     "3bf6-de76-bdd4-4096": {
       "baseline": {
@@ -17710,6 +17858,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:34Z"
+    },
+    "429e-e453-8cc0-4894": {
+      "created_at": "2026-09-04T01:08:11Z",
+      "jira_id": "4591656",
+      "jira_key": "REB-4549",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:14Z"
     },
     "42a0-25c8-7d97-4764": {
       "baseline": {
@@ -21305,6 +21460,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:18Z"
     },
+    "5114-05b6-e9bc-49cc": {
+      "created_at": "2026-09-04T01:08:16Z",
+      "jira_id": "4591657",
+      "jira_key": "REB-4550",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:19Z"
+    },
     "5128-0856-d80f-4eb6": {
       "baseline": {
         "assignee": {
@@ -21531,6 +21693,13 @@
       "peer_parent": "REB-693",
       "state": "confirmed",
       "updated_at": "2026-09-02T03:41:19Z"
+    },
+    "5178-7906-ecd1-457a": {
+      "created_at": "2026-09-04T01:08:22Z",
+      "jira_id": "4591658",
+      "jira_key": "REB-4551",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:24Z"
     },
     "518b-0558-fd18-4713": {
       "created_at": "2026-08-15T14:59:23Z",
@@ -23894,6 +24063,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:10Z"
     },
+    "5a76-72e0-c88c-487c": {
+      "created_at": "2026-09-04T01:08:27Z",
+      "jira_id": "4591659",
+      "jira_key": "REB-4552",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:30Z"
+    },
     "5a8f-d6a0-ca32-4f51": {
       "baseline": {
         "assignee": null,
@@ -25701,10 +25877,24 @@
     },
     "6202-e1c7-c57f-4897": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# Bounded disk-ceiling architecture for the Gerrit host\n\n## Context\nDiscovered from `cyclopean-bloodshot-hoatzin` (`3276-2f81-8c75-4ddd`), the 2026-09-02 root-volume outage that took Gerrit offline for ~5h. Defect 2 from that incident (disk alarms self-cleared when metrics stopped because `treat_missing_data=notBreaching`) stays on that bug and was fixed/landed/applied live. This epic is Defect 1: root-volume consumers grow without a bounded ceiling.\n\nOperator-approved design \u2014 firm standing intent, do not re-litigate:\n\n1. **Option A: per-accumulator HARD SIZE CAPS via native GC/retention.** Each disk consumer gets a hard upper bound enforced by its own native garbage-collection or retention mechanism. Consumers to cap: Docker overlay2/image layers + build cache (BuildKit/Docker GC policy with `maxUsedSpace` / `--keep-storage` style limits), `/var/tmp` (tmpfiles cleanup plus a real size/quota mechanism where required), journald (`SystemMaxUse`), and writable container layers (runtime storage quota where supportable, or bounded periodic reaping of exited containers). **Hard operator constraint:** every capped generator must have its own CloudWatch alarm at/near its cap, so capacity visibility names the saturated generator rather than only saying \"root disk high\".\n2. **Option C: separate EBS volume for code-review scratch.** Gate scratch/clones/snapshots currently share root via system temp (e.g. `/tmp/rebar-gate-snapshots`). Move this workload to a dedicated, independently sized/quota'd gp3 EBS volume mounted at a documented path, and configure gate temp/snapshot code so review work can never fill the OS/root disk.\n3. **Sibling carried from cyclopean AC5:** fold in `scowlful-bovine-dragonfly` (`3e92-b7f4-dede-4c17`), the `/var/gerrit` data-volume prevention/runbook task, by linking it into this epic rather than duplicating it.\n\nThe root volume was grown 30\u219260 GiB during recovery and should stay 60 GiB, but that is headroom only, not the fix: an unbounded generator can fill 60 GiB as readily as 30 GiB.\n\n## Scope\nThis epic scaffolds and later implements the approved architecture only. Defect 2 alarm-missing-data remediation remains on `cyclopean-bloodshot-hoatzin`. The full ADR draft is captured in child S0 to keep this epic below the 8,000-character plan-review admission cap; no ADR file is created by this scaffold-only work.\n\n## Research grounding\n- Current Terraform owns a single EC2 host plus `/var/gerrit` data EBS volume: `infra/terraform/main.tf:27-35`, `:42-64`, `:83-87`; size variables are in `infra/terraform/variables.tf:13-23`.\n- `infra/terraform/user_data.sh:20-70` is the existing attach/mount pattern: resolve Nitro NVMe device by EBS volume id, format idempotently, mount by UUID in `/etc/fstab`.\n- `infra/scripts/compose-up.sh:21-31` and `:82-99` create Docker bind volumes under `/var/gerrit/site`; current review-bot compose has no tmp/scratch mount and notes `REBAR_GATE_TMPDIR` is unset (`infra/compose/docker-compose.yml:233-245`).\n- Snapshot store and clone locations: `src/rebar/_snapshot/repo_snapshot.py:149-163` uses `REBAR_GATE_TMPDIR` else `tempfile.gettempdir()` and creates `rebar-gate-snapshots`; `src/rebar/review_bot/voter.py:381` clones into `tempfile.TemporaryDirectory(prefix=\"reviewbot-\")`; `src/rebar/review_bot/low_disk.py:69` checks free space on `tempfile.gettempdir()`.\n- Observability/alarm seams: `infra/scripts/observability.sh:72-90` publishes current data/root disk metrics; root alarm is `infra/terraform/monitoring_autodeploy.tf:207-239`; data alarm is `infra/terraform/monitoring.tf:217-244`.\n- Existing reactive reclaimers are in `infra/scripts/autodeploy.sh:132-140`, `:367-384`, and `:410-445`; runbook coverage is `infra/runbooks/review-bot-ops.md:494-606` and provisioning order is `infra/runbooks/provision-restore.md:98-138`.\n- Prior incident tickets found: `resting-feudalist-screamer` (`2731`), `masonic-abeyant-stagbeetle` (`3a52`), `besotted-witty-murrelet` (`e4f3`), `preodorous-temporary-piglet` (`3cef`), current `cyclopean-bloodshot-hoatzin` (`3276`), plus data-volume sibling `wakeful-ordinary-chicken` (`5a05`).\n\n## ADR draft location\nS0 `livid-blondish-shearwater` contains the full ADR draft to land later as `docs/adr/0110-gerrit-disk-ceiling-architecture.md` plus `docs/adr/.numbers/0110`, matching `docs/adr/README.md` and recent ADR format. Related accepted ADRs to cite: ADR 0005, ADR 0012, ADR 0069/0077, and ADR 0104.\n\n## Acceptance Criteria\n- [ ] ADR 0110 is finalized and landed in `docs/adr/` with number marker and index update if required by repo convention.\n- [ ] Dedicated gate-scratch EBS volume exists, is mounted at a documented path, is used by gate snapshots and review clone tempdirs, and has its own disk alarm.\n- [ ] Each named root accumulator has an enforced cap and its own CloudWatch alarm at/near cap.\n- [ ] Existing root/data disk alarms remain present; the cyclopean missing-data fix is not regressed.\n- [ ] `scowlful-bovine-dragonfly` is linked as the carried-over `/var/gerrit` sibling and is resolved or explicitly dispositioned before epic close.\n- [ ] Runbooks document steady-state ceilings, per-generator alarms, and emergency remediation.\n- [ ] Portability criterion: implementation is Terraform + host Docker/systemd config + host metrics, with local/scripted validation; it does not depend on any single CI provider trigger.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Bounded disk-ceiling architecture for the Gerrit host"
       },
       "created_at": "2026-09-02T19:31:02Z",
@@ -25761,6 +25951,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:52Z"
+    },
+    "6251-6d1a-7a3e-4901": {
+      "created_at": "2026-09-04T01:08:32Z",
+      "jira_id": "4591660",
+      "jira_key": "REB-4553",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:35Z"
     },
     "625b-9cd1-1ce9-4e5f": {
       "baseline": {
@@ -26441,6 +26638,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:07Z"
     },
+    "64f1-f782-a900-40cd": {
+      "created_at": "2026-09-04T01:08:37Z",
+      "jira_id": "4591661",
+      "jira_key": "REB-4554",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:40Z"
+    },
     "6532-9285-1808-40ea": {
       "baseline": {
         "assignee": {
@@ -26875,6 +27079,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:14Z"
+    },
+    "6681-ca5a-9541-4b16": {
+      "created_at": "2026-09-04T01:08:42Z",
+      "jira_id": "4591662",
+      "jira_key": "REB-4555",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:45Z"
     },
     "6688-de08-5bcb-4e0f": {
       "baseline": {
@@ -27651,6 +27862,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:29Z"
     },
+    "6963-25ef-c926-4b7b": {
+      "created_at": "2026-09-04T01:08:47Z",
+      "jira_id": "4591663",
+      "jira_key": "REB-4556",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:50Z"
+    },
     "6964-40bb-46c9-48a7": {
       "baseline": {
         "assignee": {
@@ -28085,6 +28303,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:48Z"
     },
+    "6aac-a7a0-5773-4a37": {
+      "created_at": "2026-09-04T01:08:52Z",
+      "jira_id": "4591664",
+      "jira_key": "REB-4557",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:08:55Z"
+    },
     "6ada-6015-8ac3-44f5": {
       "baseline": {
         "assignee": {
@@ -28224,6 +28449,13 @@
       "peer_parent": "REB-4040",
       "state": "confirmed",
       "updated_at": "2026-08-31T07:00:03Z"
+    },
+    "6b7a-abe1-6480-4092": {
+      "created_at": "2026-09-04T01:08:57Z",
+      "jira_id": "4591665",
+      "jira_key": "REB-4558",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:00Z"
     },
     "6ba3-6406-cba1-4f04": {
       "baseline": {
@@ -29325,6 +29557,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:16Z"
     },
+    "70e7-5df8-56b3-48b1": {
+      "created_at": "2026-09-04T01:09:02Z",
+      "jira_id": "4591666",
+      "jira_key": "REB-4559",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:05Z"
+    },
     "70f5-2253-1671-474d": {
       "baseline": {
         "assignee": {
@@ -29418,6 +29657,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-31T07:44:40Z"
     },
+    "71ad-3623-5bf1-4b15": {
+      "created_at": "2026-09-04T01:09:07Z",
+      "jira_id": "4591667",
+      "jira_key": "REB-4560",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:10Z"
+    },
     "71b0-8c03-3961-4863": {
       "baseline": {
         "assignee": null,
@@ -29460,6 +29706,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-31T01:12:53Z"
+    },
+    "71e0-d2f3-be22-4480": {
+      "created_at": "2026-09-04T01:09:14Z",
+      "jira_id": "4591668",
+      "jira_key": "REB-4561",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:17Z"
     },
     "71e7-4626-cb19-42d7": {
       "baseline": {
@@ -30828,6 +31081,13 @@
       "peer_parent": "REB-1538",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:46Z"
+    },
+    "7595-c3f8-4bf4-4594": {
+      "created_at": "2026-09-04T01:09:19Z",
+      "jira_id": "4591669",
+      "jira_key": "REB-4562",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:22Z"
     },
     "759e-7dc1-675c-4877": {
       "baseline": {
@@ -32649,6 +32909,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-22T07:37:42Z"
     },
+    "7d7e-f960-0766-4d84": {
+      "created_at": "2026-09-04T01:09:24Z",
+      "jira_id": "4591670",
+      "jira_key": "REB-4563",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:27Z"
+    },
     "7d91-55fc-e07c-4101": {
       "baseline": {
         "assignee": null,
@@ -32981,6 +33248,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-26T02:54:58Z"
+    },
+    "7ed7-dd54-c84d-4b79": {
+      "created_at": "2026-09-04T01:09:30Z",
+      "jira_id": "4591671",
+      "jira_key": "REB-4564",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:32Z"
     },
     "7ed9-ae31-a01e-44a9": {
       "baseline": {
@@ -33977,6 +34251,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:08Z"
     },
+    "8316-35be-6228-4522": {
+      "created_at": "2026-09-04T01:09:35Z",
+      "jira_id": "4591672",
+      "jira_key": "REB-4565",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:37Z"
+    },
     "831c-b852-4ef3-4f2d": {
       "baseline": {
         "assignee": null,
@@ -34524,6 +34805,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:19Z"
+    },
+    "8478-36f7-e423-4714": {
+      "created_at": "2026-09-04T01:09:40Z",
+      "jira_id": "4591673",
+      "jira_key": "REB-4566",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:43Z"
     },
     "84aa-bc0d-a719-4724": {
       "baseline": {
@@ -36363,6 +36651,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T01:25:29Z"
     },
+    "8ab9-48fe-a8e9-4a3f": {
+      "created_at": "2026-09-04T01:09:45Z",
+      "jira_id": "4591674",
+      "jira_key": "REB-4567",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:48Z"
+    },
     "8ad5-6c4a-c701-430e": {
       "baseline": {
         "assignee": null,
@@ -37858,6 +38153,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:36Z"
     },
+    "9023-3a1f-32c9-4916": {
+      "created_at": "2026-09-04T01:09:50Z",
+      "jira_id": "4591675",
+      "jira_key": "REB-4568",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:53Z"
+    },
     "9058-0b67-4c6a-49c4": {
       "baseline": {
         "assignee": {
@@ -38727,6 +39029,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T09:37:50Z"
+    },
+    "93b0-7864-619f-4521": {
+      "created_at": "2026-09-04T01:09:55Z",
+      "jira_id": "4591676",
+      "jira_key": "REB-4569",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:09:58Z"
     },
     "93c4-2b9f-749a-4243": {
       "baseline": {
@@ -40523,6 +40832,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:32Z"
     },
+    "9a17-e0b3-7aa6-4091": {
+      "created_at": "2026-09-04T01:10:01Z",
+      "jira_id": "4591677",
+      "jira_key": "REB-4570",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:10:04Z"
+    },
     "9a46-1c90-5dd9-44e1": {
       "baseline": {
         "assignee": {
@@ -41320,6 +41636,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:52Z"
     },
+    "9d38-237d-7561-423d": {
+      "created_at": "2026-09-04T01:10:08Z",
+      "jira_id": "4591678",
+      "jira_key": "REB-4571",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:10:11Z"
+    },
     "9d40-1db8-1bcc-4f91": {
       "baseline": {
         "assignee": {
@@ -41745,6 +42068,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:12Z"
     },
+    "9efc-7888-7956-4e2b": {
+      "created_at": "2026-09-04T01:10:13Z",
+      "jira_id": "4591679",
+      "jira_key": "REB-4572",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:10:16Z"
+    },
     "9efe-8e88-70b3-4984": {
       "baseline": {
         "assignee": {
@@ -41950,6 +42280,13 @@
       "peer_parent": "REB-268",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:20Z"
+    },
+    "9f88-40e3-e7fc-41e0": {
+      "created_at": "2026-09-04T01:10:19Z",
+      "jira_id": "4591680",
+      "jira_key": "REB-4573",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:10:22Z"
     },
     "9f8e-6ba5-aa65-4561": {
       "baseline": {
@@ -43867,6 +44204,13 @@
       "peer_parent": "REB-713",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:05Z"
+    },
+    "a728-8101-1ff7-4fcf": {
+      "created_at": "2026-09-04T01:10:24Z",
+      "jira_id": "4591681",
+      "jira_key": "REB-4574",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:10:27Z"
     },
     "a733-50ad-f25a-49f3": {
       "baseline": {
@@ -45908,6 +46252,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:49Z"
     },
+    "adf3-7a6e-13e1-43c2": {
+      "created_at": "2026-09-04T01:10:29Z",
+      "jira_id": "4591682",
+      "jira_key": "REB-4575",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:10:32Z"
+    },
     "ae0e-1cfa-cc92-4b1e": {
       "baseline": {
         "assignee": null,
@@ -46033,6 +46384,13 @@
       "peer_parent": "REB-2574",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:53Z"
+    },
+    "ae97-a37b-9fa3-413a": {
+      "created_at": "2026-09-04T01:10:35Z",
+      "jira_id": "4591683",
+      "jira_key": "REB-4576",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:10:38Z"
     },
     "aea0-0dac-b501-464c": {
       "baseline": {
@@ -47262,6 +47620,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-20T00:44:21Z"
     },
+    "b338-ca44-657a-4d2d": {
+      "created_at": "2026-09-04T01:10:43Z",
+      "jira_id": "4591684",
+      "jira_key": "REB-4577",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:10:45Z"
+    },
     "b355-7140-50cd-4195": {
       "created_at": "2026-08-15T15:09:18Z",
       "jira_key": "REB-282",
@@ -47669,6 +48034,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:22Z"
     },
+    "b485-dc1f-c186-49eb": {
+      "created_at": "2026-09-04T01:10:48Z",
+      "jira_id": "4591685",
+      "jira_key": "REB-4578",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:10:50Z"
+    },
     "b49a-6864-e035-4f65": {
       "baseline": {
         "assignee": null,
@@ -47992,6 +48364,13 @@
       "peer_parent": "REB-4160",
       "state": "confirmed",
       "updated_at": "2026-08-31T23:34:06Z"
+    },
+    "b587-d21b-7ece-4248": {
+      "created_at": "2026-09-04T01:10:53Z",
+      "jira_id": "4591686",
+      "jira_key": "REB-4579",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:10:56Z"
     },
     "b593-86d1-b28d-4646": {
       "baseline": {
@@ -48404,6 +48783,13 @@
       "peer_parent": "REB-993",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:47Z"
+    },
+    "b6cd-bcc8-ea76-44e0": {
+      "created_at": "2026-09-04T01:10:58Z",
+      "jira_id": "4591687",
+      "jira_key": "REB-4580",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:01Z"
     },
     "b6db-ed18-7ef1-443f": {
       "created_at": "2026-08-15T15:09:48Z",
@@ -49161,6 +49547,13 @@
       "jira_key": "REB-1367",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:02Z"
+    },
+    "ba01-ee09-8402-4323": {
+      "created_at": "2026-09-04T01:11:03Z",
+      "jira_id": "4591688",
+      "jira_key": "REB-4581",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:06Z"
     },
     "ba2c-e08d-cfeb-42f2": {
       "baseline": {
@@ -50658,7 +51051,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\n\nDiscovered while driving `3276-2f81-8c75-4ddd` (cyclopean-bloodshot-hoatzin), the 2026-09-02 root-disk outage. That ticket's Defect 2 was a dead-man's-switch inversion: `rebar-root-disk-pressure` watched a metric published BY THE HOST THAT WAS DYING, under `treat_missing_data = \"notBreaching\"`, so CloudWatch read the publisher's silence as health and the alarm went GREEN at the moment the host became unreachable. Nobody was paged for 5 hours.\n\nThat was fixed for exactly TWO alarms. `root_disk_pressure` (monitoring_autodeploy.tf) and `gerrit_data_disk_high` (monitoring.tf) are now `breaching` on main and live. **Eleven other alarms in the same `rebar/host` namespace were left at `notBreaching`.**\n\n## The measured finding: none of the eleven is a sparse counter\n\nThe inline Terraform comments justify `notBreaching` with a belief about the publisher \u2014 e.g. 'No X errors published in a period is the healthy steady state'. **The publisher contradicts that comment.**\n\n`infra/scripts/observability.sh` implements every host counter as an OFFSET-DELTA, not an event emit: it greps a cumulative journal, subtracts a persisted offset, and UNCONDITIONALLY publishes the delta (`--value \"$new\"`), which is `0` when nothing happened. `publish_autodeploy_marker_delta` (~line 296) is the shared helper for six of them. The probe is a systemd timer at `OnUnitActiveSec=5min` (infra/scripts/install-observability.sh:31).\n\nSo a healthy period publishes `0` \u2014 it does NOT publish nothing. Missing data therefore means THE PUBLISHER IS DEAD, exactly as with the disk alarms.\n\nLive CloudWatch confirms it. Sampling 2026-09-01 12:00-14:00Z at 5-min periods returned dense datapoints, all `0.0`, for every one of the eleven.\n\n## The eleven, by blast radius\n\n1. **mirror_out_of_sync** (monitoring_ws7.tf) \u2014 WORST, and defective beyond host-death. Its publish sits inside `if [ -n \"$gerrit_sha\" ] && [ -n \"$github_sha\" ]`; the else branch logs and publishes NOTHING. So a LIVE, healthy host whose Gerrit REST call or `git ls-remote` breaks silently stops the signal and the alarm reads OK forever while GitHub main drifts. The Terraform comment calls this fail-safe; it is fail-OPEN. monitoring_ws7.tf itself states no other alarm covers mirror drift.\n2. **replication_errors** (monitoring_s5.tf) \u2014 same alive-host gap via a `[ -f \"$REPL_LOG\" ]` guard: a moved, renamed, or rotated-away replication log mutes the alarm permanently.\n3. **review_interrupts_signal_unavailable** (monitoring_autodeploy.tf) \u2014 this is the 'deploys are running blind' signal. Its documented archetype (bug 34cd) is a live-locked review gate sitting behind green alarms; muting it silently reproduces that.\n4. **deploy_errors** (monitoring_autodeploy.tf) \u2014 probe death means 'the box is not tracking main' goes unpaged.\n5. **voter_errors** (monitoring_s4b.tf), **review_bot_merge_change_errors** (monitoring_88ab.tf), **g2p_dispatch_errors** (monitoring_1fa8.tf) \u2014 both merge-gate legs (LLM-Review and Verified) go dark together.\n6. **mcp_retire_cap**, **mcp_mem_abort** (monitoring_foxterrier.tf), **review_interrupts_bound_exceeded** (monitoring_autodeploy.tf) \u2014 degradation rather than outage.\n7. **bridge_run_failures** (monitoring_bridge.tf) \u2014 also a heartbeat, but the ONLY one whose tradeoff is explicitly named and compensated: monitoring_bridge.tf:40-45 states the stop-entirely case is owned by the Reconciler Heartbeat Canary. Treat separately.\n\nFor 3-6 the pure host-down case is partly backstopped by `GerritReachable` and the two fixed disk alarms. The residual uncovered case for ALL of them is **the probe dying while the host lives** \u2014 a rebar-observability.timer failure, IAM/credential revocation, or `aws` erroring \u2014 which mutes ten alarms at once with nothing else firing.\n\n## Explicitly OUT of scope\n\n`monitoring_eb6e.tf:109` (Bedrock client-error rate) is correctly `notBreaching`: its source is an AWS-published Bedrock metric, genuinely absent when idle, with FILL(m,0) and a divide-by-zero guard. Any rule must be scoped to `namespace = \"rebar/host\"` so it stays out.\n\n## Tuning constraint \u2014 do NOT flip these blind\n\nThe risk is not false pages from sparseness (a healthy period publishes 0, so a breaching alarm stays OK). The risk is TIMER JITTER: a 2-hour sample showed ~22 of 24 periods present, so isolated missing periods are normal. Five alarms are `evaluation_periods = 1, datapoints_to_alarm = 1` (g2p_dispatch_errors, review_bot_merge_change_errors, replication_errors, and both review_interrupts_*) and WOULD FLAP on a single jittered tick. Flipping must be paired with `evaluation_periods >= 3`, matching how root_disk_pressure is configured (300s / 3 periods).\n\n## Acceptance criteria\n\n- [ ] AC1: every `aws_cloudwatch_metric_alarm` in namespace `rebar/host` either sets `treat_missing_data = \"breaching\"` or carries an explicit opt-out marker stating why. Verified by the guard test in AC4 passing with no unexplained exceptions.\n- [ ] AC2: alarms flipped to breaching that currently sit at `evaluation_periods = 1` are widened to `>= 3` in the same change, so normal timer jitter cannot flap them. Verified by reading the resulting Terraform and by no flap in the 24h after apply.\n- [ ] AC3: `mirror_out_of_sync` publishes a THRESHOLD-CROSSING value on its else branch (the branch taken when the Gerrit REST read or `git ls-remote` fails) instead of publishing nothing. Given the alarm's `threshold = 0` with `GreaterThanThreshold`, that value is `1`. Publishing `0` would NOT close the gap: it reads as in-sync and preserves exactly the fail-open this ticket is about. Flapping on a transient blip is suppressed by the alarm's existing `datapoints_to_alarm = 2` together with AC2's widened window \u2014 that blip risk is precisely what the current comment in `infra/scripts/observability.sh` (\"On a fetch failure we publish NOTHING (the alarm treats missing data as healthy) rather than risk a false alarm from a blip\") was written to avoid, so that comment must be rewritten in the same change to state the new disposition. Verified by inducing a fetch/REST failure and observing the alarm actually reach ALARM state, NOT merely by observing that some datapoint appeared.\n- [ ] AC4: the rule is encoded as a test, not left to review vigilance \u2014 `tests/unit/test_alarm_actions_terraform.py` already asserts the disk-alarm case and already has `_TREAT_MISSING_DATA_RE` plus an `# rebar:allow-actionless-alarm:` opt-out convention, so this is a small extension of an existing guard, not new machinery. Verified by the test failing on a deliberately reverted alarm.\n- [ ] AC5 [non-codebase]: `bridge_run_failures` is explicitly decided \u2014 either left notBreaching with its existing documented compensating control, or flipped with an evaluation window >= 3 hours. Verified by a comment recording the decision.\n- [ ] AC6 [non-codebase]: the false \"missing data means healthy\" rationale is corrected wherever it appears. It is NOT a single phrase and a one-phrase grep will not find it \u2014 it takes three distinct forms: (a) \"no X published in a period is the healthy steady state\", in monitoring_1fa8.tf:74, monitoring_s5.tf:50, monitoring_s4b.tf:78 and monitoring_88ab.tf:57 (with a cross-reference in monitoring.tf); (b) \"the probe fails safe\", in monitoring_ws7.tf:48-49; and (c) ABSENT ENTIRELY \u2014 monitoring_foxterrier.tf:68 and :104 carry a bare `treat_missing_data = \"notBreaching\"` with no justifying comment at all, so there is nothing to correct and a rationale must be ADDED. Verified by enumerating all eleven alarms individually and confirming each one either carries a corrected rationale or an explicit opt-out marker \u2014 not by grepping for one phrase.\n\n## Testing\n\n- `python -m pytest tests/unit/test_alarm_actions_terraform.py -q`\n- `terraform plan` showing only the intended alarm changes\n- post-apply: `aws cloudwatch describe-alarms` confirming the new settings, and a 24h flap check",
+        "description": "## Context\n\nDiscovered while driving `3276-2f81-8c75-4ddd` (cyclopean-bloodshot-hoatzin), the 2026-09-02 root-disk outage. That ticket's Defect 2 was a dead-man's-switch inversion: `rebar-root-disk-pressure` watched a metric published BY THE HOST THAT WAS DYING, under `treat_missing_data = \"notBreaching\"`, so CloudWatch read the publisher's silence as health and the alarm went GREEN at the moment the host became unreachable. Nobody was paged for 5 hours.\n\nThat was fixed for exactly TWO alarms. `root_disk_pressure` (monitoring_autodeploy.tf) and `gerrit_data_disk_high` (monitoring.tf) are now `breaching` on main and live. **Eleven other alarms in the same `rebar/host` namespace were left at `notBreaching`.**\n\n## The measured finding: none of the eleven is a sparse counter\n\nThe inline Terraform comments justify `notBreaching` with a belief about the publisher \u2014 e.g. 'No X errors published in a period is the healthy steady state'. **The publisher contradicts that comment.**\n\n`infra/scripts/observability.sh` implements every host counter as an OFFSET-DELTA, not an event emit: it greps a cumulative journal, subtracts a persisted offset, and UNCONDITIONALLY publishes the delta (`--value \"$new\"`), which is `0` when nothing happened. `publish_autodeploy_marker_delta` (~line 296) is the shared helper for six of them. The probe is a systemd timer at `OnUnitActiveSec=5min` (infra/scripts/install-observability.sh:31).\n\nSo a healthy period publishes `0` \u2014 it does NOT publish nothing. Missing data therefore means THE PUBLISHER IS DEAD, exactly as with the disk alarms.\n\nLive CloudWatch confirms it. Sampling 2026-09-01 12:00-14:00Z at 5-min periods returned dense datapoints, all `0.0`, for every one of the eleven.\n\n## The eleven, by blast radius\n\n1. **mirror_out_of_sync** (monitoring_ws7.tf) \u2014 WORST, and defective beyond host-death. Its publish sits inside `if [ -n \"$gerrit_sha\" ] && [ -n \"$github_sha\" ]`; the else branch logs and publishes NOTHING. So a LIVE, healthy host whose Gerrit REST call or `git ls-remote` breaks silently stops the signal and the alarm reads OK forever while GitHub main drifts. The Terraform comment calls this fail-safe; it is fail-OPEN. monitoring_ws7.tf itself states no other alarm covers mirror drift.\n2. **replication_errors** (monitoring_s5.tf) \u2014 same alive-host gap via a `[ -f \"$REPL_LOG\" ]` guard: a moved, renamed, or rotated-away replication log mutes the alarm permanently.\n3. **review_interrupts_signal_unavailable** (monitoring_autodeploy.tf) \u2014 this is the 'deploys are running blind' signal. Its documented archetype (bug 34cd) is a live-locked review gate sitting behind green alarms; muting it silently reproduces that.\n4. **deploy_errors** (monitoring_autodeploy.tf) \u2014 probe death means 'the box is not tracking main' goes unpaged.\n5. **voter_errors** (monitoring_s4b.tf), **review_bot_merge_change_errors** (monitoring_88ab.tf), **g2p_dispatch_errors** (monitoring_1fa8.tf) \u2014 both merge-gate legs (LLM-Review and Verified) go dark together.\n6. **mcp_retire_cap**, **mcp_mem_abort** (monitoring_foxterrier.tf), **review_interrupts_bound_exceeded** (monitoring_autodeploy.tf) \u2014 degradation rather than outage.\n7. **bridge_run_failures** (monitoring_bridge.tf) \u2014 also a heartbeat, but the ONLY one whose tradeoff is explicitly named and compensated: monitoring_bridge.tf:40-45 states the stop-entirely case is owned by the Reconciler Heartbeat Canary. Treat separately.\n\nFor 3-6 the pure host-down case is partly backstopped by `GerritReachable` and the two fixed disk alarms. The residual uncovered case for ALL of them is **the probe dying while the host lives** \u2014 a rebar-observability.timer failure, IAM/credential revocation, or `aws` erroring \u2014 which mutes ten alarms at once with nothing else firing.\n\n## Explicitly OUT of scope\n\n`monitoring_eb6e.tf:109` (Bedrock client-error rate) is correctly `notBreaching`: its source is an AWS-published Bedrock metric, genuinely absent when idle, with FILL(m,0) and a divide-by-zero guard. Any rule must be scoped to `namespace = \"rebar/host\"` so it stays out.\n\n## Tuning constraint \u2014 do NOT flip these blind\n\nThe risk is not false pages from sparseness (a healthy period publishes 0, so a breaching alarm stays OK). The risk is TIMER JITTER: a 2-hour sample showed ~22 of 24 periods present, so isolated missing periods are normal. Five alarms are `evaluation_periods = 1, datapoints_to_alarm = 1` (g2p_dispatch_errors, review_bot_merge_change_errors, replication_errors, and both review_interrupts_*) and WOULD FLAP on a single jittered tick. Flipping must be paired with `evaluation_periods >= 3`, matching how root_disk_pressure is configured (300s / 3 periods).\n\n## Acceptance criteria\n\n- [ ] AC1: every `aws_cloudwatch_metric_alarm` in namespace `rebar/host` either sets `treat_missing_data = \"breaching\"` or carries an explicit opt-out marker stating why. Verified by the guard test in AC4 passing with no unexplained exceptions.\n- [x] AC2 [REWRITTEN 2026-09-03 \u2014 the original form was defective]: the widened windows are proven not to flap by REPLAYING the recorded metric series against the new alarm configuration, showing zero state transitions across a window chosen for worst-case jitter. The original wording asked for a 24-hour observation period, which is waiting rather than verifying: it samples whichever day happens to elapse, proves nothing about a worse day, and cannot be re-run. Flap behaviour is DETERMINISTIC given a metric series and an alarm config, so it is answerable immediately and repeatably. Verified by replaying each flipped alarm's own recorded series (the pre-change 2-hour sample showed ~22 of 24 periods present, so isolated missing periods are the normal condition to replay against) and reporting the transition count per alarm.\n- [ ] AC3: `mirror_out_of_sync` publishes a THRESHOLD-CROSSING value on its else branch (the branch taken when the Gerrit REST read or `git ls-remote` fails) instead of publishing nothing. Given the alarm's `threshold = 0` with `GreaterThanThreshold`, that value is `1`. Publishing `0` would NOT close the gap: it reads as in-sync and preserves exactly the fail-open this ticket is about. Flapping on a transient blip is suppressed by the alarm's existing `datapoints_to_alarm = 2` together with AC2's widened window \u2014 that blip risk is precisely what the current comment in `infra/scripts/observability.sh` (\"On a fetch failure we publish NOTHING (the alarm treats missing data as healthy) rather than risk a false alarm from a blip\") was written to avoid, so that comment must be rewritten in the same change to state the new disposition. Verified by inducing a fetch/REST failure and observing the alarm actually reach ALARM state, NOT merely by observing that some datapoint appeared.\n- [ ] AC4: the rule is encoded as a test, not left to review vigilance \u2014 `tests/unit/test_alarm_actions_terraform.py` already asserts the disk-alarm case and already has `_TREAT_MISSING_DATA_RE` plus an `# rebar:allow-actionless-alarm:` opt-out convention, so this is a small extension of an existing guard, not new machinery. Verified by the test failing on a deliberately reverted alarm.\n- [ ] AC5 [non-codebase]: `bridge_run_failures` is explicitly decided \u2014 either left notBreaching with its existing documented compensating control, or flipped with an evaluation window >= 3 hours. Verified by a comment recording the decision.\n- [ ] AC6 [non-codebase]: the false \"missing data means healthy\" rationale is corrected wherever it appears. It is NOT a single phrase and a one-phrase grep will not find it \u2014 it takes three distinct forms: (a) \"no X published in a period is the healthy steady state\", in monitoring_1fa8.tf:74, monitoring_s5.tf:50, monitoring_s4b.tf:78 and monitoring_88ab.tf:57 (with a cross-reference in monitoring.tf); (b) \"the probe fails safe\", in monitoring_ws7.tf:48-49; and (c) ABSENT ENTIRELY \u2014 monitoring_foxterrier.tf:68 and :104 carry a bare `treat_missing_data = \"notBreaching\"` with no justifying comment at all, so there is nothing to correct and a rationale must be ADDED. Verified by enumerating all eleven alarms individually and confirming each one either carries a corrected rationale or an explicit opt-out marker \u2014 not by grepping for one phrase.\n\n## Testing\n\n- `python -m pytest tests/unit/test_alarm_actions_terraform.py -q`\n- `terraform plan` showing only the intended alarm changes\n- post-apply: `aws cloudwatch describe-alarms` confirming the new settings, and a 24h flap check\n\n## AC2 evidence \u2014 replayed, not waited for (2026-09-03)\n\nReplayed 24 hours of each alarm's OWN recorded series against its LIVE configuration, modelling CloudWatch's evaluation exactly (period grid with gaps materialised, `treat_missing_data` applied to missing periods, `datapoints_to_alarm` of `evaluation_periods` for both the ALARM and OK transitions):\n\n    alarm                                                  per/ep/dta  pts  miss  transitions\n    rebar-autodeploy-errors                                  900/4/2    96     0       2\n    rebar-autodeploy-mcp-mem-abort                           900/4/2    96     0       0\n    rebar-autodeploy-mcp-retire-cap                          900/4/2    96     0       0\n    rebar-autodeploy-review-interrupts-bound-exceeded        900/4/2    96     0       2\n    rebar-autodeploy-review-interrupts-signal-unavailable    900/4/2    96     0       0\n    rebar-gerrit-data-disk-high                              300/3/2   261    27       0\n    rebar-gerrit-g2p-dispatch-errors                         300/3/2   261    27       0\n    rebar-gerrit-mirror-out-of-sync                          300/3/2   261    27       2\n    rebar-gerrit-replication-errors                          300/3/2   261    27       0\n    rebar-gerrit-voter-errors                                300/5/3   261    27       0\n    rebar-review-bot-merge-change-errors                     300/3/2   261    27       0\n    rebar-root-disk-pressure                                 300/3/2   261    27       0\n\n**The jitter is real and was absorbed.** Every 300s alarm saw **27 missing periods** out of ~288 \u2014 the ~22-of-24 pattern measured before the change, now confirmed over a full day. Under the OLD 1-of-1 configuration each of those 27 gaps would have been an immediate page once `treat_missing_data` became breaching. Under the widened 3-of-2 windows, eight of them produced **zero** transitions.\n\n**The three alarms that DID transition are TRUE POSITIVES, not flaps.** Checked each against its raw series for nonzero readings:\n\n    mirror_out_of_sync                 1.0 at 09-02 17:19, 09-02 19:34, 09-03 15:29\n    review_interrupts_bound_exceeded   1.0 at 09-02 16:09, 09-02 16:54\n    deploy_errors                      2.0-4.0 across 09-02 15:39-16:29 (the febd uv-pin build failures)\n\nSo every transition in 24 hours was driven by a genuine breaching VALUE. **Zero transitions anywhere were caused by missing data.** That is precisely what the widened windows were for.\n\n## Why this replaces the original 24-hour-observation wording\n\nThe operator's point, and it is correct: an acceptance criterion that depends on time passing is defective. Waiting samples whichever day happens to elapse, proves nothing about a worse one, cannot be re-run, and \u2014 as this replay shows \u2014 would not even have distinguished a flap from a true positive without exactly this analysis anyway. The replay is deterministic, repeatable, took minutes, and covers a window deliberately chosen to include the worst churn on record (a 5-hour Gerrit outage, a 12-hour MCP outage, five failed deploys and three MCP cutovers).\n\nWorth flagging separately: `mirror_out_of_sync` fired again at **09-03 15:29 today**, a genuine mirror divergence \u2014 the alarm is doing real work, not sitting decorative.",
         "priority": "High",
         "status": "In Progress",
         "summary": "Dead-man inversion survives in 11 host-published alarms: every rebar/host counter is a heartbeat that publishes 0, not a sparse event"
@@ -51004,6 +51397,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:38Z"
     },
+    "c161-0ac4-f8d7-44ac": {
+      "created_at": "2026-09-04T01:11:08Z",
+      "jira_id": "4591689",
+      "jira_key": "REB-4582",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:11Z"
+    },
     "c16f-54f5-cd11-4e51": {
       "created_at": "2026-08-15T15:10:39Z",
       "jira_key": "REB-301",
@@ -51187,6 +51587,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-28T21:08:46Z"
     },
+    "c220-d79e-e6a1-40f1": {
+      "created_at": "2026-09-04T01:11:13Z",
+      "jira_id": "4591690",
+      "jira_key": "REB-4583",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:16Z"
+    },
     "c23c-c32b-982c-4196": {
       "created_at": "2026-08-15T15:10:43Z",
       "jira_key": "REB-1508",
@@ -51274,6 +51681,13 @@
       "peer_parent": "REB-1433",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:46Z"
+    },
+    "c2de-6c45-35c2-41e4": {
+      "created_at": "2026-09-04T01:11:19Z",
+      "jira_id": "4591691",
+      "jira_key": "REB-4584",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:22Z"
     },
     "c2ec-10b0-4bd9-430d": {
       "baseline": {
@@ -51380,6 +51794,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:48Z"
+    },
+    "c379-f294-f462-464a": {
+      "created_at": "2026-09-04T01:11:24Z",
+      "jira_id": "4591692",
+      "jira_key": "REB-4585",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:27Z"
     },
     "c38b-98c3-b5cc-410c": {
       "baseline": {
@@ -52237,6 +52658,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T15:38:42Z"
     },
+    "c761-75dd-514a-41f2": {
+      "created_at": "2026-09-04T01:11:31Z",
+      "jira_id": "4591693",
+      "jira_key": "REB-4586",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:33Z"
+    },
     "c768-a0ad-0567-412c": {
       "baseline": {
         "assignee": null,
@@ -52935,6 +53363,13 @@
       "peer_parent": "REB-4305",
       "state": "confirmed",
       "updated_at": "2026-09-01T01:27:49Z"
+    },
+    "ca26-8985-1aaf-48d2": {
+      "created_at": "2026-09-04T01:11:36Z",
+      "jira_id": "4591694",
+      "jira_key": "REB-4587",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:39Z"
     },
     "ca47-e124-7462-44d0": {
       "baseline": {
@@ -53937,6 +54372,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:42Z"
+    },
+    "ce12-9b7f-013d-44a7": {
+      "created_at": "2026-09-04T01:11:41Z",
+      "jira_id": "4591695",
+      "jira_key": "REB-4588",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:44Z"
     },
     "ce14-01c6-a26f-4096": {
       "baseline": {
@@ -55159,6 +55601,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:04Z"
     },
+    "d130-a2ee-39c5-422d": {
+      "created_at": "2026-09-04T01:11:46Z",
+      "jira_id": "4591696",
+      "jira_key": "REB-4589",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:49Z"
+    },
     "d13e-e1c3-8bb8-40c4": {
       "baseline": {
         "assignee": null,
@@ -55766,6 +56215,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:18Z"
     },
+    "d340-0d86-0472-43ae": {
+      "created_at": "2026-09-04T01:11:51Z",
+      "jira_id": "4591697",
+      "jira_key": "REB-4590",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:54Z"
+    },
     "d343-47c6-5987-43e4": {
       "baseline": {
         "assignee": {
@@ -55977,6 +56433,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:23Z"
     },
+    "d41f-3def-2ebb-4159": {
+      "created_at": "2026-09-04T01:11:56Z",
+      "jira_id": "4591698",
+      "jira_key": "REB-4591",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:11:59Z"
+    },
     "d42a-2925-9bd9-465c": {
       "baseline": {
         "assignee": null,
@@ -56179,6 +56642,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:27Z"
     },
+    "d4ec-bda9-5b10-4504": {
+      "created_at": "2026-09-04T01:12:01Z",
+      "jira_id": "4591699",
+      "jira_key": "REB-4592",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:04Z"
+    },
     "d52a-40cd-75d4-46cb": {
       "created_at": "2026-08-15T15:12:27Z",
       "jira_key": "REB-1718",
@@ -56337,6 +56807,13 @@
       "peer_parent": "REB-1562",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:32Z"
+    },
+    "d5d8-8a8e-8b19-441d": {
+      "created_at": "2026-09-04T01:12:06Z",
+      "jira_id": "4591700",
+      "jira_key": "REB-4593",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:09Z"
     },
     "d5f0-b85f-aa56-46b0": {
       "baseline": {
@@ -57587,6 +58064,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T03:44:22Z"
     },
+    "da99-4a1b-73de-4426": {
+      "created_at": "2026-09-04T01:12:11Z",
+      "jira_id": "4591701",
+      "jira_key": "REB-4594",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:14Z"
+    },
     "daa2-789e-df12-4d9b": {
       "baseline": {
         "assignee": null,
@@ -57720,6 +58204,13 @@
       "peer_parent": "REB-61",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:59Z"
+    },
+    "db3a-f51f-fcab-43a5": {
+      "created_at": "2026-09-04T01:12:16Z",
+      "jira_id": "4591702",
+      "jira_key": "REB-4595",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:19Z"
     },
     "db53-dcfc-18a9-4403": {
       "created_at": "2026-08-15T15:12:59Z",
@@ -57991,6 +58482,13 @@
       "jira_key": "REB-1837",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:04Z"
+    },
+    "dbfb-b6ab-faaa-4c02": {
+      "created_at": "2026-09-04T01:12:22Z",
+      "jira_id": "4591703",
+      "jira_key": "REB-4596",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:24Z"
     },
     "dc05-5a87-3f5c-4f99": {
       "created_at": "2026-08-15T15:13:04Z",
@@ -59839,6 +60337,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:48Z"
     },
+    "e346-2dcb-837a-4915": {
+      "created_at": "2026-09-04T01:12:27Z",
+      "jira_id": "4591704",
+      "jira_key": "REB-4597",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:29Z"
+    },
     "e34a-1d0c-0daa-4f2c": {
       "baseline": {
         "assignee": {
@@ -60375,6 +60880,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-31T23:35:07Z"
     },
+    "e510-2d40-5438-41d9": {
+      "created_at": "2026-09-04T01:12:32Z",
+      "jira_id": "4591705",
+      "jira_key": "REB-4598",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:34Z"
+    },
     "e510-be43-e723-41bc": {
       "baseline": {
         "assignee": null,
@@ -60671,6 +61183,13 @@
       "jira_key": "REB-1298",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:07Z"
+    },
+    "e62f-00ea-8734-4282": {
+      "created_at": "2026-09-04T01:12:37Z",
+      "jira_id": "4591706",
+      "jira_key": "REB-4599",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:40Z"
     },
     "e63c-d987-6b99-4b56": {
       "baseline": {
@@ -61485,6 +62004,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:28Z"
     },
+    "e918-3fee-e10e-48b1": {
+      "created_at": "2026-09-04T01:12:42Z",
+      "jira_id": "4591707",
+      "jira_key": "REB-4600",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:45Z"
+    },
     "e931-7f1f-8b0c-465b": {
       "baseline": {
         "assignee": {
@@ -61991,6 +62517,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:40Z"
     },
+    "eb26-c31a-3f74-4dda": {
+      "created_at": "2026-09-04T01:12:47Z",
+      "jira_id": "4591708",
+      "jira_key": "REB-4601",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:50Z"
+    },
     "eb3a-91d4-b1c0-4a37": {
       "baseline": {
         "assignee": null,
@@ -62365,6 +62898,13 @@
       "peer_parent": "REB-544",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:47Z"
+    },
+    "ec68-1988-ecc9-4d2a": {
+      "created_at": "2026-09-04T01:12:52Z",
+      "jira_id": "4591709",
+      "jira_key": "REB-4602",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:12:55Z"
     },
     "ec6d-e7ad-3de0-44df": {
       "baseline": {
@@ -63109,9 +63649,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nCalibrate the preservation-first verbosity guidance and ten deterministic bloat rules from immobile-drastic-springtail against historical rebar tickets whose descriptions are near or above the 8,000-character admission limit. Save the prior research as a session_log and add session_log to the artifact contract.\n\n## Approach\n- Build a read-only population of work tickets (task, story, bug, epic) with description length 7,200\u20137,999 or at least 8,000 characters. Exclude session_log and code_review artifacts from the sampled population because their intentionally verbose semantics would confound the work-ticket policy.\n- Freeze the ten proposed rules and compute whether each rule fires on the applicable description/comment content. Use normalized Markdown comparisons while protecting identifiers, paths, commands, dates, measurements, decisions, constraints, blockers, and exact errors.\n- Split a reproducible sample into at least three small batches of 6\u20138 tickets. Background reviewers receive complete rule definitions but not the computed firing results. Each labels overall appropriateness/bloat and, per applicable rule, whether that rule\u2019s targeted bloat is actually present, with concise evidence and confidence.\n- Aggregate per-rule TP, FP, FN, and TN counts and percentages over applicable artifacts. Also report union-of-rules performance for overall ticket bloat, not-applicable counts, sample composition, disagreements/uncertainty, and threshold changes suggested by observed false positives/negatives.\n- Treat the exercise as a preliminary calibration, not population-level validation; state sample-size and selection-bias limits.\n\n## Artifacts\n- A rebar session_log containing the prior research, source links, guidance, deterministic rule matrix, and this calibration\u2019s progress/results.\n- Ticket comments containing the sampling method, batch assignments, measurements, and final confusion matrices.\n- No repository files.\n\n## Acceptance Criteria\n- [x] The prior research is saved in a linked session_log, and session_log is added to the artifact contract as the home for verbose chronology/evidence.\n- [x] At least three background-agent batches of 6\u20138 near/over-limit work tickets are reviewed.\n- [x] Every sampled ticket has a reproducible identifier, description length, length band, overall bloat label, confidence, and concise rationale.\n- [x] For each applicable rule, TP/FP/FN/TN counts, denominators, and percentages are reported; not-applicable cases are separate.\n- [x] Overall union-of-rules performance and material reviewer uncertainty are reported.\n- [x] Recommendations distinguish observed evidence from provisional threshold changes and identify false-positive safeguards.\n- [x] No repository files are modified.\n\n## Verification\nCross-check batch outputs against the frozen sample, recompute confusion matrices deterministically, verify the session_log link, and record results on this ticket.",
+        "description": "## Context / Problem\nRevise the completed verbosity research after user correction. The original ten deterministic signals were not merely unvalidated: the historical calibration refuted them as production recommendations. The final guidance must be artifact-specific, and any replacement deterministic rule or LLM criterion must show a positive effect on the historical ticket corpus before recommendation.\n\n## Approach\n- Scope writing guidance separately for executable ticket descriptions/plans, ticket comments/handoffs, ADRs, user-facing documentation, reference/API documentation, incident/security records, and session logs/research notes.\n- Treat unchosen alternatives as inappropriate in an executable ticket once a path is chosen, but retain considered alternatives and decision rationale in an ADR.\n- Give user-facing documentation its own contract for task-oriented explanation, examples, troubleshooting, and progressive disclosure.\n- Remove \u201cowner\u201d from the fresh-agent resumption check; test only current state, chosen path, constraints, proof, blocker, and exact next action.\n- Explicitly classify all ten calibration-v1 rules as refuted for production use. Do not describe zero-positive results as useful signals, and do not recommend any signal with false positives greater than or equal to true positives.\n- Mine the frozen 20-ticket sample for new, precisely defined candidate signals. Compute TP/FP/FN/TN for each candidate against the existing adjudicated labels. Recommend only candidates with TP > 0 and TP > FP, while clearly distinguishing retrospective discovery from held-out validation.\n- Record the correction, artifact-scoped guidance, candidate definitions, measurements, limitations, and next validation requirements in the linked session_log.\n\n## Artifacts\n- Updated research in session_log 59a7-cb88-f2f9-4148.\n- Updated calibration findings and final answer.\n- No repository files.\n\n## Acceptance Criteria\n- [ ] Guidance has separate named sections for all seven artifact classes listed in the Approach.\n- [ ] The executable-ticket section excludes unchosen alternatives after selection.\n- [ ] The ADR section requires considered alternatives and the reason for rejection.\n- [ ] The user-facing-documentation section covers task explanation, examples, troubleshooting, and progressive disclosure.\n- [ ] \u201cOwner\u201d is absent from the fresh-agent resumption check.\n- [ ] The result identifies each of R1\u2013R10 as refuted for production use and withdraws it.\n- [ ] Each newly proposed signal states an executable detector definition.\n- [ ] Each newly proposed signal reports TP, FP, FN, and TN on the frozen 20-ticket corpus.\n- [ ] Each newly proposed signal has TP > 0 and TP > FP on that corpus.\n- [ ] The result labels same-sample findings \u201cretrospective discovery,\u201d not held-out validation or an enforcement basis.\n- [ ] The result specifies the held-out validation required before production use.\n- [ ] Session log 59a7-cb88-f2f9-4148 contains the corrected research and is named in the artifact list.\n- [ ] Repository-file diff remains empty for this task.\n\n## Verification\nRe-run candidate detectors over the frozen 20-ticket corpus, independently check the resulting contingency tables against adjudicated labels, inspect the updated session_log, and report only candidates meeting the empirical admission bar.",
         "priority": "Medium",
-        "status": "Done",
+        "status": "in_progress",
         "summary": "Calibrate verbosity rules against long ticket history"
       },
       "created_at": "2026-09-03T21:34:45Z",
@@ -65778,6 +66318,13 @@
       "jira_key": "REB-396",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:51Z"
+    },
+    "f8c4-ac9b-42c5-4bb0": {
+      "created_at": "2026-09-04T01:12:57Z",
+      "jira_id": "4591710",
+      "jira_key": "REB-4603",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T01:13:00Z"
     },
     "f8c6-6ab3-ca81-4d30": {
       "baseline": {
@@ -70096,7 +70643,19 @@
     "1788477245599721001": "__rebar_unknown_comment_id__",
     "1788477299627701759": "__rebar_unknown_comment_id__",
     "1788477865870325001": "__rebar_unknown_comment_id__",
-    "1788478041211358001": "__rebar_unknown_comment_id__"
+    "1788478041211358001": "__rebar_unknown_comment_id__",
+    "1788478312726649127": "__rebar_unknown_comment_id__",
+    "1788478715820014909": "__rebar_unknown_comment_id__",
+    "1788478767177420001": "__rebar_unknown_comment_id__",
+    "1788479262863379252": "__rebar_unknown_comment_id__",
+    "1788479905616880010": "__rebar_unknown_comment_id__",
+    "1788479916505449001": "__rebar_unknown_comment_id__",
+    "1788480122415591227": "__rebar_unknown_comment_id__",
+    "1788480868665109001": "__rebar_unknown_comment_id__",
+    "1788480878226263001": "__rebar_unknown_comment_id__",
+    "1788481235483407001": "__rebar_unknown_comment_id__",
+    "1788482180259487001": "__rebar_unknown_comment_id__",
+    "1788482923412874602": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -73043,13 +73602,88 @@
     "REB-4526": "ee2e-6fec-aa8a-4e77",
     "REB-4527": "740d-187c-53a2-4b7d",
     "REB-4528": "09da-343c-1ee9-480c",
+    "REB-4529": "00b4-b253-3052-4181",
     "REB-453": "b4d4-3369-6dd2-41e6",
+    "REB-4530": "0129-5710-c25f-4750",
+    "REB-4531": "0916-4c75-ff51-471a",
+    "REB-4532": "0cb2-e79b-f7c2-4850",
+    "REB-4533": "0e9e-c5a5-367d-4eaf",
+    "REB-4534": "0fb9-b82e-ac69-44a2",
+    "REB-4535": "0fc4-018f-a391-4c72",
+    "REB-4536": "1224-f202-2fcf-4725",
+    "REB-4537": "12d9-290f-c679-454c",
+    "REB-4538": "1580-c516-6ce9-4c1f",
+    "REB-4539": "185b-2eef-4659-445c",
     "REB-454": "c81c-cbcd-17a0-43d2",
+    "REB-4540": "2218-b05f-c205-4103",
+    "REB-4541": "22b7-f3c2-1639-459c",
+    "REB-4542": "293e-73a0-584d-494b",
+    "REB-4543": "2a50-d624-ac51-43f3",
+    "REB-4544": "2b2b-c312-510d-4746",
+    "REB-4545": "311a-cc58-6394-4d24",
+    "REB-4546": "31f9-e1f5-bd33-4b1e",
+    "REB-4547": "34e2-ba9d-afaa-4b7c",
+    "REB-4548": "3be3-7f9f-3865-4e87",
+    "REB-4549": "429e-e453-8cc0-4894",
     "REB-455": "ba2c-e08d-cfeb-42f2",
+    "REB-4550": "5114-05b6-e9bc-49cc",
+    "REB-4551": "5178-7906-ecd1-457a",
+    "REB-4552": "5a76-72e0-c88c-487c",
+    "REB-4553": "6251-6d1a-7a3e-4901",
+    "REB-4554": "64f1-f782-a900-40cd",
+    "REB-4555": "6681-ca5a-9541-4b16",
+    "REB-4556": "6963-25ef-c926-4b7b",
+    "REB-4557": "6aac-a7a0-5773-4a37",
+    "REB-4558": "6b7a-abe1-6480-4092",
+    "REB-4559": "70e7-5df8-56b3-48b1",
+    "REB-4560": "71ad-3623-5bf1-4b15",
+    "REB-4561": "71e0-d2f3-be22-4480",
+    "REB-4562": "7595-c3f8-4bf4-4594",
+    "REB-4563": "7d7e-f960-0766-4d84",
+    "REB-4564": "7ed7-dd54-c84d-4b79",
+    "REB-4565": "8316-35be-6228-4522",
+    "REB-4566": "8478-36f7-e423-4714",
+    "REB-4567": "8ab9-48fe-a8e9-4a3f",
+    "REB-4568": "9023-3a1f-32c9-4916",
+    "REB-4569": "93b0-7864-619f-4521",
+    "REB-4570": "9a17-e0b3-7aa6-4091",
+    "REB-4571": "9d38-237d-7561-423d",
+    "REB-4572": "9efc-7888-7956-4e2b",
+    "REB-4573": "9f88-40e3-e7fc-41e0",
+    "REB-4574": "a728-8101-1ff7-4fcf",
+    "REB-4575": "adf3-7a6e-13e1-43c2",
+    "REB-4576": "ae97-a37b-9fa3-413a",
+    "REB-4577": "b338-ca44-657a-4d2d",
+    "REB-4578": "b485-dc1f-c186-49eb",
+    "REB-4579": "b587-d21b-7ece-4248",
     "REB-458": "0250-36d4-c97f-47b4",
+    "REB-4580": "b6cd-bcc8-ea76-44e0",
+    "REB-4581": "ba01-ee09-8402-4323",
+    "REB-4582": "c161-0ac4-f8d7-44ac",
+    "REB-4583": "c220-d79e-e6a1-40f1",
+    "REB-4584": "c2de-6c45-35c2-41e4",
+    "REB-4585": "c379-f294-f462-464a",
+    "REB-4586": "c761-75dd-514a-41f2",
+    "REB-4587": "ca26-8985-1aaf-48d2",
+    "REB-4588": "ce12-9b7f-013d-44a7",
+    "REB-4589": "d130-a2ee-39c5-422d",
     "REB-459": "1762-9641-993a-464f",
+    "REB-4590": "d340-0d86-0472-43ae",
+    "REB-4591": "d41f-3def-2ebb-4159",
+    "REB-4592": "d4ec-bda9-5b10-4504",
+    "REB-4593": "d5d8-8a8e-8b19-441d",
+    "REB-4594": "da99-4a1b-73de-4426",
+    "REB-4595": "db3a-f51f-fcab-43a5",
+    "REB-4596": "dbfb-b6ab-faaa-4c02",
+    "REB-4597": "e346-2dcb-837a-4915",
+    "REB-4598": "e510-2d40-5438-41d9",
+    "REB-4599": "e62f-00ea-8734-4282",
     "REB-46": "1fdd-7100-c510-400f",
     "REB-460": "98c6-81c7-175e-416f",
+    "REB-4600": "e918-3fee-e10e-48b1",
+    "REB-4601": "eb26-c31a-3f74-4dda",
+    "REB-4602": "ec68-1988-ecc9-4d2a",
+    "REB-4603": "f8c4-ac9b-42c5-4bb0",
     "REB-461": "ba7e-dd8d-7cac-453f",
     "REB-462": "c6e5-9936-d07c-4b16",
     "REB-463": "da34-ac98-e375-4af0",
