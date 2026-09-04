@@ -10,7 +10,9 @@ existing importers dispatch to them unchanged.
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
+from pathlib import Path
 
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced import llm_eval as _llm_eval_parsers
@@ -116,40 +118,23 @@ def _criteria_eval(args: argparse.Namespace) -> int:
     from rebar.llm.errors import LLMError
     from rebar.llm.evals import eval as _eval
 
-    if not (args.criterion_id or "").strip():
-        sys.stderr.write("Error: a criterion id is required (e.g. `rebar criteria eval F1`)\n")
+    if args.criterion_id and args.changed_since:
+        sys.stderr.write("Error: criterion id and --changed-since are mutually exclusive\n")
         return 2
     if args.runs < 1:
         sys.stderr.write("Error: --runs must be >= 1\n")
         return 2
+    if not (args.criterion_id or "").strip():
+        if args.changed_since:
+            return _criteria_eval_changed_since(args)
+        return _missing_criterion_error()
 
-    try:
-        repo_root = str(config.repo_root())
-    except Exception:  # noqa: BLE001 — not in a repo — fall open to repo_root=None
-        repo_root = None
+    repo_root = _repo_root_or_none(config)
 
     # Reject an unknown or cross-gate-ambiguous criterion up front (before touching fixtures).
-    try:
-        from rebar.llm.code_review import registry as code_review_registry
-        from rebar.llm.plan_review import registry as plan_review_registry
-
-        active_plan_review = args.criterion_id in plan_review_registry.by_id(repo_root)
-        active_code_review = args.criterion_id in code_review_registry.effective_criteria(repo_root)
-        if active_plan_review and active_code_review:
-            sys.stderr.write(
-                f"Error: ambiguous criterion {args.criterion_id!r} is active in both "
-                "plan_review and code_review\n"
-            )
-            return 1
-        if not (active_plan_review or active_code_review):
-            sys.stderr.write(
-                f"Error: unknown criterion {args.criterion_id!r} (not in the effective registry; "
-                "activate a project criterion in .rebar/criteria_routing.json first)\n"
-            )
-            return 1
-    except LLMError as exc:
-        sys.stderr.write(f"Error: {exc}\n")
-        return 1
+    registry_status = _validate_criterion_id(args.criterion_id, repo_root)
+    if registry_status != 0:
+        return registry_status
 
     try:
         report = _eval.calibrate_criterion(args.criterion_id, repo_root=repo_root, runs=args.runs)
@@ -157,9 +142,132 @@ def _criteria_eval(args: argparse.Namespace) -> int:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
 
-    if args.output == "json":
+    _write_criteria_report(report, output=args.output)
+    return 0
+
+
+def _missing_criterion_error() -> int:
+    sys.stderr.write("Error: a criterion id is required (e.g. `rebar criteria eval F1`)\n")
+    return 2
+
+
+def _repo_root_or_none(config_module: object) -> str | None:
+    try:
+        return str(config_module.repo_root())  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 — not in a repo — fall open to repo_root=None
+        return None
+
+
+def _validate_criterion_id(criterion_id: str, repo_root: str | None) -> int:
+    from rebar.llm.errors import LLMError
+
+    try:
+        from rebar.llm.code_review import registry as code_review_registry
+        from rebar.llm.plan_review import registry as plan_review_registry
+
+        active_plan_review = criterion_id in plan_review_registry.by_id(repo_root)
+        active_code_review = criterion_id in code_review_registry.effective_criteria(repo_root)
+        if active_plan_review and active_code_review:
+            sys.stderr.write(
+                f"Error: ambiguous criterion {criterion_id!r} is active in both "
+                "plan_review and code_review\n"
+            )
+            return 1
+        if not (active_plan_review or active_code_review):
+            sys.stderr.write(
+                f"Error: unknown criterion {criterion_id!r} (not in the effective registry; "
+                "activate a project criterion in .rebar/criteria_routing.json first)\n"
+            )
+            return 1
+    except LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    return 0
+
+
+def _criteria_eval_changed_since(args: argparse.Namespace) -> int:
+    from rebar import config
+    from rebar.llm.evals.changed_criteria import select_changed_criteria
+
+    repo_root = _changed_since_repo_root(config)
+    try:
+        changed_paths = _changed_paths_since(args.changed_since, cwd=repo_root)
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        sys.stderr.write(f"Error: git diff failed for --changed-since {args.changed_since!r}")
+        if detail:
+            sys.stderr.write(f": {detail}")
+        sys.stderr.write("\n")
+        return 1
+
+    selection_root = Path(repo_root) if repo_root is not None else Path.cwd()
+    selection = select_changed_criteria(changed_paths, selection_root)
+    for criterion_id in selection.selected:
+        sys.stdout.write(f"{criterion_id}\n")
+    for unmapped in selection.unmapped:
+        sys.stderr.write(
+            f"warning: changed rubric path maps to no registry criterion: {unmapped}\n"
+        )
+
+    if _live_criteria_eval_available():
+        _run_selected_criteria_live(selection.selected, repo_root=repo_root, args=args)
+    return 0
+
+
+def _changed_since_repo_root(config_module: object) -> str | None:
+    try:
+        proc = subprocess.run(  # raw-git-ok: read-only repository root query
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=Path.cwd(),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return _repo_root_or_none(config_module)
+    return proc.stdout.strip() or None
+
+
+def _changed_paths_since(ref: str, *, cwd: str | None) -> list[str]:
+    proc = subprocess.run(  # raw-git-ok: read-only changed-file query
+        ["git", "diff", "--name-only", f"{ref}..HEAD"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return sorted({line.strip() for line in proc.stdout.splitlines() if line.strip()})
+
+
+def _live_criteria_eval_available() -> bool:
+    from rebar.llm.config import available_backends
+
+    backends = available_backends()
+    return bool(
+        backends.get("pydantic_ai")
+        and (backends.get("anthropic_api_key") or backends.get("openai_api_key"))
+    )
+
+
+def _run_selected_criteria_live(
+    criterion_ids: tuple[str, ...], *, repo_root: str | None, args: argparse.Namespace
+) -> None:
+    from rebar.llm.errors import LLMError
+    from rebar.llm.evals import eval as _eval
+
+    for criterion_id in criterion_ids:
+        try:
+            report = _eval.calibrate_criterion(criterion_id, repo_root=repo_root, runs=args.runs)
+        except LLMError as exc:
+            sys.stderr.write(f"Error: {criterion_id}: {exc}\n")
+            continue
+        _write_criteria_report(report, output=args.output)
+
+
+def _write_criteria_report(report: dict, *, output: str) -> None:
+    if output == "json":
         sys.stdout.write(js_safe_dumps(report) + "\n")
-        return 0
+        return
 
     def _pct(v: float | None) -> str:
         return "—" if v is None else f"{v * 100:.0f}%"
@@ -177,7 +285,6 @@ def _criteria_eval(args: argparse.Namespace) -> int:
         f"  stability:                       min {_pct(report['stability_min'])}, "
         f"mean {_pct(report['stability_mean'])}\n"
     )
-    return 0
 
 
 @guard_parse_errors

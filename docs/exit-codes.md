@@ -174,7 +174,7 @@ guarantee `2`).
 | `bridge check-access` | 0 | — | — | no ticket id; subprocess passthrough (jira-capability-probe.py); 0 = PROBE_PASS, non-zero = PROBE_FAIL |
 | `bridge-probe` | 0 | — | — | compatibility alias for `bridge check-access`; preserves the same subprocess exit status |
 | `config` | 0 | — | — | no ticket id; reads or writes rebar config; error → 1 |
-| `criteria` | 0 | — | — | no ticket id; `criteria eval <id>` runs calibration fixtures live; empty or missing id → 2; unknown criterion → 1 |
+| `criteria` | 0 | — | — | no ticket id; `criteria eval <id>` runs calibration fixtures live; `criteria eval --changed-since <ref>` prints selected criterion ids and exits 0; an unmappable rubric path is named on stderr and still exits 0; positional id and `--changed-since` together → 2; empty or missing id with no `--changed-since` → 2; unknown criterion → 1 |
 | `doctor` | 0 | — | — | no ticket id; 0 = no outstanding findings (or all repaired); 1 = findings remain; bad args → 2 |
 | `enrich` | 0 | — | — | no ticket id; cross-ticket overlap drain; always 0 on a clean run |
 | `explain` | 0 | — | — | no ticket id; `explain <criterion-id\|guide>`; unknown id or guide name → 1 |

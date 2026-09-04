@@ -291,6 +291,7 @@
     "ci_gate::.github/workflows/mirror-guard.yml::Install rebar (core, stdlib-only)": 1,
     "ci_gate::.github/workflows/mirror-guard.yml::mirror-guard — replication health (Gerrit vs GitHub main SHA)": 1,
     "ci_gate::.github/workflows/prompt-eval.yml::Install with the agents extra (from the committed lock)": 1,
+    "ci_gate::.github/workflows/prompt-eval.yml::Run changed-rubric criterion evals": 1,
     "ci_gate::.github/workflows/prompt-eval.yml::Run dataset-bearing prompt evals (live) → JUnit": 1,
     "ci_gate::.github/workflows/prompt-eval.yml::Summarize LLM token usage → job summary": 1,
     "ci_gate::.github/workflows/reconcile-bridge-canary.yml::Binding-drift alert lifecycle (find/open/comment/close)": 1,

@@ -51,6 +51,52 @@ jobs:
     if: ${{ github.event_name != 'schedule' }}
     uses: ./.github/workflows/_eval-discipline.yml
 
+  eval-changed-rubrics:
+    name: eval changed rubrics (advisory)
+    # Rubric regressions arrive with commits, not time. Run only on same-repo PR/push
+    # events so forks/Dependabot and the weekly sweep never spend provider tokens.
+    if: >-
+      ${{ (github.event_name == 'pull_request' || github.event_name == 'push')
+          && github.repository == 'navapbc/rebar' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: true
+      - name: Install with the agents extra (from the committed lock)
+        run: |
+          uv sync --locked --extra agents
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      # mechanism-ok: ci_gate .github/workflows/prompt-eval.yml::Run changed-rubric criterion evals — story 5169 requires rubric-change live evals outside the weekly sweep
+      - name: Run changed-rubric criterion evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CHANGED_SINCE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          REBAR_USAGE_LOG: ${{ runner.temp }}/changed-rubric-usage.jsonl
+        run: |
+          rebar criteria eval --changed-since "$CHANGED_SINCE"
+      - name: Summarize LLM token usage → job summary
+        if: ${{ always() }}
+        env:
+          REBAR_USAGE_LOG: ${{ runner.temp }}/changed-rubric-usage.jsonl
+        run: |
+          python -m rebar.llm.usage_log summarize "$REBAR_USAGE_LOG" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload LLM token-usage log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: changed-rubric-eval-usage-log
+          path: ${{ runner.temp }}/changed-rubric-usage.jsonl
+          if-no-files-found: ignore
+
   eval-live:
     name: eval live (gated — needs [agents] + credentials)
     # Manual dispatch or the weekly schedule ONLY, and only on the canonical repo —
