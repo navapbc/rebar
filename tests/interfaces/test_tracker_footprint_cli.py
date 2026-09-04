@@ -13,13 +13,22 @@ from _subprocess_env import subprocess_env
 from rebar import schemas
 
 
+def _run_git(*argv: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *argv], check=check, capture_output=True, text=True)
+
+
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        check=check,
-        capture_output=True,
-        text=True,
-    )
+    """Run git in a NON-BARE worktree, which git may discover from ``repo``."""
+    return _run_git("-C", str(repo), *args, check=check)
+
+
+def _bare_git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run git against a BARE repository, which must be named explicitly.
+
+    git refuses to *discover* a bare repository through ``-C`` when a developer
+    sets ``safe.bareRepository = explicit`` [rebar:740d-187c-53a2-4b7d].
+    """
+    return _run_git("--git-dir", str(repo), *args, check=check)
 
 
 def _run_cli(
@@ -78,7 +87,7 @@ def test_fresh_clone_json_exposes_allocation_without_a_policy_verdict(
     tracker = _publish_ticket_store(rebar_repo, remote, small_files=256)
     before_project = _repo_state(rebar_repo)
     before_tracker = _repo_state(tracker)
-    before_remote_refs = _git(remote, "show-ref").stdout
+    before_remote_refs = _bare_git(remote, "show-ref").stdout
 
     completed = _run_cli(
         rebar_repo,
@@ -113,7 +122,7 @@ def test_fresh_clone_json_exposes_allocation_without_a_policy_verdict(
     assert "verdict" not in serialized
     assert _repo_state(rebar_repo) == before_project
     assert _repo_state(tracker) == before_tracker
-    assert _git(remote, "show-ref").stdout == before_remote_refs
+    assert _bare_git(remote, "show-ref").stdout == before_remote_refs
 
 
 def test_mounted_linked_store_is_shared_and_read_only(rebar_repo: Path) -> None:
@@ -160,7 +169,7 @@ def test_invalid_configured_branch_cleans_only_its_temporary_child(
     secret = "credential-sentinel-do-not-leak"
     remote = tmp_path / f"{secret}.git"
     _publish_ticket_store(rebar_repo, remote)
-    before_remote_refs = _git(remote, "show-ref").stdout
+    before_remote_refs = _bare_git(remote, "show-ref").stdout
     temp_root = tmp_path / "command-tmp"
     temp_root.mkdir()
     sentinel = temp_root / "keep-me"
@@ -183,7 +192,7 @@ def test_invalid_configured_branch_cleans_only_its_temporary_child(
     assert secret not in completed.stdout
     assert sentinel.read_text(encoding="utf-8") == "operator-owned\n"
     assert set(os.listdir(temp_root)) == {sentinel.name}
-    assert _git(remote, "show-ref").stdout == before_remote_refs
+    assert _bare_git(remote, "show-ref").stdout == before_remote_refs
 
 
 def test_unknown_argument_exits_two_without_a_report(rebar_repo: Path) -> None:
