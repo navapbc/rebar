@@ -526,7 +526,7 @@ per-pass model claim checkable.
 
 **Run shape** (bug aec1). Every row — success and failure alike — also carries the shape of the
 agent loop that produced it, reduced from the run's accumulated pydantic-ai messages by the ONE
-reducer both outcomes share (`run_shape`, the outcome-neutral alias of `failure_usage`):
+reducer both outcomes share (`run_shape`, the outcome-neutral alias of `run_shape`):
 `tool_calls`, `tool_calls_distinct`, `max_consecutive_repeat`, `top_repeated_tool_calls`
 (signature + count, arguments **hashed** so the privacy contract is unchanged), plus the
 `request_limit`/`tool_calls_limit` the call ran under and the provider's `finish_reason`. These

@@ -43,39 +43,13 @@ from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.gate_error_sidecar import emit_gate_error
 from rebar.llm.run_identity import with_identity
 from rebar.llm.tracing import run_span
+from rebar.llm.workflow import plan_review_recovery as _plan_review_recovery
 from rebar.llm.workflow.completion_metrics import (  # noqa: F401
     WORKFLOW_STEP_IDS,
     _add_phase,
     _attach_completion_metrics,
     _sum_run_consumption,
     attach_completion_workflow_phases,
-)
-
-# Back-compat re-export (load-bearing): the plan-review recovery cluster lives in the
-# workflow/plan_review_recovery.py strict leaf to buy headroom under the module-size cap. ~15 tests
-# reach these as `gate_dispatch.<name>` attribute access or import them from here; re-importing
-# keeps them module-globals of THIS module, so every existing reference and monkeypatch target
-# resolves unchanged.
-from rebar.llm.workflow.plan_review_recovery import (  # noqa: F401
-    _DET_STEP_IDS,
-    _LLM_STEP_KINDS,
-    _PLAN_REVIEW_REQUIRED_STEP_IDS,
-    STEP_ASSEMBLE,
-    STEP_COACH,
-    STEP_DECIDE,
-    STEP_FINDERS,
-    STEP_PRECHECK,
-    STEP_VERIFY,
-    GateContractError,
-    _attach_plan_review_metrics,
-    _cancelled_plan_review_verdict,
-    _collect_step_ids,
-    _config_fault_plan_review_verdict,
-    _criteria_config_failure,
-    _degraded_plan_review_verdict,
-    _recover_plan_review_coach_failure,
-    _recover_plan_review_verify_failure,
-    _validate_gate_step_ids,
 )
 
 
@@ -115,13 +89,11 @@ def produce_plan_review_verdict(
     ``${{ inputs.probe_criteria }}`` reference always resolves."""
     import time
 
+    from rebar.llm import review_kernel
     from rebar.llm.config import gate_config
     from rebar.llm.plan_review import generation
-    from rebar.llm.plan_review.orchestrator import (
-        assemble_context_cache,
-        collect_contract_violations,
-        material_fingerprint,
-    )
+    from rebar.llm.plan_review.context_assembly import assemble_context_cache
+    from rebar.llm.plan_review.pass1 import material_fingerprint
     from rebar.llm.plan_review.prerequisites import focused_inputs
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
     from rebar.llm.runner import get_runner
@@ -141,7 +113,7 @@ def produce_plan_review_verdict(
         # the run and before any recorder exists (`rec` is created only past this point), so
         # zero billable work has happened; there is legitimately nothing consumed to record.
         emit_gate_error(ctx.ticket_id, "plan_review", cause=str(exc), repo_root=repo_root)
-        return _degraded_plan_review_verdict(
+        return _plan_review_recovery._degraded_plan_review_verdict(
             ctx, cfg, error=exc, advisory_cap=advisory_cap, runner_name=runner_sel.name
         )
 
@@ -153,9 +125,12 @@ def produce_plan_review_verdict(
     # cfg.repo_path; so we must NOT thread the code snapshot here, or ticket reads would look
     # for the store under the .git-less code snapshot and miss it.
     doc = _gate_doc("plan-review", repo_root)
+    _validate_gate_step_ids = _plan_review_recovery._validate_gate_step_ids
     # Catch a step-id rename in gates/plan-review.yaml LOUDLY here — before the billable run —
     # rather than letting a recovery lookup silently return None and degrade to INDETERMINATE.
-    _validate_gate_step_ids(doc, _PLAN_REVIEW_REQUIRED_STEP_IDS, gate_name="plan-review")
+    _validate_gate_step_ids(
+        doc, _plan_review_recovery._PLAN_REVIEW_REQUIRED_STEP_IDS, gate_name="plan-review"
+    )
     rec = MemoryRecorder()
     _t_total = time.monotonic()
     cancel: Any = None
@@ -174,7 +149,7 @@ def produce_plan_review_verdict(
             # instead of minting a fresh one, and the whole run is one trace.
             run_span("review-plan", ticket_id=ctx.ticket_id),
             assemble_context_cache(),
-            collect_contract_violations(),
+            review_kernel.collect_contract_violations(),
             # Tally LLM step calls that fail but do not fail the run, so repeated silent
             # degradation (the motivating case: every overlap-judge batch dying) is visible on
             # the verdict coverage instead of only in the logs. Additive observability — see
@@ -221,33 +196,33 @@ def produce_plan_review_verdict(
             diagnostic=_consumed_diagnostic(rec),
             repo_root=repo_root,
         )
-        return _degraded_plan_review_verdict(
+        return _plan_review_recovery._degraded_plan_review_verdict(
             ctx, cfg, error=exc, advisory_cap=advisory_cap, runner_name=runner_sel.name
         )
     except generation.PlanReviewCancelledStale:
         # The batch (finders) path propagates step exceptions RAW (interpreter._run_batch
         # has no try around runner.run), unlike scripted ops (captured in-band) — accept
         # both routes into the same cancelled verdict.
-        return _cancelled_plan_review_verdict(ctx, cfg, scope=cancel)
+        return _plan_review_recovery._cancelled_plan_review_verdict(ctx, cfg, scope=cancel)
     total_ms = round((time.monotonic() - _t_total) * 1000, 1)
 
     # Mid-run cancellation (story 2c89): checked BEFORE the recovery reconstructions
     # below — a cancelled run must yield the cancelled INDETERMINATE, never a verdict
     # "recovered" from the pre-edit passes (which review_plan would sign/sidecar).
     if cancel is not None and cancel.event.is_set():
-        return _cancelled_plan_review_verdict(ctx, cfg, scope=cancel)
+        return _plan_review_recovery._cancelled_plan_review_verdict(ctx, cfg, scope=cancel)
 
     verdict = res.terminal_output
     if res.status == "succeeded" and isinstance(verdict, dict) and "verdict" in verdict:
-        _attach_plan_review_metrics(verdict, rec, total_ms)
+        _plan_review_recovery._attach_plan_review_metrics(verdict, rec, total_ms)
         return verdict
 
     # A criteria/configuration parse fault is a local deterministic failure, not an LLM outage.
     # The assemble step carries this exact exception identity through the generic interpreter as
     # a stable structured marker; discriminate it before any source-blind degraded fallback.
-    criteria_config_error = _criteria_config_failure(rec)
+    criteria_config_error = _plan_review_recovery._criteria_config_failure(rec)
     if criteria_config_error is not None:
-        return _config_fault_plan_review_verdict(
+        return _plan_review_recovery._config_fault_plan_review_verdict(
             ctx,
             cfg,
             error=criteria_config_error,
@@ -260,9 +235,9 @@ def produce_plan_review_verdict(
     # Pass-3 `decide` succeeded (so finders+verify ran), reconstruct the verdict from the
     # decide partition with empty coaching — NOT a hollow INDETERMINATE that would discard the
     # real findings and wrongly block the claim.
-    recovered = _recover_plan_review_coach_failure(rec, cfg, error=res.error)
+    recovered = _plan_review_recovery._recover_plan_review_coach_failure(rec, cfg, error=res.error)
     if recovered is not None:
-        _attach_plan_review_metrics(recovered, rec, total_ms)
+        _plan_review_recovery._attach_plan_review_metrics(recovered, rec, total_ms)
         return recovered
 
     # Pass-2 verify failed but Pass-1 finders SUCCEEDED (e.g. the agentic verifier exhausted its
@@ -270,14 +245,14 @@ def produce_plan_review_verdict(
     # findings; treating that as a systemic outage discards them and (fail-closed) wrongly blocks
     # the claim. Recover: preserve the Pass-1 findings as unverified → INDETERMINATE, and let
     # finalize_verdict fail-OPEN unless a preserved finding is on a blocking-enabled criterion.
-    recovered = _recover_plan_review_verify_failure(rec, cfg, error=res.error)
+    recovered = _plan_review_recovery._recover_plan_review_verify_failure(rec, cfg, error=res.error)
     if recovered is not None:
-        _attach_plan_review_metrics(recovered, rec, total_ms)
+        _plan_review_recovery._attach_plan_review_metrics(recovered, rec, total_ms)
         return recovered
 
     # finders failed (the LLM tier did not produce findings) — degrade to INDETERMINATE,
     # never sign a hollow PASS, mirroring run_review's broad-except → llm_unavailable path.
-    return _degraded_plan_review_verdict(
+    return _plan_review_recovery._degraded_plan_review_verdict(
         ctx,
         cfg,
         error=(res.error or "plan-review workflow LLM tier failed"),
@@ -439,6 +414,7 @@ def _assemble_code_review_run(request: CodeReviewRequest) -> _CodeReviewPrep:
     # scope-intent overlay (ONLY ticket-aware one): commit-trailer scope/AC, ONLY when >=1 resolved.
     context_overrides = {"code-review-scope-intent": dc.scope_context} if dc.scope_context else None
     doc = _gate_doc("code-review", request.repo_root)
+    _validate_gate_step_ids = _plan_review_recovery._validate_gate_step_ids
     # Same guard the plan-review dispatch gets at :154 — catch a step-id rename in
     # gates/code-review.yaml LOUDLY, before the billable run, instead of letting
     # finalize's lookups silently return None (mirror F13).
@@ -703,6 +679,7 @@ def produce_completion_verdict(
     # graph by ticket type — that override made an epic close re-verify every descendant and blew
     # the step budget (see the step-floor history in completion.py).
     doc = _gate_doc("completion-verification", repo_root)
+    _validate_gate_step_ids = _plan_review_recovery._validate_gate_step_ids
     # Mirror F13. This gate degrades even more quietly than the other two: a renamed
     # step falls through completion_metrics' mapping into the "unclassified" bucket,
     # so the timing is silently mis-filed and nothing errors.

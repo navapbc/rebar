@@ -21,14 +21,12 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
+from rebar.llm import anthropic_model as _anthropic_model
 from rebar.llm import findings as _findings
+from rebar.llm import runner_support as _runner_support
 from rebar.llm import step_failures, usage_log
+from rebar.llm import structured_run as _structured_run
 from rebar.llm.agent_call import build_agent_kwargs, log_call_success, record_call_spend
-from rebar.llm.anthropic_model import (
-    _DIRECT_ANTHROPIC_BASE_URL,  # noqa: F401  (re-exported for tests / back-compat)
-    _local_proxy_bypass_base_url,  # noqa: F401  (re-exported for tests / back-compat)
-    _pai_model,
-)
 from rebar.llm.capabilities import (
     cache_settings_for,
     capabilities_for,
@@ -48,36 +46,11 @@ from rebar.llm.model_classes import (
     primary_endpoint_for,
 )
 from rebar.llm.providers import ProviderSession
-from rebar.llm.runner_support import (
-    _TOOL_CAPABILITY_CHECKED,  # noqa: F401  (re-exported for tests / back-compat)
-    _answering_model,
-    _check_tool_capability,
-    _intersect_capabilities,
-    _merge_success_run_shape,
-    _readonly_gate,
-)
-from rebar.llm.structured_run import (
-    FailureContext,
-    SingleTurnBounds,
-    _extract_usage,
-    _import_pydantic_ai,
-    _pai_check_config,
-    _pai_structured,
-    _warn_if_zeroed_usage,
-    apply_structured_seams,
-    build_model_settings,
-    build_usage_limits,
-    effective_max_iterations,  # noqa: F401  (re-exported: tests import it from `runner`)
-    effective_max_tokens,  # noqa: F401  (re-exported: tests import it from `runner`)
-    estimate_marked_prefix_tokens,
-    interpret_failure,
-    warn_if_cache_ineffective,
-)
 
 logger = logging.getLogger(__name__)
 
 # Dedup set (story S3/2932) so the "temperature withdrawn" INFO line logs ONCE per resolved
-# model string, not once per call — mirrors `_TOOL_CAPABILITY_CHECKED` below.
+# model string, not once per call — mirrors `_runner_support._TOOL_CAPABILITY_CHECKED` below.
 _TEMPERATURE_WITHDRAWN_LOGGED: set[str] = set()
 
 
@@ -147,9 +120,10 @@ class RunRequest:
     # prefix of ``system_prompt``. DEFAULTED None so every other caller is byte-unchanged.
     cache_prefix: str | None = None
 
-    #: The all-``None`` :class:`SingleTurnBounds` — "inherit run-wide policy", said out loud.
+    #: The all-``None`` :class:`_structured_run.SingleTurnBounds` — "inherit
+    #: run-wide policy", said out loud.
     #: A ``ClassVar`` (so not a field) means a call site names it without a second import.
-    INHERIT_POLICY: ClassVar[SingleTurnBounds] = SingleTurnBounds(
+    INHERIT_POLICY: ClassVar[_structured_run.SingleTurnBounds] = _structured_run.SingleTurnBounds(
         output_tokens=None, timeout_s=None, structured_retries=None, transport_attempts=None
     )
 
@@ -162,7 +136,7 @@ class RunRequest:
         config: LLMConfig,
         reviewers: list[str],
         output_schema: str,
-        bounds: SingleTurnBounds,
+        bounds: _structured_run.SingleTurnBounds,
         target: dict | None = None,
     ) -> RunRequest:
         """The ONE constructor for a single-turn structured sub-call.
@@ -329,8 +303,8 @@ class PydanticAIRunner:
         (mamba's run seam) — a config error classifies non-retryable, so it maps to the
         existing INDETERMINATE exit, never the retryable exit 11."""
         try:
-            _import_pydantic_ai()
-            _pai_check_config(self._config)
+            _structured_run._import_pydantic_ai()
+            _structured_run._pai_check_config(self._config)
         except LLMError as exc:
             from rebar.llm.failure import ClassifyContext, classify_llm_failure
 
@@ -371,7 +345,7 @@ class PydanticAIRunner:
         # so an absent extra surfaces as a clean LLMConfigError (naming the extra), not a
         # raw ModuleNotFoundError from the `pydantic_ai.exceptions`/`.usage` imports below.
         # run() is reachable (library/CLI/MCP) without a preceding preflight().
-        Agent = _import_pydantic_ai()
+        Agent = _structured_run._import_pydantic_ai()
 
         from types import SimpleNamespace
 
@@ -380,7 +354,7 @@ class PydanticAIRunner:
         from rebar.llm import pai_tools
 
         cfg = _effective_config(self._config, req)
-        _pai_check_config(cfg)
+        _structured_run._pai_check_config(cfg)
         # Best-effort OTLP→Langfuse tracing: no-op without the [tracing] extra / Langfuse
         # keys, never raises, idempotent. Write-only (never read back into a decision).
         from rebar.llm.tracing import setup_tracing
@@ -399,16 +373,16 @@ class PydanticAIRunner:
             # Exempt a model_override run: that is the offline TestModel harness (it reads a
             # disposable tmp dir, never a production checkout), not a real agent operation.
             if self._model_override is None:
-                from rebar.llm.config import assert_gated
+                from rebar.llm.gate_context import assert_gated
 
                 assert_gated("agentic filesystem tools")
             # Read-only ticket contract (the gates): in attested mode the agent reads a
             # PINNED snapshot copy of the ticket store, so a comment write would be lost —
             # withhold it. Local mode reads the live checkout, where a comment is a real
             # write, so it is allowed there. `current_code_root()` is set only in attested mode.
-            from rebar.llm.config import current_code_root
+            from rebar.llm.gate_context import current_code_root
 
-            allow_comment = (not _readonly_gate()) and current_code_root() is None
+            allow_comment = (not _runner_support._readonly_gate()) and current_code_root() is None
             # The rebar ticket tools read the PINNED ticket-store snapshot when set, else the
             # in-place checkout's store. The file tools stay on the code snapshot.
             # `grounding_tools` adds `resolve_symbol` (bug 406f) so the finder can CONFIRM a
@@ -425,7 +399,7 @@ class PydanticAIRunner:
             if req.extra_tools:
                 tools = [*tools, *req.extra_tools]
             toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
-        resolved = _pai_model(cfg)
+        resolved = _anthropic_model._pai_model(cfg)
         cfg = self._recover_slot_endpoint(cfg, resolved)
         # Provider resolution is delegated to the per-run ProviderSession seam (story S1 /
         # one-provider-factory) — the ONE place answering "how is a Provider built for
@@ -484,7 +458,7 @@ class PydanticAIRunner:
                 for candidate_model, candidate in zip(
                     getattr(model, "models", [model]), candidates, strict=True
                 ):
-                    _check_tool_capability(candidate_model, candidate)
+                    _runner_support._check_tool_capability(candidate_model, candidate)
             # Prompt caching (story 0250; capability-based since story S2). The stable bytes
             # re-sent across the container fan-out live in `system_prompt`;
             # `anthropic_cache_instructions` puts a `cache_control` breakpoint on that block
@@ -496,15 +470,19 @@ class PydanticAIRunner:
             # `prompt_cache_style`; each style's keys are provider-specific and would error on
             # an unrelated provider, so they are applied at THIS shared seam only — no
             # RunRequest content-list change, so the structured-output retry path is untouched.
-            # Resolved ONCE, threaded into `_pai_structured` below: `model` (a real object, whose
+            # Resolved ONCE, threaded into `_structured_run._pai_structured` below: `model`
+            # (a real object, whose
             # PROFILE may carry a provider override, S4) for a real run, but `resolved` (the
             # config STRING) for `model_override` — its profile is irrelevant there, and every
             # model_override test pins the string behavior; cache_settings stays None then. A
             # chain resolves capabilities over the whole CANDIDATE SET
-            # (`_intersect_capabilities`), never over the wrapper: `FallbackModel` carries no
+            # (`_runner_support._intersect_capabilities`), never over the wrapper:
+            # `FallbackModel` carries no
             # profile and its `.provider` is None.
             if fallback_targets:
-                caps = _intersect_capabilities([capabilities_for(m) for m in model.models])
+                caps = _runner_support._intersect_capabilities(
+                    [capabilities_for(m) for m in model.models]
+                )
             else:
                 caps = capabilities_for(resolved if self._model_override is not None else model)
             cache_settings = (
@@ -545,12 +523,12 @@ class PydanticAIRunner:
             # Model settings + usage limits are built by the ADR 0056 decision-3 leaf helpers
             # (structured_run.py); see their docstrings for the max_tokens/timeout/temperature/
             # step-budget rationale (bug ids, measured numbers, and invariants preserved there).
-            model_settings = build_model_settings(
+            model_settings = _structured_run.build_model_settings(
                 cfg, req, caps, resolved, cache_settings, model_override=self._model_override
             )
             # Sampling-temperature withdrawal (story S3/2932: e.g. `us.anthropic.claude-opus-4-7`
             # 400s "temperature is deprecated for this model") is decided PURELY inside
-            # ``build_model_settings`` (no logging there — see its docstring and
+            # ``_structured_run.build_model_settings`` (no logging there — see its docstring and
             # ``_TEMPERATURE_WITHDRAWN_LOGGED`` below). The once-per-model dedup INFO log for that
             # withdrawal stays HERE, the only place allowed to mutate the dedup set.
             temperature = getattr(req.config, "temperature", None)
@@ -572,8 +550,10 @@ class PydanticAIRunner:
                 cfg, req, tools, toolsets, model_settings=model_settings, web_caps=web_caps
             )
             # RP-01 S2: merge shared bounded-op seams (wire projection + output-retry counter).
-            apply_structured_seams(kwargs, req, candidates, model_settings)
-            usage_limits, req_limit, eff_max_iter = build_usage_limits(cfg, req, UsageLimits)
+            _structured_run.apply_structured_seams(kwargs, req, candidates, model_settings)
+            usage_limits, req_limit, eff_max_iter = _structured_run.build_usage_limits(
+                cfg, req, UsageLimits
+            )
             # Observability (one structured record per LLM call): which reviewer/criterion,
             # execution mode, model, and wall-clock — so a slow/serial fan-out (e.g. the
             # container per-child loop) is visible without a debugger. Quiet by default;
@@ -618,24 +598,25 @@ class PydanticAIRunner:
                     if req.tool_step_limit is not None:
                         _structured.check_response(run_result.response)
                     outcome = {"messages": [SimpleNamespace(content=str(run_result.output))]}
-                    usage = _extract_usage(run_result)
+                    usage = _structured_run._extract_usage(run_result)
                 else:
                     with usage_log.collect_failure_messages(run_messages):
                         # Only forward `artifact_dir` when the operator opted in, so the
-                        # default path calls `_pai_structured` with its historical arg list.
+                        # default path calls `_structured_run._pai_structured` with its
+                        # historical arg list.
                         _extra = (
                             {"artifact_dir": cfg.parse_failure_artifact_dir}
                             if cfg.parse_failure_artifact_dir
                             else {}
                         )
-                        structured, usage = _pai_structured(
+                        structured, usage = _structured_run._pai_structured(
                             Agent, model, caps, req, kwargs, usage_limits, **_extra
                         )
                     outcome = {"structured_response": structured}
                 # Agent-build invariant (story anole): telemetry warning on a REAL run whose
                 # usage looks zeroed (never blocks; test doubles report zero usage, so skip them).
                 if self._model_override is None:
-                    _warn_if_zeroed_usage(usage)
+                    _structured_run._warn_if_zeroed_usage(usage)
                     # Cache-effectiveness telemetry (story S3/2932): caching can fail SILENTLY on
                     # some Bedrock models (MEASURED: cache_read=0 AND cache_write=0 while billing
                     # full input tokens, no error) — this is the signal an operator otherwise never
@@ -646,11 +627,11 @@ class PydanticAIRunner:
                     # 4096, which both missed real failures on low-floor models (opus-4-8,
                     # rebar's DEFAULT_MODEL, is 1024) and named the wrong quantity when a big
                     # payload rode unmarked after the breakpoint.
-                    warn_if_cache_ineffective(
+                    _structured_run.warn_if_cache_ineffective(
                         usage,
                         caching_requested=cache_settings is not None,
                         model=ran_model,
-                        marked_prefix_tokens=estimate_marked_prefix_tokens(
+                        marked_prefix_tokens=_structured_run.estimate_marked_prefix_tokens(
                             cache_settings,
                             # Bug 1dbe: when the caller relocated the breakpoint to a
                             # ``cache_prefix``, the MARKED span is that prefix — not the whole
@@ -660,7 +641,7 @@ class PydanticAIRunner:
                         ),
                         cache_min_prefix_tokens=caps.cache_min_prefix_tokens,
                     )
-            except Exception as exc:  # noqa: BLE001 — the except spine is `interpret_failure`
+            except Exception as exc:  # noqa: BLE001 — the except spine is `_structured_run.interpret_failure`
                 # (ADR 0056 decision 3, src/rebar/llm/structured_run.py): it dispatches on
                 # UsageLimitExceeded / LLMError / anything-else in that load-bearing order and
                 # always raises, so this broad catch is exactly as narrow as the three arms it
@@ -683,10 +664,10 @@ class PydanticAIRunner:
                 # silently, which made repeated degradation invisible to a JSON consumer. A
                 # no-op outside an active sink scope, and it cannot raise.
                 step_failures.record(_call_label)
-                interpret_failure(
+                _structured_run.interpret_failure(
                     exc,
                     run_messages,
-                    FailureContext(
+                    _structured_run.FailureContext(
                         call_label=_call_label,
                         execution_mode=req.execution_mode,
                         ran_model=ran_model,
@@ -703,7 +684,7 @@ class PydanticAIRunner:
                 model_scope.close()
         if fallback_targets:
             # Attest the model that ANSWERED, read off the response rather than the wrapper.
-            answered = _answering_model(run_messages, candidates)
+            answered = _runner_support._answering_model(run_messages, candidates)
             if answered is not None:
                 ran_model = answered
             provider_provenance["ran_model"] = ran_model
@@ -744,7 +725,7 @@ class PydanticAIRunner:
             # record cache efficacy into coverage/observability. Private key — non-breaking
             # for every existing consumer of the review_result/structured dict.
             result["_usage"] = usage
-            _merge_success_run_shape(
+            _runner_support._merge_success_run_shape(
                 usage,
                 run_messages,
                 request_limit=req_limit,
@@ -781,10 +762,3 @@ def get_runner(config: LLMConfig, *, runtime=None, override: Runner | None = Non
     from rebar.llm.config import RUNNERS
 
     raise LLMConfigError(f"unknown runner {config.runner!r}; valid runners: {RUNNERS}")
-
-
-# ── lazy imports + helpers ────────────────────────────────────────────────────
-# The stateless helper cluster (`_check_tool_capability` + its `_TOOL_CAPABILITY_CHECKED`
-# cache, `_intersect_capabilities`, `_answering_model`, `_readonly_gate`) lives in
-# `runner_support` (imported at module top) to keep this module under the size cap; those
-# names remain importable from `rebar.llm.runner` for callers and tests.

@@ -135,10 +135,10 @@ def test_verify_inputs_step_emits_shared_prefix_not_plan(monkeypatch) -> None:
     from types import SimpleNamespace
 
     import rebar.llm.plan_review as pr
-    from rebar.llm.plan_review import workflow_ops
+    from rebar.llm.plan_review import context_assembly, workflow_ops
 
     monkeypatch.setattr(
-        pr.orchestrator,
+        context_assembly,
         "assemble_context",
         lambda tid, repo_root=None: SimpleNamespace(plan_text="PLAN-TEXT"),
     )

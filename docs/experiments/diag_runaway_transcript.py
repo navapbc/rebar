@@ -1,6 +1,6 @@
 """Diagnostic: capture WHY the completion verifier runs away.
 
-The durable gate-error record (usage_log.failure_usage) deliberately HASHES tool
+The durable gate-error record (usage_log.run_shape) deliberately HASHES tool
 arguments and drops results, so it can tell us a run issued 164 distinct search_files
 calls but never WHAT it searched for or WHAT came back. This script closes that gap
 locally and opt-in: it wraps the real completion-verifier tools (filesystem_tools /
@@ -11,7 +11,7 @@ floor lowered so the run exhausts cheaply (the sanctioned "induced exhaustion" p
 
 Privacy: the raw transcript (which contains repo content from tool results) is written
 to a path OUTSIDE the repo and is never committed. Only an aggregated, content-free
-analysis is meant to land under docs/experiments. This mirrors failure_usage's contract.
+analysis is meant to land under docs/experiments. This mirrors run_shape's contract.
 
 Usage:
     AWS_REGION=us-east-1 \

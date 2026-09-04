@@ -25,7 +25,8 @@ pytest.importorskip("pydantic_ai")
 
 import pydantic_ai.models
 
-from rebar.llm.config import LLMConfig, use_code_root
+from rebar.llm.config import LLMConfig
+from rebar.llm.gate_context import use_code_root
 from rebar.llm.runner import PydanticAIRunner, RunRequest
 
 pytestmark = pytest.mark.unit

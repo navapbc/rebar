@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rebar.llm.plan_review import orchestrator
+from rebar.llm.plan_review import coach_moves
 from rebar.llm.review_kernel.coach import applicable_moves, render_coach_notes
 
 REPO_ROOT = str(Path(__file__).resolve().parents[2])
@@ -25,7 +25,7 @@ EXPECTED_SENTENCE = EXPECTED_TEMPLATE.format(subject="the Gerrit landing workflo
 
 
 def _reg() -> dict:
-    return orchestrator.load_move_registry(repo_root=REPO_ROOT)
+    return coach_moves.load_move_registry(repo_root=REPO_ROOT)
 
 
 # ── the move loads with the exact authored fields ────────────────────────────────
@@ -78,10 +78,10 @@ def test_deterministic_render():
 def test_project_owned_only():
     # Loading the project overlay must not mutate the packaged MOVE_REGISTRY mapping:
     # the project move is merged into a fresh copy, never into the built-in dict.
-    packaged_ids = set(orchestrator.MOVE_REGISTRY)
+    packaged_ids = set(coach_moves.MOVE_REGISTRY)
     reg = _reg()
     assert MOVE_ID in reg  # present in the merged view
-    assert MOVE_ID not in orchestrator.MOVE_REGISTRY  # ...but never in the packaged map
-    assert set(orchestrator.MOVE_REGISTRY) == packaged_ids  # packaged keys unchanged
+    assert MOVE_ID not in coach_moves.MOVE_REGISTRY  # ...but never in the packaged map
+    assert set(coach_moves.MOVE_REGISTRY) == packaged_ids  # packaged keys unchanged
     # every built-in id survives the merge
     assert packaged_ids <= set(reg)

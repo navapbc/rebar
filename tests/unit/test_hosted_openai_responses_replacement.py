@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from rebar.llm.anthropic_model import _pai_model
 from rebar.llm.config import LLMConfig
 from rebar.llm.model_classes import CLASS_NAMES, ClassSlot, _resolve_target, primary_endpoint_for
-from rebar.llm.runner import _pai_model
 
 pytestmark = pytest.mark.unit
 

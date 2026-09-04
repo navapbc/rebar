@@ -73,8 +73,6 @@ def _score_floor_novelty(
     from rebar.llm.review_kernel.verify import score_novelty
     from rebar.llm.runner import RunRequest, get_runner
 
-    from . import passes
-
     try:
         from dataclasses import replace
 
@@ -85,6 +83,8 @@ def _score_floor_novelty(
         # bypasses the workflow `with: temperature` seam): a re-run must not resample the
         # carryover-vs-novel judgement (upstream review-code report §2).
         vcfg = replace(_verifier_cfg(cfg), temperature=0.0)
+        from . import passes
+
         system = passes._resolve_system(passes.PASS_NOVELTY, ctx.plan_text, vcfg)
 
         def run_chunk(instructions: str, context: str) -> list[dict[str, Any]]:
@@ -119,7 +119,8 @@ def _apply_completion_floor_to_verdict(
     delivered_ids: frozenset[str],
 ) -> None:
     """Apply the Pass-3 COMPLETION floor (story 6533) IN PLACE on the surfaced advisory findings:
-    a finding at position ``i`` is DROPPED iff :func:`passes.completion_floor_drop` (attribution in
+    a finding at position ``i`` is DROPPED iff
+    :func:`completion_subcall.completion_floor_drop` (attribution in
     ``delivered_ids`` + limited-to-closed + plan-semantics + priority < floor + not-preserved).
     Dropped findings move from ``advisory`` into the verdict's ``dropped`` bucket carrying
     ``drop_reason="completion"`` (+ the finding's ``completion`` answers for the sidecar join), and
@@ -127,14 +128,14 @@ def _apply_completion_floor_to_verdict(
     ``completion_floored_finding_ids`` (namespaced so they never collide with the novelty floor's
     keys) AND corrects its ``counts``. Pure (no LLM); the completion answers per index + the
     delivered-now id set are injected. A no-drop run leaves the verdict byte-identical."""
-    from . import passes
+    from . import completion_subcall
 
     advisory = verdict.get("advisory") or []
     kept: list[dict[str, Any]] = []
     dropped: list[dict[str, Any]] = []
     for i, f in enumerate(advisory):
         ans = completion_map.get(i)
-        if ans and passes.completion_floor_drop(
+        if ans and completion_subcall.completion_floor_drop(
             ans,
             f.get("priority") or 0.0,
             f.get("criteria") or [],
@@ -175,13 +176,13 @@ def _classify_completion(
     on error, so this is defense-in-depth."""
     from rebar.llm.runner import get_runner
 
-    from . import passes
+    from . import completion_subcall
 
     try:
         from rebar.llm.plan_review import _verifier_cfg
 
         runner_sel = runner or get_runner(cfg)
-        return passes.pass2_completion(
+        return completion_subcall.pass2_completion(
             runner_sel,
             _verifier_cfg(cfg),
             plan=ctx.plan_text,

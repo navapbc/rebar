@@ -19,10 +19,10 @@ import dataclasses
 
 import pytest
 
-from rebar.llm.plan_review import orchestrator
+from rebar.llm.plan_review import context_assembly, orchestrator
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.plan_review.drift_floor import _recompute_verdict_after_drop
-from rebar.llm.workflow import gate_dispatch
+from rebar.llm.workflow import gate_dispatch, plan_review_recovery
 
 pytestmark = pytest.mark.unit
 
@@ -55,7 +55,7 @@ def test_total_enumeration_failure_flags_hierarchy_incomplete(monkeypatch) -> No
     monkeypatch.setattr("rebar._reads.show_ticket", _show)
     monkeypatch.setattr("rebar._reads.list_tickets", _list)
 
-    pctx = orchestrator.assemble_context(_TARGET, repo_root=None)
+    pctx = context_assembly.assemble_context(_TARGET, repo_root=None)
 
     assert pctx.children == []
     assert pctx.has_children is False
@@ -97,7 +97,7 @@ def test_partial_child_fetch_failure_records_child_id(monkeypatch) -> None:
     monkeypatch.setattr("rebar._reads.show_ticket", _show)
     monkeypatch.setattr("rebar._reads.list_tickets", _list)
 
-    pctx = orchestrator.assemble_context(_TARGET, repo_root=None)
+    pctx = context_assembly.assemble_context(_TARGET, repo_root=None)
 
     assert pctx.hierarchy_incomplete is True
     assert pctx.hierarchy_incomplete_detail == [_CHILD]
@@ -124,7 +124,7 @@ def test_retry_recovers_transient_enumeration_failure(monkeypatch) -> None:
     monkeypatch.setattr("rebar._reads.show_ticket", _show)
     monkeypatch.setattr("rebar._reads.list_tickets", _list)
 
-    pctx = orchestrator.assemble_context(_TARGET, repo_root=None)
+    pctx = context_assembly.assemble_context(_TARGET, repo_root=None)
 
     assert calls["n"] == 2, "must retry after the first failure, not give up immediately"
     assert pctx.hierarchy_incomplete is False
@@ -201,7 +201,7 @@ def test_recover_coach_failure_threads_hierarchy_incomplete() -> None:
             ),
         ]
     )
-    verdict = gate_dispatch._recover_plan_review_coach_failure(
+    verdict = plan_review_recovery._recover_plan_review_coach_failure(
         rec, LLMConfig(runner="fake"), error="coach step failed"
     )
     assert verdict is not None
@@ -231,7 +231,7 @@ def test_recover_verify_failure_threads_hierarchy_incomplete() -> None:
             _succeeded("finders", {"findings": [{"finding": "uses A1", "criteria": ["A1"]}]}),
         ]
     )
-    verdict = gate_dispatch._recover_plan_review_verify_failure(
+    verdict = plan_review_recovery._recover_plan_review_verify_failure(
         rec, LLMConfig(runner="fake"), error="verify step failed"
     )
     assert verdict is not None
@@ -251,7 +251,7 @@ def test_degraded_verdict_threads_hierarchy_incomplete_from_ctx() -> None:
         hierarchy_incomplete=True,
         hierarchy_incomplete_detail=["enumeration"],
     )
-    verdict = gate_dispatch._degraded_plan_review_verdict(
+    verdict = plan_review_recovery._degraded_plan_review_verdict(
         ctx, LLMConfig(runner="fake"), error="outage", advisory_cap=10, runner_name="fake"
     )
     assert verdict["verdict"] == "INDETERMINATE"

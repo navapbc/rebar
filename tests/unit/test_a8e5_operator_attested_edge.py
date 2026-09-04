@@ -4,7 +4,7 @@ tests/unit/test_plan_review.py after the implementer has only seen the happy pat
 import pytest
 
 from rebar.llm import review_kernel
-from rebar.llm.plan_review.workflow_ops import (
+from rebar.llm.plan_review.decide_ops import (
     enrich_operator_attested,
     operator_attested_ac_texts,
 )

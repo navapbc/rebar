@@ -196,8 +196,9 @@ def test_reask_bounds_a_huge_faulty_prior_reply():
     fixed-char truncation-with-``[truncated]``-marker echo with this principled window-fit
     projection (a reply that fits is carried whole; one that does not is omitted whole)."""
     from rebar.llm import model_classes
+    from rebar.llm.anthropic_model import _pai_model
     from rebar.llm.config import LLMConfig
-    from rebar.llm.runner import PydanticAIRunner, _pai_model
+    from rebar.llm.runner import PydanticAIRunner
 
     cfg = LLMConfig(repo_path=".")
     window = model_classes.own_window_tokens(_pai_model(cfg))

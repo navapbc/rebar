@@ -8,7 +8,7 @@ context plumbing — so it is AGENT_TIER but NOT CODEBASE_GROUNDED."""
 import pytest
 
 from rebar.llm.criteria import overlay as _overlay
-from rebar.llm.plan_review import passes, registry
+from rebar.llm.plan_review import coach_moves, registry
 
 pytestmark = pytest.mark.unit
 
@@ -78,7 +78,7 @@ def test_registry_coverage_still_passes_with_g7() -> None:
 
 
 def test_g7_coach_move_realign_to_parent() -> None:
-    moves = passes.MOVE_REGISTRY
+    moves = coach_moves.MOVE_REGISTRY
     realign = [m for m in moves.values() if "G7" in (m.get("applies_when") or [])]
     assert realign, "no parent-realign coach move gated on G7"
     template = realign[0]["template"].lower()

@@ -13,21 +13,20 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from rebar.llm import pai_tools
-from rebar.llm import runner as runner_mod
+from rebar.llm import runner_support as runner_support_mod
+from rebar.llm import structured_run as structured_run_mod
 from rebar.llm.errors import LLMConfigError
-from rebar.llm.runner import (
-    _check_tool_capability,
-    _warn_if_zeroed_usage,
-)
+from rebar.llm.runner_support import _check_tool_capability
+from rebar.llm.structured_run import _warn_if_zeroed_usage
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
 def _clear_capability_cache():
-    runner_mod._TOOL_CAPABILITY_CHECKED.clear()
+    runner_support_mod._TOOL_CAPABILITY_CHECKED.clear()
     yield
-    runner_mod._TOOL_CAPABILITY_CHECKED.clear()
+    runner_support_mod._TOOL_CAPABILITY_CHECKED.clear()
 
 
 # ── Tools actually offered (a #5177 hook-strips-a-tool regression is caught) ──
@@ -102,7 +101,7 @@ def test_usage_limits_on_run_not_constructor(monkeypatch):
 
     ctor_kwargs: dict = {}
     run_kwargs: dict = {}
-    real_import = runner_mod._import_pydantic_ai
+    real_import = structured_run_mod._import_pydantic_ai
 
     def _spy_import():
         RealAgent = real_import()
@@ -118,7 +117,7 @@ def test_usage_limits_on_run_not_constructor(monkeypatch):
 
         return _Spy
 
-    monkeypatch.setattr(runner_mod, "_import_pydantic_ai", _spy_import)
+    monkeypatch.setattr(structured_run_mod, "_import_pydantic_ai", _spy_import)
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
     from rebar.llm.config import LLMConfig
     from rebar.llm.runner import PydanticAIRunner, RunRequest

@@ -154,7 +154,7 @@ def capture_attempt_messages() -> Iterator[None]:
                 sink.extend(messages)
 
 
-def failure_usage(
+def run_shape(
     messages: list[object],
     *,
     request_limit: int,
@@ -227,14 +227,6 @@ def failure_usage(
         "distinct_fetches": distinct_fetches,
         **_repetition_summary(signatures),
     }
-
-
-# Outcome-neutral name for the SAME function. Both names exist deliberately: ``failure_usage``
-# has live call sites (llm/structured_run.py) that are being edited concurrently, so renaming it
-# would collide; but the success path now calls the same reducer, and a success-path call reading
-# ``failure_usage(...)`` would tell a reader the opposite of the truth. New call sites should use
-# ``run_shape``; the old name stays as the compatible spelling until its callers migrate.
-run_shape = failure_usage
 
 
 def shape_only(shape: dict) -> dict[str, Any]:
@@ -479,7 +471,7 @@ def _resolve_sink() -> str | None:
     # targets name `rebar.llm.config.<name>`, so a consumer reading the new module directly would
     # keep working while those patches silently stopped applying. `test_gate_context_seam.py`
     # enforces this for every module under src/.
-    from rebar.llm.config import in_gate_session
+    from rebar.llm.gate_context import in_gate_session
 
     if not in_gate_session():
         return None
@@ -596,7 +588,7 @@ def record_failure(
     ``model_class``, ``model``, ``provider``) and the same token-counter field set — so
     :func:`summarize` folds it and the failed call's spend lands in the totals, which is the whole
     point. It differs only by an explicit ``outcome`` of :data:`OUTCOME_FAILED`. Counters come from
-    :func:`failure_usage`, which reads what was actually burned off the accumulated pydantic-ai
+    :func:`run_shape`, which reads what was actually burned off the accumulated pydantic-ai
     messages; ``tool_calls_limit`` mirrors ``interpret_failure``'s own ``max(8, eff_max_iter)`` so
     the two diagnostics of one failure agree. ``step``/``model_class`` resolve here because
     :func:`step_identity` wraps the WHOLE step execution, the raise included.
@@ -613,18 +605,21 @@ def record_failure(
 
         step = active_step()
         step_id, model_token = step if step is not None else (None, None)
+        kwargs: dict[str, Any] = {
+            "op": op,
+            "model": model,
+            "provider": infer_provider(model) if model else None,
+            "step": step_id,
+            "model_class": declared_model_class(model_token) or model,
+            "outcome": OUTCOME_FAILED,
+        }
+        if duration_s is not None:
+            kwargs["duration_s"] = duration_s
+        if ticket is not None:
+            kwargs["ticket"] = ticket
         record(
-            failure_usage(
-                messages, request_limit=request_limit, tool_calls_limit=max(8, eff_max_iter)
-            ),
-            op=op,
-            model=model,
-            provider=infer_provider(model) if model else None,
-            step=step_id,
-            model_class=declared_model_class(model_token),
-            outcome=OUTCOME_FAILED,
-            duration_s=duration_s,
-            ticket=ticket,
+            run_shape(messages, request_limit=request_limit, tool_calls_limit=max(8, eff_max_iter)),
+            **kwargs,
         )
     except Exception as exc:  # noqa: BLE001 — telemetry must never mask the provider's error
         logger.warning("usage-log: failed-call record failed for op=%s: %s", op, exc)

@@ -368,7 +368,7 @@ def test_fallback_chain_all_supporting_preserves_native_under_thinking():
     `native_output_with_thinking` with `all(...)` like every sibling field — a chain whose
     candidates ALL support native-under-thinking keeps it True and routes NativeOutput under
     thinking. A build omitting the field collapses it to False and this goes RED."""
-    from rebar.llm.runner import _intersect_capabilities
+    from rebar.llm.runner_support import _intersect_capabilities
 
     measured = _caps(_bedrock_claude_model(_MEASURED_SONNET_ID))
     chain = _intersect_capabilities([measured, measured])
@@ -381,7 +381,7 @@ def test_fallback_chain_mixed_collapses_to_prompted_under_thinking():
     """The conservative half of the intersection: a chain mixing a measured cell with a
     non-measured Claude cell must NOT claim native-under-thinking (any candidate could answer), so
     the field collapses to False and thinking routes PromptedOutput."""
-    from rebar.llm.runner import _intersect_capabilities
+    from rebar.llm.runner_support import _intersect_capabilities
 
     measured = _caps(_bedrock_claude_model(_MEASURED_SONNET_ID))
     unmeasured = _caps(_bedrock_claude_model("us.anthropic.claude-opus-4-8"))

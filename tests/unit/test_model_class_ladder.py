@@ -261,7 +261,7 @@ def test_models_at_or_above_returns_todays_bare_ids_with_no_classes_configured(
 
     This is what stops a "resolve always" implementation: `resolve_class` runs every name through
     `_resolve_target`, which PREFIXES the inferred provider, so the naive wiring silently changes
-    every existing caller's strings. `orchestrator._models_at_or_above` is asserted against
+    every existing caller's strings. `sizing.models_at_or_above` is asserted against
     literal bare ids at test_plan_review.py:1145, and `prerequisites.py:257` logs these.
     """
     assert sizing.models_at_or_above(_TODAY_TRIVIAL) == _TODAY_LADDER
