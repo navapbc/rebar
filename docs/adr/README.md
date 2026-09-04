@@ -130,6 +130,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0050 — Optional authentication for the rebar MCP server (OAuth 2.1 Resource-Server model)](0050-mcp-optional-auth-resource-server.md)
 - [0058 — `.github/module-size-limit.txt` is the ONLY LOC ceiling](0058-the-module-size-limit-file-is-the-only-loc-ceiling.md)
 - [0081 — Adjective-adjective-animal aliases for new tickets](0081-adjective-adjective-animal-aliases.md)
+- [0115 — Retire config aliases by clean pre-1.0 removal](0115-retire-config-aliases.md)
 
 ## Other decisions
 
