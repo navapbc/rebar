@@ -12,9 +12,9 @@ are what this file pins:
 
 * The two metric seeds held their ids with a `compute` that always returned `None`.
   Every registrar appends under `if spec.id not in existing`, so a future REAL
-  implementation of `module_size_trend` would find the id taken and be SILENTLY skipped —
-  no error, no warning, metric `Unavailable` forever. The seeds being gone is only
-  meaningful if that id can now be claimed, which is what is tested here.
+  implementation would find the id taken and be SILENTLY skipped — no error, no warning,
+  metric `Unavailable` forever. `module_size_trend` now has a real implementation; the
+  remaining freed-id guard pins only the still-unclaimed `commit_cadence_trend` id.
 """
 
 from __future__ import annotations
@@ -37,8 +37,7 @@ def test_run_eval_rejects_dirty() -> None:
 # ── (c) the freed metric ids can now actually be claimed ────────────────────
 
 
-@pytest.mark.parametrize("metric_id", ["module_size_trend", "commit_cadence_trend"])
-def test_a_real_spec_can_now_claim_the_freed_id(metric_id: str) -> None:
+def test_a_real_spec_can_now_claim_the_remaining_freed_id() -> None:
     """The latent trap, tested directly: with the seed present this registration was a
     silent no-op. It must now succeed, and the registered spec must be the REAL one.
 
@@ -48,6 +47,7 @@ def test_a_real_spec_can_now_claim_the_freed_id(metric_id: str) -> None:
     import rebar.metrics  # noqa: F401  (import-time hydration)
     from rebar.metrics.registry import REGISTRY, MetricSpec
 
+    metric_id = "commit_cadence_trend"
     existing = {s.id for s in REGISTRY}
     assert metric_id not in existing, (
         f"{metric_id} is still held by a placeholder; a real implementation would be "
