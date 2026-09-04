@@ -58,6 +58,12 @@ def build_criteria(*, prog: str) -> argparse.ArgumentParser:
         "--runs", type=int, default=1, help="N-run stability: runs per fixture (default 1)"
     )
     p_eval.add_argument("--output", "-o", choices=["text", "json"], default="text")
+    p_heal = subparsers.add_parser("heal", help="mine regression fixtures for gap criteria")
+    p_heal.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the attempt list without running or spending",
+    )
     return parser
 
 
