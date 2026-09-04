@@ -445,11 +445,68 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bubblewrap
           bwrap --version
+
+      # The e2e tier drives the real bpmn-io libraries through a Node harness, so `npm ci`
+      # + an esbuild bundle are test DEPENDENCIES — provisioned below with the Python ones,
+      # rather than lazily inside the first e2e test. Doing it lazily is what bug
+      # 9a17-e0b3-7aa6-4091 was: a 90-120s cold install was charged to that one test's 300s
+      # pytest-timeout budget, and `timeout_method = "thread"` calls os._exit(1), so crossing
+      # it killed the whole xdist worker (`node down: Not properly terminated`) with no
+      # traceback.
+      #
+      # Pin the toolchain rather than inheriting whatever Node the runner image happens to
+      # ship: an image bump would otherwise silently change what the e2e tier builds and
+      # runs.
+      - name: Pin the Node toolchain for the e2e tier
+        id: e2e-node
+        if: matrix.os != 'macos-latest'
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903  # v6.0.0
+        with:
+          node-version: '22'
+
+      # Keyed on the RESOLVED Node version as well as the lockfile, so a Node upgrade cannot
+      # reuse a ~/.npm tree populated by a different toolchain.
+      - name: Cache the npm store for the e2e Node toolchain
+        if: matrix.os != 'macos-latest'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ steps.e2e-node.outputs.node-version }}-${{ hashFiles('tests/e2e/js/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-${{ steps.e2e-node.outputs.node-version }}-
+
       - name: Install rebar from the committed lock (dev + reviewbot + ui extras)
         shell: bash
         run: |
           uv sync --locked --extra dev --extra reviewbot --extra ui --python '${{ matrix.python-version }}'
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          # `make e2e-deps` (not an inline npm invocation) is deliberate: the same
+          # portable target provisions a checkout with no CI provider at all, and the e2e
+          # conftest keeps an in-fixture fallback. macOS is skipped because that lane
+          # selects only the platform_compat subset, which contains no e2e node.
+          #
+          # `make -n` is the PREDATES-THE-GATE guard. The Verified lane runs this workflow
+          # from trusted main against an arbitrary patchset, so a base older than this
+          # change has no `e2e-deps` rule and a bare `make e2e-deps` would fail the step —
+          # turning a fix for someone else's flake into a red vote on their change. Probing
+          # the target keeps the guard on the tree's OWN Makefile, which is the only thing
+          # that can answer whether the rule exists.
+          #
+          # Pre-provisioning is an OPTIMISATION, so it must never fail this step. It moves
+          # the install off a test's clock; when it cannot run — a transient registry
+          # failure, an offline runner, or a patchset whose base has no `e2e-deps` rule —
+          # the correct outcome is to fall through to the in-fixture path, which is the
+          # portable half that works with no CI provider at all. Failing here instead would
+          # turn a fix for someone else's flake into a red vote on their change, which this
+          # step has now risked twice. The notice keeps a silent skip from reading as
+          # success.
+          if [ '${{ matrix.os }}' = 'macos-latest' ]; then
+            echo "::notice::e2e toolchain: macOS lane selects no e2e node — not provisioning"
+          elif ! make -n e2e-deps >/dev/null 2>&1; then
+            echo "::notice::e2e toolchain: this tree has no e2e-deps rule (change predates it) — the fixture will provision"
+          elif ! make e2e-deps; then
+            echo "::notice::e2e toolchain: pre-provisioning failed (offline or registry error) — the fixture will provision, or the tier self-skips"
+          fi
 
       # Git identity is required by the suites that build throwaway commit stores.
       - name: Configure git identity
