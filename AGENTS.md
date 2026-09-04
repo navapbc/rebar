@@ -275,14 +275,28 @@ restated here:
 
 ## Bound background helpers at spawn
 
-Give every unbounded background helper a wall-clock limit when you start it. Install process-group cleanup in the spawning shell so interruption and error paths also reap helpers.
+Give every unbounded background helper a wall-clock limit when you start it, and record its pid so
+the shell that owns the spawn can reap it. Use whichever bounder the host has: `timeout` is absent
+on macOS, where the command exits **127** and the helper you meant to bound never runs at all.
+Choose at spawn, and refuse to spawn when the host has none.
 
 ```sh
-# Stop the helper even if the shell never returns normally.
-timeout 120 python -c 'while True: pass' &
-# Reap every helper in this process group when the shell exits.
-trap 'kill 0' EXIT INT TERM
+bound() {  # bound <seconds> <cmd>... — it execs, so background it or call it as ( bound ... )
+  secs=$1; shift
+  if command -v timeout >/dev/null 2>&1; then exec timeout "$secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then exec gtimeout "$secs" "$@"
+  elif command -v perl >/dev/null 2>&1; then exec perl -e 'alarm shift; exec @ARGV' "$secs" "$@"
+  else echo "no wall-clock bounder (timeout/gtimeout/perl): not spawning" >&2; exit 127
+  fi
+}
+bound 120 python -c 'while True: pass' & helper=$!   # execs, so $helper IS the bounded work
+trap 'kill "$helper" 2>/dev/null' EXIT INT TERM      # reap on interrupt and error paths too
 ```
+
+The `exec` is load-bearing: without it a backgrounded helper function leaves `$helper` pointing at a
+shell wrapper, and killing that wrapper orphans the process you meant to reap. The `perl` form dies
+of `SIGALRM` (exit 142) where `timeout` reports 124; either way the helper is gone. Confirm with
+`python3 scripts/check_orphaned_load.py`.
 
 These rules are mandatory:
 
@@ -290,7 +304,18 @@ These rules are mandatory:
 - No process you start may reach PPID 1.
 - Never start an unbounded busy loop such as `while True: pass`, `yes > /dev/null`, or `while :; do :; done` without a wall-clock bound. `nice` is not a bound.
 - Prefer a workload with a fixed end condition.
-- Do not put a timeout on `review-plan`, `verify-completion`, a completion-verifier-gated close, or another bounded LLM gate operation. Let the gate produce its verdict.
+- **A bound that is not installed does not bind, and says so only on stderr.** Never write a bare
+  `timeout`: on a host without it you get exit 127, no helper, and an unbounded improvised retry.
+- **Do not use `trap 'kill 0'`.** `kill 0` signals the caller's *process group*, which is both too
+  wide and too narrow: a subshell shares its parent's group, so it kills your own script (observed:
+  the script died of `SIGTERM`, rc 143), while a wrapper shell above you is never in the group and
+  survives — that wrapper is what leaked here. Kill the pids you recorded at spawn.
+- **`pgrep -f <pattern>` matches command-line TEXT, not identity.** A "wait until nothing matches"
+  loop matches any process that merely mentions the pattern — a sibling agent's identical waiter,
+  a `ps | grep` pipeline, and on some platforms the waiter's own wrapper — so it can wait forever
+  or signal the wrong pid. Wait on the pid you recorded (`wait "$helper"`); if you must match text,
+  exclude `$$` and confirm each hit with `ps -o pid=,command= -p <pid>`.
+- Do not bound `review-plan`, `verify-completion`, a completion-verifier-gated close, `make verify`, or another bounded LLM/gate operation. Let it produce its verdict.
 
 The incident evidence, detector instructions, output interpretation, and operator recovery procedure live in [docs/orphaned-processes.md](docs/orphaned-processes.md).
 
