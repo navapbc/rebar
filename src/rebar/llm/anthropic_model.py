@@ -378,24 +378,28 @@ def _build_retrying_anthropic_model(
 
 def _pai_model(cfg: LLMConfig):
     """The Pydantic AI model string for ``cfg`` (provider-qualified). If ``cfg.model``
-    already carries a ``provider:`` prefix it is preserved, except that a bare/legacy
-    ``openai:`` request is made explicit (ticket 155c): ``openai-responses:`` for hosted
-    OpenAI, or ``openai-chat:`` when a custom ``base_url`` is configured (a custom
-    OpenAI-compatible endpoint stays on Chat Completions — rebar builds it only under the
-    ``openai``/``openai-chat`` keys and vendor ``/v1/responses`` support is UNKNOWN). An
-    EXPLICIT ``openai-chat:`` (or ``model_provider = "openai-chat"``) is preserved as-is; its
-    hosted use is the deprecated fallback the runner signals. Otherwise the provider is inferred
+    already carries a ``provider:`` prefix it is preserved, except that an OpenAI-family
+    request (``openai:`` / ``openai-chat:`` / ``model_provider`` set to either) is made
+    explicit: ``openai-responses:`` for hosted OpenAI, or ``openai-chat:`` when a custom
+    ``base_url`` is configured (a custom OpenAI-compatible endpoint stays on Chat
+    Completions — rebar builds it only under the ``openai``/``openai-chat`` keys and vendor
+    ``/v1/responses`` support is UNKNOWN). Otherwise the provider is inferred
     (or taken from ``cfg.model_provider``) and mapped to Pydantic AI's prefix — no per-provider
     construction code, the string is the only switch."""
     m = cfg.model
     if ":" in m:
-        if m.startswith("openai:"):
+        if m.startswith("openai-chat:") and not cfg.base_url:
+            from rebar.llm.model_classes import primary_endpoint_for
+
+            if primary_endpoint_for(m, repo_root=cfg.repo_path):
+                return m
+        if m.startswith(("openai:", "openai-chat:")):
             return f"{_openai_wire_prefix(cfg.base_url)}:{m.split(':', 1)[1]}"
         return m
     from rebar.llm.config import infer_provider
 
     prov = cfg.model_provider or infer_provider(m, None)
-    if prov == "openai":
+    if prov in {"openai", "openai-chat"}:
         return f"{_openai_wire_prefix(cfg.base_url)}:{m}"
     prefix = _PAI_PROVIDER_PREFIX.get(prov or "", prov)
     return f"{prefix}:{m}" if prefix else m

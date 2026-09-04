@@ -22,9 +22,9 @@
 # "Could not resolve authentication method", because those arms deliberately blank
 # ANTHROPIC_API_KEY.
 [llm]
-model = "openai-chat:gpt-5.4"
+model = "openai-responses:gpt-5.4"
 
 [llm.model_classes]
-frontier = { model = "openai-chat:gpt-5.4" }
-standard = { model = "openai-chat:gpt-5.4-mini" }
-trivial  = { model = "openai-chat:gpt-5.4-nano" }
+frontier = { model = "openai-responses:gpt-5.4" }
+standard = { model = "openai-responses:gpt-5.4-mini" }
+trivial  = { model = "openai-responses:gpt-5.4-nano" }

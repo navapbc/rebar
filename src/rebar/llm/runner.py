@@ -343,8 +343,7 @@ class PydanticAIRunner:
             raise
 
     def _recover_slot_endpoint(self, cfg: LLMConfig, resolved: str) -> LLMConfig:
-        """Fold a model-class SLOT endpoint into ``cfg.base_url`` and emit the hosted
-        ``openai-chat:`` deprecation, returning the (possibly updated) config.
+        """Fold a model-class SLOT endpoint into ``cfg.base_url``.
 
         A model class may set its endpoint on the SLOT (``REBAR_LLM_<CLASS>_ENDPOINT`` / the
         ``endpoint`` field), which ops drop when they collapse the class onto ``cfg.model``.
@@ -354,19 +353,11 @@ class PydanticAIRunner:
         provider (bug 6e70). Never overrides an explicit ``base_url``; both slot reads take the
         CONFIG's own root (bug 2876).
 
-        Hosted OpenAI on the explicit ``openai-chat:`` fallback is DEPRECATED (ticket 155c:
-        Responses-API cutover); signal it once per run via the central registry — but NOT when a
-        custom ``base_url``/slot ``endpoint`` (folded in above) forces Chat by construction, a
-        constraint with no ``openai-responses:`` alternative, not a deprecated opt-in.
         """
         if not cfg.base_url and self._model_override is None:
             slot_endpoint = primary_endpoint_for(resolved, repo_root=cfg.repo_path)
             if slot_endpoint:
                 cfg = replace(cfg, base_url=slot_endpoint)
-        if resolved.startswith("openai-chat:") and not cfg.base_url:
-            from rebar._deprecations import warn_deprecated
-
-            warn_deprecated("cfg:the hosted-OpenAI 'openai-chat:' provider prefix", logger=logger)
         return cfg
 
     def run(self, req: RunRequest) -> dict:
