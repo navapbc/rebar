@@ -140,6 +140,7 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         config=None,
         extra_tools=None,
         extra_context: str | None = None,
+        tool_provider=None,
     ) -> None:
         self._runner = runner
         self._repo_root = repo_root
@@ -156,6 +157,14 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         # primary verifier's criterion-id manifest, so a run carrying the banking tool knows
         # which `criterion_id`s to record. None → context unchanged (every other step).
         self._extra_context = extra_context
+        # Per-CALL tool provider/finalizer seam (REB-640): a callable
+        # ``tool_provider(ctx) -> (tools, finalize)`` invoked ONCE PER agent call to mint a
+        # fresh, per-call toolset (e.g. a Terraform grounding session owning an immutable
+        # parse cache + query ledger) and its finalizer, which is run after the call to free
+        # the session and surface its usage. Distinct from ``extra_tools`` (a STATIC per-run
+        # toolset): the provider's tools are appended to any static ``extra_tools`` and their
+        # lifetime is exactly one call. None → no per-call tools (every other step unchanged).
+        self._tool_provider = tool_provider
 
     def run(self, ctx: _ex.StepContext) -> _ex.StepResult:
         from dataclasses import replace as _replace
@@ -278,6 +287,7 @@ class RunnerAgentStep(_ex.AgentStepRunner):
                 langfuse_cfg=cfg.langfuse,
                 repo_root=prompt_repo_root,
             )
+            call_tools, finalize = self._resolve_call_tools(ctx)
             req = build_agent_request(
                 prompt,
                 ctx,
@@ -286,10 +296,32 @@ class RunnerAgentStep(_ex.AgentStepRunner):
                 instructions=instructions,
                 langfuse_prompt=langfuse_prompt,
                 ticket_id=ticket_id,
-                extra_tools=self._extra_tools,
+                extra_tools=call_tools,
             )
-            outs.append(runner.run(req))
+            try:
+                outs.append(runner.run(req))
+            finally:
+                if finalize is not None:
+                    finalize()
         return _ex.StepResult(outputs=_merge_chunked_outputs(outs))
+
+    def _resolve_call_tools(self, ctx: _ex.StepContext):
+        """The toolset + optional finalizer for ONE agent call (REB-640).
+
+        Combines the STATIC per-run ``extra_tools`` with any PER-CALL tools minted by
+        ``tool_provider(ctx)`` (a fresh grounding session per call). Returns
+        ``(tools_or_None, finalize_or_None)``; the finalizer, when present, is run after the
+        call in a ``finally`` so a per-call session is always freed."""
+        if self._tool_provider is None:
+            return self._extra_tools, None
+        provided = self._tool_provider(ctx)
+        if not provided:
+            return self._extra_tools, None
+        per_call_tools, finalize = provided
+        if not per_call_tools:
+            return self._extra_tools, finalize
+        combined = list(self._extra_tools or []) + list(per_call_tools)
+        return combined, finalize
 
 
 def build_agent_request(

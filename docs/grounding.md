@@ -263,3 +263,89 @@ in-process). The static integration contract — the discovery surface — is ex
 across all three interfaces as the typed `grounding_info` read tool, mirroring
 rebar's other read tools (a canonical `.schema.json` registered in
 `OUTPUT_SCHEMAS`, validated across CLI/library/MCP in CI).
+
+## Terraform structural grounding (opt-in: the `grounding-terraform` extra)
+
+A separate, opt-in surface (`rebar.grounding.terraform_tools`, epic
+`a374-849c-c8f2-4234`) grounds the plan-review infra/IaC overlay (`T10`) in real
+Terraform structure. Like the oracle above it is **refutation-only** and
+**fail-open**, but it is a per-agent-call **session** rather than a stateless query,
+and it parses **`.tf`/`.tf.json`** with the pinned pure-Python `python-hcl2==8.1.3`
+parser — **in process, never** shelling out to `terraform`/`opentofu`/a provider/
+`tfparse`/`tflint`/`trivy`/`terraform-ls`/`terraform-docs` (ADR 0115). The only
+subprocess is the shared grounding worker (`run_in_worker`, 60 s) that runs the pure
+parse fail-open.
+
+### Install & routing
+
+```
+pip install 'rebar[grounding-terraform]'   # or: uv sync --extra grounding-terraform
+```
+
+`hcl2`/`lark` import **lazily** (inside the worker only), so `import rebar` and every
+non-Terraform review stay parser-free. The tools are routed **only** to the
+Terraform-scoped criterion `T10`; no other criterion sees them. A Terraform-scoped
+Pass-1 finding drives the **agentic** Pass-2 branch, whose verifier issues its **own**
+structural query (it may reuse the immutable parse cache but never accepts a Pass-1
+receipt as verification). When the extra is absent, `available()` is `False` and every
+query returns a closed `no_tool`/`missing_extra` abstention — never a raise.
+
+### The session API
+
+* `open_session(repo_root, selected) -> TerraformSession` — builds a bounded, frozen
+  snapshot over the `selected` `.tf` seeds (following literal in-repo child `module`
+  `source`s forward and discovering in-repo reverse callers), owning an immutable parse
+  cache + a query ledger.
+* `TerraformSession.lookup_declaration(address, module_path="")` — refute an asserted
+  ABSENCE of a declaration by canonical address (`variable.region`, `aws_instance.web`,
+  `data.aws_ami.base`, `module.vpc`, …).
+* `TerraformSession.resolve_reference(reference, from_file)` — refute an asserted
+  ABSENCE of a referenced member/output (`var.region`, `module.vpc.vpc_id`, …).
+* `TerraformSession.finalize() -> Usage` — free the cache/ledger and report
+  `concrete_reads` (the `.tf`/`.tf.json` actually read) + `membership_globs` (e.g.
+  `infra/**/*.tf`) for the signed read-set.
+
+Each query returns a `Result` with `.evidence` (a grounding record — `refuted` or
+`abstain`, **never** `match`, **never** an asserted absence; validated against the
+`GROUNDING` schema) and `.receipt` (the canonical, credential-redacting receipt,
+validated against `TERRAFORM_GROUNDING_RECEIPT`). All digests are `sha256:`-prefixed;
+attribute literals and `default` values are redacted.
+
+### Limits
+
+`terraform_index.LIMITS` bounds a snapshot; over any bound the build raises
+`TerraformLimitError` (with `.detail`) and yields **no partial snapshot**:
+
+| bound | default | `.detail` |
+|-------|---------|-----------|
+| modules | 64 | `module_limit` |
+| files | 5000 | `file_limit` |
+| bytes | 33554432 | `byte_limit` |
+| timeout_ms | 60000 | (worker boundary) |
+
+An absolute/out-of-repo `selected` path or an escaping symlink raises
+`TerraformPathError`.
+
+### Outcomes & abstention reasons
+
+Every non-refuted query abstains with a CLOSED `(evidence.reason / receipt.reason_detail)`
+pair:
+
+| situation | `evidence.reason` / `receipt.reason_detail` |
+|-----------|---------------------------------------------|
+| missing extra | `no_tool` / `missing_extra` |
+| wrong parser version | `version_skew` / `parser_version` |
+| non-Terraform call | `unsupported_lang` / `not_terraform` |
+| invalid/undecodable input, or worker parse_error | `parse_error` / `invalid_input` |
+| unreadable capture | `parse_error` / `unreadable_file` |
+| worker timeout | `timeout` / `worker_timeout` |
+| worker other failure | `other` / `worker_failure` |
+| duplicate address | `ambiguous` / `duplicate_address` |
+| no unique hit | `ambiguous` / `no_unique_address` |
+| dynamic `source`/expression | `ambiguous` / `dynamic_source` \| `dynamic_expression` |
+| computed value | `ambiguous` / `computed_value` |
+| provider attribute | `ambiguous` / `provider_attribute` |
+| splat/index | `ambiguous` / `splat_index` |
+| unknown tfvars | `ambiguous` / `unknown_tfvars` |
+| path outside snapshot (abs/out-of-repo/escaping symlink) | `private_or_internal_suspected` / `path_outside_snapshot` |
+| module/file/byte bound | `other` / `module_limit` \| `file_limit` \| `byte_limit` |
