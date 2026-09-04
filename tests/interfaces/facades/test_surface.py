@@ -39,7 +39,14 @@ def test_mcp_exposes_expected_tools() -> None:
         "ready_tickets",
         "next_batch",
         "search",
-        "reconcile",
+        "bridge_preview",
+        "bridge_run",
+        "bridge_sync",
+        "bridge_status",
+        "bridge_pause",
+        "bridge_resume",
+        "bridge_fsck",
+        "bridge_check_access",
         "create_ticket",
         "create_idea",
         "transition_ticket",
@@ -65,6 +72,7 @@ def test_mcp_exposes_expected_tools() -> None:
         "set_verify_commands",
     }
     assert expected <= names, f"missing MCP tools: {expected - names}"
+    assert "reconcile" not in names
 
 
 def test_mcp_has_no_init_or_classify() -> None:
@@ -143,10 +151,18 @@ def test_library_public_api() -> None:
         "ready",
         "next_batch",
         "search",
-        "reconcile",
+        "bridge_preview",
+        "bridge_run",
+        "bridge_sync",
+        "bridge_status",
+        "bridge_pause",
+        "bridge_resume",
+        "bridge_fsck",
+        "bridge_check_access",
     ):
         assert callable(getattr(rebar, fn)), fn
     assert not hasattr(rebar, "classify")
+    assert not hasattr(rebar, "reconcile")
 
 
 # ── CLI surface ───────────────────────────────────────────────────────────────

@@ -1217,22 +1217,6 @@
       ],
       "return": "list[TicketState]"
     },
-    "reconcile": {
-      "kind": "callable",
-      "params": [
-        [
-          "mode",
-          "POSITIONAL_OR_KEYWORD",
-          "'dry-run'"
-        ],
-        [
-          "repo_root",
-          "KEYWORD_ONLY",
-          "None"
-        ]
-      ],
-      "return": "dict"
-    },
     "reduce_all_tickets": {
       "kind": "callable",
       "params": [

@@ -6,7 +6,6 @@ import asyncio
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -51,35 +50,27 @@ def test_real_engine_rejects_abbreviation_before_store_access(
     assert _tracker_bytes(rebar_repo) == before
 
 
-def test_library_live_reconcile_keeps_legacy_mode_adapter(rebar_repo: Path, monkeypatch) -> None:
-    calls: list[list[str]] = []
+def test_library_reconcile_is_removed_before_operational_work(rebar_repo: Path) -> None:
+    del rebar_repo  # the stale caller would have supplied it, but lookup fails first.
 
-    def fake_run(cmd, **_kwargs):
-        calls.append(cmd)
-        return SimpleNamespace(returncode=0, stdout="OK: applied 1 of 1\n", stderr="")
-
-    monkeypatch.setattr(_lib_ops, "subprocess", SimpleNamespace(run=fake_run))
-    result = rebar.reconcile("live", repo_root=str(rebar_repo))
-
-    assert calls[0][-4:] == ["--mode", "live", "--repo-root", str(rebar_repo)]
-    assert result == {
-        "mode": "live",
-        "returncode": 0,
-        "output": "OK: applied 1 of 1",
-        "stderr": "",
-    }
+    assert not hasattr(_lib_ops, "reconcile")
+    name = "reconcile"
+    with pytest.raises(AttributeError):
+        getattr(rebar, name)
 
 
-def test_mcp_live_reconcile_keeps_legacy_library_call(monkeypatch) -> None:
-    monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "1")
-    monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
+def test_mcp_reconcile_is_removed_before_library_call(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(
         rebar,
         "reconcile",
-        lambda mode="dry-run": calls.append(mode) or {"mode": mode, "legacy": True},
+        lambda mode="dry-run": calls.append(mode) or {"mode": mode},
+        raising=False,
     )
 
-    result = asyncio.run(build_server().call_tool("reconcile", {"mode": "live"}))
-    assert calls == ["live"]
-    assert "legacy" in str(result).lower()
+    server = build_server()
+    assert "reconcile" not in {tool.name for tool in asyncio.run(server.list_tools())}
+    with pytest.raises(Exception) as exc:
+        asyncio.run(server.call_tool("reconcile", {"mode": "live"}))
+    assert "reconcile" in str(exc.value).lower()
+    assert calls == []
