@@ -24571,6 +24571,15 @@
       "source_id": "9a08-614d-a9d4-4a81",
       "target_id": "3ba4-c0d1-1813-44a5"
     },
+    "9a17-e0b3-7aa6-4091|a1f1-a30d-2d50-4f5a|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788496808240812257,
+      "link_id": "50873",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "9a17-e0b3-7aa6-4091",
+      "target_id": "a1f1-a30d-2d50-4f5a"
+    },
     "9a46-1c90-5dd9-44e1|e369-a449-4773-48fb|parent": {
       "confirmed_at": 1786807014033344146,
       "confirmed_pass": "2026-08-15T14-49-02",
@@ -25745,6 +25754,15 @@
       "source": "backfill",
       "source_id": "a1a2-f491-84e3-4f21",
       "target_id": "56c0-1d2f-f39c-4ac1"
+    },
+    "a1f1-a30d-2d50-4f5a|9a17-e0b3-7aa6-4091|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788496808240844445,
+      "link_id": "50873",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "a1f1-a30d-2d50-4f5a",
+      "target_id": "9a17-e0b3-7aa6-4091"
     },
     "a263-515e-839b-49aa|25aa-1df0-5901-417b|blocks": {
       "direction": "snapshot",
