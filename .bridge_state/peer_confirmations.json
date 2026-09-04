@@ -19749,6 +19749,15 @@
       "source_id": "78f1-13e8-7025-42ce",
       "target_id": "ad0d-6338-bc8c-43b6"
     },
+    "78f2-b104-e3c9-4b86|b973-b298-9b5d-4765|depends_on": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788511556583099051,
+      "link_id": "50878",
+      "relation": "depends_on",
+      "source": "snapshot",
+      "source_id": "78f2-b104-e3c9-4b86",
+      "target_id": "b973-b298-9b5d-4765"
+    },
     "7931-e644-30de-4023|86ac-086a-20ad-4327|parent": {
       "confirmed_at": 1786807014032409065,
       "confirmed_pass": "2026-08-15T14-49-02",
@@ -22731,6 +22740,15 @@
       "source_id": "8eff-87c1-d09a-4893",
       "target_id": "3a46-32f3-2753-4632"
     },
+    "8eff-87c1-d09a-4893|9a17-e0b3-7aa6-4091|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788511556583174271,
+      "link_id": "50879",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "8eff-87c1-d09a-4893",
+      "target_id": "9a17-e0b3-7aa6-4091"
+    },
     "8eff-87c1-d09a-4893|a691-3cb9-7d1d-4ef1|blocks": {
       "direction": "snapshot",
       "first_confirmed_at": 1788324049000700827,
@@ -24588,6 +24606,15 @@
       "source": "backfill",
       "source_id": "9a08-614d-a9d4-4a81",
       "target_id": "3ba4-c0d1-1813-44a5"
+    },
+    "9a17-e0b3-7aa6-4091|8eff-87c1-d09a-4893|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788511556583412065,
+      "link_id": "50879",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "9a17-e0b3-7aa6-4091",
+      "target_id": "8eff-87c1-d09a-4893"
     },
     "9a17-e0b3-7aa6-4091|90c7-c465-4037-42d5|relates_to": {
       "direction": "snapshot",
@@ -29123,6 +29150,15 @@
       "source": "snapshot",
       "source_id": "b967-8a1a-9bbb-4b86",
       "target_id": "d3ed-88e3-86a3-4918"
+    },
+    "b973-b298-9b5d-4765|78f2-b104-e3c9-4b86|blocks": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1788511556583453210,
+      "link_id": "50878",
+      "relation": "blocks",
+      "source": "snapshot",
+      "source_id": "b973-b298-9b5d-4765",
+      "target_id": "78f2-b104-e3c9-4b86"
     },
     "b9b8-1c40-ea53-4ef3|e369-a449-4773-48fb|parent": {
       "confirmed_at": 1786807014034228932,
