@@ -13986,6 +13986,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T03:41:58Z"
     },
+    "337e-b558-17a2-49bd": {
+      "created_at": "2026-09-04T06:51:06Z",
+      "jira_id": "4591719",
+      "jira_key": "REB-4611",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T06:51:09Z"
+    },
     "3388-96e8-e14e-4221": {
       "baseline": {
         "assignee": {
@@ -15503,9 +15510,31 @@
       "updated_at": "2026-08-15T14:56:31Z"
     },
     "3960-1016-ad4b-4c90": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nAudit how the artifact-specific concision guidance recorded by inanimate-unrideable-wasp maps to documentation and durable records in the current rebar project.\n\n## Approach\n- Read the canonical documentation policy and indexes, then inspect representative examples of agent guidance, executable-plan guidance, ADRs, user-facing guides, generated reference/API documentation, incident/security material, templates/prompts, ticket comments, and session logs.\n- For each artifact class, compare its stated purpose and observed structure with the proposed contract: minimum sufficient content, progressive disclosure, protected facts, current-versus-historical state, alternatives, evidence, and resumption information.\n- Classify each class as typically following, partially following, or intentionally not following the guidance. Describe concrete deviations and whether they are defects or purpose-driven exceptions.\n- Cite exact repository files and use the existing historical-ticket calibration for tracker artifacts.\n\n## Artifacts\n- A concise answer with repository citations.\n- A ticket comment recording the audit result.\n- No repository files.\n\n## Acceptance Criteria\n- [x] The answer covers canonical agent guidance, executable tickets/plans, comments/handoffs, ADRs, user-facing documentation, reference/API documentation, incident/security records, and session logs/research notes.\n- [x] Each artifact class has a follows/partially follows/does-not-follow classification.\n- [x] Each non-following or partial class names the specific ways it diverges.\n- [x] Purpose-driven exceptions are distinguished from bloat defects.\n- [x] Claims about repository documentation cite current files.\n- [x] No repository files are modified.\n\n## Verification\nCross-check classifications against docs/documentation-policy.md, docs/README.md, representative files from each artifact class, and the completed 20-ticket calibration.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Audit concision guidance against current project artifacts"
+      },
       "created_at": "2026-09-04T05:43:23Z",
       "jira_id": "4591715",
       "jira_key": "REB-4607",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-04T05:43:26Z"
     },
@@ -19376,9 +19405,17 @@
       "updated_at": "2026-08-15T14:58:07Z"
     },
     "477b-4130-424d-41eb": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`tests/e2e/_toolchain.py::provision_toolchain` checks `_satisfied()` BEFORE taking the flock, and `_satisfied` treats the harness bundle as ready on mere existence (`(js_dir / BUNDLE_RELPATH).is_file()`). esbuild writes `dist/roundtrip.mjs` in place, so under `-n 4 --dist worksteal` a worker can see the path exist while the lock holder is still writing it, return early, and run `node dist/roundtrip.mjs` against a truncated file. The failure would surface as a confusing harness/JSON error rather than as a provisioning problem.\n\nRaised as an LLM-Review advisory on change 2600 (`tests/e2e/_toolchain.py:151`). It did not block that change and was deliberately left to land the priority-0 unblocker first; nothing about it is fixed by what merged.\n\n## Approach\n\nDelete the unlocked fast path and evaluate `_satisfied()` INSIDE the lock. The fast path was an optimisation for the already-provisioned case, but an `fcntl.flock` on a local file costs microseconds and is taken a handful of times per run (once per xdist worker at collection, plus at most once per session in the fixture fallback), so the saving it buys does not pay for the race it opens. A waiter blocks only while a peer is genuinely provisioning, and it waits during COLLECTION, which is not on any test timeout budget \u2014 the property bug 9a17-e0b3-7aa6-4091 established.\n\n## Scope\n\n- `tests/e2e/_toolchain.py` \u2014 move the `_satisfied()` check inside `_install_lock`.\n- `tests/e2e/test_toolchain_provisioning.py` \u2014 extend the concurrency oracle.\n\n## Testing\n\nThe existing two-process concurrency test brackets only the install step. Extend the stub `npm` to bracket `run build` as well, and assert the whole event sequence across both processes is disjoint (no span of either step opens while another is open). Pre-fix, a second process returns as soon as the bundle path appears, so its span closes before the builder finishes and the sequence interleaves; post-fix it cannot. Verify RED before GREEN.\n\n## Acceptance Criteria\n\n- [ ] `provision_toolchain` performs no readiness check outside the lock. Checked by the\n      extended two-process test, which must fail against the current code and pass after.\n- [ ] A caller never returns while a peer is mid-build. Checked by the disjoint-span assertion\n      over bracketed install AND build events from both processes.\n- [ ] No regression in the existing behaviour. Checked by\n      `pytest tests/e2e/test_toolchain_provisioning.py -q` and a cold\n      `pytest tests/e2e -n 4 --dist worksteal -q` completing with no worker kill.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "e2e toolchain provisioning has an unlocked fast path that can expose a half-written harness bundle"
+      },
       "created_at": "2026-09-04T05:43:29Z",
       "jira_id": "4591716",
       "jira_key": "REB-4608",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-04T05:43:31Z"
     },
@@ -38809,9 +38846,17 @@
       "updated_at": "2026-08-22T18:38:37Z"
     },
     "90c7-c465-4037-42d5": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe `scanner-integration (pinned Semgrep + Gitleaks on the patchset)` job, added to `main` in `6125c5345f01` (Gerrit change 2595, ticket aa9e), fails on every change pushed since it merged. It casts `Verified -1` and blocks all merges; six open changes are affected (2594, 2600, 2601, 2607, 2608, 2609). With bug `9a17-e0b3-7aa6-4091` this leaves two gates red and no route to `Verified +1`.\n\n**How it landed broken (the escape).** The job never ran before merge. Change 2595's own Verified run `33831682168` contains 26 jobs and no `scanner-integration` job at all: the Verified lane executes `gerrit-verify.yaml` from trusted `main`, and `main` did not yet wire the lane. So 2595's `Verified +1` was cast without the new job ever executing. Absence of coverage, not divergent conditions \u2014 base staleness is ruled out (change 2607 is parented directly on `6125c5345f01` and still fails).\n\n**Why it fails (the fault) \u2014 two independent defects, both quoted from real job logs.**\n\nDefect 1, the make recipe is not POSIX-sh portable. On a tree that carries the new script (mirror branch-head lane, run 33834183836 job 100903189596, base `main`):\n\n```\nreview scanner locks: OK\n/bin/sh: 1: set: Illegal option -o pipefail\nmake: *** [Makefile:475: scanner-integration] Error 2\n```\n\n`Makefile:475` opens the recipe with `@set -euo pipefail;`. The Makefile sets no `SHELL`, so GNU make runs recipes under `/bin/sh` \u2014 dash on ubuntu-latest, which has no `pipefail`. The recipe contains no pipeline, so `pipefail` buys nothing. This breaks the job on main content itself, independently of the patchset context.\n\nDefect 2, the gate step is unguarded against a pre-gate base. Change 2608 (patchset `f50dc100`, run 33837736047 job 100913937750):\n\n```\npython: can't open file '/home/runner/work/rebar/rebar/scripts/install_review_scanners.py':\n[Errno 2] No such file or directory\n```\n\n`.github/workflows/_scanner-integration.yml` runs `scripts/install_review_scanners.py` and `make scanner-integration` with no `[ -f ]` guard and no `# predates-gate-ok:` marker \u2014 the exact invariant `tests/unit/test_predates_gate_guard_parity.py` owns. That guard's `GUARDED_WORKFLOWS` is a hardcoded tuple; `_scanner-integration.yml` (like `_artifact-probe.yml` and `_eval-discipline.yml`) is wired into `gerrit-verify.yaml` but absent from the tuple, so the completeness check never looked at it. A new lane is opt-in to its own invariant, which is backwards.\n\n## Approach\n\nThe pre-merge property to restore is that a newly added CI lane's correctness is enforced by the **unit-test suite**, which always executes on the change that introduces it, rather than by the new job, which does not. Both defects are made catchable that way, and the opt-in step that 2595 could skip is removed.\n\n1. `Makefile` \u2014 replace `set -euo pipefail` with POSIX `set -eu` in the `scanner-integration`\n   recipe. The recipe has no pipeline, so this is behaviour-preserving under bash and correct\n   under dash.\n2. `.github/workflows/_scanner-integration.yml` \u2014 wrap the gate step in the canonical\n   `[ -f scripts/install_review_scanners.py ]` guard emitting the exact phrase\n   `change predates the gate`, and make the failure path actionable: name the violated contract\n   (pinned Semgrep + Gitleaks locks) and print the local reproduction command\n   `make scanner-integration`.\n3. `tests/unit/test_predates_gate_guard_parity.py` \u2014 derive `GUARDED_WORKFLOWS` from the lane\n   instead of hardcoding it: take `gerrit-verify.yaml` and `test.yml` as roots and follow every\n   local `uses: ./.github/...` reference transitively. A reusable workflow or composite action\n   is then inside the invariant the moment it is wired, with no second edit. Keep the current\n   tuple as an asserted floor so the derivation cannot silently shrink.\n4. `tests/unit/test_ci_workflow_parity.py` \u2014 pin defect 1's class: every make recipe reachable\n   from CI must parse under a strict POSIX shell, so a bash-only builtin fails in the local\n   suite instead of on ubuntu-latest.\n\nNo new script, config key, env var, feature flag or lock is introduced, so the mechanism-delta ratchet sees no new mechanism.\n\n## Scope\n\n- `Makefile` \u2014 the `scanner-integration` recipe's `set` line.\n- `.github/workflows/_scanner-integration.yml` \u2014 guard plus actionable failure message.\n- `tests/unit/test_predates_gate_guard_parity.py` \u2014 lane-derived guarded set, coverage assertion.\n- `tests/unit/test_ci_workflow_parity.py` \u2014 POSIX-shell contract for make recipes.\n\n## Testing\n\n- Happy path: the scanner step is inside `test_completeness_every_gate_step_is_guarded_or_marked`\n  and `test_empty_tree_every_guarded_step_skips_cleanly`; the guarded body run in an empty\n  directory exits 0 and prints `change predates the gate`.\n- Coverage path: a new assertion pins that the derived guarded set contains every local `uses:`\n  target reachable from `gerrit-verify.yaml` and `test.yml`, so a future lane cannot be wired\n  outside the invariant.\n- Failure/edge path (defect-seeded RED): reintroduce each fault \u2014 drop the `-f` guard, and\n  restore `set -euo pipefail` \u2014 and show the corresponding test fail, then revert.\n- Empty/degenerate path: a recipe with no shell content passes the POSIX parse trivially rather\n  than erroring.\n- Verification set: `make lint`, `make typecheck`, and\n  `python -m pytest tests/unit/test_predates_gate_guard_parity.py tests/unit/test_ci_workflow_parity.py tests/unit/test_mechanism_delta.py -q`.\n\n## Acceptance Criteria\n\n- [ ] Root cause is quoted from real job logs, not inferred from workflow source: both the\n      `Illegal option -o pipefail` failure (job 100903189596) and the `No such file or\n      directory` failure (job 100913937750) are cited with job ids. Checked by reading this\n      description and the change's commit message.\n- [ ] `scanner-integration` passes on a patchset that is otherwise unmodified relative to its\n      base. Checked by this fix's Gerrit change reaching `Verified +1` with the\n      `scanner-integration` job green.\n- [ ] The escape is closed: a newly added CI lane can no longer land unvalidated because its own\n      job did not execute on the introducing change. `tests/unit/test_predates_gate_guard_parity.py`\n      derives its workflow set from the `gerrit-verify.yaml`/`test.yml` local-`uses:` closure\n      rather than a hardcoded list, so the always-running unit suite covers a lane the moment it\n      is wired; the make-recipe POSIX contract covers defect 1 the same way. Checked by running\n      both modules and by the new coverage assertion failing when a lane member is omitted.\n- [ ] Defect-seeded RED: with the guard removed the completeness test fails naming\n      `_scanner-integration.yml`, and with `set -euo pipefail` restored the POSIX contract fails\n      naming `scanner-integration`; both pass after revert. Checked by the quoted pytest output\n      recorded in a ticket comment.\n- [ ] The job's failure message names the violated contract and the local command that\n      reproduces it. Checked by reading the step body: the failure path prints\n      `make scanner-integration` as the local reproduction.",
+        "priority": "Highest",
+        "status": "To Do",
+        "summary": "scanner-integration job fails on every change since it merged, blocking all merges: passed its own CI then broke everyone else's (trusted-main asymmetry)"
+      },
       "created_at": "2026-09-04T05:43:34Z",
       "jira_id": "4591717",
       "jira_key": "REB-4609",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-04T05:43:36Z"
     },
@@ -50036,6 +50081,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:00Z"
     },
+    "b973-b298-9b5d-4765": {
+      "created_at": "2026-09-04T06:51:14Z",
+      "jira_id": "4591720",
+      "jira_key": "REB-4612",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T06:51:17Z"
+    },
     "b9aa-7d80-1a7d-452d": {
       "baseline": {
         "assignee": null,
@@ -52931,9 +52983,17 @@
       "updated_at": "2026-08-15T15:10:59Z"
     },
     "c5ca-b32b-5e9e-4053": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Symptom\n\n`provision_toolchain` in `tests/e2e/_toolchain.py` (around `:151`) runs its fast-path `_satisfied()` check **before** taking the `flock`, and treats the bundle as ready on mere existence. A worker can therefore observe a partially-written `node_modules`/`dist`, conclude provisioning is done, return early, and run tests against a bundle another worker is still writing.\n\nFlagged as an advisory by the LLM reviewer on Gerrit change 2600 patchset 3, and judged a real defect rather than a style note by the implementing agent.\n\n## Why it was not fixed in 2600\n\nChange 2600 is the fix for bug `9a17-e0b3-7aa6-4091`, which was failing ~46% of CI runs repo-wide and blocking every open change. Pushing a further patchset would have reset its `LLM-Review +1` and cost another full review plus CI cycle on the change that was unblocking the repository. The deliberate call was to land 2600 and track this separately.\n\n**This is not a regression introduced by 2600.** Before that change there was no lock at all and workers raced freely; 2600 narrowed the window substantially. This ticket closes the remainder.\n\n## Fix shape\n\nDrop the unlocked fast path and perform the `_satisfied()` check **inside** the lock. An `flock` on a local file costs microseconds and is taken a handful of times per run, so the fast path buys negligible time while creating the window.\n\n## Acceptance criteria\n\nAll deterministic and verifiable in a single run \u2014 no \"run it a few times and see\".\n\n1. A test demonstrates the race deterministically **before** the fix: one worker is made to observe\n   the partially-written state (e.g. hold the lock while a bundle is half-created, or stub the\n   filesystem state the fast path inspects) and is shown returning early. RED first \u2014 a race\n   asserted only by repetition is not a reproduction.\n2. After the fix, the same test shows the second worker blocking on the lock and observing only a\n   complete bundle.\n3. The existing provisioning behaviour is unchanged for the uncontended case: `tests/e2e/test_toolchain_provisioning.py`\n   still passes in full, and a cold single-worker run still provisions exactly once.\n4. **Defect-seeded**: restoring the unlocked fast path makes AC1's test fail again. Demonstrated by\n   mutation, then reverted.\n5. No new mechanism is registered \u2014 this should be a movement of an existing check, not new\n   machinery. Verify with `check_mechanism_delta.py --check` **and** `tests/unit/test_mechanism_delta.py`\n   (the latter is not covered by `make lint`).\n\n## Note\n\n`tests/e2e/_toolchain.py` and its lock were introduced by change 2600; read that change first for the surrounding design, including why provisioning moved out of the fixture into `pytest_collection_modifyitems` and why a failed pre-provision must degrade to the in-fixture path rather than fail the step.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "e2e toolchain provisioning has an unlocked fast path: a worker can run against a bundle another worker is still writing"
+      },
       "created_at": "2026-09-04T05:43:41Z",
       "jira_id": "4591718",
       "jira_key": "REB-4610",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-04T05:43:44Z"
     },
@@ -67041,6 +67101,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:49Z"
     },
+    "f850-674c-c89f-4b97": {
+      "created_at": "2026-09-04T06:51:18Z",
+      "jira_id": "4591721",
+      "jira_key": "REB-4613",
+      "state": "confirmed",
+      "updated_at": "2026-09-04T06:51:21Z"
+    },
     "f87a-f632-0ecd-437c": {
       "created_at": "2026-08-15T15:15:50Z",
       "jira_key": "REB-1339",
@@ -71507,7 +71574,13 @@
     "1788500044190301001": "__rebar_unknown_comment_id__",
     "1788500163873413001": "__rebar_unknown_comment_id__",
     "1788500179624714001": "__rebar_unknown_comment_id__",
-    "1788500247763681519": "__rebar_unknown_comment_id__"
+    "1788500247763681519": "__rebar_unknown_comment_id__",
+    "1788500631552753001": "__rebar_unknown_comment_id__",
+    "1788502041705935276": "__rebar_unknown_comment_id__",
+    "1788502500848565611": "__rebar_unknown_comment_id__",
+    "1788503141543535001": "__rebar_unknown_comment_id__",
+    "1788503795457105001": "__rebar_unknown_comment_id__",
+    "1788504124329895001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -74544,6 +74617,9 @@
     "REB-4609": "90c7-c465-4037-42d5",
     "REB-461": "ba7e-dd8d-7cac-453f",
     "REB-4610": "c5ca-b32b-5e9e-4053",
+    "REB-4611": "337e-b558-17a2-49bd",
+    "REB-4612": "b973-b298-9b5d-4765",
+    "REB-4613": "f850-674c-c89f-4b97",
     "REB-462": "c6e5-9936-d07c-4b16",
     "REB-463": "da34-ac98-e375-4af0",
     "REB-467": "9af8-8d59-c940-4e41",
