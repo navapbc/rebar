@@ -594,6 +594,7 @@ grace_seconds        = 120            # never evict an entry used within this wi
 max_age_seconds      = 604800         # cold-trim entries older than this (7 days; env REBAR_GATE_MAX_AGE_SECONDS)
 max_bytes            = 0              # cap the snapshot store's own size in bytes; 0 = off (env REBAR_GATE_MAX_BYTES)
 max_entries          = 2000           # cap the snapshot store's ENTRY COUNT; 0 = off (env REBAR_GATE_MAX_ENTRIES)
+max_concurrent_gates = 4              # cap CONCURRENT plan-review + verify-completion runs; 0 = off (no env override)
 reverify_seconds     = 0              # periodic integrity reverify period; 0 = off (env REBAR_GATE_REVERIFY_SECONDS)
 interval_seconds     = 300            # janitor background pass cadence (env REBAR_GATE_JANITOR_INTERVAL_SECONDS)
 ```
@@ -655,6 +656,40 @@ large the store currently is before deciding on a value:
 ```sh
 ls "${REBAR_GATE_TMPDIR:-${TMPDIR:-/tmp}}/rebar-gate-snapshots" | wc -l
 ```
+
+`max_concurrent_gates` is the **concurrency** bound, and the only key here that refuses work
+rather than reclaiming it. The janitor evicts by high-water mark and relies on POSIX
+delete-on-last-close: it can `unlink` an in-flight snapshot, but the blocks are not returned
+until the last reader closes. So while several gates are running the bytes they hold are
+**live, not garbage** — a size cap below the peak concurrent hold cannot be honoured by any
+amount of reclamation. Bounding the number of holders is the only control that reaches those
+bytes, which is why ADR 0112 makes it a precondition for the other caps rather than an
+optimization. The same counter also bounds concurrent gate RSS, the other budget a shared
+review host runs out of.
+
+Plan-review and completion-verifier runs share **one** counter, because both copy the repo at a
+ref: two caps of N each would admit 2N holders. **At capacity a gate is refused, not queued** —
+a queued gate still holds its thread and its resident memory, converting disk pressure into
+memory pressure, and it holds the MCP client's request past its deadline. The refusal is a
+`GateCongestedError`, never a verdict: over MCP it arrives as a structured `retryable: true`
+payload with error code `gate_congested`, and the CLI exits **11** ("transient — retry"). One
+`GATE_CONGESTED` journald marker is emitted per refusal so congestion is visible in aggregate.
+
+Degradation splits by fault. A missing `fcntl` or a single unusable slot file **admits** the
+gate — one local fault must not become a total gate outage — but announces itself with a
+`GATE_ADMISSION_DISARMED` marker naming the reason, so "the cap was not in force" is in the
+record rather than inferred from a full volume. An unreachable **store root** (the scratch
+volume unmounted or read-only) instead **refuses**, per ADR 0112: admitting there would put
+snapshot and clone bytes back on the root filesystem, which is the failure the split volume
+exists to prevent. Setting `0` is an operator choice, not a fault, and emits nothing.
+
+**The default 4 is measured, not guessed.** A complete plan-review peaks around 748 MB resident
+and a completion-verifier around 462 MB (`GATE_PEAK_RSS` markers; the figure varies run to run —
+a degraded run measured 501 MB). On the 8 GiB review host, ~2.17 GB of steady state plus
+Gerrit's ~3 GiB config reservation leave roughly 3 GiB for gate work: 4 x 748 MB is about
+2.99 GB and fits, a fifth run does not. Raise it on a roomier host; `0` disables the bound
+entirely. Unlike every other key here it has **no `REBAR_GATE_*` env override** yet — see bug
+`a1f1-a30d-2d50-4f5a`.
 
 Env-only (NOT `[snapshot]` keys): `REBAR_GATE_TMPDIR` (the snapshot store's base directory;
 default the system temp dir — never a hardcoded `/tmp`) and `REBAR_GATE_ALLOW_UNGATED`
