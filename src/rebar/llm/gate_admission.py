@@ -91,6 +91,7 @@ __all__ = [
     "MARKER",
     "gate_admission",
     "max_concurrent_gates",
+    "scratch_unavailable_detail",
 ]
 
 #: The line-start journald marker token for a refused admission (AC7). Same convention as
@@ -154,29 +155,56 @@ def max_concurrent_gates(repo_root: str | os.PathLike[str] | None = None) -> int
     return resolve_gate_max_concurrent(DEFAULT_MAX_CONCURRENT_GATES, repo_root)
 
 
-def _require_scratch_volume(gate: str) -> None:
-    """Refuse when a declared gate-scratch volume is not mounted (ADR 0112 decision 3).
+def scratch_unavailable_detail() -> str | None:
+    """Why the declared gate-scratch volume is unusable, or ``None`` when there is nothing
+    wrong (ADR 0112 decision 3; story ``aa40``, bug ``1ef8-c849-5801-4eee``).
+
+    THE ONE OWNER of the two-marker predicate. It is public — and the only public name in
+    this module that is not about concurrency — because refusal enforcement now spans TWO
+    callers: :func:`_require_scratch_volume` (the gates) and the review-bot's pre-clone
+    admission in ``rebar.review_bot.low_disk``, whose per-review clone is a plain
+    ``tempfile.TemporaryDirectory`` that never passes through :func:`gate_admission`. Those
+    two paths MUST NOT compute mountedness independently: two derivations can disagree, and a
+    guard that half-fires is worse than none, because the loud half creates confidence the
+    protection is in force. ``infra/scripts/observability.sh`` reads the same proof marker for
+    the same reason, so monitoring and enforcement cannot diverge either.
 
     Uses :func:`~rebar._snapshot.repo_snapshot.peek_store_root`, the SIDE-EFFECT-FREE
-    derivation, and runs BEFORE :func:`_slot_dir`. That ordering is the whole point: the
-    creating :func:`store_root` would materialise the store on the root filesystem on its way
-    to the refusal, so checking afterwards would report the fault having already caused it.
+    derivation, so asking the question never materialises a store on the root filesystem —
+    which is the very outcome the answer exists to prevent.
 
-    Silent on a host with no declaration, so the guard is opt-in by PROVISIONING rather than
+    The markers describe the HOST, not one consumer's temp path: a box that declared a
+    dedicated scratch volume and lost it must not start large writes anywhere, whichever of
+    ``REBAR_GATE_TMPDIR`` / ``TMPDIR`` routed them. That is deliberately conservative, and it
+    is what keeps one predicate honest for both callers.
+
+    ``None`` on a host with no declaration, so the guard is opt-in by PROVISIONING rather than
     by rebar version — no laptop, CI runner or existing box changes behaviour.
     """
     from rebar._snapshot.repo_snapshot import peek_store_root
 
     base = peek_store_root().parent
     if not (base.parent / _SCRATCH_REQUIRED_MARKER).is_file():
-        return
+        return None
     if (base / _SCRATCH_MOUNTED_MARKER).is_file():
-        return
-    raise GateScratchUnavailableError(
-        gate,
+        return None
+    return (
         f"{base} declares a dedicated scratch volume ({base.parent / _SCRATCH_REQUIRED_MARKER}) "
-        f"but {_SCRATCH_MOUNTED_MARKER} is absent, so the volume is not mounted",
+        f"but {_SCRATCH_MOUNTED_MARKER} is absent, so the volume is not mounted"
     )
+
+
+def _require_scratch_volume(gate: str) -> None:
+    """Raise :class:`GateScratchUnavailableError` when the shared predicate says the declared
+    scratch volume is not mounted.
+
+    Runs BEFORE :func:`_slot_dir`. That ordering is the whole point: the creating
+    :func:`store_root` would materialise the store on the root filesystem on its way to the
+    refusal, so checking afterwards would report the fault having already caused it.
+    """
+    detail = scratch_unavailable_detail()
+    if detail is not None:
+        raise GateScratchUnavailableError(gate, detail)
 
 
 def _slot_dir() -> Path:

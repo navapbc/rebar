@@ -41,9 +41,8 @@ from rebar.review_bot.dedup import DedupStore
 from rebar.review_bot.finding_publish import post_review
 from rebar.review_bot.gerrit_client import GerritClient, GerritError
 from rebar.review_bot.low_disk import GAP_REASON as _LOW_DISK_GAP_REASON
-from rebar.review_bot.low_disk import decision as _low_disk_decision
 from rebar.review_bot.low_disk import exhausted_result as _low_disk_exhausted_result
-from rebar.review_bot.low_disk import review_clone_has_room as _review_clone_has_room
+from rebar.review_bot.low_disk import pre_clone_refusal as _pre_clone_refusal
 from rebar.review_bot.voter_merge import (
     assemble_merge_diff as _assemble_merge_diff,
 )
@@ -375,9 +374,10 @@ async def _decision_for_review_target(
     commit_message: str,
     runtime: LLMRuntime | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Run the review setup after the pre-clone free-space admission check."""
-    if not _review_clone_has_room(cfg):
-        return _low_disk_decision(), ""
+    """Run the review setup after the pre-clone disk admission check (see
+    ``low_disk.pre_clone_refusal``), which must precede the ``TemporaryDirectory``."""
+    if (refusal := _pre_clone_refusal(cfg)) is not None:
+        return refusal, ""
     with tempfile.TemporaryDirectory(prefix="reviewbot-") as repo_root:
         await asyncio.to_thread(
             gc.clone_change_ref,
