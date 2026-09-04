@@ -37,14 +37,24 @@ from rebar.llm.gate_context import use_ticket_view
 from rebar.llm.plan_review.attest import current_material_fingerprint
 
 
-def _git(repo: str | Path, *args: str) -> str:
-    proc = subprocess.run(
-        ["git", "-C", str(repo), *args],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+def _run_git(*argv: str) -> str:
+    proc = subprocess.run(["git", *argv], check=True, capture_output=True, text=True)
     return proc.stdout.strip()
+
+
+def _git(repo: str | Path, *args: str) -> str:
+    """Run git in a NON-BARE worktree, which git may discover from ``repo``."""
+    return _run_git("-C", str(repo), *args)
+
+
+def _bare_git(repo: str | Path, *args: str) -> str:
+    """Run git against a BARE repository, which must be named explicitly.
+
+    git refuses to *discover* a bare repository through ``-C`` when a developer
+    sets ``safe.bareRepository = explicit``, failing with exit 128 before any ref
+    lookup [rebar:740d-187c-53a2-4b7d].  A top-level ``--git-dir`` names it.
+    """
+    return _run_git("--git-dir", str(repo), *args)
 
 
 def _in_progress_ticket(repo: Path, title: str = "atomic close") -> str:
@@ -398,8 +408,10 @@ def test_relevant_remote_rejection_never_places_candidate_on_shared_head(
 
     _assert_no_bundle_after(tracker, baseline, ticket)
     assert rebar.show_ticket(ticket, repo_root=str(rebar_repo))["status"] == "in_progress"
-    assert _git(remote, "rev-parse", "refs/heads/tickets") == remote_tip
-    names = _git(remote, "ls-tree", "-r", "--name-only", "refs/heads/tickets", ticket).splitlines()
+    assert _bare_git(remote, "rev-parse", "refs/heads/tickets") == remote_tip
+    names = _bare_git(
+        remote, "ls-tree", "-r", "--name-only", "refs/heads/tickets", ticket
+    ).splitlines()
     assert not any(name.endswith("-COMPLETION_VERDICT.json") for name in names)
     assert not any(name.endswith("-SIGNATURE.json") for name in names)
 
@@ -412,7 +424,7 @@ def test_successful_push_followed_by_remote_rewrite_fails_closed(
     result = _atomic_pass(rebar_repo, ticket, run_id="post-push-remote-rewrite")
     tracker = str(config.tracker_dir(str(rebar_repo)))
     local_baseline = _git(tracker, "rev-parse", "HEAD")
-    remote_baseline = _git(remote, "rev-parse", "refs/heads/tickets")
+    remote_baseline = _bare_git(remote, "rev-parse", "refs/heads/tickets")
     real_git = push._git
     rewrote = False
 
@@ -420,7 +432,7 @@ def test_successful_push_followed_by_remote_rewrite_fails_closed(
         nonlocal rewrote
         actual = real_git(base, *args, **kwargs)
         if not rewrote and args[:2] == ("push", "origin") and actual.returncode == 0:
-            _git(remote, "update-ref", "refs/heads/tickets", remote_baseline)
+            _bare_git(remote, "update-ref", "refs/heads/tickets", remote_baseline)
             rewrote = True
         return actual
 
@@ -432,7 +444,7 @@ def test_successful_push_followed_by_remote_rewrite_fails_closed(
     assert rewrote is True
     _assert_no_bundle_after(tracker, local_baseline, ticket)
     assert rebar.show_ticket(ticket, repo_root=str(rebar_repo))["status"] == "in_progress"
-    assert _git(remote, "rev-parse", "refs/heads/tickets") == remote_baseline
+    assert _bare_git(remote, "rev-parse", "refs/heads/tickets") == remote_baseline
 
 
 def test_unrelated_remote_rejection_merges_and_rebuilds_private_candidate(
@@ -452,7 +464,7 @@ def test_unrelated_remote_rejection_merges_and_rebuilds_private_candidate(
     assert rebar.show_ticket(unrelated, repo_root=str(rebar_repo))["comments"][0]["body"] == (
         "safe concurrent delta"
     )
-    remote_names = _git(
+    remote_names = _bare_git(
         remote, "ls-tree", "-r", "--name-only", "refs/heads/tickets", ticket
     ).splitlines()
     assert sum(name.endswith("-COMPLETION_VERDICT.json") for name in remote_names) == 1
@@ -490,7 +502,7 @@ def test_lost_push_ack_is_confirmed_without_publishing_a_second_bundle(
     assert accepted is True
     assert outcome.atomic_close["delivery"] == "pushed_after_ambiguous_ack"
     assert outcome.atomic_close["atomic_close_push_attempts"] == 1
-    remote_names = _git(
+    remote_names = _bare_git(
         remote, "ls-tree", "-r", "--name-only", "refs/heads/tickets", ticket
     ).splitlines()
     assert sum(name.endswith("-COMPLETION_VERDICT.json") for name in remote_names) == 1
@@ -573,7 +585,7 @@ def test_post_push_convergence_preserves_concurrent_local_delivery_pending(
     assert rebar.show_ticket(unrelated, repo_root=str(rebar_repo))["comments"][0]["body"] == (
         "committed locally while completion converged"
     )
-    remote_names = _git(
+    remote_names = _bare_git(
         remote, "ls-tree", "-r", "--name-only", "refs/heads/tickets", unrelated
     ).splitlines()
     assert not any(name.endswith("-COMMENT.json") for name in remote_names)
