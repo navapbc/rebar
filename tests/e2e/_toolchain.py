@@ -22,10 +22,14 @@ they exist to convert an unbounded hang into a *named* failure, not to police a 
 registry. The default install bound is deliberately larger than the pytest budget it used to
 sit inside: the point is never to be the thing that fires first on a merely slow day.
 
-**The install is locked.** Under ``-n 4 --dist worksteal`` each xdist worker runs the
-session-scoped fixture independently, so several can race the same ``node_modules``/``dist``.
-An advisory ``fcntl.flock`` serializes them; where ``fcntl`` is absent the lock degrades to a
-no-op, which changes nothing for the single-process case that platform is in.
+**The install is locked — readiness check included.** Under ``-n 4 --dist worksteal`` each
+xdist worker runs the session-scoped fixture independently, so several can race the same
+``node_modules``/``dist``. An advisory ``fcntl.flock`` serializes them; where ``fcntl`` is
+absent the lock degrades to a no-op, which changes nothing for the single-process case that
+platform is in. Nothing — not even the "is it already provisioned?" question — is answered
+outside that lock: ``_satisfied`` reads mere existence and esbuild writes the bundle IN
+PLACE, so a caller that checked first and locked second could see a peer's half-written
+``dist/roundtrip.mjs`` and run node against a truncated file (bug 477b-4130-424d-41eb).
 """
 
 from __future__ import annotations
@@ -148,27 +152,31 @@ def provision_toolchain(
     """
     js_dir = Path(js_dir)
     bundle = js_dir / BUNDLE_RELPATH
-    if _satisfied(js_dir, with_browser=with_browser):
-        return
-
-    npm = shutil.which("npm")
-    if npm is None:
-        raise ToolchainProvisioningError(
-            "e2e toolchain: `npm` not on PATH (install Node to run the bpmn-io round-trip tier)"
-        )
-
-    # `npm ci` is lockfile-exact and reproducible; `npm install` is the fallback for a tree
-    # that has no lockfile to be exact about.
-    verb = "ci" if (js_dir / "package-lock.json").is_file() else "install"
-    install = [verb] if with_browser else [verb, OMIT_BROWSER_FLAG]
+    # EVERY question is answered under the lock, readiness first. Asking it outside was a
+    # fast path for the already-provisioned case, but it bought microseconds — the lock is a
+    # local-file flock taken a handful of times per run, during COLLECTION and so off every
+    # test's timeout budget — while opening the window this whole module exists to close: a
+    # peer mid-build has already created `dist/roundtrip.mjs`, so an unlocked existence check
+    # reports "ready" over a file that is still being written (bug 477b-4130-424d-41eb).
     with _install_lock(js_dir):
-        # Re-check under the lock: a peer may have finished while this caller waited. The
-        # browser stack is re-checked separately, so a tree provisioned earlier WITHOUT it
+        # The browser stack is checked separately, so a tree provisioned earlier WITHOUT it
         # is completed rather than mistaken for a finished install.
-        if not _satisfied(js_dir, with_browser=with_browser):
-            if not (js_dir / "node_modules").is_dir() or (
-                with_browser and not (js_dir / "node_modules" / BROWSER_PACKAGE).is_dir()
-            ):
-                _run_step(" ".join(["npm", *install]), [npm, *install], js_dir, install_timeout)
-            if not bundle.is_file():
-                _run_step("npm run build", [npm, "run", "build"], js_dir, build_timeout)
+        if _satisfied(js_dir, with_browser=with_browser):
+            return
+
+        npm = shutil.which("npm")
+        if npm is None:
+            raise ToolchainProvisioningError(
+                "e2e toolchain: `npm` not on PATH (install Node to run the bpmn-io round-trip tier)"
+            )
+
+        # `npm ci` is lockfile-exact and reproducible; `npm install` is the fallback for a
+        # tree that has no lockfile to be exact about.
+        verb = "ci" if (js_dir / "package-lock.json").is_file() else "install"
+        install = [verb] if with_browser else [verb, OMIT_BROWSER_FLAG]
+        if not (js_dir / "node_modules").is_dir() or (
+            with_browser and not (js_dir / "node_modules" / BROWSER_PACKAGE).is_dir()
+        ):
+            _run_step(" ".join(["npm", *install]), [npm, *install], js_dir, install_timeout)
+        if not bundle.is_file():
+            _run_step("npm run build", [npm, "run", "build"], js_dir, build_timeout)
