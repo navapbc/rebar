@@ -181,24 +181,29 @@ def test_a_missing_npm_is_reported_as_a_named_provisioning_failure(
 
 
 _CONCURRENCY_STUB = """#!/bin/sh
-# Bracket the install with markers. The file is opened O_APPEND by both writers, so the
-# ORDER of lines in it is the order the spans actually happened in.
+# Bracket BOTH provisioning steps with markers. The file is opened O_APPEND by every writer,
+# so the ORDER of lines in it is the order the spans actually happened in. Nothing here
+# creates node_modules or the bundle, so both processes really run both steps — which is
+# what gives the disjointness assertion something to observe.
 case "$1" in
-  ci|install) ;;
+  ci|install) step=install ;;
+  run) step=build ;;
   *) exit 0 ;;
 esac
-echo start >> ../calls.log
+echo "${step}-start" >> ../calls.log
 sleep 1
-echo end >> ../calls.log
+echo "${step}-end" >> ../calls.log
 exit 0
 """
 
 
-def test_two_concurrent_workers_do_not_overlap_their_install_steps(
+def test_two_concurrent_workers_do_not_overlap_their_provisioning_steps(
     tmp_path: Path,
 ) -> None:
     """Under `-n 4 --dist worksteal` each xdist worker runs the session fixture itself, so
-    several can race the same node_modules. The lock makes those spans disjoint."""
+    several can race the same node_modules/dist. The lock makes every span disjoint — the
+    build as much as the install, since the build is the step that writes the bundle a peer
+    might otherwise observe half-written."""
     pytest.importorskip("fcntl", reason="the provisioning lock needs POSIX fcntl")
     js_dir, bin_dir = _js_dir(tmp_path, _CONCURRENCY_STUB)
     calls = tmp_path / "calls.log"
@@ -225,8 +230,109 @@ def test_two_concurrent_workers_do_not_overlap_their_install_steps(
         assert proc.returncode == 0, f"provisioning worker failed: {err or out}"
 
     ordered = calls.read_text(encoding="utf-8").split()
-    assert ordered == ["start", "end", "start", "end"], (
-        f"install spans overlapped — the lock did not serialize them: {ordered}"
+    assert len(ordered) == 8, f"expected two install+build pairs from two processes: {ordered}"
+    spans = [(ordered[i], ordered[i + 1]) for i in range(0, len(ordered), 2)]
+    assert all(end == start.replace("-start", "-end") for start, end in spans), (
+        f"a span opened while another was still open — the lock did not serialize them: {ordered}"
+    )
+    assert [start for start, _ in spans] == ["install-start", "build-start"] * 2, ordered
+
+
+# ---------------------------------------------------------------------------
+# the forced interleaving
+#
+# The race this pins is not reproduced by running N workers and hoping. The interleaving is
+# CONSTRUCTED: a peer process takes the provisioning lock and, while holding it, creates
+# exactly the state an unlocked readiness check inspects — node_modules, the browser stack,
+# and a `dist/roundtrip.mjs` that exists but is half-written, which is what esbuild leaves
+# visible while it writes the bundle in place. Only then does the caller run. The append-only
+# log is the oracle, so the verdict is an ORDER, not a duration.
+# ---------------------------------------------------------------------------
+
+_PEER_HOLD_SECONDS = 2.0
+_PEER_MID_BUILD = "peer-mid-build"
+
+_PEER_HOLDS_A_HALF_WRITTEN_BUNDLE = r"""
+import fcntl
+import sys
+import time
+from pathlib import Path
+
+js_dir, log = Path(sys.argv[1]), Path(sys.argv[2])
+lock_name, hold = sys.argv[3], float(sys.argv[4])
+handle = (js_dir / lock_name).open("a+")
+fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+try:
+    (js_dir / "node_modules" / "playwright").mkdir(parents=True, exist_ok=True)
+    (js_dir / "dist").mkdir(parents=True, exist_ok=True)
+    # esbuild writes the bundle IN PLACE: the path exists long before the bytes are complete.
+    (js_dir / "dist" / "roundtrip.mjs").write_text("// half-written\n", encoding="utf-8")
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write("peer-mid-build\n")
+    time.sleep(hold)
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write("peer-done\n")
+finally:
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    handle.close()
+"""
+
+
+def _await_line(log: Path, needle: str, peer: subprocess.Popen, *, deadline_s: float) -> None:
+    """Block until the peer has recorded `needle` — a PRECONDITION, not a hoped-for race."""
+    limit = time.monotonic() + deadline_s
+    while time.monotonic() < limit:
+        if log.is_file() and needle in log.read_text(encoding="utf-8"):
+            return
+        assert peer.poll() is None, f"the peer exited before recording {needle!r}"
+        time.sleep(0.02)
+    raise AssertionError(f"the peer never recorded {needle!r} within {deadline_s:g}s")
+
+
+def test_a_caller_cannot_return_while_a_peer_holds_the_lock_over_a_half_written_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The defect, forced: provisioning must not answer "ready" from outside the lock.
+
+    A pre-lock `_satisfied()` sees node_modules and an existing `dist/roundtrip.mjs` and
+    returns AT ONCE, while the peer holding the lock is still writing that file — so the
+    caller would go on to run `node dist/roundtrip.mjs` against a truncated bundle. With the
+    check under the lock the caller can only return after the peer releases it, which is a
+    fact about ORDER and so is decidable in one run rather than by repetition.
+    """
+    pytest.importorskip("fcntl", reason="the provisioning lock needs POSIX fcntl")
+    js_dir, bin_dir = _js_dir(tmp_path, _SUCCEEDS)
+    _with_stub_on_path(monkeypatch, bin_dir)
+    log = tmp_path / "order.log"
+    peer_script = tmp_path / "peer.py"
+    peer_script.write_text(_PEER_HOLDS_A_HALF_WRITTEN_BUNDLE, encoding="utf-8")
+
+    peer = subprocess.Popen(
+        [
+            sys.executable,
+            str(peer_script),
+            str(js_dir),
+            str(log),
+            LOCK_NAME,
+            str(_PEER_HOLD_SECONDS),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _await_line(log, _PEER_MID_BUILD, peer, deadline_s=30.0)
+        provision_toolchain(js_dir, install_timeout=30.0, build_timeout=30.0)
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write("caller-returned\n")
+    finally:
+        out, err = peer.communicate(timeout=60)
+    assert peer.returncode == 0, f"the peer failed: {err or out}"
+
+    ordered = log.read_text(encoding="utf-8").split()
+    assert ordered == ["peer-mid-build", "peer-done", "caller-returned"], (
+        "the caller returned while a peer still held the lock over a half-written bundle — "
+        f"a readiness check ran outside the lock: {ordered}"
     )
 
 
@@ -492,6 +598,29 @@ def test_a_satisfied_tree_is_not_reinstalled(
     _with_stub_on_path(monkeypatch, bin_dir)
     provision_toolchain(js_dir, with_browser=True)
     before = _npm_calls(js_dir / "npm-calls.log")
+
+    provision_toolchain(js_dir, with_browser=True)
+
+    assert _npm_calls(js_dir / "npm-calls.log") == before
+
+
+def test_a_satisfied_tree_needs_no_npm_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Readiness is answered under the lock BEFORE the `npm` lookup, so an already-provisioned
+    tree still returns cleanly on a host with no npm.
+
+    The old pre-lock fast path returned before ever looking npm up. Moving the readiness check
+    under the lock had to keep that property, or a machine that ran `make e2e-deps` once and
+    later lost npm from PATH would start failing provisioning that has nothing left to do.
+    """
+    js_dir, bin_dir = _js_dir(tmp_path, _SUCCEEDS_LOGGING)
+    _with_stub_on_path(monkeypatch, bin_dir)
+    provision_toolchain(js_dir, with_browser=True)
+    before = _npm_calls(js_dir / "npm-calls.log")
+    empty = tmp_path / "empty-bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
 
     provision_toolchain(js_dir, with_browser=True)
 
