@@ -8,17 +8,20 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
-## BREAKING (pre-1.0) — Python/MCP `reconcile(mode=...)` compatibility is removed
+## BREAKING (pre-1.0) — legacy reconcile compatibility surfaces are removed
 
-The public Python facade no longer exports `rebar.reconcile`, and the MCP server no longer
-registers a `reconcile` tool. Stale programmatic callers now fail at attribute lookup or MCP
-tool dispatch before any reconciler subprocess or bridge operation can start.
+The public Python facade no longer exports `rebar.reconcile`, the MCP server no longer
+registers a `reconcile` tool, and the top-level CLI `rebar reconcile` route is no longer
+registered or advertised. Direct `python -m rebar_reconciler --mode reconcile-check` and
+`--filter-local-ids` invocations now reject before operational work starts, and bridge status no
+longer reads stale `.bridge_state/reconcile-check.json` diagnostics.
 
-Use `rebar.bridge_preview(...)` for former dry-run programmatic callers,
-`rebar.bridge_sync(...)` or `rebar.bridge_run(profile=...)` for mutating synchronization, and
-`rebar.bridge_fsck(...)` / `rebar.bridge_status(...)` for bridge diagnostics. The CLI
-`rebar reconcile --mode ...` and direct `python -m rebar_reconciler` routes remain available for
-operators and scheduled compatibility jobs, including the distinct `reconcile-check` report.
+Use `rebar bridge preview` / `rebar.bridge_preview(...)` for live Jira-vs-local proposed
+changes, `rebar bridge sync` / `rebar.bridge_sync(...)` or `bridge_run(profile=...)` for
+mutating synchronization, `rebar bridge fsck` / `rebar.bridge_fsck(...)` for offline
+binding/integrity audit, and `rebar bridge status` / `rebar.bridge_status(...)` for operational
+state. Scheduled bridge runners may keep the profile spelling `reconcile-check`; it now invokes
+canonical preview.
 
 ## `severity` is now OPTIONAL on `review_result` findings (epic `pink-complex-xenurine`)
 
@@ -498,11 +501,11 @@ All providers therefore use the same five `MODE` values and 0/1/2 automation res
 The pip wheel, Homebrew formula virtualenv, and MCP Registry/uvx installation all carry that
 same core; a checkout-relative script is no longer required.
 
-This is an automation-wrapper change, not a legacy CLI contraction. Noun-based
-`rebar bridge preview` and `rebar bridge sync` remain primary, while direct
-`rebar reconcile --mode ...` and `python -m rebar_reconciler` callers retain their published
-defaults, messages, mutation behavior, and benign 3/4/75 sentinels. Only the shared provider
-adapter translates those benign sentinels to provider success.
+This is an automation-wrapper change; noun-based `rebar bridge preview` and
+`rebar bridge sync` are the supported operator CLI. The later reconcile-compatibility
+contraction removed top-level `rebar reconcile`, direct `--mode reconcile-check`, and direct
+`--filter-local-ids`; scheduled provider adapters retain the profile spelling
+`reconcile-check` only as a compatibility profile that invokes preview.
 
 ## Destructive repairs now own a durable reconciler pause
 
@@ -581,18 +584,17 @@ Canonical sync retains a comparable manifest for capped and uncapped runs;
 selection (`--only` / `--except`) narrows examination. `rebar bridge pause REASON`
 temporarily stops scheduled synchronization, and `rebar bridge resume` clears it.
 
-This expand-contract migration retains `rebar reconcile`, direct engine `--mode`,
-and `--filter-local-ids`. Their historical defaults do not collapse: argument-less
-`rebar reconcile` stays dry-run, argument-less direct engine invocation stays live,
-and the legacy filter remains a post-computation write filter. Legacy uncapped LIVE keeps
-its tally/no-manifest behavior. Reconcile-check remains its distinct lock-free diagnostic
-and is not an alias for preview. See
-[ADR 0092](adr/0092-bridge-primary-vocabulary-compatibility-adapters.md).
+The expand-contract window originally retained `rebar reconcile`, direct engine `--mode`,
+and `--filter-local-ids`; that compatibility window has now closed for top-level
+`rebar reconcile`, direct `--mode reconcile-check`, and direct `--filter-local-ids`. Use
+canonical preview for proposed changes and `bridge fsck` for offline binding/integrity audit.
+See [ADR 0092](adr/0092-bridge-primary-vocabulary-compatibility-adapters.md) for the original
+compatibility decision.
 
-The production workflow maps its retained profiles exactly: `dry-run` → `bridge preview`,
+The production workflow maps its retained profiles exactly: `reconcile-check` →
+`bridge preview`, `dry-run` → `bridge preview`,
 `bootstrap-strict` → `bridge sync --max-changes 10`, `bootstrap-throttle` →
-`bridge sync --max-changes 100`, and `live` → `bridge sync`; `reconcile-check` alone
-continues through `rebar reconcile --mode reconcile-check` for its diagnostic contract.
+`bridge sync --max-changes 100`, and `live` → `bridge sync`.
 
 Canonical `bridge preview` / `bridge sync` (including the direct-engine canonical verbs) now
 expose only 0 success/benign, 1 operational failure, and 2 invalid invocation/configuration.
@@ -601,11 +603,10 @@ are benign canonical exit 0 states with a stable one-line state marker. The engi
 classifies and executes a single pass; route adapters translate only the final status/message,
 so repository and ref effects are identical.
 
-The remaining rolling-migration compatibility routes — `rebar reconcile --mode ...`,
-direct-engine `--mode`, and argument-less direct-engine invocation — retain their historical
-defaults, messages, and 3 (pass in flight), 4 (phase gate), and 75 (reschedule) sentinels.
-The Python and MCP `reconcile(mode=...)` adapters are removed; programmatic automation should
-move to the explicit bridge operations. The production workflow no longer carries a 3/75
+The remaining direct-engine compatibility route keeps argument-less live behavior and the
+supported rollout modes (`dry-run`, `bootstrap-strict`, `bootstrap-throttle`, `live`). The
+removed `reconcile-check` diagnostic and `--filter-local-ids` CLI surface now reject; callers
+should move to explicit bridge operations. The production workflow no longer carries a 3/75
 whitelist; its paused-marker commit-skip remains unchanged.
 
 ## Durable reconciler status and last-pass witness

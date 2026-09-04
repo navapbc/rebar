@@ -73,7 +73,6 @@ _OWNED_FILES = (
     "_engine/rebar_reconciler/pass_io.py",
     "_engine/rebar_reconciler/rebar_id_audit.py",
     "_engine/rebar_reconciler/reconcile.py",
-    "_engine/rebar_reconciler/reconcile_check.py",
     "_engine/rebar_reconciler/reconcile_helpers.py",
     "_engine/rebar_reconciler/request.py",
     "_engine/rebar_reconciler/run_differs.py",

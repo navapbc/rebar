@@ -29,8 +29,8 @@ def test_workflow_delegates_to_the_shared_runner() -> None:
     assert _run_step() == "rebar bridge run"
 
 
-def test_current_operator_docs_lead_with_bridge_and_retain_legacy_mapping() -> None:
-    """Primary instructions migrate while the compatibility contract stays discoverable."""
+def test_current_operator_docs_lead_with_bridge_and_remove_legacy_cli_mapping() -> None:
+    """Primary instructions expose bridge operations after the legacy CLI is removed."""
     workflow_step = _run_step()
     assert workflow_step == "rebar bridge run"
 
@@ -46,8 +46,7 @@ def test_current_operator_docs_lead_with_bridge_and_retain_legacy_mapping() -> N
 
     assert "rebar bridge preview" in combined
     assert "rebar bridge sync" in combined
-    assert "rebar reconcile" in combined
     normalized = " ".join(combined.split())
-    assert "no arguments still mean dry-run" in normalized
-    assert "python -m rebar_reconciler" in combined
-    assert "argument-less direct engine invocation stays live" in normalized
+    assert "The legacy top-level `rebar reconcile` adapter is removed" in combined
+    assert "direct `--mode reconcile-check`" in combined
+    assert "profile spelling `reconcile-check`" in normalized

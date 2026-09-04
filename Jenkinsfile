@@ -17,7 +17,7 @@ pipeline {
         choice(
             name: 'MODE',
             choices: ['live', 'reconcile-check', 'dry-run', 'bootstrap-strict', 'bootstrap-throttle'],
-            description: 'Bridge operation profile'
+            description: 'Bridge operation profile (reconcile-check maps to preview)'
         )
     }
 

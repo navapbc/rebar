@@ -45,7 +45,6 @@ Subcommands:
   set-verify-commands   Record DD-level verify commands (JSON array of {dd_id,dd_text,command}).
   attach-commits        Link commits to a ticket by SHA (repairs a missing rebar-ticket: trailer).
   session-log           Capture helper: append "<entry>" to the current session_log (start rotates to a fresh log).
-  reconcile             Preview or synchronize Jira reconciliation for a repository.
   review-code           Run an LLM code review of a change (a git range or a diff file) and emit aggregated structured findings. Requires the 'agents' extra and an API key.
   scan-spec             Batch-scan open epics against a specification and emit structured findings (gaps, conflicts, and overlaps). Requires the 'agents' extra.
   verify-completion     Run the completion-verifier agent on a ticket and emit a PASS or FAIL verdict for whether its completion requirements are demonstrably met by the implementation. Completion requirements are the acceptance, success, and close criteria and the definitions of done, and for a bug, that the bug is resolved. Requires the 'agents' extra and a model API key. Run `rebar verify-completion --check` to confirm availability.

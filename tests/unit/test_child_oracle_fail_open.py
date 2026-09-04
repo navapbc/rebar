@@ -162,9 +162,11 @@ def test_reconcile_routing_oracle_rejects_a_signal_killed_child(
     repo.mkdir()
 
     with pytest.raises(AssertionError) as excinfo:
-        module.test_reconcile_intercepted_dry_run_default(repo, {"PATH": os.environ["PATH"]})
+        module.test_top_level_reconcile_route_is_removed_before_operational_work(
+            repo, {"PATH": os.environ["PATH"]}
+        )
 
-    _assert_names_the_signal(excinfo, "the reconcile routing pass")
+    _assert_names_the_signal(excinfo, "the removed reconcile route check")
 
 
 # ── Site 3 — the re-dispatch "no warning" oracle ─────────────────────────────

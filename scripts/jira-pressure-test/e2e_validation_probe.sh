@@ -11,7 +11,7 @@
 #   2. Edit local ticket → sync outbound → verify Jira updated
 #   3. Edit Jira issue → sync inbound → verify local ticket updated
 #   4. Idempotency — 3 no-op passes → verify 0 mutations each
-#   5. Reconciliation check → verify 0 discrepancies
+#   5. Bridge preview cleanliness check → verify 0 proposed probe changes
 #   6. Cleanup — delete Jira issue + local ticket
 #
 # Run this probe manually from the repository root. It requires
@@ -117,6 +117,48 @@ run_reconciler() {
 # examination to the probe ticket so the probe is safe and deterministic.
 run_filtered_reconciler() {
     run_reconciler sync --max-changes 100 --only "$LOCAL_ID" --repo-root "$REPO_ROOT"
+}
+
+run_bridge_preview_for_ids() {
+    local filter_ids="$1"
+    cd "$RECONCILER_DIR"
+    "$PYTHON_BIN" -m rebar_reconciler preview --only "$filter_ids" --repo-root "$REPO_ROOT"
+}
+
+preview_plan_is_clean_for_probe() {
+    local output="$1"
+    local local_id="$2"
+    local jira_key="${3:-}"
+    printf '%s\n' "$output" | "$PYTHON_BIN" -c '
+import json
+import sys
+
+local_id = sys.argv[1]
+jira_key = sys.argv[2] if len(sys.argv) > 2 else ""
+doc = None
+for line in reversed([line.strip() for line in sys.stdin if line.strip()]):
+    try:
+        doc = json.loads(line)
+        break
+    except json.JSONDecodeError:
+        continue
+if doc is None:
+    print("preview emitted no JSON document")
+    sys.exit(1)
+route = doc.get("route")
+if route != "preview":
+    print(f"expected route=preview, got {route!r}")
+    sys.exit(1)
+mutation_count = doc.get("mutation_count", -1)
+if int(mutation_count) != 0:
+    print(f"expected mutation_count=0, got {mutation_count!r}")
+    sys.exit(1)
+plan_text = json.dumps(doc.get("plan", []), sort_keys=True)
+for needle in (local_id, jira_key):
+    if needle and needle in plan_text:
+        print(f"preview plan still contains probe identifier {needle}")
+        sys.exit(1)
+' "$local_id" "$jira_key"
 }
 
 # Extract a field from a Jira issue via ACLI search (search-based, not
@@ -470,25 +512,25 @@ for i in 1 2 3; do
 done
 
 # ---------------------------------------------------------------------------
-# Phase 5: Reconciliation check
+# Phase 5: Bridge preview cleanliness check
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== PHASE 5: Reconciliation check ==="
+echo "=== PHASE 5: Bridge preview cleanliness check ==="
 echo ""
 
-reconcile_check_output=$(run_reconciler --mode reconcile-check --repo-root "$REPO_ROOT")
-echo "$reconcile_check_output"
+set +e
+preview_output=$(run_bridge_preview_for_ids "$LOCAL_ID")
+preview_rc=$?
+set -e
+echo "$preview_output"
 
-# The reconcile-check should report 0 discrepancies for our bound pair.
-# Check that the output does not list our Jira key as a discrepancy.
-if echo "$reconcile_check_output" | grep -q "0 discrepancies\|No discrepancies"; then
-    pass_test "Phase5.reconcile-check-clean"
-elif echo "$reconcile_check_output" | grep -q "$JIRA_KEY"; then
-    fail_test "Phase5.reconcile-check-clean" "discrepancy found for ${JIRA_KEY}"
+if [ "$preview_rc" -ne 0 ]; then
+    fail_test "Phase5.bridge-preview-clean" "preview exited ${preview_rc}"
+elif preview_error=$(preview_plan_is_clean_for_probe "$preview_output" "$LOCAL_ID" "$JIRA_KEY" 2>&1); then
+    pass_test "Phase5.bridge-preview-clean"
 else
-    # If total is 0 or our key is not mentioned, consider it a pass.
-    pass_test "Phase5.reconcile-check-clean (key not in discrepancies)"
+    fail_test "Phase5.bridge-preview-clean" "$preview_error"
 fi
 
 # ---------------------------------------------------------------------------
