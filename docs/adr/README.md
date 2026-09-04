@@ -147,3 +147,4 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0108 — Retire the severity label; priority + blocking/advisory is the canonical signal](0108-retire-severity-label.md)
 - [0110 — Change shape enters the floor as an advisory on file surface, not as a blocking size rule](0110-change-shape-advisory-not-blocking.md)
 - [0113 — Fixture mining and admission protocol: what asserts a criterion's required behavior](0113-fixture-mining-and-admission-protocol.md)
+- [0114 — New required CI gates prove green advisory before entering the Verified hot path](0114-advisory-gate-before-hot-path.md)

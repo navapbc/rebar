@@ -482,6 +482,7 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   [CONTRIBUTING.md](CONTRIBUTING.md) §2d.
 - **The gate:** a change is submittable only at **`LLM-Review +1` AND `Verified +1` AND no
   unresolved comments** — only the bots/admins cast either label, so you cannot self-approve.
+  For adding/promoting required CI gates into the `Verified` hot path, see ADR 0114.
   A `Verified -1` is a CI failure: open the run and read it. `recheck` only for a **provably
   environmental** fault (see the next bullet).
 - **A flaky test is a BUG to root-cause, never a retry.** A test that fails intermittently gets
