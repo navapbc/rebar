@@ -591,6 +591,11 @@ dedicated scratch volume (see **Where the gate scratch lives** below), so a root
 Docker's or journald's, and anything still under `/tmp/rebar-gate-snapshots` is a pre-aa40
 leftover.
 
+> **Before you prune, read "Docker storage caps and their per-generator alarms" at the end of
+> this runbook.** At the 2026-09-02 outage ~6.5 GB of `overlay2` was invisible to
+> `docker system df` and unreachable by ANY prune; `rebar-docker-unaccounted-bytes` is the
+> alarm that tells you when you are in that case, and pruning is then the wrong lever.
+
 **Recover.** Reclaim space, largest lever first:
 
 ```bash
@@ -724,3 +729,118 @@ running, wait for them; deleting under them frees nothing until the last reader 
   (`infra/terraform/monitoring_autodeploy.tf`) fires when `rebar/host:root_disk_used_percent`
   (published by `observability.sh`, 5-min cadence) stays above 85% (2 of 3 periods). It pages
   before exhaustion so you can prune ahead of a fail-closed gate.
+
+## Docker storage caps and their per-generator alarms (ADR 0112 / story `9183-aaae-667d-45e6`)
+
+**Read this before running any `prune`.** On 2026-09-02 `/var/lib/docker` held 17G — `overlay2`
+alone 16G across 67 layer directories — while `docker system df` reported **~9.5 GB with ZERO
+dangling images**. Roughly **6.5 GB of orphaned `overlay2` was invisible to Docker's own
+accounting**, so four rounds of prune-based reclamation had a combined ceiling of ~1.06 GB
+against a 29 GB problem. Pruning is not a small lever here; against that residue it is the
+wrong lever entirely.
+
+### One budget, three enforcement strengths
+
+`infra/scripts/docker-storage-cap.sh` is the single source of truth for the `/var/lib/docker`
+budget and its internal split (20 GiB total, 5 GiB of it BuildKit, both env-settable). Read it
+with `bash infra/scripts/docker-storage-cap.sh --print-env`. The three parts are NOT equally
+enforceable, and knowing which one is saturated is what decides the response:
+
+| Part | Bounded by | If it saturates |
+|---|---|---|
+| BuildKit cache | the daemon's OWN `builder.gc` policy in `/etc/docker/daemon.json` | the policy is not in effect — see below |
+| Image/layer store | RETENTION: `docker image prune -f` plus `autodeploy.sh`'s `mcp_reconcile_orphans`, which sweeps superseded per-release tags and preserves the live backend and the recorded previous release | a genuine capacity problem; retention is working but the workload outgrew the share |
+| Orphaned `overlay2` | **nothing** — Docker does not know these bytes exist | prune cannot help; go to the daemon-level reclaim below |
+
+### Which alarm fired?
+
+| Alarm | Metric | What it means | First move |
+|---|---|---|---|
+| `rebar-docker-storage-cap-high` | `docker_storage_used_percent` | the whole budget is >85% full, measured from the FILESYSTEM | read the other two before touching anything — this one cannot say which generator grew |
+| `rebar-docker-buildkit-cache-high` | `docker_buildkit_cache_used_percent` | the BuildKit generator is at its own cap | the `builder.gc` policy is not taking effect (below) |
+| `rebar-docker-unaccounted-bytes` | `docker_unaccounted_bytes` | >2 GiB under `/var/lib/docker` that `docker system df` does not account for in any row | **do not prune** — daemon-level reclaim (below) |
+
+All three are `treat_missing_data = "breaching"`, and `observability.sh` §2f publishes them
+only on a SUCCESSFUL measurement — so an alarm with no data means the probe could not read the
+disk or the daemon, which is itself the condition to investigate.
+
+```bash
+# The two independent measurements, by hand — this is what the metrics compare. Both sides
+# span the SAME bytes on purpose: the WHOLE Docker root against the WHOLE ledger. Scoping the
+# `du` to overlay2 while subtracting the whole ledger under-reports the residue, and scoping it
+# to overlay2 at all breaks outright under the containerd snapshotter, where the layer bytes
+# are not in overlay2 to begin with.
+du -sx --block-size=1 /var/lib/docker             # filesystem truth (the minuend)
+du -sx --block-size=1 /var/lib/docker/overlay2    # breadcrumb only — names the subtree
+docker system df --format '{{.Type}}|{{.Size}}'   # Docker's ledger, ALL FOUR rows (subtrahend)
+```
+
+**Where the unaccounted bytes usually are.** `docker system df` has no row for several real
+consumers, so these are the subtrees to size first — none of them is reachable by any `prune`
+subcommand that reports on them:
+
+```bash
+du -sxh /var/lib/docker/{overlay2,buildkit,volumes,containers,image}
+du -sxh /var/lib/docker/buildkit/*      # `content/` is the only routinely-GB entry here
+du -sxh /var/lib/docker/containers/*    # per-container JSON logs, counted by NO ledger row
+```
+
+Orphaned `overlay2` (the 2026-09-02 shape) is one cause; container logs and BuildKit's content
+store are the other two seen on this box.
+
+### The BuildKit cap is not taking effect
+
+The rendered `builder.gc` key depends on the engine version, and **a key the daemon does not
+recognise is silently ignored** — the config looks installed and the cap simply does not exist.
+Engine >= 25.0 honours `maxUsedSpace`; older engines honour `defaultKeepStorage`.
+
+```bash
+docker version --format '{{.Server.Version}}'
+python3 -m json.tool /etc/docker/daemon.json     # what is actually installed
+bash infra/scripts/docker-storage-cap.sh --print-json   # what SHOULD be installed (writes nothing)
+bash infra/scripts/docker-storage-cap.sh --install      # backup + validate + install
+```
+
+`--install` validates the candidate with `dockerd --validate` before moving it into place: a
+rejected render leaves the existing file untouched, because a malformed `daemon.json` stops
+`dockerd` starting.
+
+**Installed is not in force, and the script says which one you have.** `builder.gc` is read by
+`dockerd` at STARTUP and nowhere else — a SIGHUP reload (`systemctl reload docker`) exits 0 and
+changes nothing about it, so no reload is attempted and none should be read as activation.
+Instead `--install` compares when the live daemon process started against when `daemon.json`
+was last written, and prints one of three things:
+
+| What it prints | What it means | What you do |
+|---|---|---|
+| `Docker is not running; it will read the … policy when it next starts` | first boot; `compose-up.sh` starts Docker next | nothing |
+| `the live Docker daemon started after this policy was written, so the … policy IS in effect` | verified in force | nothing |
+| `WARNING — … is INSTALLED but is NOT in effect` | the running daemon predates the file (or its start time was unreadable) | schedule a restart, below |
+
+**It never restarts Docker.** A restart takes Gerrit, the review-bot and the on-box MCP server
+down together, so scheduling one is an operator decision — do it in a quiet window with
+`systemctl restart docker`, then re-run `--install` (it is a no-op that re-checks) and confirm
+it now reports the policy IS in effect, plus `docker buildx du` / `docker system df`.
+
+### NEVER delete under `/var/lib/docker`
+
+The layer metadata under `/var/lib/docker` belongs to the daemon. Removing directories behind
+its back desynchronises its database from the tree, which turns a disk problem into a broken
+daemon that cannot start containers at all — on the host whose whole purpose is to keep Gerrit
+and the review-bot up. There is no situation in this runbook where `rm -rf` under
+`/var/lib/docker` is the right answer.
+
+To reclaim orphaned `overlay2`, use daemon-level operations only, in a quiet window:
+
+```bash
+docker system df -v                  # per-image / per-cache detail before deciding
+docker builder prune -f              # BuildKit cache (rebuilds are slower once, not lost)
+docker image prune -f                # dangling layers only; tagged :prev/:latest are kept
+# If the residue persists, it is orphan state the daemon must reconcile itself:
+systemctl restart docker             # OPERATOR-SCHEDULED — takes Gerrit + review-bot + MCP down
+```
+
+Never remove tagged images by hand: `compose-review-bot:prev` is the review-bot's rollback
+lifeline and the live `compose-mcp:<sha>` is the serving MCP release. `mcp_reconcile_orphans`
+already sweeps the surplus ones with `docker image rm` **without** `-f`, so the daemon itself
+refuses while anything still references an image.

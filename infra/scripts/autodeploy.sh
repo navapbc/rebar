@@ -129,7 +129,20 @@ INFLIGHT_TIMEOUT="${INFLIGHT_TIMEOUT:-5}"             # bound the in-flight prob
 HEALTH_FAIL_LOG_LINES="${HEALTH_FAIL_LOG_LINES:-100}"   # bounded stderr tail captured on bot-unhealthy
 HEALTH_FAIL_LOG_BYTES="${HEALTH_FAIL_LOG_BYTES:-20000}" # …and a hard byte cap on that tail
 BACKOFF_BASE="${BACKOFF_BASE:-60}"; BACKOFF_FACTOR="${BACKOFF_FACTOR:-2}"; BACKOFF_CAP="${BACKOFF_CAP:-900}"
-BUILD_CACHE_KEEP="${BUILD_CACHE_KEEP:-5GB}"           # buildkit cache hard cap (docker builder prune --keep-storage)
+# ── the Docker storage budget (ADR 0112 decision 1, story 9183-aaae-667d-45e6) ──
+# infra/scripts/docker-storage-cap.sh is the SINGLE source of truth for the /var/lib/docker
+# budget and its internal split, and it also renders the daemon's OWN builder.gc policy. Both
+# caps therefore come from one place: the on-demand `docker builder prune --keep-storage`
+# below and the GC the daemon runs on its own schedule cannot disagree about the BuildKit
+# share, because neither number is spelled here.
+DOCKER_CAP_SH="${DOCKER_CAP_SH:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/docker-storage-cap.sh}"
+eval "$(bash "$DOCKER_CAP_SH" --print-env 2>/dev/null)" || true
+# buildkit cache hard cap (docker builder prune --keep-storage). EMPTY means the budget could
+# not be read — a broken install, not a policy. prune_docker_caches then SKIPS the capped
+# builder prune rather than re-inventing the number here: losing a warm cache is cheap, and a
+# second copy of the ceiling is exactly the drift this indirection removes. The uncapped state
+# is not a blind spot either — rebar-docker-buildkit-cache-high is what surfaces it.
+BUILD_CACHE_KEEP="${BUILD_CACHE_KEEP:-${DOCKER_BUILDKIT_CACHE_BYTES:-}}"
 # Disk-pressure reclaim on the no-op path (incident 2731 follow-up, story 28f9): a quiescent
 # `main` never hits the deploy/backoff paths where prune_docker_caches already runs, so a
 # build burst could fill the root disk and stay pinned until the NEXT real deploy (~39h
@@ -374,6 +387,8 @@ prune_docker_caches() {
     if ! timeout 120 docker builder prune -f >/dev/null 2>&1; then
       log "prune_docker_caches: builder prune failed (non-fatal)"
     fi
+  elif [ -z "$BUILD_CACHE_KEEP" ]; then
+    log "prune_docker_caches: BuildKit cap unavailable (docker-storage-cap.sh unreadable); skipping the capped builder prune rather than guessing a ceiling"
   elif ! timeout 120 docker builder prune -f --keep-storage "$BUILD_CACHE_KEEP" >/dev/null 2>&1; then
     log "prune_docker_caches: builder prune failed (non-fatal)"
   fi
