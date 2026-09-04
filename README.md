@@ -245,9 +245,10 @@ name; or register it directly in your client config (zero pre-install via
 
 (Already pip/pipx-installed `nava-rebar[mcp]`? Use `"command": "rebar-mcp"`
 instead.) Server flags: `REBAR_MCP_READONLY=1` exposes only read tools;
-`reconcile` is dry-run unless `REBAR_MCP_ALLOW_JIRA_SYNC=1`. Both flags
-accept any case-insensitive truthy value — `1`, `true`, or `yes` (surrounding
-whitespace tolerated); anything else (incl. unset) is off.
+mutating bridge tools (`bridge_run`, `bridge_sync`, `bridge_pause`, and
+`bridge_resume`) require `REBAR_MCP_ALLOW_JIRA_SYNC=1`. Both flags accept any
+case-insensitive truthy value — `1`, `true`, or `yes` (surrounding whitespace
+tolerated); anything else (incl. unset) is off.
 
 #### Private-repo fetch credentials (code-reading gates)
 
@@ -444,9 +445,8 @@ rebar.bridge_pause("maintenance")
 rebar.bridge_resume()
 access = rebar.bridge_check_access()
 
-# Compatibility APIs remain supported with their published contracts:
-legacy = rebar.reconcile("dry-run")              # defaults to dry-run
-audit = rebar.bridge_fsck()                       # unchanged offline audit
+# Legacy reconcile(mode=...) is not a Python API; use explicit bridge operations.
+audit = rebar.bridge_fsck()                       # offline bridge audit
 
 # Sign a DSSE operation certificate by applying SSHSIG to its PAE bytes with the environment's Ed25519 key and principal.
 rebar.sign_manifest(tid, ["unit tests: PASS", "security review: clean"])
@@ -491,11 +491,11 @@ rebar-mcp          # stdio transport
 Exposes ticket operations as MCP tools. The **complete tool reference**, grouped by
 gate tier (read-only / LLM-gated / write-gated), is
 [docs/mcp-reference.md](docs/mcp-reference.md) (generated from the server's own
-registrars). Prefer the explicit `bridge_preview`, `bridge_run`, `bridge_sync`, `bridge_status`,
-`bridge_pause`, `bridge_resume`, and `bridge_check_access` tools. The retained
-`reconcile` tool still defaults to `dry-run`, and `bridge_fsck` remains unchanged.
-Run/sync/pause/resume and mutating legacy reconcile modes require
-`REBAR_MCP_ALLOW_JIRA_SYNC=1`; `REBAR_MCP_READONLY=1` blocks every mutation. To
+registrars). Use the explicit `bridge_preview`, `bridge_run`, `bridge_sync`, `bridge_status`,
+`bridge_pause`, `bridge_resume`, `bridge_check_access`, and `bridge_fsck` tools.
+The former MCP `reconcile(mode=...)` compatibility tool is no longer registered.
+Run/sync/pause/resume require `REBAR_MCP_ALLOW_JIRA_SYNC=1`;
+`REBAR_MCP_READONLY=1` blocks every mutation. To
 register it in an MCP client (registry name
 `io.github.navapbc/rebar`, or a direct `uvx` config), see
 [Install → MCP server](#mcp-server--from-the-mcp-registry) above.

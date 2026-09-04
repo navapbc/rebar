@@ -36,7 +36,6 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | `quality_check` | Check ticket dispatch readiness ({verdict, line_count, keyword_count, ac_items, file_impact, reason, passed}). |
 | `ready_tickets` | List tickets ready to work (all blockers closed). ``sort`` orders by ``priority\|created\|updated\|id\|status`` (prefix ``-`` for descending; unset values sort last). |
 | `recent_session_logs` | The newest session_log tickets, newest first (by created_at; default limit 5). session_logs are hidden from list_tickets; this is the type-specific read that surfaces them. |
-| `reconcile` | Run the Jira reconciler. Defaults to a non-mutating dry-run. _(live/mutating modes are blocked by `REBAR_MCP_READONLY` first, then require `REBAR_MCP_ALLOW_JIRA_SYNC`; dry-run/check are always available)_ |
 | `render_workflow` | Render a workflow (a .rebar/workflows/<name> name or a file path) to a read-only Mermaid flowchart (TEXT; the host renders it to SVG, never committed). Large graphs degrade to a text outline. Read tool, always available. |
 | `search` | Search titles/descriptions/comments/tags with bounded discovery results. |
 | `show_ticket` | Show compiled ticket state (accepts full id, short id, or alias). Includes the computed ``inbound_deps`` (inbound edges: other tickets linking TO this one, with the source's status) alongside the stored outgoing ``deps``. |
@@ -101,7 +100,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_READONLY` | Set to 1 to expose only the read tools (no write/mutation tools). |
 | `REBAR_MCP_ALLOW_LLM` | Set to 1 to enable the billable LLM tools (review_code / scan_spec / verify_completion / review_plan); off by default. |
 | `REBAR_MCP_DEDUP` | In-flight de-duplication of the long-running gate tools (review_plan / verify_completion): a concurrent duplicate call for the same ticket+basis attaches to the running gate instead of launching a second billable LLM pass. On by default; set to 0 to disable (kill-switch). |
-| `REBAR_MCP_ALLOW_JIRA_SYNC` | Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only. |
+| `REBAR_MCP_ALLOW_JIRA_SYNC` | Set to 1 to enable MCP bridge tools that mutate Jira or bridge state (bridge_run / bridge_sync / bridge_pause / bridge_resume); off by default. |
 | `REBAR_MCP_TRANSPORT` | Transport for the MCP server: 'stdio' (default) or 'http' (the optional Streamable-HTTP transport). |
 | `REBAR_MCP_HTTP_HOST` | Bind host for the Streamable-HTTP transport (default 127.0.0.1). |
 | `REBAR_MCP_HTTP_PORT` | Bind port for the Streamable-HTTP transport (1-65535; default 8000). |
@@ -135,4 +134,4 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_PROXY_SCOPES` | Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes). |
 | `REBAR_MCP_AUTH_CUSTOM_IMPORT` | The `custom` strategy's `module:factory` import string, resolving to a factory that returns a TokenVerifier; a TRUSTED operator config value that loads and executes the operator-configured code at startup (fail-closed on any load error). |
 
-_65 tools._
+_64 tools._
