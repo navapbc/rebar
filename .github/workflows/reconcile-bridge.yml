@@ -33,7 +33,7 @@
 # rebar divergences from DSO's reconcile-bridge (see docs/jira-sync-setup.md
 # "Necessary & sufficient"):
 #   * primary invocation uses `rebar bridge preview` / `rebar bridge sync`; the
-#     lock-free reconcile-check diagnostic retains its compatibility spelling
+#     reconcile-check profile spelling is retained for compatibility and maps to preview
 #   * canonical bridge commands use 0 benign/success, 1 operational, 2 invocation/config
 #   * the reconciler may leave inbound events uncommitted or create its own binding
 #     commit; the final strict core adapter commits when needed and synchronously
@@ -55,7 +55,7 @@ on:
         default: 'live'
         type: choice
         options:
-          - reconcile-check   # read-only diagnostic (no lock, no writes) — safe first run
+          - reconcile-check   # compatibility profile for canonical preview
           - dry-run           # compute mutations, apply none
           - bootstrap-strict
           - bootstrap-throttle

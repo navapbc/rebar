@@ -148,24 +148,16 @@ def test_bare_help_word_in_freetext_is_not_intercepted(rebar_repo: Path) -> None
     assert any("--help" in c["body"] for c in comments)
 
 
-def test_reconcile_intercepted_dry_run_default(
+def test_top_level_reconcile_route_is_removed_before_operational_work(
     rebar_repo: Path, offline_acli_env: dict[str, str]
 ) -> None:
-    """`rebar reconcile` is intercepted and routed to the reconciler in dry-run
-    by default — it must not crash the CLI with an unknown-subcommand error (the
-    dispatcher has no reconcile arm).
-
-    Hermetic: a fake empty ``acli`` (no JIRA creds) lets the dry-run pass run
-    fully offline. The live-Jira behaviour is covered by the opt-in integration
-    test below, so this routing check never touches the network."""
+    """The removed top-level route is rejected by the help/router pre-scan."""
     offline_acli_env["REBAR_ROOT"] = str(rebar_repo)
     cp = _cli("reconcile", cwd=str(rebar_repo), env=offline_acli_env)
-    # The routing verdict rests on a string being ABSENT, so it fails OPEN without this: a
-    # signal-killed CLI writes nothing, and the unknown-subcommand text is trivially absent.
-    # Only a signal death is rejected — the healthy offline pass legitimately exits non-zero,
-    # and this test deliberately checks ROUTING ONLY, so no exit code is pinned.
-    assert_child_was_not_signal_killed(cp, what="the reconcile routing pass")
-    assert "unknown subcommand 'reconcile'" not in (cp.stdout + cp.stderr).lower()
+    assert_child_was_not_signal_killed(cp, what="the removed reconcile route check")
+    assert cp.returncode == 1
+    assert "unknown subcommand 'reconcile'" in (cp.stdout + cp.stderr).lower()
+    assert "rebar bridge preview" not in cp.stdout
 
 
 @pytest.mark.integration
@@ -174,9 +166,9 @@ def test_reconcile_intercepted_dry_run_default(
 # `--dist loadgroup` and races the confined group. Module-scope pytestmark is wrong here —
 # this file is overwhelmingly non-live tests.
 @pytest.mark.xdist_group("live_reconcile_e2e")
-def test_reconcile_dry_run_against_live_jira(rebar_repo: Path) -> None:
-    """External integration check: `rebar reconcile` runs a real dry-run against
-    the configured live Jira. Excluded from the default run (``-m "not
+def test_bridge_preview_against_live_jira(rebar_repo: Path) -> None:
+    """External integration check: `rebar bridge preview` runs a real dry-run
+    against the configured live Jira. Excluded from the default run (``-m "not
     integration"``); run it when reconcile/Jira behaviour is impacted, in an
     environment with `acli` + credentials. Asserts the pass is routed and stays
     non-mutating (dry-run, no writes)."""
@@ -187,9 +179,8 @@ def test_reconcile_dry_run_against_live_jira(rebar_repo: Path) -> None:
     # would FAIL (not skip) on a machine that has `acli` but no configured project.
     if not os.environ.get("JIRA_PROJECT"):
         pytest.skip("requires a configured Jira project (JIRA_PROJECT / [jira] project)")
-    cp = _cli("reconcile", cwd=str(rebar_repo))
+    cp = _cli("bridge", "preview", cwd=str(rebar_repo))
     out = cp.stdout + cp.stderr
-    assert "unknown subcommand 'reconcile'" not in out.lower()
     # A dry-run must never write — surfaced in the pass report.
     assert '"mode": "dry-run"' in out or '"no_write": true' in out or cp.returncode == 0
 

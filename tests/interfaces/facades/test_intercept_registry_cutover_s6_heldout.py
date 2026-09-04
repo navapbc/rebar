@@ -36,7 +36,6 @@ def _run(
 # spellings in new files); its post-cutover dispatch is proven by the registry-derived
 # parametrization in test_cli_registry_cutover_s6_heldout.py instead.
 _NO_STORE_CASES = [
-    ("reconcile", ("reconcile", "--help"), 0, "Usage: rebar reconcile"),
     ("review-plan", ("review-plan", "--help"), 0, "Usage: rebar review-plan"),
     ("review-code", ("review-code", "--help"), 0, "rebar review-code"),
     ("scan-spec", ("scan-spec", "--help"), 0, "rebar scan-spec"),

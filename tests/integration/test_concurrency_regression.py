@@ -1268,7 +1268,7 @@ def test_a3_repair_replacement_cannot_clear_foreign_pause_and_blocks_sync(two_cl
         pause, owned_oid = observed
         assert str(pause["reason"]).startswith("repair:fsck:")
 
-        blocked = _engine_run(repo_b, "reconcile", "--mode", "live", check=False)
+        blocked = _engine_run(repo_b, "bridge", "sync", check=False)
         assert blocked.returncode == 0
         assert blocked.stdout == ""
         assert blocked.stderr.startswith("BRIDGE_PAUSED: ")

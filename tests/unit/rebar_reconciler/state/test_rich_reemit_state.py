@@ -693,9 +693,6 @@ _ALL_BINDINGS_READERS = {
     "_engine/rebar_reconciler/reconcile_helpers.py": (
         "iterates to advance baselines; writes go through set_baseline / merge_baseline"
     ),
-    "_engine/rebar_reconciler/reconcile_check.py": (
-        "iterates to build the discrepancy report for a read-only command"
-    ),
     "_commands/bridge_repair.py": (
         "before/after snapshots of the outer map, used as a refusal guard; the prune "
         "itself goes through unbind()"

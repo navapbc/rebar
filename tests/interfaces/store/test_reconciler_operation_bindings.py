@@ -239,26 +239,3 @@ def test_mixed_dotted_and_nested_overrides_reach_settings() -> None:
     )
     assert runtime.settings.tracker_dir.name == "dotted-tracker"
     assert runtime.settings.tracker_branch == "nested-branch"
-
-
-# --------------------------------------------------------------------------- #
-# AC6 — provider-neutral read output parity through the built backend          #
-# --------------------------------------------------------------------------- #
-def test_reconcile_check_maps_through_runtime_backend() -> None:
-    """The runtime-built backend drives the pure reconcile_check to a
-    provider-neutral report (no scope/mapping drift from the binding cutover).
-    Empty local/remote/bindings never touch the transport, so a bare stub
-    suffices."""
-    import importlib as _il
-
-    rc = _il.import_module("rebar_reconciler.reconcile_check")
-
-    runtime = compose_reconciler_runtime()
-    backend = runtime.build_backend(transport=object())
-
-    class _EmptyBindings:
-        def all_bindings(self) -> dict:
-            return {}
-
-    report = rc.reconcile_check([], {}, _EmptyBindings(), backend=backend)
-    assert isinstance(report, dict)

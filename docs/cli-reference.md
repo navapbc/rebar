@@ -77,7 +77,7 @@ The golden record of the normalization: what each verb printed before the confir
 
 ## Command syntax
 
-One section per visible command that is not retired (77 in total), in registry order. Every section embeds its committed package help bytes.
+One section per visible command that is not retired (76 in total), in registry order. Every section embeds its committed package help bytes.
 
 ### `show`
 
@@ -804,34 +804,6 @@ options:
                         ticket this log relates to
   --discovered-from DISCOVERED_FROM
                         ticket this log was discovered from
-```
-
-### `reconcile`
-
-```
-Usage: rebar reconcile [-h] [--repo-root REPO_ROOT] [--mode MODE] [--dry-run-enumerate] [--filter-local-ids FILTER_LOCAL_IDS] [--only IDS | --except IDS] [--max-changes N] [{preview,sync}]
-
-Preview or synchronize Jira reconciliation for a repository.
-
-positional arguments:
-  {preview,sync}
-
-options:
-  -h, --help            show this help message and exit
-  --repo-root REPO_ROOT
-                        Repository root (default: auto-detect from script
-                        location)
-  --mode MODE           Compatibility mode: reconcile-check | dry-run |
-                        bootstrap-strict | bootstrap-throttle | live (legacy
-                        default: live)
-  --dry-run-enumerate   List enumerable tracker directories and exit without
-                        running a pass.
-  --filter-local-ids FILTER_LOCAL_IDS
-                        Compatibility write filter applied after the full differ
-                        computation.
-  --only IDS
-  --except IDS
-  --max-changes N
 ```
 
 ### `review-code`

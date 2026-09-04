@@ -71,15 +71,6 @@ def test_render_embeds_help_backed_committed_bytes():
     assert "Usage: rebar create" in doc
 
 
-def test_render_embeds_intercept_committed_bytes():
-    """An intercept command embeds its committed help bytes."""
-    from rebar._cli import _help
-
-    committed = _help.subcommand_help("reconcile")
-    assert committed is not None
-    assert committed.rstrip("\n") in gen.render()
-
-
 def test_check_mode_clean_against_committed_tree():
     """The committed docs/cli-reference.md matches the generator (exit 0)."""
     assert gen.main(["--check"]) == 0
@@ -92,18 +83,6 @@ def _intercept_section(doc: str, name: str) -> str:
     after = doc.split(marker, 1)[1]
     body = after.split("```", 2)
     return body[1]
-
-
-def test_intercept_usage_is_unwrapped_to_a_single_line():
-    """Version-stability: an intercept command's usage renders as ONE line, so argparse's
-    3.13 usage line-wrapping change cannot make the committed doc drift across the CI matrix.
-    `reconcile`'s usage keeps its first and LAST token on the same physical line."""
-    section = _intercept_section(gen.render(), "reconcile")
-    usage_line = next(ln for ln in section.splitlines() if ln.startswith("Usage: rebar reconcile"))
-    assert "[{preview,sync}]" in usage_line, (
-        "reconcile usage is still wrapped across lines — it must be unwrapped to one line so "
-        "the doc is byte-identical on 3.11/3.12/3.13"
-    )
 
 
 def test_intercept_option_metavars_are_collapsed():
@@ -241,7 +220,7 @@ def test_generate_writes_full_doc_for_every_route(tmp_path: Path, monkeypatch):
 def test_check_mode_reflects_registry_change(monkeypatch):
     """Derivation teeth via main(): drop a route from the registry and the committed doc
     (rendered from the full registry) is detected as stale."""
-    dropped = tuple(r for r in _routes() if r.name != "reconcile")
+    dropped = tuple(r for r in _routes() if r.name != "create")
     import rebar._cli._registry as reg
 
     monkeypatch.setattr(reg, "ROUTES", dropped, raising=True)

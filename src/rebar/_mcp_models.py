@@ -416,7 +416,6 @@ try:
         completed_at: str | None = None
         lock_fence: int | None = None
         detail: dict[str, Any] | None = None
-        reconcile_diagnostics: dict[str, Any] | None = None
         lock_oid: str | None = None
         lock_holder: str | None = None
         lock_lease_secs: float | None = None
