@@ -104,6 +104,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0089 — Activity-based liveness under run_sync; async idle-watchdog deferred](0089-async-liveness-watchdog.md)
 - [0104 — MCP on the AWS box: a self-contained `rebar-mcp` HTTP server for copilot/codex/claude](0104-mcp-on-box.md)
 - [0105 — SSM SecureString secrets use write-only arguments — secret values are never persisted to terraform state](0105-ssm-secrets-never-in-terraform-state.md)
+- [0112 — The review host's disk is bounded by per-accumulator caps, a dedicated gate-scratch volume, and bounded gate concurrency](0112-on-box-disk-ceiling-architecture.md)
 
 ## Store & event sourcing
 
