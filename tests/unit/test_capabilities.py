@@ -33,6 +33,7 @@ _EXPECTED: dict[str, tuple[str, str]] = {
     "pricing": ("pricing", "unavailable"),
     "grounding_structural": ("grounding", "abstain"),
     "grounding_t2": ("grounding-t2", "abstain"),
+    "grounding_terraform": ("grounding-terraform", "abstain"),
     "cloud_adf": ("adf", "fallback"),
     "datacenter_wiki": ("wiki", "fallback"),
     "trace_export": ("tracing", "fallback"),
