@@ -277,6 +277,7 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# patchset predating the script): `make lint` runs the patchset's OWN Makefile.
 	python scripts/check_raw_git_writes.py
 	python scripts/check_wall_clock_asserts.py
+	python scripts/check_bare_repository_discovery.py
 	@# Destructive test-exec gate (ticket 6818-615f-555e-4bb9). A test must not
 	@# subprocess-exec a shell script whose deletion target is an unguarded variable
 	@# interpolation: on 2026-08-26 exactly that ran `rm -rf "$${dir}"/*` with dir="",
