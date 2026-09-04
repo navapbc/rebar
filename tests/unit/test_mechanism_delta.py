@@ -16,9 +16,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
 
@@ -27,6 +31,16 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "check_mechanism_delta.py"
 BASELINE = REPO_ROOT / ".github" / "mechanism-baseline.json"
 MAKEFILE = REPO_ROOT / "Makefile"
 LIMIT_FILE = REPO_ROOT / ".github" / "module-size-limit.txt"
+
+# Reach the private detector subpackage the way `scripts/check_mechanism_delta.py` reaches it
+# from `scripts/`: an insert derived from THIS file's own `__file__`, done here at module
+# level rather than left to whatever else the session happened to import first (bug 7f46).
+# It is the `scripts/` directory, NOT the repository root: putting the repo root on sys.path
+# would make `tests.`-rooted imports resolve process-wide and silently defeat the standing
+# guard in `tests/unit/test_tests_import_convention.py` (bug a371).
+_SCRIPTS_DIR = str(REPO_ROOT / "scripts")
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
 
 
 def _load():
@@ -99,8 +113,6 @@ def test_the_seven_detector_name_sets_are_pairwise_disjoint():
 def test_config_key_and_feature_flag_split_the_config_surface():
     """AC2/AC3. Derived live: the boolean-coerced entries belong to feature_flag and the
     remainder to config_key, and together they account for every key exactly once."""
-    import sys
-
     sys.path.insert(0, str(REPO_ROOT / "src"))
     from rebar._config_sections import _SECTIONS
 
@@ -114,8 +126,6 @@ def test_config_names_are_section_qualified_so_repeated_keys_do_not_collapse():
     """The fourth plan-review round caught this. `_SECTIONS` repeats key names across
     sections, so a bare-key baseline merges distinct definition sites: removing one
     section's key while the other persists would show no delta at all."""
-    import sys
-
     sys.path.insert(0, str(REPO_ROOT / "src"))
     from rebar._config_sections import _SECTIONS
 
@@ -290,8 +300,14 @@ def test_a_marker_admits_a_step_whose_name_carries_a_flag(tmp_path):
 
 
 def ratchet_head_lines() -> int:
-    """The filename-glob head window, read from the module rather than duplicated."""
-    from scripts._mechanism_delta.markers import HEAD_LINES
+    """The filename-glob head window, read from the module rather than duplicated.
+
+    Imported by bare name off the `sys.path` entry this module installs for itself at import
+    time. The `scripts.`-rooted spelling this replaced resolved only when the repository root
+    reached `sys.path`, which the BARE `pytest` console script never supplies — so it passed
+    in a full session and died in a narrow selection (bug 7f46).
+    """
+    from _mechanism_delta.markers import HEAD_LINES
 
     return HEAD_LINES + 1
 
@@ -363,9 +379,6 @@ def test_the_shipped_modules_respect_the_module_size_cap():
 )
 def test_the_shipped_modules_clear_the_complexity_ceiling():
     """AC16. The complexity ratchet scans `src/rebar` only, so this suite asserts it."""
-    import subprocess
-    import sys
-
     proc = subprocess.run(
         [
             sys.executable,
@@ -395,3 +408,65 @@ def test_the_docs_describe_every_kind_and_every_marker_placement():
         assert kind in docs, f"docs do not name the `{kind}` kind"
     for shape in ("definition line", "string literal", "filename glob", "YAML step"):
         assert shape in docs, f"docs do not name the `{shape}` marker placement"
+
+
+# ---------------------------------------------------------------------------
+# import isolation (bug 7f46)
+
+
+#: The node from the bug report: the only test here that reaches `_mechanism_delta` directly.
+_REPRO_NODE = "test_a_marker_in_a_new_gate_scripts_head_admits_it"
+
+
+@pytest.mark.allow_unharnessed_subprocess(
+    "spawns the BARE pytest console script; the child's own sys.path IS the thing under test"
+)
+def test_the_reported_selection_passes_standalone(tmp_path):
+    """AC3. The reported reproduction passes when run entirely on its own (bug 7f46).
+
+    Runs the BARE ``pytest`` console script — not ``python -m pytest``, which puts the cwd on
+    the child's ``sys.path`` and so cannot observe the defect — from a cwd outside the
+    repository, so the repository root cannot reach ``sys.path`` by accident. That is the
+    exact condition under which ``ModuleNotFoundError: No module named
+    'scripts._mechanism_delta'`` fired. Dynamic counterpart to the module-level insert above:
+    the insert states the convention, this pins the observable symptom.
+
+    Only the reported NODE is re-run, not the whole module: the module takes ~170 s, which
+    would put a nested full-module run within sight of the 300 s per-test budget in
+    ``pyproject.toml`` for no extra signal — every other test here is already reached through
+    ``_load()``, which needs no path entry at all. Mirrors
+    ``tests/unit/test_scripts_import_convention.py::test_repro_module_passes_standalone``.
+    """
+    console_script = Path(sys.executable).parent / "pytest"
+    if not console_script.exists():  # pragma: no cover - environment without the script
+        pytest.skip("no `pytest` console script next to the running interpreter")
+
+    env = subprocess_env()
+    env.pop("PYTHONPATH", None)
+    child_basetemp = tmp_path / "standalone-pytest"
+    proc = subprocess.run(
+        [
+            str(console_script),
+            f"{Path(__file__).resolve()}::{_REPRO_NODE}",
+            "-q",
+            "-p",
+            "no:randomly",
+            "-p",
+            "no:cacheprovider",
+            "--basetemp",
+            str(child_basetemp),
+        ],
+        cwd=Path(os.environ.get("TMPDIR", "/tmp")).resolve(),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+
+    assert proc.returncode == 0, (
+        f"a standalone bare `pytest` run of {_REPRO_NODE} failed:\n"
+        f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
+    )
+    assert "ModuleNotFoundError" not in proc.stdout + proc.stderr
+    assert child_basetemp.is_dir(), "nested pytest did not use its parent-owned basetemp"
