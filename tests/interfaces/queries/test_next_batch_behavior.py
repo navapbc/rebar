@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from rebar import schemas
 from rebar._engine_support import next_batch as nb
 from rebar._engine_support import reads
 
@@ -246,15 +247,86 @@ def test_manual_awaiting_parent_defers_children(tracker: Path) -> None:
     )
 
 
-def test_childless_story_needs_planning(tracker: Path) -> None:
-    """A story with no children is reported as needing planning, never batched."""
+def test_childless_story_is_an_executable_leaf(tracker: Path) -> None:
+    """A childless story is a LEAF and is scheduled, keeping its ``story`` type.
+
+    Contract card: ADR 0078 (Accepted) — "Proportionate scrutiny is keyed on
+    container (has children) vs leaf (no children), never on ticket type" —
+    restated in the shipped author contract at
+    ``src/rebar/_guides/writing-a-passing-plan.md``. The structural container
+    boundary is the already-computed ``parent_ids_with_children`` check; ticket
+    type does not veto scheduling. ``skipped_needs_planning`` is retained as a
+    published compatibility field (result, JSON, schema) but ticket type no
+    longer populates it.
+
+    ``reads.ready_states`` applies no type filter, so this also pins the
+    ``ready`` -> ``next-batch`` pipeline agreeing about the same ticket.
+    """
     ts = 1700000000000000000
     _create(tracker, "e", "epic", None, priority=1, ts=ts)
     _create(tracker, "lonely", "story", "e", priority=2, ts=ts + 1)
 
     r = nb.compute(str(tracker), "e")
-    assert r.batch == []
-    assert r.skipped_needs_planning == [("lonely", "Title lonely")]
+
+    assert [c.id for c in r.batch] == ["lonely"]
+    assert r.batch[0].itype == "story"
+    assert r.skipped_needs_planning == []
+
+    # ``ready`` and ``next-batch`` are documented as one pipeline: what ready
+    # returns must be schedulable, not filed under a skip bucket.
+    ready_ids = {s["ticket_id"] for s in reads.ready_states(str(tracker), epic="e")}
+    assert "lonely" in ready_ids
+    assert ready_ids <= {c.id for c in r.batch}
+
+    # The compatibility field survives in the JSON projection and the schema.
+    d = nb.to_json_dict(r)
+    assert d["skipped_needs_planning"] == []
+    schemas.validator(schemas.NEXT_BATCH).validate(d)
+
+
+@pytest.mark.parametrize("leaf_type", ["story", "task", "bug", "epic"])
+def test_childless_leaf_is_batched_regardless_of_ticket_type(tracker: Path, leaf_type: str) -> None:
+    """Schedulability is type-INDEPENDENT: only children make a container.
+
+    Before the fix a childless ``epic`` and a childless ``bug`` were both
+    batched while an otherwise-identical childless ``story`` was not — the
+    asymmetry that falsified the "stories are containers" reading. This pins
+    the ADR 0078 principle itself rather than the story case alone, so the
+    defect cannot return under a different ticket type.
+    """
+    ts = 1700000000000000000
+    _create(tracker, "e", "epic", None, priority=1, ts=ts)
+    _create(tracker, "leaf", leaf_type, "e", priority=2, ts=ts + 1)
+
+    r = nb.compute(str(tracker), "e")
+
+    assert [c.id for c in r.batch] == ["leaf"], f"childless {leaf_type} was not batched"
+    assert r.batch[0].itype == leaf_type
+    assert r.skipped_needs_planning == []
+
+
+def test_story_with_children_is_a_container_not_a_candidate(tracker: Path) -> None:
+    """Negative control: a story WITH a child stays a container.
+
+    The container is neither batched nor reported in any skip bucket (it is
+    structurally excluded, not deferred), while its eligible leaf child is
+    scheduled.
+    """
+    ts = 1700000000000000000
+    _create(tracker, "e", "epic", None, priority=1, ts=ts)
+    _create(tracker, "parent", "story", "e", priority=2, ts=ts + 1)
+    _create(tracker, "kid", "task", "parent", priority=2, ts=ts + 2)
+
+    r = nb.compute(str(tracker), "e")
+
+    assert [c.id for c in r.batch] == ["kid"]
+    assert "parent" not in {c.id for c in r.batch}
+
+    d = nb.to_json_dict(r)
+    skipped_ids = {
+        item["id"] for key, items in d.items() if key.startswith("skipped_") for item in items
+    }
+    assert "parent" not in skipped_ids, "a structural container must not be reported as deferred"
 
 
 # ───────────────────────── file-overlap selection ────────────────────────────
