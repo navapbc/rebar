@@ -615,3 +615,24 @@ def test_security_pin_main_uses_aware_now_local_date_not_date_today():
         isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "date"
         for n in ast.walk(main_fn)
     ), "main() must convert the aware instant to a local date via .date()"
+
+
+def test_terraform_grounding_provider_is_byte_neutral_for_ws5_python_security_path(tmp_path):
+    """A configured Terraform grounding provider must not perturb WS5 non-IaC security verdicts."""
+    from rebar.llm.code_review import detectors
+    from rebar.llm.code_review.batch_runner import build_code_review_tf_provider
+
+    baseline = detectors.apply_failclosed(
+        _pass_verdict(), changed_files=["app.py"], repo_root=str(tmp_path)
+    )
+    provider = build_code_review_tf_provider(
+        repo_root=str(tmp_path), changed_files=["app.py"], usage_sink={}
+    )
+    ctx = _types.SimpleNamespace(step={"prompt": "code-review-security"}, inputs={})
+    assert provider(ctx) is None
+    assert (
+        detectors.apply_failclosed(
+            _pass_verdict(), changed_files=["app.py"], repo_root=str(tmp_path)
+        )
+        == baseline
+    )

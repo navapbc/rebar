@@ -30,7 +30,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from time import monotonic_ns
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 # Back-compat re-export (load-bearing): tests/unit/test_code_review_fp_ledger.py calls
 # ``gate_dispatch._attach_code_review_metrics`` at 7 sites. The code-review finalization cluster
@@ -528,6 +528,28 @@ def _activated_code_review_project_criteria(
     )
 
 
+def _fold_tf_grounding_usage(verdict: dict[str, Any], tf_usage_sink: dict[str, Any]) -> None:
+    """Fold the Terraform tool provider's distinct_fetches into the verdict usage.
+
+    Best-effort (REB-640/afe3): the grounding reads are a usage/audit signal, never a gate
+    outcome, so a malformed usage shape is swallowed rather than failing the review.
+    """
+    try:
+        usage = verdict.setdefault("_usage", {})
+        if not isinstance(usage, dict):
+            return
+        merged = list(usage.get("distinct_fetches", []) or [])
+        seen = {(f.get("tool"), f.get("target")) for f in merged if isinstance(f, dict)}
+        for fetch in tf_usage_sink.get("distinct_fetches", []) or []:
+            key = (fetch.get("tool"), fetch.get("target")) if isinstance(fetch, dict) else None
+            if key and key not in seen:
+                merged.append(fetch)
+                seen.add(key)
+        usage["distinct_fetches"] = merged
+    except Exception:  # noqa: BLE001 — usage is best-effort; never fails the gate
+        pass
+
+
 def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> dict[str, Any]:
     """Run the four-pass gate in a snapshot session, then finalize.
 
@@ -538,7 +560,10 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     import time
 
     from rebar.llm import gate_source, review_kernel
-    from rebar.llm.code_review.batch_runner import CodeReviewBatchRunner
+    from rebar.llm.code_review.batch_runner import (
+        CodeReviewBatchRunner,
+        build_code_review_tf_provider,
+    )
     from rebar.llm.runner import get_runner
     from rebar.llm.step_failures import collect_step_failures
 
@@ -554,10 +579,19 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     cfg = gate_source.apply_handle(request.cfg, handle)
     if handle.source == gate_source.SOURCE_LOCAL:
         cfg = replace(cfg, repo_path=str(handle.path))
-    execution_repo_root = cfg.repo_path
+    execution_repo_root = cast(str, cfg.repo_path)
     # Rebuild the runner from the RE-ROOTED cfg (bug pelt-mead-aeon): the preflight runner baked the
     # pre-snapshot cfg; reusing it hits the bare clone (missing .tickets-tracker); injected kept.
     runner_sel = request.runner or get_runner(cfg)
+    # Terraform grounding (REB-640/afe3): mint TF tools for the IaC finder + verify routes when the
+    # CHANGED set has Terraform scope; the provider's reads fold into the verdict usage below.
+    tf_usage_sink: dict[str, Any] = {}
+    changed_files = list(prep.dc.changed_files)
+    tf_provider = build_code_review_tf_provider(
+        repo_root=execution_repo_root,
+        changed_files=changed_files,
+        usage_sink=tf_usage_sink,
+    )
     try:
         with (
             gate_source.gate_read_root(handle),
@@ -572,7 +606,10 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
                 target_ticket=request.target_ticket,
                 repo_root=execution_repo_root,
                 agent_runner=RunnerAgentStep(
-                    runner=runner_sel, repo_root=request.repo_root, config=cfg
+                    runner=runner_sel,
+                    repo_root=request.repo_root,
+                    config=cfg,
+                    tool_provider=tf_provider,
                 ),
                 batch_runner=CodeReviewBatchRunner(
                     context=prep.dc.context,
@@ -584,6 +621,7 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
                     # discovery and rubric resolution, so the runner's agreement check can
                     # catch a future divergence instead of it surfacing as "unknown prompt".
                     project_criteria_root=execution_repo_root,
+                    changed_files=changed_files,
                 ),
                 recorder=prep.rec,
             )
@@ -610,6 +648,7 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     total_ms = round((time.monotonic() - prep.t_total) * 1000, 1)
     verdict = res.terminal_output
     if res.status == "succeeded" and isinstance(verdict, dict) and "verdict" in verdict:
+        _fold_tf_grounding_usage(verdict, tf_usage_sink)
         # Delegate the whole post-verdict finalization tail (metrics + WS5 fail-closed + deps +
         # region floor + durable emit) to the code_review/finalize.py strict leaf. Lazy import
         # matches this module's all-lazy cross-module import style.

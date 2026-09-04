@@ -16,7 +16,7 @@ constructs it with the context it assembled; the offline test constructs it dire
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +35,40 @@ from rebar.llm.workflow.runners import BatchRunner, BatchRunRequest, BatchRunRes
 
 _FINDINGS_SCHEMA = "code_review_findings"
 _ROUND_A_STEP_ID = "round_a"
+
+
+def build_code_review_tf_provider(
+    *, repo_root: str, changed_files: object, usage_sink: dict[str, Any]
+) -> Callable[[Any], tuple[list, Callable[[], None]] | None]:
+    from rebar.llm.code_review import workflow_ops
+    from rebar.llm.plan_review import terraform_seam
+
+    def _selected_changed() -> list[str]:
+        if not isinstance(changed_files, (list, tuple, set, frozenset)):
+            return []
+        return [
+            path
+            for path in changed_files
+            if isinstance(path, str) and path.endswith(workflow_ops._TF_SCOPE_SUFFIXES)
+        ]
+
+    def provider(ctx: Any) -> tuple[list, Callable[[], None]] | None:
+        step = getattr(ctx, "step", None)
+        prompt = (step if isinstance(step, dict) else {}).get("prompt")
+        selected: list[str] = []
+        if prompt == "code-review-iac" and workflow_ops.changed_terraform_scope(changed_files):
+            selected = _selected_changed()
+        elif prompt == "code-review-verify" and workflow_ops.changed_terraform_scope(changed_files):
+            inputs = getattr(ctx, "inputs", None)
+            findings = (inputs if isinstance(inputs, dict) else {}).get("findings")
+            selected = workflow_ops._selected_terraform_paths_from_iac_findings(findings)
+        if not selected:
+            return None
+        return terraform_seam.build_tool_provider(
+            repo_root=repo_root, selected=selected, usage_sink=usage_sink, force=True
+        )(ctx)
+
+    return provider
 
 
 class CodeReviewBatchRunner(BatchRunner):

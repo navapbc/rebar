@@ -24,6 +24,68 @@ logger = logging.getLogger(__name__)
 _LINE_BUCKET = 10  # cluster findings within ~10 lines (mirrors aggregate.py's _LINE_BUCKET)
 
 
+_TF_CITED_SUFFIXES = (".tf", ".tf.json")
+_TF_SCOPE_SUFFIXES = (*_TF_CITED_SUFFIXES, ".tfvars")
+
+
+def _terraform_paths_from_finding(finding: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    location = finding.get("location")
+    if isinstance(location, dict):
+        paths.append(str(location.get("file") or ""))
+    elif isinstance(location, str):
+        paths.append(_file_from_location(location))
+    for key in ("files", "cited_files", "paths", "evidence"):
+        value = finding.get(key)
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    paths.append(_file_from_location(item))
+                elif isinstance(item, dict):
+                    paths.append(str(item.get("file") or item.get("path") or ""))
+    return [p for p in paths if any(p.endswith(suffix) for suffix in _TF_CITED_SUFFIXES)]
+
+
+def iac_terraform_findings(findings: object) -> list[dict]:
+    out: list[dict] = []
+    if not isinstance(findings, (list, tuple)):
+        return out
+    for finding in findings:
+        if not isinstance(finding, dict) or finding.get("_shed") or finding.get("_too_big"):
+            continue
+        criteria = finding.get("criteria") or []
+        is_iac = finding.get("reviewer_id") == "code-review-iac" or (
+            isinstance(criteria, (list, tuple, set, frozenset)) and "iac" in criteria
+        )
+        if is_iac and _terraform_paths_from_finding(finding):
+            out.append(finding)
+    return out
+
+
+def any_iac_terraform_evidence(findings: object) -> bool:
+    return bool(iac_terraform_findings(findings))
+
+
+def changed_terraform_scope(changed_files: object) -> bool:
+    if isinstance(changed_files, str):
+        return changed_files.endswith(_TF_SCOPE_SUFFIXES)
+    if not isinstance(changed_files, (list, tuple, set, frozenset)):
+        return False
+    return any(
+        isinstance(path, str) and path.endswith(_TF_SCOPE_SUFFIXES) for path in changed_files
+    )
+
+
+def _selected_terraform_paths_from_iac_findings(findings: object) -> list[str]:
+    return sorted(
+        {
+            path
+            for finding in iac_terraform_findings(findings)
+            for path in _terraform_paths_from_finding(finding)
+        }
+    )
+
+
 # ── assemble the diff context ──────────────────────────────────────────────────────────────
 @register_step(
     "assemble_diff",

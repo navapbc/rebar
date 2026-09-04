@@ -367,6 +367,15 @@ def finalize_code_review_verdict(
 
     try:
         _dep_paths = set(prep.dc.changed_files) | _sidecar._cited_paths_code_review(verdict)
+        usage = verdict.get("_usage") if isinstance(verdict.get("_usage"), dict) else {}
+        for fetch in usage.get("distinct_fetches", []) if isinstance(usage, dict) else []:
+            target = fetch.get("target") if isinstance(fetch, dict) else None
+            if (
+                isinstance(target, str)
+                and "*" not in target
+                and target.endswith((".tf", ".tf.json"))
+            ):
+                _dep_paths.add(target)
         verdict["deps"] = _sidecar.reviewed_file_hashes(_dep_paths, repo_root=request.repo_root)
     except Exception:  # noqa: BLE001 — deps collection is best-effort; never fails the gate
         verdict.setdefault("deps", {})

@@ -14,6 +14,17 @@ structured reason), **never** a false accusation. The refutation lanes are
 never assert that something is absent. So the oracle only ever *reduces* false
 positives — it never manufactures one.
 
+## Terraform grounding in code review
+
+The code-review gate also reuses the plan-review Terraform seam for the IaC overlay. When a
+review changes Terraform files, the `code-review-iac` finder gets the structural lookup and
+reference-resolution tools for those changed modules; if the merged IaC findings cite Terraform
+files, the verifier gets a fresh grounding session over those cited files. The session reads are
+folded into the review's usage/dependency set so sibling module files consulted by grounding are
+part of the signed read set. As with plan-review, the `grounding-terraform` extra is optional:
+missing parser support makes each query abstain with a recorded reason instead of failing the
+gate or manufacturing a finding.
+
 ## The three query surfaces
 
 The public API is a thin facade, `rebar.grounding.oracle` (re-exported from
