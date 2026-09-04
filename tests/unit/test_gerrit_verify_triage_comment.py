@@ -30,7 +30,6 @@ EXPECTED_VOTE_NEEDS = {
     "docs-only",
     "build-and-test",
     "mutation",
-    "scanner-integration",
     "optionality",
     "artifact-probe",
     "eval-discipline",

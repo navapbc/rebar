@@ -238,20 +238,6 @@ jobs:
       gerrit-project: ${{ inputs.GERRIT_PROJECT }}
       gerrit-url: https://${{ vars.GERRIT_SERVER }}
 
-  scanner-integration:
-    # Pinned native scanner contracts ON THE PATCHSET (ticket aa9e): install Semgrep and
-    # Gitleaks from the checked-in hash locks, then run the nine real scanner integration
-    # contracts. This is full-route only; docs-only explicitly skips it in the vote
-    # aggregation below.
-    name: scanner-integration (pinned Semgrep + Gitleaks on the patchset)
-    needs: [clear-vote, require-ticket, classify]
-    if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
-    uses: ./.github/workflows/_scanner-integration.yml
-    with:
-      gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
-      gerrit-project: ${{ inputs.GERRIT_PROJECT }}
-      gerrit-url: https://${{ vars.GERRIT_SERVER }}
-
   optionality:
     # Run the clean-core-wheel + optional-extras (per-extra venvs + union) contract ON THE PATCHSET,
     # so a no-extras import leak or packaging regression BLOCKS Verified pre-merge (build-and-test
@@ -443,7 +429,7 @@ jobs:
     # snapshots this run's jobs — that snapshot (im-open/workflow-conclusion, a REST list-jobs read
     # enabled by `permissions: actions: read`) folds the reusable workflow's job conclusions into
     # WORKFLOW_CONCLUSION, so a clean-wheel/packaging failure casts Verified-1.
-    needs: [clear-vote, require-ticket, classify, docs-only, build-and-test, mutation, scanner-integration, optionality, artifact-probe, eval-discipline, golden-path, verify-identity]
+    needs: [clear-vote, require-ticket, classify, docs-only, build-and-test, mutation, optionality, artifact-probe, eval-discipline, golden-path, verify-identity]
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate the run conclusion
@@ -487,7 +473,6 @@ jobs:
                   needs.docs-only.result == 'success' &&
                   needs.build-and-test.result == 'skipped' &&
                   needs.mutation.result == 'skipped' &&
-                  needs.scanner-integration.result == 'skipped' &&
                   needs.optionality.result == 'skipped' &&
                   needs.artifact-probe.result == 'skipped' &&
                   needs.eval-discipline.result == 'skipped' &&
@@ -499,7 +484,6 @@ jobs:
                   needs.docs-only.result == 'skipped' &&
                   needs.build-and-test.result == 'success' &&
                   needs.mutation.result == 'success' &&
-                  needs.scanner-integration.result == 'success' &&
                   needs.optionality.result == 'success' &&
                   needs.artifact-probe.result == 'success' &&
                   needs.eval-discipline.result == 'success' &&

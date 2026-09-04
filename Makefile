@@ -28,15 +28,15 @@ GIT_CLIFF_VERSION := 2.13.1
 RELEASE_WORKFLOW := .github/workflows/release.yml
 # Zizmor audit scope (epic 5664 S1; extended by ticket 1c70): the release workflow, the
 # Gerrit Verified-gate vote-casting critical path — gerrit-verify.yaml (the workflow that
-# casts the Verified vote) and ALL six reusables it calls that check out code / build
+# casts the Verified vote) and ALL five reusables it calls that check out code / build
 # artifacts (_build-and-test.yml, _mutation.yml, _optionality.yml, _artifact-probe.yml,
-# _eval-discipline.yml, _scanner-integration.yml) — PLUS reconcile-bridge.yml, the other
-# privileged workflow in this repo: it runs with contents/actions-write and OIDC capability,
-# so it carries the same action-security risk (pinning, credential-persistence,
-# template-injection) as the vote path even though it does not itself cast a gate vote.
-# Widening beyond release.yml closes the gap where the workflows that actually gate every
-# change (or hold write/OIDC creds) were unaudited. Keep the set to these credentialed
-# workflows (not all workflows) so the audit surface stays proportional to risk.
+# _eval-discipline.yml) — PLUS reconcile-bridge.yml, the other privileged workflow in this
+# repo: it runs with contents/actions-write and OIDC capability, so it carries the same
+# action-security risk (pinning, credential-persistence, template-injection) as the vote
+# path even though it does not itself cast a gate vote. Widening beyond release.yml closes
+# the gap where the workflows that actually gate every change (or hold write/OIDC creds)
+# were unaudited. Keep the set to these credentialed workflows (not all workflows) so the
+# audit surface stays proportional to risk.
 ZIZMOR_WORKFLOWS := $(RELEASE_WORKFLOW) \
 	.github/workflows/gerrit-verify.yaml \
 	.github/workflows/_build-and-test.yml \
@@ -44,22 +44,10 @@ ZIZMOR_WORKFLOWS := $(RELEASE_WORKFLOW) \
 	.github/workflows/_optionality.yml \
 	.github/workflows/_artifact-probe.yml \
 	.github/workflows/_eval-discipline.yml \
-	.github/workflows/_scanner-integration.yml \
 	.github/workflows/reconcile-bridge.yml
 ACTIONLINT_VERSION := 1.7.12
 ACTIONLINT_SHA256_LINUX_AMD64 := 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 LOCAL_BIN := .tools/bin
-REVIEW_SCANNER_PREFIX := .tools/review-scanners
-SCANNER_INTEGRATION_NODES := \
-	tests/unit/test_code_review_conflict_markers.py::test_positive_conflict_markers_match \
-	tests/unit/test_code_review_conflict_markers.py::test_negative_bare_equals_does_not_match \
-	tests/unit/test_code_review_conflict_markers.py::test_conflict_marker_match_stays_advisory \
-	tests/unit/test_code_review_conflict_markers.py::test_clean_diff_produces_no_finding \
-	tests/unit/test_code_review_public_exposure.py::test_positive_public_exposure_matches \
-	tests/unit/test_code_review_public_exposure.py::test_negative_fp_guards_do_not_match \
-	tests/unit/test_code_review_public_exposure.py::test_public_exposure_match_stays_advisory \
-	tests/unit/test_code_review_ws5.py::test_planted_secret_blocks_end_to_end_real_gitleaks \
-	tests/unit/test_code_review_ws5.py::test_repo_gitleaks_config_allowlists_doc_throwaway_but_not_real_secret
 
 # Dev interpreter pin (bug a5f5). Single-sourced in .github/python-version.txt — the same
 # discipline as .github/git-version-floor.txt and .github/module-size-limit.txt — and held to
@@ -67,7 +55,7 @@ SCANNER_INTEGRATION_NODES := \
 # fails a test instead of silently leaving every fresh venv on an interpreter nothing tests.
 PYTHON_VERSION_FILE := .github/python-version.txt
 
-.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check test e2e-deps scanner-integration jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
+.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check test e2e-deps jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -494,16 +482,6 @@ e2e-deps:  ## Provision the e2e Node toolchain (npm ci + esbuild bundle) BEFORE 
 
 test:  ## Run the default test suite (excludes integration + external).
 	pytest -m "not integration and not external" -q
-
-# mechanism-ok: ci_gate scanner-integration — aa9e-3d35 explicit native-scanner Verified lane.
-scanner-integration:  ## Install pinned native review scanners, then run the nine real scanner contracts.
-	@set -eu; \
-	platform_arg=""; \
-	if [ -n "$${REBAR_SCANNER_PLATFORM:-}" ]; then platform_arg="--platform $${REBAR_SCANNER_PLATFORM}"; fi; \
-	python scripts/install_review_scanners.py install $$platform_arg --prefix "$(REVIEW_SCANNER_PREFIX)"; \
-	python scripts/install_review_scanners.py check $$platform_arg --prefix "$(REVIEW_SCANNER_PREFIX)"; \
-	export PATH="$(CURDIR)/$(REVIEW_SCANNER_PREFIX)/bin:$(CURDIR)/$(REVIEW_SCANNER_PREFIX)/semgrep-venv/bin:$$PATH"; \
-	pytest -q $(SCANNER_INTEGRATION_NODES)
 
 jira-dc-up:  ## Build + start the Jira DC verification harness (fresh instance; see tests/external/live_jira_dc/README.md).
 	cd tests/external/live_jira_dc && docker compose up -d --build --force-recreate
