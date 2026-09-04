@@ -188,7 +188,7 @@ _169 variables._
 These reads pass a non-literal name argument, so the concrete variable name is not statically resolvable:
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
-- `src/rebar/_config_resolvers.py:341` — `os.environ.get(<non-literal>)`
+- `src/rebar/_config_resolvers.py:361` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:367` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:380` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:384` — `os.environ.get(<non-literal>)`

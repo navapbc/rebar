@@ -26,6 +26,72 @@ class LLMConfigError(LLMUnavailableError):
     :class:`LLMUnavailableError` (so one ``except`` catches deps + runtime failures)."""
 
 
+class GateCongestedError(LLMError):
+    """The host is at its concurrent-gate cap, so the gate was NOT started (ADR 0112
+    decision 5; story 09da-343c-1ee9-480c).
+
+    Deliberately NOT an :class:`LLMRunnerError`: no runner ran and nothing about the ticket
+    was judged. It IS an :class:`LLMError` so that the ``except LLMError`` arms the MCP tool
+    bodies and the CLI gate handlers ALREADY carry route it — a structured ``retryable``
+    payload over MCP, exit 11 ("transient — retry") on the CLI — instead of a parallel except
+    clause at every call site.
+
+    Both of those paths read ``.outcome``, so the retryable disposition is attached HERE, at
+    construction. Without it the MCP payload would say ``retryable: false`` and the CLI would
+    exit 1: shed load that nobody retries is a dropped request, not backpressure.
+    """
+
+    def __init__(self, gate: str, limit: int) -> None:
+        self.gate = gate
+        self.limit = limit
+        super().__init__(
+            f"gate admission refused: all {limit} concurrent gate slot(s) on this host are "
+            f"in use, so {gate} was not started. This is HOST CONGESTION, not a review "
+            "result \u2014 no verdict was produced and nothing about the ticket was judged. "
+            "Retry later, or raise [snapshot].max_concurrent_gates if the host has room."
+        )
+        self.outcome = _admission_outcome("gate_congested", gate, request_limit=limit)
+
+
+class GateScratchUnavailableError(LLMError):
+    """The gate scratch store itself is unreachable, so the gate was NOT started.
+
+    ADR 0112 puts gate scratch on a dedicated volume and states the consequence directly: gate
+    admission must treat "scratch volume unmounted" as a REFUSAL, "not as an empty cache to
+    repopulate onto the root filesystem — otherwise the volume's failure mode is silently
+    reverting to the state this ADR exists to prevent". So this is the one degradation in
+    admission that fails CLOSED. It is retryable for the same reason the free-space floor is:
+    remounting the volume clears it without changing the request.
+    """
+
+    def __init__(self, gate: str, detail: str) -> None:
+        self.gate = gate
+        self.detail = detail
+        super().__init__(
+            f"gate admission refused: the gate scratch store is unreachable ({detail}), so "
+            f"{gate} was not started. Running anyway would put snapshot and clone bytes back "
+            "on the root filesystem. This is a HOST condition, not a review result — no "
+            "verdict was produced. Retry once the scratch volume is mounted and writable."
+        )
+        self.outcome = _admission_outcome("gate_scratch_unavailable", gate)
+
+
+def _admission_outcome(error_type: str, gate: str, **extra: object):
+    """The retryable ``LLMOutcome`` carried by an admission refusal, or ``None`` if the failure
+    module is unavailable. ``WAIT_AND_RETRY`` is the honest class for both: the condition clears
+    on its own (holders finish; the volume is remounted) with no change to the request. The
+    import is in-body because :mod:`rebar.llm.failure` imports THIS module."""
+    try:
+        from rebar.llm.failure import LLMOutcome, ResolutionClass
+    except ImportError:  # pragma: no cover - failure is a sibling leaf; absent only if broken
+        return None
+    return LLMOutcome(
+        resolution_class=ResolutionClass.WAIT_AND_RETRY,
+        diagnostic={"error_type": error_type, "gate": gate, **extra},
+        retryable=True,
+    )
+
+
 class LLMRunnerError(LLMError):
     """A runner failed to execute the operation."""
 

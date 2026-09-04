@@ -60,6 +60,8 @@ KNOWN_ERROR_CODES: frozenset[str] = frozenset(
         "criterion_registry_malformed",
         "criterion_missing_file",
         "llm_unavailable",
+        "gate_congested",
+        "gate_scratch_unavailable",
         "not_found",
         "invalid_input",
         "config_unreadable",
@@ -112,14 +114,30 @@ def _llm_error_code(exc: BaseException) -> str | None:
     The availability subtree (``LLMUnavailableError`` and its ``LLMConfigError`` /
     prompt/reviewer config subclasses) stays ``llm_unavailable``. The ``LLMRunnerError``
     subtree and every other non-availability ``LLMError`` map to the honest broad
-    ``command_failed``. The bare ``WorkflowError`` base keeps dbca's execute-outage
+    ``command_failed``. The two gate-admission refusals are checked FIRST and take dedicated
+    codes (``gate_congested`` / ``gate_scratch_unavailable``): the gate never ran, so
+    ``command_failed`` would misreport a refusal to START as a failure to complete.
+    The bare ``WorkflowError`` base keeps dbca's execute-outage
     compatibility contract at ``llm_unavailable``; dedicated workflow subclasses use their
     explicit/earlier codes or fall through to ``command_failed``.
     """
     try:
-        from rebar.llm.errors import LLMError, LLMRunnerError, LLMUnavailableError, WorkflowError
+        from rebar.llm.errors import (
+            GateCongestedError,
+            GateScratchUnavailableError,
+            LLMError,
+            LLMRunnerError,
+            LLMUnavailableError,
+            WorkflowError,
+        )
     except ImportError:
         return None
+    # Host congestion is not an LLM failure at all: the gate never started. It gets its own
+    # code so an agent can tell "retry, the box is busy" from "the model call failed".
+    if isinstance(exc, GateCongestedError):
+        return "gate_congested"
+    if isinstance(exc, GateScratchUnavailableError):
+        return "gate_scratch_unavailable"
     if isinstance(exc, LLMRunnerError):
         return "command_failed"
     if isinstance(exc, LLMUnavailableError):

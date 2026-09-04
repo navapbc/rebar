@@ -267,32 +267,39 @@ def review_plan(
     """
     from rebar.llm import gate_source
     from rebar.llm.config_binding import compose_and_bind_llm_config
+    from rebar.llm.gate_admission import gate_admission
     from rebar.llm.peak_rss import gate_peak_rss
 
-    handle = gate_source.resolve_gate_handle(ref, source, repo_root)
-    with (
-        # Measurement only (bug 9ea3): emits the GATE_PEAK_RSS marker on completion,
-        # including on the raising paths. Wrapping HERE covers both the MCP daemon and
-        # the CLI, which both reach the gate through this function.
-        gate_peak_rss("plan_review", ticket_id),
-        gate_source.gate_read_root(handle),
-        compose_and_bind_llm_config(repo_root=repo_root, explicit=config) as bound,
-    ):
-        cfg = gate_source.apply_handle(bound, handle)
-        verdict = _run_plan_review(
-            ticket_id,
-            cfg=cfg,
-            runner=runner,
-            sign=sign,
-            emit_sidecar=emit_sidecar,
-            advisory_cap=advisory_cap,
-            repo_root=repo_root,
-            force=force,
-            retry=retry,
-            # Resolved source: stamped on the verdict only AFTER this returns (bug 5128).
-            source_mode=handle.source,
-        )
-    return gate_source.annotate_result(verdict, handle)
+    # Concurrency admission (ADR 0112 decision 5) is taken BEFORE resolve_gate_handle,
+    # because materializing the snapshot is what spends the bytes the cap bounds. Wrapping
+    # HERE rather than the MCP daemon and the CLI separately covers both call paths at one
+    # seam, exactly as gate_peak_rss does, and shares ONE counter with verify_completion.
+    # At capacity this RAISES GateCongestedError instead of running the gate.
+    with gate_admission("plan_review", ticket_id, repo_root):
+        handle = gate_source.resolve_gate_handle(ref, source, repo_root)
+        with (
+            # Measurement only (bug 9ea3): emits the GATE_PEAK_RSS marker on completion,
+            # including on the raising paths. Wrapping HERE covers both the MCP daemon and
+            # the CLI, which both reach the gate through this function.
+            gate_peak_rss("plan_review", ticket_id),
+            gate_source.gate_read_root(handle),
+            compose_and_bind_llm_config(repo_root=repo_root, explicit=config) as bound,
+        ):
+            cfg = gate_source.apply_handle(bound, handle)
+            verdict = _run_plan_review(
+                ticket_id,
+                cfg=cfg,
+                runner=runner,
+                sign=sign,
+                emit_sidecar=emit_sidecar,
+                advisory_cap=advisory_cap,
+                repo_root=repo_root,
+                force=force,
+                retry=retry,
+                # Resolved source: stamped on the verdict only AFTER this returns (bug 5128).
+                source_mode=handle.source,
+            )
+        return gate_source.annotate_result(verdict, handle)
 
 
 def _finalize_signature(
