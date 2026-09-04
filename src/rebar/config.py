@@ -244,11 +244,12 @@ def reclaim_horizon_days(root: str | os.PathLike[str] | None = None) -> int:
     return int(str(_config_value(root, "reclaim", "horizon_days")))
 
 
+def fixture_heal_interval_days(root: str | os.PathLike[str] | None = None) -> int:
+    return int(str(_config_value(root, "fixture_heal", "interval_days")))
+
+
 # ── config-file discovery + layered load ──────────────────────────────────────
-#
-# Config resolution is on the COMMAND HOT PATH (every CLI invocation + many library
-# reads resolve config; the verify gate and ticket.display_mode go through
-# load_config). Two caches keep it cheap and bounded WITHOUT risking staleness:
+# Config resolution is on the COMMAND HOT PATH. Two caches keep it cheap and bounded:
 #
 #  * _TOML_CACHE memoizes a parsed TOML file by (path, mtime_ns, size) — so the
 #    upward discovery walk and the final read never parse the same pyproject twice

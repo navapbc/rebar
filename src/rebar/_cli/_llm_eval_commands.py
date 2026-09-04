@@ -13,11 +13,14 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 
 from rebar._cli._parser import guard_parse_errors
 from rebar._cli._parsers.advanced import llm_eval as _llm_eval_parsers
 from rebar._mcp_errors import js_safe_dumps
+
+if TYPE_CHECKING:
+    from rebar.llm.evals.fixture_mining.heal import HealReport
 
 
 @guard_parse_errors
@@ -109,8 +112,56 @@ def _criteria(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "eval":
         return _criteria_eval(args)
+    if args.cmd == "heal":
+        return _criteria_heal(args)
     parser.print_help()
     return 1
+
+
+def _criteria_heal(args: argparse.Namespace) -> int:
+    from rebar import config
+    from rebar.llm.errors import LLMError
+    from rebar.llm.evals.fixture_mining.heal import heal_fixtures, production_attempter
+
+    repo_root = _repo_root_or_none(config)
+    if repo_root is None:
+        repo_root = str(Path.cwd())
+    try:
+        if args.dry_run:
+            report = heal_fixtures(repo_root, dry_run=True)
+            for criterion_id in report.attempted:
+                sys.stdout.write(f"{criterion_id}\n")
+            return 0
+        ledger_path = Path(repo_root) / ".rebar" / "fixture_heal_ledger.jsonl"
+        attempter = production_attempter(repo_root, ledger_path=ledger_path, cap_usd=25.0)
+        report = heal_fixtures(repo_root, attempter=attempter, ledger_path=ledger_path)
+        _write_heal_summary(report)
+    except LLMError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    return 0
+
+
+def _write_heal_summary(report: HealReport) -> None:
+    """Print the outcome of a live ``criteria heal`` sweep so an operator can see what the
+    scheduled run did: whether it ran or was skipped by the due-stamp, whether it stopped for
+    budget, and which criteria were attempted / admitted / quarantined / skipped."""
+    if not report.ran:
+        sys.stdout.write("Fixture heal sweep: skipped (not due)\n")
+        return
+    sys.stdout.write("Fixture heal sweep: ran\n")
+
+    def _line(label: str, ids: tuple[str, ...]) -> None:
+        sys.stdout.write(f"  {label}: {', '.join(ids) if ids else '(none)'}\n")
+
+    _line("attempted", report.attempted)
+    _line("admitted", report.admitted)
+    _line("quarantined", report.quarantined)
+    _line("skipped (unreliable)", report.skipped_unreliable)
+    if report.stopped_for_budget:
+        sys.stdout.write("  budget: STOPPED (cap reached)\n")
+    else:
+        sys.stdout.write("  budget: within cap\n")
 
 
 def _criteria_eval(args: argparse.Namespace) -> int:

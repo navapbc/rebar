@@ -56,7 +56,7 @@ or conversely if false positives prove noisy once an acting id is resolved.
 
 ## Configuration keys
 
-The 103 typed `section.field` keys with type, default, description, and lifecycle.
+The 104 typed `section.field` keys with type, default, description, and lifecycle.
 
 | Key | Type | Default | Description | Lifecycle |
 |-----|------|---------|-------------|-----------|
@@ -98,6 +98,7 @@ The 103 typed `section.field` keys with type, default, description, and lifecycl
 | `compact.trigger` | `str` | `'async'` | Selects asynchronous, inline, or disabled compaction after qualifying write operations. | active |
 | `compact.trigger_interval_s` | `int` | `21600` | Starts a compaction sweep when the prior sweep is older than this many seconds. | active |
 | `reclaim.horizon_days` | `int` | `30` | Sets the remote-anchored reclamation horizon in days. | active |
+| `fixture_heal.interval_days` | `int` | `30` | Sets the scheduled fixture-mining heal loop interval in days. | active |
 | `sync.push` | `str` | `'always'` | Selects synchronous, asynchronous, or disabled ticket-store pushes after writes. | active |
 | `sync.pull` | `str` | `'on'` | Controls whether ticket-store reads fetch and integrate remote updates. | active |
 | `sync.remote` | `str` | `'origin'` | Names the Git remote used to push, fetch, reconcile, and verify the tickets branch. | active |
