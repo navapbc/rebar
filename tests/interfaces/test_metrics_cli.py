@@ -110,8 +110,66 @@ def test_metrics_context_carries_code_health_config(rebar_repo, monkeypatch, cap
     }
 
 
-def test_cap_change_events_deregistered():
-    assert "cap_change_events" not in {spec.id for spec in REGISTRY}
+def test_module_size_trend_and_cap_change_events_registered_live():
+    """Ticket 21de-f9d9: these ids are no longer permanently-unavailable placeholders —
+    they must be live specs with real ``code_health``/``git``/``high`` provenance."""
+    ids = {spec.id: spec for spec in REGISTRY}
+    for metric_id in ("module_size_trend", "cap_change_events"):
+        assert metric_id in ids, f"{metric_id} must be registered"
+        spec = ids[metric_id]
+        assert spec.lens == "code_health"
+        assert spec.source == "git"
+        assert spec.confidence == "high"
+
+
+def test_metrics_cli_surfaces_module_size_trend_and_cap_change_events(rebar_repo):
+    """Exercise the real ``rebar metrics`` CLI over a small Git-derived history."""
+
+    def _commit_at(msg: str, iso_date: str) -> None:
+        subprocess.run(
+            ["git", "add", "-A"], cwd=rebar_repo, check=True, capture_output=True, text=True
+        )
+        env = subprocess_env()
+        env["GIT_AUTHOR_DATE"] = iso_date
+        env["GIT_COMMITTER_DATE"] = iso_date
+        subprocess.run(
+            ["git", "commit", "-q", "-m", msg],
+            cwd=rebar_repo,
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+
+    (rebar_repo / ".github").mkdir()
+    (rebar_repo / ".github" / "module-size-limit.txt").write_text("800\n", encoding="utf-8")
+    (rebar_repo / "src" / "rebar").mkdir(parents=True)
+    (rebar_repo / "src" / "rebar" / "mod.py").write_text("x\n", encoding="utf-8")
+    _commit_at("add cap + module", "2026-01-01T00:00:00+00:00")
+    (rebar_repo / "src" / "rebar" / "mod.py").write_text("x\ny\n", encoding="utf-8")
+    _commit_at("grow module", "2026-01-02T00:00:00+00:00")
+
+    p = _cli(
+        "metrics",
+        "--since",
+        "2000-01-01",
+        "--until",
+        "2100-01-01",
+        "--output",
+        "json",
+        cwd=str(rebar_repo),
+    )
+    assert p.returncode == 0, p.stderr
+    metrics = json.loads(p.stdout)["metrics"]
+
+    trend = metrics["module_size_trend"]
+    assert trend["lens"] == "code_health"
+    assert trend["source"] == "git"
+    assert trend["confidence"] == "high"
+    assert trend["value"]["qualified_revisions"] == 2
+    assert len(trend["value"]["samples"]) == 2
+
+    events = metrics["cap_change_events"]
+    assert events["value"] == {"events": [], "qualified_revisions": 2}
 
 
 def test_foreign_repo_honest_unavailable(rebar_repo):
@@ -209,3 +267,29 @@ def test_metrics_cli_names_missing_producers(rebar_repo, monkeypatch, capsys):
     assert metrics["duplication_summary"]["unavailable"]["reason"] == (
         "could not run jscpd: missing"
     )
+
+
+# Held-out oracle re-applied after implementation.
+def test_oracle_git_history_metrics_are_registered_and_rendered_by_cli(rebar_repo):
+    p = _cli(
+        "metrics",
+        "--since",
+        "2026-01-01",
+        "--until",
+        "2026-01-31",
+        "--output",
+        "json",
+        cwd=str(rebar_repo),
+    )
+    assert p.returncode == 0, p.stderr
+    metrics = json.loads(p.stdout)["metrics"]
+
+    for metric_id in ("module_size_trend", "cap_change_events"):
+        assert metric_id in metrics
+        entry = metrics[metric_id]
+        if "value" in entry:
+            assert entry["lens"] == "code_health"
+            assert entry["source"] == "git"
+            assert entry["confidence"] == "high"
+        else:
+            assert entry["unavailable"]["reason"]
