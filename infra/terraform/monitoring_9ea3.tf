@@ -35,7 +35,7 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "mcp_serving_path_down" {
-  alarm_name        = "rebar-mcp-serving-path-down"
+  alarm_name = "rebar-mcp-serving-path-down"
   # NOTE: AWS caps alarm_description at 1024 characters and rejects longer ones at
   # apply time, so keep this terse and put procedure in the runbook. See the guard
   # test_alarm_descriptions_fit_the_aws_limit in tests/unit/test_alarm_actions_terraform.py.
