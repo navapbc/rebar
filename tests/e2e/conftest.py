@@ -6,10 +6,13 @@ of the permissive ``xml.etree`` the unit tests use. That is the only way to catc
 *faithfulness* bugs — e.g. an id that is a legal XML attribute but an illegal BPMN id,
 which ``xml.etree`` keeps and ``bpmn-moddle`` drops.
 
-The tier is **opt-in and self-skipping**: it needs Node + a one-time ``npm install`` +
-esbuild bundle. When Node is absent or the install/build fails (offline CI, etc.) the
-whole tier skips with a clear reason rather than failing — the Python unit tests remain
-the always-on floor.
+The tier is **opt-in and self-skipping**: it needs Node + a one-time ``npm ci`` +
+esbuild bundle. Provision that AHEAD of pytest with ``make e2e-deps`` — a toolchain install
+is the build's work, not a test's, and charging it to the first e2e test's setup is what
+bug 9a17-e0b3-7aa6-4091 was. ``tests/e2e/_toolchain.py`` remains the in-fixture fallback for
+a checkout that never ran the target. When Node is absent or provisioning fails (offline CI,
+etc.) the whole tier skips with a clear reason rather than failing — the Python unit tests
+remain the always-on floor.
 """
 
 from __future__ import annotations
@@ -27,13 +30,56 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 from _child_diag import child_failure_detail  # noqa: E402
+from _toolchain import JS_DIR as _JS_DIR  # noqa: E402
+from _toolchain import ToolchainProvisioningError, provision_toolchain  # noqa: E402
 
-_JS_DIR = Path(__file__).parent / "js"
 _BUNDLE = _JS_DIR / "dist" / "roundtrip.mjs"
+
+# Fixtures whose tests need the Node toolchain. Provisioning is triggered by their
+# PRESENCE IN THE SELECTION, so a run that selects none of them (the toolchain's own
+# tests, the macOS platform_compat subset) never pays for it.
+_BROWSER_FIXTURE = "browser_runner"
+_TOOLCHAIN_FIXTURES = frozenset({"bpmn_harness", _BROWSER_FIXTURE})
+
+# The one piece of state: the message from a provisioning that FAILED at collection time.
+# The toolchain fixtures re-REPORT it rather than re-running the attempt, so a slow failure
+# is paid once per session instead of once per test. A successful provisioning needs no flag
+# — ``provision_toolchain`` is a no-op once the toolchain is on disk.
+_PROVISION_ERROR: str | None = None
 
 
 def _have_node() -> str | None:
     return shutil.which("node")
+
+
+def pytest_collection_modifyitems(config, items) -> None:
+    """Provision the Node toolchain at COLLECTION time, not inside a test.
+
+    This is the load-bearing half of bug 9a17-e0b3-7aa6-4091. pytest-timeout bounds test
+    ITEMS: with ``timeout = 300`` / ``timeout_method = "thread"`` (pyproject.toml), a
+    session-scoped fixture that installs the toolchain spends that install inside the first
+    e2e test's setup, and crossing the budget makes the thread method ``os._exit(1)`` — the
+    whole xdist worker dies as ``node down: Not properly terminated`` with no traceback. A
+    lock alone does not fix it: under ``-n 4 --dist worksteal`` every worker runs the
+    fixture, so serializing them merely converts the race into a queue that is *still* being
+    charged to a test. Collection is not an item, so nothing here is on any test's clock.
+    """
+    global _PROVISION_ERROR
+    here = Path(__file__).parent
+    selected = {
+        name
+        for item in items
+        if Path(str(item.fspath)).is_relative_to(here)
+        for name in _TOOLCHAIN_FIXTURES.intersection(getattr(item, "fixturenames", ()))
+    }
+    if not selected or not _have_node():
+        return  # the fixtures self-skip on a missing Node; nothing to provision for.
+    # Install the browser stack only when a browser test is actually in the selection: it is
+    # 4 of the 15 packages and over half the tree, and the round-trip harness never uses it.
+    try:
+        provision_toolchain(_JS_DIR, with_browser=_BROWSER_FIXTURE in selected)
+    except ToolchainProvisioningError as exc:
+        _PROVISION_ERROR = str(exc)
 
 
 @pytest.fixture(scope="session")
@@ -44,25 +90,16 @@ def bpmn_harness():
     node = _have_node()
     if not node:
         pytest.skip("e2e: `node` not on PATH (install Node to run the bpmn-io round-trip tier)")
-    if not (_JS_DIR / "node_modules").is_dir():
-        npm = shutil.which("npm")
-        if not npm:
-            pytest.skip("e2e: `npm` not on PATH")
-        r = subprocess.run(
-            [npm, "install"], cwd=_JS_DIR, capture_output=True, text=True, check=False
-        )
-        if r.returncode != 0:
-            pytest.skip(f"e2e: `npm install` failed (offline?):\n{r.stderr[-500:]}")
-    if not _BUNDLE.is_file():
-        r = subprocess.run(
-            [shutil.which("npm"), "run", "build"],
-            cwd=_JS_DIR,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if r.returncode != 0:
-            pytest.skip(f"e2e: harness build failed:\n{r.stderr[-500:]}")
+    # A failure at collection time is re-REPORTED, never re-run: retrying a slow failure
+    # once per test is how the original defect burned the budget in the first place.
+    if _PROVISION_ERROR is not None:
+        pytest.skip(f"e2e: {_PROVISION_ERROR}")
+    # Otherwise the last fallback, for a session that reached the fixture without either
+    # `make e2e-deps` or the hook having run. A no-op once the toolchain is on disk.
+    try:
+        provision_toolchain(_JS_DIR, with_browser=False)
+    except ToolchainProvisioningError as exc:
+        pytest.skip(f"e2e: {exc}")
 
     def run(bpmn_xml: str, *, mode: str = "serialize", moddle: dict | None = None) -> dict:
         req = {"mode": mode, "bpmn": bpmn_xml, "moddle": moddle}
@@ -93,6 +130,18 @@ def browser_runner():
     node = _have_node()
     if not node:
         pytest.skip("e2e(browser): `node` not on PATH")
+    # Same provisioning contract as `bpmn_harness`: this fixture is in _TOOLCHAIN_FIXTURES,
+    # so a selection containing it triggers collection-time provisioning, and a failure there
+    # must surface HERE too. Reporting it only for `bpmn_harness` would leave exactly the
+    # asymmetric surface this change exists to remove — a browser test would skip citing a
+    # missing playwright dir while the real cause (a failed `npm ci`) went unnamed.
+    # (bug 9a17-e0b3-7aa6-4091)
+    if _PROVISION_ERROR is not None:
+        pytest.skip(f"e2e(browser): {_PROVISION_ERROR}")
+    try:
+        provision_toolchain(_JS_DIR, with_browser=True)
+    except ToolchainProvisioningError as exc:
+        pytest.skip(f"e2e(browser): {exc}")
     if not (_JS_DIR / "node_modules" / "playwright").is_dir():
         pytest.skip("e2e(browser): playwright not installed (npm install in tests/e2e/js)")
     # Confirm a browser actually launches (the download may be absent in CI).
