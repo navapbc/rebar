@@ -5,12 +5,9 @@ three of the five ``orchestrator.finalize_verdict`` call sites live in it, and s
 an argument at each. That change was physically unlandable. This pins the split that bought the
 headroom back.
 
-A relocation has no new behaviour, so the real regression net is the existing suite passing
-UNCHANGED — in particular the many tests that reach these symbols as ``gate_dispatch.<name>``
-attribute access, which keep resolving because ``gate_dispatch`` re-imports the moved names. What
-CAN be asserted here is the structure the split has to preserve: the new module is a genuine leaf,
-both files sit inside the size policy, and the moved names are still reachable from their original
-home so no caller or monkeypatch seam had to be edited.
+ADR 0111 retired the internal-only compatibility shims that kept moved symbols reachable from
+their old private homes. This file now asserts the canonical modules remain healthy and that the
+old re-export surfaces are gone.
 """
 
 from __future__ import annotations
@@ -51,28 +48,30 @@ def test_extracted_module_clears_the_anti_fragmentation_floor() -> None:
     )
 
 
-def test_moved_names_are_still_reachable_from_gate_dispatch() -> None:
-    """The zero-test-edit mechanism. Many tests reach these as ``gate_dispatch.<name>`` attribute
-    access or import them directly; re-importing keeps them module-globals of gate_dispatch, so
-    every existing reference and monkeypatch target resolves unchanged."""
+def test_moved_names_are_no_longer_reachable_from_gate_dispatch() -> None:
+    """Plan-review recovery symbols are owned only by ``workflow.plan_review_recovery``."""
     from rebar.llm.workflow import gate_dispatch
 
-    for name in (
-        "STEP_PRECHECK",
-        "STEP_ASSEMBLE",
-        "STEP_FINDERS",
-        "STEP_VERIFY",
-        "STEP_DECIDE",
-        "STEP_COACH",
-        "GateContractError",
-        "_collect_step_ids",
-        "_validate_gate_step_ids",
-        "_attach_plan_review_metrics",
-        "_recover_plan_review_coach_failure",
-        "_recover_plan_review_verify_failure",
-        "_degraded_plan_review_verdict",
-    ):
-        assert hasattr(gate_dispatch, name), f"gate_dispatch lost {name} in the split"
+    leaked = [
+        name
+        for name in (
+            "STEP_PRECHECK",
+            "STEP_ASSEMBLE",
+            "STEP_FINDERS",
+            "STEP_VERIFY",
+            "STEP_DECIDE",
+            "STEP_COACH",
+            "GateContractError",
+            "_collect_step_ids",
+            "_validate_gate_step_ids",
+            "_attach_plan_review_metrics",
+            "_recover_plan_review_coach_failure",
+            "_recover_plan_review_verify_failure",
+            "_degraded_plan_review_verdict",
+        )
+        if hasattr(gate_dispatch, name)
+    ]
+    assert leaked == [], f"gate_dispatch still re-exports plan-review recovery names: {leaked}"
 
 
 def test_recovery_module_is_a_leaf_at_import_time() -> None:
@@ -133,23 +132,23 @@ def test_context_assembly_clears_the_anti_fragmentation_floor() -> None:
     )
 
 
-def test_moved_assembly_names_are_still_reachable_from_orchestrator() -> None:
-    """LOAD-BEARING, and stronger than the gate_dispatch case: production_batch_runner.py does
-    ``from .orchestrator import assemble_context`` at import time, as do four test modules. If the
-    re-export were dropped, that is an ImportError at startup, not a test failure."""
+def test_moved_assembly_names_are_no_longer_reachable_from_orchestrator() -> None:
+    """Context assembly and sizing helpers are no longer re-exported from orchestrator."""
     from rebar.llm.plan_review import orchestrator
 
-    for name in (
-        "assemble_context",
-        "assemble_context_cache",
-        "_assemble_cache",
-        "_assemble_cache_key",
-        "_assemble_context_uncached",
-        # not part of the moved cluster, but its last in-module caller left with the cluster and
-        # four tests still reach it here — the re-export must survive an "unused import" cleanup
-        "largest_window_tokens",
-    ):
-        assert hasattr(orchestrator, name), f"orchestrator lost {name} in the split"
+    leaked = [
+        name
+        for name in (
+            "assemble_context",
+            "assemble_context_cache",
+            "_assemble_cache",
+            "_assemble_cache_key",
+            "_assemble_context_uncached",
+            "largest_window_tokens",
+        )
+        if hasattr(orchestrator, name)
+    ]
+    assert leaked == [], f"orchestrator still re-exports moved names: {leaked}"
 
 
 def test_context_assembly_is_a_leaf_at_import_time() -> None:
@@ -169,10 +168,7 @@ def test_the_memo_still_collapses_repeated_reads_after_the_move() -> None:
     cache scope the same key must return the SAME PlanContext object and read the store ONCE. A
     relocation that dropped the ContextVar (or created a second copy of it under the new module)
     would leave every structural test above green while silently restoring the N+1 read."""
-    from rebar.llm.plan_review import context_assembly, orchestrator
-
-    # the re-export must be the SAME ContextVar object, not a second one
-    assert orchestrator._assemble_cache is context_assembly._assemble_cache
+    from rebar.llm.plan_review import context_assembly
 
     calls: list[str] = []
 

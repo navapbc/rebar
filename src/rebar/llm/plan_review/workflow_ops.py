@@ -5,7 +5,7 @@ These are THIN adapters over the shared, already-tested plan-review units in
 :mod:`rebar.llm.plan_review` — each op delegates to those units
 (:mod:`.det_floor`, :mod:`.registry`, :func:`.orchestrator.route_criteria` /
 ``partition_findings`` / ``pass3_over_findings`` / ``finalize_verdict``,
-:func:`.passes.render_coach_notes`) rather than re-implementing the gate. This workflow
+:func:`.review_coach.render_coach_notes`) rather than re-implementing the gate. This workflow
 is now the SOLE plan-review gate (the bespoke ``orchestrator.run_review`` driver it once
 mirrored was retired in story B-RETIRE). The workflow shape (mirrors the B3 completion
 gate):
@@ -30,15 +30,19 @@ registration decorators (import-light, no heavy LLM deps, no import cycle).
 
 from __future__ import annotations
 
+import importlib
 import logging
 from typing import Any
 
+from rebar.llm import review_kernel
 from rebar.llm import step_failures as step_failure_sink
+from rebar.llm.review_kernel import verify as review_verify
 from rebar.llm.workflow.executor import StepContext, StepResult, register_step
 from rebar.llm.workflow.plan_review_recovery import CRITERIA_CONFIG_FAILURE_KIND
 from rebar.types import PLAN_REVIEW_BARE_EXEMPT_TYPES, PLAN_REVIEW_BUG_TIER_TYPES
 
 logger = logging.getLogger(__name__)
+review_coach = importlib.import_module("rebar.llm.review_kernel.coach")
 
 # Register the extracted workflow adapters alongside this module's historical step registry
 # population: `@register_step` populates a process-global registry as an IMPORT SIDE EFFECT, so
@@ -46,22 +50,8 @@ logger = logging.getLogger(__name__)
 # only exist for the engine if the modules holding them are imported. `workflow/steps.py`
 # deliberately imports only `workflow_ops` and stays unaware of plan-review's internal file
 # layout, so both imports belong here, not there.
-from . import decide_ops as _decide_ops  # noqa: E402,F401
+from . import decide_ops as _decide_ops  # noqa: E402
 from . import prerequisite_workflow_ops as _prerequisite_workflow_ops  # noqa: E402,F401
-
-# Re-export the names `decide_ops` now owns. Nine test modules and the historical public surface
-# reach them as `workflow_ops.<name>`, so re-exporting is what makes b5fe a zero-test-edit
-# relocation. `_OPERATOR_ATTESTED_AC_RE` must pass through by OBJECT IDENTITY —
-# `tests/unit/test_det_floor_operator_attested.py:153` asserts `is` against
-# `det_operator_attested._OPERATOR_ATTESTED_TAG_RE`, which `==` on a recompiled pattern would
-# silently satisfy.
-from .decide_ops import (  # noqa: E402,F401
-    _OPERATOR_ATTESTED_AC_RE,
-    _ticket_id,
-    enrich_operator_attested,
-    operator_attested_ac_texts,
-    plan_review_decide,
-)
 
 _OUTPUT_SCHEMA = "plan_review_verdict"
 _BUG_TIER_BLOCKING_DET_CRITERIA = {"P1", "P4", "P10"}
@@ -86,11 +76,11 @@ def _bug_tier_keeps_blocking(finding: dict[str, Any]) -> bool:
 )
 def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     """Run the DET floor; short-circuit to a deterministic verdict on exempt/blocking."""
-    from . import det_floor, orchestrator
+    from . import context_assembly, det_floor, orchestrator
     from .prerequisites import current_blocks
 
-    tid = _ticket_id(ctx)
-    pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
+    tid = _decide_ops._ticket_id(ctx)
+    pctx = context_assembly.assemble_context(tid, repo_root=ctx.repo_root)
     base: dict[str, Any] = {
         "canonical_id": pctx.ticket_id,
         "ticket_type": pctx.ticket_type,
@@ -220,10 +210,10 @@ def plan_review_assemble_criteria(ctx: StepContext) -> StepResult | dict[str, An
     """
     from rebar.llm.criteria import CriteriaError
 
-    from . import orchestrator, registry
+    from . import context_assembly, orchestrator, registry
 
-    tid = _ticket_id(ctx)
-    pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
+    tid = _decide_ops._ticket_id(ctx)
+    pctx = context_assembly.assemble_context(tid, repo_root=ctx.repo_root)
     # gate_log: every deterministic-gate skip (ticket 4ee2) as {criterion_id: rule_name},
     # merged below into routing.det_gated — the sidecar's coverage.routing carries it, so
     # a criterion skipped on total vocabulary absence (zero LLM routing) stays observable.
@@ -339,7 +329,8 @@ def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
         "prompt step. `shared_prefix` = prompts.shared_plan_prefix(assemble_context(ticket_id)"
         ".plan_text) — the byte-identical plan-bearing leading prefix shared with the Pass-1 "
         "finder system prompt. `instructions` is a LIST of per-chunk "
-        "listings (passes.verify_instructions, global indices preserved): ONE element in the "
+        "listings (review_verify.verify_instructions, global indices preserved): ONE element "
+        "in the "
         "common case (the whole request fits the verifier model window) — byte-identical to a "
         "single aggregate verify — and TOKEN-BUDGETED splits (sizing.verify_request_chunks, no "
         "magic count) only when the request would exceed the window. The verify prompt step runs "
@@ -355,13 +346,13 @@ def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     from rebar import config as _config
     from rebar.llm.config import resolve_gate_config
 
-    from . import _verifier_cfg, generation, orchestrator, passes, sizing
+    from . import _verifier_cfg, context_assembly, generation, sizing
 
     # Between-pass cancel probe (story 2c89): after the Pass-1 finders, before the
     # billable Pass-2 verify. OWN-material only — see generation.probe_cancel.
     generation.probe_cancel("post-finders")
-    tid = _ticket_id(ctx)
-    pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
+    tid = _decide_ops._ticket_id(ctx)
+    pctx = context_assembly.assemble_context(tid, repo_root=ctx.repo_root)
     findings = list(ctx.inputs.get("findings") or [])
     # Size against the RESOLVED verifier model (the Sonnet downgrade, operator override honored)
     # — the same model the verify prompt step runs under (gate_dispatch passes _verifier_cfg(cfg)).
@@ -371,14 +362,14 @@ def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     try:
         headroom = float(_config.compose_config(ctx.repo_root).verify.verify_window_headroom)
     except Exception:  # noqa: BLE001 — config unreadable → the documented default
-        headroom = sizing.DEFAULT_VERIFY_WINDOW_HEADROOM
+        headroom = review_verify.DEFAULT_VERIFY_WINDOW_HEADROOM
     chunks, _omitted = sizing.verify_request_chunks(findings, model=verify_model, headroom=headroom)
     # `_omitted` indices are intentionally left out of every chunk → no verification for them →
     # pass3_decide(None) marks them INDETERMINATE (never silently dropped). When there are no
     # findings (or all were omitted), still emit ONE (empty) chunk so the verify step makes its
     # single aggregate call returning an empty `verifications` list — the prior behavior the
     # decide step depends on.
-    instructions = [passes.verify_instructions(chunk) for chunk in (chunks or [[]])]
+    instructions = [review_verify.verify_instructions(chunk) for chunk in (chunks or [[]])]
     from rebar.llm.prompting import prompts
 
     return {
@@ -395,8 +386,9 @@ def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
         "Emit the {{plan}} text + the Pass-4 coach INSTRUCTIONS for the coach_notes prompt step "
         "on the LIVE path: `plan` = assemble_context(ticket_id).plan_text and `instructions` = "
         "the SAME move-registry + coachable-findings listing that the workflow coach consumes "
-        "(passes.coach_instructions) over the blocking+surviving findings. Reuses passes.coach_"
-        "instructions + passes.load_move_registry so the format never diverges from the live path."
+        "(review_coach.coach_listing) over the blocking+surviving findings. Reuses passes.coach_"
+        "instructions + coach_moves.load_move_registry so the format never diverges from the "
+        "live path."
     ),
 )
 def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
@@ -404,14 +396,14 @@ def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
     ``findings`` (story 8086) is the coachable union — BLOCKING first, then surviving
     advisory — so blocking findings (the ones an agent must remediate) get coaching too;
     it also drives the coach_gate branch condition (fires when EITHER bucket is non-empty)."""
-    from . import generation, orchestrator, passes
+    from . import coach_moves, context_assembly, generation
     from .prerequisites import current_blocks
 
     # Between-pass cancel probe (story 2c89): after the deterministic Pass-3 decide,
     # before the billable Pass-4 coach. OWN-material only — see generation.probe_cancel.
     generation.probe_cancel("post-decide")
-    tid = _ticket_id(ctx)
-    pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
+    tid = _decide_ops._ticket_id(ctx)
+    pctx = context_assembly.assemble_context(tid, repo_root=ctx.repo_root)
     surviving = list(ctx.inputs.get("surviving") or [])
     blocking = list(ctx.inputs.get("blocking") or [])
     reclassified = [
@@ -454,10 +446,10 @@ def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
     # given the active triggers (plan-review's = the criteria the coachable findings carry).
     # Existing plan-review moves declare no `applies_when` ⇒ always-applicable ⇒ the listing is
     # unchanged; the field + filter are the mechanism a future gate (b744) uses.
-    moves = passes.load_move_registry(ctx.repo_root)
+    moves = coach_moves.load_move_registry(ctx.repo_root)
     triggers = {c for f in prompt_coachable for c in f.get("criteria", []) or []}
-    applicable = passes.applicable_moves(moves, triggers)
-    instructions = passes.coach_instructions(prompt_coachable, applicable)
+    applicable = review_coach.applicable_moves(moves, triggers)
+    instructions = review_coach.coach_listing(prompt_coachable, applicable)
     return {
         "plan": pctx.plan_text,
         "instructions": instructions,
@@ -474,7 +466,8 @@ def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
         "Pass-4 + verdict assembly: render the coach prompt's raw move picks into deterministic "
         "affirmative coaching (locked move templates; the LLM never authors prose), then assemble "
         "the terminal plan_review_verdict (verdict + findings + coaching + coverage) via shared "
-        "finalize_verdict. NO signing (B5). Reuses passes.render_coach_notes + finalize_verdict."
+        "finalize_verdict. NO signing (B5). Reuses review_coach.render_coach_notes + "
+        "finalize_verdict."
     ),
 )
 def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
@@ -482,7 +475,7 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
     from rebar.llm import findings as _findings
     from rebar.llm.config import resolve_gate_config
 
-    from . import orchestrator, passes
+    from . import coach_moves, orchestrator
     from .det_floor import PlanContext
 
     # The caller-resolved run config (veiny-trout-brink): so the verdict's model/runner FIELDS
@@ -499,23 +492,23 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
     # outside the applicable set is dropped, so the LLM can never select outside it. Triggers =
     # the criteria the coachable (blocking + surfaced) findings carry (matching coach_inputs,
     # story 8086). The decision map stamps each note with its finding's decision.
-    moves = passes.load_move_registry(ctx.repo_root)
+    moves = coach_moves.load_move_registry(ctx.repo_root)
     surviving = list(ctx.inputs.get("surfaced") or [])
     blocking_in = list(ctx.inputs.get("blocking") or [])
     coachable = blocking_in + surviving
     triggers = {c for f in coachable for c in f.get("criteria", []) or []}
-    applicable = passes.applicable_moves(moves, triggers)
+    applicable = review_coach.applicable_moves(moves, triggers)
     decision_map = {str(f.get("id")): "block" for f in blocking_in} | {
         str(f.get("id")): "advisory" for f in surviving
     }
-    coaching = passes.render_coach_notes(
+    coaching = review_coach.render_coach_notes(
         list(ctx.inputs.get("notes") or []), applicable, decision_map=decision_map
     )
 
     # finalize_verdict needs only ctx.ticket_id + ctx.ticket_type — a minimal context (no
     # rebar read) suffices here (the precheck already canonicalized the id/type).
     pctx = PlanContext(
-        ticket_id=str(ctx.inputs.get("canonical_id") or _ticket_id(ctx)),
+        ticket_id=str(ctx.inputs.get("canonical_id") or _decide_ops._ticket_id(ctx)),
         ticket_type=str(ctx.inputs.get("ticket_type") or ""),
         title="",
         description="",
@@ -536,7 +529,7 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
     # Surface any Pass-2 verification contract violations recorded by `plan_review_decide` this
     # run (expand-contract observability). Present ONLY when non-empty, so a clean run's verdict
     # coverage is byte-identical to before (attestation-safe); never changes the verdict string.
-    violations = orchestrator.drain_contract_violations()
+    violations = review_kernel.drain_contract_violations()
     if violations:
         coverage["verification_contract_violations"] = violations
     # Same posture for LLM step calls that failed but did not fail this run (the overlap judge
@@ -559,7 +552,7 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
     # R6 (epic 6982): deterministic advisory triage — bucket the surviving advisories into
     # apply-now/defer from recorded fields (no LLM), attached as a top-level verdict key. The
     # `plan_review_verdict` schema allows additional properties, so no schema change is needed.
-    verdict["triage"] = passes.triage_advisories(surviving)
+    verdict["triage"] = coach_moves.triage_advisories(surviving)
     return _findings.validate_structured(verdict, _OUTPUT_SCHEMA)
 
 

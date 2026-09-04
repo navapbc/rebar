@@ -31,6 +31,8 @@ from dataclasses import replace
 
 import pytest
 
+from rebar.llm import anthropic_model as anthropic_model_mod
+
 pytest.importorskip("pydantic_ai")
 
 import yaml
@@ -123,7 +125,6 @@ class _Rec(_ex.RunRecorder):
 @pytest.fixture
 def gate_run(tmp_path, monkeypatch):
     """Run the REAL gate once offline; return (usage-log rows, [(step, resolved model), ...])."""
-    import rebar.llm.runner as runner_mod
     from rebar.llm import config as llm_config
 
     for name in _ENV_VARS:
@@ -149,14 +150,14 @@ def gate_run(tmp_path, monkeypatch):
     monkeypatch.setenv("REBAR_USAGE_LOG", str(log_path))
 
     resolved: list[tuple[str | None, str]] = []
-    real_pai_model = runner_mod._pai_model
+    real_pai_model = anthropic_model_mod._pai_model
 
     def _spy(cfg):
         active = usage_log.active_step()
         resolved.append((active[0] if active else None, cfg.model))
         return real_pai_model(cfg)
 
-    monkeypatch.setattr(runner_mod, "_pai_model", _spy)
+    monkeypatch.setattr(anthropic_model_mod, "_pai_model", _spy)
 
     doc = _migrate.migrate_to_current(yaml.safe_load(_GATE.read_text()))
     cfg = replace(

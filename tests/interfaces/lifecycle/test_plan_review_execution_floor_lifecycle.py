@@ -5,8 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from rebar.llm.config import LLMConfig
-from rebar.llm.plan_review import orchestrator, workflow_ops
-from rebar.llm.workflow import gate_dispatch
+from rebar.llm.plan_review import decide_ops, orchestrator
+from rebar.llm.workflow import plan_review_recovery
 from rebar.llm.workflow.executor import StepContext
 
 
@@ -41,7 +41,7 @@ def _verification() -> dict:
 
 
 def _decide(phase: str) -> dict:
-    return workflow_ops.plan_review_decide(
+    return decide_ops.plan_review_decide(
         StepContext(
             run_id="r",
             step_id="decide",
@@ -95,7 +95,7 @@ def test_verify_failure_recovery_threads_phase_and_legacy_defaults_planning(monk
                 },
             ]
         )
-        return gate_dispatch._recover_plan_review_verify_failure(
+        return plan_review_recovery._recover_plan_review_verify_failure(
             rec, LLMConfig(runner="fake"), error="verify failed"
         )
 

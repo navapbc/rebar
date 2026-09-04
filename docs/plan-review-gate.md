@@ -302,7 +302,7 @@ these axes as 0.0, so replay MUST segment by `impact_model_version` (ADR 0036).
 The coach maps each surviving advisory finding to one **move** and renders the prose
 **deterministically** from the move's locked template (the LLM only picks the move id
 and fills a bounded noun-phrase `{subject}`). The built-in registry
-(`orchestrator.MOVE_REGISTRY`):
+(`coach_moves.MOVE_REGISTRY`):
 
 | id | move | template (rendered with `{subject}`) |
 |----|------|--------------------------------------|
@@ -502,7 +502,7 @@ Report §5.2 found the dominant plan-review leak is advisory **latency**, not bl
 4/8 tickets with persisted reviews applied a surfaced advisory only *after* claim
 (CAUGHT-BUT-IGNORED). Nothing told the author *which* surviving advisories were worth
 applying now. So Pass-4 also runs a **deterministic advisory triage** over the surviving
-advisory findings (`passes.triage_advisories`), attached to the verdict as `verdict["triage"]`
+advisory findings (`coach_moves.triage_advisories`), attached to the verdict as `verdict["triage"]`
 — a structured array `[{id, criteria, priority, block_threshold, bucket, reason}]`, one entry
 per surviving advisory. It makes **no** LLM call and emits no free prose (only fixed tokens +
 the findings' recorded numbers), so the same finding set yields byte-identical output. It is

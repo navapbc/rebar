@@ -33,7 +33,7 @@ from rebar.llm.review_kernel import (
 )
 from rebar.llm.runner import Runner
 
-from . import det_floor, generation, passes, registry, sidecar, sizing
+from . import budget, checkpoints, det_floor, generation, passes, registry, sidecar, sizing
 from .container_stage import (  # noqa: F401 — re-exported for the pass1.<symbol> call sites
     _CONTAINER_MAX_WORKERS,
     CONTAINER_CRITERIA,
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 # Private aliases for the sizing helpers the moved code calls (preserve the
 # historical call sites verbatim).
 _pass1_with_ladder = sizing.pass1_with_ladder
-_shed_to_budget = sizing.shed_to_budget
+_shed_to_budget = budget.shed_to_budget
 
 
 # The minimum prompt-prefix the anthropic cache will write/read. Below this the parent-plan
@@ -316,7 +316,7 @@ def run_pass1(
         # interruptible; up to pool-width of them complete as sunk cost. The ContextVar
         # scope reaches pool workers via _submit_ctx's copy_context().
         if generation.review_cancelled():
-            cancel_plan = sizing._discovery_unit_plan(
+            cancel_plan = checkpoints._discovery_unit_plan(
                 chunk=chunk, model=cfg.model, agentic=agentic, policy_digest=policy_digest
             )
             discovery_trace.append(_trace_record(cancel_plan, "cancelled", Usage(), None))
@@ -324,14 +324,14 @@ def run_pass1(
         # The injected extra-context is part of the checkpoint identity, so it is built
         # BEFORE the cache lookup.
         extra = _chunk_extra_context(chunk, ctx, decomp_context)
-        unit_plan = sizing._discovery_unit_plan(
+        unit_plan = checkpoints._discovery_unit_plan(
             chunk=chunk,
             model=cfg.model,
             agentic=agentic,
             extra_context=extra,
             policy_digest=policy_digest,
         )
-        digest = sizing.checkpoint_identity(
+        digest = checkpoints.checkpoint_identity(
             material=material,
             chunk=chunk,
             model=cfg.model,
@@ -341,7 +341,7 @@ def run_pass1(
             code_ref=code_ref,
             topology_digest=topology_digest,
         )
-        cached = sizing.load_checkpoint(ctx, digest)
+        cached = checkpoints.load_checkpoint(ctx, digest)
         if cached is not None:
             resumed += 1
             # A checkpoint-served chunk made NO LLM call this run — zero usage records.
@@ -364,7 +364,7 @@ def run_pass1(
             content=out,
             usage=usage,
         )
-        sizing.save_checkpoint(ctx, env)
+        checkpoints.save_checkpoint(ctx, env)
         discovery_trace.append(_trace_record(unit_plan, "success", usage, env))
         return out, calls
 

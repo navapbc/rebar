@@ -32,7 +32,7 @@ _SRC = REPO_ROOT / "src" / "rebar"
 # `config_readers.py` is `config.py`'s own composition-root sibling (ticket 02b7 moved the
 # env/file-reader helpers there to clear the module-size cap). It calls `current_code_root()`
 # directly for `_read_llm_file_table`'s ambient-discovery fallback; that call is never a
-# monkeypatch target (no test patches `rebar.llm.config.current_code_root` — it's a
+# monkeypatch target (no test patches `rebar.llm.gate_context.current_code_root` — it's a
 # ContextVar-backed read, exercised via `use_code_root`/`gate_read_root`, not mocked), so
 # giving it its own import does not reproduce the silent-break mode this guard exists for.
 _CONFIG_READERS = REPO_ROOT / "src" / "rebar" / "llm" / "config_readers.py"
@@ -80,12 +80,12 @@ def test_the_audited_override_warning_names_the_module_that_holds_the_code(caplo
     attributing it to a module that no longer contains the code sends whoever greps the logs to the
     wrong file. Verified safe to re-point: that literal had exactly one occurrence repo-wide and no
     test filtered on it."""
-    from rebar.llm import config as llm_config
+    from rebar.llm import gate_context
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("REBAR_GATE_ALLOW_UNGATED", "1")
         with caplog.at_level("WARNING"):
-            llm_config.assert_gated("probe context")
+            gate_context.assert_gated("probe context")
 
     records = [r for r in caplog.records if "OUTSIDE a snapshot gate session" in r.getMessage()]
     assert records, "the override warning was not emitted"
@@ -97,36 +97,35 @@ def test_the_audited_override_warning_names_the_module_that_holds_the_code(caplo
 # ══ HELD OUT ══════════════════════════════════════════════════════════════════════════
 
 
-def test_every_moved_name_is_still_reachable_through_config() -> None:
-    """THE CONTRACT THAT KEEPS THE SUITE GREEN WITHOUT EDITING IT. Thirteen monkeypatch targets name
-    `rebar.llm.config.<moved name>`; they resolve against `config`'s module globals, so the
-    re-export is what keeps them working. A missing name here is an ImportError at collection for
-    the module-scope importers and a silently ineffective patch for the rest."""
+def test_moved_names_are_no_longer_reachable_through_config() -> None:
+    """ADR 0111: gate-context state has one canonical binding in ``rebar.llm.gate_context``."""
     from rebar.llm import config as llm_config
 
-    missing = [n for n in (*_MOVED_PUBLIC, *_MOVED_PRIVATE) if not hasattr(llm_config, n)]
-    assert missing == [], f"no longer reachable as rebar.llm.config.<name>: {missing}"
+    leaked = [n for n in (*_MOVED_PUBLIC, *_MOVED_PRIVATE) if hasattr(llm_config, n)]
+    assert leaked == [], f"still reachable as rebar.llm.config.<name>: {leaked}"
 
 
-def test_no_src_consumer_is_repointed_at_the_new_module() -> None:
-    """THE SILENT-BREAK GUARD. Repointing a consumer to `gate_context` leaves every
-    `rebar.llm.config.<name>` monkeypatch still applying to `config` while the consumer reads the
-    new module — the patch stops taking effect and its test passes while asserting nothing. Only
-    `config.py` itself (and its own `config_readers.py` composition-root sibling, ticket 02b7 —
-    see `_CONFIG_READERS` above for why that import is not a repoint) may import from
-    `gate_context`."""
+def test_src_consumers_import_gate_context_from_the_canonical_module() -> None:
+    """No source consumer may keep importing gate-context symbols through ``llm.config``."""
     offenders: list[str] = []
     for module in parsed_python_files(_SRC):
         if module.path in (_GATE_CONTEXT, _CONFIG, _CONFIG_READERS):
             continue
         for node in ast.walk(module.tree):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("gate_context"):
-                offenders.append(f"{module.path.relative_to(REPO_ROOT)}:{node.lineno}")
-            elif isinstance(node, ast.Import):
-                if any(a.name.endswith("gate_context") for a in node.names):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("llm.config"):
+                names = {a.name for a in node.names}
+                if names.intersection((*_MOVED_PUBLIC, *_MOVED_PRIVATE)):
+                    offenders.append(f"{module.path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute):
+                if (
+                    isinstance(node.value.value, ast.Name)
+                    and node.value.value.id == "config"
+                    and node.value.attr in {"llm"}
+                    and node.attr in _MOVED_PUBLIC
+                ):
                     offenders.append(f"{module.path.relative_to(REPO_ROOT)}:{node.lineno}")
     assert offenders == [], (
-        f"these repoint at gate_context instead of going through rebar.llm.config: {offenders}"
+        f"these still route gate-context symbols through rebar.llm.config: {offenders}"
     )
 
 
@@ -143,15 +142,12 @@ def test_gate_context_is_a_leaf_and_does_not_import_config() -> None:
     assert cycles == [], f"gate_context imports llm.config (cycle): {cycles}"
 
 
-def test_a_monkeypatch_on_config_still_reaches_a_real_consumer(monkeypatch) -> None:
-    """The BEHAVIOURAL proof behind the two structural guards above. `plan_review/attest.py:123`
-    does a function-level `from rebar.llm.config import current_code_sha`, so patching
-    `rebar.llm.config.current_code_sha` must still change what that consumer sees. Structure tests
-    can pass while this fails if a consumer was quietly repointed."""
-    from rebar.llm import config as llm_config
+def test_a_monkeypatch_on_gate_context_still_reaches_a_real_consumer(monkeypatch) -> None:
+    """Behavioural proof that consumers resolve the canonical gate-context module."""
+    from rebar.llm import gate_context
 
-    monkeypatch.setattr(llm_config, "current_code_sha", lambda: "deadbeef")
-    from rebar.llm.config import current_code_sha as resolved_at_call_time
+    monkeypatch.setattr(gate_context, "current_code_sha", lambda: "deadbeef")
+    from rebar.llm.gate_context import current_code_sha as resolved_at_call_time
 
     assert resolved_at_call_time() == "deadbeef"
 

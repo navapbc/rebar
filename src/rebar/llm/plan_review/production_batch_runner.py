@@ -4,7 +4,7 @@ A THIN adapter that plugs plan-review's adaptive Pass-1 finder machinery into th
 generic workflow ``BatchRunner`` seam (:mod:`rebar.llm.workflow.runners`). It owns
 NO sizing/loop/budget logic — it maps a generic :class:`BatchRunRequest` onto the
 SHARED units the bespoke orchestrator also calls
-(:func:`.orchestrator.assemble_context`, :mod:`.registry`, :func:`.pass1.run_pass1`),
+(:func:`.context_assembly.assemble_context`, :mod:`.registry`, :func:`.pass1.run_pass1`),
 so there is no duplicated algorithm (B1 AC3). See
 ``docs/design/batch-runner-seam.md`` (decisions D1-D5).
 
@@ -48,7 +48,8 @@ from rebar.llm.workflow.runners import (
 )
 
 from . import registry, sizing
-from .orchestrator import assemble_context, route_criteria
+from .context_assembly import assemble_context
+from .orchestrator import route_criteria
 from .pass1 import aggregate_usage, run_pass1
 from .registry import _PROJECT_PREFIX, _PROMPT_ID_PREFIX
 

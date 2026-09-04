@@ -1,6 +1,6 @@
 """A gate run must durably record its RUN SHAPE — tool calls, not just requests (bug aec1).
 
-``failure_usage()`` already reduces the accumulated pydantic-ai messages to the full
+``run_shape()`` already reduces the accumulated pydantic-ai messages to the full
 loop-versus-breadth signal — ``tool_calls``, ``tool_calls_distinct``,
 ``max_consecutive_repeat``, ``top_repeated_tool_calls``, plus both limits. ``record()`` then
 built its row from ``_FIELDS`` alone, which carries ``requests`` and the four token counters
@@ -13,7 +13,7 @@ Two further gaps in the same defect: the SUCCESS path never computed the shape a
 (``_extract_usage`` returns five keys), and neither row carried wall-clock duration.
 
 Every test here drives the REAL runner and then READS THE FILE, because the defect is about
-what reaches the file — asserting on ``failure_usage()``'s return in isolation is exactly what
+what reaches the file — asserting on ``run_shape()``'s return in isolation is exactly what
 the pre-aec1 suite did (``test_usage_log_repetition_a89d.py``) and it could not see the drop.
 The fixture deliberately VARIES THE PATH AXIS — success, breadth, and budget exhaustion — since
 a success-only fixture would be vacuous for a ticket whose whole point is that the failure path
@@ -33,8 +33,9 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from rebar.llm import usage_log
-from rebar.llm.config import LLMConfig, gate_session
+from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMError
+from rebar.llm.gate_context import gate_session
 from rebar.llm.runner import PydanticAIRunner, RunRequest
 
 pytestmark = pytest.mark.unit
@@ -157,7 +158,7 @@ def test_success_shape_capture_swallows_reducer_failure_and_warns(monkeypatch, c
     a failure in `run_shape`/`shape_only` must NEVER break the call path. It is swallowed with a
     single warning and leaves the authoritative `usage` dict untouched, so a reducer bug can
     never corrupt the billable figures `_extract_usage` already placed there."""
-    from rebar.llm import runner as _runner
+    from rebar.llm import runner_support
 
     def _boom(*_a, **_k):
         raise RuntimeError("reducer exploded")
@@ -166,7 +167,7 @@ def test_success_shape_capture_swallows_reducer_failure_and_warns(monkeypatch, c
     usage = {"input_tokens": 11, "output_tokens": 7}
     before = dict(usage)
     with caplog.at_level("WARNING"):
-        _runner._merge_success_run_shape(
+        runner_support._merge_success_run_shape(
             usage, [], request_limit=5, tool_calls_limit=8, call_label="op-x"
         )
     assert usage == before, "a telemetry failure must not mutate the authoritative usage dict"

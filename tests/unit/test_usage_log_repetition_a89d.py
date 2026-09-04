@@ -6,7 +6,7 @@ of legitimate work or span in a loop, and the step count provably cannot tell th
 ``tool_calls_limit = max(8, max_iter)``, so a one-tool-call-per-turn loop trips the request
 ceiling first — exactly like careful sequential work does.
 
-``failure_usage`` therefore reduces each tool call to a ``tool_name:sha256(args)[:8]``
+``run_shape`` therefore reduces each tool call to a ``tool_name:sha256(args)[:8]``
 signature and summarizes the sequence. The arguments are HASHED, never recorded, so the
 module's stated privacy contract (prompts, tool arguments and tool results are excluded
 from the durable gate-error record) is preserved — a digest plus the tool name, which is a
@@ -54,7 +54,7 @@ def _messages(calls: list[tuple[str, object]]) -> list[object]:
 
 
 def _summary(calls: list[tuple[str, object]]) -> dict:
-    return usage_log.failure_usage(_messages(calls), request_limit=240, tool_calls_limit=480)
+    return usage_log.run_shape(_messages(calls), request_limit=240, tool_calls_limit=480)
 
 
 def test_a_loop_reads_as_one_distinct_signature_repeated() -> None:
@@ -119,7 +119,7 @@ def test_unhashable_arguments_degrade_rather_than_raise() -> None:
 
 def test_no_tool_calls_yields_zeroed_signals() -> None:
     """A run that never called a tool reports zeros, not a missing key."""
-    summary = usage_log.failure_usage([], request_limit=240, tool_calls_limit=480)
+    summary = usage_log.run_shape([], request_limit=240, tool_calls_limit=480)
 
     assert summary["tool_calls"] == 0
     assert summary["tool_calls_distinct"] == 0
@@ -175,7 +175,7 @@ def test_short_all_identical_sequence_reports_none_not_a_trip() -> None:
 
 
 def test_empty_sequence_reports_none() -> None:
-    summary = usage_log.failure_usage([], request_limit=240, tool_calls_limit=480)
+    summary = usage_log.run_shape([], request_limit=240, tool_calls_limit=480)
 
     assert summary["distinct_ratio_window"] is None
 

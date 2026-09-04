@@ -9,8 +9,8 @@ from pydantic import ValidationError
 
 from rebar.llm import contracts, parity
 from rebar.llm.plan_review import orchestrator, passes, prerequisite_workflow_ops, sizing
+from rebar.llm.plan_review.decide_ops import plan_review_decide
 from rebar.llm.plan_review.det_floor import PlanContext
-from rebar.llm.plan_review.workflow_ops import plan_review_decide
 from rebar.llm.workflow.executor import StepContext
 
 

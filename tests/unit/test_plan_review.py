@@ -9,6 +9,7 @@ tests/interfaces/test_plan_review_gate.py.
 
 from __future__ import annotations
 
+import importlib
 import itertools
 from dataclasses import replace
 from pathlib import Path
@@ -20,14 +21,24 @@ from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.plan_review import (
     _verifier_cfg,
     attest,
+    budget,
+    checkpoints,
+    coach_moves,
+    container_stage,
     det_floor,
     orchestrator,
+    pass1,
     passes,
     registry,
     sidecar,
     sizing,
 )
 from rebar.llm.plan_review.det_floor import PlanContext
+from rebar.llm.review_kernel import decide as kdecide
+from rebar.llm.review_kernel import verify as kverify
+from rebar.llm.review_kernel import verify as review_verify
+
+kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
 
 
 def _ctx(description: str, *, ttype: str = "task", title: str = "T", **kw) -> PlanContext:
@@ -103,7 +114,9 @@ def test_verify_chunks_splits_over_budget_preserving_global_indices(monkeypatch)
     preserving GLOBAL indices, and every emitted chunk's estimated request fits the budget
     (the chars/4 estimate + headroom keeps each call under the window)."""
     # Shrink the window so ~one finding fits per chunk (budget just above the system reserve).
-    budget = sizing.VERIFY_SYSTEM_RESERVE_TOKENS + sizing.PER_FINDING_VERIFY_TOKENS + 50
+    budget = (
+        review_verify.VERIFY_SYSTEM_RESERVE_TOKENS + review_verify.PER_FINDING_VERIFY_TOKENS + 50
+    )
     monkeypatch.setattr(sizing, "largest_window_tokens", lambda model: budget)
     findings = [_finding(i) for i in range(6)]
     chunks, omitted = sizing.verify_request_chunks(
@@ -115,14 +128,13 @@ def test_verify_chunks_splits_over_budget_preserving_global_indices(monkeypatch)
     flat = [idx for chunk in chunks for idx, _ in chunk]
     assert flat == list(range(6))
     # Every chunk's estimated request is within budget (the safety margin is grounded).
-    from rebar.llm.plan_review import passes as _passes
     from rebar.llm.plan_review.det_floor import est_tokens
 
     for chunk in chunks:
         req = (
-            est_tokens(_passes.verify_instructions(chunk))
-            + sizing.VERIFY_SYSTEM_RESERVE_TOKENS
-            + len(chunk) * sizing.PER_FINDING_VERIFY_TOKENS
+            est_tokens(kverify.verify_instructions(chunk))
+            + review_verify.VERIFY_SYSTEM_RESERVE_TOKENS
+            + len(chunk) * review_verify.PER_FINDING_VERIFY_TOKENS
         )
         assert req <= budget, (req, budget)
 
@@ -131,7 +143,9 @@ def test_verify_chunks_omits_finding_too_big_to_verify(monkeypatch) -> None:
     """A single finding whose own request exceeds the budget at the largest reachable model
     is OMITTED from every chunk (its index returned in `omitted`) — left unverified so pass3
     routes it to INDETERMINATE, never silently dropped."""
-    budget = sizing.VERIFY_SYSTEM_RESERVE_TOKENS + sizing.PER_FINDING_VERIFY_TOKENS + 50
+    budget = (
+        review_verify.VERIFY_SYSTEM_RESERVE_TOKENS + review_verify.PER_FINDING_VERIFY_TOKENS + 50
+    )
     monkeypatch.setattr(sizing, "largest_window_tokens", lambda model: budget)
     findings = [_finding(0), _finding(1, big=True), _finding(2)]  # index 1 is oversized
     chunks, omitted = sizing.verify_request_chunks(
@@ -268,7 +282,7 @@ def test_p2_p3_fail_open_per_tool(monkeypatch, mode: str) -> None:
 
 # ── Pass-3 deterministic math ─────────────────────────────────────────────────
 def _verif(binary=None, attrs=None):
-    base_b = {q: "yes" for q in passes.GRADED_BINARY}
+    base_b = {q: "yes" for q in kdecide.GRADED_BINARY}
     base_b["cited_reference_accurate"] = "na"
     base_a = {
         "prod_impact": "high",
@@ -284,52 +298,52 @@ def _verif(binary=None, attrs=None):
 
 
 def test_pass3_validity_graded_fraction() -> None:
-    v = _verif(binary={q: "no" for q in passes.GRADED_BINARY})
-    assert passes.pass3_decide(v)["validity"] == 0.0
-    v2 = _verif(binary={q: "insufficient" for q in passes.GRADED_BINARY})
-    assert passes.pass3_decide(v2)["validity"] == 0.5
+    v = _verif(binary={q: "no" for q in kdecide.GRADED_BINARY})
+    assert kdecide.pass3_decide(v)["validity"] == 0.0
+    v2 = _verif(binary={q: "insufficient" for q in kdecide.GRADED_BINARY})
+    assert kdecide.pass3_decide(v2)["validity"] == 0.5
 
 
 def test_pass3_impact_and_priority() -> None:
-    d = passes.pass3_decide(_verif(), blocking_enabled=True)
+    d = kdecide.pass3_decide(_verif(), blocking_enabled=True)
     assert d["validity"] == 1.0 and d["impact"] == 1.0 and d["priority"] == 1.0
     assert "severity" not in d  # the impact-only label is retired from pass3_decide's output
 
 
 def test_pass3_advisory_by_default_even_at_max_priority() -> None:
     # blocking disabled (v1 default posture) ⇒ never blocks regardless of priority.
-    assert passes.pass3_decide(_verif(), blocking_enabled=False)["decision"] == "advisory"
+    assert kdecide.pass3_decide(_verif(), blocking_enabled=False)["decision"] == "advisory"
 
 
 def test_pass3_blocks_only_when_opted_in_and_over_threshold() -> None:
-    assert passes.pass3_decide(_verif(), blocking_enabled=True)["decision"] == "block"
+    assert kdecide.pass3_decide(_verif(), blocking_enabled=True)["decision"] == "block"
 
 
 def test_pass3_drops_low_validity() -> None:
     # A strict MAJORITY of the graded set is "no" (count-robust as GRADED_BINARY grows, e.g.
     # R5's na-default addition; _verif fills the remainder with "yes"), so the graded fraction
     # stays below the 0.5 bar and the finding drops.
-    n_no = len(passes.GRADED_BINARY) // 2 + 1
-    v = _verif(binary={q: "no" for q in list(passes.GRADED_BINARY)[:n_no]})
-    assert passes.pass3_decide(v)["decision"] == "dropped"
+    n_no = len(kdecide.GRADED_BINARY) // 2 + 1
+    v = _verif(binary={q: "no" for q in list(kdecide.GRADED_BINARY)[:n_no]})
+    assert kdecide.pass3_decide(v)["decision"] == "dropped"
 
 
 def test_pass3_cited_reference_veto() -> None:
     assert (
-        passes.pass3_decide(_verif(binary={"cited_reference_accurate": "no"}))["decision"]
+        kdecide.pass3_decide(_verif(binary={"cited_reference_accurate": "no"}))["decision"]
         == "dropped"
     )
 
 
 def test_pass3_indeterminate_without_verification() -> None:
-    assert passes.pass3_decide(None)["decision"] == "indeterminate"
+    assert kdecide.pass3_decide(None)["decision"] == "indeterminate"
 
 
 def test_pass3_absence_claim_veto() -> None:
     """a8e5 Component 1 (plan-review re-export): the absence-claim veto drops a finding whose
     absence premise the verifier refuted (a provision WAS found in the plan)."""
     v = _verif(binary={"claims_absence": "yes", "absence_confirmed_in_context": "no"})
-    d = passes.pass3_decide(v)
+    d = kdecide.pass3_decide(v)
     assert d["decision"] == "dropped" and d["reason"] == "veto:absence-refuted"
 
 
@@ -399,7 +413,7 @@ def test_det_hygiene_drops_subjectless_det_finding() -> None:
 def test_operator_attested_ac_texts_parses_tagged_criteria() -> None:
     """The pure DET parser extracts ONLY criteria tagged with the exact `[operator-attested]`
     token (case-insensitive), returning their criterion text (tag stripped)."""
-    from rebar.llm.plan_review.workflow_ops import operator_attested_ac_texts
+    from rebar.llm.plan_review.decide_ops import operator_attested_ac_texts
 
     desc = (
         "## Acceptance Criteria\n"
@@ -417,7 +431,7 @@ def test_enrich_operator_attested_clears_ac_unverifiable_upstream() -> None:
     BEFORE impact_plan reads it — so the hard-override 0.85 floor no longer fires. The kernel
     impact_plan math is unchanged; the fact is injected upstream."""
     from rebar.llm import review_kernel
-    from rebar.llm.plan_review.workflow_ops import enrich_operator_attested
+    from rebar.llm.plan_review.decide_ops import enrich_operator_attested
 
     desc = (
         "## Acceptance Criteria\n"
@@ -712,7 +726,7 @@ def test_review_kernel_coach_maps_findings_and_renders_deterministically() -> No
     import importlib
 
     kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
-    moves = orchestrator.MOVE_REGISTRY
+    moves = coach_moves.MOVE_REGISTRY
     notes = kcoach.coach(
         [{"id": "f1", "finding": "x"}],
         moves,
@@ -737,7 +751,7 @@ def test_move_registry_foundation_enhancement_and_no_defer() -> None:
     # REPLACES a DEFERRED_MEASUREMENT move — which must NOT exist (a blocking AC must be
     # in-session-closable). It is scoped (applies_when) to sizing/complexity/risk criteria, and
     # move 9 is sharpened to cover restating a deferred/unobservable target as an observable proxy.
-    reg = orchestrator.MOVE_REGISTRY
+    reg = coach_moves.MOVE_REGISTRY
     m10 = reg.get("10", {})
     assert "foundation" in m10.get("name", "").lower()
     assert "follow-on" in m10.get("template", "").lower(), "move 10 routes to a dependent follow-on"
@@ -766,7 +780,7 @@ _OUT_OF_LOOP_PROOF_TEMPLATE = (
 def test_population_move_template_is_locked() -> None:
     # Ticket e3cf: move 15 reframes a named instance as a sample and demands a machine-checkable
     # completeness proof. The template is LOCKED (the LLM only names {subject}) — pin it verbatim.
-    m15 = orchestrator.MOVE_REGISTRY["15"]
+    m15 = coach_moves.MOVE_REGISTRY["15"]
     assert m15["name"] == "sample, not the population"
     assert m15["template"] == _POPULATION_MOVE_TEMPLATE
     assert m15["template"].count("{subject}") == 1
@@ -776,7 +790,7 @@ def test_population_move_triggers_are_the_grounding_criteria() -> None:
     # Scoped to the criteria where a finding names one member of a population: codebase-grounding
     # (G1G2/E4/A1) + mechanism-correctness edge cases (G6). Verifiability (E6/F1) is NOT a
     # population, so it must stay out or the move fires where no enumeration exists.
-    m15 = orchestrator.MOVE_REGISTRY["15"]
+    m15 = coach_moves.MOVE_REGISTRY["15"]
     assert set(m15["applies_when"]) == {"G1G2", "E4", "G6", "A1"}
     assert not {"E6", "F1"} & set(m15["applies_when"])
 
@@ -790,17 +804,17 @@ def test_population_move_applicability_is_off_until_a_trigger_fires() -> None:
     # module has to be imported by name (same idiom as tests/unit/test_review_kernel.py).
     kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
 
-    m15 = orchestrator.MOVE_REGISTRY["15"]
+    m15 = coach_moves.MOVE_REGISTRY["15"]
     assert not kcoach.move_applies(m15, active_triggers=[])
     assert not kcoach.move_applies(m15, active_triggers=["E6", "F1"])
     for trigger in ("G1G2", "E4", "G6", "A1"):
         assert kcoach.move_applies(m15, active_triggers=[trigger]), trigger
-    assert "15" not in kcoach.applicable_moves(orchestrator.MOVE_REGISTRY, [])
-    assert "15" in kcoach.applicable_moves(orchestrator.MOVE_REGISTRY, ["G1G2"])
+    assert "15" not in kcoach.applicable_moves(coach_moves.MOVE_REGISTRY, [])
+    assert "15" in kcoach.applicable_moves(coach_moves.MOVE_REGISTRY, ["G1G2"])
 
 
 def test_out_of_loop_proof_move_is_locked_and_validated() -> None:
-    m16 = orchestrator.load_move_registry()["16"]
+    m16 = coach_moves.load_move_registry()["16"]
     assert m16["name"] == "out-of-loop proof"
     assert m16["template"] == _OUT_OF_LOOP_PROOF_TEMPLATE
     assert m16["template"].count("{subject}") == 1
@@ -816,12 +830,12 @@ def test_out_of_loop_proof_move_is_scoped_to_t15() -> None:
     import importlib
 
     kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
-    m16 = orchestrator.MOVE_REGISTRY["16"]
+    m16 = coach_moves.MOVE_REGISTRY["16"]
     assert not kcoach.move_applies(m16, active_triggers=[])
     assert not kcoach.move_applies(m16, active_triggers=["E6", "F1", "T14"])
     assert kcoach.move_applies(m16, active_triggers=["T15"])
-    assert "16" not in kcoach.applicable_moves(orchestrator.MOVE_REGISTRY, ["E6"])
-    assert "16" in kcoach.applicable_moves(orchestrator.MOVE_REGISTRY, ["T15"])
+    assert "16" not in kcoach.applicable_moves(coach_moves.MOVE_REGISTRY, ["E6"])
+    assert "16" in kcoach.applicable_moves(coach_moves.MOVE_REGISTRY, ["T15"])
 
 
 def test_t15_finding_can_select_and_render_out_of_loop_proof() -> None:
@@ -830,7 +844,7 @@ def test_t15_finding_can_select_and_render_out_of_loop_proof() -> None:
     kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
     notes = kcoach.coach(
         [{"id": "t15-finding", "finding": "x", "criteria": ["T15"]}],
-        orchestrator.MOVE_REGISTRY,
+        coach_moves.MOVE_REGISTRY,
         pick=lambda _instructions, _applicable: [
             {
                 "move_id": "16",
@@ -857,10 +871,10 @@ def test_non_t15_finding_cannot_select_out_of_loop_proof(criteria: list[str]) ->
     import importlib
 
     kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
-    assert orchestrator.MOVE_REGISTRY["16"]["applies_when"] == ["T15"]
+    assert coach_moves.MOVE_REGISTRY["16"]["applies_when"] == ["T15"]
     notes = kcoach.coach(
         [{"id": "other-finding", "finding": "x", "criteria": criteria}],
-        orchestrator.MOVE_REGISTRY,
+        coach_moves.MOVE_REGISTRY,
         pick=lambda _instructions, _applicable: [
             {
                 "move_id": "16",
@@ -879,7 +893,7 @@ def test_move_registry_matches_docs_table() -> None:
 
     doc = (REPO_ROOT / "docs" / "plan-review-gate.md").read_text()
     rows = dict(re.findall(r"^\|\s*(\d+)\s*\|[^|]+\|\s*\"(.+?)\"\s*\|$", doc, re.MULTILINE))
-    reg = orchestrator.MOVE_REGISTRY
+    reg = coach_moves.MOVE_REGISTRY
     assert rows, "no move-table rows parsed from the doc"
     for mid, move in reg.items():
         assert rows.get(mid) == move["template"], f"doc row {mid} != MOVE_REGISTRY template"
@@ -893,20 +907,20 @@ def test_load_move_registry_merges_project_extensions(tmp_path) -> None:
         ' "bad": {"name": "no placeholder", "template": "no subject slot"}}',
         encoding="utf-8",
     )
-    reg = orchestrator.load_move_registry(repo_root=str(tmp_path))
+    reg = coach_moves.load_move_registry(repo_root=str(tmp_path))
     assert "1" in reg  # built-ins retained
     assert reg["99"]["name"] == "custom move"  # project move added
     assert "bad" not in reg  # rejected: template lacks {subject}
 
 
 def test_subject_validator_accepts_noun_phrase() -> None:
-    assert passes._validate_subject("the retry/timeout policy") == "the retry/timeout policy"
+    assert kcoach.validate_subject("the retry/timeout policy") == "the retry/timeout policy"
 
 
 def test_subject_validator_rejects_imperative_code_and_overlong() -> None:
-    assert passes._validate_subject("Add a retry policy") is None
-    assert passes._validate_subject("call foo()") is None
-    assert passes._validate_subject("a " * 20) is None
+    assert kcoach.validate_subject("Add a retry policy") is None
+    assert kcoach.validate_subject("call foo()") is None
+    assert kcoach.validate_subject("a " * 20) is None
 
 
 # ── attestation + material binding ────────────────────────────────────────────
@@ -1154,37 +1168,35 @@ def test_p9_container_closed_children_do_not_poison() -> None:
 
 
 def test_material_fingerprint_changes_on_material_edit() -> None:
-    a = orchestrator.material_fingerprint(_ctx(_GOOD_AC))
-    b = orchestrator.material_fingerprint(_ctx(_GOOD_AC + "\nNEW material content."))
+    a = pass1.material_fingerprint(_ctx(_GOOD_AC))
+    b = pass1.material_fingerprint(_ctx(_GOOD_AC + "\nNEW material content."))
     assert a != b
 
 
 def test_material_fingerprint_stable_for_same_content() -> None:
-    assert orchestrator.material_fingerprint(_ctx(_GOOD_AC)) == orchestrator.material_fingerprint(
-        _ctx(_GOOD_AC)
-    )
+    assert pass1.material_fingerprint(_ctx(_GOOD_AC)) == pass1.material_fingerprint(_ctx(_GOOD_AC))
 
 
 def test_material_fingerprint_invariant_under_checkbox_flip() -> None:
     """Checkbox STATE is progress metadata, not plan material (bug 330c): the AC-box
     close precheck (433c) requires flipping boxes before close, so a flip must not
     stale the attestation — while any item-TEXT edit still must."""
-    a = orchestrator.material_fingerprint(_ctx(_GOOD_AC))
-    b = orchestrator.material_fingerprint(_ctx(_GOOD_AC.replace("- [ ]", "- [x]")))
-    c = orchestrator.material_fingerprint(_ctx(_GOOD_AC.replace("- [ ]", "- [X]")))
+    a = pass1.material_fingerprint(_ctx(_GOOD_AC))
+    b = pass1.material_fingerprint(_ctx(_GOOD_AC.replace("- [ ]", "- [x]")))
+    c = pass1.material_fingerprint(_ctx(_GOOD_AC.replace("- [ ]", "- [X]")))
     assert a == b == c
 
 
 def test_material_fingerprint_checkbox_flip_star_bullets_and_indent() -> None:
     star = "## Acceptance Criteria\n  * [ ] alpha\n\t* [x] beta\n"
-    a = orchestrator.material_fingerprint(_ctx(star))
-    b = orchestrator.material_fingerprint(_ctx(star.replace("* [ ]", "* [x]")))
+    a = pass1.material_fingerprint(_ctx(star))
+    b = pass1.material_fingerprint(_ctx(star.replace("* [ ]", "* [x]")))
     assert a == b
 
 
 def test_material_fingerprint_item_text_edit_still_changes() -> None:
-    a = orchestrator.material_fingerprint(_ctx(_GOOD_AC))
-    b = orchestrator.material_fingerprint(
+    a = pass1.material_fingerprint(_ctx(_GOOD_AC))
+    b = pass1.material_fingerprint(
         _ctx(_GOOD_AC.replace("another check", "another different check"))
     )
     assert a != b
@@ -1219,9 +1231,9 @@ def test_material_fingerprint_distinguishes_declared_none_without_legacy_churn()
         },
     )
 
-    assert orchestrator.material_fingerprint(undeclared) == "5eb256d6e1db8ce8"
-    assert orchestrator.material_fingerprint(paths) == "fc243d36aeb93a46"
-    assert orchestrator.material_fingerprint(declared_none) not in {
+    assert pass1.material_fingerprint(undeclared) == "5eb256d6e1db8ce8"
+    assert pass1.material_fingerprint(paths) == "fc243d36aeb93a46"
+    assert pass1.material_fingerprint(declared_none) not in {
         "5eb256d6e1db8ce8",
         "fc243d36aeb93a46",
     }
@@ -1275,8 +1287,10 @@ def test_checkpoint_save_resume_and_material_invalidation(tmp_path) -> None:
 
     ctx = _ctx(_GOOD_AC, repo_root=str(tmp_path))
     chunk = [{"id": "E2"}]
-    digest = sizing.checkpoint_identity(material="matFP", chunk=chunk, model="m", agentic=False)
-    assert sizing.load_checkpoint(ctx, digest) is None  # cold miss
+    digest = checkpoints.checkpoint_identity(
+        material="matFP", chunk=chunk, model="m", agentic=False
+    )
+    assert checkpoints.load_checkpoint(ctx, digest) is None  # cold miss
     env = CheckpointEnvelope(
         unit_id="single:E2",
         kind="success",
@@ -1285,12 +1299,14 @@ def test_checkpoint_save_resume_and_material_invalidation(tmp_path) -> None:
         content=[{"finding": "x", "criteria": ["E2"]}],
         usage=Usage(),
     )
-    sizing.save_checkpoint(ctx, env)
-    got = sizing.load_checkpoint(ctx, digest)  # resume
+    checkpoints.save_checkpoint(ctx, env)
+    got = checkpoints.load_checkpoint(ctx, digest)  # resume
     assert got and got.content[0]["finding"] == "x"
     # A material edit (different fingerprint) ⇒ a different identity ⇒ cache miss.
-    other = sizing.checkpoint_identity(material="OTHER_FP", chunk=chunk, model="m", agentic=False)
-    assert sizing.load_checkpoint(ctx, other) is None
+    other = checkpoints.checkpoint_identity(
+        material="OTHER_FP", chunk=chunk, model="m", agentic=False
+    )
+    assert checkpoints.load_checkpoint(ctx, other) is None
 
 
 def test_concurrent_save_checkpoint_same_digest_loses_no_writer(
@@ -1316,7 +1332,9 @@ def test_concurrent_save_checkpoint_same_digest_loses_no_writer(
 
     ctx = _ctx(_GOOD_AC, repo_root=str(tmp_path))
     chunk = [{"id": "E2"}]
-    digest = sizing.checkpoint_identity(material="matFP", chunk=chunk, model="m", agentic=False)
+    digest = checkpoints.checkpoint_identity(
+        material="matFP", chunk=chunk, model="m", agentic=False
+    )
 
     def _env(finding: str) -> CheckpointEnvelope:
         return CheckpointEnvelope(
@@ -1343,7 +1361,7 @@ def test_concurrent_save_checkpoint_same_digest_loses_no_writer(
     results: dict[str, bool] = {}
 
     def worker(name: str, finding: str) -> None:
-        results[name] = sizing.save_checkpoint(ctx, _env(finding))
+        results[name] = checkpoints.save_checkpoint(ctx, _env(finding))
 
     threads = [
         threading.Thread(target=worker, args=("A", "from-A")),
@@ -1356,7 +1374,7 @@ def test_concurrent_save_checkpoint_same_digest_loses_no_writer(
 
     assert results == {"A": True, "B": True}, f"a concurrent writer lost its checkpoint: {results}"
     cache = tmp_path / ".rebar" / "cache" / "plan-review" / ctx.ticket_id
-    loaded = sizing.load_checkpoint(ctx, digest)
+    loaded = checkpoints.load_checkpoint(ctx, digest)
     assert loaded is not None and loaded.content[0]["finding"] in {"from-A", "from-B"}
     assert not list(cache.glob(".tmp-*")), "atomic tmp+rename must leave no residue"
 
@@ -1371,14 +1389,14 @@ def test_centrality_from_ticket_graph() -> None:
     }
     children = [{"ticket_id": "k1"}, {"ticket_id": "k2"}]
     # 2 blast edges + 2 children = 4/10 = 0.4
-    assert orchestrator._centrality(state, children) == 0.4
-    assert orchestrator._centrality({}, []) == 0.0
+    assert budget.centrality(state, children) == 0.4
+    assert budget.centrality({}, []) == 0.0
 
 
 def test_budget_cap_scales_with_centrality(monkeypatch) -> None:
     monkeypatch.setenv("REBAR_PLAN_REVIEW_BUDGET", "1.0")
-    low = sizing.plan_budget_cap(_ctx(_GOOD_AC))  # centrality 0 → 1.0
-    high = sizing.plan_budget_cap(_ctx(_GOOD_AC, centrality=1.0))  # → 2.0
+    low = budget.plan_budget_cap(_ctx(_GOOD_AC))  # centrality 0 → 1.0
+    high = budget.plan_budget_cap(_ctx(_GOOD_AC, centrality=1.0))  # → 2.0
     assert low == 1.0 and high == 2.0
 
 
@@ -1404,14 +1422,14 @@ class _SeqRunner:
 
 
 def test_is_context_limit_error_and_ladder() -> None:
-    assert orchestrator._is_context_limit_error(Exception("prompt is too long: 1.2M tokens"))
-    assert not orchestrator._is_context_limit_error(Exception("connection reset"))
-    assert orchestrator._models_at_or_above("claude-haiku-4-5") == [
+    assert sizing.is_context_limit_error(Exception("prompt is too long: 1.2M tokens"))
+    assert not sizing.is_context_limit_error(Exception("connection reset"))
+    assert sizing.models_at_or_above("claude-haiku-4-5") == [
         "claude-haiku-4-5",
         "claude-sonnet-4-6",
         "claude-opus-4-8",
     ]
-    assert orchestrator._models_at_or_above("claude-opus-4-8") == ["claude-opus-4-8"]
+    assert sizing.models_at_or_above("claude-opus-4-8") == ["claude-opus-4-8"]
 
 
 def test_size_ladder_batch_falls_back_to_one_per_call() -> None:
@@ -1425,7 +1443,7 @@ def test_size_ladder_batch_falls_back_to_one_per_call() -> None:
         ]
     )
     events: list = []
-    out, _calls = orchestrator._pass1_with_ladder(
+    out, _calls = sizing.pass1_with_ladder(
         runner, _fake_cfg(), "plan", [{"id": "E2"}, {"id": "E5"}], False, events
     )
     assert sorted(f["finding"] for f in out) == ["a", "b"]
@@ -1436,7 +1454,7 @@ def test_size_ladder_too_big_emits_blocking_failure_finding() -> None:
     # A single criterion that context-limits at EVERY model → a too-big failure finding.
     runner = _SeqRunner([Exception("maximum context length exceeded")])
     events: list = []
-    out, _calls = orchestrator._pass1_with_ladder(
+    out, _calls = sizing.pass1_with_ladder(
         runner, _fake_cfg(), "plan", [{"id": "E2"}], False, events
     )
     assert len(out) == 1 and out[0]["_too_big"] is True and out[0]["criteria"] == ["E2"]
@@ -1445,12 +1463,12 @@ def test_size_ladder_too_big_emits_blocking_failure_finding() -> None:
 
 def test_largest_window_uses_configured_model_window() -> None:
     # A haiku-only deployment caps P8 at haiku's window, not the ladder's 1M top.
-    assert orchestrator.largest_window_tokens("claude-haiku-4-5") == 1_000_000  # escalates up
-    assert orchestrator.largest_window_tokens("claude-opus-4-8") == 1_000_000
-    assert orchestrator.largest_window_tokens(None) == sizing.MODEL_LADDER[-1][1]
+    assert sizing.largest_window_tokens("claude-haiku-4-5") == 1_000_000  # escalates up
+    assert sizing.largest_window_tokens("claude-opus-4-8") == 1_000_000
+    assert sizing.largest_window_tokens(None) == sizing.MODEL_LADDER[-1][1]
     # A model the ladder cannot LOCATE has no known window, so the honest answer is the
     # conservative one — the ladder MINIMUM. Returning the maximum made P8 under-block.
-    assert orchestrator.largest_window_tokens("some-unknown-model") == min(
+    assert sizing.largest_window_tokens("some-unknown-model") == min(
         w for _, w in sizing.MODEL_LADDER
     )
 
@@ -1483,7 +1501,7 @@ class _ModelRecordingRunner:
 def test_unlocated_primary_start_rung_is_the_primary_itself() -> None:
     # The only proposed rung is the operator's own model: there is no rung to climb onto, and
     # crucially no SMALLER-window, different-provider rung proposed as an "escalation".
-    rungs = orchestrator._models_at_or_above(_UNLOCATED_PRIMARY)
+    rungs = sizing.models_at_or_above(_UNLOCATED_PRIMARY)
     assert rungs == [_UNLOCATED_PRIMARY]
     assert not any("claude-" in name for name in rungs)
 
@@ -1491,10 +1509,10 @@ def test_unlocated_primary_start_rung_is_the_primary_itself() -> None:
 def test_unlocated_primary_window_is_the_ladder_minimum() -> None:
     # Assert the identity of the window (the ladder MINIMUM), not just "not the maximum":
     # MODEL_LADDER's sonnet and opus rungs share 1_000_000, so a bare inequality is weak.
-    assert orchestrator.largest_window_tokens(_UNLOCATED_PRIMARY) == min(
+    assert sizing.largest_window_tokens(_UNLOCATED_PRIMARY) == min(
         w for _, w in sizing.MODEL_LADDER
     )
-    assert orchestrator.largest_window_tokens(_UNLOCATED_PRIMARY) < sizing.MODEL_LADDER[-1][1]
+    assert sizing.largest_window_tokens(_UNLOCATED_PRIMARY) < sizing.MODEL_LADDER[-1][1]
 
 
 def test_size_ladder_unlocated_primary_never_leaves_the_operator_model() -> None:
@@ -1504,17 +1522,15 @@ def test_size_ladder_unlocated_primary_never_leaves_the_operator_model() -> None
     runner = _ModelRecordingRunner()
     cfg = replace(_fake_cfg(), model=_UNLOCATED_PRIMARY)
     events: list = []
-    out, _calls = orchestrator._pass1_with_ladder(
-        runner, cfg, "plan", [{"id": "E2"}], False, events
-    )
+    out, _calls = sizing.pass1_with_ladder(runner, cfg, "plan", [{"id": "E2"}], False, events)
     assert len(out) == 1 and out[0]["_too_big"] is True and out[0]["criteria"] == ["E2"]
     assert runner.models_seen == [_UNLOCATED_PRIMARY, _UNLOCATED_PRIMARY]
 
 
 def test_located_anthropic_primary_start_rung_is_unchanged() -> None:
     # Back-compat control: a primary the ladder CAN locate is untouched by the fix.
-    assert orchestrator._models_at_or_above("anthropic:claude-opus-4-8") == ["claude-opus-4-8"]
-    assert orchestrator._models_at_or_above(None) == [n for n, _w in sizing.MODEL_LADDER]
+    assert sizing.models_at_or_above("anthropic:claude-opus-4-8") == ["claude-opus-4-8"]
+    assert sizing.models_at_or_above(None) == [n for n, _w in sizing.MODEL_LADDER]
 
 
 # ── bug 1157: a rung that buys no additional context is not an escalation ────────────
@@ -1587,9 +1603,7 @@ def test_size_ladder_sonnet_primary_never_pays_for_the_no_op_opus_retry() -> Non
     runner = _ModelRecordingRunner()
     cfg = replace(_fake_cfg(), model="claude-sonnet-4-6")
     events: list = []
-    out, _calls = orchestrator._pass1_with_ladder(
-        runner, cfg, "plan", [{"id": "E2"}], False, events
-    )
+    out, _calls = sizing.pass1_with_ladder(runner, cfg, "plan", [{"id": "E2"}], False, events)
     assert runner.models_seen == ["claude-sonnet-4-6", "claude-sonnet-4-6"]
     assert not any("opus" in str(m) for m in runner.models_seen)
     # The genuine outcome is still reported — the criterion really does not fit.
@@ -1602,9 +1616,7 @@ def test_size_ladder_haiku_primary_still_escalates_onto_sonnet() -> None:
     runner = _ModelRecordingRunner()
     cfg = replace(_fake_cfg(), model="claude-haiku-4-5")
     events: list = []
-    out, _calls = orchestrator._pass1_with_ladder(
-        runner, cfg, "plan", [{"id": "E2"}], False, events
-    )
+    out, _calls = sizing.pass1_with_ladder(runner, cfg, "plan", [{"id": "E2"}], False, events)
     assert runner.models_seen == [
         "claude-haiku-4-5",  # the batch call
         "claude-haiku-4-5",  # single-criterion retry at the primary
@@ -1767,7 +1779,7 @@ def test_container_loop_per_child_and_too_big_pairing() -> None:
     )
     g3 = registry.by_id()["G3"]
     cov: dict = {}
-    out, _calls = orchestrator._run_container(ctx, _fake_cfg(), fr, [g3], cov)
+    out, _calls = container_stage._run_container(ctx, _fake_cfg(), fr, [g3], cov)
     # c1 pairing fits → a per-child finding tagged with the child; c2 is too-big → a
     # failure finding citing the oversized pairing.
     assert any(f.get("_container_child") == "c1" for f in out)
@@ -1864,7 +1876,7 @@ def test_container_warm_then_fan_out_runs_each_pairing_once() -> None:
     g3 = registry.by_id()["G3"]
     runner = _PairingRunner()
     cov: dict = {}
-    out, _calls = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
+    out, _calls = container_stage._run_container(ctx, _fake_cfg(), runner, [g3], cov)
     assert runner.calls == 3  # 1 warm + 2 fanned-out, each pairing once
     assert len([f for f in out if f.get("_container_child")]) == 3
     assert cov["container"]["warmed"] is True
@@ -1879,7 +1891,7 @@ def test_container_skips_warm_below_cache_floor() -> None:
     g3 = registry.by_id()["G3"]
     runner = _PairingRunner()
     cov: dict = {}
-    out, _calls = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
+    out, _calls = container_stage._run_container(ctx, _fake_cfg(), runner, [g3], cov)
     assert runner.calls == 3
     assert cov["container"]["warmed"] is False
     assert len([f for f in out if f.get("_container_child")]) == 3
@@ -1894,7 +1906,7 @@ def test_container_warm_systemic_failure_aborts() -> None:
     g3 = registry.by_id()["G3"]
     runner = _PairingRunner(fail_first="systemic")
     with pytest.raises(LLMUnavailableError):
-        orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], {})
+        container_stage._run_container(ctx, _fake_cfg(), runner, [g3], {})
     assert runner.calls == 1  # aborted at the warm call; no fan-out
 
 
@@ -1905,7 +1917,7 @@ def test_container_warm_nonsystemic_failure_degrades_to_direct_fan_out() -> None
     g3 = registry.by_id()["G3"]
     runner = _PairingRunner(fail_first="nonsystemic")
     cov: dict = {}
-    out, _calls = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
+    out, _calls = container_stage._run_container(ctx, _fake_cfg(), runner, [g3], cov)
     assert runner.calls == 4  # 1 failed warm + 3 in the pool (the failed pairing re-runs)
     assert cov["container"]["warmed"] is False
     assert len([f for f in out if f.get("_container_child")]) == 3  # no pairing dropped
@@ -1918,7 +1930,7 @@ def test_container_merges_g3_g4_into_one_call_per_child() -> None:
     container = [registry.by_id()["G3"], registry.by_id()["G4"]]
     runner = _PairingRunner()
     cov: dict = {}
-    orchestrator._run_container(ctx, _fake_cfg(), runner, container, cov)
+    container_stage._run_container(ctx, _fake_cfg(), runner, container, cov)
     assert runner.calls == 3  # one merged call per child, NOT 2 per child (would be 6)
     assert cov["container"]["pairings_evaluated"] == 3
 
@@ -1968,7 +1980,7 @@ def test_container_bin_packs_small_children_into_fewer_calls() -> None:
     container = [registry.by_id()["G3"], registry.by_id()["G4"]]
     runner = _PairingRunner()
     cov: dict = {}
-    orchestrator._run_container(ctx, _fake_cfg(), runner, container, cov)
+    container_stage._run_container(ctx, _fake_cfg(), runner, container, cov)
     assert cov["container"]["bins"] == 1  # 4 small children packed into a single bin
     assert runner.calls == 1  # ONE call for the whole bin (< 4)
     assert cov["container"]["pairings_evaluated"] == 1
@@ -2053,7 +2065,7 @@ def test_container_oversized_child_keeps_too_big_finding() -> None:
     )
     container = [registry.by_id()["G3"], registry.by_id()["G4"]]
     cov: dict = {}
-    out, _calls = orchestrator._run_container(ctx, _fake_cfg(), _PairingRunner(), container, cov)
+    out, _calls = container_stage._run_container(ctx, _fake_cfg(), _PairingRunner(), container, cov)
     assert any("too big" in f["finding"].lower() and "big" in f["finding"] for f in out)
     assert cov["container"]["bins"] == 1  # only the small child's bin runs
 
@@ -2065,10 +2077,10 @@ def test_container_floor_reflects_packed_bins_and_zero_without_container() -> No
     ctx = _ctx(_GOOD_AC, ttype="epic", children=children, largest_window_tokens=1_000_000)
     chunks = [[{"id": "E2"}]]
     cov: dict = {}
-    sizing.shed_to_budget(ctx, chunks, [], [{"id": "G3"}, {"id": "G4"}], cov)
-    assert cov["budget"]["container_floor_usd"] == round(1 * sizing.COST_AGENT_USD, 4)  # 1 bin
+    budget.shed_to_budget(ctx, chunks, [], [{"id": "G3"}, {"id": "G4"}], cov)
+    assert cov["budget"]["container_floor_usd"] == round(1 * budget.COST_AGENT_USD, 4)  # 1 bin
     cov2: dict = {}
-    sizing.shed_to_budget(ctx, chunks, [], [], cov2)  # no container criteria
+    budget.shed_to_budget(ctx, chunks, [], [], cov2)  # no container criteria
     assert cov2["budget"]["container_floor_usd"] == 0.0
 
 
@@ -2085,7 +2097,7 @@ def test_budget_cap_never_sheds_container_criteria() -> None:
         agent = [{"id": "T8"}, {"id": "G6"}]  # an overlay + a core agent criterion
         container = [{"id": "G3"}, {"id": "G4"}]
         cov: dict = {}
-        kept_agent, kept_container, shed = sizing.shed_to_budget(ctx, chunks, agent, container, cov)
+        kept_agent, kept_container, shed = budget.shed_to_budget(ctx, chunks, agent, container, cov)
         assert {c["id"] for c in kept_container} == {"G3", "G4"}  # container survives
         assert {c["id"] for c in shed}.isdisjoint({"G3", "G4"})  # nothing container shed
         assert cov["budget"]["container_never_shed"] is True
@@ -2112,13 +2124,13 @@ def test_cap_override_is_used_verbatim_and_never_centrality_scaled() -> None:
     ctx = _cap_override_ctx()
     chunks = [[{"id": "E2"}]]
     cov: dict = {}
-    sizing.shed_to_budget(ctx, chunks, [], [], cov, 0.25)
+    budget.shed_to_budget(ctx, chunks, [], [], cov, 0.25)
     assert cov["budget"]["cap_usd"] == 0.25  # NOT 0.25 * (1 + centrality)
     assert cov["budget"]["cap_source"] == "override"
     # ...and the computed cap for the same ctx IS scaled, so the two genuinely differ.
     cov_computed: dict = {}
-    sizing.shed_to_budget(ctx, chunks, [], [], cov_computed)
-    assert cov_computed["budget"]["cap_usd"] == sizing.plan_budget_cap(ctx)
+    budget.shed_to_budget(ctx, chunks, [], [], cov_computed)
+    assert cov_computed["budget"]["cap_usd"] == budget.plan_budget_cap(ctx)
     assert cov_computed["budget"]["cap_source"] == "computed"
 
 
@@ -2127,10 +2139,10 @@ def test_cap_override_below_computed_cap_sheds_what_the_computed_cap_kept() -> N
     chunks = [[{"id": "E2"}]]
     agent = [{"id": "T8"}, {"id": "G6"}]
     cov_computed: dict = {}
-    kept_computed, _c, shed_computed = sizing.shed_to_budget(ctx, chunks, agent, [], cov_computed)
+    kept_computed, _c, shed_computed = budget.shed_to_budget(ctx, chunks, agent, [], cov_computed)
     assert shed_computed == [] and len(kept_computed) == 2  # the generous computed cap keeps both
     cov: dict = {}
-    kept, _c2, shed = sizing.shed_to_budget(ctx, chunks, agent, [], cov, 0.0)
+    kept, _c2, shed = budget.shed_to_budget(ctx, chunks, agent, [], cov, 0.0)
     assert kept == [] and {c["id"] for c in shed} == {"T8", "G6"}
 
 
@@ -2139,7 +2151,7 @@ def test_cap_override_zero_is_a_real_cap_not_absent() -> None:
     computed cap — the exact trap this seam exists to avoid."""
     ctx = _cap_override_ctx()
     cov: dict = {}
-    sizing.shed_to_budget(ctx, [[{"id": "E2"}]], [], [], cov, 0.0)
+    budget.shed_to_budget(ctx, [[{"id": "E2"}]], [], [], cov, 0.0)
     assert cov["budget"]["cap_usd"] == 0.0
     assert cov["budget"]["cap_source"] == "override"
 
@@ -2175,7 +2187,7 @@ def test_ticket_graph_blob_includes_parent_children_links() -> None:
         },
         children=[{"ticket_id": "c1", "title": "child one"}],
     )
-    blob = orchestrator._ticket_graph_blob(ctx)
+    blob = pass1._ticket_graph_blob(ctx)
     assert "parent: ep01" in blob and "c1: child one" in blob and "relates_to -> log01" in blob
 
 

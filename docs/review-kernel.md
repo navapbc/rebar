@@ -53,7 +53,7 @@ A gate consumes the kernel for Pass-2/3/4 and supplies these per-gate plug-point
 4. **The verify-prompt preamble** — the verifier's system prompt; it **embeds the
    `VERIFIER_RULES_SCAFFOLD`** (below). Plan-review: `reviewers/plan_review_verifier*.md`.
 5. **The move catalog** — the Pass-4 moves (their CONTENT). Plan-review:
-   `passes.MOVE_REGISTRY` (a registry INSTANCE of the kernel schema). Code review
+   `coach_moves.MOVE_REGISTRY` (a registry INSTANCE of the kernel schema). Code review
    supplies code moves.
 
 The per-criterion threshold/posture LOOKUP is a consumer concern too:

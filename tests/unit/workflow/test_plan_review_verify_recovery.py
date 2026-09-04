@@ -20,8 +20,9 @@ from rebar.llm.config import DEFAULT_MAX_TOKENS, LLMConfig
 from rebar.llm.plan_review import orchestrator
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.prompting import prompts
-from rebar.llm.runner import FakeRunner, effective_max_iterations, effective_max_tokens
-from rebar.llm.workflow import gate_dispatch
+from rebar.llm.runner import FakeRunner
+from rebar.llm.structured_run import effective_max_iterations, effective_max_tokens
+from rebar.llm.workflow import gate_dispatch, plan_review_recovery
 from rebar.llm.workflow.executor import StepContext
 from rebar.llm.workflow.runs import RunnerAgentStep
 
@@ -244,7 +245,7 @@ def test_recover_verify_failure_preserves_findings_and_does_not_block_falsely() 
             _succeeded("finders", {"findings": [{"finding": "uses A1", "criteria": ["A1"]}]}),
         ]
     )
-    verdict = gate_dispatch._recover_plan_review_verify_failure(
+    verdict = plan_review_recovery._recover_plan_review_verify_failure(
         rec, LLMConfig(runner="fake"), error="agent exceeded its step budget"
     )
     assert verdict is not None
@@ -258,7 +259,9 @@ def test_recover_returns_none_when_finders_did_not_run() -> None:
     """No finders output → a genuine LLM-tier failure (not verify-only) → caller degrades."""
     rec = _rec([{"status": "succeeded", "frame_key": "precheck", "outputs": {"canonical_id": "T"}}])
     assert (
-        gate_dispatch._recover_plan_review_verify_failure(rec, LLMConfig(runner="fake"), error="x")
+        plan_review_recovery._recover_plan_review_verify_failure(
+            rec, LLMConfig(runner="fake"), error="x"
+        )
         is None
     )
 
@@ -287,17 +290,21 @@ def test_collect_step_ids_includes_nested_branch_steps() -> None:
     live inside the review branch), so the contract check sees the WHOLE workflow, not just the
     top-level steps."""
     doc = gate_dispatch._gate_doc("plan-review", None)
-    ids = gate_dispatch._collect_step_ids(doc.get("steps"))
-    for nested in (gate_dispatch.STEP_VERIFY, gate_dispatch.STEP_DECIDE, gate_dispatch.STEP_COACH):
+    ids = plan_review_recovery._collect_step_ids(doc.get("steps"))
+    for nested in (
+        plan_review_recovery.STEP_VERIFY,
+        plan_review_recovery.STEP_DECIDE,
+        plan_review_recovery.STEP_COACH,
+    ):
         assert nested in ids, f"{nested} (a branch-nested step) must be collected"
-    assert gate_dispatch._PLAN_REVIEW_REQUIRED_STEP_IDS <= ids
+    assert plan_review_recovery._PLAN_REVIEW_REQUIRED_STEP_IDS <= ids
 
 
 def test_validate_gate_step_ids_passes_on_real_doc() -> None:
     """The packaged gate doc satisfies the contract (no raise) — a guard against a false alarm."""
     doc = gate_dispatch._gate_doc("plan-review", None)
-    gate_dispatch._validate_gate_step_ids(
-        doc, gate_dispatch._PLAN_REVIEW_REQUIRED_STEP_IDS, gate_name="plan-review"
+    plan_review_recovery._validate_gate_step_ids(
+        doc, plan_review_recovery._PLAN_REVIEW_REQUIRED_STEP_IDS, gate_name="plan-review"
     )
 
 
@@ -307,12 +314,12 @@ def test_validate_gate_step_ids_raises_on_renamed_step() -> None:
     import copy
 
     drifted = copy.deepcopy(gate_dispatch._gate_doc("plan-review", None))
-    _rename_all_steps(drifted, gate_dispatch.STEP_DECIDE, "decide_RENAMED")
-    with pytest.raises(gate_dispatch.GateContractError) as exc:
-        gate_dispatch._validate_gate_step_ids(
-            drifted, gate_dispatch._PLAN_REVIEW_REQUIRED_STEP_IDS, gate_name="plan-review"
+    _rename_all_steps(drifted, plan_review_recovery.STEP_DECIDE, "decide_RENAMED")
+    with pytest.raises(plan_review_recovery.GateContractError) as exc:
+        plan_review_recovery._validate_gate_step_ids(
+            drifted, plan_review_recovery._PLAN_REVIEW_REQUIRED_STEP_IDS, gate_name="plan-review"
         )
-    assert gate_dispatch.STEP_DECIDE in str(exc.value)
+    assert plan_review_recovery.STEP_DECIDE in str(exc.value)
 
 
 def test_produce_plan_review_verdict_raises_loudly_on_step_rename(monkeypatch) -> None:
@@ -322,7 +329,7 @@ def test_produce_plan_review_verdict_raises_loudly_on_step_rename(monkeypatch) -
     import copy
 
     drifted = copy.deepcopy(gate_dispatch._gate_doc("plan-review", None))
-    _rename_all_steps(drifted, gate_dispatch.STEP_PRECHECK, "precheck_RENAMED")
+    _rename_all_steps(drifted, plan_review_recovery.STEP_PRECHECK, "precheck_RENAMED")
     monkeypatch.setattr(gate_dispatch, "_gate_doc", lambda name, repo_root: drifted)
 
     class _StubRunner:
@@ -332,7 +339,7 @@ def test_produce_plan_review_verdict_raises_loudly_on_step_rename(monkeypatch) -
             return None
 
     ctx = SimpleNamespace(ticket_id="T-1")
-    with pytest.raises(gate_dispatch.GateContractError):
+    with pytest.raises(plan_review_recovery.GateContractError):
         gate_dispatch.produce_plan_review_verdict(
             ctx, LLMConfig(runner="fake"), runner=_StubRunner(), advisory_cap=5, repo_root=None
         )

@@ -146,7 +146,7 @@ def test_typed_error_carries_the_repetition_diagnostic():
 
 def test_runaway_warning_names_the_loop_and_merges_run_counters(caplog):
     """interpret_failure's OWN typed branch: a WARNING that names the runaway (never a
-    provider-failure line), and failure_usage's run counters merged into the guard's
+    provider-failure line), and run_shape's run counters merged into the guard's
     raise-time diagnostic rather than replacing it."""
     counter = {"n": 0}
     cfg = _cfg(max_iterations=200)
@@ -162,7 +162,7 @@ def test_runaway_warning_names_the_loop_and_merges_run_counters(caplog):
         "a runaway must never be reported as a provider failure"
     )
     diagnostic = excinfo.value.diagnostic
-    assert diagnostic.get("requests"), "failure_usage counters must be merged in"
+    assert diagnostic.get("requests"), "run_shape counters must be merged in"
     assert diagnostic.get("tool_calls"), "raise-time tool-call count must survive the merge"
 
 

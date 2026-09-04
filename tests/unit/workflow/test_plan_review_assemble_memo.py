@@ -2,10 +2,10 @@
 (rancid-vane-wreak).
 
 Each plan-review workflow op (``precheck`` / ``assemble_criteria`` / ``verify_inputs`` /
-``coach_inputs``) independently calls ``orchestrator.assemble_context``, an N+1 store read
+``coach_inputs``) independently calls ``context_assembly.assemble_context``, an N+1 store read
 (``show_ticket`` + ``list_tickets(parent=)`` + one ``show_ticket`` per child). Pre-change one
 gate run re-assembled the graph ~4× → ~4·(2+K) reads (K = direct children). The fix wraps the
-run in :func:`orchestrator.assemble_context_cache`, collapsing those repeated identical calls to
+run in :func:`context_assembly.assemble_context_cache`, collapsing those repeated identical calls to
 a SINGLE graph read while returning an IDENTICAL ``PlanContext`` (verdict bytes unchanged).
 
 These tests are OFFLINE: ``rebar.show_ticket`` / ``rebar.list_tickets`` are spied (no git store),
@@ -20,7 +20,7 @@ import pytest
 
 from rebar.llm import findings as _findings
 from rebar.llm.config import LLMConfig
-from rebar.llm.plan_review import orchestrator
+from rebar.llm.plan_review import context_assembly
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.runner import FakeRunner
 from rebar.llm.workflow import gate_dispatch
@@ -165,12 +165,12 @@ def test_memoized_assemble_returns_identical_context(monkeypatch) -> None:
     spy.install(monkeypatch, children=True)
 
     # A fresh (un-memoized) assembly is the byte reference.
-    reference = orchestrator.assemble_context(_TARGET, repo_root=None)
+    reference = context_assembly.assemble_context(_TARGET, repo_root=None)
     reads_after_reference = spy.total
 
-    with orchestrator.assemble_context_cache():
-        first = orchestrator.assemble_context(_TARGET, repo_root=None)
-        second = orchestrator.assemble_context(_TARGET, repo_root=None)
+    with context_assembly.assemble_context_cache():
+        first = context_assembly.assemble_context(_TARGET, repo_root=None)
+        second = context_assembly.assemble_context(_TARGET, repo_root=None)
 
     # Within the scope the second call is a cache HIT (the very same object), and no new reads
     # were issued for it: the scope cost exactly one graph read (2+K=3), same as the reference.
@@ -186,19 +186,19 @@ def test_cache_does_not_leak_across_scopes(monkeypatch) -> None:
     spy = _ReadSpy()
     spy.install(monkeypatch, children=False)
 
-    with orchestrator.assemble_context_cache():
-        orchestrator.assemble_context(_TARGET, repo_root=None)
-        orchestrator.assemble_context(_TARGET, repo_root=None)  # cache hit
+    with context_assembly.assemble_context_cache():
+        context_assembly.assemble_context(_TARGET, repo_root=None)
+        context_assembly.assemble_context(_TARGET, repo_root=None)  # cache hit
     after_first = spy.total
     assert after_first == 2  # one graph read for the whole first scope
 
-    with orchestrator.assemble_context_cache():
-        orchestrator.assemble_context(_TARGET, repo_root=None)
+    with context_assembly.assemble_context_cache():
+        context_assembly.assemble_context(_TARGET, repo_root=None)
     assert spy.total == after_first + 2  # the second scope re-read (no leak)
 
     # Outside any scope, every call reads fresh — byte-identical to the prior behavior.
-    orchestrator.assemble_context(_TARGET, repo_root=None)
-    orchestrator.assemble_context(_TARGET, repo_root=None)
+    context_assembly.assemble_context(_TARGET, repo_root=None)
+    context_assembly.assemble_context(_TARGET, repo_root=None)
     assert spy.total == after_first + 2 + 4
 
 
@@ -221,11 +221,11 @@ def test_distinct_keys_are_cached_separately(monkeypatch) -> None:
     monkeypatch.setattr("rebar._reads.show_ticket", _show)
     monkeypatch.setattr("rebar._reads.list_tickets", lambda parent=None, repo_root=None: [])
 
-    with orchestrator.assemble_context_cache():
-        a1 = orchestrator.assemble_context("ticket-A", repo_root=None)
-        b1 = orchestrator.assemble_context("ticket-B", repo_root=None)
-        a2 = orchestrator.assemble_context("ticket-A", repo_root=None)  # hit
-        b2 = orchestrator.assemble_context("ticket-B", repo_root=None)  # hit
+    with context_assembly.assemble_context_cache():
+        a1 = context_assembly.assemble_context("ticket-A", repo_root=None)
+        b1 = context_assembly.assemble_context("ticket-B", repo_root=None)
+        a2 = context_assembly.assemble_context("ticket-A", repo_root=None)  # hit
+        b2 = context_assembly.assemble_context("ticket-B", repo_root=None)  # hit
 
     assert a1 is a2 and b1 is b2
     assert a1.ticket_id == "ticket-A" and b1.ticket_id == "ticket-B"

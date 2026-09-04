@@ -1,6 +1,6 @@
 """R6 (epic 6982): deterministic advisory triage.
 
-Covers ``passes.triage_advisories`` (the pure ranking function) and its wiring into the
+Covers ``coach_moves.triage_advisories`` (the pure ranking function) and its wiring into the
 ``plan_review_coach`` step's ``verdict["triage"]``. The triage buckets the round's surviving
 ADVISORY findings into ``apply-now`` vs ``defer`` from recorded fields alone (no LLM), so the
 same finding set yields byte-identical output. See docs/plan-review-gate.md "Advisory triage".
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from rebar.llm.plan_review import passes
+from rebar.llm.plan_review import coach_moves
 from rebar.llm.review_kernel.decide import DEFAULT_BLOCK_THRESHOLD
 
 
@@ -25,8 +25,8 @@ def _adv(fid, priority, *, block_threshold=0.60, criteria=("E1",), decision="adv
 
 def test_determinism_byte_identical():
     findings = [_adv("a", 0.55), _adv("b", 0.20), _adv("c", 0.55, criteria=["E2"])]
-    out1 = passes.triage_advisories(findings)
-    out2 = passes.triage_advisories(findings)
+    out1 = coach_moves.triage_advisories(findings)
+    out2 = coach_moves.triage_advisories(findings)
     assert out1 == out2
     assert json.dumps(out1, sort_keys=True) == json.dumps(out2, sort_keys=True)
     for e in out1:
@@ -42,9 +42,9 @@ def test_boundary_bucketing():
     bt = 0.60
     # Exactly on the boundary (priority == block_threshold - APPLY_NOW_MARGIN) -> apply-now;
     # one epsilon below -> defer. Both use the same subtraction so the comparison is exact.
-    at = _adv("at", bt - passes.APPLY_NOW_MARGIN, block_threshold=bt)
-    below = _adv("below", bt - passes.APPLY_NOW_MARGIN - 1e-9, block_threshold=bt)
-    out = {e["id"]: e for e in passes.triage_advisories([at, below])}
+    at = _adv("at", bt - coach_moves.APPLY_NOW_MARGIN, block_threshold=bt)
+    below = _adv("below", bt - coach_moves.APPLY_NOW_MARGIN - 1e-9, block_threshold=bt)
+    out = {e["id"]: e for e in coach_moves.triage_advisories([at, below])}
     assert out["at"]["bucket"] == "apply-now"
     assert out["below"]["bucket"] == "defer"
 
@@ -58,7 +58,7 @@ def test_ordering_ties_and_empty_criteria():
         _adv("n", 0.5, criteria=[]),  # empty criteria -> "~" -> last among the 0.5 group
         _adv("hi", 0.9, criteria=["Z9"]),  # highest priority -> first overall
     ]
-    order = [e["id"] for e in passes.triage_advisories(findings)]
+    order = [e["id"] for e in coach_moves.triage_advisories(findings)]
     assert order == ["hi", "m", "a", "z", "n"]
 
 
@@ -69,7 +69,7 @@ def test_advisory_only_each_appears_once():
         _adv("adv2", 0.2, criteria=["E2"]),
         {"id": "ind", "priority": 0.3, "criteria": ["E1"], "decision": "indeterminate"},
     ]
-    out = passes.triage_advisories(findings)
+    out = coach_moves.triage_advisories(findings)
     ids = [e["id"] for e in out]
     assert ids == ["adv1", "adv2"]  # only advisories, each exactly once, ordered
     assert "blk" not in ids and "ind" not in ids
@@ -79,7 +79,7 @@ def test_det_tier_advisory_without_block_threshold_defers():
     # DET-tier advisories (priority 0.4, no block_threshold) fall back to DEFAULT (0.95) -> defer.
     det = _adv("det", 0.4, block_threshold=None, criteria=["P6"])
     assert "block_threshold" not in det
-    out = passes.triage_advisories([det])
+    out = coach_moves.triage_advisories([det])
     assert out[0]["bucket"] == "defer"
     assert out[0]["block_threshold"] == DEFAULT_BLOCK_THRESHOLD
 
@@ -112,5 +112,5 @@ def test_integration_verdict_carries_triage():
     )
     op = STEP_REGISTRY["plan_review_coach"]
     out = op(ctx)
-    assert out["triage"] == passes.triage_advisories(surfaced)
+    assert out["triage"] == coach_moves.triage_advisories(surfaced)
     assert [e["id"] for e in out["triage"]] == ["a", "b"]  # priority 0.55 before 0.20

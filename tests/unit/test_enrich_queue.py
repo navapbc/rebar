@@ -123,7 +123,7 @@ def test_cert_enqueues(repo: str, monkeypatch) -> None:
 
     # Simulate an active attested session: the sign seam's no-null-pin invariant
     # (bug 5128-0856) refuses to sign with no snapshot SHA at all.
-    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: "c" * 40)
+    monkeypatch.setattr("rebar.llm.gate_context.current_code_sha", lambda: "c" * 40)
     monkeypatch.delenv("REBAR_LLM_OVERLAP_DRAIN", raising=False)
     tid = rebar.create_ticket("task", "Cert enqueues", repo_root=repo)
     # Enable the overlap feature; leave overlap_drain at its default ("async" — enabled).
@@ -141,7 +141,7 @@ def test_cert_with_drain_off_appends_no_queue_event(repo: str, monkeypatch) -> N
     rebar-ticket 4eae-c207-7d7b-41f3)."""
     from rebar.llm.plan_review import attest
 
-    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: "c" * 40)
+    monkeypatch.setattr("rebar.llm.gate_context.current_code_sha", lambda: "c" * 40)
     monkeypatch.delenv("REBAR_LLM_OVERLAP_DRAIN", raising=False)
     tid = rebar.create_ticket("task", "Cert with drain off", repo_root=repo)
     Path(repo, "rebar.toml").write_text(

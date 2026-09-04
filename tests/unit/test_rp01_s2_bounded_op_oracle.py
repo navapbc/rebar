@@ -48,7 +48,7 @@ def _candidate_window(cfg):
     boundary tests size their token usage against the REAL window (a known config model has a
     large window, not the ladder minimum) rather than a hardcoded assumption."""
     from rebar.llm import model_classes
-    from rebar.llm.runner import _pai_model
+    from rebar.llm.anthropic_model import _pai_model
 
     return model_classes.own_window_tokens(_pai_model(cfg))
 
@@ -201,8 +201,8 @@ def test_unknown_count_response_is_omitted_but_retained_in_full_history():
     from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
     from pydantic_ai.usage import RequestUsage
 
+    from rebar.llm.anthropic_model import _pai_model
     from rebar.llm.pai_retry import wire_history_processor
-    from rebar.llm.runner import _pai_model
 
     cfg = LLMConfig(repo_path=".")
     proc = wire_history_processor([_pai_model(cfg)], 16000).processor

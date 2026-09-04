@@ -4,7 +4,7 @@ An explicit operator override that RESUMES only the exact latest retained review
 that review is a retryable ``INDETERMINATE`` — reusing the checkpointed findings of the
 units that already succeeded and issuing model calls only for the missing units, under a
 FRESH per-invocation attempt budget. It layers ONLY two things over the existing
-chunk-checkpoint resume seam (:func:`sizing.load_checkpoint`, already exercised by a
+chunk-checkpoint resume seam (:func:`checkpoints.load_checkpoint`, already exercised by a
 normal re-run): a latest-review ELIGIBILITY gate and a fresh attempt budget. It
 introduces no second resume mechanism.
 
@@ -31,7 +31,7 @@ from typing import Any
 
 from rebar.llm.review_kernel import DISCOVERY_NAMESPACE_VERSION
 
-from . import attest, claimability, sidecar, sizing
+from . import attest, checkpoints, claimability, sidecar
 from .sidecar import DISCOVERY_JOURNAL_VERSION, RETRY_LINEAGE_VERSION
 
 # Journal unit kinds whose checkpointed success can be reused (they carry a lineage digest).
@@ -96,7 +96,7 @@ def _reusable_checkpoints_present(ctx, reusable: list[dict]) -> bool:
     the stored success can no longer be reused → the latest review is stale."""
     for unit in reusable:
         digest = (unit.get("lineage") or {}).get("digest")
-        if not digest or sizing.load_checkpoint(ctx, digest) is None:
+        if not digest or checkpoints.load_checkpoint(ctx, digest) is None:
             return False
     return True
 

@@ -28,6 +28,8 @@ import pathlib
 
 import pytest
 
+from rebar.llm import structured_run as structured_run_mod
+
 pytest.importorskip("pydantic_ai")
 
 from _tree_scan import parsed_python_files
@@ -106,16 +108,15 @@ def test_runner_funnels_structured_through_one_operation_but_text_bypasses_it(mo
     the public facade, not source text — so it survives a refactor of the implementation's body
     (a rename of the dispatch point is the one thing it pins, which is exactly the invariant:
     there is a single structured dispatch point and the facade routes to it)."""
-    import rebar.llm.runner as runner_mod
 
-    real = runner_mod._pai_structured
+    real = structured_run_mod._pai_structured
     calls = {"n": 0}
 
     def counting(*a, **k):
         calls["n"] += 1
         return real(*a, **k)
 
-    monkeypatch.setattr(runner_mod, "_pai_structured", counting)
+    monkeypatch.setattr(structured_run_mod, "_pai_structured", counting)
     cfg = LLMConfig(repo_path=".")
 
     smodel, _ = _scripted_model([{"text": _VALID}])

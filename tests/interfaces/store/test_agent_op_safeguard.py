@@ -20,7 +20,7 @@ import pytest
 
 import rebar
 import rebar.llm
-from rebar.llm import config as llmcfg
+from rebar.llm import gate_context as llmcfg
 from rebar.llm import gate_source
 from rebar.llm.workflow import runs
 

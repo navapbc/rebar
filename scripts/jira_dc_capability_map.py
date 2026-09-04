@@ -684,7 +684,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # A standalone, one-off "local mode" gate session (rebar.llm.gate_source), the
         # sanctioned seam for a NEW agentic operation outside the review/verify gates
-        # (see rebar.llm.config.assert_gated). This op does not read repo files or ticket
+        # (see rebar.llm.gate_context.assert_gated). This op does not read repo files or ticket
         # state for its OWN purpose (see the system prompt), so `local` (the in-place
         # checkout, no snapshot materialization) is the right mode — never `attested`,
         # which would fetch/materialize a snapshot this op has no use for.

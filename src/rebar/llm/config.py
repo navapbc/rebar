@@ -37,6 +37,11 @@ from dataclasses import dataclass, field
 
 from rebar import config as _root_config
 from rebar._optional import module_available as _module_available
+
+# Gate read-root / snapshot-session context is owned by ``rebar.llm.gate_context``.
+# Keep only a module import here so ``LLMConfig.from_env`` can consume the active context
+# without re-exporting gate-context internals from this configuration module.
+from rebar.llm import gate_context as _gate_context
 from rebar.llm.config_readers import (  # noqa: F401  (re-export: monkeypatch.setattr(rebar.llm.config, "...") targets these; from_env below calls them as bare names resolved through THIS module's namespace)
     _env_truthy,
     _llm_drain_mode,
@@ -48,29 +53,6 @@ from rebar.llm.config_readers import (  # noqa: F401  (re-export: monkeypatch.se
     _read_llm_file_table,
     _read_llm_limit_settings,
     _read_llm_overlap_settings,
-)
-
-# The gate read-root / snapshot-session domain lives in `gate_context` (ticket b300 moved ~185
-# lines out of this file to clear the 800-line cap; see that module's docstring for why the cut
-# is inert mass rather than the real absorber). These names are RE-EXPORTED here and this is the
-# ONLY import path any consumer under `src/` uses — `from_env` below reads two of them, and
-# thirteen `monkeypatch.setattr` targets in the suite name `rebar.llm.config.<name>` and rebind
-# THESE globals. Repointing any consumer at `rebar.llm.gate_context` would leave those patches
-# applying to a module the consumer no longer reads: the tests would pass while asserting nothing.
-from rebar.llm.gate_context import (  # noqa: F401  (re-export: see above)
-    _active_code_root,
-    _active_tickets_root,
-    _in_gate_session,
-    assert_gated,
-    current_code_root,
-    current_code_sha,
-    current_tickets_root,
-    gate_session,
-    in_gate_session,
-    resolve_code_root,
-    use_code_root,
-    use_ticket_view,
-    use_tickets_root,
 )
 from rebar.llm.headers import resolve_headers
 
@@ -500,13 +482,13 @@ class LLMConfig:
         #   config deep in a gate run reads the pinned snapshot, never the mutable checkout)
         #   > REBAR_LLM_REPO_PATH env > the resolved repo root (the in-place checkout).
         repo_path = (
-            current_code_root()
+            _gate_context.current_code_root()
             or os.environ.get("REBAR_LLM_REPO_PATH")
             or str(_root_config.repo_root(repo_root))
         )
         # The agent's rebar ticket tools read the PINNED ticket-store snapshot when a gate
         # set it (None when unset -> the live checkout's store; preserves prior behavior).
-        tickets_path = current_tickets_root()
+        tickets_path = _gate_context.current_tickets_root()
         # Bedrock region: value + origin from the ONE resolution pass (cda8) — the source
         # label can never disagree with which layer actually won. Precedence unchanged:
         # CLI > REBAR_LLM_BEDROCK_REGION > config file > None.

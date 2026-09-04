@@ -16,7 +16,8 @@ replicates the real ``PydanticAIRunner.run``'s first agentic action (``assert_ga
 
 from __future__ import annotations
 
-from rebar.llm.config import LLMConfig, assert_gated, gate_session, in_gate_session
+from rebar.llm.config import LLMConfig
+from rebar.llm.gate_context import assert_gated, gate_session, in_gate_session
 from rebar.llm.plan_review import pass1
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.runner import FakeRunner
