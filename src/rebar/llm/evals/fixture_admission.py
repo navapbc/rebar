@@ -87,6 +87,9 @@ def run_admission(
         raise ValueError("epochs must be >= 1")
 
     from rebar.llm.evals import eval_solver
+    from rebar.llm.plan_review.container_stage import CONTAINER_CRITERIA
+
+    container_criteria = frozenset(CONTAINER_CRITERIA)
 
     manifest = Path(manifest_path)
     out = Path(out_dir)
@@ -121,6 +124,32 @@ def run_admission(
                     predicted="",
                     observed="skipped",
                     reason="not-inline-admissible",
+                    ticket_id=None,
+                    review_event_uuid="",
+                )
+            )
+            continue
+        if criterion in container_criteria:
+            # A container criterion (G3/G4/decomp-shape) is scored over a (parent, children,
+            # roster) decomposition whose rubric reads each child's LIVE title/description
+            # (G3's coverage discharge cannot fire on a title-only roster). The sidecar corpus
+            # persists children as bare ticket-id STRINGS only (corpus._child_ids), with no
+            # per-child material, so a rehydrated container case would run the finder over an
+            # IMPOVERISHED roster — an admit/drift verdict UNFAITHFUL to the historical review
+            # (whose finder saw full child state via context_assembly.show_ticket). Until the
+            # corpus captures per-child title/description, scope container criteria OUT the way
+            # ISF/packaged ones are skipped: never dispatch, admit nothing, and record it as
+            # container-material-unrecoverable so the run stays auditable. Mark it processed so
+            # a resume run REPLACES this row rather than appending a duplicate.
+            processed.add(criterion)
+            drift_entries.append(
+                DriftEntry(
+                    criterion=criterion,
+                    case_id=prompt_id,
+                    direction="",
+                    predicted="",
+                    observed="skipped",
+                    reason="container-material-unrecoverable",
                     ticket_id=None,
                     review_event_uuid="",
                 )

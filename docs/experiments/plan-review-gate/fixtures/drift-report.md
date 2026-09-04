@@ -19,9 +19,8 @@
 | G1G2 | plan-review-G1G2-fire-0 | finding | finding | unbalanced | ecb4-ceda-e276-4efb | 41a3c341-2ebe-43c8-b8c1-16fe67fb34d0 |
 | G1G2 | plan-review-G1G2-fire-2 | finding | finding | unbalanced | 6e3b-3d1a-0ff7-44b6 | d5b56bad-b042-4aa9-957e-5555819898bc |
 | G1G2 | plan-review-G1G2-fire-3 | finding | finding | unbalanced | f6e9-a5fd-e908-4b82 | fa27f545-c4d9-4778-89ac-cf864694b1c6 |
-| G4 | plan-review-G4-fire-1 | finding | pass | non-reproducing | 28a3-a62d-6345-44a0 | b3ef6d6e-a47c-4d5b-bdd1-a4cb9c4c17b6 |
-| G4 | plan-review-G4-fire-2 | finding | pass | non-reproducing | 759e-7dc1-675c-4877 | 0892a8f4-632a-4a79-94ed-f37e394cd994 |
-| G4 | plan-review-G4-fire-3 | finding | pass | non-reproducing | 759e-7dc1-675c-4877 | 0892a8f4-632a-4a79-94ed-f37e394cd994 |
+| G3 | plan-review-G3 |  | skipped | container-material-unrecoverable |  |  |
+| G4 | plan-review-G4 |  | skipped | container-material-unrecoverable |  |  |
 | G5 | plan-review-G5-fire-0 | finding | pass | non-reproducing | cf34-9b8b-1aa7-4d95 | 25cb84f0-05e5-492e-b084-e1818c763804 |
 | G5 | plan-review-G5-fire-1 | finding | pass | non-reproducing | cf34-9b8b-1aa7-4d95 | e6e0ca64-a106-45a4-a824-16b4094b3706 |
 | G5 | plan-review-G5-fire-2 | finding | pass | non-reproducing | c44a-2d4c-f793-42e6 | 969f72f0-65c9-44a0-86f6-7be472102172 |

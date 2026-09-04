@@ -245,47 +245,54 @@ def test_reproducing_criterion_admits_spec_over_rehydrated_material(tmp_path, mo
 
 
 # ── container-criterion child shape (regression: bare-string corpus children) ───────────
-def test_container_criterion_rehydrates_children_as_dicts(tmp_path, monkeypatch):
+def test_container_criterion_is_withheld_unrecoverable(tmp_path, monkeypatch):
     """A container criterion (G3/G4/decomp-shape) is scored over a (parent, children, roster)
-    decomposition, so the eval case the runner hands the solver must carry ``children`` as a
-    list of ``{ticket_id, ...}`` DICTS — the shape ``pass1_container`` and ``build_sibling_roster``
-    consume. But the sidecar corpus stores a review's child list as bare ticket-id STRINGS
-    (``corpus._build_sidecar_row`` -> ``_child_ids``). The runner must NORMALIZE those strings to
-    dicts on rehydration, or the real container solver raises
-    ``AttributeError: 'str' object has no attribute 'get'`` on the very first agent-tier
-    container case (observed live during the 67aa AC10 admission run)."""
-    from rebar.llm.plan_review.pass1 import build_sibling_roster
-
+    decomposition, and its rubric reads the LIVE per-child ``title``/``description`` (G3's
+    coverage discharge cannot fire on a title-only roster — see ``container_stage``). But the
+    sidecar corpus persists a review's children as bare ticket-id STRINGS only
+    (``corpus._build_sidecar_row`` -> ``_child_ids``), with no per-child title/description. So a
+    container case rehydrated from the corpus would run the finder over an IMPOVERISHED roster
+    (empty child content) — an admit/drift verdict UNFAITHFUL to the historical review, whose
+    finder saw full child state (``context_assembly`` fetches each child via ``show_ticket``).
+    Until the corpus captures per-child material, the runner must SCOPE container criteria OUT
+    the way it skips ISF/packaged ones: never dispatch, admit nothing, write no spec and no
+    ledger row, record it in the drift report as ``container-material-unrecoverable`` — and keep
+    processing the remaining criteria."""
     stub_genai_prices(monkeypatch, usd_per_row=0.01)
     crit = "G3"
+    good = "project.alpha"  # sorts AFTER "G3", so scoping-out must not starve it
     rows = [
-        candidate(crit, "fire", 0, "uuid-fire"),
-        candidate(crit, "no_fire", 0, "uuid-pass"),
+        candidate(crit, "fire", 0, "uuid-c-fire"),
+        candidate(crit, "no_fire", 0, "uuid-c-pass"),
+        candidate(good, "fire", 0, "uuid-fire"),
+        candidate(good, "no_fire", 0, "uuid-pass"),
     ]
     manifest = write_manifest_file(rows, tmp_path)
     material = {
-        # BARE STRINGS — the real corpus shape (`_child_ids` returns `list[str]`).
-        "uuid-fire": sidecar_row(
-            "uuid-fire",
-            ticket_id="t-fire",
-            description="parent plan A",
-            children=["child-a", "child-b"],
+        "uuid-c-fire": sidecar_row(
+            "uuid-c-fire", ticket_id="t-cf", description="parent plan A", children=["child-a"]
         ),
-        "uuid-pass": sidecar_row(
-            "uuid-pass",
-            ticket_id="t-pass",
-            description="parent plan B",
-            children=["child-c"],
+        "uuid-c-pass": sidecar_row(
+            "uuid-c-pass", ticket_id="t-cp", description="parent plan B", children=["child-c"]
         ),
+        "uuid-fire": sidecar_row("uuid-fire", ticket_id="t-fire", description="fire plan"),
+        "uuid-pass": sidecar_row("uuid-pass", ticket_id="t-pass", description="pass plan"),
     }
+    # The solver RAISES if ever handed a container case — proving it is never dispatched; the
+    # good criterion after it in sort order is scripted to reproduce and admit.
+    container_boom = AssertionError("container criterion must never be dispatched to the solver")
     solver = ScriptedSolver(
         {
-            case_id(crit, "fire", 0): [True, True, False],
-            case_id(crit, "no_fire", 0): [False, False, True],
-        }
+            case_id(good, "fire", 0): [True, True, False],
+            case_id(good, "no_fire", 0): [False, False, True],
+        },
+        raises={
+            case_id(crit, "fire", 0): container_boom,
+            case_id(crit, "no_fire", 0): container_boom,
+        },
     )
     p = admission_paths(tmp_path)
-    run_admission(
+    summary = run_admission(
         manifest,
         material_index=material,
         solver=solver,
@@ -299,16 +306,20 @@ def test_container_criterion_rehydrates_children_as_dicts(tmp_path, monkeypatch)
         tier_for=lambda _c: CHEAP,
     )
 
-    fire_case = next(case for _pid, case in solver.calls if case["id"] == case_id(crit, "fire", 0))
-    # The exact production consumer must ingest the rehydrated children without raising.
-    roster = build_sibling_roster(fire_case["children"])
-    assert "child-a" in roster and "child-b" in roster
-    # And the normalized shape is the eval-case contract: {ticket_id, ...} dicts.
-    assert fire_case["children"] == [{"ticket_id": "child-a"}, {"ticket_id": "child-b"}]
-    pass_case = next(
-        case for _pid, case in solver.calls if case["id"] == case_id(crit, "no_fire", 0)
-    )
-    assert pass_case["children"] == [{"ticket_id": "child-c"}]
+    # The container criterion was never dispatched to the solver — no unfaithful reproduction.
+    assert all(not cid.startswith(criterion_prompt_id(crit)) for cid in solver.case_ids())
+    # It admitted nothing; the good criterion after it in sort order still admitted.
+    assert crit not in summary.admitted
+    assert summary.admitted == [good]
+    # No container spec, no container ledger row.
+    assert not (p["out_dir"] / f"{criterion_prompt_id(crit)}.eval.yaml").exists()
+    ledger_text = p["ledger_path"].read_text(encoding="utf-8") if p["ledger_path"].exists() else ""
+    assert f"admission-{criterion_prompt_id(crit)}" not in ledger_text
+    # It is recorded in the drift report as container-material-unrecoverable.
+    container_drift = [d for d in summary.drift if d.criterion == crit]
+    assert container_drift
+    assert all(d.reason == "container-material-unrecoverable" for d in container_drift)
+    assert "container-material-unrecoverable" in p["drift_path"].read_text(encoding="utf-8")
 
 
 # ── inline-unadmissible criterion (regression: ISF finder crashes the run) ──────────────
