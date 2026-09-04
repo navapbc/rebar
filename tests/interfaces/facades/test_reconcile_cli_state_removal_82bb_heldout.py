@@ -28,15 +28,16 @@ def _load_module(name: str, filename: str):
     return mod
 
 
-def test_legacy_reconcile_cli_and_filter_flag_are_absent() -> None:
+def test_legacy_reconcile_cli_is_absent_and_engine_filter_is_retained() -> None:
     mode_mod = _load_module("heldout_82bb_mode", "mode.py")
     request_mod = _load_module("heldout_82bb_request", "request.py")
 
     assert _registry.route_for("reconcile") is None
     with pytest.raises((request_mod.RequestError, ValueError)):
         request_mod.normalize_request(["--mode", "reconcile-check"], mode_mod)
-    with pytest.raises(request_mod.RequestError):
-        request_mod.normalize_request(["--filter-local-ids", "local-1"], mode_mod)
+    request = request_mod.normalize_request(["--filter-local-ids", "local-1"], mode_mod)
+    assert request.route == "legacy"
+    assert request.filter_local_ids == {"local-1"}
 
 
 def test_bridge_runner_reconcile_check_profile_invokes_canonical_preview() -> None:

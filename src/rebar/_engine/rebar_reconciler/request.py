@@ -1,4 +1,4 @@
-"""Normalize canonical bridge verbs and retained reconciler modes into one request.
+"""Normalize canonical bridge verbs and retained reconciler flags into one request.
 
 The parser is intentionally separate from ``__main__``: both the new
 ``preview``/``sync`` vocabulary and the retained direct-engine ``--mode`` adapter
@@ -68,6 +68,11 @@ def _parser() -> _Parser:
         action="store_true",
         help="List enumerable tracker directories and exit without running a pass.",
     )
+    parser.add_argument(
+        "--filter-local-ids",
+        default=None,
+        help="Compatibility write filter applied after the full differ computation.",
+    )
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--only", metavar="IDS")
     selection.add_argument("--except", dest="except_ids", metavar="IDS")
@@ -86,6 +91,8 @@ def normalize_request(argv: list[str] | None, mode_mod: Any) -> ReconcileRequest
         raise RequestError("--only and --except require preview or sync")
     if args.command != "sync" and args.max_changes is not None:
         raise RequestError("--max-changes is supported only by sync")
+    if args.command is not None and args.filter_local_ids is not None:
+        raise RequestError("--filter-local-ids is available only on the legacy route")
     if args.command == "preview":
         target_mode = mode_mod.Mode.DRY_RUN
     elif args.command == "sync":
@@ -102,6 +109,7 @@ def normalize_request(argv: list[str] | None, mode_mod: Any) -> ReconcileRequest
 
     only = _tokens(args.only, "--only")
     excluded = _tokens(args.except_ids, "--except")
+    raw_filter = _tokens(args.filter_local_ids, "--filter-local-ids")
     from rebar.config import reconciler_repo_root as _owned_repo_root
 
     root = Path(args.repo_root) if args.repo_root else _owned_repo_root()
@@ -112,6 +120,6 @@ def normalize_request(argv: list[str] | None, mode_mod: Any) -> ReconcileRequest
         max_changes=args.max_changes,
         selection_kind="only" if only else ("except" if excluded else None),
         selection_tokens=only or excluded,
-        filter_local_ids=None,
+        filter_local_ids=set(raw_filter) or None,
         dry_run_enumerate=args.dry_run_enumerate,
     )

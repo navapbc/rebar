@@ -72,11 +72,12 @@ def _rich_markdown(heading: str, bold: str, code: str) -> str:
     return f"# {heading}\n\nA paragraph with **{bold}** emphasis.\n\n{{code}}\n{code}\n{{code}}\n"
 
 
-# The reconcile passes this module spawns are SCOPED (``--only``), so bug f449's lag-free
-# snapshot overlay applies: each scoped pass direct-GETs the bound key from the primary store
-# (immediately consistent) and arbitrates on that, NOT on the eventually-consistent JQL search
-# index. So a pass run immediately after a write no longer needs to wait for the Lucene index
-# to catch up — the former search-visibility wait/reindex dance is gone.
+# The reconcile passes this module spawns are SCOPED (``--filter-local-ids``), so bug
+# f449's lag-free snapshot overlay applies: each scoped pass direct-GETs the bound key from
+# the primary store (immediately consistent) and arbitrates on that, NOT on the
+# eventually-consistent JQL search index. So a pass run immediately after a write no longer
+# needs to wait for the Lucene index to catch up — the former search-visibility wait/reindex
+# dance is gone.
 
 
 def _rendered_description_html(dc_request: Any, key: str) -> str:
@@ -107,9 +108,10 @@ def _push_and_converge(
 ) -> None:
     """Set the local ``description`` and run a scoped writing pass.
 
-    Scoping (``--only local_id,key``) is MANDATORY for writing passes here: the store copy
-    is binding-scrubbed, so an unscoped pass would route the whole copied store down the
-    CREATE path. Asserts the pass settled (no traceback, ``BRIDGE_STATE: converged``).
+    Scoping (``--filter-local-ids local_id,key``) is MANDATORY for writing passes here:
+    the store copy is binding-scrubbed, so an unscoped pass would route the whole copied
+    store down the CREATE path. Asserts the pass settled (no traceback,
+    ``BRIDGE_STATE: converged``).
 
     No post-push search-index wait is needed: the write lands over REST (immediately visible
     to a direct GET) and the NEXT scoped pass arbitrates on a lag-free direct GET of the key

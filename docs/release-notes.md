@@ -12,9 +12,11 @@ observed by an agent or a different rebar version.
 
 The public Python facade no longer exports `rebar.reconcile`, the MCP server no longer
 registers a `reconcile` tool, and the top-level CLI `rebar reconcile` route is no longer
-registered or advertised. Direct `python -m rebar_reconciler --mode reconcile-check` and
-`--filter-local-ids` invocations now reject before operational work starts, and bridge status no
-longer reads stale `.bridge_state/reconcile-check.json` diagnostics.
+registered or advertised. Direct `python -m rebar_reconciler --mode reconcile-check`
+invocations now reject before operational work starts, and bridge status no longer reads stale
+`.bridge_state/reconcile-check.json` diagnostics. The engine-only `--filter-local-ids`
+post-filter remains available on the legacy route for active live-DC harness scoping that
+primary `--only` selection cannot express for not-yet-bound inbound Jira keys.
 
 Use `rebar bridge preview` / `rebar.bridge_preview(...)` for live Jira-vs-local proposed
 changes, `rebar bridge sync` / `rebar.bridge_sync(...)` or `bridge_run(profile=...)` for
@@ -603,11 +605,11 @@ are benign canonical exit 0 states with a stable one-line state marker. The engi
 classifies and executes a single pass; route adapters translate only the final status/message,
 so repository and ref effects are identical.
 
-The remaining direct-engine compatibility route keeps argument-less live behavior and the
-supported rollout modes (`dry-run`, `bootstrap-strict`, `bootstrap-throttle`, `live`). The
-removed `reconcile-check` diagnostic and `--filter-local-ids` CLI surface now reject; callers
-should move to explicit bridge operations. The production workflow no longer carries a 3/75
-whitelist; its paused-marker commit-skip remains unchanged.
+The remaining direct-engine compatibility route keeps argument-less live behavior, the
+engine-only `--filter-local-ids` post-filter, and the supported rollout modes (`dry-run`,
+`bootstrap-strict`, `bootstrap-throttle`, `live`). The removed `reconcile-check` diagnostic now
+rejects; callers should move to explicit bridge operations. The production workflow no longer
+carries a 3/75 whitelist; its paused-marker commit-skip remains unchanged.
 
 ## Durable reconciler status and last-pass witness
 
