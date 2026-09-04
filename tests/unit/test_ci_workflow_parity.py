@@ -1104,7 +1104,7 @@ def test_optionality_contract_gates_the_verified_path() -> None:
 # marking them from a conftest would otherwise silently drop the optionality contract on a
 # fully GREEN build. Bump this count when a test is legitimately added to either file.
 _OPTIONALITY_SUITE = ("tests/unit/test_core_optionality.py", "tests/unit/test_optional.py")
-_OPTIONALITY_SUITE_ITEM_COUNT = 9
+_OPTIONALITY_SUITE_ITEM_COUNT = 10
 # The default suite selection, verbatim from the reusable `_build-and-test.yml` test step.
 _DEFAULT_SELECTION = "not integration and not external"
 
