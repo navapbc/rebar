@@ -220,6 +220,16 @@ jira-datacenter = [
 grounding-t2 = [
     "pyright>=1.1",
 ]
+# Optional Terraform structural grounding tools (REB-640, slice forcible-diminished-lamb).
+# Net-new extra. The evidence CONTRACT, the RECEIPT schema, the bounded index, and the
+# fail-open worker boundary are stdlib-only and import-clean; this extra adds ONLY the
+# in-process HCL parser (python-hcl2, pinned EXACTLY — the analyzer reads public Lark
+# `Tree.meta` spans whose shape is version-sensitive, so an unpinned floor would let local
+# and CI diverge). `hcl2`/`lark` are imported LAZILY inside the worker parse, so `import
+# rebar` and non-Terraform reviews pull nothing; only the Terraform grounding path needs it.
+grounding-terraform = [
+    "python-hcl2==8.1.3",
+]
 # Optional S3 ticket-store backend (epic cf3c). Ships the awslabs/git-remote-s3 remote
 # helper (Apache-2.0) so `sync.remote` can point at an s3://bucket/prefix remote. NEVER
 # required by core rebar; only operators using the S3 backend install it. The >=0.3.2 floor
