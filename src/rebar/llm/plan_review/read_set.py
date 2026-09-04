@@ -180,3 +180,35 @@ def read_set_dependency_paths(read_set: Sequence[str], *, base: str) -> list[str
     out = {str(path) for path in read_set if str(path)}
     out.update(blast_radius_paths(base=base))
     return sorted(out)
+
+
+#: The Terraform capture suffixes a synthetic membership glob may range over (REB-640).
+_TERRAFORM_GLOB_SUFFIXES = (".tf", ".tf.json")
+
+
+def terraform_membership_entries(globs: Iterable[str]) -> list[str]:
+    """Validate + normalize synthetic Terraform membership globs into dependency entries.
+
+    A Terraform grounding session reports the membership globs (e.g. ``infra/**/*.tf``,
+    ``**/*.tf.json``) that bound the set of captures a refutation query DEPENDED ON. Recorded
+    as read-set dependency entries they flow through the SAME glob-membership machinery as the
+    blast radius (:func:`hash_dep_entry` → :func:`glob_membership_digest`), so a ``.tf`` ADDED
+    under the glob after signing moves the attestation's freshness digest — the exact
+    "membership freshness" guard the concrete per-file reads cannot provide.
+
+    Each entry must be a repo-relative POSIX glob (contains a metacharacter, is not absolute,
+    does not escape the repo with ``..``) that ranges over a Terraform capture suffix.
+    Non-conforming entries are dropped (never raised on — a malformed synthetic entry must not
+    fail an otherwise-valid attestation). Deduped and sorted for a reproducible signed map."""
+    out: set[str] = set()
+    for raw in globs or ():
+        entry = str(raw or "").strip()
+        if not entry or os.path.isabs(entry) or not is_glob(entry):
+            continue
+        posix = PurePath(entry).as_posix()
+        if posix.startswith("../") or "/../" in posix or posix == "..":
+            continue
+        if not any(posix.endswith(suffix) for suffix in _TERRAFORM_GLOB_SUFFIXES):
+            continue
+        out.add(posix)
+    return sorted(out)

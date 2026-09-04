@@ -436,6 +436,7 @@ def pass1_with_ladder(
     agentic: bool,
     events: list[str],
     extra_context: str = "",
+    tf_provider: Any = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Run a Pass-1 finder call with the SIZE-HANDLING LADDER (ca03 AC4/AC6):
 
@@ -461,7 +462,13 @@ def pass1_with_ladder(
     ids = [c["id"] for c in chunk]
     try:
         findings, usage = passes.pass1_chunk(
-            runner, cfg, plan=plan, chunk=chunk, agentic=agentic, extra_context=extra_context
+            runner,
+            cfg,
+            plan=plan,
+            chunk=chunk,
+            agentic=agentic,
+            extra_context=extra_context,
+            tf_provider=tf_provider,
         )
         calls.append(usage_record(ids, usage))
         return findings, calls
@@ -485,6 +492,7 @@ def pass1_with_ladder(
                     chunk=[crit],
                     agentic=agentic,
                     extra_context=extra_context,
+                    tf_provider=tf_provider,
                 )
                 out.extend(crit_findings)
                 calls.append(usage_record([crit["id"]], usage))

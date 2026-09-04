@@ -75,6 +75,7 @@ __all__ = [
     "SIGN_RESULT",
     "SIGN_REVIEW_RESULT",
     "SUMMARY",
+    "TERRAFORM_GROUNDING_RECEIPT",
     "TICKET_DIGEST",
     # name constants
     "TICKET_STATE",
@@ -208,6 +209,12 @@ GROUNDING = "grounding"
 # tool. Unlike the GROUNDING evidence contract (an INTERNAL schema validated
 # directly), THIS is a command --output, so it IS wired into OUTPUT_SCHEMAS below.
 GROUNDING_INFO = "grounding_info"
+# rebar.grounding.terraform_tools — the canonical, credential-redacting RECEIPT a
+# Terraform structural grounding query emits alongside its grounding evidence (REB-640,
+# slice forcible-diminished-lamb). Like GROUNDING it is an INTERNAL contract validated
+# directly via schemas.validator(TERRAFORM_GROUNDING_RECEIPT), never a command --output,
+# so it is exempt from OUTPUT_SCHEMAS via INPUT_SCHEMAS below.
+TERRAFORM_GROUNDING_RECEIPT = "terraform_grounding_receipt"
 # rebar.llm.workflow — the per-step I/O CONTRACT schemas (workflow authoring v2,
 # walking skeleton 5e78). A scripted step DECLARES an input + output schema BY NAME
 # via `@register_step(input_schema=…, output_schema=…)`; the names resolve to these
@@ -236,7 +243,14 @@ JIRA_SNAPSHOT_ENTRY = "jira_snapshot_entry"
 # OUTPUT_SCHEMAS; the coverage-guard test exempts this set so an authored-but-unwired
 # check still catches a forgotten OUTPUT schema while permitting these.
 INPUT_SCHEMAS: frozenset[str] = frozenset(
-    {WORKFLOW_V1, WORKFLOW_V2, WORKFLOW_V3, GROUNDING, JIRA_SNAPSHOT_ENTRY}
+    {
+        WORKFLOW_V1,
+        WORKFLOW_V2,
+        WORKFLOW_V3,
+        GROUNDING,
+        TERRAFORM_GROUNDING_RECEIPT,
+        JIRA_SNAPSHOT_ENTRY,
+    }
 )
 
 # Per-step I/O CONTRACT schemas (workflow authoring v2): a step's declared input and
