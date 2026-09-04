@@ -510,3 +510,115 @@ resource "aws_cloudwatch_metric_alarm" "docker_unaccounted_bytes" {
     Ticket  = "9183"
   }
 }
+
+# ---------------------------------------------------------------------------
+# journald, the /var/log generator (ADR 0112 decisions 1+2, story e956-b1c3-45b9-4016)
+# ---------------------------------------------------------------------------
+# The other accumulator the 2026-09-02 measurement found: /var/log was 1.8G of the 28G root
+# working set and 1.7G of that was the JOURNAL, because every compose service logs to the host
+# journal. rebar-root-disk-pressure could only say "root disk high".
+#
+# TWO alarms, because neither implies the other — the rebar-gerrit-data-disk-debris (task 3e92)
+# argument again:
+#
+#   1. journal-usage-high        — is the journal approaching the ceiling it is measured against?
+#   2. journal-cap-not-in-effect — is that ceiling the one the RUNNING journald actually read?
+#                                  journald reads its configuration at startup and
+#                                  systemd-journald.service implements no ExecReload, so a
+#                                  ceiling can sit installed on disk while the live daemon
+#                                  enforces the one it read at boot. In that state alarm 1 is
+#                                  computed against a denominator that is NOT in force and
+#                                  reads perfectly healthy, which is exactly the gap story 9183
+#                                  left open for its BuildKit share.
+#
+# HONEST STRENGTH, so an operator reading these during an incident is not misled: SystemMaxUse
+# is a real cap that journald enforces as it extends a journal file, but only ARCHIVED files are
+# vacuumed, so usage can exceed the ceiling by up to one active file (SystemMaxFileSize, default
+# 1/8 of the ceiling). And it bounds /var/log/journal ONLY — the rest of /var/log is covered
+# only by rebar-root-disk-pressure.
+#
+# Published dimensionless by observability.sh 2g on the 5-minute cadence, following
+# root_disk_used_percent: CloudWatch keys a metric by namespace+name+dimensions, so a dimension
+# on only one side silently never matches. The ceiling behind the percent comes from
+# infra/scripts/journald-cap.sh, the same file that renders the drop-in journald reads.
+
+resource "aws_cloudwatch_metric_alarm" "journal_usage_high" {
+  alarm_name        = "rebar-journal-usage-high"
+  alarm_description = <<-EOT
+    The systemd journal is above 85% of its configured ceiling (SystemMaxUse; the value lives in
+    infra/scripts/journald-cap.sh, readable with `--print-env`). journald will vacuum ARCHIVED
+    journal files to stay under the ceiling, so this is a warning that history is about to be
+    discarded rather than that the disk is about to fill — but sustained growth here is a
+    generator to investigate, because the ceiling is not the whole story: only archived files
+    are vacuumed, so usage can exceed it by up to one active file. CHECK
+    rebar-journal-cap-not-in-effect FIRST: if that alarm is also firing, this percentage is
+    measured against a ceiling the running journald never read. DIAGNOSIS: `journalctl
+    --disk-usage`, `du -sx /var/log/journal`. REMEDIATION: `journalctl --vacuum-size=` (never
+    `rm` under /var/log/journal). Published as rebar/host:journal_used_percent by
+    observability.sh 2g. Runbook: infra/runbooks/review-bot-ops.md.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "journal_used_percent"
+  statistic   = "Maximum"
+
+  # The house 300/3/2 shape (root_disk_pressure above): 2 breaching datapoints in a 3-period
+  # window absorbs the ordinary timer jitter that makes ~2 of 24 periods absent on this box.
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 85
+  comparison_operator = "GreaterThanThreshold"
+
+  # observability.sh 2g publishes this ONLY on a successful measurement, so absence means the
+  # probe could not size the journal — which is exactly when this must page rather than clear to
+  # OK (bug 3276 defect 2). Pinned by tests/unit/test_alarm_actions_terraform.py.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "e956"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "journal_cap_not_in_effect" {
+  alarm_name        = "rebar-journal-cap-not-in-effect"
+  alarm_description = <<-EOT
+    The journal ceiling on disk is NOT the one the running systemd-journald is enforcing.
+    journald reads its configuration at STARTUP only and the unit implements no ExecReload, so a
+    drop-in installed under a live daemon stays dormant until that daemon restarts. While this
+    fires, rebar-journal-usage-high is computed against a denominator that is not in force and
+    can read healthy while the journal grows to whatever ceiling the daemon read at boot (or to
+    journald's derived default). CONFIRM with `bash infra/scripts/journald-cap.sh
+    --check-active` (prints 1/0) and `--install`, which reports the state in words. REMEDIATE by
+    restarting the logger: `systemctl restart systemd-journald`. Published as
+    rebar/host:journal_cap_in_effect, a 1/0 heartbeat on every probe tick.
+    Runbook: infra/runbooks/review-bot-ops.md.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "journal_cap_in_effect"
+  statistic   = "Minimum"
+
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+
+  # Heartbeat semantics (the gate_scratch_unmounted shape): the healthy path publishes 1 on
+  # EVERY tick, so absence means the probe, the timer, or the host is dead — the one state this
+  # alarm most needs to announce.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "e956"
+  }
+}

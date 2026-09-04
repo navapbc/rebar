@@ -844,3 +844,96 @@ Never remove tagged images by hand: `compose-review-bot:prev` is the review-bot'
 lifeline and the live `compose-mcp:<sha>` is the serving MCP release. `mcp_reconcile_orphans`
 already sweeps the surplus ones with `docker image rm` **without** `-f`, so the daemon itself
 refuses while anything still references an image.
+
+## The journald disk ceiling and its alarms (ADR 0112 / story `e956-b1c3-45b9-4016`)
+
+`/var/log` was 1.8G of the 28G root working set at the 2026-09-02 outage and **1.7G of that was
+the journal** — every compose service logs to the host journal, so journald is a genuine
+root-volume generator. `rebar-root-disk-pressure` could only say "root disk high".
+
+### What is actually enforced, and how strongly
+
+`infra/scripts/journald-cap.sh` is the single source of truth for the ceiling. Read it with
+`bash infra/scripts/journald-cap.sh --print-env` (default **3 GiB**, env-settable via
+`JOURNAL_MAX_USE_BYTES`); it renders
+`/etc/systemd/journald.conf.d/99-rebar-disk-ceiling.conf`, which sets `SystemMaxUse=`.
+
+`SystemMaxUse` is a **real cap enforced by journald itself**, checked synchronously as it
+extends a journal file — stronger than the Docker image/layer share above, which has no ceiling
+at all. Two residuals you must know before reading the alarms:
+
+| Residual | Consequence |
+|---|---|
+| Only **archived** journal files are vacuumed; the active file is never deleted | real usage can exceed the ceiling by up to one file — bounded by `SystemMaxFileSize`, default 1/8 of the ceiling, so the honest worst case is 9/8 × the ceiling (3.375 GiB at the 3 GiB default) |
+| It bounds `/var/log/journal` **only**, not `/var/log` | anything else under `/var/log` (~0.1G of the 1.8G at the incident) is covered only by `rebar-root-disk-pressure` |
+
+Two knobs are deliberately **not** set. `SystemKeepFree=` defaults to 15% of the filesystem
+capped at 4G, i.e. it is already at its cap here — pinning it changes nothing and pinning a
+*smaller* value would weaken the free-space floor. `RuntimeMaxUse=` governs `/run/log/journal`,
+which is tmpfs: RAM, not the root volume.
+
+### Which alarm fired?
+
+| Alarm | Metric | What it means | First move |
+|---|---|---|---|
+| `rebar-journal-usage-high` | `journal_used_percent` | the journal is >85% of its configured ceiling | check the other alarm FIRST — if it is also firing this percentage is measured against a ceiling that is not in force |
+| `rebar-journal-cap-not-in-effect` | `journal_cap_in_effect` | the ceiling on disk is NOT the one the running journald read | restart the logger, below |
+
+Both are `treat_missing_data = "breaching"`. `journal_used_percent` is published only on a
+SUCCESSFUL measurement, so its silence means the probe could not size the journal;
+`journal_cap_in_effect` is a heartbeat published on every tick including its `0` path, so ITS
+silence means the probe, the timer or the host is dead.
+
+```bash
+# Size the journal the way the metric does — the SAME tree the ceiling governs. Do not
+# substitute /var/log: SystemMaxUse does not bound it, so that ratio would be about no
+# quantity at all.
+du -sx --block-size=1 /var/log/journal
+journalctl --disk-usage                        # journald's own view of the same files
+bash infra/scripts/journald-cap.sh --print-env # the ceiling the percentage is measured against
+```
+
+### "Installed" is not "in force", and the script says which one you have
+
+journald reads its configuration at **startup** and `systemd-journald.service` implements **no
+`ExecReload`** — a reload cannot apply this and its exit status would prove nothing. So nothing
+in the install path infers activation from a command: it compares when the live journald started
+(`/proc/<MainPID>`) against when the drop-in was written, and **fails closed**.
+
+```bash
+bash infra/scripts/journald-cap.sh --check-active   # 1 or 0, nothing else
+bash infra/scripts/journald-cap.sh --install        # idempotent; reports the state in words
+systemctl restart systemd-journald                  # the ONLY way to apply a changed ceiling
+```
+
+| What `--install` prints | What it means | What you do |
+|---|---|---|
+| `systemd-journald is not running; it will read the …B journal ceiling when it next starts` | first boot; the next start reads it | nothing |
+| `the live systemd-journald started after this ceiling was written, so SystemMaxUse=… IS in effect` | verified in force | nothing |
+| `WARNING — the …B journal ceiling is INSTALLED but is NOT in effect` | the running daemon predates the file, or its start time was unreadable | `systemctl restart systemd-journald`, then re-run `--install` to confirm |
+| `WARNING — systemd-journald declares no file-descriptor store … NOT restarting` | the restart-safety precondition is missing on this host | leave it dormant; it takes effect at the next boot, or restart the logger by hand in a quiet window |
+
+**Why the installer restarts the logger when the Docker one refuses to.** Restarting
+`systemd-journald` takes no service down: PID 1 owns its listening sockets
+(`Sockets=systemd-journald.socket systemd-journald-dev-log.socket`) and holds its per-service
+stdout stream fds in the unit's file-descriptor store (`FileDescriptorStoreMax=4224`, whose
+upstream comment is "Ensure services using `StandardOutput=journal` do not break when journald
+is stopped"), handing them back on the way up. That fd store is the load-bearing assumption, so
+it is **probed** and the restart is refused when it is absent — without it a restart would sever
+the log streams of already-running services and silently zero the marker-count metrics
+`observability.sh` derives from those journals, which reads as health. Restarting **Docker**, by
+contrast, takes Gerrit, the review-bot and the MCP server down together, which is why that one
+is an operator-scheduled outage instead.
+
+### Reclaiming journal space
+
+```bash
+journalctl --vacuum-size=1G      # trim archived journals to a target size
+journalctl --vacuum-time=7d      # or by age
+journalctl --verify              # after any reclaim, confirm the remaining files are intact
+```
+
+Never `rm` under `/var/log/journal`: journald tracks its own files, and deleting behind its back
+leaves the running daemon writing into a tree it no longer agrees with. Vacuuming only ever
+removes **archived** files, so it cannot reclaim the active one — if the journal is still large
+afterwards, the active file is the remainder and it rotates on its own.

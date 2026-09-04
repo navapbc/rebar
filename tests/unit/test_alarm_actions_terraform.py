@@ -51,7 +51,7 @@ _TF_DIR = Path(__file__).resolve().parents[2] / "infra" / "terraform"
 # loudly instead of passing vacuously. A vacuous guard is the failure mode this guard exists
 # to prevent, so it must not be able to fall to it itself. Raise this floor when alarms are
 # added; never lower it without deleting alarms.
-_MIN_EXPECTED_ALARMS = 24
+_MIN_EXPECTED_ALARMS = 26
 
 _ALARM_RE = re.compile(
     r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{',
@@ -67,7 +67,7 @@ _MISSING_DATA_OPT_OUT_RE = re.compile(r"#\s*rebar:allow-missing-data-notbreachin
 # Host-published alarms had 13 rebar/host blocks when this guard was written. Same
 # anti-vacuity role as _MIN_EXPECTED_ALARMS: a scope filter that silently matches nothing
 # makes the guard below pass for free.
-_MIN_EXPECTED_HOST_ALARMS = 19
+_MIN_EXPECTED_HOST_ALARMS = 21
 
 
 def _quoted_attr(raw: str, masked: str, attr: str) -> str | None:
@@ -266,6 +266,15 @@ def test_host_published_disk_alarms_treat_missing_data_as_breaching() -> None:
         ("monitoring_autodeploy.tf", "docker_storage_cap_high"),
         ("monitoring_autodeploy.tf", "docker_buildkit_cache_high"),
         ("monitoring_autodeploy.tf", "docker_unaccounted_bytes"),
+        # The journald pair (story e956-b1c3-45b9-4016). Same ADR 0112 obligation, pinned for
+        # the same reason — and with the same reachable runtime edge as the Docker trio:
+        # observability.sh 2g publishes ``journal_used_percent`` only on a successful
+        # measurement, so its missing-data state is a real condition (a ``du`` that could not
+        # run) and ``notBreaching`` would render "the probe can no longer size the journal" as
+        # health. ``journal_cap_in_effect`` is a heartbeat published on EVERY tick including
+        # its 0 path, so ITS absence can only mean the probe, the timer or the host is dead.
+        ("monitoring_autodeploy.tf", "journal_usage_high"),
+        ("monitoring_autodeploy.tf", "journal_cap_not_in_effect"),
     }
     found: set[tuple[str, str]] = set()
     offenders: list[str] = []

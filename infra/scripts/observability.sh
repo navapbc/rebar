@@ -23,6 +23,11 @@
 #       9183; three alarms in monitoring_autodeploy.tf). The last one is the point: it is
 #       overlay2 measured from the FILESYSTEM minus what `docker system df` accounts for, i.e.
 #       the bytes no `docker prune` can reach.
+#   2g. journald, the other /var/log generator -> rebar/host:journal_bytes,
+#       journal_used_percent and the journal_cap_in_effect heartbeat (ADR 0112 / story e956;
+#       two alarms in monitoring_autodeploy.tf). The heartbeat is the point: journald reads its
+#       ceiling only at startup, so a drop-in installed under a live daemon is dormant — and
+#       the percentage is then measured against a cap that is NOT in force.
 #   3. Gerrit->GitHub replication failures (replication_log) -> rebar/host:replication_errors (S5 alarm).
 #   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
 #   4c. review-bot merge-change failures (MERGE_CHANGE_ERROR) -> rebar/host:review_bot_merge_change_errors (epic 88ab/S2 alarm).
@@ -291,11 +296,12 @@ DOCKER_ROOT="${DOCKER_ROOT:-/var/lib/docker}"
 DOCKER_DU_TIMEOUT="${DOCKER_DU_TIMEOUT:-120}"
 DOCKER_DF_TIMEOUT="${DOCKER_DF_TIMEOUT:-20}"
 
-# Percent of a cap, CLAMPED to 100. CloudWatch's `Percent` unit is defined over 0-100, and a
-# datapoint of 300 rescales every dashboard that shares the axis into unreadability at exactly
-# the moment someone is reading it. Nothing is lost: the companion `*_bytes` gauge is
-# unclamped and carries the magnitude, and the 85% alarm threshold fires either way.
-docker_pct_of() {
+# Percent of a cap, CLAMPED to 100 — shared by 2f and 2g. CloudWatch's `Percent` unit is
+# defined over 0-100, and a datapoint of 300 rescales every dashboard that shares the axis into
+# unreadability at exactly the moment someone is reading it. Nothing is lost: the companion
+# `*_bytes` gauge is unclamped and carries the magnitude, and the 85% alarm threshold fires
+# either way.
+pct_of_cap() {
   local pct
   pct=$(( $1 * 100 / $2 ))
   [ "$pct" -gt 100 ] && pct=100
@@ -372,7 +378,7 @@ if [ -n "$docker_total_bytes" ]; then
   if [ -n "${DOCKER_BUDGET_BYTES:-}" ] && [ "${DOCKER_BUDGET_BYTES:-0}" -gt 0 ]; then
     aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
       --metric-name docker_storage_used_percent --unit Percent \
-      --value "$(docker_pct_of "$docker_total_bytes" "$DOCKER_BUDGET_BYTES")" 2>/dev/null || true
+      --value "$(pct_of_cap "$docker_total_bytes" "$DOCKER_BUDGET_BYTES")" 2>/dev/null || true
   fi
 fi
 
@@ -387,7 +393,7 @@ if [ -n "$docker_ledger" ]; then
   if [ -n "${DOCKER_BUILDKIT_CACHE_BYTES:-}" ] && [ "${DOCKER_BUILDKIT_CACHE_BYTES:-0}" -gt 0 ]; then
     aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
       --metric-name docker_buildkit_cache_used_percent --unit Percent \
-      --value "$(docker_pct_of "$docker_cache_bytes" "$DOCKER_BUILDKIT_CACHE_BYTES")" 2>/dev/null || true
+      --value "$(pct_of_cap "$docker_cache_bytes" "$DOCKER_BUILDKIT_CACHE_BYTES")" 2>/dev/null || true
   fi
   # The residue needs BOTH halves. Without either one there is no defensible number, so none
   # is invented — this is the one metric whose whole value is that it is not derivable from
@@ -407,6 +413,78 @@ if [ -n "$docker_ledger" ]; then
       --metric-name docker_unaccounted_bytes --unit Bytes --value "$docker_unaccounted" 2>/dev/null || true
     logger -t rebar-health \
       "docker root bytes=${docker_total_bytes} overlay2=${docker_overlay2_bytes:-unread} ledger=${docker_accounted_bytes} unaccounted=${docker_unaccounted} (bytes docker prune cannot reach)"
+  fi
+fi
+
+# --- 2g. journald, the /var/log generator (ADR 0112 decisions 1+2, story e956) ------
+# §2b answers "how full is root". §2f named the Docker accumulator; this names the other one
+# the 2026-09-02 measurement found: /var/log was 1.8G of the 28G working set and 1.7G of that
+# was the JOURNAL, because every compose service logs to the host journal.
+#
+# THREE readings, and they fail independently on purpose.
+#
+#   journal_bytes          the size of ${JOURNAL_DIR}, from the filesystem.
+#   journal_used_percent   that size against the ceiling journald is configured to enforce.
+#   journal_cap_in_effect  a 1/0 HEARTBEAT: is that ceiling the one the LIVE journald read?
+#
+# BOTH SIDES OF THE RATIO MUST SPAN THE SAME BYTES — §2f's lesson in ratio form. `SystemMaxUse`
+# governs the journal files under ${JOURNAL_DIR} and nothing else, so the numerator is a `du`
+# of exactly that tree. Measuring /var/log instead would count rotated syslog, nginx access
+# logs and every other consumer against a ceiling that does not bound them, and the percentage
+# would be about no quantity at all. The one residual runs the safe way: `du` counts every byte
+# under the tree while journald's quota counts only its own `*.journal*` files, so a stray file
+# there OVER-reports and pages early rather than reading healthy.
+#
+# THE HEARTBEAT IS NOT A SPARE METRIC. journald reads its configuration at startup and
+# systemd-journald.service implements no ExecReload, so a ceiling can sit on disk while the
+# running daemon enforces the one it read at boot — and in that state `journal_used_percent` is
+# computed against a denominator that is NOT in force, so every other reading looks healthy.
+# Story 9183 shipped exactly that gap for the BuildKit share ("the runbook documents the
+# restart; nothing tracks that it happened"). This tracks it. It follows the §2e heartbeat rule
+# (bug bff5): a value on EVERY tick INCLUDING the 0 path, so ABSENCE means the probe, the timer
+# or the host is dead rather than the ceiling being fine.
+#
+# Every other reading is GATED ON ITS OWN MEASUREMENT SUCCEEDING, the §2e/§2f rule: a probe that
+# could not measure publishes NOTHING rather than a plausible 0, and treat_missing_data =
+# "breaching" pages on the silence — while a 0 would read as an empty journal on a box that is
+# filling.
+#
+# DIMENSIONLESS on both sides, following root_disk_used_percent (§2b): CloudWatch keys a metric
+# by namespace+name+dimensions, so a dimension on only one side silently never matches.
+#
+# The ceiling comes from infra/scripts/journald-cap.sh, the single source of truth that also
+# renders the drop-in journald reads — so the published "percent of cap" and the cap the box is
+# configured to enforce can never drift apart.
+JOURNALD_CAP_SH="${JOURNALD_CAP_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/journald-cap.sh}"
+eval "$(bash "$JOURNALD_CAP_SH" --print-env 2>/dev/null)" || true
+JOURNAL_DIR="${JOURNAL_DIR:-/var/log/journal}"
+# BOUNDED, the §2d rule: a `du` over a large journal is a stat walk and must not hold the
+# 5-minute timer open. Exceeding it is indistinguishable from a failed read, and is reported as
+# silence.
+JOURNAL_DU_TIMEOUT="${JOURNAL_DU_TIMEOUT:-60}"
+
+journal_in_effect="$(bash "$JOURNALD_CAP_SH" --check-active 2>/dev/null)"
+case "$journal_in_effect" in 1) ;; *) journal_in_effect=0 ;; esac
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name journal_cap_in_effect --unit Count --value "$journal_in_effect" 2>/dev/null || true
+logger -t rebar-health "journal ceiling ${JOURNAL_MAX_USE_BYTES:-unset}B in_effect=${journal_in_effect}"
+if [ "$journal_in_effect" -eq 0 ]; then
+  logger -t rebar-health \
+    "the journald ceiling is NOT the one the running systemd-journald read — journal_used_percent is measured against a cap that is not in force; see infra/runbooks/review-bot-ops.md"
+fi
+
+journal_bytes="$(timeout "$JOURNAL_DU_TIMEOUT" du -sx --block-size=1 "$JOURNAL_DIR" 2>/dev/null | tail -1 | awk '{print $1}')"
+case "$journal_bytes" in ''|*[!0-9]*) journal_bytes="" ;; esac
+if [ -n "$journal_bytes" ]; then
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name journal_bytes --unit Bytes --value "$journal_bytes" 2>/dev/null || true
+  logger -t rebar-health "journal ${JOURNAL_DIR} bytes=${journal_bytes}"
+  # Independently gated from the size: losing the ceiling must not also take the MAGNITUDE off
+  # the air, since journal_bytes is what an operator sizes the problem with.
+  if [ -n "${JOURNAL_MAX_USE_BYTES:-}" ] && [ "${JOURNAL_MAX_USE_BYTES:-0}" -gt 0 ]; then
+    aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+      --metric-name journal_used_percent --unit Percent \
+      --value "$(pct_of_cap "$journal_bytes" "$JOURNAL_MAX_USE_BYTES")" 2>/dev/null || true
   fi
 fi
 
