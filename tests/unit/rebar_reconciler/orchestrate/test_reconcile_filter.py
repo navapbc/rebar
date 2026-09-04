@@ -434,8 +434,8 @@ class TestReconcileOnceFiltered:
 # ---------------------------------------------------------------------------
 
 
-class TestFilterLocalIdsCliRemoval:
-    """The CLI-only ``--filter-local-ids`` surface is removed; internal plumbing remains."""
+class TestFilterLocalIdsLegacyRoute:
+    """The engine-only ``--filter-local-ids`` surface remains on the legacy route."""
 
     def _load_main(self):
         name = "rebar_reconciler_main_under_test"
@@ -448,16 +448,40 @@ class TestFilterLocalIdsCliRemoval:
         spec.loader.exec_module(mod)
         return mod
 
-    def test_filter_local_ids_rejects_before_pass_work(self, tmp_path, monkeypatch, capsys):
+    def test_filter_local_ids_reaches_legacy_route_post_filter(self, tmp_path, monkeypatch, capsys):
         main_mod = self._load_main()
-        run_pass = MagicMock(side_effect=AssertionError("removed CLI filter reached pass work"))
+        run_pass = MagicMock(return_value=0)
         monkeypatch.setattr(main_mod, "run_pass", run_pass)
+        package = sys.modules.setdefault("rebar_reconciler", types.ModuleType("rebar_reconciler"))
+        last_pass = types.ModuleType("rebar_reconciler.last_pass")
+        last_pass.finalize_process = MagicMock(side_effect=lambda _repo, _pass_id, run: run())
+        last_pass.release_process_lock = MagicMock()
+        monkeypatch.setattr(package, "last_pass", last_pass, raising=False)
+        monkeypatch.setitem(sys.modules, "rebar_reconciler.last_pass", last_pass)
+        original_load_sibling_keyed = main_mod._load_sibling_keyed
+        advisory = types.SimpleNamespace(
+            ReconcileLockLost=RuntimeError,
+            check_pass_lock=MagicMock(return_value=False),
+            acquire_pass_lock=MagicMock(return_value="oid"),
+            _lock_lease_secs=MagicMock(return_value=60),
+            check_phase_gate=MagicMock(return_value=False),
+        )
+        monkeypatch.setattr(
+            main_mod,
+            "_load_sibling_keyed",
+            lambda key, filename: (
+                advisory
+                if filename == "_advisory_lock.py"
+                else original_load_sibling_keyed(key, filename)
+            ),
+        )
 
         rc = main_mod.main(["--filter-local-ids=abc", "--repo-root", str(tmp_path)])
 
-        assert rc == 2
-        assert "filter-local-ids" in capsys.readouterr().err
-        run_pass.assert_not_called()
+        assert rc == 0
+        assert "filter-local-ids" not in capsys.readouterr().err
+        assert run_pass.call_args.kwargs["filter_local_ids"] == {"abc"}
+        assert run_pass.call_args.kwargs["selection_ids"] is None
 
 
 # ---------------------------------------------------------------------------

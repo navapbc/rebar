@@ -201,7 +201,7 @@ class OutboundFieldMapper:
                 # composing in this order makes it its own fixed point (both halves are
                 # idempotent and normalization only ever shrinks the ADF). That is what
                 # keeps the send value and every description comparison routing through
-                # this port — including ``reconcile_check`` — on one convergent value.
+                # this port on one convergent value.
                 # Swapping the two re-introduces a diff that never converges.
                 out["description"] = (
                     self._codec.normalize_outbound(self._codec.fit_outbound(value))

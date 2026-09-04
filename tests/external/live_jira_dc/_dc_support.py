@@ -194,22 +194,21 @@ def source_repo_root() -> Path:
 
 
 def run_reconcile(repo: Path, mode: str, *, only: str | None = None):
-    """Invoke the canonical bridge operation for a rollout profile.
+    """Invoke the reconciler subprocess directly so BOTH streams are observable.
 
-    ``only`` maps to the primary ``--only`` selection contract. Scoping is MANDATORY for
-    writing passes here: the scrub removes every binding, so an unscoped writing pass would
-    route the whole copied store down the CREATE path (`outbound_differ.py:518-520`) and file
-    production tickets as new harness issues.
+    ``only`` maps to ``--filter-local-ids``. Scoping is MANDATORY for writing passes here:
+    the scrub removes every binding, so an unscoped writing pass would route the whole copied
+    store down the CREATE path (`outbound_differ.py:518-520`) and file production tickets as
+    new harness issues.
     """
-    if mode == "dry-run":
-        return run_bridge(repo, "preview", only=only)
-    if mode == "bootstrap-strict":
-        return run_bridge(repo, "sync", only=only, max_changes=10)
-    if mode == "bootstrap-throttle":
-        return run_bridge(repo, "sync", only=only, max_changes=100)
-    if mode == "live":
-        return run_bridge(repo, "sync", only=only)
-    raise AssertionError(f"unsupported bridge profile {mode!r}")
+    from rebar._engine import engine_env
+
+    argv = [sys.executable, "-m", "rebar_reconciler", "--mode", mode, "--repo-root", str(repo)]
+    if only is not None:
+        argv += ["--filter-local-ids", only]
+    return subprocess.run(
+        argv, env=engine_env(str(repo)), text=True, capture_output=True, check=False
+    )
 
 
 def run_bridge(
@@ -221,8 +220,8 @@ def run_bridge(
 ):
     """Invoke a primary ``preview`` or ``sync`` reconciler command.
 
-    ``only`` uses the primary selection contract and therefore narrows examination as well
-    as writes.
+    Unlike the retained ``run_reconcile`` compatibility helper, ``only`` uses the
+    primary selection contract and therefore narrows examination as well as writes.
     """
     from rebar._engine import engine_env
 
