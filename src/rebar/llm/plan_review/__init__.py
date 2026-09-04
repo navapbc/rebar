@@ -28,7 +28,7 @@ from typing import Any
 from rebar.llm.config import LLMConfig
 from rebar.llm.runner import Runner
 
-from . import attest, drift_floor, material_diff, orchestrator, sidecar
+from . import attest, context_assembly, drift_floor, material_diff, orchestrator, sidecar
 from .attest import claim_gate_check, plan_review_status
 from .floors import (
     _apply_completion_floor_to_verdict,
@@ -422,7 +422,7 @@ def _run_plan_review(
 
     initial_generation = generation.from_snapshot(review_snapshot)
 
-    ctx = orchestrator.assemble_context(ticket_id, repo_root=repo_root, cfg=cfg)
+    ctx = context_assembly.assemble_context(ticket_id, repo_root=repo_root, cfg=cfg)
     review_phase = initial_generation.phase
     priority_floor = initial_generation.priority_floor
     # Exact retry (story RP-06 S5): resume ONLY the latest review, and ONLY when it is a

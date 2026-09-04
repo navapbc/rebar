@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 from rebar.llm.criteria.model import threshold_for
-from rebar.llm.plan_review import orchestrator, registry
+from rebar.llm.plan_review import coach_moves, orchestrator, registry
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.review_kernel.coach import applicable_moves
 
@@ -141,7 +141,7 @@ def test_prompt_carries_an_interface_local_non_finding():
 
 # ── move contract ──────────────────────────────────────────────────────────────────
 def test_move_is_offered_for_the_criterion_and_not_for_noise():
-    moves = orchestrator.load_move_registry(repo_root=str(REPO_ROOT))
+    moves = coach_moves.load_move_registry(repo_root=str(REPO_ROOT))
     assert MOVE_ID in moves, f"move {MOVE_ID!r} missing from plan_review_moves.json"
     assert "{subject}" in moves[MOVE_ID]["template"]
     assert MOVE_ID in applicable_moves(moves, {CRITERION_ID})

@@ -31,7 +31,7 @@ from typing import Any
 
 from rebar.llm.review_kernel import DISCOVERY_NAMESPACE_VERSION
 
-from . import attest, claimability, sidecar, sizing
+from . import attest, checkpoints, claimability, sidecar
 from .sidecar import DISCOVERY_JOURNAL_VERSION, RETRY_LINEAGE_VERSION
 
 # Journal unit kinds whose checkpointed success can be reused (they carry a lineage digest).
@@ -96,7 +96,7 @@ def _reusable_checkpoints_present(ctx, reusable: list[dict]) -> bool:
     the stored success can no longer be reused → the latest review is stale."""
     for unit in reusable:
         digest = (unit.get("lineage") or {}).get("digest")
-        if not digest or sizing.load_checkpoint(ctx, digest) is None:
+        if not digest or checkpoints.load_checkpoint(ctx, digest) is None:
             return False
     return True
 

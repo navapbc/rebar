@@ -38,18 +38,6 @@ from rebar.types import PLAN_REVIEW_EXEMPT_TYPES
 from . import registry
 from .det_floor import PlanContext
 
-# The Pass-1 finder machinery lives in :mod:`.pass1` (module-size seam, epic B /
-# story B1). Re-exported here for the historical ``orchestrator.<name>`` call sites
-# (attest.py + the test suite). The Pass-1 finder itself now runs only via the workflow's
-# ProductionBatchRunner (which imports run_pass1 from .pass1 directly) — the bespoke
-# _run_passes that invoked it here was retired in epic solid-timer-unison (WS1).
-from .pass1 import (  # noqa: F401
-    CONTAINER_CRITERIA,
-    _run_container,
-    _ticket_graph_blob,
-    material_fingerprint,
-)
-
 logger = logging.getLogger(__name__)
 
 # Advisory surfacing cap (config-overridable; owned by child 55de). Blocking
@@ -58,43 +46,6 @@ logger = logging.getLogger(__name__)
 # overflow COUNT is still reported (coverage.counts.advisory_overflow) and the full
 # overflow set persists to the REVIEW_RESULT sidecar.
 DEFAULT_ADVISORY_CAP = 20
-
-# The size/budget/ladder/checkpoint cluster lives in :mod:`.sizing`; re-export the
-# names this module + the tests use (backward-compatible public surface). Private
-# aliases (``_centrality`` etc.) preserve the historical call sites.
-from . import sizing  # noqa: E402
-
-# ``largest_window_tokens`` is no longer called in this module (its only caller moved to
-# :mod:`.context_assembly` with ticket 1484's split), but four tests reach it as
-# ``orchestrator.largest_window_tokens`` — keep the re-export so the split needs no test edit.
-from .sizing import largest_window_tokens  # noqa: E402,F401
-
-_centrality = sizing.centrality
-_is_context_limit_error = sizing.is_context_limit_error
-_models_at_or_above = sizing.models_at_or_above
-_pass1_with_ladder = sizing.pass1_with_ladder
-_shed_to_budget = sizing.shed_to_budget
-
-
-# Back-compat re-export (LOAD-BEARING, not cosmetic): the run-scoped context-assembly cluster
-# moved to the context_assembly.py strict leaf (ticket 1484) to buy headroom under the module-size
-# cap. production_batch_runner.py and four test modules do `from .orchestrator import
-# assemble_context`, and the suite reaches these as `orchestrator.<name>`; re-importing keeps them
-# module-globals of THIS module so every existing reference and monkeypatch target resolves
-# unchanged.
-#
-# The Pass-4 move registry + loader live in the pure-data `coach_moves` seam; re-exported here
-# for the historical ``orchestrator.MOVE_REGISTRY`` / ``orchestrator.load_move_registry`` call
-# sites (module-size seam, child 75a9).
-
-from .coach_moves import MOVE_REGISTRY, load_move_registry  # noqa: E402,F401
-from .context_assembly import (  # noqa: E402,F401
-    _assemble_cache,
-    _assemble_cache_key,
-    _assemble_context_uncached,
-    assemble_context,
-    assemble_context_cache,
-)
 
 
 # ── delivered-children manifest (completion-aware container plan-review, epic 66ac / 94fd) ──────
@@ -167,24 +118,6 @@ def delivered_children_manifest(container_id: str, *, repo_root=None) -> list[di
 
 
 # ── verification contract-violation collection (run-scoped) ──────────────────────
-# Pass-2's verifier→Pass-3 reshape (the `plan_review_decide` op) detects contract violations
-# (malformed / duplicate / out-of-range verification indices) via the shared
-# `review_kernel.reshape_verifications` seam. Under the expand-contract posture (epic
-# drag-gripe-brake) those NEVER change the verdict — they are surfaced as ADDITIVE observability:
-# an ERROR log + a `verification_contract_violations` entry on the verdict coverage, present ONLY
-# when non-empty (so a clean run's verdict stays byte-identical → attestation-safe). `decide` and
-# `coach` run as SEPARATE workflow steps, so the report is carried between them by a run-scoped
-# ContextVar, activated once per gate run by `produce_plan_review_verdict`.
-#
-# The sink now lives in `review_kernel.telemetry` (ticket c2c5) — code-review shares the SAME
-# implementation instead of forking it. Re-exported here (not duplicated) so every existing
-# `orchestrator.collect_contract_violations` / `record_contract_violation` /
-# `drain_contract_violations` call site keeps working unmodified.
-collect_contract_violations = review_kernel.collect_contract_violations
-record_contract_violation = review_kernel.record_contract_violation
-drain_contract_violations = review_kernel.drain_contract_violations
-
-
 # ── finding id (content fingerprint — orchestrator is the SOLE owner) ─────────────
 def mint_finding_id(finding: dict[str, Any]) -> str:
     """A stable content fingerprint for a finding (the caller-visible ``id`` the

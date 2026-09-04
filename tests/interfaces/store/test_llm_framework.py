@@ -354,8 +354,8 @@ def test_model_string_selection_is_provider_agnostic() -> None:
     construction code): a bare name is provider-qualified, and hosted ``openai:`` defaults to
     the Responses API (ticket 155c), while a custom ``base_url`` keeps it on Chat Completions."""
     pytest.importorskip("pydantic_ai")
+    from rebar.llm.anthropic_model import _pai_model
     from rebar.llm.config import LLMConfig
-    from rebar.llm.runner import _pai_model
 
     assert _pai_model(LLMConfig(model="claude-opus-4-8")) == "anthropic:claude-opus-4-8"
     assert (

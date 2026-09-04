@@ -24,7 +24,7 @@ from rebar.llm.plan_review import pass1, passes, prerequisites, registry, sizing
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
 from rebar.llm.runner import FakeRunner
-from rebar.llm.workflow.gate_dispatch import _attach_plan_review_metrics
+from rebar.llm.workflow.plan_review_recovery import _attach_plan_review_metrics
 from rebar.llm.workflow.runners import BatchRunRequest
 
 _USAGE = {

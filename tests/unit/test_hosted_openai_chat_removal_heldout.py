@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
+from rebar.llm.anthropic_model import _pai_model
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError
 from rebar.llm.model_classes import _resolve_target
 from rebar.llm.providers import ProviderSession
-from rebar.llm.runner import _pai_model
 
 pytestmark = pytest.mark.unit
 

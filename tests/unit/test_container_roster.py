@@ -162,7 +162,7 @@ def test_roster_prefix_is_byte_stable_across_pairings() -> None:
 
 
 def test_roster_counted_in_prefix_estimate() -> None:
-    """CORRECTNESS, not just cost: ``parent_tokens`` feeds ``sizing.pack_container_bins`` and
+    """CORRECTNESS, not just cost: ``parent_tokens`` feeds ``budget.pack_container_bins`` and
     the per-pairing size estimate as well as the warm gate. With the roster in the prefix but
     absent from the estimate, a bin can be packed OVER the window budget."""
     src = inspect.getsource(pass1._run_container)

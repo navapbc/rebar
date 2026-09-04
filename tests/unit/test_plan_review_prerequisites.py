@@ -5,7 +5,7 @@ from dataclasses import replace
 from rebar.llm import contracts, parity
 from rebar.llm.config import LLMConfig
 from rebar.llm.plan_review import orchestrator, passes, prerequisites, sizing
-from rebar.llm.plan_review.workflow_ops import plan_review_decide
+from rebar.llm.plan_review.decide_ops import plan_review_decide
 from rebar.llm.workflow.executor import StepContext
 from rebar.llm.workflow.runners import BatchRunRequest
 

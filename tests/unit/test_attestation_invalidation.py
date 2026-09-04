@@ -777,7 +777,7 @@ def test_normal_sign_container_scope_contract(
         children = []
 
     monkeypatch.setattr(
-        "rebar.llm.config.current_code_sha",
+        "rebar.llm.gate_context.current_code_sha",
         lambda: signing.head_sha(str(store)),
     )
     material = attest.current_material_fingerprint(ticket_id, repo_root=str(store))

@@ -68,11 +68,10 @@ def test_full_review_emits_the_exact_pre_llm_snapshot(
         lambda *a, **k: snapshot,
     )
     monkeypatch.setattr(
-        plan_review.orchestrator,
+        plan_review.context_assembly,
         "assemble_context",
         lambda *a, **k: SimpleNamespace(ticket_id="1111-2222-3333-4444", ticket_type="story"),
     )
-    monkeypatch.setattr(plan_review.orchestrator, "material_fingerprint", lambda ctx: "m" * 16)
     monkeypatch.setattr(
         "rebar.llm.workflow.gate_dispatch.produce_plan_review_verdict",
         lambda *a, **k: {

@@ -441,7 +441,8 @@ def _ast_index() -> _AstIndex:
 
 def _functions() -> dict[str, list[_FunctionSite]]:
     """Every function/method in ``src/rebar``, indexed by its bare name (the granularity a call
-    site gives us: ``passes.pass2_completion(...)`` and ``pass2_completion(...)`` both resolve by
+    site gives us: ``completion_subcall.pass2_completion(...)`` and
+    ``pass2_completion(...)`` both resolve by
     ``pass2_completion``)."""
     return {name: list(sites) for name, sites in _ast_index().functions_by_name.items()}
 

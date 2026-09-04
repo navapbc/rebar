@@ -510,7 +510,7 @@ def review_code_sha(repo_root=None) -> str | None:
     eligibility baseline would be structurally inert exactly in local BLOCK loops), else None
     (best-effort; never raises)."""
     try:
-        from rebar.llm.config import current_code_sha
+        from rebar.llm.gate_context import current_code_sha
 
         sha = current_code_sha()
         if sha:

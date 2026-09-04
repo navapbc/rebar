@@ -28,7 +28,7 @@ from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.runner import FakeRunner
 from rebar.llm.workflow import executor as _ex
-from rebar.llm.workflow import gate_dispatch
+from rebar.llm.workflow import gate_dispatch, plan_review_recovery
 
 pytestmark = pytest.mark.unit
 
@@ -87,7 +87,7 @@ def _minimal_plan_review_doc(monkeypatch: pytest.MonkeyPatch) -> None:
         "_gate_doc",
         lambda name, repo_root: {
             "id": "g",
-            "steps": [{"id": sid} for sid in gate_dispatch._PLAN_REVIEW_REQUIRED_STEP_IDS],
+            "steps": [{"id": sid} for sid in plan_review_recovery._PLAN_REVIEW_REQUIRED_STEP_IDS],
         },
     )
 

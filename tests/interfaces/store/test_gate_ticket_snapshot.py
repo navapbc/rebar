@@ -22,7 +22,7 @@ import pytest
 import rebar
 from rebar._snapshot import materialize_tickets
 from rebar.llm import gate_source
-from rebar.llm.config import current_tickets_root
+from rebar.llm.gate_context import current_tickets_root
 
 
 def _git(repo: Path, *args: str) -> str:

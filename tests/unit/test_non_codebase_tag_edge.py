@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar.llm.plan_review import workflow_ops
+from rebar.llm.plan_review import decide_ops
 from rebar.llm.plan_review.det_operator_attested import (
     _OPERATOR_ATTESTED_TAG_RE,
     ac_item_lines,
@@ -72,16 +72,16 @@ def test_findall_returns_plain_strings_not_tuples() -> None:
         "- [ ] [non-codebase] deployed to prod",
         "- [ ] [operator-attested] landed on main via Gerrit",
     )
-    texts = workflow_ops.operator_attested_ac_texts(desc)
+    texts = decide_ops.operator_attested_ac_texts(desc)
     assert len(texts) == 2
     assert all(isinstance(t, str) for t in texts), f"findall returned non-str: {texts!r}"
     assert texts == ["deployed to prod", "landed on main via Gerrit"]
 
 
 def test_single_source_identity_seam_is_preserved() -> None:
-    """workflow_ops must keep re-exporting the SAME compiled object — `==` on a recompiled
+    """decide_ops must expose the SAME compiled object — `==` on a recompiled
     pattern would pass while silently forking the two matchers."""
-    assert workflow_ops._OPERATOR_ATTESTED_AC_RE is _OPERATOR_ATTESTED_TAG_RE
+    assert decide_ops._OPERATOR_ATTESTED_AC_RE is _OPERATOR_ATTESTED_TAG_RE
 
 
 def test_alternation_is_non_capturing_in_the_pattern_source() -> None:
@@ -108,7 +108,7 @@ def test_plan_time_lint_parity(tag: str) -> None:
 @pytest.mark.parametrize("tag", ["[non-codebase]", "[operator-attested]"])
 def test_enrichment_parity(tag: str) -> None:
     """Parent AC parity surface 2: Pass-3 enrichment recognizes both spellings."""
-    assert workflow_ops.operator_attested_ac_texts(_ac(f"- [ ] {tag} deployed to prod")) == [
+    assert decide_ops.operator_attested_ac_texts(_ac(f"- [ ] {tag} deployed to prod")) == [
         "deployed to prod"
     ]
 

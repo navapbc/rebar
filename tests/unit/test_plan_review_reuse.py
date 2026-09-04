@@ -30,6 +30,7 @@ import pytest
 import rebar
 import rebar.llm
 from rebar.llm.plan_review import sidecar
+from rebar.llm.review_kernel import decide as kdecide
 from rebar.llm.runner import FakeRunner
 
 # The blocking LLM criterion the fake pins its finding to: F1 has default_posture
@@ -57,7 +58,6 @@ class _CountingGateFake(FakeRunner):
 
     def run(self, req) -> dict:  # type: ignore[override]
         from rebar.llm import findings as _f
-        from rebar.llm.plan_review import passes
 
         self.calls += 1
         schema = req.output_schema
@@ -71,7 +71,7 @@ class _CountingGateFake(FakeRunner):
                     {
                         "index": i,
                         "binary": {
-                            **{q: "yes" for q in passes.GRADED_BINARY},
+                            **{q: "yes" for q in kdecide.GRADED_BINARY},
                             "cited_reference_accurate": "na",
                         },
                         "severity_attributes": {"vague_directive": "high"},

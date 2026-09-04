@@ -40,7 +40,7 @@ def remediation_mode_candidate(
     and a review inside the configured freshness window. Read failures simply deny the mode.
     """
     from rebar import signing
-    from rebar.llm.config import current_code_sha
+    from rebar.llm.gate_context import current_code_sha
 
     from . import sidecar
     from .attest import (

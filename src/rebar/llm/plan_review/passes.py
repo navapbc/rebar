@@ -26,13 +26,6 @@ arithmetic — no model, fully unit-testable.
 
 from __future__ import annotations
 
-# ── Pass-4 coach MECHANISM: the shared review KERNEL owns it (epic vivid-gang-day WS3). These
-#    module-level re-exports keep the historical `passes.<name>` call sites (workflow_ops + the
-#    test suite) — thin aliases, NOT a second copy. `MOVE_REGISTRY` below stays as plan-review's
-#    catalog INSTANCE. (Module assignments, not `import X as Y`, so isort never drops them.) The
-#    submodule is resolved via importlib because the kernel package re-exports a `coach` FUNCTION
-#    that shadows the `coach` submodule attribute on the package.
-import importlib
 import logging
 import re
 from typing import Any
@@ -40,70 +33,13 @@ from typing import Any
 from rebar.llm import contracts
 from rebar.llm.config import LLMConfig
 from rebar.llm.prompting import prompts
-
-# ── Pass-2 + Pass-3: the shared review KERNEL owns the verification contract, the verify
-#    listing builders, and the decision math now (epic vivid-gang-day WS1+WS2). Re-exported
-#    here so the plan-review pass modules + the test suite keep their historical
-#    `passes.<name>` call sites — thin re-exports, NOT a second copy (AC: "no second copy
-#    remains"). `verify_instructions`/`verify_finding_listing` are the kernel listing builders;
-#    `verification_model` backs `plan_review_verification` (the same kernel model). ───────────
-from rebar.llm.review_kernel.decide import (  # noqa: F401
-    DEFAULT_BLOCK_THRESHOLD,
-    GRADED_BINARY,
-    impact,
-    pass3_decide,
-    severity_label,
-    validity,
-)
-from rebar.llm.review_kernel.verify import (  # noqa: F401
-    finding_listing as verify_finding_listing,
-)
-from rebar.llm.review_kernel.verify import (  # noqa: F401
-    novelty_model,
-    plan_review_verification_model,
-    score_novelty,
-    verification_model,
-    verify_instructions,
-)
+from rebar.llm.review_kernel import verify as _verify
 from rebar.llm.runner import Runner, RunRequest
 
-# The Pass-4 move catalog + loader (`MOVE_REGISTRY` / `load_move_registry`) and the R6 advisory
-# triage (`APPLY_NOW_MARGIN` / `triage_advisories`) live in the leaf sibling `coach_moves.py`
-# (module-size seam). Re-exported here so the historical `passes.<name>` call sites (workflow_ops
-# + the test suite) and the `orchestrator.*` re-exports keep resolving — thin aliases, NOT a copy.
-from .coach_moves import (  # noqa: F401
-    APPLY_NOW_MARGIN,
-    MOVE_REGISTRY,
-    load_move_registry,
-    triage_advisories,
-)
-
-# The Pass-2 completion sub-call + the Pass-3 completion floor live in the sibling
-# `completion_subcall.py` (module-size seam, task 8705). Re-exported here so every historical call
-# site keeps resolving through `passes` — `plan_review/__init__.py`, the calibration script and the
-# test suite — thin aliases, NOT a copy. `_pass2_completion_model` backs `register_contracts()`
-# below; `_completion_finding_listing` is asserted on directly by the completion unit suite.
-from .completion_subcall import (  # noqa: F401
-    COMPLETION_ATTRIBUTION_NONE,
-    COMPLETION_CONTAINMENT,
-    COMPLETION_CONTAINMENT_CLOSED,
-    COMPLETION_LAYER,
-    COMPLETION_LAYER_PLAN,
-    _completion_finding_listing,
-    _pass2_completion_model,
-    completion_floor_drop,
-    pass2_completion,
-)
+from . import completion_subcall as _completion_subcall
 from .prerequisites import prerequisite_coverage_model as _prerequisite_coverage_model
 
 logger = logging.getLogger(__name__)
-
-_coach = importlib.import_module("rebar.llm.review_kernel.coach")
-coach_instructions = _coach.coach_listing
-render_coach_notes = _coach.render_coach_notes
-applicable_moves = _coach.applicable_moves
-validate_move_registry = _coach.validate_move_registry
-_validate_subject = _coach.validate_subject
 
 
 # ── structured-output contracts (registered once on import) ────────────────────
@@ -150,11 +86,11 @@ def _pass1_model() -> type:
 # decide.impact_plan aggregates. It reuses the kernel's exact Binary vocabulary (built from the
 # shared helper), so only the severity_attributes differ; the kernel `verification` contract used
 # by code-review + the kernel default stays byte-identical.
-_pass2_model = plan_review_verification_model
+_pass2_model = _verify.plan_review_verification_model
 # Pass-2's SEPARATE novelty sub-call contract (child 150b) — the same kernel `novelty` model
 # factory, aliased under the plan-review name `plan_review_novelty` (mirroring the verification
 # pairing). The kernel registers it under the canonical name `novelty`.
-_pass2_novelty_model = novelty_model
+_pass2_novelty_model = _verify.novelty_model
 
 
 # The Pass-2 COMPLETION sub-call contract + its closed-vocabulary constants
@@ -186,7 +122,9 @@ def register_contracts() -> None:
     contracts.register_contract("plan_review_findings", _pass1_model)
     contracts.register_contract("plan_review_verification", _pass2_model)
     contracts.register_contract("plan_review_novelty", _pass2_novelty_model)
-    contracts.register_contract("plan_review_completion", _pass2_completion_model)
+    contracts.register_contract(
+        "plan_review_completion", _completion_subcall._pass2_completion_model
+    )
     contracts.register_contract("plan_review_coach", _pass4_model)
     contracts.register_contract("plan_review_prerequisite_coverage", _prerequisite_coverage_model)
 
@@ -217,11 +155,8 @@ PASS_COMMENT_TRAIL = "plan-review-comment-trail"  # validation: comment-trail co
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
 def _max_output_cfg(cfg: LLMConfig) -> LLMConfig:
-    """Model-max output budget for every plan-review request (bug 30a2) — see
-    :func:`sizing.max_output_cfg`. Lazy import: ``sizing`` imports this module."""
-    from .sizing import max_output_cfg
-
-    return max_output_cfg(cfg)
+    """Model-max output budget for every plan-review request (bug 30a2)."""
+    return _verify.max_output_cfg(cfg)
 
 
 def _criterion_block(c: dict[str, Any]) -> str:
@@ -572,21 +507,3 @@ def summarize_for_isf(
 
 
 # ── Pass 2: completion sub-call (epic 66ac / child 94fd) — the completion-aware container seam ──
-# The sub-call (`pass2_completion` + its manifest/listing/coercion helpers) and the deterministic
-# Pass-3 completion FLOOR (`completion_floor_drop`) live in the sibling `completion_subcall.py`
-# (module-size seam, task 8705) and are re-exported at the top of this module — thin aliases, NOT
-# a second copy. The floor is listed here, beside Pass 3, because that is where it is applied.
-
-# ── Pass 3: decide (DETERMINISTIC — no model in this path) ────────────────────────
-# The Pass-3 decision core (`validity` / `impact` / `severity_label` / `pass3_decide`
-# + the grade/severity maps + `DEFAULT_BLOCK_THRESHOLD` / `GRADED_BINARY`) lives in the
-# shared review kernel (`rebar.llm.review_kernel.decide`) and is re-exported at the top
-# of this module — there is no second copy here (epic vivid-gang-day WS1).
-
-
-# ── Pass 4: coach (rendered deterministically from a locked template) ──
-# The Pass-4 move registry + loader (`MOVE_REGISTRY` / `load_move_registry`) live in the leaf
-# sibling `coach_moves.py` and are re-exported at the top of this module. The Pass-4 coach
-# MECHANISM (listing/render/validator/applicability) lives in the shared review kernel (epic
-# vivid-gang-day WS3), also re-exported at the top of this module; the workflow gate owns the
-# live structured coach request wiring.

@@ -1,27 +1,30 @@
 from __future__ import annotations
 
+import importlib
 import json
 from types import SimpleNamespace
 
-from rebar.llm.plan_review import orchestrator, passes
+from rebar.llm.plan_review import coach_moves, context_assembly
 from rebar.llm.plan_review.prerequisites import focused_inputs
 from rebar.llm.plan_review.workflow_ops import plan_review_coach_inputs
 from rebar.llm.workflow.executor import StepContext
+
+review_coach = importlib.import_module("rebar.llm.review_kernel.coach")
 
 
 def test_coach_prompt_inputs_exclude_prerequisite_identity_and_plan(monkeypatch) -> None:
     prerequisite_id = "aaaa-bbbb-cccc-dddd"
     prerequisite_plan = "PRIVATE PREREQUISITE PLAN TEXT"
     monkeypatch.setattr(
-        orchestrator,
+        context_assembly,
         "assemble_context",
         lambda *args, **kwargs: SimpleNamespace(plan_text="subject plan"),
     )
-    monkeypatch.setattr(passes, "load_move_registry", lambda repo_root: {})
-    monkeypatch.setattr(passes, "applicable_moves", lambda moves, triggers: {})
+    monkeypatch.setattr(coach_moves, "load_move_registry", lambda repo_root: {})
+    monkeypatch.setattr(review_coach, "applicable_moves", lambda moves, triggers: {})
     monkeypatch.setattr(
-        passes,
-        "coach_instructions",
+        review_coach,
+        "coach_listing",
         lambda findings, moves: json.dumps(findings, sort_keys=True),
     )
     ctx = StepContext(

@@ -192,7 +192,8 @@ def test_context_code_root_reroots_deep_from_env(tmp_path, monkeypatch):
     """The load-bearing mechanism the workflow-routed gates rely on: a config rebuilt deep
     in a gate run (e.g. gate_ops citation resolution) via LLMConfig.from_env reads the
     snapshot while the context root is active, and reverts cleanly afterward (AC3)."""
-    from rebar.llm.config import LLMConfig, current_code_root, use_code_root
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.gate_context import current_code_root, use_code_root
 
     monkeypatch.delenv("REBAR_LLM_REPO_PATH", raising=False)
     snap = str(tmp_path / "snap")
