@@ -45,6 +45,11 @@ _HEAVY = (
     # contract + harness are stdlib-only; tree-sitter must stay lazy (worker boundary).
     "tree_sitter",
     "tree_sitter_language_pack",
+    # [grounding-terraform] extra (REB-640) — python-hcl2 (and its lark parser) power
+    # the optional Terraform structural grounding tools; both must stay lazy so
+    # `import rebar` and non-Terraform reviews never pull the HCL parser.
+    "hcl2",
+    "lark",
 )
 
 _SRC = Path(rebar.__file__).resolve().parent
@@ -138,3 +143,48 @@ def test_no_core_module_imports_heavy_stack_at_module_scope() -> None:
         "heavy [agents]/[tracing] imports must be LAZY (inside a function), "
         "not at module scope:\n" + "\n".join(offenders)
     )
+
+
+def test_terraform_grounding_extra_is_optional_and_advertises_nothing_when_absent() -> None:
+    """REB-640: with `hcl2` unimportable, `import rebar` and the grounding package
+    still import, the Terraform tools report themselves UNAVAILABLE (advertise
+    nothing), and a session's queries return a closed `no_tool/missing_extra`
+    abstention — never a raise. Run in a clean subprocess with hcl2 blocked."""
+    code = textwrap.dedent(
+        """
+        # Simulate the extra being ABSENT the way rebar actually detects it:
+        # capability availability is resolved with importlib.util.find_spec
+        # (never by importing the probe), so hide hcl2/lark from find_spec. Also
+        # block real import as belt-and-braces, proving nothing eagerly imports it.
+        import builtins, importlib.util
+        _blocked = ("hcl2", "lark")
+        _real_find_spec = importlib.util.find_spec
+        def _hidden_find_spec(name, *args, **kwargs):
+            if name in _blocked or name.split(".")[0] in _blocked:
+                return None
+            return _real_find_spec(name, *args, **kwargs)
+        importlib.util.find_spec = _hidden_find_spec
+        _real_import = builtins.__import__
+        def _block_import(name, *args, **kwargs):
+            if name in _blocked or name.split(".")[0] in _blocked:
+                raise ModuleNotFoundError("blocked by optionality oracle: " + name)
+            return _real_import(name, *args, **kwargs)
+        builtins.__import__ = _block_import
+
+        import rebar
+        import rebar.grounding
+        from rebar.grounding import terraform_tools as tft
+
+        assert tft.available() is False, "must advertise NO terraform tools without the extra"
+        session = tft.open_session(repo_root=".", selected=["infra/main.tf"])
+        res = session.lookup_declaration("variable.x", module_path="infra")
+        session.finalize()
+        assert res.evidence["outcome"] == "abstain"
+        assert res.evidence["reason"] == "no_tool"
+        assert res.receipt["reason_detail"] == "missing_extra"
+        print("OK")
+        """
+    )
+    cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert cp.returncode == 0, cp.stderr
+    assert cp.stdout.strip().endswith("OK"), cp.stdout + cp.stderr

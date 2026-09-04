@@ -251,6 +251,43 @@ def shape_only(shape: dict) -> dict[str, Any]:
     return {field: shape[field] for field in _SHAPE_FIELDS if field in shape}
 
 
+def merge_synthetic_reads(
+    distinct_fetches: list[dict],
+    *,
+    concrete_reads: Iterable[str] = (),
+    membership_globs: Iterable[str] = (),
+) -> list[dict]:
+    """Deterministically merge a Terraform grounding session's reads into ``distinct_fetches``.
+
+    A per-call Terraform grounding session (REB-640) does NOT read project files through the
+    agent's ``read_file`` tool — it parses captures in-process — so its reads never appear in
+    the message-derived :func:`run_shape` telemetry. To make those reads part of the signed
+    read-set (and thus the attestation's currency material) they are projected onto the SAME
+    ``{"tool": "read_file", "target": ...}`` shape the reducer emits:
+
+    * each ``concrete_reads`` path (a repo-relative ``.tf``/``.tf.json`` actually parsed) and
+    * each ``membership_globs`` pattern (which :func:`~rebar.llm.plan_review.read_set.is_glob`
+      routes to a membership digest downstream)
+
+    is appended as a synthetic ``read_file`` fetch. The merge is order-independent and deduped
+    on ``(tool, target)`` against the existing fetches, and the appended entries are sorted, so
+    the resulting read-set — and every digest computed from it — is reproducible regardless of
+    query order within the session."""
+    seen: set[tuple[str, str]] = {
+        (str(f.get("tool")), str(f.get("target")))
+        for f in distinct_fetches
+        if isinstance(f, dict) and f.get("target") is not None
+    }
+    additions: set[str] = set()
+    for target in (*concrete_reads, *membership_globs):
+        text = str(target or "").strip()
+        if text and ("read_file", text) not in seen:
+            additions.add(text)
+    merged = list(distinct_fetches)
+    merged.extend({"tool": "read_file", "target": t} for t in sorted(additions))
+    return merged
+
+
 def tool_call_signature(name: str, args: object) -> str:
     """``tool_name:args_digest`` for one ``(name, args)`` pair — identity WITHOUT the
     argument content.
