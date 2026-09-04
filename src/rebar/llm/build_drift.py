@@ -144,16 +144,27 @@ def _resolve_repo_root(repo_root: str | None) -> str | None:
         return repo_root
 
 
-def detect_drift(pinned_sha: str | None, repo_root: str | None) -> BuildDrift | None:
-    """Return a :class:`BuildDrift` when the running build is a STRICT ancestor of
-    ``pinned_sha`` in the target repo, else ``None``.
+def detect_drift(
+    pinned_sha: str | None, repo_root: str | None, *, build_sha: str | None = None
+) -> BuildDrift | None:
+    """Return a :class:`BuildDrift` when a build is a STRICT ancestor of ``pinned_sha``
+    in the target repo, else ``None``.
+
+    ``build_sha`` names the build to measure and DEFAULTS to the running process's own
+    (:func:`running_build_sha`), which is the gate-time question this module was written
+    for. It is a parameter because the same ancestry question is asked about a build the
+    caller is not executing: ``rebar doctor``'s build-freshness scan measures the build
+    the host's main-tracking updater PUBLISHED, read off its ``current`` pointer, which a
+    developer checkout cannot answer by introspecting itself (bug ae97-a37b-9fa3-413a).
+    Passing it reuses this ancestry walk rather than forking a second one that would
+    drift from it.
 
     ``None`` covers every "cannot prove drift" case as well as the healthy ones: no build
     provenance, no pinned SHA (a ``local``-source gate pins nothing), either SHA absent
     from the target repo (notably: gate code and target are different repositories), git
     unavailable, and the build being at or ahead of the pinned ref.
     """
-    raw = running_build_sha()
+    raw = build_sha or running_build_sha()
     if not raw or not pinned_sha:
         return None
     dirty = raw.endswith(_DIRTY_SUFFIX)
