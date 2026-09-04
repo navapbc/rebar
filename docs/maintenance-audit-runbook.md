@@ -64,6 +64,8 @@ rebar metrics --since <YYYY-MM-DD> --until <YYYY-MM-DD> --output json
 
 Record the selected interval. A metric reported as `unavailable` has no accumulated data for that dimension and must not be interpreted as zero. The packaged discovery phase defines how metrics supplement the one-shot analysis tools.
 
+For the module-size question specifically, `code_health.module_size_trend` and `code_health.cap_change_events` derive their history straight from Git rather than the working tree, so they corroborate the one-shot gate check above across the audited interval: `module_size_trend` samples the tracked module count and the largest module's historical line count (by revision, against that revision's own cap) and `cap_change_events` lists every time the cap in `.github/module-size-limit.txt` itself changed. An empty `cap_change_events.events` list is a real finding — the cap held steady over the interval — not a sign of missing data; only the standard `unavailable` shape (never a zero) means the interval had too little qualifying history to report.
+
 ### Documentation and skill checks
 
 Confirm that maintained documentation links resolve and that the packaged skills retain valid frontmatter.
