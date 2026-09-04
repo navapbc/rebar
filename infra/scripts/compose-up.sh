@@ -99,6 +99,24 @@ for d in ${SITE_SUBDIRS}; do
       "${vol}" >/dev/null
 done
 
+# --- 2b. Ensure the gate-scratch bind path exists (ADR 0112 decision 3, story aa40) ---
+# The review-bot binds /var/lib/rebar so its snapshot store and reviewbot-* clones land on
+# the dedicated scratch EBS volume rather than on root. Docker would create a missing host
+# path for us — which is precisely the hazard: it would create it on the ROOT filesystem and
+# the container would run happily on the disk this volume exists to protect.
+#
+# So this only ever creates the PARENT (which is root-resident by design — it carries the
+# declaration marker) and never the mount point's contents. If user_data.sh has not mounted
+# the volume, the proof marker is absent, rebar's gate admission refuses, and the operator is
+# told; compose-up does not paper over it.
+SCRATCH_MOUNT="${GATE_SCRATCH_MOUNT:-/var/lib/rebar/gate-scratch}"
+mkdir -p "$(dirname "${SCRATCH_MOUNT}")"
+if [ ! -f "${SCRATCH_MOUNT}/.gate-scratch-mounted" ]; then
+  echo "compose-up: WARNING — ${SCRATCH_MOUNT} carries no .gate-scratch-mounted marker." >&2
+  echo "compose-up:   The gate-scratch volume is not mounted. Gate runs will REFUSE rather" >&2
+  echo "compose-up:   than write to the root filesystem. See infra/runbooks/review-bot-ops.md." >&2
+fi
+
 # Copy the baked plugins ONCE (only if the persistent plugins dir is empty), so we
 # keep the image's bundled plugins (incl. replication, used by S5) while still
 # persisting any plugins S4a/WS8 add later (events-log, oauth.jar) via the separate

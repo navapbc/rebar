@@ -580,14 +580,16 @@ failure when the clone cannot write), and CI/deploy steps error on "no space lef
 ```bash
 df -h /                                    # root filesystem — the one that fills
 docker system df                           # images + build cache footprint (the usual culprit)
-du -sh /tmp/rebar-gate-snapshots 2>/dev/null   # leaked gate snapshot dirs (see below)
-du -sh /tmp/reviewbot-* 2>/dev/null        # leaked per-change clone workdirs
+du -sh /var/lib/rebar/gate-scratch 2>/dev/null  # gate scratch — now its OWN volume (see below)
+du -sh /tmp/rebar-gate-snapshots /tmp/reviewbot-* 2>/dev/null  # pre-aa40 root-resident leftovers
 docker builder du 2>/dev/null || docker system df -v | sed -n '/Build cache/,$p'  # builder cache detail
 ```
 
-The docker builder cache and dangling images are the most common consumers; the gate snapshot
-store (`/tmp/rebar-gate-snapshots`, overridable via `REBAR_GATE_TMPDIR`) and leaked
-`reviewbot-*` clone dirs are secondary.
+The docker builder cache and dangling images are the most common consumers; Since story `aa40-cbda-ee38-481c` the gate
+snapshot store and the `reviewbot-*` clone dirs are NOT on root at all — they live on the
+dedicated scratch volume (see **Where the gate scratch lives** below), so a root fill is now
+Docker's or journald's, and anything still under `/tmp/rebar-gate-snapshots` is a pre-aa40
+leftover.
 
 **Recover.** Reclaim space, largest lever first:
 
@@ -602,13 +604,99 @@ Never delete tagged images (`compose-review-bot:prev` is the rollback lifeline).
 reclaiming, `/rerun` any change left stuck at a disk-induced `-1` (see the `/rerun` section) —
 the vote does not clear on its own.
 
-**Where the clone workdir lives (root-volume-resident).** The voter clones each change into
-`tempfile.TemporaryDirectory(prefix="reviewbot-")` (`src/rebar/review_bot/voter.py`), which
-resolves to the system temp dir (`tempfile.gettempdir()`, typically `/tmp`) on the box's
-**ROOT** volume — **not** the `/var/gerrit` data volume. So a burst of reviews consumes root
-disk, and this workdir is one of the things the root-disk alarm covers. The dir is
-context-managed (removed when the review finishes), so a lingering `reviewbot-*` under `/tmp`
-means a crashed/killed review, not normal operation.
+**Where the gate scratch lives (its OWN EBS volume, since story `aa40-cbda-ee38-481c`).**
+Both review-gate consumers now write to the dedicated gp3 volume mounted at
+**`/var/lib/rebar/gate-scratch`**, not to root and not to `/var/gerrit`:
+
+- the content-addressed snapshot store (`rebar-gate-snapshots/`, plus the admission slot
+  files under `locks/`), via `REBAR_GATE_TMPDIR`; and
+- the voter's per-change clone, `tempfile.TemporaryDirectory(prefix="reviewbot-")` in
+  `src/rebar/review_bot/voter.py`, via `TMPDIR`.
+
+Both env vars are set on the `review-bot` service in `infra/compose/docker-compose.yml`, and
+the container binds `/var/lib/rebar` (the mount's PARENT, not the mount point — see the marker
+files below). ADR 0112 decision 3 is the reasoning: a review burst can now exhaust review
+scratch without touching the OS disk, which is what turned bug `3276` into a five-hour outage.
+
+**The contents are REBUILDABLE — that is the operational point.** Every byte here is a
+snapshot that re-materialises from a git ref or a clone that re-clones. The volume carries no
+`prevent_destroy` and is not in the DLM snapshot schedule, and during an incident you may
+clear it wholesale. Contrast `/var/gerrit`, which is source of truth and must never be
+treated that way.
+
+**Two marker files decide "is the volume mounted", and they are on different filesystems.**
+A bare mount point is an ordinary directory, so without them an unmounted volume looks exactly
+like an empty one:
+
+| File | Filesystem | Meaning |
+|---|---|---|
+| `/var/lib/rebar/.gate-scratch-required` | ROOT — survives an unmount | this host HAS a dedicated scratch volume |
+| `/var/lib/rebar/gate-scratch/.gate-scratch-mounted` | the VOLUME — vanishes with it | it is mounted right now |
+
+Both are written by `infra/terraform/user_data.sh` at provision time.
+
+**If the volume is not mounted, gates REFUSE — they do not fall back to root.**
+`rebar.llm.gate_admission` raises `GateScratchUnavailableError` for every `review-plan` and
+`verify-completion` run when the declaration is present and the proof is absent. That is
+deliberate (ADR 0112): repopulating the store on the root filesystem would silently restore
+the state this whole epic exists to prevent. The refusal is a HOST condition, not a review
+result — it produces no verdict, is retryable, and must never become an `LLM-Review −1`.
+
+**Alarms.** Two, because "how full" cannot answer "is it even there":
+
+- `rebar-gate-scratch-disk-high` — `rebar/host:disk_used_percent` with
+  `mount=/var/lib/rebar/gate-scratch`, > 85%, 300/3/2, `treat_missing_data = "breaching"`.
+- `rebar-gate-scratch-unmounted` — `rebar/host:gate_scratch_mounted`, a 1/0 heartbeat
+  published on every probe tick; alarms below 1. **Its signature is "every gate refuses",
+  not disk pressure**, so if reviews stop voting and the disk looks fine, check this alarm
+  first.
+
+Both are in `infra/terraform/monitoring_autodeploy.tf`; the metrics come from
+`infra/scripts/observability.sh` §2e on the 5-minute cadence.
+
+**Recovery — the volume is not mounted:**
+
+```bash
+mountpoint -q /var/lib/rebar/gate-scratch || mount -a          # fstab entry is by UUID
+ls -la /var/lib/rebar/gate-scratch/.gate-scratch-mounted       # the proof marker
+lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT                           # is the EBS volume attached?
+```
+
+Markers are markers, not data, so a reformat or a restore onto a fresh volume loses them and
+you recreate them by hand. **Recreate the PROOF marker only after `mountpoint -q` succeeds.**
+Writing it while the volume is unmounted lands it in the underlying ROOT directory, which
+tells the guard the volume is mounted when it is not — that is the silent fallback to root
+this whole story removes, performed by the recovery procedure for it. In that order:
+
+```bash
+touch /var/lib/rebar/.gate-scratch-required                       # declaration (ROOT fs)
+mountpoint -q /var/lib/rebar/gate-scratch \
+  && touch /var/lib/rebar/gate-scratch/.gate-scratch-mounted      # proof (the VOLUME)
+```
+
+The DECLARATION is the one that is easy to lose without noticing: it is root-resident, so an
+instance replacement or a re-image drops it while the volume and its proof survive. With it
+missing the guard is simply OFF — gates run, and they run correctly, right up until the volume
+goes away and they quietly go back to filling root. Recreate it whenever the host has a
+scratch volume, mounted or not.
+
+If the volume itself is gone, re-`terraform apply` (`aws_ebs_volume.gate_scratch` +
+`aws_volume_attachment.gate_scratch`) and re-run `user_data.sh`'s mount steps, which write
+both markers; nothing needs restoring from a backup.
+
+**Recovery — the volume is full:**
+
+```bash
+df -h /var/lib/rebar/gate-scratch
+du -sh /var/lib/rebar/gate-scratch/rebar-gate-snapshots /var/lib/rebar/gate-scratch/reviewbot-* 2>/dev/null
+rm -rf /var/lib/rebar/gate-scratch/rebar-gate-snapshots/tmp/*   # in-progress/leaked builds
+```
+
+The snapshot janitor is the steady-state reclaimer (`REBAR_GATE_FREE_WATERMARK_PCT`, now
+relative to THIS volume). Note that it reclaims by high-water mark over POSIX
+delete-on-last-close, so bytes held by an in-flight gate are LIVE, not garbage — which is why
+story `09da` bounds concurrent gate runs at 4. If the volume is full while four gates are
+running, wait for them; deleting under them frees nothing until the last reader closes.
 
 **Automated mitigations already in place.** You should rarely have to do the above by hand:
 

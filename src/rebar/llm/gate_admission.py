@@ -50,6 +50,14 @@ admission must treat a scratch volume that is unmounted "not as an empty cache t
 onto the root filesystem — otherwise the volume's failure mode is silently reverting to the
 state this ADR exists to prevent". A malformed knob is handled one layer down, in the
 resolver, by falling back to the measured default rather than disarming at all.
+
+WHAT "UNREACHABLE" MEANS ONCE THE VOLUME IS REAL (story aa40-cbda-ee38-481c). An
+``OSError`` from the store root covers the loud failures — a read-only or missing tree — but
+NOT the quiet one this module's whole reason for existing turns on: a mount point whose
+volume is not mounted is an ordinary, writable, EMPTY directory, so ``store_root()`` would
+create the store on the root filesystem and every gate would keep working, on the disk the
+volume exists to protect. :func:`_require_scratch_volume` closes that gap with two marker
+files on two different filesystems, and runs BEFORE the store is touched.
 """
 
 from __future__ import annotations
@@ -114,6 +122,25 @@ DEFAULT_MAX_CONCURRENT_GATES = 4
 
 _SLOT_PREFIX = "gate-slot-"
 
+#: Marker files that make "the dedicated scratch volume is mounted" decidable (ADR 0112
+#: decision 3, story aa40-cbda-ee38-481c). A bare mount point is an ORDINARY DIRECTORY, so
+#: without these an unmounted volume is indistinguishable from an empty one and
+#: ``store_root()``'s ``mkdir(parents=True)`` quietly recreates the store on the root
+#: filesystem — the silent revert the ADR forbids in as many words.
+#:
+#: The pair works because the two files live on DIFFERENT filesystems. The DECLARATION sits
+#: beside the mount point, on root, so it survives an unmount; the PROOF sits inside it, on
+#: the volume, so it vanishes with one. Only ``declaration present AND proof absent`` is the
+#: fault state. Everything else — neither, both, or a proof whose declaration was lost during
+#: a recovery — is today's behaviour, because a host that never declared a dedicated volume
+#: must not start failing gates on an upgrade.
+#:
+#: Deliberately FILES rather than a knob: a new ``REBAR_*`` literal or ``[snapshot]`` key
+#: would be a new mechanism against the shrink-only ratchet, and provisioning is already the
+#: thing that knows whether this host has a dedicated volume.
+_SCRATCH_REQUIRED_MARKER = ".gate-scratch-required"
+_SCRATCH_MOUNTED_MARKER = ".gate-scratch-mounted"
+
 
 def max_concurrent_gates(repo_root: str | os.PathLike[str] | None = None) -> int:
     """The configured concurrent-gate cap: ``[snapshot].max_concurrent_gates`` > default.
@@ -125,6 +152,31 @@ def max_concurrent_gates(repo_root: str | os.PathLike[str] | None = None) -> int
     from rebar._config_resolvers import resolve_gate_max_concurrent
 
     return resolve_gate_max_concurrent(DEFAULT_MAX_CONCURRENT_GATES, repo_root)
+
+
+def _require_scratch_volume(gate: str) -> None:
+    """Refuse when a declared gate-scratch volume is not mounted (ADR 0112 decision 3).
+
+    Uses :func:`~rebar._snapshot.repo_snapshot.peek_store_root`, the SIDE-EFFECT-FREE
+    derivation, and runs BEFORE :func:`_slot_dir`. That ordering is the whole point: the
+    creating :func:`store_root` would materialise the store on the root filesystem on its way
+    to the refusal, so checking afterwards would report the fault having already caused it.
+
+    Silent on a host with no declaration, so the guard is opt-in by PROVISIONING rather than
+    by rebar version — no laptop, CI runner or existing box changes behaviour.
+    """
+    from rebar._snapshot.repo_snapshot import peek_store_root
+
+    base = peek_store_root().parent
+    if not (base.parent / _SCRATCH_REQUIRED_MARKER).is_file():
+        return
+    if (base / _SCRATCH_MOUNTED_MARKER).is_file():
+        return
+    raise GateScratchUnavailableError(
+        gate,
+        f"{base} declares a dedicated scratch volume ({base.parent / _SCRATCH_REQUIRED_MARKER}) "
+        f"but {_SCRATCH_MOUNTED_MARKER} is absent, so the volume is not mounted",
+    )
 
 
 def _slot_dir() -> Path:
@@ -227,6 +279,11 @@ def gate_admission(
     failures this bound exists for — gives its slot back; a leak on the error path would
     degrade the cap into a deadlock that only a reboot clears.
     """
+    # BEFORE every other branch, including the operator's `0` off-switch and the fcntl
+    # disarm: those disarm the CONCURRENCY bound, which is a different question from whether
+    # gate bytes are about to land on the root filesystem. A host that turned the counter off
+    # did not thereby consent to losing its scratch volume silently.
+    _require_scratch_volume(gate)
     limit = max_concurrent_gates(repo_root)
     if limit <= 0:
         yield  # the operator's explicit off switch — a choice, not a fault: no marker

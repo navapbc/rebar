@@ -261,3 +261,95 @@ resource "aws_cloudwatch_metric_alarm" "root_disk_pressure" {
     Bug     = "ac14"
   }
 }
+
+# ---------------------------------------------------------------------------
+# Review-gate scratch volume (ADR 0112 decisions 2+3, story aa40-cbda-ee38-481c)
+# ---------------------------------------------------------------------------
+# The scratch volume takes gate snapshots and reviewbot-* clones OFF the root
+# filesystem, which is what stops a review burst wedging the OS disk. But it also
+# adds a mount that can fail independently of root — ADR 0112 says so directly —
+# so it gets its own pair of alarms rather than riding the root alarm above.
+#
+# TWO alarms, because they answer two different questions and the 3e92 precedent is
+# explicit that the second one is not implied by the first: "how full is it" cannot
+# say "is it even there". A volume that silently failed to mount reads as 0% used —
+# perfectly healthy — while every gate on the box refuses.
+
+resource "aws_cloudwatch_metric_alarm" "gate_scratch_disk_high" {
+  alarm_name        = "rebar-gate-scratch-disk-high"
+  alarm_description = <<-EOT
+    The dedicated review-gate scratch volume is above 85% used. Gate snapshots
+    (rebar-gate-snapshots) and the review-bot's per-review reviewbot-* clones live
+    here; exhaustion refuses gates instead of taking the OS disk with it (ADR 0112
+    decision 3). Reclaim runs through the snapshot janitor; the contents are
+    REBUILDABLE, so a stuck volume may be cleared wholesale. Published as
+    rebar/host:disk_used_percent with mount=/var/lib/rebar/gate-scratch by
+    observability.sh 2e (5-min cadence).
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "disk_used_percent"
+  statistic   = "Maximum"
+
+  dimensions = {
+    InstanceId = data.aws_instance.gerrit.id
+    mount      = var.gate_scratch_mount
+  }
+
+  # The house 300/3/2 shape (root_disk_pressure above, gerrit_data_disk_high in
+  # monitoring.tf): 2 breaching datapoints in a 3-period window absorbs the ordinary
+  # timer jitter that makes ~2 of 24 periods absent on this box.
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 85
+  comparison_operator = "GreaterThanThreshold"
+
+  # Bug 3276's defect 2 in one line: an alarm whose metric stops must PAGE, not clear
+  # itself to OK. Pinned by tests/unit/test_alarm_actions_terraform.py so this is not
+  # a copy-paste that a later edit can quietly drop.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "aa40"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "gate_scratch_unmounted" {
+  alarm_name        = "rebar-gate-scratch-unmounted"
+  alarm_description = <<-EOT
+    The review-gate scratch volume is NOT mounted at its expected path. rebar's gate
+    admission refuses every plan-review and completion-verifier run in this state
+    (GateScratchUnavailableError) rather than repopulating the snapshot store on the
+    ROOT filesystem, so the visible symptom is "all gates refuse", not disk pressure.
+    Remount the volume (see infra/runbooks/review-bot-ops.md). Published as
+    rebar/host:gate_scratch_mounted, a 1/0 heartbeat on every probe tick.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "gate_scratch_mounted"
+  statistic   = "Minimum"
+
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+
+  # Heartbeat semantics: the healthy path publishes 1 on EVERY tick, so absence means
+  # the probe, the timer, or the host is dead — the one state this alarm most needs to
+  # announce.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "aa40"
+  }
+}
