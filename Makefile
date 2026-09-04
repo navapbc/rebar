@@ -55,7 +55,7 @@ LOCAL_BIN := .tools/bin
 # fails a test instead of silently leaving every fresh venv on an interpreter nothing tests.
 PYTHON_VERSION_FILE := .github/python-version.txt
 
-.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check test jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
+.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check test e2e-deps jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -454,6 +454,22 @@ config-check:  ## ERRORS ONLY: validate every infra config (fails CI on a malfor
 	bash infra/scripts/config-check.sh
 
 check: lint typecheck  ## Run every check-only gate (no mutation).
+
+e2e-deps:  ## Provision the e2e Node toolchain (npm ci + esbuild bundle) BEFORE pytest.
+	@# A toolchain install is the build's work, not a test's. Doing it inside the first
+	@# e2e test's session-fixture setup charged 90-120s to that ONE test's 300s
+	@# pytest-timeout budget, and `timeout_method = "thread"` kills the xdist worker
+	@# (`node down: Not properly terminated`) rather than reporting a timeout
+	@# (bug 9a17-e0b3-7aa6-4091). This target is the PORTABLE trigger — a plain make
+	@# target any developer or any CI system can run, with no CI provider required;
+	@# tests/e2e/_toolchain.py stays as the in-fixture fallback for a checkout that
+	@# never ran it. Absent Node is not an error: the e2e tier is self-skipping, so
+	@# leave that decision to pytest rather than failing the build here.
+	@if ! command -v npm >/dev/null 2>&1; then \
+	  echo "e2e-deps: npm not on PATH — skipping (the e2e tier self-skips without Node)"; \
+	  exit 0; \
+	fi; \
+	cd tests/e2e/js && npm ci && npm run build
 
 test:  ## Run the default test suite (excludes integration + external).
 	pytest -m "not integration and not external" -q

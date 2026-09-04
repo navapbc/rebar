@@ -445,11 +445,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bubblewrap
           bwrap --version
+
+      # The e2e tier drives the real bpmn-io libraries through a Node harness, so `npm ci`
+      # + an esbuild bundle are test DEPENDENCIES — provisioned here, with the Python ones,
+      # rather than lazily inside the first e2e test. Doing it lazily is what bug
+      # 9a17-e0b3-7aa6-4091 was: a 90-120s cold install was charged to that one test's 300s
+      # pytest-timeout budget, and `timeout_method = "thread"` calls os._exit(1), so crossing
+      # it killed the whole xdist worker (`node down: Not properly terminated`) with no
+      # traceback. Caching ~/.npm on the lockfile keeps the normal case off the registry.
+      - name: Cache the npm store for the e2e Node toolchain
+        if: matrix.os != 'macos-latest'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('tests/e2e/js/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
       - name: Install rebar from the committed lock (dev + reviewbot + ui extras)
         shell: bash
         run: |
           uv sync --locked --extra dev --extra reviewbot --extra ui --python '${{ matrix.python-version }}'
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          # `make e2e-deps` (not an inline npm invocation) is deliberate: the same portable
+          # target provisions a checkout with no CI provider at all, and
+          # tests/e2e/_toolchain.py stays as the in-fixture fallback. macOS is skipped
+          # because that lane selects only the platform_compat subset, which contains no
+          # e2e node.
+          if [ '${{ matrix.os }}' != 'macos-latest' ]; then make e2e-deps; fi
 
       # Git identity is required by the suites that build throwaway commit stores.
       - name: Configure git identity
