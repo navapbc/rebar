@@ -448,7 +448,7 @@ jobs:
       - name: Install rebar from the committed lock (dev + reviewbot + ui extras)
         shell: bash
         run: |
-          uv sync --locked --extra dev --extra reviewbot --extra ui --python '${{ matrix.python-version }}'
+          uv sync --locked --extra dev --extra reviewbot --extra ui --extra grounding-terraform --python '${{ matrix.python-version }}'
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       # Git identity is required by the suites that build throwaway commit stores.

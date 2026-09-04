@@ -133,7 +133,9 @@ def _production_entry_model(monkeypatch, ladder: tuple[str, ...]) -> str:
 
     captured: dict[str, str] = {}
 
-    def _fake_run_pass1(ctx, cfg, runner, single, agent, coverage, cap_override=None):
+    def _fake_run_pass1(
+        ctx, cfg, runner, single, agent, coverage, cap_override=None, tf_provider=None
+    ):
         captured["model"] = cfg.model
         return []
 
@@ -414,7 +416,7 @@ def _recording_pass1_chunk(monkeypatch, *, fail_all: bool = False) -> list[tuple
     ``cfg.model`` each attempt was dispatched with."""
     observed: list[tuple[str, tuple]] = []
 
-    def _stub(runner, cfg, *, plan, chunk, agentic=False, extra_context=""):
+    def _stub(runner, cfg, *, plan, chunk, agentic=False, extra_context="", tf_provider=None):
         observed.append((cfg.model, tuple(c["id"] for c in chunk)))
         if fail_all or len(chunk) > 1:
             raise RuntimeError("prompt is too long")
