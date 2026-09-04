@@ -1,6 +1,8 @@
 # ADR 0092 — Bridge-primary vocabulary with explicit reconcile compatibility adapters
 
-**Status:** Accepted
+**Status:** Accepted; compatibility-removal follow-up implemented by
+`seagreen-wet-bluefish` for the top-level CLI route, direct `reconcile-check` mode, and
+direct `--filter-local-ids`
 **Date:** 2026-08-08
 
 ## Context
@@ -52,5 +54,9 @@ returns its historical tally; legacy bootstrap modes and `MODE_CAPS` remain unch
 - Removing compatibility requires a separate deprecation decision after real consumers have
   migrated; this decision does not authorize removal.
 
-Rollback is additive: callers can return to the retained `rebar reconcile --mode ...` adapter
-without changing the shared reconciliation core or persisted store data.
+The later compatibility-removal follow-up closed the top-level `rebar reconcile` adapter,
+direct `--mode reconcile-check`, and direct `--filter-local-ids`. Current rollback guidance is
+to use canonical `bridge preview` for proposed changes, `bridge fsck` for offline
+binding/integrity audit, and `bridge status` for operational state; the scheduled
+`reconcile-check` profile spelling remains only as a runner compatibility profile that invokes
+preview.

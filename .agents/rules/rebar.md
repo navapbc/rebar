@@ -8,7 +8,7 @@ reference-and-summary — read **`AGENTS.md`** for the authoritative protocol.
 ## Tech stack
 
 - **Core**: Python 3.11+, an event-sourced ticketing system (`rebar`) over a git-backed store.
-- **Integrations**: a Jira reconciler (`rebar reconcile`), Gerrit code review, and the Serena
+- **Integrations**: Jira bridge operations (`rebar bridge`), Gerrit code review, and the Serena
   LSP MCP server for semantic navigation.
 
 ## Essentials (see `AGENTS.md` for the full protocol)

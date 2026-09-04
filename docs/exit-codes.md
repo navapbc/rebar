@@ -52,13 +52,12 @@ Canonical benign states return 0 with one stable stderr line:
 | reschedule requested | `BRIDGE_STATE: reschedule` |
 | historical phase gate | `BRIDGE_STATE: legacy-gated` |
 
-The remaining rolling-migration compatibility routes — `rebar reconcile --mode ...`,
-direct-engine `--mode`, and argument-less direct-engine invocation — retain their historical
-results and defaults. Converged and paused remain 0; another pass in flight remains **3**;
-the phase gate remains **4**; and reschedule remains **75**. Their established messages remain
-unchanged (`reconcile: ... another pass in flight`, `reconcile: ... gate blocks advancement ...`,
-and `RESCHEDULE: ...`). The former Python and MCP `reconcile(mode=...)` adapters are removed;
-new automation should use the canonical bridge routes and ordinary 0/1/2 handling.
+The remaining direct-engine compatibility route keeps argument-less live behavior and supported
+rollout modes (`dry-run`, `bootstrap-strict`, `bootstrap-throttle`, `live`). The top-level
+`rebar reconcile` route, direct `--mode reconcile-check`, and direct `--filter-local-ids`
+surface are removed. New automation should use canonical bridge routes and ordinary 0/1/2
+handling: preview for proposed changes, fsck for offline binding/integrity audit, and status
+for operational state.
 
 ### Cross-cutting rules
 
@@ -187,7 +186,6 @@ guarantee `2`).
 | `llm` | 0 | — | — | no ticket id; `llm setup` FakeRunner dry-run; 0 = dry-run OK, 1 = dry-run failed or write error; no subcommand → 1 |
 | `metrics` | 0 | — | — | no ticket id; repo-wide metrics report; bad args → 2 |
 | `prompt` | 0 | — | — | no ticket id; `prompt eval <id>` validates a prompt's eval spec; error → 1; no subcommand → 1 |
-| `reconcile` | 0 | — | — | no ticket id; compatibility subprocess passthrough retaining reconciler codes 3/4/75 |
 | `remote-cert` | 0 | — | — | no ticket id; trusted op-cert gate service client; bad args → 2; error → 1 |
 | `review-code` | 0 | — | — | no ticket id; PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11 |
 | `review-plan` | 0 | 1 | — | PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11; `--status`: 0 = current, 12 = stale/absent; `--retry`: resumes the latest INDETERMINATE (same 0/1/2/11 dispositions), or exits 2 refusing an ineligible resume / a `--force`/`--status`/`--check` conflict |

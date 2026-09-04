@@ -204,52 +204,6 @@ def _read_matching_detail(
     return "matching", decoded
 
 
-def _read_reconcile_diagnostics(repo_root: Path) -> dict[str, Any] | None:
-    path = _store_dir(repo_root) / ".bridge_state" / "reconcile-check.json"
-    try:
-        decoded = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(decoded, dict):
-        return None
-    discrepancies = decoded.get("discrepancies")
-    orphaned_bindings = decoded.get("orphaned_bindings")
-    orphaned_jira = decoded.get("orphaned_jira")
-    total_bindings = decoded.get("total_bindings")
-    checked = decoded.get("checked")
-    in_sync = decoded.get("in_sync")
-    unbound_local = decoded.get("unbound_local")
-    unbound_jira = decoded.get("unbound_jira")
-    if not isinstance(discrepancies, list):
-        return None
-    if not isinstance(orphaned_bindings, list):
-        return None
-    if not isinstance(orphaned_jira, list):
-        return None
-    integer_fields = (
-        total_bindings,
-        checked,
-        in_sync,
-        unbound_local,
-        unbound_jira,
-    )
-    if any(not isinstance(value, int) or isinstance(value, bool) for value in integer_fields):
-        return None
-    return {
-        "report_path": str(path),
-        "total_bindings": total_bindings,
-        "checked": checked,
-        "in_sync": in_sync,
-        "discrepancy_count": len(discrepancies),
-        "orphaned_binding_count": len(orphaned_bindings),
-        "orphaned_jira_count": len(orphaned_jira),
-        "unbound_local": unbound_local,
-        "unbound_jira": unbound_jira,
-    }
-
-
 def snapshot(
     repo_root: Path,
     *,
@@ -325,9 +279,6 @@ def snapshot(
             lock_lease_secs=lock.lease_secs,
             live_lock_fence=lock.fence,
         )
-    reconcile_diagnostics = _read_reconcile_diagnostics(repo_root)
-    if reconcile_diagnostics is not None:
-        result["reconcile_diagnostics"] = reconcile_diagnostics
     return result
 
 

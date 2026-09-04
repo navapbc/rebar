@@ -1,8 +1,8 @@
-"""Normalize canonical bridge verbs and legacy reconciler flags into one request.
+"""Normalize canonical bridge verbs and retained reconciler modes into one request.
 
 The parser is intentionally separate from ``__main__``: both the new
-``preview``/``sync`` vocabulary and the retained ``--mode`` adapter enter the
-same lock, gate, pass, and exit-policy spine after this module returns.
+``preview``/``sync`` vocabulary and the retained direct-engine ``--mode`` adapter
+enter the same lock, gate, pass, and exit-policy spine after this module returns.
 """
 
 from __future__ import annotations
@@ -59,19 +59,14 @@ def _parser() -> _Parser:
         "--mode",
         default=None,
         help=(
-            "Compatibility mode: reconcile-check | dry-run | bootstrap-strict | "
-            "bootstrap-throttle | live (legacy default: live)"
+            "Direct-engine mode: dry-run | bootstrap-strict | bootstrap-throttle | "
+            "live (default: live)"
         ),
     )
     parser.add_argument(
         "--dry-run-enumerate",
         action="store_true",
         help="List enumerable tracker directories and exit without running a pass.",
-    )
-    parser.add_argument(
-        "--filter-local-ids",
-        default=None,
-        help="Compatibility write filter applied after the full differ computation.",
     )
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--only", metavar="IDS")
@@ -91,20 +86,22 @@ def normalize_request(argv: list[str] | None, mode_mod: Any) -> ReconcileRequest
         raise RequestError("--only and --except require preview or sync")
     if args.command != "sync" and args.max_changes is not None:
         raise RequestError("--max-changes is supported only by sync")
-    if args.command is not None and args.filter_local_ids is not None:
-        raise RequestError("--filter-local-ids is available only on the legacy route")
-
     if args.command == "preview":
         target_mode = mode_mod.Mode.DRY_RUN
     elif args.command == "sync":
         target_mode = mode_mod.Mode.LIVE
     else:
         mode_value = args.mode if args.mode is not None else mode_mod.Mode.LIVE.value
+        if mode_value == mode_mod.Mode.RECONCILE_CHECK.value:
+            raise RequestError(
+                "--mode reconcile-check has been removed; use preview for live Jira-vs-local "
+                "proposed changes, fsck for offline binding/integrity audit, and status for "
+                "operational state"
+            )
         target_mode = mode_mod.Mode.from_str(mode_value)
 
     only = _tokens(args.only, "--only")
     excluded = _tokens(args.except_ids, "--except")
-    raw_filter = _tokens(args.filter_local_ids, "--filter-local-ids")
     from rebar.config import reconciler_repo_root as _owned_repo_root
 
     root = Path(args.repo_root) if args.repo_root else _owned_repo_root()
@@ -115,6 +112,6 @@ def normalize_request(argv: list[str] | None, mode_mod: Any) -> ReconcileRequest
         max_changes=args.max_changes,
         selection_kind="only" if only else ("except" if excluded else None),
         selection_tokens=only or excluded,
-        filter_local_ids=set(raw_filter) or None,
+        filter_local_ids=None,
         dry_run_enumerate=args.dry_run_enumerate,
     )

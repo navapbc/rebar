@@ -15,8 +15,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rebar_reconciler.adapters.jira.backend import JiraBackend
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
 
@@ -62,11 +60,6 @@ def sync_logger_mod():
 @pytest.fixture(scope="module")
 def outbound_differ_mod():
     return _load("reconcile_wiring_outbound_differ", "outbound_differ.py")
-
-
-@pytest.fixture(scope="module")
-def reconcile_check_mod():
-    return _load("reconcile_wiring_reconcile_check", "reconcile_check.py")
 
 
 # ---------------------------------------------------------------------------
@@ -335,44 +328,6 @@ class TestInboundUpdate:
         mut = inbound_updates[0]
         assert mut.target == "DIG-200"
         assert mut.payload["local_id"] == "def-5678"
-
-
-class TestReconcileCheckMode:
-    """test_reconcile_check_mode_produces_report"""
-
-    def test_reconcile_check_returns_json_report(
-        self,
-        tmp_path,
-        reconcile_check_mod,
-    ):
-        """reconcile_check() returns a structured report with expected keys."""
-        local_tickets = [
-            {"id": "abc-1", "title": "Test", "status": "open"},
-        ]
-        jira_snapshot = {
-            "DIG-1": {"summary": "Test", "status": "To Do"},
-        }
-
-        # Minimal binding store stub.
-        # all_bindings() returns dict[local_id, entry] per the BindingStore
-        # protocol — reconcile_check.reconcile_check iterates it via .items()
-        # (bug 0776 — list shape would crash with AttributeError).
-        class FakeBindings:
-            def all_bindings(self):
-                return {"abc-1": {"jira_key": "DIG-1", "state": "confirmed"}}
-
-        report = reconcile_check_mod.reconcile_check(
-            local_tickets,
-            jira_snapshot,
-            FakeBindings(),
-            backend=JiraBackend(transport=object()),
-        )
-        assert "total_bindings" in report
-        assert "checked" in report
-        assert "in_sync" in report
-        assert "discrepancies" in report
-        assert report["total_bindings"] == 1
-        assert report["checked"] == 1
 
 
 class TestCapCombined:

@@ -10,7 +10,6 @@ An in-process Python CLI. Its structure:
 * Read and leaf-write commands dispatch **in-process** to
   ``rebar._engine_support.reads.main`` / ``rebar._commands.main`` with the
   per-command auto-init policy (:mod:`rebar._cli._init`).
-* ``reconcile`` routes to ``python -m rebar_reconciler``.
 """
 
 from __future__ import annotations
@@ -71,13 +70,6 @@ def _wants_help(rest: list[str]) -> bool:
 def _help_requested(sub: str, rest: list[str]) -> bool:
     """Deprecated shim — see :func:`rebar._cli._help_route.help_requested`."""
     return _help_route.help_requested(sub, rest)
-
-
-def _reconcile(argv: list[str]) -> int:
-    """Compatibility wrapper for the established ``rebar reconcile`` spelling."""
-    from rebar._cli._bridge_commands import launch_reconciler
-
-    return launch_reconciler(argv)
 
 
 def _enrich(rest: list[str]) -> int:

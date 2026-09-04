@@ -20,7 +20,6 @@
     "completed_at": { "type": ["string", "null"] },
     "lock_fence": { "type": ["integer", "null"] },
     "detail": { "type": "object", "additionalProperties": true },
-    "reconcile_diagnostics": { "type": "object", "additionalProperties": true },
     "lock_oid": { "type": "string" },
     "lock_holder": { "type": "string" },
     "lock_lease_secs": { "type": "number" },

@@ -196,12 +196,11 @@ do not rewrite the tickets worktree or its event history.
 Do **not** let `live` mode be your first run. The bridge supports read-only and
 no-write modes for exactly this:
 
-1. **`reconcile-check`** — dispatch *Reconcile Bridge* manually with
-   `mode = reconcile-check`. Read-only diagnostic: no lock, no writes, no Jira
-   mutations. Confirms creds, acli, and worktree mounting work.
-2. **`dry-run`** — computes the full mutation plan and applies nothing. Review the
+1. **`dry-run` / `rebar bridge preview`** — computes the full mutation plan and applies nothing. Review the
    plan in the run log.
-3. **`live`** — enable the schedule. The first live run may be large (it reconciles
+2. **`rebar bridge fsck`** — audits offline binding and store integrity without contacting Jira.
+3. **`rebar bridge status`** — checks the durable last-pass, pause, and live-lock operational state.
+4. **`live`** — enable the schedule. The first live run may be large (it reconciles
    the whole backlog): it creates one Jira issue per local ticket **serially** via
    acli (~4 s each), so the job's `timeout-minutes` must cover the full initial
    pass — commit-back only persists on a **completed** pass, so a pass that times
@@ -277,7 +276,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 | Step | rebar fact that requires it |
 |------|------------------------------|
 | **Mount `tickets` as a worktree** | The store lives on the `tickets` orphan branch at the repo root; `actions/checkout` lands you on `main`. The reconciler reads/writes `.tickets-tracker`, so the branch must be mounted there. We mount on the real `tickets` branch (`-B tickets`) so `tracker.branch` matches and `rebar fsck` doesn't WARN. |
-| **`rebar bridge preview` / `rebar bridge sync`** | These are the primary bridge entry points. They are lean-runtime capabilities — no `[agents]` extra needed. The workflow retains `rebar reconcile --mode reconcile-check` for the distinct lock-free diagnostic. |
+| **`rebar bridge preview` / `rebar bridge sync`** | These are the primary bridge entry points. They are lean-runtime capabilities — no `[agents]` extra needed. The workflow retains the `reconcile-check` profile spelling for compatibility, and that profile invokes preview. |
 | **Exit-code handling (0 / 75 / 3 / other)** | `__main__.py` returns **75** (reschedule — rebase-retry exhausted; the next scheduled run retries) and **3** (another pass already holds the pass-lock). Both are operational, not errors, so we exit 0 on them; any other non-zero fails the job. |
 | **Commit-back + push when dirty *or ahead*** | **The reconciler does not push.** It writes inbound events as *uncommitted* files in the worktree and makes its own `.bridge_state/bindings.json` commit *without pushing*. So a clean worktree does **not** mean "nothing to push" — we push whenever the local `tickets` branch is ahead of `origin/tickets`. This is the single biggest divergence from a naive DSO copy (whose `git status --porcelain` gate would skip pushing the reconciler's own binding commit). |
 | **Strict core commit + push** | Multiple writers (this bridge, the canary, interactive `rebar` clients) share the orphan branch. The store core owns fetch→merge→immediate-repush recovery and makes a failed workflow delivery terminal. |
@@ -301,7 +300,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 
 ### Intentionally omitted (and why)
 
-- **The `scripts/jira-pressure-test/` probes** are maintained connected checks that create, edit, and delete Jira issues and local tickets. Run them manually outside CI with an explicit `JIRA_PROJECT`. The general probe requires `REBAR_E2E_VALIDATION_PROBE=1`, while the field probe requires `REBAR_FIELD_VALIDATION_PROBE=1`. Both use `.venv/bin/python` and `.venv/bin/rebar` from the checkout unless the documented engine or ticket command override applies. Use `mode = reconcile-check` or `rebar bridge check-access` for automated validation.
+- **The `scripts/jira-pressure-test/` probes** are maintained connected checks that create, edit, and delete Jira issues and local tickets. Run them manually outside CI with an explicit `JIRA_PROJECT`. The general probe requires `REBAR_E2E_VALIDATION_PROBE=1`, while the field probe requires `REBAR_FIELD_VALIDATION_PROBE=1`. Both use `.venv/bin/python` and `.venv/bin/rebar` from the checkout unless the documented engine or ticket command override applies. Use `rebar bridge preview`, `rebar bridge fsck`, `rebar bridge status`, or `rebar bridge check-access` for automated validation.
 - **A `BRIDGE_ENV_ID` input** (DSO required one). rebar doesn't: the reconciler stamps
   events with `REBAR_ENV_ID` (default `"reconciler"`) — it's an author label, not a
   required identity. Set it only if you want a distinct sync-bot author in the log.
@@ -464,8 +463,8 @@ be re-applied if they land inside the window.
     transport threading. The falsey values `0` / `false` / `off` / `no`
     restore the legacy ambient apply path; they do not change which create
     route runs.
-- **Safe re-validate:** before re-enabling `live`, dispatch with
-  `mode = reconcile-check` then `dry-run`.
+- **Safe re-validate:** before re-enabling `live`, review `rebar bridge preview`, then
+  `rebar bridge fsck` and `rebar bridge status`.
 - **Bad push:** the `tickets` branch is ordinary git history — an erroneous reconciler
   commit on `origin/tickets` is revertable like any other commit (the event log is a
   union merge, so reverts converge across clones).
@@ -642,8 +641,8 @@ safety rails so it can be rolled out — and rolled back — without editing cod
 `.github/workflows/reconcile-bridge.yml` exposes a **`workflow_dispatch` `mode`
 input** (`reconcile-check → dry-run → bootstrap-strict → bootstrap-throttle →
 live`). This is the one-click brake: dispatch the workflow with `mode: dry-run`
-(computes the plan, applies nothing) or `mode: reconcile-check` (read-only
-diagnostic) to **immediately stop all acting mutations** — terminal transitions,
+(computes the plan, applies nothing) or the compatibility `mode: reconcile-check`
+(also routed to preview) to **immediately stop all acting mutations** — terminal transitions,
 GC retirements, and adoptions — on the next pass, without a revert. The
 self-rescheduling chain re-dispatches the chosen mode, so it sticks until you
 change it back.
@@ -668,7 +667,7 @@ warm-up window and the
 
 ### Rollback procedure (summary)
 
-1. Dispatch `reconcile-bridge.yml` with **`mode: dry-run`** (or `reconcile-check`)
+1. Dispatch `reconcile-bridge.yml` with **`mode: dry-run`** (or compatibility `reconcile-check`)
    — stops all acting mutations on the next pass.
 2. Retirements are a reversible soft-delete (`bindings-retired.json`, full history
    on the `tickets` branch); re-linking a wrongly-retired binding is a recovery,

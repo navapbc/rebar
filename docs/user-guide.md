@@ -652,13 +652,13 @@ Use `--json` for automation, `--target ENVIRONMENT_ID` to select the expected pr
 failed, stale, and never-run exit nonzero. The older `rebar bridge-status` spelling remains a
 hidden compatibility alias; `purge-bridge` remains retired.
 
-The established `rebar reconcile` adapter remains available: no arguments still mean
-dry-run, every historical `--mode` value is retained, and `--filter-local-ids` keeps
-its write-only filtering semantics. Direct argument-less `python -m rebar_reconciler`
-still means live synchronization, including its historical uncapped LIVE tally/no-manifest
-behavior. The canonical spellings are `rebar bridge setup`, `rebar bridge check-access`,
-`rebar bridge fsck`, and `rebar doctor`. The legacy `jira-onboard`, `bridge-probe`, and
-`bridge-fsck` spellings remain available as compatibility aliases.
+The legacy top-level `rebar reconcile` adapter is removed. Use `rebar bridge preview` for live
+Jira-vs-local proposed changes, `rebar bridge sync` for writes, `rebar bridge fsck` for offline
+binding/integrity audit, and `rebar bridge status` for operational state. Direct argument-less
+`python -m rebar_reconciler` still means live synchronization, and its supported rollout modes
+remain `dry-run`, `bootstrap-strict`, `bootstrap-throttle`, and `live`; direct
+`--mode reconcile-check` and `--filter-local-ids` now reject. The legacy `jira-onboard`,
+`bridge-probe`, and `bridge-fsck` spellings remain available as compatibility aliases.
 
 `rebar bridge fsck` is audit-only with one exception: `rebar bridge fsck --repair` prunes
 reverse bindings that have no forward entry (`store_integrity` findings of kind
@@ -679,8 +679,8 @@ the installed `rebar bridge run` command. The adapter retains the established `M
 routing new work through the noun-based `bridge preview` / `bridge sync` commands. It requires
 the Jira variables, `REBAR_ENV_ID`, `BRIDGE_RUN_ID`, and the bridge bot name/email before the
 pass starts; a shallow checkout is rejected because it cannot reconcile ticket history safely.
-This shared CI adapter does not remove or change direct legacy `rebar reconcile` and
-`python -m rebar_reconciler` entrypoints.
+This shared CI adapter keeps the `reconcile-check` profile spelling for provider compatibility;
+that profile now invokes canonical preview rather than the removed top-level reconcile route.
 
 For an explicit one-off selection, use `rebar bridge run --profile dry-run`. Provider
 templates normally omit `--profile` and supply the established `MODE` environment
@@ -692,11 +692,10 @@ Python and MCP callers have the same noun-based machine operations:
 schema-backed dictionaries. `bridge_run(profile=...)` accepts the same compatibility profile as
 the installed CLI and returns captured streams without printing, so it is safe for MCP stdio.
 `bridge_preview` cannot write; `bridge_run` and `bridge_sync` are explicitly mutating. The
-legacy library and MCP `reconcile(mode=...)` interfaces are removed; use `bridge_preview` for
-former dry-run callers, `bridge_sync` or `bridge_run` for mutating callers, and
-`bridge_fsck` / `bridge_status` for diagnostic observables. The CLI `rebar reconcile` remains
-available, including `--mode reconcile-check`, for operators that need the live check report.
-Interactive `bridge setup` remains CLI-only. Setting up Jira is an operator task — see
+legacy library, MCP, and top-level CLI `reconcile` interfaces are removed; use `bridge_preview`
+for proposed changes, `bridge_sync` or `bridge_run` for mutating callers, `bridge_fsck` for
+offline binding/integrity audit, and `bridge_status` for operational state. Interactive
+`bridge setup` remains CLI-only. Setting up Jira is an operator task — see
 [jira-sync-setup.md](jira-sync-setup.md).
 
 ### Jira Cloud vs. Jira Data Center

@@ -42,7 +42,7 @@ def _git_env() -> SubprocessEnv:
 
 
 MODE_COMMANDS = {
-    "reconcile-check": ["reconcile", "--mode", "reconcile-check"],
+    "reconcile-check": ["bridge", "preview"],
     "dry-run": ["bridge", "preview"],
     "bootstrap-strict": ["bridge", "sync", "--max-changes", "10"],
     "bootstrap-throttle": ["bridge", "sync", "--max-changes", "100"],

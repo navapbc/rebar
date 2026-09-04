@@ -284,21 +284,21 @@ def test_canonical_sync_maps_benign_preflight_to_zero(
     run_pass.assert_not_called()
 
 
-def test_reconcile_check_returns_before_pause_and_pass_lock_reads(main_mod, tmp_path):
-    """The legacy read-only diagnostic keeps its pre-gate early-return ordering."""
-    run_check = MagicMock(return_value=0)
+def test_removed_reconcile_check_mode_rejects_before_operational_work(main_mod, tmp_path):
+    """The removed direct-engine diagnostic mode never reaches locks or a pass."""
+    run_pass = MagicMock(return_value=0)
     pass_lock = MagicMock(side_effect=AssertionError("pass lock must not be read"))
     pause_read = MagicMock(side_effect=AssertionError("pause gate must not be read"))
 
     with (
-        patch.object(main_mod, "_run_reconcile_check", run_check),
+        patch.object(main_mod, "run_pass", run_pass),
         patch(f"{_ADVISORY_LOCK_KEY}.check_pass_lock", pass_lock),
         patch(f"{_ADVISORY_LOCK_KEY}.read_pause", pause_read),
     ):
         rc = main_mod.main(["--mode=reconcile-check", "--repo-root", str(tmp_path)])
 
-    assert rc == 0
-    run_check.assert_called_once_with(tmp_path)
+    assert rc == 2
+    run_pass.assert_not_called()
     pass_lock.assert_not_called()
     pause_read.assert_not_called()
 
@@ -321,14 +321,14 @@ def test_operation_snapshot_binding_does_not_leak_past_main_return(main_mod, tmp
 
     observed: dict[str, object] = {}
 
-    def _run_check(repo_root: Path) -> int:
+    def _run_preview(**kwargs) -> int:
         snapshot = active_snapshot()
         observed["snapshot"] = snapshot
         observed["repo_root"] = str(snapshot.repo_root) if snapshot is not None else None
         return 0
 
-    with patch.object(main_mod, "_run_reconcile_check", _run_check):
-        rc = main_mod.main(["--mode=reconcile-check", "--repo-root", str(tmp_path)])
+    with patch.object(main_mod, "run_pass", _run_preview):
+        rc = main_mod.main(["preview", "--repo-root", str(tmp_path)])
 
     assert rc == 0
     assert observed["snapshot"] is not None, "snapshot must be bound while main() runs"
