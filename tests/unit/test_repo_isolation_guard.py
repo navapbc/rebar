@@ -36,7 +36,15 @@ from _subprocess_env import subprocess_env  # noqa: E402
 pytest_plugins = ["pytester"]
 
 
-def _blocking_git(tmp_path: Path, operation: str) -> tuple[Path, dict[str, str]]:
+def _blocking_git(
+    tmp_path: Path, operation: str, *, persistent: bool = True
+) -> tuple[Path, dict[str, str]]:
+    """A ``git`` shim that stalls the guard's probe.
+
+    ``persistent`` stalls EVERY probe from the second call onward, so the retry budget is
+    exhausted and the guard must still fail loudly. ``persistent=False`` stalls exactly ONE
+    call — the transient contention that bug 860b-28eb-10c0-4249 turned into a false red.
+    """
     real_git = shutil.which("git")
     assert real_git is not None
     bin_dir = tmp_path / "bin"
@@ -57,7 +65,7 @@ def _blocking_git(tmp_path: Path, operation: str) -> tuple[Path, dict[str, str]]
         "    state = Path(os.environ['REBAR_BLOCK_GIT_STATE'])\n"
         "    count = int(state.read_text()) if state.exists() else 0\n"
         "    state.write_text(str(count + 1))\n"
-        "    if count + 1 == 2:\n"
+        f"    if count + 1 {'>=' if persistent else '=='} 2:\n"
         "        os.close(1)\n"
         "        os.close(2)\n"
         "        time.sleep(60)\n"
@@ -86,14 +94,14 @@ def _run_real_guard_with_blocking_git(
             "conftest",
             str(nested_test),
             env=env,
-            timeout=30,
+            timeout=90,
             cwd=_TESTS_DIR.parent,
         )
     except subprocess.TimeoutExpired as exc:
         raise AssertionError(
-            f"real repo-isolation {operation} probe kept pytest alive beyond 30 seconds"
+            f"real repo-isolation {operation} probe kept pytest alive beyond 90 seconds"
         ) from exc
-    assert state.read_text() == "2", "the shim did not block the second real guard probe"
+    assert int(state.read_text()) >= 2, "the shim did not block the real guard probe"
     return result
 
 
@@ -147,6 +155,42 @@ def test_commit_guard_fails_explicitly_when_head_times_out(tmp_path):
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
     assert "TimeoutExpired" in output, output
+
+
+def test_a_transient_probe_stall_is_re_sampled_rather_than_reported(tmp_path, monkeypatch):
+    """One starved sample is contention, not a HEAD move (bug 860b-28eb-10c0-4249).
+
+    The macOS full-suite sweep runs this probe once per test, three xdist workers deep, on
+    a runner where ORDINARY fixture setup was measured at 4.562s against the 5s per-attempt
+    bound. A single stalled sample there errored the innocent test that happened to be
+    running and reddened the branch head. The probe is read-only and idempotent, so a
+    transient stall must be re-sampled rather than reported.
+
+    The paired guarantee — that a PERSISTENT stall still fails loudly — is held by
+    ``test_commit_guard_fails_explicitly_when_head_times_out`` above.
+    """
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    state, env = _blocking_git(tmp_path, "head", persistent=False)
+
+    with monkeypatch.context() as patch:
+        for key in (
+            "PATH",
+            "PYTHONPATH",
+            "REBAR_BLOCK_GIT_OPERATION",
+            "REBAR_BLOCK_GIT_STATE",
+        ):
+            patch.setenv(key, env[key])
+        patch.setattr(_isolation, "GIT_PROBE_TIMEOUT_SECONDS", 0.5)
+        before = _isolation.head(repo)
+        assert before, "the first sample must succeed"
+        after = _isolation.head(repo)  # the shim stalls this one sample
+
+    assert after == before, "a transient stall must not be reported as a changed HEAD"
+    assert int(state.read_text()) == 3, (
+        "the stalled sample must be re-sampled, not reported; git was invoked "
+        f"{state.read_text()} times"
+    )
 
 
 def test_git_probe_timeout_ignores_a_test_monkeypatch_of_time_sleep(tmp_path, monkeypatch):

@@ -30,19 +30,52 @@ _stable_subprocess_time = SimpleNamespace(
 LEAK_WATCH_SUBDIRS = (".rebar",)
 GIT_PROBE_TIMEOUT_SECONDS = 5
 
+# A timed-out sample of a READ-ONLY, IDEMPOTENT probe (``rev-parse``/``status``) is not
+# evidence of anything, so it is re-sampled rather than reported. The guard runs once per
+# test — ~19k times in the macOS full-suite sweep, three xdist workers deep — on a runner
+# where ORDINARY fixture setup was measured at 4.562s against this 5s per-attempt bound.
+# One starved sample there is contention, and erroring the innocent test that happened to
+# be running is a false red that turns the whole branch head red (bug 860b-28eb-10c0-4249).
+#
+# Retries carry NO sleep: the elapsed per-attempt timeout is itself the backoff, and
+# sleeping here would re-introduce the patched-``time.sleep`` hazard that
+# ``_stable_subprocess_time`` exists to defend against.
+#
+# The LAST attempt's ``TimeoutExpired`` still propagates, and that is load-bearing: a probe
+# that can never sample must fail LOUDLY rather than silently cease to detect a HEAD move.
+# Retrying absorbs a TRANSIENT stall; it must never absorb a PERSISTENT one.
+GIT_PROBE_ATTEMPTS = 3
+
+
+def _git_probe_once(root, args: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+    """One bounded attempt. Only the timeout is retryable — a non-zero exit is
+    deterministic, so ``CalledProcessError`` propagates from the first attempt."""
+    return _run_process(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=GIT_PROBE_TIMEOUT_SECONDS,
+    )
+
 
 def _run_git_probe(root, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run a bounded Git probe without inheriting a test's patched sleep."""
+    """Run a bounded Git probe without inheriting a test's patched sleep.
+
+    A timed-out attempt is re-sampled up to ``GIT_PROBE_ATTEMPTS`` times. The final
+    attempt is deliberately OUTSIDE the retry loop so its ``TimeoutExpired`` propagates
+    unconditionally — the loudness of a persistent failure is structural here, not a
+    conditional that a later edit could quietly invert.
+    """
     subprocess_time = subprocess.time  # type: ignore[attr-defined]
     subprocess.time = _stable_subprocess_time  # type: ignore[attr-defined]
     try:
-        return _run_process(
-            ["git", "-C", str(root), *args],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=GIT_PROBE_TIMEOUT_SECONDS,
-        )
+        for _ in range(GIT_PROBE_ATTEMPTS - 1):
+            try:
+                return _git_probe_once(root, args)
+            except subprocess.TimeoutExpired:
+                continue
+        return _git_probe_once(root, args)
     finally:
         subprocess.time = subprocess_time  # type: ignore[attr-defined]
 
