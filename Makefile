@@ -208,13 +208,32 @@ worktree:  ## Create a fresh worktree from origin/main + provision its venv & ho
 		echo "  fetched origin/main, then provisions .venv + editable install + the pre-commit gate."; \
 		exit 2; \
 	fi
-	@target_dir="$(if $(dir),$(dir),../$(name))"; \
+	@# Bug 1738: every step below used to be joined with `;`, and make applies no `set -e`
+	@# semantics INSIDE a recipe line — it checks only the line's overall status, which is
+	@# its LAST command's. A failed `make venv`/`make install` was therefore discarded and
+	@# the target printed "✓ worktree ready" and exited 0, handing the caller a worktree
+	@# with no usable .venv (first symptom: the commit gate dying on a missing ruff/mypy,
+	@# which reads as a code problem, not an environment one). `set -e` makes the line
+	@# abort; the per-step handlers make the failure name itself.
+	@set -e; \
+	target_dir="$(if $(dir),$(dir),../$(name))"; \
 	echo "→ git fetch origin"; \
-	git fetch origin; \
+	git fetch origin || { \
+		echo "ERROR: 'git fetch origin' failed — cannot branch from a current origin/main."; \
+		exit 1; }; \
 	echo "→ git worktree add $$target_dir -b $(name) origin/main"; \
-	git worktree add "$$target_dir" -b "$(name)" origin/main; \
+	git worktree add "$$target_dir" -b "$(name)" origin/main || { \
+		echo "ERROR: 'git worktree add $$target_dir -b $(name) origin/main' failed — no worktree created."; \
+		exit 1; }; \
 	echo "→ provisioning $$target_dir/.venv (pinned Python) then canonical 'make install'"; \
-	( cd "$$target_dir" && $(MAKE) venv && . .venv/bin/activate && $(MAKE) install ); \
+	( cd "$$target_dir" && $(MAKE) venv && . .venv/bin/activate && $(MAKE) install ) || { \
+		echo ""; \
+		echo "ERROR: provisioning FAILED in $$target_dir — the worktree exists but has NO usable .venv."; \
+		echo "       Do not work in it as-is: the commit gate would fail on a missing ruff/mypy,"; \
+		echo "       which reads as a code problem rather than an environment one."; \
+		echo "       Finish it:  cd $$target_dir && make venv && . .venv/bin/activate && make install"; \
+		echo "       Or drop it: git worktree remove $$target_dir && git branch -D $(name)"; \
+		exit 1; }; \
 	echo ""; \
 	echo "✓ worktree ready: $$target_dir"; \
 	echo "  activate it with:  cd $$target_dir && source .venv/bin/activate"
