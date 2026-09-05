@@ -1,9 +1,9 @@
 """Typed output models for the rebar MCP server (FastMCP outputSchema).
 
 Extracted from ``rebar.mcp_server`` so the per-cluster tool registrars
-(``_mcp_reads`` / ``_mcp_writes`` / ``_mcp_llm``) and ``mcp_server`` itself can all
-share one definition of the output models WITHOUT importing ``mcp_server`` (which
-would form an import cycle). This module imports only ``pydantic`` — it is a leaf
+(``_mcp_reads`` / ``_mcp_writes`` / ``_mcp_llm``) can share one definition of the
+output models WITHOUT importing ``mcp_server`` (which would form an import cycle).
+This module imports only ``pydantic`` — it is a leaf
 with no ``rebar.*`` edges, so it never participates in an import cycle.
 
 Each model mirrors a ``src/rebar/schemas/*.schema.json`` file and is kept

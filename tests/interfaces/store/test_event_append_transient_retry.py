@@ -22,7 +22,7 @@ import pytest
 
 import rebar
 from rebar import config
-from rebar._store import event_append
+from rebar._store import event_append, gitutil
 
 # The verbatim CI stderr (Linux ENOENT variant) for a transient object-DB add failure.
 _TRANSIENT_ADD_STDERR = (
@@ -48,7 +48,7 @@ _MACOS_EINVAL_ADD_STDERR = (
 def test_macos_einval_add_stderr_is_classified_transient() -> None:
     """Pin the classification the macos-latest self-heal relies on: the EINVAL variant
     must match the retry marker."""
-    assert event_append._is_transient_add_error(_MACOS_EINVAL_ADD_STDERR)
+    assert gitutil._is_transient_object_write_error(_MACOS_EINVAL_ADD_STDERR)
 
 
 def test_macos_einval_matches_via_errno_independent_prefix() -> None:
@@ -58,7 +58,7 @@ def test_macos_einval_matches_via_errno_independent_prefix() -> None:
     prefix and not on the Linux-only "No such file or directory" phrase. This goes RED if
     that shared marker is ever tightened to the full Linux errno phrase."""
     einval_only = "error: unable to create temporary file: Invalid argument"
-    assert event_append._is_transient_add_error(einval_only)
+    assert gitutil._is_transient_object_write_error(einval_only)
 
 
 # git's lockfile-commit failure for the INDEX write (read-cache.c write_locked_index /
@@ -82,7 +82,7 @@ def test_index_write_stderr_is_classified_transient() -> None:
     """`fatal: unable to write new index file` — the production signature reported on
     scary-fiscal-grunion — must match the transient WRITE retry marker so the store self-heals
     instead of surfacing it as a hard write failure requiring an operator retry."""
-    assert event_append._is_transient_add_error(_TRANSIENT_INDEX_WRITE_STDERR)
+    assert gitutil._is_transient_object_write_error(_TRANSIENT_INDEX_WRITE_STDERR)
 
 
 def test_post_ref_update_index_write_stderr_is_not_transient() -> None:
@@ -90,7 +90,7 @@ def test_post_ref_update_index_write_stderr_is_not_transient() -> None:
     write new_index file`) must NOT be classified transient: HEAD has already moved, so a
     blind retry could duplicate the committed event. This is the safety boundary that makes
     retrying the pre-ref-update `unable to write new index file` provably idempotent."""
-    assert not event_append._is_transient_add_error(_POST_REF_INDEX_WRITE_STDERR)
+    assert not gitutil._is_transient_object_write_error(_POST_REF_INDEX_WRITE_STDERR)
 
 
 def _fresh_tracker(tmp_path: Path, name: str) -> str:

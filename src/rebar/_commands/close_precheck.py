@@ -384,13 +384,6 @@ def _referencing_commits(
     return commits
 
 
-def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) -> bool:
-    """Whether ANY commit references one of ``accepted_ids`` — the long-standing bool
-    contract, preserved verbatim as a thin wrapper over :func:`_referencing_commits` so
-    existing call sites and the documented monkeypatch target keep working unchanged."""
-    return bool(_referencing_commits(accepted_ids, tracker, repo_root))
-
-
 def _emit_completion_sidecar(
     completion_sidecar, result, ticket_id: str, repo_root, *, is_pass: bool
 ) -> None:

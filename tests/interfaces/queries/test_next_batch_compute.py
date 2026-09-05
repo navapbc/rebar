@@ -407,7 +407,7 @@ def test_usage_and_limit_errors(tracker: Path):
 
 def test_library_and_mcp_shape(tracker: Path, monkeypatch):
     import rebar
-    from rebar.mcp_server import NextBatchOut
+    from rebar._mcp_models import NextBatchOut
 
     _three_tier(tracker)
     monkeypatch.setenv("REBAR_TRACKER_DIR", str(tracker))

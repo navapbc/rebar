@@ -63,7 +63,7 @@ def test_clarity_check_missing_ticket_schema_conformant(rebar_repo: Path) -> Non
     # Validates against the canonical schema.
     schemas.validator(schemas.CLARITY_RESULT).validate(res)
     # And against the MCP output model.
-    from rebar.mcp_server import ClarityResultOut
+    from rebar._mcp_models import ClarityResultOut
 
     ClarityResultOut.model_validate(res)
 

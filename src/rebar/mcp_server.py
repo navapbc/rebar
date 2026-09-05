@@ -16,7 +16,7 @@ packs the shared handles + gate helpers into a ``ctx`` namespace, and calls the
 three per-cluster registrars (``register_read_tools`` / ``register_llm_tools`` /
 ``register_write_tools`` in ``_mcp_reads`` / ``_mcp_llm`` / ``_mcp_writes``). The
 gate helpers, the workflow-payload budget cap, ``_dump``, the ``MODE_CAPS`` table,
-and the output models (re-exported from ``_mcp_models`` for back-compat) live here.
+and the startup entry points live here.
 """
 
 from __future__ import annotations
@@ -27,40 +27,12 @@ import sys
 from types import SimpleNamespace
 
 import rebar
-
-# Output models live in the leaf module rebar._mcp_models (imported only by pydantic)
-# so the per-cluster registrars can share them WITHOUT importing this module (which
-# would form an import cycle). Re-exported here for back-compat: existing callers
-# import e.g. ``rebar.mcp_server.NextBatchOut`` / ``ValidateReportOut`` directly.
 from rebar._mcp_budget import (
     _LIST_TOKEN_BUDGET_BYTES,  # noqa: F401  (re-exported: tests read the budget here)
     _bound_list_payload,
     _cap_workflow_payload,
 )
 from rebar._mcp_llm import register_llm_tools
-from rebar._mcp_models import (
-    BridgeAccessCheckOut,
-    BridgeControlOut,
-    BridgeFsckOut,
-    BridgeRunOut,
-    BridgeStatusOut,
-    ClaimResultOut,
-    ClarityResultOut,
-    CreateResultOut,
-    DepsGraphOut,
-    FileImpactItemOut,
-    FsckOut,
-    GateResultOut,
-    GroundingBackendOut,
-    GroundingInfoOut,
-    NextBatchOut,
-    SignResultOut,
-    TicketStateOut,
-    ValidateReportOut,
-    VerifyCommandItemOut,
-    VerifySignatureResultOut,
-    WorkflowRunOut,
-)
 from rebar._mcp_reads import register_read_tools
 from rebar._mcp_writes import register_write_tools
 
@@ -68,28 +40,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "MCP_ENV_VARS",
-    "BridgeAccessCheckOut",
-    "BridgeControlOut",
-    "BridgeFsckOut",
-    "BridgeRunOut",
-    "BridgeStatusOut",
-    "ClaimResultOut",
-    "ClarityResultOut",
-    "CreateResultOut",
-    "DepsGraphOut",
-    "FileImpactItemOut",
-    "FsckOut",
-    "GateResultOut",
-    "GroundingBackendOut",
-    "GroundingInfoOut",
     "McpStartupError",
-    "NextBatchOut",
-    "SignResultOut",
-    "TicketStateOut",
-    "ValidateReportOut",
-    "VerifyCommandItemOut",
-    "VerifySignatureResultOut",
-    "WorkflowRunOut",
     "build_server",
     "main",
 ]

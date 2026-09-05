@@ -176,9 +176,9 @@ def test_the_s3_doctor_inherits_the_write_side_retry(
     assert calls[0] == 2
 
 
-def test_event_append_reuses_the_shared_write_marker_family() -> None:
-    """Exactly ONE definition of the write-side markers: event_append's historical
-    classifier IS gitutil's, not a second copy that can drift."""
-    from rebar._store import event_append
+def test_historical_event_add_classifier_shims_are_removed() -> None:
+    """The write-side transient classifier has one owner: gitutil."""
+    from rebar._store import event_append, event_commit_git
 
-    assert event_append._is_transient_add_error is gitutil._is_transient_object_write_error
+    assert not hasattr(event_append, "_is_transient_add_error")
+    assert not hasattr(event_commit_git, "_is_transient_add_error")

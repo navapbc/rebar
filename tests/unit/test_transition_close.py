@@ -1,7 +1,7 @@
 """Close landed-work precheck must not print unrelated ambiguity noise (bug af11).
 
 The completion gate's deterministic referencing-commit precheck
-(``rebar._commands.transition_close._referencing_commit_exists``) scans EVERY
+(``rebar._commands.close_precheck._referencing_commits``) scans EVERY
 reachable commit message and resolves every extracted candidate id through the
 shared resolver. The resolver reports ambiguity to stderr — correct when the USER
 supplied the ambiguous id, pure noise when the precheck is merely walking
@@ -25,7 +25,7 @@ import pytest
 import rebar
 from rebar import signing as _signing
 from rebar._commands import transition_close
-from rebar._commands.transition_close import _referencing_commit_exists
+from rebar._commands.close_precheck import _referencing_commits
 from rebar._ids import resolve_ticket_id
 
 TARGET = "af99-1111-2222-3333"
@@ -61,7 +61,7 @@ def test_scan_finds_target_without_ambiguity_noise(scan_env, capsys) -> None:
     """Preconditions hold: the prefix IS ambiguous in this tracker (control below),
     yet the scan neither prints the ambiguity error nor misses the full-ID commit."""
     tracker, repo = scan_env
-    assert _referencing_commit_exists({TARGET}, tracker, repo) is True
+    assert bool(_referencing_commits({TARGET}, tracker, repo)) is True
     captured = capsys.readouterr()
     assert "Ambiguous" not in captured.err
     assert "Ambiguous" not in captured.out
@@ -71,7 +71,7 @@ def test_scan_still_fails_when_no_commit_references_the_ticket(scan_env, capsys)
     """Unchanged gate decision, failing direction: an id no commit references is
     still NOT found — quieting diagnostics must not loosen the precheck."""
     tracker, repo = scan_env
-    assert _referencing_commit_exists({"dddd-9999-8888-7777"}, tracker, repo) is False
+    assert bool(_referencing_commits({"dddd-9999-8888-7777"}, tracker, repo)) is False
     captured = capsys.readouterr()
     assert "Ambiguous" not in captured.err
     assert "Ambiguous" not in captured.out

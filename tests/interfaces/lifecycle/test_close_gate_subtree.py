@@ -2,7 +2,8 @@
 
 The completion-gate's deterministic referencing-commit precondition
 (``rebar._commands.transition_close._completion_precheck`` /
-``_referencing_commit_exists``) must credit a parent's ENTIRE descendant subtree: a
+``rebar._commands.close_precheck._referencing_commits``) must credit a parent's ENTIRE
+descendant subtree: a
 ticket that records ``file_impact`` closes when a ``rebar-ticket:`` trailer references it
 OR any of its descendants. A parent's code is delivered by its children's commits, so an
 epic/story must not be forced into ``--force`` (unsigned) merely because the

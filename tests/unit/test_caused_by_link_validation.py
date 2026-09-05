@@ -170,4 +170,3 @@ def test_close_precheck_scan_still_reports_an_empty_list_when_history_is_unreada
     from rebar._commands import close_precheck
 
     assert close_precheck._referencing_commits({"x"}, str(tmp_path), str(tmp_path)) == []
-    assert close_precheck._referencing_commit_exists({"x"}, str(tmp_path), str(tmp_path)) is False

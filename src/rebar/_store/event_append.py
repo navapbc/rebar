@@ -50,9 +50,8 @@ from rebar._store import git_outcome
 from rebar._store import lock as _lock
 from rebar._store import staging as _staging
 
-# Concern leaves, re-exported so every existing ``event_append.NAME`` binding — dotted,
-# ``setattr``/``getattr`` by string, or through an import alias — resolves unchanged, and
-# so the relocated verbs stay reachable through this module's globals for monkeypatching.
+# Concern leaves, re-exported so the relocated verbs stay reachable through this module's
+# globals for the store writer's established monkeypatch seams.
 from rebar._store.event_commit_git import (
     _GIT_ADD_ATTEMPTS as _GIT_ADD_ATTEMPTS,
 )
@@ -68,9 +67,6 @@ from rebar._store.event_commit_git import (
     _run_git,
     _unstage,
     run_auto_maintenance,
-)
-from rebar._store.event_commit_git import (
-    _is_transient_add_error as _is_transient_add_error,
 )
 from rebar._store.event_prepare import (
     EVENT_TYPES as EVENT_TYPES,

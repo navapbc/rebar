@@ -204,14 +204,6 @@ def test_unreadable_attached_sha_is_skipped(det):
     det(impact=["src/a.py"], attached=["foreign"], unreadable=["foreign"])
 
 
-# ── Refactor contract: the bool wrapper still behaves ────────────────────────
-def test_referencing_commit_exists_wraps_referencing_commits(monkeypatch):
-    monkeypatch.setattr(close_precheck, "_referencing_commits", lambda *a, **k: ["abc"])
-    assert close_precheck._referencing_commit_exists({"t"}, "/tracker", "/code") is True
-    monkeypatch.setattr(close_precheck, "_referencing_commits", lambda *a, **k: [])
-    assert close_precheck._referencing_commit_exists({"t"}, "/tracker", "/code") is False
-
-
 # ── One implementation of the glob rule; no LLM in the DET path ──────────────
 def test_both_llm_copies_delegate_to_the_shared_helper(monkeypatch):
     from rebar.llm.code_review import registry

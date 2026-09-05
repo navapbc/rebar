@@ -30,13 +30,9 @@ from rebar._commands import (
 from rebar._commands._seam import CommandError
 
 # The completion-precheck cluster lives in close_precheck (ticket 74a3: module-size split
-# along the existing call-graph seam). Re-imported here so the historical seam names —
-# `transition_close._completion_precheck` (a documented monkeypatch target) and
-# `transition_close._referencing_commit_exists` — keep working unchanged.
-from rebar._commands.close_precheck import (  # noqa: F401 — re-exported compatibility seam
-    _completion_precheck,
-    _referencing_commit_exists,
-)
+# along the existing call-graph seam). Re-imported here so the documented monkeypatch seam
+# `transition_close._completion_precheck` keeps working unchanged.
+from rebar._commands.close_precheck import _completion_precheck
 from rebar._commands.completion_bundle import verdict_manifest as _verdict_manifest
 from rebar.graph._unblock import batch_close_operations
 from rebar.types import PLAN_REVIEW_REVIEWED_TYPES

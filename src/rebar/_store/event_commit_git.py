@@ -29,21 +29,11 @@ import subprocess
 from rebar._store.gitutil import (
     _AUTOMAINT_OFF,
     _LOCAL_GIT_TIMEOUT,
-    _is_transient_object_write_error,
     _with_index_lock_retry,
     _with_transient_fault_retry,
     run_git_bounded,
 )
 
-# The transient object-DB WRITE fault this path rides out — git's loose-object temp create
-# blipping on a CI-runner FS during ``git add``/``git commit`` — is classified and retried by
-# the SHARED seam (``gitutil._TRANSIENT_WRITE_MARKERS`` /
-# :func:`gitutil._with_transient_fault_retry`).
-# The marker family used to live here privately, which left every OTHER caller of the shared
-# write seam unprotected against the identical fault (bug unheedful-custodial-bluebottle); it
-# now has exactly one definition, in gitutil. Re-exported under this module's historical name
-# so a test that pins the classification keeps a symbol to assert on.
-_is_transient_add_error = _is_transient_object_write_error
 _GIT_ADD_ATTEMPTS = 3
 
 

@@ -135,7 +135,7 @@ def test_usage_errors(capsys, monkeypatch, tmp_path: Path):
 # ───────────────────────────── library / MCP ─────────────────────────────────
 def test_library_and_mcp_shape(monkeypatch):
     import rebar
-    from rebar.mcp_server import ValidateReportOut
+    from rebar._mcp_models import ValidateReportOut
 
     monkeypatch.setenv("REBAR_SYNC_PULL", "off")
     d = rebar.validate()  # real store, in-process
