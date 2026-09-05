@@ -13,6 +13,12 @@ bug 9a17-e0b3-7aa6-4091 was. ``tests/e2e/_toolchain.py`` remains the in-fixture 
 a checkout that never ran the target. When Node is absent or provisioning fails (offline CI,
 etc.) the whole tier skips with a clear reason rather than failing — the Python unit tests
 remain the always-on floor.
+
+The BROWSER half of the tier is stricter (bug 337e-b558-17a2-49bd). Its non-execution is not
+allowed to be silent: every ``browser_runner`` / ``editor_server*`` skip path calls
+``_browser_tier.tier_unavailable``, which licenses the skip only against the recorded opt-out
+in ``tests/e2e/browser-tier-optout.toml`` and FAILS when that record is missing. Delete the
+record and the browser tier turns red instead of quietly green.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ _TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
+from _browser_tier import tier_unavailable  # noqa: E402
 from _child_diag import child_failure_detail  # noqa: E402
 from _toolchain import JS_DIR as _JS_DIR  # noqa: E402
 from _toolchain import ToolchainProvisioningError, provision_toolchain  # noqa: E402
@@ -124,12 +131,19 @@ def bpmn_harness():
 @pytest.fixture(scope="session")
 def browser_runner():
     """A callable ``run(script_name, url) -> dict`` that runs a Playwright browser probe
-    (``js/browser_*.mjs``) against a running editor URL in real headless Chromium. Skips if
-    Node, Playwright, or the Chromium download is unavailable — the real browser is the
-    only place the bundle's runtime behavior (rendering, panel, selection) can be checked."""
+    (``js/browser_*.mjs``) against a running editor URL in real headless Chromium — the real
+    browser is the only place the bundle's runtime behavior (rendering, panel, selection) can
+    be checked.
+
+    When Node, Playwright, the Chromium download or the built bundle is unavailable the tier
+    cannot run, and that is routed through ``tier_unavailable`` rather than a bare
+    ``pytest.skip``: with the recorded opt-out present it is a LOUD skip that names itself as a
+    deliberate non-execution, and without it a hard failure. A bare skip here is what made a
+    green build indistinguishable from one that actually exercised the browser
+    (bug 337e-b558-17a2-49bd)."""
     node = _have_node()
     if not node:
-        pytest.skip("e2e(browser): `node` not on PATH")
+        tier_unavailable("`node` is not on PATH")
     # Same provisioning contract as `bpmn_harness`: this fixture is in _TOOLCHAIN_FIXTURES,
     # so a selection containing it triggers collection-time provisioning, and a failure there
     # must surface HERE too. Reporting it only for `bpmn_harness` would leave exactly the
@@ -137,13 +151,13 @@ def browser_runner():
     # missing playwright dir while the real cause (a failed `npm ci`) went unnamed.
     # (bug 9a17-e0b3-7aa6-4091)
     if _PROVISION_ERROR is not None:
-        pytest.skip(f"e2e(browser): {_PROVISION_ERROR}")
+        tier_unavailable(f"the Node toolchain failed to provision — {_PROVISION_ERROR}")
     try:
         provision_toolchain(_JS_DIR, with_browser=True)
     except ToolchainProvisioningError as exc:
-        pytest.skip(f"e2e(browser): {exc}")
+        tier_unavailable(f"the Node toolchain failed to provision — {exc}")
     if not (_JS_DIR / "node_modules" / "playwright").is_dir():
-        pytest.skip("e2e(browser): playwright not installed (npm install in tests/e2e/js)")
+        tier_unavailable("playwright is not installed (npm install in tests/e2e/js)")
     # Confirm a browser actually launches (the download may be absent in CI).
     check = subprocess.run(
         [
@@ -157,7 +171,7 @@ def browser_runner():
         check=False,
     )
     if check.returncode != 0:
-        pytest.skip("e2e(browser): Chromium unavailable (run `npx playwright install chromium`)")
+        tier_unavailable("Chromium will not launch (run `npx playwright install chromium`)")
 
     def run(script_name: str, url: str) -> dict:
         proc = subprocess.run(
@@ -182,11 +196,12 @@ def editor_server(tmp_path):
 
     from rebar.llm.workflow import editor as _editor
 
-    # A TRACKED fixture (not the gitignored .rebar/workflows copy) so the browser tier
-    # runs in CI; only skip when the built editor bundle is genuinely absent.
+    # A TRACKED fixture (not the gitignored .rebar/workflows copy) so the tier depends on
+    # nothing a checkout might lack; the only non-execution here is a genuinely absent
+    # editor bundle, and that is routed through the guard like every other one.
     sample = Path(__file__).parent / "fixtures" / "roundtrip-demo.yaml"
     if not sample.is_file() or not _editor.assets_available():
-        pytest.skip("e2e(browser): fixture workflow or built editor bundle missing")
+        tier_unavailable("the fixture workflow or the built editor bundle is missing")
     ir = tmp_path / "roundtrip-demo.yaml"
     shutil.copy(sample, ir)
     server, host, port, _token = _editor.edit_workflow(
@@ -209,7 +224,7 @@ def editor_server_batch(tmp_path):
 
     sample = Path(__file__).parent / "fixtures" / "batch-demo.yaml"
     if not sample.is_file() or not _editor.assets_available():
-        pytest.skip("e2e(browser): batch fixture workflow or built editor bundle missing")
+        tier_unavailable("the batch fixture workflow or the built editor bundle is missing")
     ir = tmp_path / "batch-demo.yaml"
     shutil.copy(sample, ir)
     server, host, port, _token = _editor.edit_workflow(

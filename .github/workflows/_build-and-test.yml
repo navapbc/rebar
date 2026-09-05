@@ -457,6 +457,16 @@ jobs:
       # Pin the toolchain rather than inheriting whatever Node the runner image happens to
       # ship: an image bump would otherwise silently change what the e2e tier builds and
       # runs.
+      #
+      # There is deliberately NO browser-provisioning step here. The e2e BROWSER tier
+      # (`browser_runner`) is local-only: provisioning it means a Playwright install plus a
+      # large Chromium download on the critical path of every run, and rebar's shipped
+      # surface is a library, a CLI and an MCP server. That decision is recorded in the tree
+      # at tests/e2e/browser-tier-optout.toml, not here, because the enforcement must work in
+      # a checkout with no CI provider at all: `tests/e2e/_browser_tier.py` reads that record
+      # on every non-execution and FAILS when it is missing, so the tier can never quietly
+      # go back to skipping by accident. Deleting the record turns the browser tier red
+      # everywhere, this lane included. (bug 337e-b558-17a2-49bd)
       - name: Pin the Node toolchain for the e2e tier
         id: e2e-node
         if: matrix.os != 'macos-latest'
