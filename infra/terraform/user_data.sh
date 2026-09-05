@@ -31,13 +31,58 @@ dnf install -y nvme-cli || true
 #
 # Terraform's templatefile() substitutes the volume ids before this script is ever
 # executed. ShellCheck lints the UNRENDERED template and cannot know that.
+
+# Two refusals, each written as its OWN function called from a single line, so the guard is
+# individually removable — which is what lets a test SEED the defect back in and prove the
+# guard is load-bearing rather than incidental (bug d614-448f-a538-4cec, AC4).
+
+# An EBS volume id is `vol-` plus exactly 8 (legacy) or 17 hex digits. The device matches
+# below are SUBSTRING tests and what they return becomes a mkfs.xfs target, so a degenerate
+# argument has to be refused BEFORE any device is examined rather than guessed at:
+#   empty id  -> `grep -qi ""` matches EVERY device, so resolution returns whichever
+#                /dev/nvme*n1 sorts first, with exit 0. Proven in a sandbox to mkfs an
+#                unrelated volume and to append a permanent `UUID= ...` line to /etc/fstab.
+#   truncated -> a prefix such as vol-0ddd matches the real serial by substring.
+# `set -u` catches an UNSET variable; it does NOT catch an EMPTY one, and empty is the
+# reachable case — infra/runbooks/review-bot-ops.md tells an operator to re-run these mount
+# steps by hand, so this lands on a human under incident pressure beside the Gerrit data
+# volume. Anchoring end to end also makes every accepted id a FIXED LENGTH, which is why no
+# valid id can be a proper prefix of another — that is what keeps the substring test in the
+# by-id fallback safe without disturbing a fallback proven to work when nvme-cli is broken.
+require_well_formed_volume_id() {
+  if printf '%s' "$1" | grep -qiE '^vol([0-9a-f]{8}|[0-9a-f]{17})$'; then
+    return 0
+  fi
+  echo "refusing malformed EBS volume id '$2' -- will not guess a device" >&2
+  return 2
+}
+
+# A device blkid RECOGNISES but has no UUID for — a GPT-partitioned disk, say — skips the
+# mkfs below and used to fall straight through to appending
+# `UUID= <mount> xfs defaults,nofail 0 2`. That malformed line persists in /etc/fstab
+# forever, `mount -a` still exits 0, and so did mount_ebs_volume. Both call sites already
+# treat a non-zero return as FATAL, so refusing here is a loud stop instead.
+require_filesystem_uuid() {
+  if [ -n "$2" ]; then
+    return 0
+  fi
+  echo "$1 has no filesystem UUID -- refusing to write a malformed fstab entry" >&2
+  return 1
+}
+
 resolve_ebs_device() {
   vol_nodash=$(echo "$1" | tr -d '-')
+  require_well_formed_volume_id "$vol_nodash" "$1" || return 2 # REFUSE-DEGENERATE-VOLUME-ID
   found=""
 
   for d in /dev/nvme*n1; do
     [ -e "$d" ] || continue
-    if nvme id-ctrl -v "$d" 2>/dev/null | grep -qi "$vol_nodash"; then
+    # Anchored on non-alphanumeric boundaries so the id must be a WHOLE token in the identify
+    # page rather than any substring of it — defense in depth behind the shape guard above.
+    # The regex fragments are single-quoted, so no dollar-brace sequence reaches Terraform's
+    # templatefile(), which interpolates this file whole (bug dd30-f10d-69f3-4c36).
+    if nvme id-ctrl -v "$d" 2>/dev/null \
+      | grep -qiE '(^|[^0-9a-zA-Z])'"$vol_nodash"'([^0-9a-zA-Z]|$)'; then
       found="$d"
       break
     fi
@@ -76,6 +121,7 @@ mount_ebs_volume() {
 
   mkdir -p "$mount_point"
   uuid=$(blkid -s UUID -o value "$device")
+  require_filesystem_uuid "$device" "$uuid" || return 1 # REFUSE-EMPTY-FILESYSTEM-UUID
   if ! grep -q "$uuid" /etc/fstab; then
     echo "UUID=$uuid $mount_point xfs defaults,nofail 0 2" >> /etc/fstab
   fi
