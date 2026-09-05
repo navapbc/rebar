@@ -1,16 +1,11 @@
-"""Story 9416: `verify.overlap_enabled` -> `verify.suggest_duplicate_tickets`.
+"""Story 9416 after ADR 0116: only verify.suggest_duplicate_tickets remains live.
 
-The rename names what the setting PRODUCES (advisory duplicate-link suggestions)
-rather than the internal mechanism it toggles. Both the old TOML key and the old
-env var stay honored FOREVER as permanent aliases, so an untouched project config
-keeps working. These tests pin the two alias paths, the canonical-wins precedence
-both of them branch on, the unchanged default, and the permanent (not scheduled)
-classification of the two registry rows.
+The old TOML key and env var are retired by clean removal: they are no longer
+aliases, while the canonical key/env retains the previous typed behavior.
 """
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -55,22 +50,20 @@ def test_default_is_unchanged_when_nothing_is_set(tmp_path: Path) -> None:
     assert cfg.load_config(root=_proj(tmp_path)).verify.suggest_duplicate_tickets is False
 
 
-# ── TOML alias ────────────────────────────────────────────────────────────────
-def test_toml_alias_resolves(caplog: pytest.LogCaptureFixture) -> None:
-    """An untouched project config using the old key still turns the feature on."""
-    with caplog.at_level(logging.WARNING, logger="rebar._config_schema"):
+# ── removed TOML alias ───────────────────────────────────────────────────────
+def test_toml_alias_is_ignored_as_unknown(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING", logger="rebar.config"):
         out = coerce_sparse({"verify": {"overlap_enabled": "true"}})
-    assert out == {"verify": {"suggest_duplicate_tickets": True}}
+    assert out == {}
     joined = " ".join(r.getMessage() for r in caplog.records)
-    assert "permanent alias" in joined
-    assert "scheduled for removal" not in joined
+    assert "verify.overlap_enabled" in joined
+    assert "permanent alias" not in joined
 
 
 # ── env alias ─────────────────────────────────────────────────────────────────
-def test_env_alias_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The old env var still turns the feature on when the canonical var is unset."""
+def test_env_alias_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(_LEGACY_ENV, "1")
-    assert cfg.env_overrides().get("verify") == {"suggest_duplicate_tickets": "1"}
+    assert cfg.env_overrides().get("verify") is None
 
 
 def test_canonical_env_name_is_derived_from_the_new_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,43 +75,25 @@ def test_canonical_env_name_is_derived_from_the_new_key(monkeypatch: pytest.Monk
 def test_canonical_wins_over_legacy(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """With BOTH set — in TOML or in the environment — the canonical value wins."""
-    # TOML: canonical wins and the legacy key is dropped WITHOUT a warning.
-    with caplog.at_level(logging.WARNING, logger="rebar._config_schema"):
+    """With both set, the canonical value is the only value consumed."""
+    with caplog.at_level("WARNING", logger="rebar.config"):
         out = coerce_sparse(
             {"verify": {"overlap_enabled": "false", "suggest_duplicate_tickets": "true"}}
         )
     assert out == {"verify": {"suggest_duplicate_tickets": True}}
-    assert not [r for r in caplog.records if "overlap_enabled" in r.getMessage()]
+    assert any("verify.overlap_enabled" in r.getMessage() for r in caplog.records)
+    assert not any("permanent alias" in r.getMessage() for r in caplog.records)
 
-    # env: the canonical var wins, so the legacy truthy value does not turn it on.
     monkeypatch.setenv(_LEGACY_ENV, "1")
     monkeypatch.setenv(_CANONICAL_ENV, "0")
     assert cfg.env_overrides().get("verify") == {"suggest_duplicate_tickets": "0"}
 
 
-# ── the registry rows ─────────────────────────────────────────────────────────
-@pytest.mark.parametrize(
-    ("key", "replacement"),
-    [
-        ("cfg:verify.overlap_enabled", "verify.suggest_duplicate_tickets"),
-        ("env:REBAR_VERIFY_OVERLAP_ENABLED", _CANONICAL_ENV),
-    ],
-)
-def test_rows_are_permanent(key: str, replacement: str) -> None:
-    """Both alias rows are PERMANENT renames — not scheduled supersessions."""
-    row = dep.REGISTRY[key]
-    assert row.permanent is True
-    assert row.remove_in is None
-    assert row.replacement == replacement
-    msg = dep.warn_deprecated(key)
-    assert "permanent alias" in msg
-    assert "scheduled for removal" not in msg
+# ── removed registry rows ───────────────────────────────────────────────────
+def test_rows_are_removed_from_deprecation_registry() -> None:
+    assert "cfg:verify.overlap_enabled" not in dep.REGISTRY
+    assert f"env:{_LEGACY_ENV}" not in dep.REGISTRY
 
 
-def test_legacy_env_alias_resolution_table_carries_the_rename() -> None:
-    assert cfg._LEGACY_ENV_ALIASES[_LEGACY_ENV] == (
-        "verify",
-        "suggest_duplicate_tickets",
-        _CANONICAL_ENV,
-    )
+def test_legacy_env_alias_resolution_table_no_longer_carries_the_rename() -> None:
+    assert _LEGACY_ENV not in cfg._LEGACY_ENV_ALIASES

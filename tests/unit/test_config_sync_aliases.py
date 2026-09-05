@@ -1,16 +1,11 @@
-"""EV-1: unified sync model REBAR_SYNC_PUSH / REBAR_SYNC_PULL with the permanent
-REBAR_NO_SYNC alias and its negative->positive boolean flip. Verifies the canonical
-names, the REBAR_NO_SYNC alias (warn + map), canonical-wins precedence, and the value
-flip — at the config layer (the single source of truth) and through the push
-(_push_mode) / freshness (_sync_disabled) consumers.
+"""EV-1: unified sync model REBAR_SYNC_PUSH / REBAR_SYNC_PULL.
 
-(The scheduled REBAR_PUSH alias of REBAR_SYNC_PUSH was removed pre-1.0 — DE7 — so it
-is now ignored; only REBAR_SYNC_PUSH is honored.)
+REBAR_NO_SYNC is retired by ADR 0116's clean-removal policy: it is no longer
+parsed, mapped, or warned as an alias. Only REBAR_SYNC_PULL disables pull sync.
 """
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -55,49 +50,30 @@ def test_removed_rebar_push_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert cfg.load_config(root=_proj(tmp_path)).sync.push == "always"
 
 
-# ── deprecated alias: REBAR_NO_SYNC -> sync.pull (negative->positive flip) ─────
-@pytest.mark.parametrize(
-    ("no_sync_val", "expected_pull"),
-    [
-        # truthy → pull off (sync disabled), per the shared _as_bool convention
-        ("1", "off"),
-        ("true", "off"),
-        ("yes", "off"),
-        ("on", "off"),
-        ("TRUE", "off"),  # case-insensitive
-        (" 1 ", "off"),  # whitespace-tolerant
-        # falsy → pull on (sync stays enabled). Regression (bug 7a): the old
-        # `value and value != "0"` treated these non-"0" strings as SET, WRONGLY
-        # disabling pull and inverting the documented truthy convention.
-        ("0", "on"),
-        ("", "on"),
-        ("false", "on"),
-        ("no", "on"),
-        ("off", "on"),
-        (" 0 ", "on"),  # whitespace-tolerant falsy
-        ("FALSE", "on"),  # case-insensitive falsy
-    ],
-)
-def test_legacy_no_sync_flip(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_sync_val: str, expected_pull: str
+# ── removed alias: REBAR_NO_SYNC is no longer read ───────────────────────────
+@pytest.mark.parametrize("no_sync_val", ["1", "true", "yes", "on", "0", "false", "off"])
+def test_legacy_no_sync_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_sync_val: str
 ) -> None:
     monkeypatch.setenv("REBAR_NO_SYNC", no_sync_val)
-    assert cfg.load_config(root=_proj(tmp_path)).sync.pull == expected_pull
-
-
-def test_canonical_pull_beats_legacy_no_sync(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("REBAR_SYNC_PULL", "on")
-    monkeypatch.setenv("REBAR_NO_SYNC", "1")  # legacy ignored when canonical set
     assert cfg.load_config(root=_proj(tmp_path)).sync.pull == "on"
 
 
-def test_no_sync_warns_deprecated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+def test_canonical_pull_beats_removed_no_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REBAR_SYNC_PULL", "off")
+    monkeypatch.setenv("REBAR_NO_SYNC", "0")
+    assert cfg.load_config(root=_proj(tmp_path)).sync.pull == "off"
+
+
+def test_no_sync_does_not_emit_alias_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     monkeypatch.setenv("REBAR_NO_SYNC", "1")
-    with caplog.at_level(logging.WARNING, logger="rebar.config"):
+    with caplog.at_level("WARNING", logger="rebar.config"):
         cfg.load_config(root=_proj(tmp_path))
-    assert any("REBAR_NO_SYNC" in r.getMessage() for r in caplog.records)
+    assert not any("REBAR_NO_SYNC" in r.getMessage() for r in caplog.records)
 
 
 def test_default_sync_when_unset(tmp_path: Path) -> None:
@@ -133,11 +109,10 @@ def test_sync_disabled_reads_config(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("REBAR_SYNC_PULL", "off")
     cfg.reset_config_cache()
     assert reads._sync_disabled(str(p)) is True
-    # legacy alias also disables
     monkeypatch.delenv("REBAR_SYNC_PULL")
     monkeypatch.setenv("REBAR_NO_SYNC", "1")
     cfg.reset_config_cache()
-    assert reads._sync_disabled(str(p)) is True
+    assert reads._sync_disabled(str(p)) is False
 
 
 # ── CLI flag: --no-pull (canonical; --no-sync alias was removed, ticket 5899) ──

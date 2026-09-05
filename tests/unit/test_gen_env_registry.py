@@ -40,14 +40,20 @@ def test_positive_capture_direct_helper_and_llm():
     assert "REBAR_LLM_TIMEOUT" in reads
 
 
-def test_aliases_present_and_removed_vars_absent():
+def test_removed_alias_vars_absent():
     doc = gen.render()
-    # a live permanent alias appears with its annotation
-    assert "REBAR_NO_SYNC" in doc
-    assert "permanent alias of `REBAR_SYNC_PULL`" in doc
-    # vars removed pre-1.0 are NOT emitted (no phantom rows)
-    assert "`REBAR_PUSH`" not in doc
-    assert "REBAR_MCP_ALLOW_RECONCILE_LIVE" not in doc
+    for name in (
+        "REBAR_NO_SYNC",
+        "COMPACT_THRESHOLD",
+        "SCRATCH_BASE_DIR",
+        "REBAR_ACLI_TIMEOUT",
+        "RECONCILER_ABSENT_GET_BUDGET",
+        "REBAR_ID_GUARD_MODE",
+        "REBAR_VERIFY_OVERLAP_ENABLED",
+        "REBAR_PUSH",
+        "REBAR_MCP_ALLOW_RECONCILE_LIVE",
+    ):
+        assert f"`{name}`" not in doc
 
 
 def test_drift_is_detected_for_a_new_read(tmp_path: Path):

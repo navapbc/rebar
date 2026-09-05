@@ -72,23 +72,9 @@ def _permanent(kind: str, name: str, replacement: str) -> Deprecation:
 # add a deprecation, add a row here AND route its warning through warn_deprecated;
 # the completeness test fails otherwise.
 _ENTRIES: tuple[Deprecation, ...] = (
-    # ── env aliases: PERMANENT ergonomic renames (no removal planned) ──────────
-    # These are stable REBAR_-prefixed renames of established names; they warned
-    # "deprecated" historically, which was a contradiction — they are kept forever.
-    # Every SCHEDULED (removable) surface had been removed in the pre-1.0 breaking
-    # passes, so for a while this registry held ONLY these permanent renames. That is
-    # no longer true: see the scheduled section below.
-    _permanent("env", "REBAR_NO_SYNC", "REBAR_SYNC_PULL"),
-    _permanent("env", "COMPACT_THRESHOLD", "REBAR_COMPACT_THRESHOLD"),
-    _permanent("env", "SCRATCH_BASE_DIR", "REBAR_SCRATCH_BASE_DIR"),
-    _permanent("env", "REBAR_ACLI_TIMEOUT", "REBAR_JIRA_CLI_TIMEOUT"),
-    _permanent("env", "RECONCILER_ABSENT_GET_BUDGET", "REBAR_RECONCILER_DELETION_PROBE_LIMIT"),
-    _permanent("env", "REBAR_ID_GUARD_MODE", "REBAR_UNSAFE_ID_GUARD_BYPASS"),
-    _permanent("env", "REBAR_VERIFY_OVERLAP_ENABLED", "REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS"),
-    # ── config-key aliases: PERMANENT renames (no removal planned) ─────────────
-    # Same shape as the env renames above, for a TOML key. `coerce_sparse` builds the
-    # `cfg:<section>.<old>` key from rebar._config_schema._ALIASES, so the two must agree.
-    _permanent("cfg", "verify.overlap_enabled", "verify.suggest_duplicate_tickets"),
+    # ── active deprecation aliases ────────────────────────────────────────────
+    # ADR 0116 retired the remaining env/config aliases by clean pre-1.0 removal.
+    # No permanent env/cfg alias rows remain.
     # ── removed scheduled surfaces (historical record) ─────────────────────────
     # NOTE (DE7): the first pre-1.0 breaking removal dropped the scheduled env
     # aliases REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE, the

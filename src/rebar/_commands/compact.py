@@ -92,7 +92,7 @@ def compact_cli(
         return 1
 
     # Default threshold from the typed config (compact.threshold; env
-    # REBAR_COMPACT_THRESHOLD, deprecated alias COMPACT_THRESHOLD, or a config file).
+    # REBAR_COMPACT_THRESHOLD, or a config file).
     # A --threshold= flag below still overrides. A malformed config is reported as a
     # clean error (exit 1), not an uncaught traceback.
     try:

@@ -30,7 +30,6 @@ _EMISSION_ALLOWLIST = {"_deprecations.py"}
 
 # ── (a) registry well-formedness ──────────────────────────────────────────────
 def test_registry_entries_well_formed() -> None:
-    assert REGISTRY, "the deprecation registry must not be empty"
     for key, entry in REGISTRY.items():
         assert isinstance(entry, Deprecation)
         # keyed by its own key (map integrity)
@@ -88,7 +87,8 @@ def test_warn_deprecated_raises_on_unknown_key() -> None:
 
 
 def test_warn_deprecated_returns_message_for_known_key() -> None:
-    # sanity: a known key emits (does not raise) and returns the built message.
+    if not REGISTRY:
+        pytest.skip("ADR 0116 removed the last active deprecation alias rows")
     key = next(iter(REGISTRY))
     msg = warn_deprecated(key)
     assert REGISTRY[key].name in msg

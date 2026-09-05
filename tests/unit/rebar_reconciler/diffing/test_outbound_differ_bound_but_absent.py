@@ -514,7 +514,7 @@ def test_idempotency_two_passes(od):
 
 
 def test_rotation_services_all_within_ceil_n_over_k(od, binding_store_mod, tmp_path, monkeypatch):
-    monkeypatch.setenv("RECONCILER_ABSENT_GET_BUDGET", "2")
+    monkeypatch.setenv("REBAR_RECONCILER_DELETION_PROBE_LIMIT", "2")
     monkeypatch.setenv("RECONCILER_ABSENT_RETIRE_GRACE", "100")  # never retire
     N = 7
     K = 2
@@ -558,7 +558,7 @@ def test_rotation_services_all_within_ceil_n_over_k(od, binding_store_mod, tmp_p
 def test_dead_key_behind_saturated_budget_still_retires(
     od, binding_store_mod, tmp_path, monkeypatch
 ):
-    monkeypatch.setenv("RECONCILER_ABSENT_GET_BUDGET", "1")
+    monkeypatch.setenv("REBAR_RECONCILER_DELETION_PROBE_LIMIT", "1")
     monkeypatch.setenv("RECONCILER_ABSENT_RETIRE_GRACE", "2")
     bs = binding_store_mod.BindingStore(tmp_path / ".tickets-tracker")
     # Two absent keys; one dead (404), one alive (200). Budget K=1.

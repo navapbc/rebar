@@ -171,10 +171,9 @@ _SECTIONS: dict[str, dict] = {
 }
 
 
-# section -> {deprecated_key -> canonical_key}, consumed by the coerce_sparse loop below. Every
-# entry needs a matching `cfg:<section>.<old>` row in rebar._deprecations, else warn_deprecated
-# raises. The 9416 entry is a PERMANENT rename: same boolean, untouched configs keep working.
-_ALIASES: dict[str, dict[str, str]] = {"verify": {"overlap_enabled": "suggest_duplicate_tickets"}}
+# section -> {deprecated_key -> canonical_key}, consumed by the coerce_sparse loop below.
+# ADR 0116 retired the remaining config-key alias, so no live cfg aliases remain.
+_ALIASES: dict[str, dict[str, str]] = {}
 
 # Config sections owned by an OPTIONAL layer rather than the stdlib core typed
 # Config — currently ``llm`` (the ``nava-rebar[agents]`` extra; resolved by
@@ -191,8 +190,7 @@ _RESERVED_SECTIONS: frozenset[str] = frozenset({"llm", "snapshot", "mapping"})
 def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -> dict:
     """Coerce+validate a nested mapping into a SPARSE nested dict of ONLY the keys
     actually present (NO defaults applied) — the per-layer building block for
-    precedence merging. Resolves legacy aliases (the legacy key is accepted, with a
-    deprecation warning, regardless of ``strict``); raises :class:`ConfigError` on an
+    precedence merging. Raises :class:`ConfigError` on an
     invalid value. Unknown sections/keys WARN by default and, with ``strict=True``,
     hard-error (the deprecation cutover). Defaults are applied ONCE, at the end, by
     :meth:`Config.from_mapping` — so a lower-priority layer's default can never

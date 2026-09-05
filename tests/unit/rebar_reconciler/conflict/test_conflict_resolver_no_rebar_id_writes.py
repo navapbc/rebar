@@ -401,13 +401,13 @@ def test_applier_guard_blocks_resolver_rebar_id_label_writes(
     # Ensure guard mode is 'raise' regardless of environment.
     import os as _os
 
-    prev = _os.environ.get("REBAR_ID_GUARD_MODE")
-    _os.environ["REBAR_ID_GUARD_MODE"] = "raise"
+    prev = _os.environ.get("REBAR_UNSAFE_ID_GUARD_BYPASS")
+    _os.environ["REBAR_UNSAFE_ID_GUARD_BYPASS"] = "false"
     try:
         with pytest.raises(error_cls):
             applier_mod._audit_rebar_id_label_writes("outbound_update", [mut])
     finally:
         if prev is None:
-            _os.environ.pop("REBAR_ID_GUARD_MODE", None)
+            _os.environ.pop("REBAR_UNSAFE_ID_GUARD_BYPASS", None)
         else:
-            _os.environ["REBAR_ID_GUARD_MODE"] = prev
+            _os.environ["REBAR_UNSAFE_ID_GUARD_BYPASS"] = prev

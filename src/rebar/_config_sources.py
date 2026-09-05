@@ -3,7 +3,7 @@
 Extracted from :mod:`rebar.config` (a pure structural split; no behavior change). This
 is the raw-input resolution layer: repo-root and config-file location, the mtime-keyed
 TOML parse cache, project/user config discovery, and the ``REBAR_<SECTION>_<KEY>``
-env-override layer (including the legacy env aliases). The typed loader, precedence
+env-override layer. The typed loader, precedence
 merge, and the public ``load_config`` / ``tracker_dir`` surface stay in
 :mod:`rebar.config`, which re-exports every name here so the public API is unchanged
 (``from rebar.config import X`` still works).
@@ -11,7 +11,7 @@ merge, and the public ``load_config`` / ``tracker_dir`` surface stay in
 This module is a LEAF: it imports only stdlib, the siblings :mod:`rebar._config_schema`
 and :mod:`rebar._deprecations`, and :mod:`rebar._config_resolvers` (whose below-seam
 resolvers it re-exports in its import block) -- never :mod:`rebar.config`, so there
-is no cycle. The logger is named ``"rebar.config"`` so env-alias log tests still match.
+is no cycle. The logger is named ``"rebar.config"`` so config log tests still match.
 """
 
 from __future__ import annotations
@@ -65,8 +65,7 @@ from rebar._config_resolvers import resolve_run_root as resolve_run_root
 from rebar._config_resolvers import resolve_stall_abort_limits as resolve_stall_abort_limits
 from rebar._config_resolvers import resolve_stall_attempts as resolve_stall_attempts
 from rebar._config_resolvers import resolve_usage_log_sink as resolve_usage_log_sink
-from rebar._config_schema import _SECTIONS, ConfigError, _as_bool
-from rebar._deprecations import warn_deprecated
+from rebar._config_schema import _SECTIONS, ConfigError
 
 logger = logging.getLogger("rebar.config")
 
@@ -108,6 +107,7 @@ def config_file(root: str | os.PathLike[str] | None = None) -> Path | None:
     """The explicit ``$REBAR_CONFIG`` file when set and present, else ``None``.
     (Project-config discovery — rebar.toml / a ``[tool.rebar]`` pyproject table —
     is done by :func:`_discover_project_config`.)"""
+    del root
     env = os.environ.get("REBAR_CONFIG")
     if env and Path(env).is_file():
         return Path(env)
@@ -327,80 +327,30 @@ def _canonical_env_name(sect: str, key: str) -> str:
     return _CANONICAL_ENV_NAMES.get((sect, key), f"REBAR_{sect.upper()}_{key.upper()}")
 
 
-# Deprecated env vars that map to a canonical config key during the rename window
-# (EV-1/EV-3/EV-3c). The OLD name still works — read only when the canonical
-# counterpart is unset (canonical always wins) — with a deprecation warning.
-# ``REBAR_NO_SYNC`` is a NEGATIVE boolean flipped to the positive ``sync.pull``
-# (truthy → "off"/disabled; falsy/unset → "on"/enabled, per the shared ``_as_bool``
-# truthy convention); ``REBAR_ID_GUARD_MODE``
-# is similarly value-mapped (warn → bypass/"true", raise/other → "false").
-#
-# ── Deprecation removal horizons ────────────────────────────────────────────────────
-# The removal horizons (and permanent-vs-scheduled classification) for EVERY deprecated
-# user-facing surface — including these env aliases — now live in the machine-readable
-# registry in ``rebar._deprecations`` (the single source of truth), and every runtime
-# signal routes through :func:`rebar._deprecations.warn_deprecated`. The DICT below is
-# the RESOLUTION table (legacy env name -> section/key/canonical) the env layer consults.
-# Every alias remaining here is now a PERMANENT ergonomic rename (REBAR_NO_SYNC,
-# COMPACT_THRESHOLD, …); the once-scheduled aliases (REBAR_PUSH / TICKETS_TRACKER_DIR /
-# REBAR_MCP_ALLOW_RECONCILE_LIVE) were removed pre-1.0 (DE7). Adding an alias here without
-# a registry row fails the registry test.
-_LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
-    # legacy name                      -> (section, key, canonical name)
-    "REBAR_NO_SYNC": ("sync", "pull", "REBAR_SYNC_PULL"),
-    "COMPACT_THRESHOLD": ("compact", "threshold", "REBAR_COMPACT_THRESHOLD"),
-    "SCRATCH_BASE_DIR": ("scratch", "base_dir", "REBAR_SCRATCH_BASE_DIR"),
-    # reconciler.* (EV-3c renames) — canonical names are the ergonomic ones above.
-    "REBAR_ACLI_TIMEOUT": ("reconciler", "jira_cli_timeout", "REBAR_JIRA_CLI_TIMEOUT"),
-    # (reconciler.lock_max_retries + its env aliases REBAR_RECONCILER_LOCK_MAX_RETRIES /
-    #  REBAR_RECONCILER_LOCK_RETRY_BUDGET were removed in epic dust-troth-naval / C4 —
-    #  the b859 retry loop they tuned is superseded by the self-healing ref lock.)
-    "RECONCILER_ABSENT_GET_BUDGET": (
-        "reconciler",
-        "deletion_probe_limit",
-        "REBAR_RECONCILER_DELETION_PROBE_LIMIT",
-    ),
-    "REBAR_ID_GUARD_MODE": ("reconciler", "id_guard_bypass_unsafe", "REBAR_UNSAFE_ID_GUARD_BYPASS"),
-    # verify.suggest_duplicate_tickets (story 9416): a pure rename, so the derived env
-    # name moved with it and the pre-rename one is kept forever.
-    "REBAR_VERIFY_OVERLAP_ENABLED": (
-        "verify",
-        "suggest_duplicate_tickets",
-        "REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS",
-    ),
-}
+# Legacy env aliases were retired by ADR 0116's clean pre-1.0 removal policy.
+# Keep the exported table empty so compatibility imports can observe that no legacy
+# env spellings are still mapped.
+_LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {}
 
 
 def _map_legacy_env(legacy: str, value: str) -> str:
-    """Map a legacy env value to its canonical config value. Non-identity cases:
-    ``REBAR_NO_SYNC`` (negative→positive boolean flip; truthy per ``_as_bool`` →
-    pull "off") and ``REBAR_ID_GUARD_MODE`` (the id-guard value-flip: ``warn`` →
-    bypass/"true", ``raise``/other → "false")."""
-    if legacy == "REBAR_NO_SYNC":
-        # Honor the shared truthy convention (``_as_bool``: 1/true/yes/on, case- and
-        # whitespace-insensitive) rather than "any non-empty, non-'0' string is set".
-        # ``REBAR_NO_SYNC`` truthy → disable pull; falsy/unset → leave pull on.
-        return "off" if _as_bool(value, legacy) else "on"
-    if legacy == "REBAR_ID_GUARD_MODE":
-        return "true" if value.strip().lower() == "warn" else "false"
+    """Compatibility shim for historical imports; no active legacy aliases remain."""
+    del legacy
     return value
 
 
 def env_overrides() -> dict:
-    """Sparse mapping of ``REBAR_<SECTION>_<KEY>`` env overrides (raw strings;
-    coerce_sparse types them). Only the known config keys are read. Deprecated
-    legacy env vars (:data:`_LEGACY_ENV_ALIASES`) are honored when their canonical
-    counterpart is unset, with a deprecation warning."""
+    """Sparse mapping of canonical ``REBAR_<SECTION>_<KEY>`` env overrides.
+
+    Values remain raw strings; :func:`coerce_sparse` applies typed coercion.
+    Retired pre-1.0 aliases are no longer parsed, mapped, or warned here.
+    """
     out: dict[str, dict] = {}
     for sect, keys in _SECTIONS.items():
         for key in keys:
             name = _canonical_env_name(sect, key)
             if name in os.environ:
                 out.setdefault(sect, {})[key] = os.environ[name]
-    for legacy, (sect, key, _canonical) in _LEGACY_ENV_ALIASES.items():
-        if legacy in os.environ and key not in out.get(sect, {}):
-            warn_deprecated(f"env:{legacy}", logger=logger)
-            out.setdefault(sect, {})[key] = _map_legacy_env(legacy, os.environ[legacy])
     return out
 
 

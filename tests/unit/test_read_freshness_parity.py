@@ -15,7 +15,7 @@ and asserts on OBSERVABLE behavior only (fetch count, visible ticket ids):
 
 1. remote visibility through each facade (parametrized over all three);
 2. the shared throttle: reads across the three facades fetch exactly once total;
-3. the three opt-outs (``REBAR_SYNC_PULL=off``, ``REBAR_NO_SYNC=1``, ``--no-pull`` /
+3. the three opt-outs (``REBAR_SYNC_PULL=off``, ``REBAR_SYNC_PULL=1``, ``--no-pull`` /
    ``no_sync=True``) suppress the fetch while local replay still returns the store;
 4. a failing fetch leaves the facade returning consistent local state, no leak.
 """
@@ -95,7 +95,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """A repo whose ``.tickets-tracker`` has an ``origin`` remote; ``origin/tickets``
     holds a NEW commit (``NEW_ID``) the tracker has not yet adopted (tracker sits at
     the shared ``BASE_ID`` base)."""
-    for name in ("REBAR_SYNC_PULL", "REBAR_NO_SYNC", "REBAR_TRACKER_DIR", "REBAR_ROOT"):
+    for name in ("REBAR_SYNC_PULL", "REBAR_SYNC_PULL", "REBAR_TRACKER_DIR", "REBAR_ROOT"):
         monkeypatch.delenv(name, raising=False)
 
     repo_root = tmp_path / "proj"
@@ -231,7 +231,7 @@ def test_shared_throttle_no_double_fetch(store, spy) -> None:
 
 # ── 3. opt-outs keep the remote invisible; local replay still works ──────────
 @pytest.mark.parametrize("facade", list(FACADES))
-@pytest.mark.parametrize("optout_env", ["REBAR_SYNC_PULL", "REBAR_NO_SYNC"])
+@pytest.mark.parametrize("optout_env", ["REBAR_SYNC_PULL"])
 def test_env_optout_suppresses_fetch_but_replays_local(
     store, spy, monkeypatch: pytest.MonkeyPatch, facade: str, optout_env: str
 ) -> None:

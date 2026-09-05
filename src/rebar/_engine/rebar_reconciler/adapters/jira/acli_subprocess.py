@@ -76,7 +76,7 @@ _ACLI_DRAIN_SECONDS: int = 2  # bounded post-SIGKILL reap/drain (D-state safe)
 def _acli_call_timeout() -> int:
     """Per-call subprocess timeout (seconds), resolved through the typed config:
     the config-file key ``[tool.rebar.reconciler].jira_cli_timeout``, overridden by
-    env ``REBAR_JIRA_CLI_TIMEOUT`` (deprecated alias ``REBAR_ACLI_TIMEOUT``), then by
+    env ``REBAR_JIRA_CLI_TIMEOUT``, then by
     ``rebar -c reconciler.jira_cli_timeout=…``.
 
     Defaults to :data:`_DEFAULT_ACLI_TIMEOUT` (120s). The typed default (0 = unset)
@@ -547,8 +547,8 @@ def _run_acli(
 
     Each invocation is bounded by an explicit positive ``call_timeout`` (the
     operation-scoped ``reconciler.jira_cli_timeout`` capture, ticket 2048-d289)
-    or, when unset, by the ambient ``REBAR_JIRA_CLI_TIMEOUT`` resolve (deprecated
-    alias ``REBAR_ACLI_TIMEOUT``; default 120s) and run
+    or, when unset, by the ambient ``REBAR_JIRA_CLI_TIMEOUT`` resolve
+    (default 120s) and run
     in its own process session, so a hung ``acli`` child (or a pipe-holding
     grandchild) is reaped rather than freezing the pass (bug d843). On timeout:
 

@@ -411,7 +411,7 @@ def test_library_and_mcp_shape(tracker: Path, monkeypatch):
 
     _three_tier(tracker)
     monkeypatch.setenv("REBAR_TRACKER_DIR", str(tracker))
-    monkeypatch.setenv("REBAR_NO_SYNC", "1")
+    monkeypatch.setenv("REBAR_SYNC_PULL", "off")
     d = rebar.next_batch("nb-epic")
     # Observable result (not just the size): the resolved epic, the selected
     # tickets with their own fields, and the blocked-story skip — so a regression
