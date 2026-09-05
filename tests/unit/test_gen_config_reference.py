@@ -230,12 +230,14 @@ def test_config_md_is_not_a_generated_target():
 
 
 def test_config_reference_reflects_cfg_deprecation_aliases():
-    """Each cfg alias appears in its own row WITH its replacement and status string."""
+    """Each active cfg alias appears in its own row; retired aliases stay absent."""
     from rebar._deprecations import REGISTRY
 
     doc = gen.render_config_reference()
     cfg_deps = [d for d in REGISTRY.values() if d.kind == "cfg"]
-    assert cfg_deps, "fixture guard: expected at least one cfg-kind deprecation"
+    if not cfg_deps:
+        assert _row_for(doc, "verify.overlap_enabled") == ""
+        return
     for dep in cfg_deps:
         row = _row_for(doc, dep.name)
         assert row, f"deprecated cfg key {dep.name!r} missing from a reference table row"

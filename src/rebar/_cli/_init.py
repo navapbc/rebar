@@ -179,7 +179,7 @@ def ensure_initialized(*, init_only: bool) -> None:
 
     # Full mode: marker-throttled, fetch-free reconverge — the SAME implementation
     # and the SAME throttle marker the read path uses (reads.ensure_fresh honors the
-    # sync.pull policy: REBAR_SYNC_PULL=off, deprecated alias REBAR_NO_SYNC).
+    # sync.pull policy: REBAR_SYNC_PULL=off.
     from rebar._engine_support import reads
 
     reads.ensure_fresh(reads.tracker_dir(repo_root))

@@ -30,8 +30,8 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f]")
 
 
 def base_dir(repo_root=None) -> str:
-    """The scratch base directory: ``scratch.base_dir`` (env REBAR_SCRATCH_BASE_DIR,
-    deprecated alias SCRATCH_BASE_DIR, or a config file) if set, else
+    """The scratch base directory: ``scratch.base_dir`` (env REBAR_SCRATCH_BASE_DIR
+    or a config file) if set, else
     ``<repo_root or config.repo_root()>/.rebar/scratch``. Scratch is best-effort
     infra, so a malformed config falls back to the default rather than erroring."""
     try:

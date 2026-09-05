@@ -21,10 +21,10 @@ Covers _audit_rebar_id_label_writes and its integration into apply():
      do NOT trigger the guard from an unauthorized leaf.
 
   5. test_warn_mode_logs_and_does_not_raise
-     — REBAR_ID_GUARD_MODE=warn logs a WARNING instead of raising.
+     — REBAR_UNSAFE_ID_GUARD_BYPASS=true logs a WARNING instead of raising.
 
   6. test_guard_mode_precedence
-     — env var REBAR_ID_GUARD_MODE takes precedence over config; default
+     — env var REBAR_UNSAFE_ID_GUARD_BYPASS takes precedence over config; default
      is 'raise'.
 """
 
@@ -226,12 +226,12 @@ def test_audit_ignores_non_rebar_id_label_mutations(applier):
 
 
 def test_warn_mode_logs_and_does_not_raise(applier, errors_mod, caplog):
-    """REBAR_ID_GUARD_MODE=warn logs a WARNING instead of raising."""
+    """REBAR_UNSAFE_ID_GUARD_BYPASS=true logs a WARNING instead of raising."""
     assert hasattr(applier, "_audit_rebar_id_label_writes"), (
         "_audit_rebar_id_label_writes not found in applier"
     )
     mut = _MockLabelMutation(payload="rebar-id-warn-test", action="create")
-    with patch.dict(os.environ, {"REBAR_ID_GUARD_MODE": "warn"}):
+    with patch.dict(os.environ, {"REBAR_UNSAFE_ID_GUARD_BYPASS": "true"}):
         with caplog.at_level(logging.WARNING):
             # Should NOT raise in warn mode
             applier._audit_rebar_id_label_writes("inbound_update", [mut])
@@ -253,31 +253,30 @@ def test_warn_mode_logs_and_does_not_raise(applier, errors_mod, caplog):
 @pytest.mark.parametrize(
     ("env_val", "config_val", "expected_raises"),
     [
-        # (a) env=warn + config=raise → warn behavior (env wins, no raise)
-        ("warn", "raise", False),
-        # (b) env=raise + config=warn → raise behavior (env wins)
-        ("raise", "warn", True),
-        # (c) env unset + config=warn → warn (config fallback)
+        # (a) env=true + config=false → bypass behavior (env wins, no raise)
+        ("true", "raise", False),
+        # (b) env=false + config=true → raise behavior (env wins)
+        ("false", "warn", True),
+        # (c) env unset + config=true → bypass (config fallback)
         (None, "warn", False),
         # (d) env unset + config unset → raise (default)
         (None, None, True),
     ],
     ids=[
-        "env_warn_beats_config_raise",
-        "env_raise_beats_config_warn",
-        "config_warn_when_env_unset",
+        "env_true_beats_config_false",
+        "env_false_beats_config_true",
+        "config_true_when_env_unset",
         "default_raise_when_both_unset",
     ],
 )
 def test_guard_mode_precedence(
     applier, errors_mod, env_val, config_val, expected_raises, tmp_path, monkeypatch
 ):
-    """env var REBAR_ID_GUARD_MODE takes precedence over the typed
+    """env var REBAR_UNSAFE_ID_GUARD_BYPASS takes precedence over the typed
     `[reconciler] id_guard_bypass_unsafe` config key — exercised through the real
     typed-config layer (0ac6 slice 2: the guard now resolves via
-    rebar.config.load_config, so both the deprecated env alias and the typed config
-    key flow through the single config entry point with env > file precedence and the
-    warn->bypass / raise->guard value-flip preserved)."""
+    rebar.config.load_config, so the canonical env var and the typed config key
+    flow through the single config entry point with env > file precedence)."""
     import rebar.config as _cfg
 
     assert hasattr(applier, "_audit_rebar_id_label_writes"), (
@@ -286,18 +285,17 @@ def test_guard_mode_precedence(
     mut = _MockLabelMutation(payload="rebar-id-prec-test", action="create")
 
     # config layer: the typed `[reconciler] id_guard_bypass_unsafe` key in rebar.toml
-    # under a tmp project root (warn->true, raise->false per the value-flip).
+    # under a tmp project root.
     monkeypatch.delenv("REBAR_UNSAFE_ID_GUARD_BYPASS", raising=False)
-    monkeypatch.delenv("REBAR_ID_GUARD_MODE", raising=False)
     if config_val is not None:
         bypass = "true" if config_val == "warn" else "false"
         (tmp_path / "rebar.toml").write_text(
             f"[reconciler]\nid_guard_bypass_unsafe = {bypass}\n", encoding="utf-8"
         )
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
-    # env layer (deprecated alias): REBAR_ID_GUARD_MODE, when set, must beat the file.
+    # env layer: REBAR_UNSAFE_ID_GUARD_BYPASS, when set, must beat the file.
     if env_val is not None:
-        monkeypatch.setenv("REBAR_ID_GUARD_MODE", env_val)
+        monkeypatch.setenv("REBAR_UNSAFE_ID_GUARD_BYPASS", env_val)
     _cfg.reset_config_cache()
 
     # Use applier.RebarIdLabelWriteError to avoid importlib module-identity mismatch.

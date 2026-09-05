@@ -121,9 +121,9 @@ _AUTHORIZED_REBAR_ID_LABEL_ACTIONS: dict[str, frozenset[str]] = {
 # list (or before dispatching the typed-mutation leaf) to ensure no unauthorized
 # leaf emits a rebar-id-* label mutation.
 #
-# The guard is BYPASSED only when REBAR_UNSAFE_ID_GUARD_BYPASS is truthy (permanent
-# alias: REBAR_ID_GUARD_MODE=warn env). Default: guard active, fail-closed. See
-# _resolve_id_guard_bypass; precedence env > config.
+# The guard is BYPASSED only when REBAR_UNSAFE_ID_GUARD_BYPASS is truthy.
+# Default: guard active, fail-closed. See _resolve_id_guard_bypass;
+# precedence env > config.
 # ---------------------------------------------------------------------------
 
 
@@ -134,9 +134,7 @@ def _resolve_id_guard_bypass() -> bool:
 
     Default ``False`` — guard active, fail-CLOSED (a violation raises). The value is
     ``[tool.rebar.reconciler].id_guard_bypass_unsafe``, overridden by env
-    ``REBAR_UNSAFE_ID_GUARD_BYPASS`` (boolean true/false), then ``rebar -c``. The old
-    ``REBAR_ID_GUARD_MODE`` env remains honored as a deprecated alias inside the config
-    layer (value-flip preserved: ``warn`` → bypass/True, ``raise``/other → False). The
+    ``REBAR_UNSAFE_ID_GUARD_BYPASS`` (boolean true/false), then ``rebar -c``. The
     legacy flat ``.rebar/config.conf`` key ``rebar_id_guard_mode`` is no longer honored
     (the flat-conf reader was removed pre-1.0 — DE7). An unreadable/invalid config FAILS
     CLOSED (guard active).
@@ -197,8 +195,7 @@ def _audit_rebar_id_label_writes(leaf_name: str, mutations: list) -> None:
         contract is per-action; defeating it would leave a security gap by
         allowing an authorized leaf to perform any action.
 
-    Guard bypass (REBAR_UNSAFE_ID_GUARD_BYPASS=true; permanent alias
-    REBAR_ID_GUARD_MODE=warn env), default OFF:
+    Guard bypass (REBAR_UNSAFE_ID_GUARD_BYPASS=true), default OFF:
       - bypass OFF (default): RebarIdLabelWriteError raised on violation (fail-closed).
       - bypass ON: a LOUD WARNING is logged on every violation; no exception (staged rollout).
 

@@ -8,7 +8,7 @@ budget (deletion_probe_limit), rebar_id_audit._resolve_id_guard_bypass
 (id_guard_bypass_unsafe) — across config LOCATIONS (pyproject, rebar.toml, XDG user,
 env, `rebar -c`) and asserts precedence CLI > env > project > user > default, the
 ergonomic canonical env names (REBAR_JIRA_CLI_TIMEOUT, REBAR_UNSAFE_ID_GUARD_BYPASS)
-+ EV-3c deprecated aliases, and the id-guard value-flip and fail-CLOSED default.
+and the id-guard fail-CLOSED default; EV-3c aliases are cleanly removed.
 """
 
 from __future__ import annotations
@@ -94,10 +94,10 @@ def test_timeout_canonical_env_is_the_nice_name(tmp_path: Path, monkeypatch) -> 
     assert acli_subprocess._acli_call_timeout() == 45
 
 
-def test_timeout_legacy_env_alias(tmp_path: Path, monkeypatch) -> None:
+def test_timeout_legacy_env_alias_ignored(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("REBAR_ROOT", str(_proj(tmp_path)))
     monkeypatch.setenv("REBAR_ACLI_TIMEOUT", "33")
-    assert acli_subprocess._acli_call_timeout() == 33
+    assert acli_subprocess._acli_call_timeout() == acli_subprocess._DEFAULT_ACLI_TIMEOUT
 
 
 def test_timeout_precedence_cli_gt_env_gt_project_gt_user_gt_default(
@@ -129,17 +129,17 @@ def test_timeout_precedence_cli_gt_env_gt_project_gt_user_gt_default(
 
 
 # ── deletion_probe_limit (resolved value the outbound differ now reads) ────────
-def test_deletion_probe_file_and_aliases(tmp_path: Path, monkeypatch) -> None:
+def test_deletion_probe_file_and_removed_alias(tmp_path: Path, monkeypatch) -> None:
     p = _proj(tmp_path)
     (p / "pyproject.toml").write_text(
         "[tool.rebar.reconciler]\ndeletion_probe_limit = 2\n", encoding="utf-8"
     )
     monkeypatch.setenv("REBAR_ROOT", str(p))
     assert cfg.load_config().reconciler.deletion_probe_limit == 2
-    monkeypatch.setenv("RECONCILER_ABSENT_GET_BUDGET", "4")  # deprecated alias
+    monkeypatch.setenv("RECONCILER_ABSENT_GET_BUDGET", "4")
     cfg.reset_config_cache()
-    assert cfg.load_config().reconciler.deletion_probe_limit == 4
-    monkeypatch.setenv("REBAR_RECONCILER_DELETION_PROBE_LIMIT", "9")  # canonical beats alias
+    assert cfg.load_config().reconciler.deletion_probe_limit == 2
+    monkeypatch.setenv("REBAR_RECONCILER_DELETION_PROBE_LIMIT", "9")
     cfg.reset_config_cache()
     assert cfg.load_config().reconciler.deletion_probe_limit == 9
 
@@ -171,11 +171,11 @@ def test_id_guard_env_beats_file(tmp_path: Path, monkeypatch) -> None:
     assert rebar_id_audit._resolve_id_guard_bypass() is False
 
 
-@pytest.mark.parametrize(("mode", "expect"), [("warn", True), ("raise", False)])
-def test_id_guard_legacy_env_value_flip(tmp_path: Path, monkeypatch, mode, expect) -> None:
+@pytest.mark.parametrize("mode", ["warn", "raise"])
+def test_id_guard_legacy_env_ignored(tmp_path: Path, monkeypatch, mode) -> None:
     monkeypatch.setenv("REBAR_ROOT", str(_proj(tmp_path)))
     monkeypatch.setenv("REBAR_ID_GUARD_MODE", mode)
-    assert rebar_id_audit._resolve_id_guard_bypass() is expect
+    assert rebar_id_audit._resolve_id_guard_bypass() is False
 
 
 def test_id_guard_fail_closed_on_malformed_config(tmp_path: Path, monkeypatch) -> None:

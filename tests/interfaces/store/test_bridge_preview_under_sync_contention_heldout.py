@@ -80,7 +80,7 @@ def _install_empty_acli(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
     monkeypatch.setenv("JIRA_API_TOKEN", "test-token")
     monkeypatch.setenv("REBAR_SYNC_PULL", "off")
-    monkeypatch.setenv("REBAR_NO_SYNC", "1")
+    monkeypatch.setenv("REBAR_SYNC_PULL", "off")
 
 
 def test_preview_is_complete_while_sync_locks_are_held(

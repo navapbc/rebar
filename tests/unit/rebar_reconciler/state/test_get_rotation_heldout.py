@@ -50,7 +50,7 @@ def _write_store(root: Path, *, inline: dict[str, str], sidecar: dict[str, str] 
 
 
 def _selected(outbound, store, monkeypatch: pytest.MonkeyPatch) -> set[str]:
-    monkeypatch.setenv("RECONCILER_ABSENT_GET_BUDGET", "1")
+    monkeypatch.setenv("REBAR_RECONCILER_DELETION_PROBE_LIMIT", "1")
     tickets = [
         {"ticket_id": f"loc-{suffix}", "status": "open", "ticket_type": "task"}
         for suffix in ("A", "B", "C")

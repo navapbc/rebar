@@ -18,8 +18,7 @@ best-effort, throttled (<=1/min) ``git fetch origin tickets`` + reconverge via
 ``rebar._store.sync`` (HEAD-based local-ahead detection, merge-as-union,
 lock-guarded reset), throttled by a ``/tmp/.ticket-sync-<md5>`` marker, so all
 three interfaces share one contract. Opt out
-with ``REBAR_SYNC_PULL=off`` (permanent alias ``REBAR_NO_SYNC=1``) or the
-``--no-pull`` CLI flag.
+with ``REBAR_SYNC_PULL=off`` or the ``--no-pull`` CLI flag.
 """
 
 from __future__ import annotations
@@ -209,8 +208,8 @@ def use_ticket_view(view: object | None) -> Iterator[None]:
 
 def _sync_disabled(root: str | None = None) -> bool:
     """Whether inbound freshness (fetch/reconverge) is turned off — the ``sync.pull``
-    policy resolved via the typed config (env ``REBAR_SYNC_PULL=off``, deprecated
-    alias ``REBAR_NO_SYNC``, or a config file). ``root`` (the repo dir holding the
+    policy resolved via the typed config (env ``REBAR_SYNC_PULL=off`` or a config
+    file). ``root`` (the repo dir holding the
     tracker) is passed explicitly so resolution is pure stat-based discovery — no
     ``git`` subprocess for root detection. Best-effort: a malformed config leaves
     sync enabled (every fetch failure is swallowed downstream anyway)."""
@@ -377,8 +376,8 @@ def show_state(
 
 
 def _load_scratch(ticket_id: str) -> dict:
-    # scratch.base_dir via the typed config (env REBAR_SCRATCH_BASE_DIR, deprecated
-    # alias SCRATCH_BASE_DIR, or a config file). Resolve the CODE repo root the config
+    # scratch.base_dir via the typed config (env REBAR_SCRATCH_BASE_DIR or a config
+    # file). Resolve the CODE repo root the config
     # way (None == discover), NOT os.path.dirname(tracker), which is the config root only
     # for a co-located store; a relocated store's parent holds no rebar.toml. Explicit root
     # → pure stat discovery (no git subprocess); a malformed config falls back to the

@@ -639,8 +639,8 @@ def _compute_outbound_select_absent_gets(
     # key to <= ceil(N/K) passes (anti-starvation, I3/I4).
     # Deletion-probe budget (GET probes to confirm a Jira issue is really deleted),
     # resolved through the typed config: [tool.rebar.reconciler].deletion_probe_limit
-    # (default 20), overridden by env REBAR_RECONCILER_DELETION_PROBE_LIMIT (deprecated
-    # alias RECONCILER_ABSENT_GET_BUDGET), then `rebar -c reconciler.deletion_probe_limit=…`.
+    # (default 20), overridden by env REBAR_RECONCILER_DELETION_PROBE_LIMIT, then
+    # `rebar -c reconciler.deletion_probe_limit=…`.
     # An unreadable config falls back to the default rather than failing the pass.
     from rebar.config import ConfigError, compose_config
 
