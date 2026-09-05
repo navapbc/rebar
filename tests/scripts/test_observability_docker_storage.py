@@ -124,20 +124,23 @@ def _environment(
         """,
     )
 
-    # `du` is the FILESYSTEM half: `du -sx --block-size=1 <path>` prints "<bytes>\\t<path>".
-    if du_total is None and du_overlay2 is None:
+    # `du` is the FILESYSTEM half. ONE walk now serves both readings (bug
+    # 9313-1fac-9f32-4b07): `du -x --block-size=1 --max-depth=1 <root>` prints a
+    # "<bytes>\\t<path>" row per immediate child and then the grand-total row for <root>
+    # itself, so the overlay2 subtotal comes out of the same traversal as the total. The stub
+    # models that shape — the previous one modelled `du -s`, which is exactly the second walk
+    # this change removes. Emitting a third child row keeps the parser honest about picking
+    # rows by PATH rather than by position.
+    if du_total is None:
         du_body = "exit 1"
     else:
-        overlay = "exit 1" if du_overlay2 is None else f'printf "{du_overlay2}\\t$1\\n"; exit 0'
-        total = "exit 1" if du_total is None else f'printf "{du_total}\\t$1\\n"; exit 0'
-        du_body = f"""
-        for a in "$@"; do
-          case "$a" in
-            *overlay2) {overlay} ;;
-          esac
-        done
-        {total}
-        """
+        root = '"${@: -1}"'
+        rows = []
+        if du_overlay2 is not None:
+            rows.append(f'printf "{du_overlay2}\\t%s/overlay2\\n" {root}')
+        rows.append(f'printf "1024\\t%s/containers\\n" {root}')
+        rows.append(f'printf "{du_total}\\t%s\\n" {root}')
+        du_body = "\n".join(rows) + "\nexit 0\n"
     _stub(bin_dir, "du", du_body)
 
     offsets = tmp_path / "offsets"

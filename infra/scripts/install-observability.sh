@@ -27,6 +27,21 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/rebar-observability.sh
+# A truncated run publishes its own death certificate (bug 9313-1fac-9f32-4b07). systemd runs
+# ExecStopPost after the main process has gone INCLUDING when TimeoutStartSec SIGTERM-ed it, and
+# exports $SERVICE_RESULT to it, so this is the one hook that observes the kill the probe cannot
+# observe itself. Without it "the probe was killed before this section" and "this section had
+# nothing to publish" are the same gap on the metric side, and with
+# treat_missing_data = "breaching" they page identically — which is how four of six alarms came
+# to be firing on healthy values on 2026-09-05.
+ExecStopPost=/usr/local/bin/rebar-observability.sh --report-exit
+# The stop path gets an explicit ceiling too (bug 9313-1fac-9f32-4b07). systemd's 90s default
+# applied, so stop was never unbounded — but 90s is three times the START budget's tail reserve
+# for a hook whose whole job is one `put-metric-data`, and "a default happens to bound it" is the
+# reasoning that produced 495s of ceilings inside a 240s timeout in the first place. The hook now
+# reads a cached region rather than IMDS and its guard runs before any prologue, so 15s is
+# generous; the point is that the number is stated and summed rather than inherited.
+TimeoutStopSec=15
 # A `Type=oneshot` with no TimeoutStartSec gets TimeoutStartUSec=INFINITY — systemd's
 # DefaultTimeoutStartSec does not apply to it. That is not merely "a slow run blocks the next
 # one": OnUnitActiveSec below is measured from the last COMPLETED activation, so a run that
