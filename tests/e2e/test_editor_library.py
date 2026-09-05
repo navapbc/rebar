@@ -5,9 +5,11 @@ mounts and lists prompts, the typed insertion produces a valid scripted-op step
 (`uses:` → ScriptTask) AND a prompt step (`prompt:` → ServiceTask), and creating a new
 prompt via the form POSTs `/prompt/save` and persists a `.rebar/prompts/<id>.md`.
 
-Self-skips when Node/Playwright/Chromium or the built bundle are unavailable (same
-contract as the other ``tests/e2e/test_editor_*`` tiers) — the Python unit suite in
-``tests/unit/workflow/test_prompt_authoring.py`` is the always-on verification floor.
+Does not run when Node/Playwright/Chromium or the built bundle are unavailable. That
+non-execution goes through ``_browser_tier.tier_unavailable`` like the rest of the tier,
+so it is a loud, licensed skip rather than a silent one (bug 337e-b558-17a2-49bd) — the
+Python unit suite in ``tests/unit/workflow/test_prompt_authoring.py`` is the always-on
+verification floor.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from _browser_tier import tier_unavailable
 
 pytestmark = pytest.mark.e2e
 
@@ -28,7 +31,7 @@ def library_editor_server(tmp_path):
 
     sample = Path(__file__).parent / "fixtures" / "roundtrip-demo.yaml"
     if not sample.is_file() or not _editor.assets_available():
-        pytest.skip("e2e(browser): fixture workflow or built editor bundle missing")
+        tier_unavailable("the fixture workflow or the built editor bundle is missing")
     repo = tmp_path
     (repo / ".rebar" / "prompts").mkdir(parents=True)
     ir = repo / "roundtrip-demo.yaml"

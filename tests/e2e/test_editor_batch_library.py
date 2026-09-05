@@ -14,9 +14,10 @@ batch step's criteria — instead of free-text typing:
       writes ``.rebar/prompts/<id>.md`` under the server's repo_root, and references the new
       id on the criterion.
 
-Self-skips when Node/Playwright/Chromium or the built bundle are unavailable (same contract
-as the other ``tests/e2e/test_editor_*`` tiers); the always-on verification floor is the
-Python unit suite for ``prompt_library`` + ``editor``.
+Does not run when Node/Playwright/Chromium or the built bundle are unavailable; that
+non-execution goes through ``_browser_tier.tier_unavailable`` like the rest of the tier, so
+it is a loud, licensed skip rather than a silent one (bug 337e-b558-17a2-49bd). The
+always-on verification floor is the Python unit suite for ``prompt_library`` + ``editor``.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from _browser_tier import tier_unavailable
 
 pytestmark = pytest.mark.e2e
 
@@ -38,7 +40,7 @@ def batch_library_editor_server(tmp_path):
 
     sample = Path(__file__).parent / "fixtures" / "batch-demo.yaml"
     if not sample.is_file() or not _editor.assets_available():
-        pytest.skip("e2e(browser): batch fixture workflow or built editor bundle missing")
+        tier_unavailable("the batch fixture workflow or the built editor bundle is missing")
     repo = tmp_path
     (repo / ".rebar" / "prompts").mkdir(parents=True)
     ir = repo / "batch-demo.yaml"

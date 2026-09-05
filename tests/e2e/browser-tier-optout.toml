@@ -1,0 +1,37 @@
+# The recorded, deliberate opt-out for the e2e BROWSER tier.
+#
+# This file is the tier's LICENCE NOT TO RUN. `tests/e2e/_browser_tier.py` reads it every
+# time a browser fixture cannot execute: with a complete record the non-execution is a LOUD,
+# recorded skip; without one it is a hard FAILURE. Deleting this file therefore turns every
+# browser test red, which is the point — a skip that nothing licences is exactly the state
+# bug 337e-b558-17a2-49bd was filed about (CI reported green while a whole class of
+# assertions never ran, and the summary could not tell that apart from coverage).
+#
+# It is a plain repository file on purpose: no environment variable, no CI detection, no
+# provider API. A checkout with no CI provider at all behaves identically to one with any.
+#
+# To CHANGE the disposition — e.g. to start provisioning a browser somewhere — delete this
+# file and make the tier actually run there. Do not widen the record to cover a tier that
+# merely happens to be broken.
+
+[browser_tier]
+
+# Where the tier is expected to execute. "local-only" means: on a developer machine that has
+# provisioned Playwright + Chromium, and nowhere else.
+scope = "local-only"
+
+# The ticket on which the decision was taken and argued.
+decided_by = "337e-b558-17a2-49bd"
+
+reason = """
+The browser tier drives the real editor bundle in headless Chromium and is the only faithful \
+oracle for the editor's runtime behaviour, but it is not run in automated builds. Provisioning \
+it there means a Playwright install plus a large Chromium download on the critical path of \
+every run, and change 2600 deliberately moved playwright to optionalDependencies to take that \
+cost off runs that contain no browser test. rebar's shipped surface is a library, a CLI and an \
+MCP server; the editor bundle's runtime behaviour is not load-bearing enough to buy that cost \
+on every build. The tier remains available and meaningful locally, which is where it was \
+already effectively running. This record does not claim the tier's assertions are covered \
+elsewhere — it states that they are NOT executed here, so that a green run is never read as \
+though they were.\
+"""

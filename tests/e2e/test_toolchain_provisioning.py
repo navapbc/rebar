@@ -443,7 +443,10 @@ def _replica(pytester: pytest.Pytester, npm_body: str, **test_files: str) -> tup
     shutil.copy(_E2E_DIR.parent / "_child_diag.py", root / "_child_diag.py")
     e2e = root / "e2e"
     e2e.mkdir()
-    for name in ("conftest.py", "_toolchain.py"):
+    # The browser-tier guard and its recorded opt-out travel with the conftest: without the
+    # record a browser fixture's non-execution is a FAILURE, not a skip (bug
+    # 337e-b558-17a2-49bd), so a replica missing it would test a different contract.
+    for name in ("conftest.py", "_toolchain.py", "_browser_tier.py", "browser-tier-optout.toml"):
         shutil.copy(_E2E_DIR / name, e2e / name)
     js_dir = e2e / "js"
     js_dir.mkdir()
@@ -552,7 +555,9 @@ def test_a_collection_failure_is_named_by_both_fixtures_and_never_retried(
 
     result.assert_outcomes(skipped=2)
     result.stdout.fnmatch_lines(["*e2e: e2e toolchain: `npm ci` failed*"])
-    result.stdout.fnmatch_lines(["*e2e(browser): e2e toolchain: `npm ci` failed*"])
+    # The browser half now reports through the recorded-opt-out guard, so its line carries the
+    # loud banner as well as the provisioning cause.
+    result.stdout.fnmatch_lines(["*BROWSER TIER DELIBERATELY NOT RUN*`npm ci` failed*"])
     installs = [call for call in _npm_calls(log) if call.startswith("ci")]
     assert len(installs) == 1, f"a failed provisioning was retried per test: {installs}"
 
