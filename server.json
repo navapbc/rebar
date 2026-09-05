@@ -40,7 +40,7 @@
         },
         {
           "name": "REBAR_MCP_ALLOW_JIRA_SYNC",
-          "description": "Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only.",
+          "description": "Set to 1 to allow bridge_sync to perform live (mutating) Jira sync; otherwise bridge_sync uses dry-run behavior.",
           "isRequired": false
         },
         {
