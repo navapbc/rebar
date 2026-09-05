@@ -485,11 +485,39 @@ def cmd_advisory_alert(
         return 0
 
     tag = environ.get("ADVISORY_TAG", "dependency-advisory-alert")
-    blocking = environ.get("BLOCKING", "false") == "true"
+    verdict = environ.get("BLOCKING", "")
     ids = environ.get("ADVISORY_IDS", "")
     summary = environ.get("ADVISORY_SUMMARY", "")
     run_url = environ.get("RUN_URL", "")
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_epoch))
+
+    # BLOCKING is a TRI-STATE, not a boolean (bug 7147-6ea7-90b4-44b1). It arrives as
+    # `${{ steps.audit.outputs.blocking }}`, and the audit step is `continue-on-error`, so an
+    # audit that CRASHES sets no output and BLOCKING arrives "". Read as a plain
+    # `== "true"`, that empty value was False and fell into the close arm below — which
+    # FORCE-CLOSED the open p1 vulnerability ticket asserting "advisories cleared", with the
+    # run still green. "The audit could not run" and "there are no vulnerabilities" were
+    # literally the same input, down to a byte-identical `rebar transition` argv.
+    #
+    # So only an EXPLICIT verdict may drive either arm; anything else fails closed. That is
+    # the same rule the hollow-ticket guard below already applies to FILING, and the same
+    # rule `normalize_ci_conclusion.normalize` states outright ("Empty or any unrecognized
+    # value: fail closed"). `canary_bridge.cmd_heartbeat_alert` /
+    # `cmd_binding_drift_alert` read their own flags as tri-states for the same reason.
+    #
+    # Returning 1 (rather than a silent no-op) is also what keeps a crashed audit VISIBLE:
+    # the audit step keeps `continue-on-error` so a blocking verdict still reaches
+    # escalation, while this step does not — so a missing verdict reddens the run instead
+    # of concluding success.
+    if verdict not in ("true", "false"):
+        print(
+            "::error::advisory-alert invoked with no audit verdict (BLOCKING="
+            f"{verdict!r}) — the audit step produced no output, so it did not complete. "
+            "Refusing to act: a missing verdict is NOT an all-clear and must never close "
+            "an advisory ticket. Fix the gate wiring."
+        )
+        return 1
+    blocking = verdict == "true"
 
     if blocking and not ids.strip():
         print(
