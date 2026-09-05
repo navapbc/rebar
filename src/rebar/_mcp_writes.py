@@ -31,6 +31,7 @@ from rebar._mcp_models import (
     WriteAckOut,
     tool_annotation_presets,
 )
+from rebar._opcert_binding import spawn_context_daemon
 
 
 def _cross_session(ticket_id: str) -> str | None:
@@ -540,7 +541,6 @@ def register_write_tools(mcp, ctx) -> None:
         mutable checkout — and is DISABLED unless REBAR_MCP_ALLOW_LLM=1 (it makes
         live, billable LLM calls), exactly like the other agentic tools. A
         deterministic-only workflow needs neither."""
-        import threading
 
         from rebar.llm.workflow import executor as _wf_exec
         from rebar.llm.workflow import runs as _wf_runs
@@ -600,5 +600,7 @@ def register_write_tools(mcp, ctx) -> None:
                         exc_info=True,
                     )
 
-        threading.Thread(target=_bg, daemon=True).start()
+        # Context-propagating spawn: a bare threading.Thread would drop the op-cert signer
+        # binding and sign the bound principal under an unbound genesis key (bug ff4a).
+        spawn_context_daemon(_bg, name=f"rebar-workflow-{run_id}")
         return {"run_id": run_id, "ticket_id": ticket_id, "status": "running"}
