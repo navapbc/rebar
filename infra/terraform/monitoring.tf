@@ -56,7 +56,7 @@ resource "aws_sns_topic_subscription" "alerts_email" {
 # METRIC SOURCE: the host observability probe (infra/scripts/observability.sh)
 # publishes Rebar/Gate:GerritReachable = 1 when the /config/server/version probe
 # returned 200, else 0 — DIMENSIONLESS, to match this alarm. Fires when Gerrit is
-# unreachable (GerritReachable < 1, i.e. 0) for 2 consecutive 5-minute periods.
+# unreachable (GerritReachable < 1, i.e. 0) for 6 consecutive 5-minute periods.
 #
 # treat_missing_data = "breaching" is DELIBERATE: if the host is down or the probe
 # timer has stopped, no datapoint arrives — we want that to ALARM (the gate is not
@@ -69,7 +69,7 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_gate_down" {
     Gerrit (the review gate) is unreachable. The host observability probe publishes
     Rebar/Gate:GerritReachable = 1 when https://${var.dns_name}/config/server/version
     returns 200, else 0. This alarm fires when it is < 1 (i.e. 0, or MISSING — the
-    host/probe stopped) for 2 consecutive 5-minute periods. Pairs with the EC2
+    host/probe stopped) for 6 consecutive 5-minute periods. Pairs with the EC2
     status-check alarms (host-down backstop) for full coverage.
   EOT
 
@@ -77,12 +77,47 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_gate_down" {
   metric_name = "GerritReachable"
   statistic   = "Minimum"
 
+  # PROFILE A (dead-man), 6-of-6 over 30 minutes — infra/runbooks/alarm-window-tuning.md.
+  #
+  # This was 2 consecutive periods (evaluation_periods = 2, datapoints_to_alarm defaulted to 2).
+  # With breaching missing data that meant TWO EMPTY BUCKETS paged on their own, and ticket
+  # a9d1-c7f3-cfd9-44ff measured 10.0-minute publisher inter-arrivals TWICE inside two hours —
+  # enough to empty two adjacent 5-minute buckets. The publisher's contractual interval is
+  # 5-9 minutes, not 5 (install-observability.sh: OnUnitActiveSec=5min is measured from the last
+  # COMPLETED run, and TimeoutStartSec=240 bounds the run), so this was one straggler from a
+  # false page.
+  #
+  # 6-of-6 requires 30 minutes with NO published 1, and datapoints_to_alarm ==
+  # evaluation_periods means any single healthy datapoint clears it.
+  #
+  # THIS WAS 3-of-3 (15 min) UNTIL A FALSE FIRING AT 20:47Z ON 2026-09-05 FALSIFIED THE PREMISE
+  # BEHIND IT. That sizing assumed §1 held the publisher's 5-9 minute cadence contract, which
+  # the 8-hour sweep supported: 93% bucket presence, 10.0-minute worst gap. Then this alarm
+  # entered ALARM on "no datapoints were received for 2 periods and 2 missing datapoints were
+  # treated as [Breaching]" while Gerrit answered HTTPS 200 in 0.266s — and the head-of-script
+  # gap was re-measured at 25.0 MINUTES, which defeats any 15-minute window. The head of the
+  # script is no longer exempt from the truncation this ticket documents, so it no longer gets
+  # a tighter window than the rest of Profile A.
+  #
+  # COST, stated plainly: detection of a genuinely unreachable Gerrit goes from 10 to 30
+  # minutes. That is a real regression and it is accepted for two reasons. First, the 10-minute
+  # detector demonstrably pages on healthy operation, so it was not buying 10-minute detection,
+  # it was buying noise. Second, host death is still caught in ~2 minutes by the EC2
+  # status-check alarms below, which are AWS-published and do not depend on this publisher at
+  # all; what widens to 30 minutes is only the "host up, Gerrit not serving" case. Once
+  # ignitable-fuchsia-kawala (9313-1fac-9f32-4b07) restores the publisher's cadence, this
+  # should go back to 3-of-3 — see the revert conditions in
+  # infra/runbooks/alarm-window-tuning.md.
   period              = 300
-  evaluation_periods  = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 1
   comparison_operator = "LessThanThreshold"
 
   # Host-down / probe-stopped → ALARM (not INSUFFICIENT_DATA). See block comment.
+  # GerritReachable is published in §1, the FIRST section of observability.sh, which makes it
+  # the head-of-script liveness sentinel: it survives a run truncated by TimeoutStartSec, so it
+  # reports "the timer stopped", while §5's mirror_out_of_sync reports "the run was cut short".
   treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
@@ -227,14 +262,26 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_high" {
     mount      = "/var/gerrit"
   }
 
-  # 2 breaching datapoints inside a 3-period window (the root_disk_pressure shape in
-  # monitoring_autodeploy.tf). Widened from a 1-period latch by ticket bff5-9163-cddd-4158:
-  # missing data is breaching here, and a single absent 5-minute probe interval is ordinary
-  # timer jitter (~22 of 24 periods present is the observed norm), so a 1-datapoint latch
-  # would page on it.
+  # PROFILE A (dead-man), 6-of-6 over 30 minutes — infra/runbooks/alarm-window-tuning.md.
+  #
+  # This alarm keeps "breaching" while the other level gauges move off it, because silence
+  # here carries information nothing else carries: §2 publishes NOTHING when it cannot read a
+  # percentage for /var/gerrit, i.e. when the data volume is gone or unmountable (see the
+  # treat_missing_data comment below). That is a real condition and it must keep paging.
+  #
+  # What changes is the evidence rule. The 2-of-3 shape counted TWO EMPTY BUCKETS as sufficient
+  # on their own, and ticket a9d1-c7f3-cfd9-44ff measured empty buckets to be guaranteed rather
+  # than unlucky: the publisher's contractual inter-arrival is 5-9 minutes against 5-minute
+  # buckets, and 6 of 47 buckets over four hours were empty (87% present, not the ~92% the
+  # comment this replaces asserted). datapoints_to_alarm == evaluation_periods means a page now
+  # needs 30 minutes with no readable percentage at all, and ANY single reading — over or under
+  # 85 — decides the alarm on real evidence instead of on absence.
+  #
+  # Detection is unchanged in kind and slower in time: a volume genuinely at or above 85% reads
+  # so on every run, so all 6 periods breach and it pages within 30 minutes.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 85
   comparison_operator = "GreaterThanOrEqualToThreshold"
 
@@ -246,7 +293,8 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_high" {
   # there is no honest placeholder: publishing 0 would assert an empty volume and 100 would
   # fabricate a full one. A df that cannot report on the Gerrit data volume means that volume
   # is gone or unmountable, which is a worse fault than the one this alarm names, so silence
-  # is allowed to page. The 3-period/2-datapoint window above absorbs a one-off read failure.
+  # is allowed to page. The 6-of-6 window above absorbs an ordinary scheduling gap and a one-off
+  # read failure alike, because either leaves the other five periods free to clear the alarm.
   treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
@@ -289,11 +337,15 @@ resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_debris" {
     mount      = "/var/gerrit"
   }
 
-  # The 3-period/2-datapoint window of Alarm 4, for the same reason: a single absent
-  # 5-minute probe interval is ordinary timer jitter, and missing data breaches here.
+  # PROFILE A (dead-man), 6-of-6 over 30 minutes — the shape of Alarm 4 above and for the same
+  # reason: §2c publishes nothing when /var/gerrit is not a directory, so silence means an
+  # unmountable data volume and must keep paging, while an ordinary scheduling gap must not.
+  # datapoints_to_alarm == evaluation_periods delivers both — see
+  # infra/runbooks/alarm-window-tuning.md and ticket a9d1-c7f3-cfd9-44ff. Debris above 1 GiB is
+  # a persistent quantity, so it reads breaching on every run and pages within 30 minutes.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 1073741824
   comparison_operator = "GreaterThanOrEqualToThreshold"
 

@@ -510,8 +510,10 @@ or subprocess can **hang** or fail mid-review and each `LLM-Review` vote fail-cl
   existed but no production process ran it and the store grew unboundedly (694M observed).
   Confirm it started: `journalctl CONTAINER_NAME=compose-review-bot-1 --no-pager -o cat | grep -i 'snapshot' | tail`.
 - **Root-disk-pressure alarm.** `rebar-root-disk-pressure` (above) now pages on sustained
-  root-fs pressure (2-of-3 5-min periods > 85%) so exhaustion is caught before it silently
-  fail-closes the gate.
+  root-fs pressure (6-of-6 5-min periods > 85%, i.e. a 30-minute window) so exhaustion is caught
+  before it silently fail-closes the gate. It was 2-of-3 until ticket `a9d1-c7f3-cfd9-44ff`,
+  under which two EMPTY periods alarmed on their own — see
+  [alarm-window-tuning.md](alarm-window-tuning.md).
 - **Hung-review timeout.** The single background worker wraps each review in a bounded
   wall-clock timeout (`REVIEW_TIMEOUT_SECONDS`, default 1200s / 20 min — see
   `src/rebar/review_bot/app.py`). A review that hangs indefinitely (a clone/subprocess/LLM
@@ -650,7 +652,12 @@ result — it produces no verdict, is retryable, and must never become an `LLM-R
 **Alarms.** Two, because "how full" cannot answer "is it even there":
 
 - `rebar-gate-scratch-disk-high` — `rebar/host:disk_used_percent` with
-  `mount=/var/lib/rebar/gate-scratch`, > 85%, 300/3/2, `treat_missing_data = "breaching"`.
+  `mount=/var/lib/rebar/gate-scratch`, > 85%, 300/6/6, `treat_missing_data = "breaching"`.
+  `datapoints_to_alarm` equals `evaluation_periods` so a publish gap cannot page and a single
+  healthy reading always clears it ([alarm-window-tuning.md](alarm-window-tuning.md)). Note that
+  §2e publishes this metric only while the volume is mounted, so when
+  `rebar-gate-scratch-unmounted` below is firing this alarm has NO data and is red for that
+  reason, not for disk pressure.
 - `rebar-gate-scratch-unmounted` — `rebar/host:gate_scratch_mounted`, a 1/0 heartbeat
   published on every probe tick; alarms below 1. **Its signature is "every gate refuses",
   not disk pressure**, so if reviews stop voting and the disk looks fine, check this alarm

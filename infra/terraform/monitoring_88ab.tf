@@ -48,23 +48,39 @@ resource "aws_cloudwatch_metric_alarm" "review_bot_merge_change_errors" {
   metric_name = "review_bot_merge_change_errors"
   statistic   = "Sum"
 
-  # 5-minute periods, 2 breaching datapoints inside a 3-period window. The window is
-  # wider than one period because treat_missing_data is "breaching" below: a single
-  # jittered probe interval is a breaching datapoint (~22 of 24 periods present is the
-  # observed norm), so a 1-period latch would page on ordinary timer jitter.
+  # PROFILE B (error counter), 2-of-4 over 20 minutes — infra/runbooks/alarm-window-tuning.md.
+  #
+  # 2-of-3 was the shape ticket a9d1-c7f3-cfd9-44ff was opened for: with treat_missing_data =
+  # "breaching" (below) an empty period IS a breaching datapoint, so two ordinary scheduling
+  # gaps satisfied datapoints_to_alarm on their own, with the counter reading 0 throughout.
+  # Observed 2026-09-05: four counters in ALARM at once, each StateReason reading "1 datapoint was
+  # received for 3 periods and 2 missing datapoints were treated as [Breaching]".
+  #
+  # datapoints_to_alarm is UNCHANGED at 2, deliberately. This alarm must keep catching an
+  # INTERMITTENT error stream — one that is not phase-aligned with CloudWatch period boundaries
+  # and lands markers in one period and none in the next — which an N-of-N streak would reset on.
+  # So the M < N sensitivity stays and the missing-data rule changes instead (below). Only
+  # evaluation_periods widens, to 4, so that 2 REAL datapoints are reachable inside the window
+  # at the publisher's contractual 5-9 minute inter-arrival (install-observability.sh:
+  # OnUnitActiveSec=5min measured from the last COMPLETED run, plus TimeoutStartSec=240). An
+  # alarm that cannot fire is as useless as one that always fires.
   period              = 300
-  evaluation_periods  = 3
+  evaluation_periods  = 4
   datapoints_to_alarm = 2
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
-  # publishes review_bot_merge_change_errors' per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
-  # period publishes 0 — the metric is continuously present. Missing data therefore means the
-  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
-  # The rationale this replaces — "no merge-change errors in a period is the healthy steady
-  # state" — described a probe that stays silent when healthy. This one publishes 0.
-  treat_missing_data = "breaching"
+  # PROFILE B, ticket a9d1-c7f3-cfd9-44ff: absence of a delta report is not evidence of errors.
+  # rebar:allow-missing-data-notbreaching: liveness is carried by the dead-man alarms, which keep
+  # treat_missing_data = "breaching" with datapoints_to_alarm == evaluation_periods and span
+  # observability.sh from §1 (GerritReachable) and §1b (mcp_healthy) through §2e/§2g/§2h/§2i (the
+  # mount / journal-cap / var-tmp-cleanup / container-reaper heartbeats) to §5 (mirror_out_of_sync).
+  # A stopped probe, and a run truncated by the unit's 240s TimeoutStartSec, therefore still page —
+  # ONCE, with an accurate message, instead of once per counter with a false one. bff5's premise
+  # (this counter publishes 0 unconditionally, so silence means a dead publisher) is still true;
+  # what bff5 got wrong was making EVERY counter say so, which is what turned one gap into a
+  # multi-alarm page. This is the conflation of liveness with condition the ticket names.
+  treat_missing_data = "notBreaching"
 
   # WIRE the shared alerts topic so the alarm is not silent (unlike S4b's metric-only
   # alarm). Reuses aws_sns_topic.alerts from monitoring.tf (see WS7 / 1fa8 alarms).

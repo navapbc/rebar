@@ -1485,8 +1485,9 @@ fi
 # `main` silently drifted, and the alarm's own treat_missing_data read that silence as health.
 # Publishing 0 would not fix it either — 0 means "in sync", which is precisely the claim a
 # failed comparison cannot make. So an unmakeable comparison reports the unsafe value, and the
-# alarm's 2-of-3 five-minute window (monitoring_ws7.tf) absorbs an isolated fetch blip: it takes
-# two breaching datapoints inside 15 minutes to page, which a one-off curl timeout cannot reach.
+# alarm's 8-of-8 five-minute window (monitoring_ws7.tf) absorbs an isolated fetch blip: it takes
+# EVERY datapoint in 40 minutes to be breaching to page, so a one-off curl timeout — or an
+# ordinary publish gap — cannot reach it (ticket a9d1-c7f3-cfd9-44ff rewindowed that alarm).
 GERRIT_BASE_URL="${GERRIT_BASE_URL:-https://rebar.solutions.navateam.com}"
 GITHUB_REPO_URL="${GITHUB_REPO_URL:-https://github.com/navapbc/rebar}"
 gerrit_sha=$(curl -fsS --max-time 10 "${GERRIT_BASE_URL}/projects/rebar/branches/main" 2>/dev/null \
