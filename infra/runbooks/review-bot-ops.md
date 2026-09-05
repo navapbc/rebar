@@ -689,6 +689,19 @@ If the volume itself is gone, re-`terraform apply` (`aws_ebs_volume.gate_scratch
 `aws_volume_attachment.gate_scratch`) and re-run `user_data.sh`'s mount steps, which write
 both markers; nothing needs restoring from a backup.
 
+**Running those mount steps by hand needs the real volume id, in full.** `resolve_ebs_device`
+matches the EBS volume id against each NVMe controller's serial, so a blank or truncated id
+used to make it GUESS — an empty id matched every device and returned whichever `/dev/nvme*n1`
+sorted first, which then became a `mkfs.xfs` target beside the Gerrit data volume
+(bug `d614-448f-a538-4cec`). It now refuses anything that is not `vol-` plus exactly 8 or 17
+hex digits, and `mount_ebs_volume` refuses to write an fstab entry when the resolved device has
+no filesystem UUID. Both refusals are non-zero and loud, so if you see one, fetch the id rather
+than working around it:
+
+```bash
+VOL=$(terraform -chdir=infra/terraform output -raw gate_scratch_volume_id)
+```
+
 **Recovery — the volume is full:**
 
 ```bash
