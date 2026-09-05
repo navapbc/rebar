@@ -910,7 +910,7 @@ fi
 
 # ── nginx edge (rebar.conf.template): DETECT-ONLY (v1 boundary) ───────────────
 if changed "$EDGE_PATHS"; then
-  err nginx_edge_manual "nginx edge changed in $TARGET — infra/nginx/rebar.conf.template needs a MANUAL operator render + nginx reload (auto-apply is a v2 follow-up: epic 6d60-2d0c-6ff7-444b)"
+  err nginx_edge_manual "nginx edge changed in $TARGET — infra/nginx/rebar.conf.template needs a MANUAL operator render + nginx reload — see infra/runbooks/nginx-edge-render.md (auto-apply is a v2 follow-up: epic 6d60-2d0c-6ff7-444b)"
   log "nginx edge change detected + signalled (not auto-applied in v1)"
 fi
 
