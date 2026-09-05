@@ -71,6 +71,61 @@ _ACTIONS_EXPR = re.compile(r"\$\{\{[^}]*\}\}")
 #: The escape hatch. The reason is MANDATORY: a bare marker must not silence the check.
 _MARKER = re.compile(r"#\s*predates-gate-ok:[ \t]*(.*)")
 
+_WORKFLOW_GUARD_ROOTS = (
+    ".github/workflows/gerrit-verify.yaml",
+    ".github/workflows/test.yml",
+)
+
+
+def _local_workflow_uses(path: str, *, root: Path = _ROOT) -> list[str]:
+    """Local reusable workflows a workflow file calls, normalized to repo-relative paths."""
+    document = yaml.safe_load((root / path).read_text(encoding="utf-8")) or {}
+    found: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "uses" and isinstance(value, str) and value.startswith("./.github/"):
+                    normalized = value.removeprefix("./")
+                    if normalized.startswith(".github/actions/") and not normalized.endswith(
+                        (".yml", ".yaml")
+                    ):
+                        normalized = f"{normalized}/action.yml"
+                    found.append(normalized)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(document)
+    return found
+
+
+def _workflow_closure(seeds: tuple[str, ...], *, root: Path = _ROOT) -> set[str]:
+    """The local reusable-workflow transitive closure rooted at ``seeds``."""
+    seen: set[str] = set()
+    stack = list(seeds)
+    while stack:
+        path = stack.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        stack.extend(_local_workflow_uses(path, root=root))
+    return seen
+
+
+def _derived_guarded_workflows(*, root: Path = _ROOT) -> set[str]:
+    """The guarded workflow surface derived from the two lane roots."""
+    return _workflow_closure(_WORKFLOW_GUARD_ROOTS, root=root) | {
+        ".github/actions/docs-gates/action.yml",
+    }
+
+
+def _ci_reachable_local_workflow_closure(*, root: Path = _ROOT) -> set[str]:
+    """Compatibility name for the CI-lane local ``uses:`` closure asserted by this ticket."""
+    return _derived_guarded_workflows(root=root)
+
 
 def _expand_assignments(run: str) -> str:
     """``run`` with simple ``name=path`` shell assignments substituted into their uses."""
@@ -124,6 +179,13 @@ def _run_steps(path: str) -> list[tuple[str, str, str]]:
     return steps
 
 
+def test_guarded_workflow_floor_is_derived_from_ci_lane_uses_closure() -> None:
+    """The guarded workflow floor is anchored to the CI lane local-uses closure."""
+    derived = _ci_reachable_local_workflow_closure()
+    assert set(GUARDED_WORKFLOWS) <= derived
+    assert ".github/workflows/_artifact-probe.yml" in derived
+
+
 #: The git listing that answers "which gate files does this tree have?". ``--cached
 #: --others --exclude-standard`` is load-bearing (bug ``1035-bed7-c855-4732``): a
 #: tracked-only listing cannot see a gate file that has been WRITTEN but not yet
@@ -165,6 +227,44 @@ def test_completeness_every_gate_step_is_guarded_or_marked() -> None:
         "these CI steps run a repo-local gate file that an older base may not have.\n"
         "Guard it with `[ -f <path> ]` + the canonical skip message, or record why no guard\n"
         "is needed with `# predates-gate-ok: <reason>`:\n  " + "\n  ".join(violations)
+    )
+
+
+def test_guarded_workflow_closure_follows_transitive_local_uses(tmp_path: Path) -> None:
+    """The closure helper follows nested local reusable-workflow calls, not just roots."""
+    repo = tmp_path / "repo"
+    workflows = repo / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "root.yml").write_text(
+        "jobs:\n  root:\n    uses: ./.github/workflows/mid.yml\n",
+        encoding="utf-8",
+    )
+    (workflows / "mid.yml").write_text(
+        "jobs:\n  mid:\n    uses: ./.github/workflows/leaf.yml\n",
+        encoding="utf-8",
+    )
+    (workflows / "leaf.yml").write_text(
+        "jobs:\n  leaf:\n    runs-on: ubuntu-latest\n    steps: []\n",
+        encoding="utf-8",
+    )
+    assert _workflow_closure((".github/workflows/root.yml",), root=repo) == {
+        ".github/workflows/root.yml",
+        ".github/workflows/mid.yml",
+        ".github/workflows/leaf.yml",
+    }
+
+
+def test_derived_guarded_workflows_cover_the_manual_floor() -> None:
+    """The hand-curated floor stays a subset of the derived workflow closure."""
+    derived = _derived_guarded_workflows()
+    assert set(GUARDED_WORKFLOWS).issubset(derived), (
+        "the manually curated guarded-workflow floor is no longer a subset of the local "
+        f"`uses:` closure rooted at the two CI lanes:\nmissing from closure: "
+        f"{sorted(set(GUARDED_WORKFLOWS) - derived)}\nclosure: {sorted(derived)}"
+    )
+    assert ".github/workflows/_artifact-probe.yml" in derived, (
+        "the derived closure no longer includes the artifact probe reusable, so the lane fan-out "
+        "from the Verified/branch roots is stale"
     )
 
 
