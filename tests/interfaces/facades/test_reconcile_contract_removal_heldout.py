@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -107,3 +108,35 @@ def test_explicit_bridge_mcp_result_contracts_survive_reconcile_removal(monkeypa
     for tool_name, (arguments, expected_subset) in cases.items():
         payload = _unwrap(asyncio.run(server.call_tool(tool_name, arguments)))
         assert expected_subset.items() <= payload.items()
+
+
+def test_mcp_jira_sync_env_help_names_bridge_sync_not_removed_reconcile() -> None:
+    from rebar.mcp_server import MCP_ENV_VARS
+
+    help_text = next(
+        v["description"] for v in MCP_ENV_VARS if v["name"] == "REBAR_MCP_ALLOW_JIRA_SYNC"
+    )
+
+    assert "bridge_sync" in help_text
+    assert "reconcile" not in help_text.lower()
+
+
+def test_mcp_server_docstring_no_registered_reconcile_tool_prose() -> None:
+    import rebar.mcp_server as mcp_server
+
+    doc = mcp_server.__doc__ or ""
+
+    assert "``reconcile``" not in doc
+    assert "registered MCP reconcile" not in doc.lower()
+
+
+def test_mcp_server_comments_no_legacy_reconcile_tool_prose() -> None:
+    source = Path("src/rebar/mcp_server.py").read_text(encoding="utf-8")
+
+    stale_needles = [
+        "The reconcile tool gates modes",
+        "reconcile is dry-run only",
+        "``reconcile`` defaults",
+    ]
+    for needle in stale_needles:
+        assert needle not in source

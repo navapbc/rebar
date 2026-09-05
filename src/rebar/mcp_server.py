@@ -2,11 +2,10 @@
 
 Exposes the ticket system as MCP tools, built on the rebar Python library.
 Reads (``show``/``list``) run in-process via rebar._reads (no subprocess);
-``reconcile`` defaults to a non-mutating dry-run.
+``bridge_sync`` defaults to non-mutating dry-run behavior.
 
 Safety:
-  * ``reconcile`` defaults to ``dry-run``; ``live`` additionally requires
-    REBAR_MCP_ALLOW_JIRA_SYNC=1.
+  * ``bridge_sync`` requires REBAR_MCP_ALLOW_JIRA_SYNC=1 for live Jira sync.
   * Write tools (create/transition/edit/link/unlink/tag/untag/archive/comment)
     are gated by REBAR_MCP_READONLY: set it to 1 to expose a read-only server.
 
@@ -149,8 +148,8 @@ MCP_ENV_VARS: tuple[dict, ...] = (
     {
         "name": "REBAR_MCP_ALLOW_JIRA_SYNC",
         "description": (
-            "Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise "
-            "reconcile is dry-run only."
+            "Set to 1 to allow bridge_sync to perform live (mutating) Jira sync; "
+            "otherwise bridge_sync uses dry-run behavior."
         ),
         "deprecated": False,
     },
@@ -406,7 +405,7 @@ MCP_ENV_VARS: tuple[dict, ...] = (
 )
 
 
-# The reconcile tool gates modes by the engine's canonical MODE_CAPS table, which
+# bridge_sync gates modes by the engine's canonical MODE_CAPS table, which
 # lives in the bundled engine at rebar_reconciler/mode.py. We load it ONCE here by
 # FILE PATH (not `from rebar_reconciler.mode import ...`) and bind the names as
 # module globals. Loading by path is deliberate: the dotted import is unreliable
