@@ -322,12 +322,17 @@ def test_ac3_verifier_routing_gets_distinct_fresh_terraform_session(
     pytest.importorskip("hcl2")
     from rebar.grounding import terraform_tools as tft
 
-    opened: list[int] = []
+    # Hold STRONG references to each opened session. Recording ``id(session)`` instead is
+    # unsound: the IaC pass's session is dropped before the verify pass opens its own, and
+    # CPython recycles the address of a freed object, so two genuinely distinct sessions can
+    # report the same ``id()``. That made this test flaky (~12% locally) and turned the
+    # gating py3.13 cell red. Keeping the objects alive makes identity the real thing.
+    opened: list[Any] = []
     real_open = tft.open_session
 
     def recording_open_session(*args, **kwargs):
         session = real_open(*args, **kwargs)
-        opened.append(id(session))
+        opened.append(session)
         return session
 
     monkeypatch.setattr(tft, "open_session", recording_open_session)
@@ -345,7 +350,7 @@ def test_ac3_verifier_routing_gets_distinct_fresh_terraform_session(
     prompts_with_queries = [q["prompt"] for q in runner.query_results]
     assert prompts_with_queries.count("code-review-iac") == 1
     assert prompts_with_queries.count("code-review-verify") == 1
-    assert len(opened) >= 2 and len(set(opened[:2])) == 2
+    assert len(opened) >= 2 and opened[0] is not opened[1]
     assert (
         runner.query_results[0]["result"]["receipt"]
         is not runner.query_results[1]["result"]["receipt"]
