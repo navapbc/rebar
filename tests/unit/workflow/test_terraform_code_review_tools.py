@@ -22,6 +22,7 @@ from rebar.llm.workflow import gate_dispatch
 pytestmark = pytest.mark.unit
 
 _TF_TOOLS = {"terraform_lookup_declaration", "terraform_resolve_reference"}
+_TF_TOOLS_ALL = _TF_TOOLS | {"terraform_probe_source"}
 
 
 def _ctx(*, prompt: str, inputs: dict[str, Any] | None = None) -> SimpleNamespace:
@@ -249,6 +250,22 @@ def test_happy_iac_finder_call_gets_tools_finalizer_and_usage(tmp_path: Path) ->
 
 
 # ─── HELD OUT (withheld from implementer) ───
+
+
+def test_code_review_provider_advertises_probe_source_as_third_tool(tmp_path: Path) -> None:
+    # REB-640 1c52: code-review delegates to terraform_seam.build_tool_provider, so minting
+    # probe_source at the seam automatically surfaces it in the code-review IaC provider too.
+    pytest.importorskip("hcl2")
+    from rebar.llm.code_review.terraform_grounding import build_code_review_tf_provider
+
+    _write(tmp_path, "infra/main.tf", 'resource "aws_instance" "web" {\n  ami = "ami-1"\n}\n')
+    provider = build_code_review_tf_provider(
+        repo_root=str(tmp_path), changed_files=["infra/main.tf"], usage_sink={}
+    )
+    provided = provider(_ctx(prompt="code-review-iac"))
+    assert provided is not None
+    tools, _finalize = provided
+    assert _TF_TOOLS_ALL <= _tool_names(tools)
 
 
 def test_ac1_round_a_iac_overlay_routing_gets_tools_and_base_disjoint(

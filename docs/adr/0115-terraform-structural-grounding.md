@@ -1,7 +1,8 @@
 # ADR 0115 — Terraform structural grounding is in-process, refutation-only hcl2 parsing
 
 **Status:** Accepted (epic `a374-849c-c8f2-4234`, task `forcible-diminished-lamb` /
-`08ab-60d2-3082-4b47`)
+`08ab-60d2-3082-4b47`; §5 amended by task `depraved-classless-rooster` /
+`1c52-5e73-4d61-4124` to record V1 registry metadata probing)
 **Date:** 2026-09-03
 
 ## Context
@@ -68,14 +69,38 @@ The following are OUT of scope for V1 and abstain with a closed reason rather th
 Receipts and evidence carry source paths, spans, structural kinds, and hashes — NEVER credentials
 or raw literal values. Every attribute literal and `default` value is redacted.
 
-### 5. Approved-but-deferred direction: ambient remote-fetch
+### 5. Registry metadata probing (V1) vs remote content fetch (still deferred)
 
-Following a literal in-repo `module` `source` is in scope; fetching a **remote** module
-(`registry.terraform.io`, a git `source`, an S3 bucket) is NOT. Ambient remote-fetch — resolving
-the closure across module registries — is an approved future direction but is deferred: it
-introduces a network trust boundary and a credential surface this slice's "pure in-process, no
-external process" decision (§1) is chosen to avoid. When taken up it must be an explicit, gated,
-non-ambient step with its own ADR.
+Following a literal in-repo `module` `source` is in scope. Task `depraved-classless-rooster` /
+`1c52-5e73-4d61-4124` extends V1 with a **metadata-only** `probe_source` operation that refutes
+an asserted-absent `source` positive-only: a repo-contained local module refutes at T1, and
+**positively-reachable registry metadata** refutes at T0. It calls only the Terraform Registry
+**service-discovery and version/metadata** endpoints over HTTPS — NEVER a module
+**download/archive** URL — and treats every access failure (401/403/404, 429, DNS/TLS/proxy,
+5xx, cross-host redirect, timeout, malformed/oversized body) as a closed abstention, never as
+absence.
+
+**Downloading or expanding remote module content** (a git/HTTP/S3/GCS checkout, a registry
+archive, Terraform Cloud API beyond registry discovery, credential helpers, provider/cloud
+credentials) remains OUT of scope and approved-but-deferred to its own gated step.
+
+**Credentialed-HTTPS trust boundary.** The metadata probe is a deliberate, bounded exception to
+§1's "no network fetch" for the parse path, justified the same way ADR 0063 justifies the
+web-search capability: it is optional, off by default (the public default registry needs no
+credential), positive-only, and credential-redacting. It reuses **ambient** Terraform
+credentials read-only in Terraform's own precedence (`TF_TOKEN_<host>` →
+`TF_CLI_CONFIG_FILE`/default CLI config → `credentials.tfrc.json`) for the **exact** registry
+hostname only; it never prompts, writes a credential file, runs a `credentials_helper`, or
+borrows a provider/cloud credential. The target is validated **before** any token attaches:
+HTTPS-only; a no-redirect opener (a cross-host redirect is a `network_error` before the
+credential is sent); embedded URL credentials, literal IPs, and non-HTTPS rejected; and a
+private-address host permitted only when it exactly matches a credentialed hostname. Responses
+are bounded (1 MiB, 60 s worker deadline). Receipts, evidence, and logs record only
+`auth_source=environment|static-file|none` and a closed `source_kind` (`local_module` |
+`registry_provider` | `registry_module`) — NEVER a token, hash, path, header, or raw body. This
+keeps the network trust boundary §1 avoided for the *parse* path narrow, explicit, and gated —
+exactly the "explicit, gated, non-ambient step with its own ADR" the prior revision of this
+section required.
 
 ## Consequences
 

@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import evidence as ev
 from . import terraform_index as tfi
 from . import terraform_receipt as tr
 
@@ -133,6 +134,12 @@ class TerraformSession:
             return self._resolve_module_output(query, from_dir, data)
         return self._resolve_decl_base(query, from_dir, data)
 
+    def probe_source(self, source: str, from_module: str = "") -> Result:
+        """Refute the asserted unavailability of a Terraform module/provider source."""
+        from . import terraform_source as tfs
+
+        return tfs.probe(session=self, source=source, from_module=from_module)
+
     def finalize(self) -> Usage:
         """Free the cache/ledger and return the deterministic read :class:`Usage`."""
         usage = Usage(
@@ -170,7 +177,7 @@ class TerraformSession:
             "language": _LANGUAGE,
             "terraform_kind": kind,
         }
-        location = _location(found_dir, decl)
+        location = _location(decl)
         return self._refuted("lookup_declaration", query, reference, location, found_dir)
 
     def _resolve_decl_base(
@@ -186,9 +193,7 @@ class TerraformSession:
             return self._abstain("resolve_reference", query, "duplicate_address", from_dir)
         found_dir, decl = matches[0]
         reference = {"kind": "member", "name": query["reference"], "language": _LANGUAGE}
-        return self._refuted(
-            "resolve_reference", query, reference, _location(found_dir, decl), found_dir
-        )
+        return self._refuted("resolve_reference", query, reference, _location(decl), found_dir)
 
     def _resolve_module_output(
         self, query: dict[str, Any], from_dir: str, data: tuple[str, str]
@@ -210,11 +215,9 @@ class TerraformSession:
             return self._abstain("resolve_reference", query, cdetail, from_dir)
         if not matches:
             return self._abstain("resolve_reference", query, "no_unique_address", from_dir)
-        found_dir, decl = matches[0]
+        _found_dir, decl = matches[0]
         reference = {"kind": "member", "name": query["reference"], "language": _LANGUAGE}
-        return self._refuted(
-            "resolve_reference", query, reference, _location(found_dir, decl), from_dir
-        )
+        return self._refuted("resolve_reference", query, reference, _location(decl), from_dir)
 
     def _find_declaration(
         self, module_dirs: list[str], canonical: str
@@ -330,11 +333,15 @@ class TerraformSession:
         operation: str,
         query: dict[str, Any],
         reference: dict[str, Any],
-        location: dict[str, Any],
+        location: dict[str, Any] | None,
         module_dir: str,
+        *,
+        tier: str = ev.TIER_T1,
+        source_kind: str | None = None,
+        detail: str | None = None,
     ) -> Result:
         return Result(
-            evidence=tr.refuted_evidence(reference, location),
+            evidence=tr.refuted_evidence(reference, location, tier=tier, detail=detail),
             receipt=tr.refuted_receipt(
                 operation,
                 query,
@@ -342,15 +349,22 @@ class TerraformSession:
                 tfi.module_digest(self._snapshot, module_dir),
                 reference,
                 location,
+                source_kind=source_kind,
             ),
         )
 
     def _abstain(
-        self, operation: str, query: dict[str, Any], reason_detail: str, module_dir: str
+        self,
+        operation: str,
+        query: dict[str, Any],
+        reason_detail: str,
+        module_dir: str,
+        *,
+        detail: str | None = None,
     ) -> Result:
         reason = tr.ABSTENTIONS[reason_detail][0]
         return Result(
-            evidence=tr.abstain_evidence(reason),
+            evidence=tr.abstain_evidence(reason, detail=detail),
             receipt=tr.abstain_receipt(
                 operation,
                 query,
@@ -396,7 +410,7 @@ def _module_call(facts: dict[str, Any], name: str) -> dict[str, Any] | None:
     return None
 
 
-def _location(module_dir: str, decl: dict[str, Any]) -> dict[str, Any]:
+def _location(decl: dict[str, Any]) -> dict[str, Any]:
     return {
         "file": decl["file"],
         "line_start": decl["line_start"],

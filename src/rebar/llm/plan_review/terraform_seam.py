@@ -227,7 +227,7 @@ def _open_session_tools(
 
 
 def _session_tools(session: Any) -> list:
-    """The two refutation queries of a session exposed as agent function tools.
+    """The three refutation queries of a session exposed as agent function tools.
 
     Each is a thin, self-documenting callable returning the query's grounding evidence +
     canonical receipt; the runner wraps a plain callable as a function tool. Only refutation
@@ -252,7 +252,17 @@ def _session_tools(session: Any) -> list:
         result = session.resolve_reference(reference, from_file=from_file)
         return {"evidence": result.evidence, "receipt": result.receipt}
 
-    return [terraform_lookup_declaration, terraform_resolve_reference]
+    def terraform_probe_source(source: str, from_module: str = "") -> dict:
+        """Refute asserted UNAVAILABILITY of a Terraform module/provider source.
+
+        ``source`` is a literal module/provider source string. ``from_module`` is the
+        repo-relative module directory for local-source resolution. Returns ``{evidence,
+        receipt}``: ``refuted`` only for an in-snapshot local module or schema-valid registry
+        metadata, else a closed ``abstain`` reason. NEVER downloads module content."""
+        result = session.probe_source(source, from_module=from_module)
+        return {"evidence": result.evidence, "receipt": result.receipt}
+
+    return [terraform_lookup_declaration, terraform_resolve_reference, terraform_probe_source]
 
 
 def _fold_usage(usage_sink: dict[str, Any], usage: Any) -> None:
