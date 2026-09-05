@@ -590,3 +590,66 @@ def test_render_tier2_report_single_criterion_mode():
     }
     text = tier2.render_tier2_report(result)
     assert "Criterion: `T5c` (exec_tier=AGENT)" in text
+
+
+def _source_store_ticket_ids(root: str) -> set[str]:
+    """Ticket ids physically present in ``root``'s OWN ticket store."""
+    tracker = Path(tracker_dir(root))
+    if not tracker.exists():
+        return set()
+    return {d.name for d in tracker.iterdir() if d.is_dir() and not d.name.startswith(".")}
+
+
+def test_materialize_reconstructed_ticket_does_not_write_into_the_source_store():
+    """The reconstructed material must land ONLY in the throwaway scratch tracker.
+
+    :func:`tier2.materialize_reconstructed_ticket` documents that its scratch tracker
+    "NEVER points at the real ticket store's live state". The scratch root is a
+    ``git worktree`` of the ticket repo, and a linked worktree has a ``.git`` FILE, so
+    ``init_core`` takes its symlink branch and mounts the PARENT store instead of a new
+    one -- silently redirecting every reconstructed CREATE into the real store
+    (rebar-ticket 00c1-dc03-1f1f-4ffc).
+
+    Asserts the containment half of that contract: replaying a corpus row leaves the
+    source project's own store byte-for-byte unchanged in its ticket set.
+    """
+    root = _init_source_tracker()
+    parent_created = rebar.create_ticket(
+        "story", "parent", description="PARENT description", repo_root=root, return_alias=True
+    )
+    parent_id = parent_created["id"]
+    child_created = rebar.create_ticket(
+        "task",
+        "child",
+        description="CHILD description",
+        parent=parent_id,
+        repo_root=root,
+        return_alias=True,
+    )
+    review_ts = int(time.time() * 1e9)
+    tracker_path = str(tracker_dir(root))
+    row = {
+        "ticket_id": parent_id,
+        "ticket_type": "story",
+        "description": "PARENT description",
+        "file_impact": [],
+        "children": [child_created["id"]],
+        "review_event_ts": review_ts,
+    }
+
+    before = _source_store_ticket_ids(root)
+    scratch_root, scratch_id = tier2.materialize_reconstructed_ticket(
+        row, tracker_path, ticket_repo_root=root
+    )
+    try:
+        after = _source_store_ticket_ids(root)
+        leaked = after - before
+        assert not leaked, (
+            f"{len(leaked)} reconstructed ticket(s) leaked into the SOURCE store at "
+            f"{tracker_path}: {sorted(leaked)}. The scratch tracker is not isolated."
+        )
+        # and the material really did land in the scratch store
+        assert scratch_id in _source_store_ticket_ids(scratch_root)
+    finally:
+        tier2.cleanup_reconstructed_ticket(scratch_root, ticket_repo_root=root)
+        shutil.rmtree(root, ignore_errors=True)

@@ -8,6 +8,38 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — `force_new_store` REFUSES inside a linked git worktree
+
+`rebar.init_repo(repo_root=..., force_new_store=True)` and `rebar init --force-new-store`
+now **fail** when the target repo is a linked git worktree (its `.git` is a *file*).
+Previously the call SUCCEEDED and silently mounted the **main repo's existing live
+store**, symlinked into place.
+
+The old behaviour was a defect, not a contract. `init_core` returns via
+`_init_via_symlink` for a linked worktree *before* `force_new_store` is consulted at all,
+so the flag was inert on that path — a caller that explicitly demanded a new store was
+handed the real one without a word. That silence let a plan-replay eval harness write 425
+duplicate tickets into the live tracker on 2026-08-31/09-01 (rebar-ticket
+`00c1-dc03-1f1f-4ffc`), and it is discovered at runtime rather than at upgrade time, which
+is why it is called out here.
+
+The flag is **not** repurposed as an isolation flag; it keeps its documented
+remote-reachability meaning. Honouring it in a worktree was rejected deliberately: rebar's
+worktree model shares ONE tracker across every worktree, so minting a separate store there
+would silently detach that worktree from the shared store — a split-brain strictly worse
+than the bug. Refusing is the only outcome that is neither.
+
+**Migration.** Nothing changes for the default path: a plain `rebar init` (or
+`init_repo` without the flag) in a worktree still mounts the shared store exactly as
+before. If you passed `force_new_store` from a worktree and *wanted* the parent store, drop
+the flag. If you wanted a genuinely ISOLATED store, do not use a linked worktree — build a
+standalone repository instead. `src/rebar/llm/evals/plan_replay/tier2.py`
+(`_scratch_source_checkout`) is the worked example: `git init` a fresh directory, point its
+`objects/info/alternates` at the source repo's object database, then `git reset --hard` to
+the commit you need. That yields a real `.git` *directory*, so init takes its ordinary path
+and mounts a private store, while the checkout stays as cheap as a worktree because objects
+are borrowed rather than copied.
+
 ## BREAKING (pre-1.0) — canonical config spellings only (ADR 0116)
 
 ADR 0116 retires eight old config/env aliases by clean pre-1.0 removal. They are no

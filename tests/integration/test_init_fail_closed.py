@@ -384,3 +384,42 @@ def test_force_new_store_is_documented_in_help_and_generated_reference() -> None
     assert "--force-new-store" in result.stdout
     reference = Path("docs/cli-reference.md").read_text(encoding="utf-8")
     assert "--force-new-store" in reference
+
+
+def test_force_new_store_never_silently_yields_the_parent_store_in_a_worktree(
+    tmp_path: Path,
+) -> None:
+    """``force_new_store`` must never SILENTLY degrade to the repo's live store.
+
+    A linked worktree has a ``.git`` FILE, so ``init_core`` returns via
+    ``_init_via_symlink`` and symlinks the tracker onto the MAIN repo's real store. That
+    branch ran BEFORE ``force_new_store`` was consulted (it is only threaded onward
+    further down), so a caller that explicitly demanded a NEW store silently received the
+    REAL one. That is the trap a replay harness stepped on, writing 425 duplicate tickets
+    into the live tracker (rebar-ticket ``00c1-dc03-1f1f-4ffc``).
+
+    The contract is stated implementation-agnostically on purpose: this call must not
+    silently SUCCEED with the parent's store. Failing closed satisfies it, and so would
+    minting a genuinely distinct store — but quietly attaching to the live store does not.
+    """
+    repo = _host_repo(tmp_path, remote=tmp_path / "missing-origin.git")
+    rebar.init_repo(repo_root=repo, force_new_store=True)
+    parent_tracker = (repo / ".tickets-tracker").resolve()
+    assert parent_tracker.is_dir()
+
+    worktree = tmp_path / "linked-worktree"
+    _git(repo, "worktree", "add", "-q", "--detach", str(worktree), "HEAD")
+    assert (worktree / ".git").is_file(), "precondition: a linked worktree has a .git FILE"
+
+    try:
+        rebar.init_repo(repo_root=worktree, force_new_store=True)
+    except rebar.RebarError:
+        return  # failed closed — the silent degrade is impossible
+
+    tracker = worktree / ".tickets-tracker"
+    assert tracker.exists(), "init reported success but mounted no tracker"
+    assert tracker.resolve() != parent_tracker, (
+        "force_new_store SILENTLY returned the parent repo's live store "
+        f"({parent_tracker}); a caller asking for a new store must never be given the "
+        "real one without saying so."
+    )
