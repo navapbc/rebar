@@ -839,7 +839,7 @@ freshness into the native read path so all three interfaces agree.
 
 **Opt out** of the fetch when you want a pure-local replay (offline, hot loops,
 or when a write already synced): set `REBAR_SYNC_PULL=off` (the `sync.pull` policy,
-honored by all interfaces; permanent alias `REBAR_NO_SYNC=1`) or pass the
+honored by all interfaces) or pass the
 `--no-pull` flag to any read subcommand (`rebar list --no-pull`). The reducer's
 local `.cache.json` (I3/I3a) is still used; only the
 network fetch/merge is skipped. (Temp repos with no remote set `REBAR_SYNC_PULL=off`

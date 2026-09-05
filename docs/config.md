@@ -153,8 +153,7 @@ verify.suggest_duplicate_tickets   = false   # ADVISORY store-wide duplicate det
                                              # it grows as the store grows. Algorithm tunables are
                                              # the `[tool.rebar.llm] overlap_*` keys (`overlap_k`,
                                              # `overlap_drain`, `overlap_conf_threshold`, …). env
-                                             # REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS; the former
-                                             # name `verify.overlap_enabled` is a permanent alias.
+                                             # REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS.
                                              # See [ADR 0086](adr/0086-cross-ticket-overlap.md).
                                              # The SAME key also enables the cheap CREATE-TIME
                                              # advisory (ticket eac3): a create whose normalized
@@ -182,7 +181,7 @@ verify.novelty_priority_floor      = 0.4     # rising floor: drop a novel findin
 ticket.display_mode      = "auto"
 ticket.default_assignee  = ""     # assignee `claim` uses when --assignee is omitted (env REBAR_DEFAULT_ASSIGNEE)
 ticket_clarity.threshold = 5      # clarity-check pass threshold (env REBAR_TICKET_CLARITY_THRESHOLD)
-compact.threshold        = 10     # env REBAR_COMPACT_THRESHOLD (alias: COMPACT_THRESHOLD)
+compact.threshold        = 10     # env REBAR_COMPACT_THRESHOLD
 compact.trigger          = "async"  # async | always | off (env REBAR_COMPACT_TRIGGER)
                         # The OPERATION-LINKED compaction trigger. Compaction does not run on
                         # the close path any more (it held the store write lock for minutes),
@@ -211,7 +210,7 @@ reclaim.horizon_days = 30  # env REBAR_RECLAIM_HORIZON_DAYS
 
 # sync (git-backed store)
 sync.push   = "always"  # always | async | off   (env REBAR_SYNC_PUSH)
-sync.pull   = "on"      # on | off               (env REBAR_SYNC_PULL; alias REBAR_NO_SYNC)
+sync.pull   = "on"      # on | off               (env REBAR_SYNC_PULL)
 sync.remote = "origin"  # git remote the tickets branch syncs to — push/fetch/reconcile, the
                         # fsck PUSH_PENDING check, and attested ticket-store materialization
                         # (env REBAR_SYNC_REMOTE). Set it for split residency: e.g. the tickets
@@ -238,7 +237,7 @@ ui.enabled = false   # gates `rebar audit serve` — the disabled-by-default, lo
                      # requires the `nava-rebar[ui]` extra.
 
 # scratch space
-scratch.base_dir = ""   # default <repo>/.rebar/scratch (env REBAR_SCRATCH_BASE_DIR; alias SCRATCH_BASE_DIR)
+scratch.base_dir = ""   # default <repo>/.rebar/scratch (env REBAR_SCRATCH_BASE_DIR)
 
 # ticket store (worktree/symlink dir + orphan branch) — both default to today's values
 tracker.dir    = ".tickets-tracker"  # env REBAR_TRACKER_DIR; a bare
@@ -346,20 +345,19 @@ standard names, which deliberately differ from the auto-derived
 
 ```toml
 [tool.rebar.reconciler]   # advanced; sensible defaults, rarely needed
-jira_cli_timeout       = 0     # acli call timeout (s); 0 ⇒ the 120s default. env REBAR_JIRA_CLI_TIMEOUT (alias REBAR_ACLI_TIMEOUT)
+jira_cli_timeout       = 0     # acli call timeout (s); 0 ⇒ the 120s default. env REBAR_JIRA_CLI_TIMEOUT
 rich_text_cutover      = "off" # rich-text wire per client: off|cloud|dc|both. Ships OFF; set back to "off" to roll back. env REBAR_RECONCILER_RICH_TEXT_CUTOVER
 dc_pandoc_timeout_s    = 10.0  # wall-clock ceiling (s) on ONE pandoc call in the DC wiki renderer; on expiry that unit falls back to raw Markdown. env REBAR_RECONCILER_DC_PANDOC_TIMEOUT_S
 # pass-lock/phase-gate backend: the self-healing refs/reconciler/* CAS lock is the ONLY backend.
 # The `lock_backend` key + its legacy accepted-but-ignored "file" value were removed pre-1.0
 # (ticket unclear-verymad-sablefish); a still-present key is ignored as unknown. See ADR 0031.
 lock_lease_secs        = 120   # ref-lock lease (s); the heartbeat renews at max(1, lease // 3).
-deletion_probe_limit   = 20    # GET probes to confirm a deletion. env REBAR_RECONCILER_DELETION_PROBE_LIMIT (alias RECONCILER_ABSENT_GET_BUDGET)
+deletion_probe_limit   = 20    # GET probes to confirm a deletion. env REBAR_RECONCILER_DELETION_PROBE_LIMIT
 # Removed in the dust-troth-naval epic: `lock_max_retries` (+ env REBAR_RECONCILER_LOCK_MAX_RETRIES /
 # REBAR_RECONCILER_LOCK_RETRY_BUDGET) — it tuned the b859 outer-retry loop, now superseded by the
 # self-healing ref lock. A still-present key is ignored with a one-time deprecation warning (not a load error).
 id_guard_bypass_unsafe = false # TEMPORARY bypass of the rebar-id write guard — do NOT leave on; fail-CLOSED.
-                               # env REBAR_UNSAFE_ID_GUARD_BYPASS; permanent alias REBAR_ID_GUARD_MODE env
-                               # (value-flip: warn→true/bypass, raise→false/guard). The legacy flat
+                               # env REBAR_UNSAFE_ID_GUARD_BYPASS. The legacy flat
                                # `rebar_id_guard_mode` config key is no longer honored (removed pre-1.0).
 
 [tool.rebar.jira]   # Atlassian-standard, UNPREFIXED env names
@@ -850,16 +848,9 @@ commonly the same person.
 settable in `[tool.rebar.ticket_clarity]`/`rebar.toml`, via `REBAR_TICKET_CLARITY_THRESHOLD`;
 it appears in `rebar config`.
 Unknown keys **warn** (not fail) during the deprecation window and hard-error under
-`REBAR_CONFIG_UNKNOWN_KEYS=error`. The PERMANENT ergonomic env renames keep their old
-names as aliases (with a warning): `REBAR_NO_SYNC`→`REBAR_SYNC_PULL`
-(negative→positive flip), `COMPACT_THRESHOLD`→`REBAR_COMPACT_THRESHOLD`,
-`SCRATCH_BASE_DIR`→`REBAR_SCRATCH_BASE_DIR`, `REBAR_ACLI_TIMEOUT`→`REBAR_JIRA_CLI_TIMEOUT`,
-`RECONCILER_ABSENT_GET_BUDGET`→`REBAR_RECONCILER_DELETION_PROBE_LIMIT`,
-`REBAR_ID_GUARD_MODE`→
-`REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true),
-`REBAR_VERIFY_OVERLAP_ENABLED`→`REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS`. The same rename
-is a permanent **config-key** alias too: `verify.overlap_enabled`→
-`verify.suggest_duplicate_tickets` (when both are set the canonical key wins). Also removed (no alias):
+`REBAR_CONFIG_UNKNOWN_KEYS=error`. Use the canonical env vars and config keys shown above;
+ADR 0116 removed the prior ergonomic config/env aliases before 1.0, and the release notes
+and changelog carry the migration table. Also removed (no alias):
 `PROJECT_ROOT` (use `REBAR_ROOT`), `REBAR_LLM_RUNNER` (runner is derived), and the
 dead `TICKET_CMD`/`REBAR_TICKET_CLI`/`TICKET_WORDLIST_PATH`/`TICKET_SYNC_CMD`/
 `_REBAR_GC_AUTO_ZERO`/`REBAR_FSCK_NO_MUTATE` internals. See the env-var
