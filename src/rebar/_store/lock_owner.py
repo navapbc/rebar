@@ -285,11 +285,34 @@ def _mkdir_lock_age_exceeds_ceiling(lock_dir: str) -> bool:
     return age is not None and age > _MKDIR_LOCK_STALE_CEILING_S
 
 
+def _signal_zero_probes_liveness() -> bool:
+    """Whether ``os.kill(pid, 0)`` PROBES a process here rather than killing it.
+
+    True on POSIX, where signal 0 is the documented existence check. FALSE on Windows:
+    ``os.kill`` there only understands ``CTRL_C_EVENT``/``CTRL_BREAK_EVENT``, and for any
+    other value — 0 included — it opens the process and calls ``TerminateProcess``. A
+    liveness probe would therefore KILL the very holder it was asking about, and since
+    this probe runs on mkdir-lock contention it would kill a live writer mid-write (story
+    ``friendless-alabaster-cub``). A function, not a constant, so the platform seam is
+    drivable in a test on either host."""
+    return os.name == "posix"
+
+
 def _pid_alive(pid: int) -> bool:
     """Whether *pid* is a live process. ``os.kill(pid, 0)`` probes existence without
     signalling. A PermissionError means the pid exists but is owned by another user
     (alive); any other error is treated as alive (conservative — never reclaim on
-    uncertainty)."""
+    uncertainty).
+
+    Where signal 0 is not a probe (:func:`_signal_zero_probes_liveness`), there is no
+    liveness SIGNAL at all, so the answer is the conservative one — "alive" — and the
+    decision falls through to the branches that need positive proof: the caller's held
+    exclusive leg, or the wall-clock age ceiling. That NARROWS reclamation rather than
+    weakening it: nothing is ever reclaimed on less evidence than before, a dead owner is
+    still reclaimed via the exclusive-leg proof in :func:`_stamp_is_stale`, and the
+    ceiling still stops an unprovable stamp wedging the store forever."""
+    if not _signal_zero_probes_liveness():
+        return True
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -326,9 +349,13 @@ def _mkdir_lock_is_stale(lock_dir: str, *, fcntl_held: bool = False) -> bool:
     :func:`_legacy_stamp_is_stale`, because the mkdir lock genuinely has a pre-v2
     ``<host>:<pid>`` dialect still in the wild.
 
-    Set *fcntl_held* only when the caller already holds the exclusive ``fcntl.flock``
-    leg for this same tracker — see :func:`_acquire_mkdir` for why that is proof rather
-    than a hint.
+    Set *fcntl_held* only when the caller already holds the exclusive kernel leg for this
+    same tracker — see :func:`rebar._store.lock._acquire_mkdir` for why that is proof
+    rather than a hint. The name is POSIX-era: the flag denotes the PLATFORM's exclusive
+    leg (``fcntl.flock`` where ``fcntl`` exists, ``msvcrt.locking`` on Windows), and
+    :mod:`rebar._store.lock_kernel` carries the per-platform argument for why each earns
+    the same conclusion. A platform with neither primitive raises there rather than
+    reaching the mkdir leg, so this is never set with nothing held.
     """
     try:
         with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), encoding="utf-8") as fh:

@@ -21,6 +21,7 @@ import time as _time
 import pytest
 
 from rebar._store import lock as _lock
+from rebar._store import lock_kernel as _kernel
 from rebar._store import lock_owner as _owner
 
 
@@ -87,6 +88,11 @@ def test_acquire_does_not_reclaim_foreign_host_owner(tmp_path):
 # genuine system fault (ENOLCK/EIO/EBADF) was masked as a spurious LockTimeout. It now branches
 # on errno: contention (EAGAIN/EACCES) waits until the deadline then returns -1; any other errno
 # is re-raised immediately with its identity. The fd is closed on every failure path.
+#
+# The primitive is patched on `lock_kernel`, which is where the platform's exclusive leg is now
+# selected (story `friendless-alabaster-cub`); `_acquire_fcntl` calls it through that seam. Same
+# module object, same assertions — this pins that the POSIX errno discrimination is unchanged by
+# the addition of the Windows leg.
 
 
 def _raise_errno(err: int):
@@ -105,10 +111,33 @@ def test_acquire_fcntl_contention_waits_then_returns_minus_one(tmp_path, monkeyp
     def _always_eagain(fd, op):
         raise OSError(_errno.EAGAIN, "resource temporarily unavailable")
 
-    monkeypatch.setattr(_lock.fcntl, "flock", _always_eagain)
+    monkeypatch.setattr(_kernel.fcntl, "flock", _always_eagain)
     deadline = _time.monotonic() + 0.15
     fd = _lock._acquire_fcntl(lock_path, deadline)
     assert fd == -1, "sustained contention past the deadline returns the -1 sentinel"
+
+
+def test_acquire_fcntl_treats_eacces_as_contention_too(tmp_path, monkeypatch):
+    """EACCES is the SECOND contention errno, and it was untested.
+
+    Some POSIX kernels and filesystems report a held advisory lock as EACCES rather than
+    EAGAIN, and the Windows CRT reports a lock violation as EACCES only. Dropping it from
+    the contention set turns a merely-contended lock into an immediately re-raised OSError
+    — a hard write failure where the caller should have waited — and no test noticed
+    (found by mutating the contention set while landing the Windows leg,
+    story ``friendless-alabaster-cub``). It is pinned here, beside its EAGAIN sibling.
+    """
+    lock_path = os.path.join(str(tmp_path), "wl")
+    monkeypatch.setattr(_kernel.fcntl, "flock", _raise_errno(_errno.EACCES))
+    fd = _lock._acquire_fcntl(lock_path, _time.monotonic() + 0.15)
+    assert fd == -1, "EACCES is contention: wait out the deadline, then the -1 sentinel"
+
+
+def test_busy_probe_reports_busy_for_an_eacces_contended_leg(tmp_path, monkeypatch):
+    """The advisory probe reads the same contention set, so EACCES must mean BUSY there
+    too — reporting a held store free would let optional work run against a live writer."""
+    monkeypatch.setattr(_kernel.fcntl, "flock", _raise_errno(_errno.EACCES))
+    assert _lock.write_lock_is_busy(str(tmp_path)) is True
 
 
 def test_acquire_fcntl_unexpected_errno_raises_immediately(tmp_path, monkeypatch):
@@ -118,7 +147,7 @@ def test_acquire_fcntl_unexpected_errno_raises_immediately(tmp_path, monkeypatch
     def _enolck(fd, op):
         raise OSError(_errno.ENOLCK, "no locks available")
 
-    monkeypatch.setattr(_lock.fcntl, "flock", _enolck)
+    monkeypatch.setattr(_kernel.fcntl, "flock", _enolck)
     # A far-future deadline: the OLD code would wait ~here for it; the fix raises promptly.
     deadline = _time.monotonic() + 30
     t0 = _time.monotonic()
@@ -139,7 +168,7 @@ def test_acquire_fcntl_closes_fd_on_timeout(tmp_path, monkeypatch):
         closed.append(fd)
         real_close(fd)
 
-    monkeypatch.setattr(_lock.fcntl, "flock", _raise_errno(_errno.EAGAIN))
+    monkeypatch.setattr(_kernel.fcntl, "flock", _raise_errno(_errno.EAGAIN))
     monkeypatch.setattr(_lock.os, "close", _spy_close)
     fd = _lock._acquire_fcntl(lock_path, _time.monotonic() + 0.1)
     assert fd == -1
@@ -156,7 +185,7 @@ def test_acquire_fcntl_closes_fd_on_unexpected_errno(tmp_path, monkeypatch):
         closed.append(fd)
         real_close(fd)
 
-    monkeypatch.setattr(_lock.fcntl, "flock", _raise_errno(_errno.EIO))
+    monkeypatch.setattr(_kernel.fcntl, "flock", _raise_errno(_errno.EIO))
     monkeypatch.setattr(_lock.os, "close", _spy_close)
     with pytest.raises(OSError):
         _lock._acquire_fcntl(lock_path, _time.monotonic() + 30)

@@ -65,19 +65,14 @@ store simply reports the lock free.
 
 from __future__ import annotations
 
-import errno
 import os
 import time
 from typing import Any
 
 from rebar._store import lock as _lock
+from rebar._store import lock_kernel as _kernel
 from rebar._store import lock_owner as _owner
 from rebar._store.paths import StorePaths
-
-try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
-    import fcntl
-except ImportError:  # pragma: no cover - platform-dependent
-    fcntl = None  # type: ignore[assignment]
 
 # Report/finding vocabulary. Kept as constants so the schema, the renderer and the tests
 # name the same strings.
@@ -124,7 +119,7 @@ def _probe_fcntl(path: str) -> str:
     """Held/free for an fcntl lock file, answered without waiting.
 
     Exactly :func:`rebar._store.lock._acquire_fcntl`'s probe with a zero deadline —
-    ``flock(LOCK_EX|LOCK_NB)`` — and the same errno discrimination
+    the platform's exclusive leg, non-blocking — and the same errno discrimination
     :func:`rebar._store.lock.write_lock_is_busy` uses: only ``EAGAIN``/``EACCES`` mean
     genuine contention, every other errno is a real fault and must not masquerade as a
     holder. The lock is released immediately (the ``finally`` closes the fd), and the
@@ -139,18 +134,22 @@ def _probe_fcntl(path: str) -> str:
         return STATE_UNKNOWN
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _kernel.take_exclusive(fd)
+        except _kernel.NoExclusiveLegError:
+            # No primitive to probe WITH. Diagnostics must never raise and must never
+            # claim a lock is free on no evidence, so this is exactly ``unknown``.
+            return STATE_UNKNOWN
         except OSError as exc:
-            if exc.errno in (errno.EAGAIN, errno.EACCES):
+            if _kernel.is_contention(exc):
                 return STATE_HELD
             return STATE_UNKNOWN
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            _kernel.release_exclusive(fd)
         except OSError:
             pass
         return STATE_FREE
     finally:
-        os.close(fd)  # closing the fd releases the leg even if LOCK_UN failed
+        os.close(fd)  # closing the fd releases the leg even if the unlock failed
 
 
 def _file_age_s(path: str) -> float | None:
