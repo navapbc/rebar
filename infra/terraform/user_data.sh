@@ -70,6 +70,43 @@ require_filesystem_uuid() {
   return 1
 }
 
+# A `nofail` fstab entry is SKIPPED QUIETLY when its volume is missing -- that is what nofail
+# is FOR, so that a missing volume cannot wedge boot. The cost is that `mount -a` exits 0
+# whether or not the mount actually happened, so a successful `mount -a` is NOT evidence. A
+# bare mount point is an ordinary directory: every consumer keeps working, on ROOT, and the
+# volume's failure mode becomes the outage it was bought to prevent. So the mount is ASSERTED.
+# Called for EVERY volume, not just gate scratch: the older /var/gerrit path had no assertion
+# at all, which meant a silently-unmounted Gerrit data volume put the repositories on the 60
+# GiB root disk while the DLM snapshots kept backing up the empty one (bug 9c93-754e-b641-48d1).
+require_mounted() {
+  if mountpoint -q "$1"; then
+    return 0
+  fi
+  echo "$1 is NOT a mount point after a CLEAN mount -a -- its nofail fstab entry was skipped silently; refusing to leave it on the ROOT filesystem" >&2
+  return 1
+}
+
+# Write the fstab entry for a mount point, REPLACING any entry that mount point already has.
+# The previous guard was `grep -q "$uuid" /etc/fstab`, which only asked whether the NEW UUID
+# was present, so replacing a volume -- which is exactly what the restore runbook's "restore
+# onto a fresh volume" path does -- APPENDED a second line for the same mount point and left
+# the old volume's line behind. `nofail` then hides the result: neither line errors, and which
+# volume ends up at the mount point becomes fstab-ORDER dependent, permanently and silently
+# (bug ad8d-4274-ef43-4f44 F3).
+#
+# The backup is not a nicety: it is what makes the truncating redirect below safe, and it is
+# the file an operator restores from if a bad edit ever leaves the host unbootable. awk READS
+# the backup and WRITES /etc/fstab, so the input is never the file being truncated. It holds
+# the state BEFORE THIS CALL, not before the boot -- with two volumes the second call
+# overwrites the first call's copy, which is what "recoverable from the last edit" means here.
+replace_fstab_entry() {
+  fstab_mount_point="$1"
+  fstab_uuid="$2"
+  cp -p /etc/fstab /etc/fstab.rebar-bak
+  awk -v mp="$fstab_mount_point" '$2 != mp' /etc/fstab.rebar-bak > /etc/fstab # DROP-STALE-FSTAB-ENTRY
+  printf '%s\n' "UUID=$fstab_uuid $fstab_mount_point xfs defaults,nofail 0 2" >> /etc/fstab
+}
+
 resolve_ebs_device() {
   vol_nodash=$(echo "$1" | tr -d '-')
   require_well_formed_volume_id "$vol_nodash" "$1" || return 2 # REFUSE-DEGENERATE-VOLUME-ID
@@ -83,7 +120,11 @@ resolve_ebs_device() {
     # templatefile(), which interpolates this file whole (bug dd30-f10d-69f3-4c36).
     if nvme id-ctrl -v "$d" 2>/dev/null \
       | grep -qiE '(^|[^0-9a-zA-Z])'"$vol_nodash"'([^0-9a-zA-Z]|$)'; then
-      found="$d"
+      # `readlink -f`, matching the by-id fallback below, so BOTH branches answer with the
+      # same canonical string for the same device. They used to differ -- the glob path here,
+      # the realpath there -- which made log lines and any future device COMPARISON depend on
+      # which branch happened to fire (bug ad8d-4274-ef43-4f44 F5).
+      found=$(readlink -f "$d")
       break
     fi
   done
@@ -111,7 +152,10 @@ resolve_ebs_device() {
 mount_ebs_volume() {
   volume_id="$1"
   mount_point="$2"
-  device=$(resolve_ebs_device "$volume_id") || return 1
+  if ! device=$(resolve_ebs_device "$volume_id"); then
+    echo "could not resolve an NVMe device for volume $volume_id" >&2
+    return 1
+  fi
 
   echo "Resolved volume $volume_id -> $device"
   if ! blkid "$device" >/dev/null 2>&1; then
@@ -122,18 +166,31 @@ mount_ebs_volume() {
   mkdir -p "$mount_point"
   uuid=$(blkid -s UUID -o value "$device")
   require_filesystem_uuid "$device" "$uuid" || return 1 # REFUSE-EMPTY-FILESYSTEM-UUID
-  if ! grep -q "$uuid" /etc/fstab; then
-    echo "UUID=$uuid $mount_point xfs defaults,nofail 0 2" >> /etc/fstab
+  replace_fstab_entry "$mount_point" "$uuid"
+
+  # Two DISTINCT failures, reported distinctly, because nofail makes them look identical from
+  # the outside: `mount -a` refusing is a real error it printed about, while `mount -a`
+  # succeeding and the mount point still being an ordinary directory is the SILENT skip.
+  # Telling them apart is what tells an operator whether to look at the filesystem or at the
+  # volume attachment.
+  if ! mount -a; then
+    echo "mount -a reported an ERROR while mounting $mount_point" >&2
+    return 3
   fi
-  mount -a
+  require_mounted "$mount_point" || return 4 # ASSERT-MOUNT-TOOK
 }
 
 # ---------------------------------------------------------------------------
 # 2) Mount the Gerrit data volume at /var/gerrit.
 # ---------------------------------------------------------------------------
+# FAILS LOUD for the same reason the gate-scratch mount below does, and this is the volume
+# where it matters MOST. `mount_ebs_volume` now asserts the mount took, so this branch covers
+# the silent `nofail` skip as well as an unresolvable device -- the specific reason is on
+# stderr immediately above. Gerrit left running on the ROOT filesystem is a 60 GiB disk that
+# has already hit 97% once, and DLM snapshots that faithfully back up an empty data volume.
 # shellcheck disable=SC2154
 if ! mount_ebs_volume "${data_volume_id}" /var/gerrit; then
-  echo "FATAL: could not resolve NVMe device for volume ${data_volume_id}" >&2
+  echo "FATAL: volume ${data_volume_id} is not in service at /var/gerrit -- refusing to run Gerrit on the ROOT filesystem" >&2
   exit 1
 fi
 
@@ -147,7 +204,9 @@ fi
 # if the mount silently does not take, every consumer keeps working — on root —
 # and the volume's failure mode becomes exactly the outage it was built to
 # prevent. `mount -a` alone does not prove the mount happened (a `nofail` entry is
-# skipped quietly), so the mount is ASSERTED with `mountpoint` afterwards.
+# skipped quietly), so the mount is ASSERTED with `mountpoint` — inside
+# `mount_ebs_volume`, so EVERY volume gets it and a second call site cannot be added
+# without one, which is how /var/gerrit came to have no assertion at all.
 # Both names are terraform template variables substituted before this ever runs, and
 # ShellCheck lints the UNRENDERED template — so each reference needs its own directive
 # (a disable comment covers only the line that follows it).
@@ -155,11 +214,7 @@ fi
 GATE_SCRATCH_MOUNT="${gate_scratch_mount}"
 # shellcheck disable=SC2154
 if ! mount_ebs_volume "${gate_scratch_volume_id}" "$GATE_SCRATCH_MOUNT"; then
-  echo "FATAL: could not resolve NVMe device for gate-scratch volume ${gate_scratch_volume_id}" >&2
-  exit 1
-fi
-if ! mountpoint -q "$GATE_SCRATCH_MOUNT"; then
-  echo "FATAL: $GATE_SCRATCH_MOUNT is not a mount point after mount -a — refusing to leave gate scratch on the ROOT filesystem" >&2
+  echo "FATAL: gate-scratch volume ${gate_scratch_volume_id} is not in service at $GATE_SCRATCH_MOUNT -- refusing to leave gate scratch on the ROOT filesystem" >&2
   exit 1
 fi
 
@@ -172,9 +227,15 @@ fi
 #     Disappears with the volume.
 # Declaration present + proof absent => gate admission refuses instead of quietly
 # repopulating the store on root.
+# `chmod` FIRST: the mount point was created under the ambient umask, and tightening it only
+# after writing the markers left a brief 0755 window on a directory that goes on to hold
+# review clones of every repository the bot sees. The window is small and the host is
+# single-tenant root, so the impact is hygiene rather than exposure -- but "tighten, then
+# populate" is the order the intent was recorded in, and an ordering that is right only by
+# accident is the kind that quietly becomes load-bearing (bug ad8d-4274-ef43-4f44 F4).
+chmod 0700 "$GATE_SCRATCH_MOUNT"
 touch "$GATE_SCRATCH_MOUNT/../.gate-scratch-required"
 touch "$GATE_SCRATCH_MOUNT/.gate-scratch-mounted"
-chmod 0700 "$GATE_SCRATCH_MOUNT"
 echo "Gate scratch mounted at $GATE_SCRATCH_MOUNT and marked"
 
 # ---------------------------------------------------------------------------
