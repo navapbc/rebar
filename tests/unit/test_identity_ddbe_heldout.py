@@ -56,9 +56,9 @@ def test_identity_excluded_from_jira_sync() -> None:
     """
     import importlib.util
 
-    config_path = (
-        Path(rebar.__file__).resolve().parent / "_engine" / "rebar_reconciler" / "config.py"
-    )
+    from _engine_path import engine_dir
+
+    config_path = engine_dir() / "rebar_reconciler" / "config.py"
     spec = importlib.util.spec_from_file_location("rebar_reconciler_config_ident", config_path)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)

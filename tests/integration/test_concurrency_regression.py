@@ -1213,7 +1213,7 @@ def _reconciler_advisory():
     sys.path so the top-level ``rebar_reconciler`` package resolves)."""
     import sys as _sys
 
-    from rebar._engine import engine_dir
+    from _engine_path import engine_dir
 
     eng = str(engine_dir())
     if eng not in _sys.path:

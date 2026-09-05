@@ -22,8 +22,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import rebar
-
 # ---------------------------------------------------------------------------
 # Projects + repo configs the rehearsal maps
 # ---------------------------------------------------------------------------
@@ -90,9 +88,11 @@ def engine_on_path() -> None:
     top-level install (mirrors ``tests/external/test_link_sync_live.py`` and the DC
     harness helpers).
     """
-    engine_dir = Path(rebar.__file__).resolve().parent / "_engine"
-    if str(engine_dir) not in sys.path:
-        sys.path.insert(0, str(engine_dir))
+    from _engine_path import engine_dir
+
+    engine = str(engine_dir())
+    if engine not in sys.path:
+        sys.path.insert(0, engine)
 
 
 def transport_class() -> type:

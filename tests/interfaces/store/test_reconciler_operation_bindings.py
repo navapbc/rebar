@@ -39,7 +39,7 @@ BackendEnvError = None
 @pytest.fixture(autouse=True, scope="module")
 def _engine_seam():
     global compose_reconciler_runtime, BackendEnvError
-    from rebar._engine import engine_dir
+    from _engine_path import engine_dir
 
     engine = str(engine_dir())
     if engine not in sys.path:

@@ -20,6 +20,7 @@ import sys
 import textwrap
 from pathlib import Path
 
+import _engine_path
 from _tree_scan import parsed_python_files
 
 import rebar
@@ -53,6 +54,9 @@ _HEAVY = (
 )
 
 _SRC = Path(rebar.__file__).resolve().parent
+# The CHECKOUT engine root -- the tests tree's one canonical copy
+# (bug bd2d-3e31-31d9-4a66); never the installed one.
+_ENGINE_DIR = str(_engine_path.engine_dir())
 
 
 def test_lean_workflow_runtime_pulls_no_heavy_stack() -> None:
@@ -77,9 +81,7 @@ def test_lean_workflow_runtime_pulls_no_heavy_stack() -> None:
         import rebar.llm.workflow.render
         import rebar.llm.workflow.lint
         import rebar.grounding
-        from rebar._engine import engine_dir
-
-        sys.path.insert(0, str(engine_dir()))
+        sys.path.insert(0, {_ENGINE_DIR!r})
         import rebar_reconciler.runtime as reconciler_runtime
 
         first_auth = reconciler_runtime.StaticAuth("first-secret")

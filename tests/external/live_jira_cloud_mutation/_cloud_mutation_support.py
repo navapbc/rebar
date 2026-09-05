@@ -27,10 +27,7 @@ import shutil
 import sys
 import time
 import uuid
-from pathlib import Path
 from typing import Any
-
-import rebar
 
 # Credentials the live-Cloud AcliClient needs; absence => skip (never a hard fail here).
 _CLOUD_CRED_VARS = ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN")
@@ -42,9 +39,11 @@ def engine_on_path() -> None:
     The reconciler ships stdlib-only UNDER the wheel rather than as a top-level install
     (mirrors the DC + S3 live harness helpers).
     """
-    engine_dir = Path(rebar.__file__).resolve().parent / "_engine"
-    if str(engine_dir) not in sys.path:
-        sys.path.insert(0, str(engine_dir))
+    from _engine_path import engine_dir
+
+    engine = str(engine_dir())
+    if engine not in sys.path:
+        sys.path.insert(0, engine)
 
 
 def live_jira_ready() -> bool:

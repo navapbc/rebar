@@ -93,9 +93,11 @@ def _load_version_module():
     # Engine python modules are imported as top-level `ticket_reducer` (the engine
     # dir is added to sys.path), not as `rebar._engine.*` (that tree is shipped data,
     # not a python package). Mirror the unit-tier conftest's sys.path insertion.
-    engine_dir = Path(rebar.__file__).resolve().parent / "_engine"
-    if str(engine_dir) not in sys.path:
-        sys.path.insert(0, str(engine_dir))
+    from _engine_path import engine_dir
+
+    engine = str(engine_dir())
+    if engine not in sys.path:
+        sys.path.insert(0, engine)
     from rebar.reducer import _version
 
     return _version
