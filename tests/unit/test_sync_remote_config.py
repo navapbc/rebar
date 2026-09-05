@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 from rebar import config as cfg
 
@@ -139,9 +140,7 @@ def test_push_reaches_nonorigin_remote_end_to_end(
 
     github = tmp_path / "github.git"
     tracker = tmp_path / "tracker"
-    subprocess.run(
-        ["git", "init", "--bare", "-b", "tickets", str(github)], check=True, capture_output=True
-    )
+    init_bare_remote(github, initial_branch="tickets")
     tracker.mkdir()
     _git(tracker, "init", "-q", "-b", "tickets")
     _git(tracker, "config", "user.email", "t@e.com")
@@ -161,9 +160,7 @@ def test_push_reaches_nonorigin_remote_end_to_end(
 
 def _bare_tickets_remote(tmp_path: Path, name: str = "github.git") -> Path:
     bare = tmp_path / name
-    subprocess.run(
-        ["git", "init", "--bare", "-b", "tickets", str(bare)], check=True, capture_output=True
-    )
+    init_bare_remote(bare, initial_branch="tickets")
     return bare
 
 

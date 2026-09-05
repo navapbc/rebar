@@ -19,6 +19,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 from _subprocess_env import subprocess_env
 
 from rebar import _engine
@@ -47,7 +48,7 @@ def _engine_run(repo: Path, *args: str) -> subprocess.CompletedProcess:
 def repo(tmp_path: Path) -> Path:
     """An initialized rebar repo with one ticket."""
     remote = tmp_path / "remote.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    init_bare_remote(remote)
     r = tmp_path / "a"
     subprocess.run(["git", "clone", "-q", str(remote), str(r)], check=True)
     _git("config", "user.email", "test@example.com", cwd=r)

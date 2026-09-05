@@ -23,6 +23,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 import rebar
 from rebar._cli import _init, main
@@ -38,7 +39,7 @@ def clone_with_origin_tickets(tmp_path, monkeypatch):
     ``.tickets-tracker`` yet. Yields (clone_path, seeded_ticket_id)."""
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    init_bare_remote(origin)
 
     seed = tmp_path / "seed"
     seed.mkdir()

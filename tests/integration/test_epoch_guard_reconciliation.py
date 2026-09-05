@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 from _subprocess_env import subprocess_env
 
 import rebar
@@ -45,6 +46,32 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     if check and cp.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed: {cp.stderr}")
     return cp
+
+
+def _clone_tickets(source: Path, destination: Path) -> None:
+    """Clone the ``tickets`` branch, surfacing git's own diagnosis on failure.
+
+    Deliberately NOT ``-q`` and NOT ``check=True``: a bare
+    ``CalledProcessError`` renders only ``returned non-zero exit status 128``
+    and drops the captured stderr, which is where git states the cause
+    [rebar:57d2-e356-7eb4-4bf5].
+    """
+    cp = subprocess.run(
+        ["git", "clone", "-b", "tickets", str(source), str(destination)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if cp.returncode != 0:
+        try:
+            cwd = os.getcwd()
+        except OSError as exc:  # the worker's cwd was deleted underneath us
+            cwd = f"<unavailable: {exc}>"
+        raise AssertionError(
+            f"git clone -b tickets {source} {destination} failed "
+            f"(exit {cp.returncode}); cwd={cwd}\n"
+            f"stdout: {cp.stdout}\nstderr: {cp.stderr}"
+        )
 
 
 def _bare_git(origin: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -99,11 +126,7 @@ def _build_epoch_divergence(
 ) -> EpochRepos:
     origin = tmp_path / "origin.git"
     root = tmp_path / "work"
-    subprocess.run(
-        ["git", "init", "-q", "--bare", str(origin)],
-        check=True,
-        capture_output=True,
-    )
+    init_bare_remote(origin)
     root.mkdir()
     _git(root.parent, "init", "-q", str(root))
     _git(root, "config", "user.email", "t@example.com")
@@ -138,11 +161,7 @@ def _build_epoch_divergence(
     remote_sha = base_sha
     if remote_advance:
         competitor = tmp_path / "competitor"
-        subprocess.run(
-            ["git", "clone", "-q", "-b", "tickets", str(origin), str(competitor)],
-            check=True,
-            capture_output=True,
-        )
+        _clone_tickets(origin, competitor)
         _git(competitor, "config", "user.email", "remote@example.com")
         _git(competitor, "config", "user.name", "Remote")
         (competitor / compat.COMPAT_FILENAME).write_text(_record(remote_epoch), encoding="utf-8")
@@ -342,11 +361,7 @@ def test_cli_always_push_surfaces_epoch_refusal_on_stderr(
 
 def _advance_origin_to_new_epoch(repos: EpochRepos, tmp_path: Path) -> str:
     competitor = tmp_path / "epoch-advance"
-    subprocess.run(
-        ["git", "clone", "-q", "-b", "tickets", str(repos.origin), str(competitor)],
-        check=True,
-        capture_output=True,
-    )
+    _clone_tickets(repos.origin, competitor)
     _git(competitor, "config", "user.email", "remote@example.com")
     _git(competitor, "config", "user.name", "Remote")
     (competitor / compat.COMPAT_FILENAME).write_text(_record(EPOCH_B), encoding="utf-8")

@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 from _subprocess_env import SubprocessEnv, subprocess_env
 
 pytestmark = pytest.mark.unit
@@ -77,13 +78,7 @@ def bare_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def bridge_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
     """Create a full-history checkout plus a real tickets remote/worktree."""
     origin = tmp_path / "tickets-origin.git"
-    subprocess.run(
-        ["git", "init", "--bare", "--initial-branch=tickets", str(origin)],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=_git_env(),
-    )
+    init_bare_remote(origin, initial_branch="tickets", env=_git_env())
 
     seed = tmp_path / "seed"
     subprocess.run(

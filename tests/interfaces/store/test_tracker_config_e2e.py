@@ -15,6 +15,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 import rebar
 from rebar import config as cfg
@@ -74,7 +75,7 @@ def test_custom_dir_and_branch_init_and_sync_roundtrip(
 ) -> None:
     toml = '[tool.rebar]\ntracker.dir = "store"\ntracker.branch = "rebar-tickets"\n'
     remote = tmp_path / "remote.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    init_bare_remote(remote)
 
     # Repo A: init at the custom dir + branch, create a ticket (auto-pushes).
     repo_a = _make_repo(tmp_path / "a", config_toml=toml, origin=remote)
