@@ -234,8 +234,8 @@ def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
         def from_str(cls, v):
             return cls()
 
-        def rank(self):
-            return 3
+        def __gt__(self, other):
+            return False
 
         LIVE = None  # patched below
         RECONCILE_CHECK = "reconcile-check-sentinel"  # sentinel; never == _FakeMode()

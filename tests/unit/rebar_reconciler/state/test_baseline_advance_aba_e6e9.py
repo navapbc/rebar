@@ -1,6 +1,6 @@
 """Bug e6e9 — the baseline must record what rebar SYNCED, not what it last FETCHED.
 
-The defect: ``reconcile._advance_baselines`` advanced the ADR-0026 baseline from the
+The defect: ``reconcile_helpers._advance_baselines`` advanced the ADR-0026 baseline from the
 pass-START snapshot, which is fetched BEFORE the outbound apply. For any field rebar
 itself pushed in that pass, the baseline was left holding Jira's PRE-push value. ADR 0026
 makes ``local == baseline`` the sole direction signal, read as "local did not change, so a
@@ -40,7 +40,7 @@ if str(_ENGINE) not in sys.path:  # pragma: no cover - import bootstrap
 from rebar_reconciler.binding_store import BindingStore  # noqa: E402
 from rebar_reconciler.inbound_fields import _map_jira_to_local_fields  # noqa: E402
 from rebar_reconciler.outbound_field_diff import diff_canonical_fields  # noqa: E402
-from rebar_reconciler.reconcile import _advance_baselines  # noqa: E402
+from rebar_reconciler.reconcile_helpers import _advance_baselines  # noqa: E402
 
 # The five inbound-mirrored fields share one guard (``_suppressed_by_inbound``) and
 # therefore one ABA exposure, so all five are covered — not just the status field that

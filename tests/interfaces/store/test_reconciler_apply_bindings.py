@@ -4,8 +4,8 @@ Declared AC1-AC6 gate file (see ticket verify_commands). The implementer works
 against THIS happy path; the poisoned-ambient / child-env-sibling / concurrency edge
 cases live in a held-out oracle the implementer does not see.
 
-Contract: ``reconcile.reconcile_once`` composes ONE ``ReconcilerRuntime`` (S2's
-``compose_reconciler_runtime``) per pass and threads its already-built backend's
+Contract: ``reconcile.reconcile_once`` composes ONE ``ReconcilerRuntime`` through
+``runtime.compose_reconciler_runtime`` per pass and threads its already-built backend's
 transport into the apply phase, forwarding it to ``applier.apply`` as ``client=`` —
 rather than each apply re-resolving ambient config via ``_load_acli``. Asserts the
 recorded ``client`` argument (observable behavior), never private source text.
@@ -37,6 +37,7 @@ def _load(name: str, rel: str):
 def test_reconcile_once_threads_composed_runtime_transport_into_apply(monkeypatch, tmp_path):
     """A pass composes one runtime and the apply phase receives its captured transport."""
     reconcile = _load("rebar_reconciler.reconcile", "reconcile.py")
+    runtime = _load("rebar_reconciler.runtime", "runtime.py")
 
     captured_transport = SimpleNamespace(name="composed-transport")
 
@@ -47,7 +48,7 @@ def test_reconcile_once_threads_composed_runtime_transport_into_apply(monkeypatc
             return SimpleNamespace(transport=captured_transport, project="REB")
 
     monkeypatch.setattr(
-        reconcile, "compose_reconciler_runtime", lambda **kw: _FakeRuntime(), raising=False
+        runtime, "compose_reconciler_runtime", lambda **kw: _FakeRuntime(), raising=True
     )
 
     recorded = {}

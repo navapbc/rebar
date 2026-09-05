@@ -7,7 +7,7 @@ the un-committed local bindings.json with the version from the remote — losing
 Phase-1 bindings and causing Phase-2 to generate outbound CREATE mutations (dedup-
 skip) instead of UPDATE mutations with the edited field values.
 
-Fix: ``reconcile_once`` calls ``_commit_binding_store_snapshot`` after every
+Fix: ``pass_support._commit_binding_store_snapshot`` runs after every
 ``binding_store.save()``, staging and committing ``.bridge_state/bindings.json``
 to the tickets orphan branch.  Subsequent ``git merge origin/tickets`` calls in
 the ticket-CLI include the new bindings because they are already on-branch.
@@ -35,7 +35,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
 BINDING_STORE_PATH = (
     REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "binding_store.py"
 )
@@ -56,10 +56,10 @@ def _load_module(name: str, path: Path):
 
 
 @pytest.fixture
-def reconcile_mod():
-    mod = _load_module("_test_reconcile_bcs", RECONCILE_PATH)
+def pass_support_mod():
+    mod = _load_module("_test_pass_support_bcs", PASS_SUPPORT_PATH)
     yield mod
-    sys.modules.pop("_test_reconcile_bcs", None)
+    sys.modules.pop("_test_pass_support_bcs", None)
 
 
 @pytest.fixture
@@ -143,7 +143,7 @@ def _binding_in_tickets_head(tracker_dir: Path, local_id: str, jira_key: str) ->
 
 def test_binding_store_committed_to_tickets_branch_after_reconcile_pass(
     tmp_path,
-    reconcile_mod,
+    pass_support_mod,
     binding_store_mod,
     outbound_differ_mod,
 ):
@@ -212,7 +212,7 @@ def test_binding_store_committed_to_tickets_branch_after_reconcile_pass(
     bs2.bind_confirm("probe-ticket-1", "DIG-5999")
     bs2.save()
 
-    reconcile_mod._commit_binding_store_snapshot(bs2, tmp_path, "test-pass-001")
+    pass_support_mod._commit_binding_store_snapshot(bs2, tmp_path, "test-pass-001")
 
     # POST-FIX: tickets branch HEAD now contains the new binding.
     assert _binding_in_tickets_head(tracker_dir, "probe-ticket-1", "DIG-5999"), (

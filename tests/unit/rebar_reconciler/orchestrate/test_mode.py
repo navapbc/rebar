@@ -59,32 +59,31 @@ def test_mode_caps_preserve_all_five_legacy_limits():
 
 
 def test_mode_ordering_dry_run_special():
-    """dry-run has a lower rank than any operational mode."""
-    assert Mode.DRY_RUN.rank() < Mode.BOOTSTRAP_STRICT.rank()
-    assert Mode.DRY_RUN.rank() < Mode.BOOTSTRAP_THROTTLE.rank()
-    assert Mode.DRY_RUN.rank() < Mode.LIVE.rank()
+    """dry-run orders before any operational mode."""
+    assert Mode.DRY_RUN < Mode.BOOTSTRAP_STRICT
+    assert Mode.DRY_RUN < Mode.BOOTSTRAP_THROTTLE
+    assert Mode.DRY_RUN < Mode.LIVE
 
 
 def test_mode_ordering_bootstrap_strict_less_than_bootstrap_throttle():
     """bootstrap-strict is ordered before bootstrap-throttle."""
-    assert Mode.BOOTSTRAP_STRICT.rank() < Mode.BOOTSTRAP_THROTTLE.rank()
+    assert Mode.BOOTSTRAP_STRICT < Mode.BOOTSTRAP_THROTTLE
 
 
 def test_mode_ordering_bootstrap_throttle_less_than_live():
     """bootstrap-throttle is ordered before live."""
-    assert Mode.BOOTSTRAP_THROTTLE.rank() < Mode.LIVE.rank()
+    assert Mode.BOOTSTRAP_THROTTLE < Mode.LIVE
 
 
 def test_mode_ordering_supports_comparison():
     """Modes support > comparison semantics for check_phase_gate."""
-    # live > bootstrap-throttle > bootstrap-strict > dry-run
-    assert Mode.LIVE.rank() > Mode.BOOTSTRAP_THROTTLE.rank()
-    assert Mode.BOOTSTRAP_THROTTLE.rank() > Mode.BOOTSTRAP_STRICT.rank()
-    assert Mode.BOOTSTRAP_STRICT.rank() > Mode.DRY_RUN.rank()
+    assert Mode.LIVE > Mode.BOOTSTRAP_THROTTLE
+    assert Mode.BOOTSTRAP_THROTTLE > Mode.BOOTSTRAP_STRICT
+    assert Mode.BOOTSTRAP_STRICT > Mode.DRY_RUN
 
 
-def test_mode_rich_comparisons_follow_rank_for_every_pair():
-    """Inherited string comparisons never replace the five-mode rank contract."""
+def test_mode_rich_comparisons_follow_order_for_every_pair():
+    """Inherited string comparisons never replace the five-mode order contract."""
     ordered = [
         Mode.RECONCILE_CHECK,
         Mode.DRY_RUN,

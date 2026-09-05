@@ -175,13 +175,9 @@ def _patch_and_run(reconcile_mod, stubs, repo_root, pass_id="test-pass", target_
             return stubs[name]
         return original_load(name, relpath)
 
-    # Also patch _read_local_tickets to return empty (no real CLI)
+    pass_support = reconcile_mod._load("rebar_reconciler.pass_support", "pass_support.py")
     with patch.object(reconcile_mod, "_load", side_effect=fake_load):
-        with patch.object(
-            reconcile_mod,
-            "_read_local_tickets",
-            return_value=[],
-        ):
+        with patch.object(pass_support, "_read_local_tickets", return_value=[]):
             return reconcile_mod.reconcile_once(
                 pass_id,
                 repo_root=repo_root,

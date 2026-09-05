@@ -14,7 +14,7 @@ THE CHAIN, read end to end:
   2. ``inbound_differ._diff_jira_vs_local:185-188`` emits ONLY the scalar:
      ``changed["assignee"] = jira_mapped.get("assignee")``. ``assignee_identity`` is not in
      ``field_map``, so it never reaches the mutation.
-  3. ``apply_inbound_records._inbound_update_write_edit_event:333-340`` documents that these
+  3. ``apply_inbound_events._inbound_update_write_edit_event`` documents that these
      fields ARE the differ's local-keyed shape, and line 369 passes ``fields["assignee"]`` —
      that string — to ``_ensure_inbound_assignee_identity``.
   4. ``_ensure_inbound_assignee_identity:100-101`` opens with ``if not isinstance(assignee,
@@ -40,6 +40,7 @@ from typing import Any
 import pytest
 
 import rebar
+import rebar_reconciler.apply_inbound_events as inbound_events
 import rebar_reconciler.apply_inbound_records as air
 from rebar_reconciler.inbound_differ import _diff_jira_vs_local
 
@@ -238,7 +239,7 @@ def test_the_update_path_mints_from_the_forwarded_identity(store: Path) -> None:
     invented by this test.
     """
     written: list[str] = []
-    air._inbound_update_write_edit_event(
+    inbound_events._inbound_update_write_edit_event(
         _differ_fields(_RAW_DC_ASSIGNEE),
         store / ".tickets-tracker",
         "some-local-id",
@@ -282,7 +283,7 @@ def test_the_cloud_update_path_keys_on_the_account_id_not_the_display_name(store
         inbound_mapper=_DCMapper(),  # the shared family mapper — Cloud uses the same one
     )
     written: list[str] = []
-    air._inbound_update_write_edit_event(
+    inbound_events._inbound_update_write_edit_event(
         changed, store / ".tickets-tracker", "some-local-id", written, repo_root=str(store)
     )
 

@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar_reconciler.reconcile_helpers import _NoOpSyncLogger
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
 
@@ -71,7 +73,7 @@ def _ctx(reconcile_mod, tmp_path: Path, **overrides):
         pass_id="pass-1",
         repo_root=tmp_path,
         persist=False,
-        sync_logger=reconcile_mod._NoOpSyncLogger(),
+        sync_logger=_NoOpSyncLogger(),
         mutations=[],
         manifest_path=None,
         nowrite_plan=None,

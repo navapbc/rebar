@@ -4,7 +4,7 @@ RED → GREEN specification:
   - commit failure (mock subprocess) → returns False + ERROR logged to stderr
     + alert appended to alert_store
   - commit success → returns True, no alert written
-  - call site in reconcile_once: on False, logs loud ERROR naming the
+  - call site in the reconcile persist phase: on False, logs loud ERROR naming the
     consequence (bindings at risk of clobber on next merge); does NOT abort pass
 
 These tests exercise the clobbered-bindings failure class: a silent commit failure
@@ -24,7 +24,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
 ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "alert_store.py"
 
 
@@ -41,10 +41,10 @@ def _load_module(name: str, path: Path) -> ModuleType:
 
 
 @pytest.fixture
-def reconcile_mod() -> ModuleType:
-    mod = _load_module("reconcile", RECONCILE_PATH)
+def pass_support_mod() -> ModuleType:
+    mod = _load_module("pass_support", PASS_SUPPORT_PATH)
     yield mod
-    sys.modules.pop("_cbsf_reconcile", None)
+    sys.modules.pop("_cbsf_pass_support", None)
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ def alert_store_mod() -> ModuleType:
 
 
 def test_commit_failure_returns_false_and_logs_error(
-    tmp_path: Path, reconcile_mod: ModuleType, alert_store_mod: ModuleType, capsys
+    tmp_path: Path, pass_support_mod: ModuleType, alert_store_mod: ModuleType, capsys
 ) -> None:
     """When git commit subprocess fails, _commit_binding_store_snapshot must
     return False and print an ERROR message to stderr.
@@ -99,7 +99,7 @@ def test_commit_failure_returns_false_and_logs_error(
         return result
 
     with patch("subprocess.run", side_effect=_failing_run):
-        result = reconcile_mod._commit_binding_store_snapshot(
+        result = pass_support_mod._commit_binding_store_snapshot(
             stub_bs, tmp_path, "test-pass-fail-001"
         )
 
@@ -115,7 +115,7 @@ def test_commit_failure_returns_false_and_logs_error(
 
 
 def test_commit_failure_appends_alert(
-    tmp_path: Path, reconcile_mod: ModuleType, alert_store_mod: ModuleType
+    tmp_path: Path, pass_support_mod: ModuleType, alert_store_mod: ModuleType
 ) -> None:
     """When git commit fails, an alert must be appended to the alert_store.
 
@@ -146,13 +146,13 @@ def test_commit_failure_appends_alert(
         result.stdout = ""
         return result
 
-    # Pre-register the alert_store module so _load() in reconcile.py picks it up
+    # Pre-register the alert_store module so _load() in pass_support.py picks it up
     _alert_key = "rebar_reconciler.alert_store"
     sys.modules[_alert_key] = alert_store_mod
 
     try:
         with patch("subprocess.run", side_effect=_failing_run):
-            result = reconcile_mod._commit_binding_store_snapshot(
+            result = pass_support_mod._commit_binding_store_snapshot(
                 stub_bs, tmp_path, "test-pass-alert-001"
             )
     finally:
@@ -193,7 +193,7 @@ def test_commit_failure_appends_alert(
 
 
 def test_commit_success_returns_true_no_alert(
-    tmp_path: Path, reconcile_mod: ModuleType, alert_store_mod: ModuleType
+    tmp_path: Path, pass_support_mod: ModuleType, alert_store_mod: ModuleType
 ) -> None:
     """When the locked-seam commit succeeds, _commit_binding_store_snapshot
     returns True, the commit lands in the tracker repo, and no alert is written.
@@ -221,7 +221,9 @@ def test_commit_success_returns_true_no_alert(
     sys.modules[_alert_key] = alert_store_mod
 
     try:
-        result = reconcile_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "test-pass-ok-001")
+        result = pass_support_mod._commit_binding_store_snapshot(
+            stub_bs, tmp_path, "test-pass-ok-001"
+        )
     finally:
         sys.modules.pop(_alert_key, None)
 
@@ -256,7 +258,7 @@ def test_commit_success_returns_true_no_alert(
 
 
 def test_commit_failure_dedup_suppresses_second_alert(
-    tmp_path: Path, reconcile_mod: ModuleType, alert_store_mod: ModuleType
+    tmp_path: Path, pass_support_mod: ModuleType, alert_store_mod: ModuleType
 ) -> None:
     """A second commit failure for the same pass_id must not write a duplicate alert.
 
@@ -291,9 +293,9 @@ def test_commit_failure_dedup_suppresses_second_alert(
 
     try:
         with patch("subprocess.run", side_effect=_failing_run):
-            reconcile_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")
+            pass_support_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")
             # Second call with same pass_id — should be deduped
-            reconcile_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")
+            pass_support_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")
     finally:
         sys.modules.pop(_alert_key, None)
 

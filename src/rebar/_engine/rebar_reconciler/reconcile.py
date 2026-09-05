@@ -52,58 +52,18 @@ def _tracker_dir(repo_root: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Leaf-helper re-exports. reconcile_helpers.py and its sibling pass_support.py
-# (ticket piscine-bullish-cowbird split reconcile_helpers.py to restore its own
-# module-size headroom) hold the pure pass-support utilities that carry no
-# back-edge to the reconcile_once spine — status preflight, binding-store
-# commit-back, the ticket-CLI reader, the selection/filter-scope builders (now
-# pass_support.py), and the no-write plan renderer + cap-0 sync-logger stand-in
-# (still reconcile_helpers.py). Load both once by path and bind their names at
-# module level so (a) the staying phase helpers call them as bare names —
-# preserving the monkeypatch seam tests rely on — and (b) attribute access
-# (``reconcile.<name>``, used by tests that load this module by path) keeps
-# resolving every name regardless of which sibling file now defines it.
+# Canonical leaf-helper modules.
+#
+# ADR 0111 forbids preserving old private compatibility bindings after a
+# move. Keep the sibling modules loaded once for the spine, but route every
+# moved collaborator through its canonical owner at call time instead of
+# rebinding it as ``reconcile.<name>``. The remaining names defined in this
+# module (``_load``, ``_load_snapshots``, ``_persist_and_log``) are phase seams
+# owned by this spine, not compatibility re-exports.
 # ---------------------------------------------------------------------------
-_helpers = _load("reconcile_helpers", "reconcile_helpers.py")
-_pass_support = _load("pass_support", "pass_support.py")
-
-StatusMappingError = _pass_support.StatusMappingError
-preflight_status_mapping = _pass_support.preflight_status_mapping
-_commit_binding_store_snapshot = _pass_support._commit_binding_store_snapshot
-_read_local_tickets = _pass_support._read_local_tickets
-SelectionStaleError = _pass_support.SelectionStaleError
-ensure_selection_current = _pass_support.ensure_selection_current
-narrow_selection_inputs = _pass_support.narrow_selection_inputs
-_build_filter_target_set = _pass_support._build_filter_target_set
-_mutation_matches_filter = _pass_support._mutation_matches_filter
-_build_plan_entries = _helpers._build_plan_entries
-_NoOpSyncLogger = _helpers._NoOpSyncLogger
-_write_prev_snapshot_key_set = _helpers._write_prev_snapshot_key_set
-# ADR-0026 baseline advance (bug e6e9 grew it past the module-size cap). Pure helpers over
-# the binding store with no back-edge to the reconcile_once spine — exactly what
-# reconcile_helpers holds — re-bound here so the bare-name calls in _persist_and_log and
-# the ``reconcile._advance_baselines`` import in the A3 oracle both keep resolving.
-_accepts_synced_fields_out = _helpers._accepts_synced_fields_out
-_accepts_client = _helpers._accepts_client
-_accepts_ticket_plans = _helpers._accepts_ticket_plans
-_advance_baselines = _helpers._advance_baselines
-_advance_peer_parent = _helpers._advance_peer_parent
-# RP-04 S3 (AC1/AC6): the runtime-binding cluster lives in reconcile_helpers (no back-edge
-# to this spine); re-bound here so reconcile_once calls them as bare names and tests that
-# load this module by path can reach them as ``reconcile.<name>``.
-_write_facade_enabled = _helpers._write_facade_enabled
-_resolve_pass_transport = _helpers._resolve_pass_transport
-bind_operation_runtime = _helpers.bind_operation_runtime
-
-# RP-04 S3 (AC1): the reconcile operation runtime (S2). Bound as a MODULE attribute
-# ``reconcile.compose_reconciler_runtime`` so a pass composes ONE runtime whose backend
-# CAPTURES scope at compose time (no ambient re-resolution per apply), and so tests can
-# monkeypatch this exact attribute. Loaded by the same by-path sibling loader the rest of
-# this module uses (runtime.py resolves its heavy deps lazily) so it resolves whether or not
-# the engine dir is importable as a package.
-compose_reconciler_runtime = _load(
-    "rebar_reconciler.runtime", "runtime.py"
-).compose_reconciler_runtime
+_helpers = _load("rebar_reconciler.reconcile_helpers", "reconcile_helpers.py")
+_pass_support = _load("rebar_reconciler.pass_support", "pass_support.py")
+_runtime = _load("rebar_reconciler.runtime", "runtime.py")
 
 
 @dataclass
@@ -232,11 +192,9 @@ def reconcile_once(
         abort_check=abort_check,
     )
     _load_snapshots(ctx)
-    # RP-04 S3 (AC1): compose the ONE operation runtime for this pass and thread its
-    # already-built backend's transport into the apply phase (AC6 toggle honored inside).
-    # Pass the module-level ``compose_reconciler_runtime`` seam (monkeypatched by tests)
-    # so the helper stays free of a back-edge to this spine.
-    bind_operation_runtime(ctx, compose_reconciler_runtime)
+    # Compose the one operation runtime through the canonical runtime module at call time
+    # so tests and callers patch the real owner, not an old ``reconcile.<name>`` shim.
+    _helpers.bind_operation_runtime(ctx, _runtime.compose_reconciler_runtime)
     # Diff phase lives in the sibling run_differs.py (loaded lazily by file path,
     # matching the sibling-loader convention). It holds no back-edge to reconcile.py.
     run_differs_mod = _load("reconcile_run_differs", "run_differs.py")
@@ -252,27 +210,21 @@ def reconcile_once(
 # locked 800-line cap). reconcile_once itself is untouched above — it remains
 # the single lifecycle facade calling these four names, exactly as before.
 #
-# _apply_mutations and _confirm_peer_links are simple alias-binds: no test
-# monkeypatches either function's OWN sub-dependencies through
-# ``reconcile.<name>`` expecting the patch to alter that function's behavior,
-# so the implementation can live entirely in its new sibling module.
+# _apply_mutations and _confirm_peer_links remain direct phase seams owned by this
+# spine: external guard tests call them to exercise the extracted phase functions.
 #
 # _load_snapshots, _save_and_commit_bindings, and _persist_and_log are thin
-# WRAPPERS instead: existing tests patch collaborators these functions call
-# internally — e.g. ``monkeypatch.setattr(reconcile, "_read_local_tickets",
-# ...)`` and expect ``reconcile._load_snapshots`` to observe it — and a bare
-# name resolves against its DEFINING module's globals, not the caller's. Each
-# wrapper below resolves every patchable collaborator as a bare name in ITS
-# OWN body (so it reads reconcile.py's current globals, picking up any
-# monkeypatch applied before the call) and forwards it into the real
-# implementation as an explicit keyword argument. This preserves every
-# existing patch seam unchanged while the implementation itself lives outside
-# this file.
+# wrappers around the sibling phase implementations. Their moved helper/runtime
+# collaborators are resolved from canonical owner modules at call time rather than
+# through old ``reconcile.<name>`` compatibility bindings.
 # ---------------------------------------------------------------------------
-_load_phase = _load("reconcile_load_phase", "load_phase.py")
-_apply_phase = _load("reconcile_apply_phase", "apply_phase.py")
-_persist_phase = _load("reconcile_persist_phase", "persist_phase.py")
+_load_phase = _load("rebar_reconciler.load_phase", "load_phase.py")
+_apply_phase = _load("rebar_reconciler.apply_phase", "apply_phase.py")
+_persist_phase = _load("rebar_reconciler.persist_phase", "persist_phase.py")
 
+# Retained phase seams owned by the reconcile spine; these are direct entry points
+# for tests/guards over the extracted phase functions, not compatibility aliases
+# for moved helper/runtime collaborators.
 _apply_mutations = _apply_phase.apply_mutations
 _confirm_peer_links = _persist_phase.confirm_peer_links
 
@@ -285,10 +237,10 @@ def _load_snapshots(ctx: _PassContext) -> None:
     _load_phase.load_snapshots(
         ctx,
         load=_load,
-        read_local_tickets=_read_local_tickets,
-        ensure_selection_current=ensure_selection_current,
-        narrow_selection_inputs=narrow_selection_inputs,
-        no_op_sync_logger_cls=_NoOpSyncLogger,
+        read_local_tickets=_pass_support._read_local_tickets,
+        ensure_selection_current=_pass_support.ensure_selection_current,
+        narrow_selection_inputs=_pass_support.narrow_selection_inputs,
+        no_op_sync_logger_cls=_helpers._NoOpSyncLogger,
         handle_corrupt_snapshot=_handle_corrupt_snapshot,
     )
 
@@ -317,8 +269,8 @@ def _save_and_commit_bindings(ctx: _PassContext) -> None:
     """
     _persist_phase.save_and_commit_bindings(
         ctx,
-        commit_binding_store_snapshot=_commit_binding_store_snapshot,
-        confirm_peer_links=_confirm_peer_links,
+        commit_binding_store_snapshot=_pass_support._commit_binding_store_snapshot,
+        confirm_peer_links=_persist_phase.confirm_peer_links,
     )
 
 

@@ -36,7 +36,7 @@ from typing import Any
 
 import pytest
 
-from rebar_reconciler import apply_planning, reconcile
+from rebar_reconciler import apply_planning, reconcile, reconcile_helpers
 
 
 def _write_manifest(tmp_path: Path, outcomes: list[dict]) -> Path:
@@ -797,7 +797,7 @@ def test_baseline_advances_only_for_proven_confirmed_writes() -> None:
     synced_fields = {"loc-applied": {"summary": "landed"}}
     # Neither key is in the pass-start fetch window (so set_baseline is not the mechanism
     # under test here — only the proven-write overlay is).
-    reconcile._advance_baselines(store, {}, synced_fields)
+    reconcile_helpers._advance_baselines(store, {}, synced_fields)
 
     assert store.overlaid == ["loc-applied"], (
         "only a proven confirmed write advances the baseline; a deferred/failed binding "

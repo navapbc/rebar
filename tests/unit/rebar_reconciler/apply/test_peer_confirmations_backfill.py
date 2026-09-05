@@ -24,6 +24,9 @@ import importlib
 
 import pytest
 
+import rebar_reconciler.pass_support as pass_support
+import rebar_reconciler.persist_phase as persist_phase
+
 
 @pytest.fixture
 def pc():
@@ -208,7 +211,7 @@ def test_ordering_backfill_runs_before_snapshot_confirmation(tracker, pc):
         }
     }
 
-    reconcile._confirm_peer_links(ctx)
+    persist_phase.confirm_peer_links(ctx)
 
     record = pc.open_store(tracker).get("src-local", "dst-local", "blocks")
     assert record is not None
@@ -237,7 +240,7 @@ def test_lost_update_backfill_and_snapshot_records_both_survive(tracker, pc):
         }
     }
 
-    reconcile._confirm_peer_links(ctx)
+    persist_phase.confirm_peer_links(ctx)
 
     reopened = pc.open_store(tracker)
     assert reopened.is_confirmed("src-local", "dst-local", "blocks"), "backfill record was lost"
@@ -249,7 +252,9 @@ def test_lost_update_backfill_and_snapshot_records_both_survive(tracker, pc):
 def test_no_write_mode_backfills_nothing(tracker, monkeypatch):
     reconcile = importlib.import_module("rebar_reconciler.reconcile")
     calls: list[str] = []
-    monkeypatch.setattr(reconcile, "_confirm_peer_links", lambda _ctx: calls.append("called") or 0)
+    monkeypatch.setattr(
+        persist_phase, "confirm_peer_links", lambda _ctx: calls.append("called") or 0
+    )
 
     ctx = reconcile._PassContext(repo_root=tracker, pass_id="pass-5")
     ctx.persist = False
@@ -270,8 +275,8 @@ def test_fail_open_backfill_failure_does_not_break_the_pass(tracker, monkeypatch
     def _boom(_ctx):
         raise RuntimeError("backfill exploded")
 
-    monkeypatch.setattr(reconcile, "_confirm_peer_links", _boom)
-    monkeypatch.setattr(reconcile, "_commit_binding_store_snapshot", lambda *a, **k: True)
+    monkeypatch.setattr(persist_phase, "confirm_peer_links", _boom)
+    monkeypatch.setattr(pass_support, "_commit_binding_store_snapshot", lambda *a, **k: True)
     saved: list[bool] = []
 
     class _BS:

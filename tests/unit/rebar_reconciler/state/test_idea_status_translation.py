@@ -14,7 +14,7 @@ puts ``src/rebar/_engine`` on ``sys.path``.
 
 from __future__ import annotations
 
-from rebar_reconciler import inbound_translate, reconcile
+from rebar_reconciler import inbound_translate, pass_support
 from rebar_reconciler.adapters.jira import outbound_fields
 
 
@@ -39,4 +39,4 @@ def test_preflight_does_not_abort_on_idea():
         {"action": "update", "direction": "outbound", "key": "t1", "fields": {"status": "idea"}}
     ]
     # Must not raise (idea is a mapped status) — returns None normally.
-    assert reconcile.preflight_status_mapping(mutations) is None
+    assert pass_support.preflight_status_mapping(mutations) is None

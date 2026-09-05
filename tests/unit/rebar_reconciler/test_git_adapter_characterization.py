@@ -23,7 +23,7 @@ from rebar_reconciler import git_adapter
 
 # ---------------------------------------------------------------------------
 # Named ref / path constants — the single source of truth for the strings the
-# commit-back path (reconcile._commit_binding_store_snapshot) stages. Drift in
+# commit-back path (pass_support._commit_binding_store_snapshot) stages. Drift in
 # any of these is a behaviour change (a differently-named branch or a store
 # written to the wrong path) and must fail loudly.
 # ---------------------------------------------------------------------------

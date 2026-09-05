@@ -9,16 +9,16 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
 BINDING_STORE_PATH = (
     REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "binding_store.py"
 )
 
 
-def _load_reconcile():
-    name = "_test_get_rotation_commit_reconcile"
+def _load_pass_support():
+    name = "_test_get_rotation_commit_pass_support"
     sys.modules.pop(name, None)
-    spec = importlib.util.spec_from_file_location(name, RECONCILE_PATH)
+    spec = importlib.util.spec_from_file_location(name, PASS_SUPPORT_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
@@ -69,8 +69,8 @@ def test_sidecar_only_change_is_staged_and_committed(tmp_path: Path) -> None:
     bindings_before = bindings.read_bytes()
 
     rotation.write_text(json.dumps({"version": 1, "last_get_pass": {"DIG-1": "p2"}}))
-    reconcile = _load_reconcile()
-    assert reconcile._commit_binding_store_snapshot(object(), tmp_path, "rotation-only") is True
+    pass_support = _load_pass_support()
+    assert pass_support._commit_binding_store_snapshot(object(), tmp_path, "rotation-only") is True
 
     after = _git(tracker, "rev-parse", "HEAD")
     assert after != before
@@ -123,8 +123,8 @@ def test_cutover_commit_contains_sidecar_only_rotation_state(tmp_path: Path) -> 
     store.set_last_get("DIG-1", "p3")
     store.save()
 
-    reconcile = _load_reconcile()
-    assert reconcile._commit_binding_store_snapshot(store, tmp_path, "cutover") is True
+    pass_support = _load_pass_support()
+    assert pass_support._commit_binding_store_snapshot(store, tmp_path, "cutover") is True
 
     committed_bindings = json.loads(_git(tracker, "show", "HEAD:.bridge_state/bindings.json"))
     committed_rotation = json.loads(_git(tracker, "show", "HEAD:.bridge_state/get_rotation.json"))

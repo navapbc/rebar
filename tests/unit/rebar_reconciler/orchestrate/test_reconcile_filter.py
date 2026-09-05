@@ -36,7 +36,20 @@ def _load_reconcile():
     return mod
 
 
+def _load_pass_support():
+    name = "pass_support_under_test"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = _RECONCILER_DIR / "pass_support.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 reconcile = _load_reconcile()
+pass_support = _load_pass_support()
 
 
 # ---------------------------------------------------------------------------
@@ -103,20 +116,20 @@ class FakeBindingStore:
 class TestBuildFilterTargetSet:
     def test_includes_local_ids(self):
         bs = FakeBindingStore({})
-        result = reconcile._build_filter_target_set({"abc", "def"}, bs)
+        result = pass_support._build_filter_target_set({"abc", "def"}, bs)
         assert "abc" in result
         assert "def" in result
 
     def test_includes_bound_jira_keys(self):
         bs = FakeBindingStore({"abc": "DIG-100", "def": "DIG-200"})
-        result = reconcile._build_filter_target_set({"abc", "def"}, bs)
+        result = pass_support._build_filter_target_set({"abc", "def"}, bs)
         assert "DIG-100" in result
         assert "DIG-200" in result
         assert "abc" in result
 
     def test_unbound_ids_only_include_local(self):
         bs = FakeBindingStore({"abc": "DIG-100"})
-        result = reconcile._build_filter_target_set({"abc", "unbound-id"}, bs)
+        result = pass_support._build_filter_target_set({"abc", "unbound-id"}, bs)
         assert "abc" in result
         assert "DIG-100" in result
         assert "unbound-id" in result
@@ -131,23 +144,23 @@ class TestBuildFilterTargetSet:
 class TestMutationMatchesFilter:
     def test_matches_by_target(self):
         m = _make_mutation(target="DIG-100")
-        assert reconcile._mutation_matches_filter(m, {"DIG-100", "abc"})
+        assert pass_support._mutation_matches_filter(m, {"DIG-100", "abc"})
 
     def test_matches_by_provenance_local_id(self):
         m = _make_mutation(target="DIG-999", local_id="abc")
-        assert reconcile._mutation_matches_filter(m, {"abc"})
+        assert pass_support._mutation_matches_filter(m, {"abc"})
 
     def test_matches_by_provenance_jira_key(self):
         m = _make_mutation(target="some-other", jira_key="DIG-100")
-        assert reconcile._mutation_matches_filter(m, {"DIG-100"})
+        assert pass_support._mutation_matches_filter(m, {"DIG-100"})
 
     def test_no_match(self):
         m = _make_mutation(target="DIG-999", local_id="xyz", jira_key="DIG-888")
-        assert not reconcile._mutation_matches_filter(m, {"abc", "DIG-100"})
+        assert not pass_support._mutation_matches_filter(m, {"abc", "DIG-100"})
 
     def test_empty_provenance(self):
         m = _make_mutation(target="DIG-999")
-        assert not reconcile._mutation_matches_filter(m, {"abc"})
+        assert not pass_support._mutation_matches_filter(m, {"abc"})
 
 
 # ---------------------------------------------------------------------------

@@ -35,7 +35,7 @@ def test_real_pass_persists_scalars_and_equivalent_second_pass_is_byte_stable(
     tmp_path: Path,
 ) -> None:
     from rebar_reconciler.binding_store import BindingStore
-    from rebar_reconciler.reconcile import _advance_baselines
+    from rebar_reconciler.reconcile_helpers import _advance_baselines
 
     tracker = tmp_path / "tracker"
     tracker.mkdir()

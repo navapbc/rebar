@@ -41,7 +41,7 @@ def _live_jira_ready() -> bool:
 _skip = pytest.mark.skipif(not _live_jira_ready(), reason="no live Jira creds / acli binary")
 
 # The well-formed-plan contract: every dry-run result must carry these keys, and
-# every plan entry must carry these (mirrors reconcile._build_plan_entries).
+# every plan entry must carry these (mirrors reconcile_helpers._build_plan_entries).
 _RESULT_KEYS = {"pass_id", "mutation_count", "mutations_applied", "mutation_failures"}
 _PLAN_ENTRY_KEYS = {"direction", "action", "target", "local_id"}
 _VALID_DIRECTIONS = {"outbound", "inbound", ""}

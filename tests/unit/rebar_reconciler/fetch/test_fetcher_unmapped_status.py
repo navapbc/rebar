@@ -7,7 +7,7 @@ proactively — emit an observable ``fetcher-unmapped-jira-status`` BRIDGE_ALERT
 ``alert_store.append`` naming the offending status — so a newly-added Jira status
 is flagged for a mapping at snapshot-build time, rather than being discovered only
 downstream when it reaches an outbound mutation and trips the status preflight
-(``reconcile.preflight_status_mapping``).
+(``pass_support.preflight_status_mapping``).
 
 RED expectation: the current fetcher builds the snapshot but never inspects status
 names, so no such alert is emitted — the test fails RED. GREEN: the fetcher detects

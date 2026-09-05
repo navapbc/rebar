@@ -24,34 +24,36 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
 
 
-def _load_reconcile():
-    spec = importlib.util.spec_from_file_location("reconcile_status_preflight_test", RECONCILE_PATH)
+def _load_pass_support():
+    spec = importlib.util.spec_from_file_location(
+        "pass_support_status_preflight_test", PASS_SUPPORT_PATH
+    )
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["reconcile_status_preflight_test"] = mod
+    sys.modules["pass_support_status_preflight_test"] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
 
 
 @pytest.fixture(scope="module")
-def reconcile():
-    if not RECONCILE_PATH.exists():
-        pytest.fail(f"reconcile.py not found at {RECONCILE_PATH}")
-    return _load_reconcile()
+def pass_support():
+    if not PASS_SUPPORT_PATH.exists():
+        pytest.fail(f"pass_support.py not found at {PASS_SUPPORT_PATH}")
+    return _load_pass_support()
 
 
-def _patch_mapping(reconcile, monkeypatch, mapping):
+def _patch_mapping(pass_support, monkeypatch, mapping):
     """Patch the config module that preflight loads via _load."""
-    cfg = reconcile._load("reconcile_config", "config.py")
+    cfg = pass_support._load("reconcile_config", "config.py")
     monkeypatch.setattr(cfg, "local_to_jira_status", mapping, raising=False)
 
 
-def test_preflight_accepts_dict_status_with_known_name(reconcile, monkeypatch):
+def test_preflight_accepts_dict_status_with_known_name(pass_support, monkeypatch):
     """When mutation.fields.status is a Jira dict whose .name is in mapping, no raise."""
-    _patch_mapping(reconcile, monkeypatch, {"To Do": "To Do", "In Progress": "In Progress"})
+    _patch_mapping(pass_support, monkeypatch, {"To Do": "To Do", "In Progress": "In Progress"})
     mutations = [
         {
             "action": "update",
@@ -59,13 +61,13 @@ def test_preflight_accepts_dict_status_with_known_name(reconcile, monkeypatch):
             "fields": {"status": {"name": "To Do", "id": "21057"}},
         }
     ]
-    reconcile.preflight_status_mapping(mutations)
+    pass_support.preflight_status_mapping(mutations)
 
 
-def test_preflight_does_not_crash_on_dict_status(reconcile, monkeypatch, capsys):
+def test_preflight_does_not_crash_on_dict_status(pass_support, monkeypatch, capsys):
     """When the .name isn't in mapping, the dict is normalized (no TypeError) and
     the unmapped status is WARNED, not raised (Facet 3: preflight is non-fatal)."""
-    _patch_mapping(reconcile, monkeypatch, {"To Do": "To Do"})
+    _patch_mapping(pass_support, monkeypatch, {"To Do": "To Do"})
     mutations = [
         {
             "action": "update",
@@ -75,13 +77,13 @@ def test_preflight_does_not_crash_on_dict_status(reconcile, monkeypatch, capsys)
     ]
     # Must NOT raise (neither StatusMappingError nor TypeError) — dict-status is
     # normalized to its .name and the unmapped value is warned, not aborted.
-    reconcile.preflight_status_mapping(mutations)
+    pass_support.preflight_status_mapping(mutations)
     assert "Bogus Status" in capsys.readouterr().err
 
 
-def test_preflight_string_status_unchanged_behavior(reconcile, monkeypatch):
+def test_preflight_string_status_unchanged_behavior(pass_support, monkeypatch):
     """String status (outbound shape) still works."""
-    _patch_mapping(reconcile, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
+    _patch_mapping(pass_support, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
     mutations = [
         {
             "action": "update",
@@ -89,12 +91,12 @@ def test_preflight_string_status_unchanged_behavior(reconcile, monkeypatch):
             "fields": {"status": "open"},
         }
     ]
-    reconcile.preflight_status_mapping(mutations)
+    pass_support.preflight_status_mapping(mutations)
 
 
-def test_preflight_skips_dict_without_name(reconcile, monkeypatch):
+def test_preflight_skips_dict_without_name(pass_support, monkeypatch):
     """Dict without name normalizes to '' which is falsy — skip the check."""
-    _patch_mapping(reconcile, monkeypatch, {"To Do": "To Do"})
+    _patch_mapping(pass_support, monkeypatch, {"To Do": "To Do"})
     mutations = [
         {
             "action": "update",
@@ -102,17 +104,17 @@ def test_preflight_skips_dict_without_name(reconcile, monkeypatch):
             "fields": {"status": {"id": "999"}},  # no name key
         }
     ]
-    reconcile.preflight_status_mapping(mutations)
+    pass_support.preflight_status_mapping(mutations)
 
 
-def test_preflight_skips_inbound_mutations(reconcile, monkeypatch):
+def test_preflight_skips_inbound_mutations(pass_support, monkeypatch):
     """Inbound mutations carry Jira status names — preflight is for outbound only.
 
     The probe Phase 3 fed inbound mutations through preflight and produced
     spurious ``local status 'To Do' not in local_to_jira_status mapping``
     errors (Jira names are mapping VALUES, not keys). Inbound must skip.
     """
-    _patch_mapping(reconcile, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
+    _patch_mapping(pass_support, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
     mutations = [
         {
             "action": "update",
@@ -122,12 +124,12 @@ def test_preflight_skips_inbound_mutations(reconcile, monkeypatch):
         }
     ]
     # Must NOT raise — direction='inbound' skips this entry.
-    reconcile.preflight_status_mapping(mutations)
+    pass_support.preflight_status_mapping(mutations)
 
 
-def test_preflight_skips_inbound_with_dict_status(reconcile, monkeypatch):
+def test_preflight_skips_inbound_with_dict_status(pass_support, monkeypatch):
     """Inbound with raw Jira dict-status also skipped."""
-    _patch_mapping(reconcile, monkeypatch, {"open": "To Do"})
+    _patch_mapping(pass_support, monkeypatch, {"open": "To Do"})
     mutations = [
         {
             "action": "update",
@@ -136,10 +138,10 @@ def test_preflight_skips_inbound_with_dict_status(reconcile, monkeypatch):
             "fields": {"status": {"name": "Bogus", "id": "999"}},
         }
     ]
-    reconcile.preflight_status_mapping(mutations)
+    pass_support.preflight_status_mapping(mutations)
 
 
-def test_preflight_accepts_outbound_jira_side_status_name(reconcile, monkeypatch):
+def test_preflight_accepts_outbound_jira_side_status_name(pass_support, monkeypatch):
     """Outbound differ pre-maps local→Jira; the resulting Jira name must pass.
 
     ``outbound_differ._map_local_to_jira_fields`` translates local status
@@ -147,7 +149,7 @@ def test_preflight_accepts_outbound_jira_side_status_name(reconcile, monkeypatch
     the mutation. The preflight then sees the VALUE side of the mapping,
     not the KEY side — both shapes must be accepted.
     """
-    _patch_mapping(reconcile, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
+    _patch_mapping(pass_support, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
     mutations = [
         {
             "action": "update",
@@ -156,14 +158,14 @@ def test_preflight_accepts_outbound_jira_side_status_name(reconcile, monkeypatch
             "fields": {"status": "In Progress"},  # Jira-side name (post-mapping)
         }
     ]
-    reconcile.preflight_status_mapping(mutations)
+    pass_support.preflight_status_mapping(mutations)
 
 
-def test_preflight_warns_on_truly_unmapped_status(reconcile, monkeypatch, capsys):
+def test_preflight_warns_on_truly_unmapped_status(pass_support, monkeypatch, capsys):
     """A status that is neither a key nor a value in the mapping is unmapped — it
     is WARNED (naming the target), not raised (Facet 3: preflight is non-fatal so
     the mutation flows to the applier and is recorded as a per-mutation failure)."""
-    _patch_mapping(reconcile, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
+    _patch_mapping(pass_support, monkeypatch, {"open": "To Do", "in_progress": "In Progress"})
     mutations = [
         {
             "action": "update",
@@ -173,7 +175,7 @@ def test_preflight_warns_on_truly_unmapped_status(reconcile, monkeypatch, capsys
         }
     ]
     # Must NOT raise — the scan is now non-fatal.
-    reconcile.preflight_status_mapping(mutations)
+    pass_support.preflight_status_mapping(mutations)
     err = capsys.readouterr().err
     assert "Nonsense" in err
     assert "DIG-7" in err

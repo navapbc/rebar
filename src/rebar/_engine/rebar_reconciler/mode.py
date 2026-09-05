@@ -67,21 +67,6 @@ class Mode(str, Enum):
     # Ordering
     # ------------------------------------------------------------------
 
-    def rank(self) -> int:
-        """Return an integer rank for ordering comparisons.
-
-        Ordering: dry-run (0) < bootstrap-strict (1) < bootstrap-throttle (2)
-        < live (3).
-
-        Backward-compat alias: the same ordering is now available natively via
-        ``<``/``>`` operators (see ``__lt__`` and ``@functools.total_ordering``).
-        New code should prefer the natural operators::
-
-            if target_mode > gated_mode:
-                raise PhaseGateError(...)
-        """
-        return _ORDERED.index(self.value)
-
     @staticmethod
     def _compatible_rank(other: object) -> int | None:
         """Return another mode member's rank across supported module-load aliases."""
@@ -100,28 +85,28 @@ class Mode(str, Enum):
         other_rank = self._compatible_rank(other)
         if other_rank is None:
             return NotImplemented
-        return self.rank() < other_rank
+        return _ORDERED.index(self.value) < other_rank
 
     def __le__(self, other: object) -> bool:
         """Order Modes by their position in ``_ORDERED``."""
         other_rank = self._compatible_rank(other)
         if other_rank is None:
             return NotImplemented
-        return self.rank() <= other_rank
+        return _ORDERED.index(self.value) <= other_rank
 
     def __gt__(self, other: object) -> bool:
         """Order Modes by their position in ``_ORDERED``."""
         other_rank = self._compatible_rank(other)
         if other_rank is None:
             return NotImplemented
-        return self.rank() > other_rank
+        return _ORDERED.index(self.value) > other_rank
 
     def __ge__(self, other: object) -> bool:
         """Order Modes by their position in ``_ORDERED``."""
         other_rank = self._compatible_rank(other)
         if other_rank is None:
             return NotImplemented
-        return self.rank() >= other_rank
+        return _ORDERED.index(self.value) >= other_rank
 
 
 # Per-mode mutation cap. None means uncapped (LIVE). 0 means "apply nothing"
