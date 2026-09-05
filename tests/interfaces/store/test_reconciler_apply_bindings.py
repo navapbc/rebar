@@ -37,7 +37,20 @@ def _load(name: str, rel: str):
 def test_reconcile_once_threads_composed_runtime_transport_into_apply(monkeypatch, tmp_path):
     """A pass composes one runtime and the apply phase receives its captured transport."""
     reconcile = _load("rebar_reconciler.reconcile", "reconcile.py")
-    runtime = _load("rebar_reconciler.runtime", "runtime.py")
+    # Patch the runtime module ``reconcile`` ITSELF resolved (reconcile.py's ``_runtime``,
+    # the exact object it hands to ``bind_operation_runtime``), never a copy loaded here.
+    # Loading it via the ``_load`` above would be wrong whenever the engine exists at TWO
+    # paths — which is what a NON-editable install (``uv pip install '.'``, three sweep
+    # lanes) produces: the checkout keeps ``src/rebar/_engine/`` while the package resolves
+    # to site-packages. ``reconcile.py`` reaches siblings through ``_loader.lazy_load``,
+    # which caches by ``sys.modules`` KEY and ignores the path, so ``_runtime`` is whichever
+    # copy an earlier test registered; ``_load``'s ``__file__`` guard (bug 9f0b, pinned by
+    # ``diffing/test_load_module_identity.py``) then read that live module as a MISS,
+    # replaced the shared key with a second copy, and this test patched the copy nobody
+    # used. The real ``compose_reconciler_runtime`` then raised for a scope-less
+    # ``tmp_path``, ``bind_operation_runtime`` swallowed it for a non-persisting pass, and
+    # apply was handed ``client=None`` (bug ae96-72a9-8145-4c85).
+    runtime = reconcile._runtime
 
     captured_transport = SimpleNamespace(name="composed-transport")
 
