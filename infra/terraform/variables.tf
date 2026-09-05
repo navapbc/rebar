@@ -63,10 +63,17 @@ variable "gate_scratch_volume_size_gb" {
 variable "gate_scratch_mount" {
   type        = string
   description = <<-EOT
-    Host path the gate-scratch volume mounts at. Single-sourced here because four things
-    must agree on it — user_data.sh's fstab entry, the review-bot's REBAR_GATE_TMPDIR/TMPDIR,
-    observability.sh's df probe, and the CloudWatch alarm's `mount` dimension. A disagreement
-    between any two of them is a silent fallback to the root filesystem.
+    Host path the gate-scratch volume mounts at. Four things must agree on it, and only TWO
+    of them derive the value from this variable: user_data.sh's fstab entry (through main.tf's
+    templatefile) and the CloudWatch alarm's `mount` dimension (monitoring_autodeploy.tf). The
+    other two hardcode the same literal — the review-bot's REBAR_GATE_TMPDIR/TMPDIR in
+    infra/compose/docker-compose.yml, and the GATE_SCRATCH_MOUNT default in
+    infra/scripts/observability.sh that its df probe reads. So this is NOT a single source:
+    changing the default here does not move those two, and they must be updated with it.
+    What holds them together is a TEST, not a substitution —
+    tests/unit/test_gate_scratch_volume_aa40.py pins all four against one SCRATCH_MOUNT
+    constant, so editing this default alone fails offline rather than on a host. A
+    disagreement between any two of them is a silent fallback to the root filesystem.
   EOT
   default     = "/var/lib/rebar/gate-scratch"
 }
