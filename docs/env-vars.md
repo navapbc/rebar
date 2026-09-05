@@ -169,12 +169,13 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REVIEW_TIMEOUT_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `SHUTDOWN_CANCEL_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `SHUTDOWN_DRAIN_SECONDS` | `src/rebar/review_bot/config.py` |  |
+| `TF_CLI_CONFIG_FILE` | `src/rebar/grounding/terraform_source.py` |  |
 | `TICKETS_REMOTE` | `src/rebar/review_bot/config.py` |  |
 | `USER` | `src/rebar/_config_resolvers.py` |  |
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_162 variables._
+_163 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -188,6 +189,7 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/config.py:392` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:722` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
+- `src/rebar/grounding/terraform_source.py:410` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:78` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config_readers.py:21` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config_readers.py:76` — `os.environ.get(<non-literal>)`

@@ -130,6 +130,32 @@ def test_terraform_call_gets_tools_and_finalizer(tmp_path: Path) -> None:
     assert any(t.endswith("*.tf") for t in targets)  # membership glob
 
 
+def test_terraform_call_advertises_probe_source_as_third_tool(tmp_path: Path) -> None:
+    # REB-640 1c52: probe_source is minted beside the two existing refutation queries at the
+    # single shared seam site, so BOTH pipelines advertise all three to a Terraform-routed call.
+    (tmp_path / "infra").mkdir()
+    (tmp_path / "infra" / "main.tf").write_text('variable "a" {}\n', encoding="utf-8")
+    provider = terraform_seam.build_tool_provider(repo_root=str(tmp_path), usage_sink={})
+    step = RunnerAgentStep(extra_tools=[], tool_provider=provider)
+    ctx = _ctx({"findings": [{"criteria": ["T10"], "location": {"file": "infra/main.tf"}}]})
+    tools, _finalize = _run_resolve(step, ctx)
+    names = {getattr(t, "__name__", "") for t in tools}
+    assert {
+        "terraform_lookup_declaration",
+        "terraform_resolve_reference",
+        "terraform_probe_source",
+    } <= names
+
+
+def test_non_terraform_call_still_sees_no_probe_source(tmp_path: Path) -> None:
+    provider = terraform_seam.build_tool_provider(repo_root=str(tmp_path), usage_sink={})
+    step = RunnerAgentStep(extra_tools=[object()], tool_provider=provider)
+    tools, finalize = _run_resolve(step, _ctx({"findings": [{"criteria": ["E4"]}]}))
+    names = {getattr(t, "__name__", "") for t in tools}
+    assert "terraform_probe_source" not in names
+    assert finalize is None
+
+
 def test_provider_none_when_not_configured() -> None:
     # No tool_provider → the static extra_tools flow through unchanged and no finalizer runs.
     static = object()

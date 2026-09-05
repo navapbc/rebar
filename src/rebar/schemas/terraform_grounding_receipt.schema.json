@@ -11,7 +11,7 @@
     },
     "operation": {
       "type": "string",
-      "enum": ["lookup_declaration", "resolve_reference"],
+      "enum": ["lookup_declaration", "resolve_reference", "probe_source"],
       "description": "Which per-call session operation produced this receipt."
     },
     "reason_detail": {
@@ -37,6 +37,19 @@
         "module_limit",
         "file_limit",
         "byte_limit",
+        "registry_not_found",
+        "registry_unauthorized",
+        "registry_rate_limited",
+        "dns_error",
+        "tls_error",
+        "proxy_error",
+        "registry_server_error",
+        "rejected_redirect",
+        "probe_timeout",
+        "malformed_metadata",
+        "oversized_metadata",
+        "rejected_target",
+        "non_registry_remote",
         null
       ]
     },
@@ -121,6 +134,11 @@
       "description": "The GENERIC grounding abstention reason (mirrors grounding.schema.json's closed enum); null for a refuted outcome."
     },
     "reason_detail": { "$ref": "terraform_grounding_receipt.schema.json#/$defs/reason_detail" },
+    "source_kind": {
+      "type": "string",
+      "enum": ["local_module", "registry_provider", "registry_module"],
+      "description": "Optional Terraform source category for positive source probes."
+    },
     "result_digest": { "$ref": "terraform_grounding_receipt.schema.json#/$defs/digest" }
   },
   "allOf": [

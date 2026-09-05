@@ -312,6 +312,11 @@ query returns a closed `no_tool`/`missing_extra` abstention — never a raise.
   `data.aws_ami.base`, `module.vpc`, …).
 * `TerraformSession.resolve_reference(reference, from_file)` — refute an asserted
   ABSENCE of a referenced member/output (`var.region`, `module.vpc.vpc_id`, …).
+* `TerraformSession.probe_source(source, from_module="")` — refute an asserted
+  ABSENCE of a declared module/provider **source**, **positive-only**: a repo-contained
+  local module refutes at T1; **positively-reachable registry metadata** refutes at T0.
+  It NEVER downloads module content and NEVER treats an access failure as absence (see
+  *Source probing* below).
 * `TerraformSession.finalize() -> Usage` — free the cache/ledger and report
   `concrete_reads` (the `.tf`/`.tf.json` actually read) + `membership_globs` (e.g.
   `infra/**/*.tf`) for the signed read-set.
@@ -321,6 +326,37 @@ Each query returns a `Result` with `.evidence` (a grounding record — `refuted`
 `GROUNDING` schema) and `.receipt` (the canonical, credential-redacting receipt,
 validated against `TERRAFORM_GROUNDING_RECEIPT`). All digests are `sha256:`-prefixed;
 attribute literals and `default` values are redacted.
+
+### Source probing — local containment + registry metadata (V1) vs remote fetch (deferred)
+
+`probe_source` refutes an asserted-absent module/provider `source` **positive-only**, and is the
+one Terraform operation that may touch the network. What it does in V1 is deliberately narrow —
+**metadata probing**, not remote fetch (ADR 0115 §5):
+
+* **Local sources** — a literal source is normalized relative to `from_module`; it refutes at
+  **T1** only when the resolved dir stays under the repo root, holds an indexable module, and is
+  in the bounded immutable closure. An absolute path, an escaping `../` or symlink, an unreadable
+  or missing dir, the generated `.terraform/modules` cache, or a dynamic (`${…}`) source all
+  **abstain** — absence is never asserted.
+* **Registry metadata** — a provider (`ns/type`) or native module (`ns/name/system`) address,
+  with an optional explicit hostname (omitted → the public default registry), is probed through
+  the Registry **service-discovery and version/metadata** endpoints over HTTPS **only** — NEVER a
+  module **download/archive** URL. A bounded (1 MiB), size-limited, schema-valid `2xx` refutes at
+  **T0** with a closed `source_kind` (`local_module` | `registry_provider` | `registry_module`)
+  plus the existing `result_digest`; no body, raw count, or remote content becomes a field.
+* **Target trust boundary (validated BEFORE any credential attaches)** — HTTPS-only; a
+  **no-redirect** opener (a cross-host redirect is `network_error` *before* a token is sent);
+  embedded URL credentials, literal IPs, and non-HTTPS are rejected; a private-address host is
+  permitted only when it exactly matches a credentialed hostname.
+* **Ambient credentials (read-only)** — Terraform's own precedence and hostname normalization:
+  (1) `TF_TOKEN_<host>` env, (2) `TF_CLI_CONFIG_FILE` else the platform-default CLI config,
+  (3) `credentials.tfrc.json` — reading only literal `credentials` entries for the **exact**
+  registry hostname. It never prompts, writes a credential file, runs a `credentials_helper`,
+  imports provider/cloud credentials, or uses another host's. Output/receipts/logs identify only
+  `auth_source=environment|static-file|none` — never a token, hash, path, header, or raw body.
+* **Still out of scope (approved-but-deferred)** — downloading or expanding remote module
+  **content** (git/HTTP/S3/GCS checkout, registry archive), Terraform Cloud API beyond registry
+  discovery, credential helpers, and provider/cloud credentials.
 
 ### Limits
 
@@ -360,3 +396,9 @@ pair:
 | unknown tfvars | `ambiguous` / `unknown_tfvars` |
 | path outside snapshot (abs/out-of-repo/escaping symlink) | `private_or_internal_suspected` / `path_outside_snapshot` |
 | module/file/byte bound | `other` / `module_limit` \| `file_limit` \| `byte_limit` |
+| registry not found / unauthorized | `private_or_internal_suspected` / `registry_not_found` \| `registry_unauthorized` |
+| registry rate-limited (429) | `rate_limited` / `registry_rate_limited` |
+| DNS / TLS / proxy / 5xx / rejected cross-host redirect | `network_error` / `dns_error` \| `tls_error` \| `proxy_error` \| `registry_server_error` \| `rejected_redirect` |
+| probe timeout | `timeout` / `probe_timeout` |
+| malformed / oversized registry metadata | `parse_error` / `malformed_metadata` \| `oversized_metadata` |
+| rejected target / non-registry remote source | `ambiguous` / `rejected_target` \| `non_registry_remote` |
