@@ -23,6 +23,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
 from _subprocess_env import subprocess_env
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
@@ -83,7 +84,8 @@ def _environment(tmp_path: Path, data_mount: Path) -> tuple[dict[str, str], Path
 
     journal = tmp_path / "journal.txt"
     journal.write_text("")
-    _stub(bin_dir, "journalctl", 'cat "$JOURNAL_FILE"; exit 0')
+    _stub(bin_dir, "journalctl", JOURNALCTL_EMULATOR)
+    _stub(bin_dir, "timeout", TIMEOUT_STUB)
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()

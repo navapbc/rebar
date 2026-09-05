@@ -22,6 +22,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
 from _subprocess_env import subprocess_env
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
@@ -72,20 +73,27 @@ def _environment(tmp_path: Path) -> tuple[dict[str, str], dict[str, Path]]:
     )
     _stub(bin_dir, "git", f'printf "{_SHA}\\trefs/heads/main\\n"; exit 0')
     _stub(bin_dir, "logger", "exit 0")
+    # The journal is materialised from $MARKERS_FILE and then served by the shared
+    # cursor-aware emulator, so the counters exercise the same bounded read path as production
+    # (bug 1205) while this suite keeps asserting its own cold-start contract.
     _stub(
         bin_dir,
         "journalctl",
         """
         n=$(cat "$MARKERS_FILE")
+        : > "$JOURNAL_FILE"
         for _ in $(seq 1 "$n"); do
-          printf '%s\\n' 'VOTER_ERROR {"ts": 1}' 'MERGE_CHANGE_ERROR {"ts": 1}'
-          printf '%s\\n' 'AUTODEPLOY_ERROR {"ts": 1}' 'AUTODEPLOY_DEFERRED {"ts": 1}'
-          printf '%s\\n' 'gerrit_to_platform error'
-          printf '%s\\n' 'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 1, "reason": "bound-exceeded"}'
-          printf '%s\\n' 'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 1, "reason": "signal-unavailable"}'
+          printf '%s\\n' 'VOTER_ERROR {"ts": 1}' 'MERGE_CHANGE_ERROR {"ts": 1}' \\
+            'AUTODEPLOY_ERROR {"ts": 1}' 'AUTODEPLOY_DEFERRED {"ts": 1}' \\
+            'gerrit_to_platform error' \\
+            'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 1, "reason": "bound-exceeded"}' \\
+            'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 1, "reason": "signal-unavailable"}' \\
+            >> "$JOURNAL_FILE"
         done
-        """,
+        """
+        + JOURNALCTL_EMULATOR,
     )
+    _stub(bin_dir, "timeout", TIMEOUT_STUB)
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
 
     # The directory exists (the script mkdir -p's it anyway); the offset FILES do not.
@@ -102,6 +110,7 @@ def _environment(tmp_path: Path) -> tuple[dict[str, str], dict[str, Path]]:
             "PATH": f"{bin_dir}:{env['PATH']}",
             "AWS_LOG": str(aws_log),
             "MARKERS_FILE": str(markers_file),
+            "JOURNAL_FILE": str(tmp_path / "journal.txt"),
             "REPL_LOG": str(repl_log),
             **{name: str(path) for name, path in paths.items()},
         }
@@ -119,6 +128,12 @@ def _values(log: Path, target: str) -> list[int]:
     return values
 
 
+def _state(path: Path) -> tuple[int, str]:
+    """`<total> <cursor>` since bug 1205; a bare total (the log-file counter) has no cursor."""
+    fields = path.read_text().split()
+    return int(fields[0]), (fields[1] if len(fields) > 1 else "")
+
+
 @pytest.mark.parametrize(("target", "offset_variable", "per_interval"), _TARGETS)
 def test_cold_start_publishes_zero_and_seeds_the_offset(
     tmp_path: Path, target: str, offset_variable: str, per_interval: int
@@ -131,9 +146,16 @@ def test_cold_start_publishes_zero_and_seeds_the_offset(
     assert result.returncode == 0
     # 0, NOT the journal's marker count — everything there predates this counter.
     assert _values(paths["aws_log"], target) == [0]
-    # Seeded to the current total, so the counter measures from the next interval on.
-    expected = _MARKERS_IN_JOURNAL * per_interval
-    assert paths[offset_variable].read_text().strip() == str(expected)
+    # Seeded so the counter measures from the next interval on. Since bug 1205 the seed is a
+    # journald CURSOR at the tail rather than a recomputed total: what makes the inherited
+    # journal un-republishable is that the next read starts after it, not the arithmetic.
+    # replication_errors greps a log file rather than journald and keeps the bare-total form.
+    total, cursor = _state(paths[offset_variable])
+    if offset_variable == "REPL_OFFSET_FILE":
+        assert (total, cursor) == (_MARKERS_IN_JOURNAL, "")
+    else:
+        assert total == 0
+        assert cursor, "no cursor seeded: the next run would re-read the inherited journal"
 
 
 def test_markers_after_initialisation_still_publish(tmp_path: Path) -> None:
@@ -149,5 +171,10 @@ def test_markers_after_initialisation_still_publish(tmp_path: Path) -> None:
     assert second.returncode == 0
     for target, offset_variable, per_interval in _TARGETS:
         assert _values(paths["aws_log"], target) == [0, per_interval], target
-        expected = (_MARKERS_IN_JOURNAL + 1) * per_interval
-        assert paths[offset_variable].read_text().strip() == str(expected), target
+        total, _cursor = _state(paths[offset_variable])
+        expected = (
+            (_MARKERS_IN_JOURNAL + 1) * per_interval
+            if offset_variable == "REPL_OFFSET_FILE"
+            else per_interval
+        )
+        assert total == expected, target

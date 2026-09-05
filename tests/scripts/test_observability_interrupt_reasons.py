@@ -15,6 +15,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
 from _subprocess_env import subprocess_env
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
@@ -74,7 +75,8 @@ def _environment(tmp_path: Path, journal_lines: list[str]) -> tuple[dict[str, st
 
     journal = tmp_path / "journal.txt"
     journal.write_text("".join(f"{line}\n" for line in journal_lines))
-    _stub(bin_dir, "journalctl", 'cat "$JOURNAL_FILE"; exit 0')
+    _stub(bin_dir, "journalctl", JOURNALCTL_EMULATOR)
+    _stub(bin_dir, "timeout", TIMEOUT_STUB)
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
@@ -82,8 +84,11 @@ def _environment(tmp_path: Path, journal_lines: list[str]) -> tuple[dict[str, st
     # absent offset file is a cold start, which seeds to the journal total and publishes 0
     # instead of the inherited history (bug e2a6-9ee4-8d5c-4290, covered by
     # test_observability_coldstart_e2a6.py). Pre-initialising keeps the split under test.
+    # `<total> <cursor>` since bug 1205: a cursor of 0 sits before the journal's first entry,
+    # so the counter is already observing and counts everything in it. A BARE total, like an
+    # absent file, is a cold start. REPL_OFFSET_FILE greps a log file and keeps the bare form.
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n")
+        (offsets / name.lower()).write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
     env = subprocess_env()
     env.update(
         {

@@ -31,5 +31,12 @@ Environment=HEALTH_URL=http://localhost:8000/health
 ExecStart=/opt/rebar/infra/scripts/autodeploy.sh
 # a failing deploy is fail-safe inside the script (last-known-good stays live); a nonzero
 # exit here just marks this run failed and lets the timer + backoff schedule the next.
+# Same latch as the observability probe (bug 1205-63b2-2c01-4e7f): a `Type=oneshot` with no
+# TimeoutStartSec gets TimeoutStartUSec=INFINITY, and rebar-autodeploy.timer's OnUnitActiveSec
+# is measured from the last COMPLETED activation — so a run that hangs (the `git clone` at
+# autodeploy.sh:787 is unbounded; the fetch beside it is already timeout-wrapped) does not delay
+# the next tick, it deletes it, and the box silently stops tracking main. 90s is below the 2min
+# period, so a hung deploy is killed before the next elapse and the timer re-arms.
+TimeoutStartSec=90
 Nice=10
 IOSchedulingClass=idle

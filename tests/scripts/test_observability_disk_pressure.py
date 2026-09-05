@@ -17,6 +17,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
 from _subprocess_env import subprocess_env
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
@@ -96,17 +97,20 @@ def _environment(
 
     journal = tmp_path / "journal.txt"
     journal.write_text("".join(f"{line}\n" for line in journal_lines))
-    _stub(bin_dir, "journalctl", 'cat "$JOURNAL_FILE"; exit 0')
+    _stub(bin_dir, "journalctl", JOURNALCTL_EMULATOR)
+    _stub(bin_dir, "timeout", TIMEOUT_STUB)
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
     paths = {name: offsets / name.lower() for name in _OFFSET_VARIABLES}
     if seed_offsets:
-        # An explicit 0 in every offset: these tests are about the disk-pressure counter, and
-        # an absent offset file is a cold start (seeds to the journal total and publishes 0 —
-        # bug e2a6, asserted separately below).
-        for path in paths.values():
-            path.write_text("0\n")
+        # `<total> <cursor>` since bug 1205: a cursor of 0 sits before the
+        # journal's first entry, so the counter is already observing and counts everything in
+        # it. A BARE total, like an absent file, is a cold start — it seeds a tail cursor and
+        # publishes 0 (bug e2a6-9ee4-8d5c-4290), which would mask what these tests measure.
+        # REPL_OFFSET_FILE greps a log file rather than journald and keeps the bare form.
+        for name, path in paths.items():
+            path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
     env = subprocess_env()
     env.update(
         {
@@ -119,6 +123,11 @@ def _environment(
     )
     (tmp_path / "replication.log").write_text("")
     return env, aws_log, paths
+
+
+def _state_total(path: Path) -> str:
+    """The cumulative total from a `<total> <cursor>` state file (bug 1205)."""
+    return path.read_text().split()[0]
 
 
 def _values(log: Path, metric: str) -> list[int]:
@@ -153,7 +162,7 @@ def test_disk_pressure_markers_are_counted_into_their_own_metric(tmp_path: Path)
 
     assert result.returncode == 0
     assert _values(aws_log, METRIC) == [2]
-    assert paths["DISK_PRESSURE_OFFSET_FILE"].read_text().strip() == "2"
+    assert _state_total(paths["DISK_PRESSURE_OFFSET_FILE"]) == "2"
 
 
 def test_cold_start_seeds_the_offset_and_publishes_zero(tmp_path: Path) -> None:
@@ -164,7 +173,7 @@ def test_cold_start_seeds_the_offset_and_publishes_zero(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert _values(aws_log, METRIC) == [0]
-    assert paths["DISK_PRESSURE_OFFSET_FILE"].read_text().strip() == "3"
+    assert _state_total(paths["DISK_PRESSURE_OFFSET_FILE"]) == "0"
 
 
 def test_second_run_publishes_only_the_new_markers(tmp_path: Path) -> None:
@@ -178,7 +187,7 @@ def test_second_run_publishes_only_the_new_markers(tmp_path: Path) -> None:
 
     assert (first.returncode, second.returncode) == (0, 0)
     assert _values(aws_log, METRIC) == [2, 1]
-    assert paths["DISK_PRESSURE_OFFSET_FILE"].read_text().strip() == "3"
+    assert _state_total(paths["DISK_PRESSURE_OFFSET_FILE"]) == "3"
 
 
 # --- the "reclaim is ineffective" counter (bug 9bc0-1200-1451-44bb) -----------
@@ -196,7 +205,7 @@ def test_persistence_markers_are_counted_into_their_own_metric(tmp_path: Path) -
 
     assert result.returncode == 0
     assert _values(aws_log, PERSIST_METRIC) == [2]
-    assert paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"].read_text().strip() == "2"
+    assert _state_total(paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"]) == "2"
 
 
 def test_the_two_disk_pressure_counters_never_cross_count(tmp_path: Path) -> None:
@@ -216,8 +225,8 @@ def test_the_two_disk_pressure_counters_never_cross_count(tmp_path: Path) -> Non
         "starts with the invocation marker's token and must not match it"
     )
     assert _values(aws_log, PERSIST_METRIC) == [2]
-    assert paths["DISK_PRESSURE_OFFSET_FILE"].read_text().strip() == "1"
-    assert paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"].read_text().strip() == "2"
+    assert _state_total(paths["DISK_PRESSURE_OFFSET_FILE"]) == "1"
+    assert _state_total(paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"]) == "2"
 
 
 def test_persistence_prose_is_not_counted(tmp_path: Path) -> None:
@@ -245,7 +254,7 @@ def test_persistence_cold_start_seeds_the_offset_and_publishes_zero(tmp_path: Pa
 
     assert result.returncode == 0
     assert _values(aws_log, PERSIST_METRIC) == [0]
-    assert paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"].read_text().strip() == "5"
+    assert _state_total(paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"]) == "0"
 
 
 def test_persistence_second_run_publishes_only_the_new_markers(tmp_path: Path) -> None:
@@ -258,7 +267,7 @@ def test_persistence_second_run_publishes_only_the_new_markers(tmp_path: Path) -
 
     assert (first.returncode, second.returncode) == (0, 0)
     assert _values(aws_log, PERSIST_METRIC) == [1, 1]
-    assert paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"].read_text().strip() == "2"
+    assert _state_total(paths["DISK_PRESSURE_PERSIST_OFFSET_FILE"]) == "2"
 
 
 def test_no_persistence_markers_publishes_zero(tmp_path: Path) -> None:
