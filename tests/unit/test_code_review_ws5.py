@@ -936,7 +936,7 @@ def test_make_scanner_integration_target_provisions_then_runs_nine_real_contract
         assert node in makefile
 
 
-def test_scanner_workflow_is_shared_by_mirror_and_gerrit_advisory():
+def test_scanner_workflow_is_shared_by_mirror_and_gerrit_voting():
     import yaml
 
     root = Path(__file__).resolve().parents[2]
@@ -956,17 +956,14 @@ def test_scanner_workflow_is_shared_by_mirror_and_gerrit_advisory():
     )
 
     vote = gerrit["jobs"]["vote"]
-    assert "scanner-integration" not in vote["needs"]
-    assert "scanner-integration" not in gerrit["jobs"]
-    conclusion = vote["steps"][2]["env"]["CONCLUSION"]
-    assert "needs.scanner-integration" not in conclusion
-
-    gerrit_scanner = yaml.safe_load(
-        (root / ".github" / "workflows" / "gerrit-scanner-verify.yml").read_text()
-    )
-    gerrit_job = gerrit_scanner["jobs"]["scanner-integration"]
+    assert "scanner-integration" in vote["needs"]
+    gerrit_job = gerrit["jobs"]["scanner-integration"]
     assert gerrit_job["uses"] == "./.github/workflows/_scanner-integration.yml"
     assert gerrit_job["with"]["gerrit-refspec"] == "${{ inputs.GERRIT_REFSPEC }}"
+    assert "route == 'full'" in gerrit_job["if"]
+    conclusion = vote["steps"][2]["env"]["CONCLUSION"]
+    assert "needs.scanner-integration.result == 'success'" in conclusion
+    assert "needs.scanner-integration.result == 'skipped'" in conclusion
 
 
 def test_reviewbot_dockerfile_uses_shared_arm64_scanner_provisioner():

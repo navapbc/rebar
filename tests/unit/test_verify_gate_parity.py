@@ -87,6 +87,16 @@ def test_guard_respects_excluded_jobs():
     assert missing == set()
 
 
+def test_scanner_integration_is_not_an_advisory_exception():
+    """scanner-integration is voting now, so parity must require it."""
+    assert "scanner-integration" not in chk.EXCLUDED_JOBS
+    gerrit = _gerrit(["build-and-test"])
+    sources = [_source("build-and-test", "scanner-integration")]
+    assert chk.missing_gating_jobs(gerrit, sources, excluded=chk.EXCLUDED_JOBS) == {
+        "scanner-integration"
+    }
+
+
 def test_vote_needs_accepts_scalar():
     """A scalar (single-string) needs is normalized to a set."""
     assert chk.vote_needs({"jobs": {"vote": {"needs": "build-and-test"}}}) == {"build-and-test"}
