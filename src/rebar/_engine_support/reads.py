@@ -492,11 +492,20 @@ def list_states(tracker: str, query: TicketQuery | None = None) -> list[dict]:
     from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 
     requested_types = {value.strip() for value in ticket_type.split(",") if value.strip()}
+    # A lean list drops LEAN_OMITTED_FIELDS *during* the reduce, not after it: nothing
+    # between here and the return consumes those six fields (the filters key off
+    # type/status/parent/tag/priority, the child_counts pass off ``parent_id``,
+    # ``blocking_state`` off the readiness graph, and ``sort_states`` off
+    # priority/created/updated/id/status), so projecting inline is behaviour-identical
+    # while keeping the whole store's bodies + signature material from ever being
+    # simultaneously live. ``lean_projection`` below stays as the one spelling of the
+    # row shape (now a no-op for these keys).
     results = reduce_all_tickets(
         tracker,
         exclude_archived=not include_archived,
         exclude_deleted=exclude_deleted,
         exclude_session_logs=requested_types.isdisjoint(_NON_GRAPH_ARTIFACT_TYPES),
+        omit_fields=() if include_body else LEAN_OMITTED_FIELDS,
     )
     # children_count: direct non-deleted children per ticket, counted over the
     # reduced set BEFORE the narrowing filters (a closed child still counts).

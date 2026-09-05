@@ -1241,6 +1241,11 @@
           "exclude_session_logs",
           "KEYWORD_ONLY",
           "False"
+        ],
+        [
+          "omit_fields",
+          "KEYWORD_ONLY",
+          "()"
         ]
       ],
       "return": "list[dict]"

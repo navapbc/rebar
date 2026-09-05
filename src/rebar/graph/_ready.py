@@ -26,6 +26,20 @@ from ._relations import build_blocked_by
 # surface in `ready`/`next-batch`, so it is never counted as ready work here.
 _OPEN_STATUSES = {"open", "in_progress"}
 
+# Fields the readiness computation never reads. Dropped during PASS 1's reduce so the
+# whole store's bodies + signature material are never simultaneously live; the ready
+# subset is re-reduced in full afterwards (see ``_rehydrate``). Spelled here rather
+# than imported from ``rebar._engine_support.reads`` to keep this module
+# dependency-light (see the module docstring).
+_READY_OMITTED_FIELDS: tuple[str, ...] = (
+    "description",
+    "comments",
+    "authorship_ledger",
+    "attestations",
+    "signature",
+    "keyring",
+)
+
 
 def _is_closed(status: str) -> bool:
     return is_terminal_status(status)
@@ -60,8 +74,16 @@ def find_ready_tickets(
 
     # session_log tickets never participate in the dependency graph — exclude them
     # so ready-computation timings are unaffected by verbose log bodies.
+    #
+    # PASS 1 (readiness): reduce LEAN. The computation below reads only
+    # ticket_id/status/parent_id/deps, so the bulky bodies + signature material are
+    # dropped inside the reducer loop and the whole store's copies are never
+    # simultaneously live. Callers of this function still receive FULL states — the
+    # ready subset is re-reduced in pass 2 below.
     all_states_list = _loader.reducer.reduce_all_tickets(
-        str(tracker_dir), exclude_session_logs=True
+        str(tracker_dir),
+        exclude_session_logs=True,
+        omit_fields=_READY_OMITTED_FIELDS,
     )
 
     # Build a lookup dict, skipping error states.
@@ -98,4 +120,23 @@ def find_ready_tickets(
         if all_blockers_closed(ticket_id):
             ready.append(state)
 
-    return ready
+    return _rehydrate(tracker_path, ready)
+
+
+def _rehydrate(tracker_path: Path, ready: list[dict]) -> list[dict]:
+    """PASS 2: re-reduce each ready ticket so the returned dicts are FULL states.
+
+    ``find_ready_tickets`` computes readiness over lean states (see
+    ``_READY_OMITTED_FIELDS``) but its contract is the full compiled state —
+    ``rebar.ready()`` and the MCP ``ready_tickets(full=True)`` path both depend on
+    it. The ready subset is a tiny fraction of the store, and each ticket's reduce
+    is served from the reducer cache the lean pass just warmed, so the second pass
+    is cheap. A ticket that fails to re-reduce (raced away mid-scan) keeps its lean
+    state rather than vanishing from the result.
+    """
+    out: list[dict] = []
+    for state in ready:
+        ticket_id = state.get("ticket_id") or ""
+        full = _loader.reducer.reduce_ticket(str(tracker_path / ticket_id))
+        out.append(full if isinstance(full, dict) else state)
+    return out
