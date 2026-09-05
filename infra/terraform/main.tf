@@ -85,11 +85,29 @@ resource "aws_instance" "gerrit" {
 
   # user_data resolves the data volume's NVMe device dynamically by volume id;
   # we pass the id in so the script doesn't have to guess /dev/sdf vs /dev/nvme*.
-  user_data = templatefile("${path.module}/user_data.sh", {
+  #
+  # GZIPPED, and that is load-bearing (bug a68c-9633-248c-4b06). EC2 caps UserData at
+  # 16,384 bytes and the provider validates it, so the plain `user_data` form stopped
+  # being PLANNABLE at all once the rendered script reached 16,668 bytes -- terraform
+  # could not generate a plan for ANY resource in this configuration, which blocked
+  # every apply for a day. cloud-init detects the gzip magic and decompresses before
+  # interpreting, so the script it runs is byte-identical to the rendered template.
+  #
+  # The script is ~73% comments, which is deliberate: templatefile() interpolates the
+  # WHOLE file including comments (bug dd30), so that prose is the context an editor
+  # needs to avoid re-breaking it. Compression is what lets the documentation and the
+  # size limit coexist -- 16,668 bytes render to 6,954 gzipped, a 2.4x margin. Do NOT
+  # "fix" a future overflow by deleting comments; scripts/check_user_data_size.py
+  # measures the payload AWS actually receives and will say how much room is left.
+  #
+  # `user_data_replace_on_change` is left at its default (false), so a change here is
+  # an IN-PLACE attribute update that takes effect on the instance's next boot. It
+  # must never force-replace aws_instance.gerrit: that is the production Gerrit host.
+  user_data_base64 = base64gzip(templatefile("${path.module}/user_data.sh", {
     data_volume_id         = aws_ebs_volume.data.id
     gate_scratch_volume_id = aws_ebs_volume.gate_scratch.id
     gate_scratch_mount     = var.gate_scratch_mount
-  })
+  }))
 
   # Pin the AMI: a new SSM-published AMI id must NOT force-replace the running
   # instance on every apply. Replacement is an explicit, deliberate action.
