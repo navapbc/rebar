@@ -229,12 +229,14 @@ def test_the_percent_is_measured_over_the_tree_the_budget_governs(tmp_path: Path
     assert "/var" not in measured
 
 
-def test_the_percent_is_clamped_to_one_hundred(tmp_path: Path) -> None:
-    """CloudWatch's ``Percent`` unit is defined over 0-100. The unclamped ``var_tmp_bytes``
-    beside it carries the magnitude and the 85 threshold still fires."""
+def test_a_budget_overrun_publishes_its_true_ratio(tmp_path: Path) -> None:
+    """``/var/tmp`` has no writer-enforced ceiling on this box — the budget is held by a
+    5-minute reaper that a fast writer outruns — so being over it is the expected failure, not
+    an impossible state. The percent used to clamp to 100 (bug ``b380-3dfc-99fc-4a0e``), which
+    made the one reading deployed to detect that failure incapable of reporting it."""
     env, aws_log, _ = _environment(tmp_path, var_tmp_bytes=9 * GIB, cap=4 * GIB)
     assert _run(env).returncode == 0
-    assert _one(aws_log, "var_tmp_used_percent") == 100
+    assert _one(aws_log, "var_tmp_used_percent") == 225
     assert _one(aws_log, "var_tmp_bytes") == 9 * GIB
 
 

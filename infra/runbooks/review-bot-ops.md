@@ -770,12 +770,23 @@ enforceable, and knowing which one is saturated is what decides the response:
 | Alarm | Metric | What it means | First move |
 |---|---|---|---|
 | `rebar-docker-storage-cap-high` | `docker_storage_used_percent` | the whole budget is >85% full, measured from the FILESYSTEM | read the other two before touching anything — this one cannot say which generator grew |
-| `rebar-docker-buildkit-cache-high` | `docker_buildkit_cache_used_percent` | the BuildKit generator is at its own cap | the `builder.gc` policy is not taking effect (below) |
+| `rebar-docker-buildkit-cache-high` | `docker_buildkit_cache_used_percent` | the BuildKit generator is at, or PAST, its own cap | the `builder.gc` policy is not taking effect (below) |
 | `rebar-docker-unaccounted-bytes` | `docker_unaccounted_bytes` | >2 GiB under `/var/lib/docker` that `docker system df` does not account for in any row | **do not prune** — daemon-level reclaim (below) |
 
 All three are `treat_missing_data = "breaching"`, and `observability.sh` §2f publishes them
 only on a SUCCESSFUL measurement — so an alarm with no data means the probe could not read the
 disk or the daemon, which is itself the condition to investigate.
+
+**Read the percentages above 100 — they are real.** Every `*_used_percent` on this box
+(`docker_storage`, `docker_buildkit_cache`, `journal`, `var_tmp`, `container_writable`) is a
+ratio against a BUDGET, not a fill level, and every one of those budgets is a best-effort
+target its writer can exceed: `builder.gc.maxUsedSpace` reclaims lazily, `SystemMaxUse` is
+journald's own target, and the `/var/tmp` and container-layer shares are held by 5-minute
+reapers a fast writer outruns. These metrics used to CLAMP at 100 (bug
+`b380-3dfc-99fc-4a0e`), which made "exactly at the cap" and "9% past it" the same datapoint —
+on 2026-09-05 the build cache sat at 5.875 GB against a 5.00 GiB cap and published 100, and the
+firing alarm was read as the cap doing its job. A reading of 109 or 300 now means what it says:
+the cap did not hold, and the number is how far past it the generator is.
 
 ```bash
 # The two independent measurements, by hand — this is what the metrics compare. Both sides
