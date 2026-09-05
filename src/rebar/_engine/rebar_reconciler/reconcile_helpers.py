@@ -8,15 +8,15 @@ filter, the RP-04 S3 runtime-binding cluster, and the ADR-0026 baseline
 advance. The status-preflight scan, the binding-store commit-back, the
 ticket-CLI reader, and the selection/filter-scope cluster moved out to the
 sibling ``pass_support.py`` (ticket piscine-bullish-cowbird, module-size
-headroom); reconcile.py loads both modules and re-exports every name at
-module level so callers see no difference.
+headroom). ``reconcile.py`` calls these canonical owners directly instead of
+re-exporting their private names.
 
 Loader convention: like every sibling in this package (and mirrored by reconcile.py /
 run_differs.py), this module loads its own siblings (``config.py``, ``alert_store.py``) by file
 path via the local ``_load`` helper (``importlib.util.spec_from_file_location``), so it resolves
 both under the real package and when a single module is loaded standalone in tests. It imports
-NOTHING from reconcile.py; reconcile.py loads this module once and re-exports these names for
-attribute-access and back-compat.
+NOTHING from reconcile.py; callers use this module as the canonical owner for
+these private helpers.
 """
 
 from __future__ import annotations
@@ -282,11 +282,11 @@ def bind_operation_runtime(ctx: Any, compose: Any) -> None:
     The composed backend CAPTURES scope at compose time; threading its transport into the
     apply phase (as ``applier.apply(client=...)``) resolves the transport ONCE per pass
     rather than letting each apply re-resolve config ambiently via ``_load_acli``. The
-    ``compose`` callable is passed in by the ``reconcile_once`` spine (the module-level
-    ``reconcile.compose_reconciler_runtime`` seam tests monkeypatch), keeping this helper
-    free of a back-edge to reconcile.py. The transport handed to ``build_backend`` comes
-    from the applier's ``_load_acli`` seam so an existing test that patches it keeps
-    controlling the client; when that seam is absent the composed runtime builds the real
+    ``compose`` callable is passed in by the ``reconcile_once`` spine from the canonical
+    runtime module, keeping this helper free of a back-edge to reconcile.py. The
+    transport handed to ``build_backend`` comes from the applier's ``_load_acli`` seam.
+    Existing tests that patch that seam keep controlling the client; when it is absent,
+    the composed runtime builds the real
     provider transport from captured scope.
 
     Composition must not crash a read-only pass whose Jira scope is absent: on a
@@ -387,8 +387,8 @@ def _advance_peer_parent(binding_store: Any, local_id: str, entry: Mapping[str, 
 def _write_prev_snapshot_key_set(prev_path: Path, curr_snapshot: Mapping[str, Any]) -> None:
     """Persist only Jira-key membership for the next pass's edge detection.
 
-    Moved from reconcile.py (ticket 0fa2) along the existing re-export seam to keep
-    that module under the 800-LOC cap; reconcile re-binds it at module level.
+    Moved from reconcile.py (ticket 0fa2) to keep that module under the 800-LOC cap;
+    this module is now the canonical owner.
     """
     key_set: dict[str, dict[str, Any]] = {jira_key: {} for jira_key in sorted(curr_snapshot)}
     prev_path.write_text(json.dumps(key_set, separators=(",", ":")) + "\n")

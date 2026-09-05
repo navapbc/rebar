@@ -167,18 +167,19 @@ def _drive_load_phase(
     """
     events: list[str] = []
 
-    monkeypatch.setattr(reconcile_mod, "_read_local_tickets", lambda *a, **k: [])
+    pass_support = reconcile_mod._load("rebar_reconciler.pass_support", "pass_support.py")
+    monkeypatch.setattr(pass_support, "_read_local_tickets", lambda *a, **k: [])
 
     if stale_selection:
 
         def _stale(*_a: Any, **_k: Any) -> None:
             events.append("staleness-abort")
-            raise reconcile_mod.SelectionStaleError("selection is stale")
+            raise pass_support.SelectionStaleError("selection is stale")
 
-        monkeypatch.setattr(reconcile_mod, "ensure_selection_current", _stale)
+        monkeypatch.setattr(pass_support, "ensure_selection_current", _stale)
     else:
         monkeypatch.setattr(
-            reconcile_mod,
+            pass_support,
             "ensure_selection_current",
             lambda *a, **k: events.append("staleness-ok"),
         )
@@ -226,7 +227,7 @@ def _drive_load_phase(
     )
     try:
         reconcile_mod._load_snapshots(ctx)
-    except reconcile_mod.SelectionStaleError:
+    except pass_support.SelectionStaleError:
         pass
     return events
 

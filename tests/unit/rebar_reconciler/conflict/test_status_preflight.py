@@ -1,4 +1,4 @@
-"""Tests for reconcile.preflight_status_mapping.
+"""Tests for pass_support.preflight_status_mapping.
 
 Verifies the preflight status-mapping scan WARNS (non-fatally) for any update
 mutation whose status field is absent from ``config.local_to_jira_status``,
@@ -22,7 +22,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECON_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
-RECONCILE_PATH = RECON_DIR / "reconcile.py"
+PASS_SUPPORT_PATH = RECON_DIR / "pass_support.py"
 CONFIG_PATH = RECON_DIR / "config.py"
 
 
@@ -36,15 +36,15 @@ def _load_module(name: str, path: Path):
 
 
 @pytest.fixture
-def reconcile_mod():
-    # Pre-register config under the name reconcile._load() uses so the
+def pass_support_mod():
+    # Pre-register config under the name pass_support._load() uses so the
     # preflight function picks up the live config module rather than
     # re-loading a fresh copy that would shadow monkeypatches.
     _load_module("reconcile_config", CONFIG_PATH)
-    return _load_module("reconcile_under_test", RECONCILE_PATH)
+    return _load_module("pass_support_under_test", PASS_SUPPORT_PATH)
 
 
-def test_missing_status_warns_but_does_not_abort(reconcile_mod, capsys):
+def test_missing_status_warns_but_does_not_abort(pass_support_mod, capsys):
     """An update mutation with an unmapped status WARNS to stderr but does NOT
     raise (Facet 3): the preflight no longer aborts the pass, so the offending
     mutation can flow to the applier and be recorded as a per-mutation failure.
@@ -64,14 +64,14 @@ def test_missing_status_warns_but_does_not_abort(reconcile_mod, capsys):
         },
     ]
     # Must NOT raise — the scan is now non-fatal.
-    reconcile_mod.preflight_status_mapping(mutations)
+    pass_support_mod.preflight_status_mapping(mutations)
     # The warning must still surface the offending status value and target key.
     err = capsys.readouterr().err
     assert "neither" in err
     assert "DIG-1" in err
 
 
-def test_unmapped_jira_status_not_mislabeled_as_local(reconcile_mod, capsys):
+def test_unmapped_jira_status_not_mislabeled_as_local(pass_support_mod, capsys):
     """An unmapped JIRA workflow status (e.g. ``Selected for Development`` added
     Jira-side) must not be reported as a "local status" (bug c672). The preflight
     accepts both local-status keys and Jira-status values and fails only when the value
@@ -91,7 +91,7 @@ def test_unmapped_jira_status_not_mislabeled_as_local(reconcile_mod, capsys):
         {"action": "update", "key": "REB-716", "fields": {"status": unmapped}},
     ]
     # Must NOT raise (non-fatal now); the message is emitted to stderr instead.
-    reconcile_mod.preflight_status_mapping(mutations)
+    pass_support_mod.preflight_status_mapping(mutations)
     msg = capsys.readouterr().err
     # Still names the offending value + target.
     assert unmapped in msg
@@ -104,7 +104,7 @@ def test_unmapped_jira_status_not_mislabeled_as_local(reconcile_mod, capsys):
     assert "local_to_jira_status" in msg
 
 
-def test_present_status_does_not_raise(reconcile_mod):
+def test_present_status_does_not_raise(pass_support_mod):
     """An update mutation whose status is in local_to_jira_status passes
     cleanly through the preflight scan."""
     mutations = [
@@ -116,10 +116,10 @@ def test_present_status_does_not_raise(reconcile_mod):
         }
     ]
     # Should not raise.
-    reconcile_mod.preflight_status_mapping(mutations)
+    pass_support_mod.preflight_status_mapping(mutations)
 
 
-def test_empty_mapping_kill_switch_does_not_raise(reconcile_mod, monkeypatch):
+def test_empty_mapping_kill_switch_does_not_raise(pass_support_mod, monkeypatch):
     """When local_to_jira_status is empty, the preflight is disabled and
     status-touching mutations pass through even with otherwise-unmapped
     values."""
@@ -134,14 +134,14 @@ def test_empty_mapping_kill_switch_does_not_raise(reconcile_mod, monkeypatch):
         }
     ]
     # Should not raise — kill-switch engaged.
-    reconcile_mod.preflight_status_mapping(mutations)
+    pass_support_mod.preflight_status_mapping(mutations)
 
 
-def test_non_update_action_ignored(reconcile_mod):
+def test_non_update_action_ignored(pass_support_mod):
     """Create and delete mutations are not subject to the status scan."""
     mutations = [
         {"action": "create", "key": "DIG-4", "fields": {"status": "neither"}},
         {"action": "delete", "key": "DIG-5", "fields": {}},
     ]
     # Should not raise.
-    reconcile_mod.preflight_status_mapping(mutations)
+    pass_support_mod.preflight_status_mapping(mutations)

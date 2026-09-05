@@ -1,6 +1,6 @@
 """Bug e6e9 — the apply layer must report only writes that CONFIRMEDLY landed.
 
-``reconcile._advance_baselines`` advances the ADR-0026 baseline to what rebar SYNCED, and
+``reconcile_helpers._advance_baselines`` advances the ADR-0026 baseline to what rebar SYNCED, and
 this is the layer that decides what "synced" means. The operator decision on this ticket
 made the granularity a hard requirement: the advance must key off PER-MUTATION success, not
 the pass exit code and not the absence of an exception at pass level. A status transition

@@ -21,22 +21,13 @@ with the event writers was ``inbound_translate._extract_name`` (the identity min
 display-name read), which is why it is still imported below; every other dependency
 here is a function-local import, as it already was.
 
-``apply_inbound_events`` is imported at module level for ONE documented back-compat
-re-export; that module never imports this one at module level, so the direction stays
-one-way.
+The event writer cluster now has exactly one owner: ``apply_inbound_events``.
 """
 
 from __future__ import annotations
 
 import logging
 
-# Back-compat: ``_inbound_update_write_edit_event`` moved to ``apply_inbound_events``
-# with the rest of the event writers, but it is still driven as
-# ``apply_inbound_records._inbound_update_write_edit_event`` (it is the phase that calls
-# the identity mint this module owns), so the name keeps resolving here.
-from rebar_reconciler.apply_inbound_events import (  # noqa: F401
-    _inbound_update_write_edit_event,
-)
 from rebar_reconciler.inbound_translate import _extract_name
 
 logger = logging.getLogger(__name__)

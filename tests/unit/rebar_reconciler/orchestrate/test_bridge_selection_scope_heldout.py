@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from rebar_reconciler import reconcile
+from rebar_reconciler import pass_support, reconcile
 
 
 class _Bindings:
@@ -94,7 +94,7 @@ def test_canonical_selection_narrows_every_differ_input_before_differ(
     _seed_previous_snapshot(tmp_path)
 
     with (
-        patch.object(reconcile, "_read_local_tickets", return_value=list(_LOCAL_TICKETS)),
+        patch.object(pass_support, "_read_local_tickets", return_value=list(_LOCAL_TICKETS)),
         patch.object(reconcile, "_load", side_effect=_module_loader(differ)),
         patch.object(reconcile, "_apply_mutations"),
         patch.object(reconcile, "_persist_and_log", return_value={"pass_id": "scope"}),
@@ -120,7 +120,7 @@ def test_disappeared_preflight_selection_stops_before_differ_or_apply(tmp_path) 
     )
 
     with (
-        patch.object(reconcile, "_read_local_tickets", return_value=list(_LOCAL_TICKETS)),
+        patch.object(pass_support, "_read_local_tickets", return_value=list(_LOCAL_TICKETS)),
         patch.object(reconcile, "_load", side_effect=_module_loader(differ)),
         patch.object(reconcile, "_apply_mutations") as apply_spy,
         patch.object(reconcile, "_persist_and_log") as persist_spy,

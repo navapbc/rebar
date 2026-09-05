@@ -38,7 +38,7 @@ if str(_ENGINE) not in sys.path:  # pragma: no cover - import bootstrap
 
 from rebar_reconciler import apply_handlers, peer_state  # noqa: E402
 from rebar_reconciler.binding_store import BindingStore  # noqa: E402
-from rebar_reconciler.reconcile import _advance_baselines  # noqa: E402
+from rebar_reconciler.reconcile_helpers import _advance_baselines  # noqa: E402
 
 _WIRE = "h1. Heading\n\n* alpha\n"
 _OTHER_WIRE = "h1. Heading\n\n* alpha\n* beta\n"

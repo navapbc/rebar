@@ -2,17 +2,17 @@
 
 Facet 2 — FAIL LOUD: after isolating per-mutation failures, a pass that recorded
 any real per-mutation error must exit NON-ZERO (not the current exit 0). The
-benign 400-comment-fallback is NOT a recorded error (reconcile.py:1082-1085 counts
+benign 400-comment-fallback is NOT a recorded error (persist_phase.persist_and_log counts
 it as applied), so it stays exit 0 — this is fail-loud boundary "Option C".
 
 Facet 3 — PREFLIGHT NO-ABORT: preflight_status_mapping must not raise a
-StatusMappingError that aborts the whole pass when a single update mutation carries
+the former StatusMappingError that aborted the whole pass when a single update mutation carries
 an unmapped status. The offending mutation is recorded as a per-mutation failure
 downstream (applier backstop) instead of aborting its siblings.
 
 RED pre-fix:
   - run_pass returns 0 even when result["mutation_failures"] > 0.
-  - preflight_status_mapping raises StatusMappingError on the first unmapped status.
+  - pass_support.preflight_status_mapping raises on the first unmapped status.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 MAIN_PATH = SCRIPTS_DIR / "rebar_reconciler" / "__main__.py"
-RECONCILE_PATH = SCRIPTS_DIR / "rebar_reconciler" / "reconcile.py"
+PASS_SUPPORT_PATH = SCRIPTS_DIR / "rebar_reconciler" / "pass_support.py"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -128,7 +128,7 @@ def test_preflight_does_not_abort_on_unmapped_status() -> None:
     """An unmapped local status on a single update mutation must NOT raise
     StatusMappingError (which aborts the entire pass). Post-fix the offending
     mutation is recorded as a per-mutation failure downstream instead."""
-    reconcile_mod = _load("reconcile_preflight", RECONCILE_PATH)
+    pass_support_mod = _load("pass_support_preflight", PASS_SUPPORT_PATH)
 
     mutations = [
         {
@@ -146,6 +146,6 @@ def test_preflight_does_not_abort_on_unmapped_status() -> None:
     ]
 
     try:
-        reconcile_mod.preflight_status_mapping(mutations)
-    except reconcile_mod.StatusMappingError as exc:
+        pass_support_mod.preflight_status_mapping(mutations)
+    except pass_support_mod.StatusMappingError as exc:
         pytest.fail(f"preflight must not abort the pass on an unmapped status; it raised {exc!r}")

@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
 
 
 def _load_module(name: str, path: Path):
@@ -33,10 +33,10 @@ def _load_module(name: str, path: Path):
 
 
 @pytest.fixture
-def reconcile_mod():
-    mod = _load_module("_test_reconcile_retired", RECONCILE_PATH)
+def pass_support_mod():
+    mod = _load_module("_test_pass_support_retired", PASS_SUPPORT_PATH)
     yield mod
-    sys.modules.pop("_test_reconcile_retired", None)
+    sys.modules.pop("_test_pass_support_retired", None)
 
 
 def _init_tickets_git_repo(tracker_dir: Path) -> None:
@@ -86,7 +86,7 @@ class _Stub:
     """Minimal stand-in: _commit_binding_store_snapshot only touches git."""
 
 
-def test_retirement_only_change_is_committed(tmp_path, reconcile_mod):
+def test_retirement_only_change_is_committed(tmp_path, pass_support_mod):
     tracker_dir = tmp_path / ".tickets-tracker"
     _init_tickets_git_repo(tracker_dir)
     bridge = tracker_dir / ".bridge_state"
@@ -112,7 +112,7 @@ def test_retirement_only_change_is_committed(tmp_path, reconcile_mod):
         json.dumps({"version": 1, "retired": {"DIG-DEAD": {"local_id": "loc-1"}}})
     )
 
-    ok = reconcile_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-retire")
+    ok = pass_support_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-retire")
     assert ok is True
 
     committed = _file_in_head(tracker_dir, ".bridge_state/bindings-retired.json")
@@ -123,7 +123,7 @@ def test_retirement_only_change_is_committed(tmp_path, reconcile_mod):
     assert "DIG-DEAD" in committed
 
 
-def test_no_change_is_noop(tmp_path, reconcile_mod):
+def test_no_change_is_noop(tmp_path, pass_support_mod):
     tracker_dir = tmp_path / ".tickets-tracker"
     _init_tickets_git_repo(tracker_dir)
     bridge = tracker_dir / ".bridge_state"
@@ -147,7 +147,7 @@ def test_no_change_is_noop(tmp_path, reconcile_mod):
     ).stdout
 
     # No change to either file → fast-path no-op (no new commit).
-    ok = reconcile_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-noop")
+    ok = pass_support_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-noop")
     assert ok is True
     head_after = subprocess.run(
         ["git", "-C", str(tracker_dir), "rev-parse", "HEAD"],
@@ -158,7 +158,7 @@ def test_no_change_is_noop(tmp_path, reconcile_mod):
     assert head_before == head_after, "no-change pass must not create a commit"
 
 
-def test_both_files_committed_together(tmp_path, reconcile_mod):
+def test_both_files_committed_together(tmp_path, pass_support_mod):
     tracker_dir = tmp_path / ".tickets-tracker"
     _init_tickets_git_repo(tracker_dir)
     bridge = tracker_dir / ".bridge_state"
@@ -174,7 +174,7 @@ def test_both_files_committed_together(tmp_path, reconcile_mod):
     (bridge / "bindings-retired.json").write_text(
         json.dumps({"version": 1, "retired": {"DIG-OLD": {"local_id": "loc-x"}}})
     )
-    ok = reconcile_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-both")
+    ok = pass_support_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-both")
     assert ok is True
     assert _file_in_head(tracker_dir, ".bridge_state/bindings.json") is not None
     assert _file_in_head(tracker_dir, ".bridge_state/bindings-retired.json") is not None
@@ -210,7 +210,7 @@ def _head_files(tracker_dir: Path) -> set[str]:
     return {line.strip() for line in r.stdout.splitlines() if line.strip()}
 
 
-def test_publication_stages_only_the_five_allowlisted_files(tmp_path, reconcile_mod):
+def test_publication_stages_only_the_five_allowlisted_files(tmp_path, pass_support_mod):
     """The allowlist is EXCLUSIVE, not merely inclusive.
 
     The tickets worktree is shared, so it can legitimately hold unrelated dirty files —
@@ -231,7 +231,7 @@ def test_publication_stages_only_the_five_allowlisted_files(tmp_path, reconcile_
     (tracker_dir / "unrelated-scratch.md").write_text("operator WIP\n", encoding="utf-8")
     (bridge / "not-allowlisted.json").write_text(json.dumps({"x": 1}), encoding="utf-8")
 
-    assert reconcile_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-excl") is True
+    assert pass_support_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-excl") is True
 
     published = _head_files(tracker_dir)
     assert published == set(_ALLOWLISTED), (

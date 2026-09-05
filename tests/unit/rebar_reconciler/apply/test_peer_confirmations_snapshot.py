@@ -31,6 +31,9 @@ import time
 
 import pytest
 
+import rebar_reconciler.pass_support as pass_support
+import rebar_reconciler.persist_phase as persist_phase
+
 
 @pytest.fixture
 def pc():
@@ -226,7 +229,7 @@ def test_reconfirmation_is_idempotent_and_does_not_rewrite(pc, store):
 
 
 def test_persist_seam_writes_and_saves(tmp_path, pc):
-    """``_confirm_peer_links`` is the named seam the persist phase calls."""
+    """``persist_phase.confirm_peer_links`` is the named seam the persist phase calls."""
     reconcile = importlib.import_module("rebar_reconciler.reconcile")
     (tmp_path / ".tickets-tracker" / ".bridge_state").mkdir(parents=True)
 
@@ -234,7 +237,7 @@ def test_persist_seam_writes_and_saves(tmp_path, pc):
     ctx.curr_snapshot = {"PROJ-1": {"issuelinks": [_outward()]}}
     ctx.binding_store = _Bindings({"PROJ-1": "src-local", "PROJ-9": "dst-local"})
 
-    written = reconcile._confirm_peer_links(ctx)
+    written = persist_phase.confirm_peer_links(ctx)
 
     assert written == 1
     assert (tmp_path / ".tickets-tracker" / ".bridge_state" / "peer_confirmations.json").exists()
@@ -253,14 +256,14 @@ def test_confirmation_failure_does_not_break_the_pass(tmp_path, monkeypatch, cap
     def _boom(_ctx):
         raise RuntimeError("snapshot confirmation exploded")
 
-    monkeypatch.setattr(reconcile, "_confirm_peer_links", _boom)
+    monkeypatch.setattr(persist_phase, "confirm_peer_links", _boom)
     saved: list[bool] = []
 
     class _BS:
         def save(self):
             saved.append(True)
 
-    monkeypatch.setattr(reconcile, "_commit_binding_store_snapshot", lambda *a, **k: True)
+    monkeypatch.setattr(pass_support, "_commit_binding_store_snapshot", lambda *a, **k: True)
 
     ctx = reconcile._PassContext(repo_root=tmp_path, pass_id="pass-9")
     ctx.binding_store = _BS()
@@ -280,7 +283,9 @@ def test_no_write_mode_confirms_nothing(tmp_path, monkeypatch):
     """AC7. A no-write pass writes no evidence, just as it writes no bindings."""
     reconcile = importlib.import_module("rebar_reconciler.reconcile")
     calls: list[str] = []
-    monkeypatch.setattr(reconcile, "_confirm_peer_links", lambda _ctx: calls.append("called") or 0)
+    monkeypatch.setattr(
+        persist_phase, "confirm_peer_links", lambda _ctx: calls.append("called") or 0
+    )
 
     ctx = reconcile._PassContext(repo_root=tmp_path, pass_id="pass-9")
     ctx.persist = False
@@ -303,7 +308,7 @@ def test_persist_seam_writes_no_file_when_nothing_is_confirmed(tmp_path):
     ctx.curr_snapshot = {"PROJ-1": {"summary": "unobserved"}}
     ctx.binding_store = _Bindings({"PROJ-1": "src-local"})
 
-    assert reconcile._confirm_peer_links(ctx) == 0
+    assert persist_phase.confirm_peer_links(ctx) == 0
     assert not (
         tmp_path / ".tickets-tracker" / ".bridge_state" / "peer_confirmations.json"
     ).exists()

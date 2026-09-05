@@ -1,18 +1,17 @@
-"""Standalone contract for the reconcile helper's git-adapter seam.
+"""Standalone contract for the pass-support git-adapter seam.
 
 Test contract card::
 
     authoritative_contract: >
-      reconcile.py and reconcile_helpers.py explicitly support by-file standalone
-      loading; _commit_binding_store_snapshot returns True for no state/success and
+      pass_support.py explicitly supports by-file standalone loading;
+      _commit_binding_store_snapshot returns True for no state/success and
       False with a diagnostic for operational failure; _loader.py preserves an exact
       sys.modules key supplied by the caller.
     trigger_preconditions: >
       an isolated child interpreter cannot import a rebar_reconciler parent package
-      and loads reconcile.py with spec_from_file_location.
+      and loads pass_support.py with spec_from_file_location.
     production_path: >
-      reconcile.py -> by-path reconcile_helpers.py ->
-      _commit_binding_store_snapshot -> rebar._store.push.commit_tickets_branch
+      pass_support.py -> _commit_binding_store_snapshot -> rebar._store.push.commit_tickets_branch
       (the locked store commit seam; the git-adapter module is still loaded for
       the tracker/state-file path constants).
     test_tier: >
@@ -35,7 +34,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+PASS_SUPPORT_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "pass_support.py"
 GIT_ADAPTER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "git_adapter.py"
 
 _STANDALONE_PROBE = r"""
@@ -45,7 +44,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-reconcile_path = Path(sys.argv[1]).resolve()
+pass_support_path = Path(sys.argv[1]).resolve()
 repo_root = Path(sys.argv[2]).resolve()
 scenario = sys.argv[3]
 
@@ -70,13 +69,15 @@ if scenario != "no_state":
     seeded_adapter.PEER_CONFIRMATIONS_FILE = ".bridge_state/peer-confirmations.json"
     sys.modules[adapter_key] = seeded_adapter
 
-spec = importlib.util.spec_from_file_location("_standalone_reconcile_contract", reconcile_path)
+spec = importlib.util.spec_from_file_location(
+    "_standalone_pass_support_contract", pass_support_path
+)
 assert spec is not None and spec.loader is not None
-reconcile = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = reconcile
-spec.loader.exec_module(reconcile)
+pass_support = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = pass_support
+spec.loader.exec_module(pass_support)
 
-result = reconcile._commit_binding_store_snapshot(object(), repo_root, "standalone-contract")
+result = pass_support._commit_binding_store_snapshot(object(), repo_root, "standalone-contract")
 resolved_adapter = sys.modules.get(adapter_key)
 head_subject = None
 if scenario == "success":
@@ -111,7 +112,7 @@ def _run_standalone(tmp_path: Path, scenario: str) -> subprocess.CompletedProces
             "-I",
             "-c",
             _STANDALONE_PROBE,
-            str(RECONCILE_PATH),
+            str(PASS_SUPPORT_PATH),
             str(tmp_path),
             scenario,
         ],
@@ -124,7 +125,7 @@ def _run_standalone(tmp_path: Path, scenario: str) -> subprocess.CompletedProces
 
 def _result(proc: subprocess.CompletedProcess[str]) -> dict:
     assert proc.returncode == 0, (
-        f"standalone reconcile probe failed:\n--- stdout ---\n{proc.stdout}"
+        f"standalone pass_support probe failed:\n--- stdout ---\n{proc.stdout}"
         f"--- stderr ---\n{proc.stderr}"
     )
     return json.loads(proc.stdout)
