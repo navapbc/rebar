@@ -20,6 +20,16 @@ name: Gerrit Verified Gate
 #
 # All third-party actions are SHA-pinned (tag in trailing comment).
 
+# RUN IDENTITY (ticket 2a21-112a-538f-46fb). This workflow is dispatched from `main`, so
+# GitHub stamps every run's `head_sha` with the sha of THIS FILE — then the job checks out a
+# Gerrit patchset ref. The API therefore reports a sha that has nothing to do with what was
+# tested, and `gh run list` shows runs of unrelated patchsets as same-sha contradictions
+# (twice mistaken for a main-is-broken signal). A workflow_dispatch run cannot restate its own
+# head_sha, so the identity rides on `run-name` — the title `gh run list` prints — built from
+# inputs the dispatcher already sends. The `||` fallbacks keep a manual, input-less dispatch
+# from rendering an empty fragment, and label it as the non-patchset run it is.
+run-name: "${{ inputs.GERRIT_CHANGE_NUMBER && format('change {0} patchset {1} (rev {2})', inputs.GERRIT_CHANGE_NUMBER, inputs.GERRIT_PATCHSET_NUMBER || '?', inputs.GERRIT_PATCHSET_REVISION || '?') || format('manual dispatch on {0} (no Gerrit patchset)', github.ref_name) }}"
+
 on:
   workflow_dispatch:
     inputs:
