@@ -4,22 +4,21 @@ This procedure covers background helpers started for development and investigati
 
 ## Prevention contract
 
-Every unbounded helper needs both a wall-clock bound at spawn and process-group cleanup in the spawning shell. A cleanup step that runs only at the end of a task is insufficient because an interrupted or killed harness never reaches that step.
+Every unbounded helper needs both a wall-clock bound at spawn and a reap step in the spawning shell that survives interruption. A cleanup step that runs only at the end of a task is insufficient because an interrupted or killed harness never reaches that step.
 
-```sh
-# Stop the helper even if the shell never returns normally.
-timeout 120 python -c 'while True: pass' &
-# Reap every helper in this process group when the shell exits.
-trap 'kill 0' EXIT INT TERM
-```
+**The prescription itself lives in exactly one place: [AGENTS.md](../AGENTS.md) section "Bound background helpers at spawn".** Read the `bound()` cascade and the mandatory rules there and follow them verbatim. This document deliberately does not restate the snippet, because the copy it used to carry drifted away from the original and went on prescribing a pattern that no-ops on macOS long after the original was corrected (bug `6a9d-4792-7099-4a17`).
 
-The `timeout` ends the helper after the declared interval. The trap signals the process group on normal exit, interruption, or error. A subagent must reap every process it starts before returning. No process started for task work may reach PPID 1.
+Three consequences of that guidance are worth stating here, because each one is what turned a bounded helper into one of the orphans catalogued below:
+
+- **A bounder that is not installed does not bind.** macOS ships neither `timeout` nor `gtimeout`, so a bare `timeout 120 <cmd> &` exits 127 with the helper never started, and announces that only on a backgrounded job's stderr. The cascade in AGENTS.md selects an installed bounder and refuses to spawn when the host has none.
+- **`trap 'kill 0'` does not reap what you think it reaps.** `kill 0` signals the caller's process group. A subshell shares its parent's group, so the trap kills the script that installed it, while a wrapper shell above the script is never in that group and survives untouched. That surviving wrapper is the process that leaks. Kill the pids you recorded at spawn instead.
+- **`pgrep -f <pattern>` matches command-line text, not identity.** A wait-until-nothing-matches loop also matches a sibling agent's identical waiter, a `ps | grep` pipeline, and on some platforms the waiter's own wrapper, so it can wait forever or signal an unrelated process. Wait on the pid you recorded.
 
 Prefer a bounded workload with a fixed end condition. Never start an unbounded busy loop such as `while True: pass`, `yes > /dev/null`, or `while :; do :; done` without a wall-clock bound. Lowering process priority with `nice` does not provide a bound.
 
 ## Bounded gate operations
 
-Do not apply `timeout` to `review-plan`, `verify-completion`, a completion-verifier-gated close, or another LLM gate operation that terminates with a verdict. Truncating a gate wastes the billable run and can make an imposed timeout appear to be a gate failure. Use the asynchronous MCP starter and status tools when a gate can outlast a client request.
+Do not apply a wall-clock bound to `review-plan`, `verify-completion`, a completion-verifier-gated close, `make verify`, or another LLM gate operation that terminates with a verdict. Truncating a gate wastes the billable run and can make an imposed timeout appear to be a gate failure. Use the asynchronous MCP starter and status tools when a gate can outlast a client request.
 
 ## Incident evidence
 
@@ -55,4 +54,4 @@ After confirming the complete match set belongs to finished work, terminate that
 pkill -f 'while True: pass'
 ```
 
-Never use a broad or unresolved pattern for reclamation. Repeat the read-only detector after recovery to confirm that the intended processes are gone and that unrelated processes remain.
+Never use a broad or unresolved pattern for reclamation. `pgrep`/`pkill` match command-line text rather than identity, so the match set can include a sibling session's live helper, the `pgrep` pipeline itself, or the shell that is doing the searching. Confirm every pid with `ps -o pid=,ppid=,command= -p <pid>` before signalling it. Repeat the read-only detector after recovery to confirm that the intended processes are gone and that unrelated processes remain.
