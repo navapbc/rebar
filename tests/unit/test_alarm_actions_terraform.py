@@ -284,6 +284,15 @@ def test_host_published_disk_alarms_treat_missing_data_as_breaching() -> None:
         # mean the probe, the timer or the host is dead.
         ("monitoring_autodeploy.tf", "var_tmp_usage_high"),
         ("monitoring_autodeploy.tf", "var_tmp_cleanup_not_active"),
+        # The writable-container-layer pair (story 910b-2d43-4482-4c64), and the sharpest reason
+        # yet to pin it: the reaper behind ``container_writable_used_percent`` can only remove
+        # EXITED containers, so when the bytes belong to a RUNNING service nothing bounds them
+        # at all and the READING is the entire control. ``notBreaching`` there would render "the
+        # probe can no longer size the one generator with no ceiling" as health.
+        # ``container_reaper_active`` is a heartbeat published on EVERY tick including its 0
+        # path, so ITS absence can only mean the probe, the timer or the host is dead.
+        ("monitoring_autodeploy.tf", "container_writable_usage_high"),
+        ("monitoring_autodeploy.tf", "container_reaper_not_active"),
     }
     found: set[tuple[str, str]] = set()
     offenders: list[str] = []
@@ -546,3 +555,56 @@ def test_the_var_tmp_generator_alarms_exist_and_are_wired_to_sns() -> None:
         "generator has its own alarm — without these, /var/tmp saturation is reported only as "
         "'root disk high', which is what made the 2026-09-02 outage take five hours."
     )
+
+
+def test_the_writable_container_layer_alarms_exist_and_are_wired_to_sns() -> None:
+    """AC of story ``910b-2d43-4482-4c64``, pinned by NAME.
+
+    Every other assertion in this file quantifies over the alarms that exist, so a DELETED alarm
+    satisfies all of them vacuously — and the epic's operator constraint is that each capped
+    generator has *its own* alarm, which is a statement about an alarm being present. Writable
+    container layers were the one generator nothing measured at all on 2026-09-02; this is what
+    stops that state being reachable again by a merge that quietly drops a resource.
+    """
+    expected = {
+        "rebar-container-writable-usage-high": "container_writable_used_percent",
+        "rebar-container-reaper-not-active": "container_reaper_active",
+    }
+    found: dict[str, str] = {}
+    for file_name, _label, raw, masked in _alarm_blocks():
+        if file_name != "monitoring_autodeploy.tf":
+            continue
+        name = _quoted_attr(raw, masked, "alarm_name")
+        if name not in expected:
+            continue
+        metric = _quoted_attr(raw, masked, "metric_name")
+        assert metric is not None
+        found[name] = metric
+        assert "aws_sns_topic.alerts.arn" in masked, (
+            f"{name} does not route to the shared SNS topic, so it fires into nothing"
+        )
+
+    assert found == expected, (
+        "the writable-container-layer alarms are missing or renamed: expected "
+        f"{expected}, found {found}. ADR 0112's operator constraint is that every capped "
+        "generator has its own alarm — without these, writable-layer saturation is reported "
+        "only as 'root disk high', which is what made the 2026-09-02 outage take five hours."
+    )
+
+
+def test_no_alarm_watches_the_quota_reading() -> None:
+    """``container_quota_enforceable`` is published WITHOUT an alarm on purpose, following
+    ``var_tmp_hard_quota_in_effect``.
+
+    Enabling a per-container overlay2 quota needs ``rootflags=pquota`` and a host REBOOT, so the
+    honest value of this metric is 0 for as long as that reboot has not been scheduled. An alarm
+    on it would page continuously and be muted within a day — which is how a real signal becomes
+    noise, and how the NEXT genuine alarm gets ignored too. It is a capacity fact an operator
+    reads when interpreting rebar-container-writable-usage-high, not an incident.
+    """
+    for file_name, label, raw, masked in _alarm_blocks():
+        metric = _quoted_attr(raw, masked, "metric_name")
+        assert metric != "container_quota_enforceable", (
+            f"{file_name}:{label} alarms on container_quota_enforceable, which reads 0 until a "
+            "host reboot enables rootflags=pquota — a permanently-firing alarm gets muted"
+        )

@@ -149,12 +149,17 @@ def test_print_env_states_the_whole_budget_and_its_split(tmp_path: Path) -> None
     values = dict(line.split("=", 1) for line in result.stdout.splitlines() if line and "=" in line)
     budget = int(values["DOCKER_BUDGET_BYTES"])
     buildkit = int(values["DOCKER_BUILDKIT_CACHE_BYTES"])
+    writable = int(values["DOCKER_CONTAINER_WRITABLE_BYTES"])
     image = int(values["DOCKER_IMAGE_SHARE_BYTES"])
-    # ADR 0112: ONE budget with an internal split, never two independent caps — the shares
-    # must therefore add up to the budget by construction, not by two edited literals.
-    assert budget == buildkit + image
+    # ADR 0112: ONE budget with an internal split, never independent caps — the shares must
+    # therefore add up to the budget by construction, not by three edited literals. The writable
+    # container-layer share (story 910b) is carved OUT of this budget rather than added beside
+    # it, because writable layers live INSIDE /var/lib/docker: two caps over one set of bytes are
+    # either double-counted or mutually violable.
+    assert budget == buildkit + writable + image
     assert budget == 20 * 1024**3
     assert buildkit == 5 * 1024**3
+    assert writable == 2 * 1024**3
 
 
 def test_the_split_follows_an_operator_override(tmp_path: Path) -> None:
@@ -166,11 +171,12 @@ def test_the_split_follows_an_operator_override(tmp_path: Path) -> None:
         env_extra={
             "DOCKER_BUDGET_BYTES": str(30 * 1024**3),
             "DOCKER_BUILDKIT_CACHE_BYTES": str(8 * 1024**3),
+            "DOCKER_CONTAINER_WRITABLE_BYTES": str(2 * 1024**3),
         },
     )
     assert result.returncode == 0, result.stderr
     values = dict(line.split("=", 1) for line in result.stdout.splitlines() if line and "=" in line)
-    assert int(values["DOCKER_IMAGE_SHARE_BYTES"]) == 22 * 1024**3
+    assert int(values["DOCKER_IMAGE_SHARE_BYTES"]) == 20 * 1024**3
 
 
 def test_a_buildkit_share_larger_than_the_budget_is_refused(tmp_path: Path) -> None:

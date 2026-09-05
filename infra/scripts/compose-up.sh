@@ -100,6 +100,20 @@ if ! bash "${SCRIPT_DIR}/vartmp-cap.sh" --install; then
   echo "compose-up: WARN — the /var/tmp bound was not installed; /var/tmp is bounded only by the size of the root volume (see infra/runbooks/review-bot-ops.md)" >&2
 fi
 
+# Install the writable-container-layer bound (ADR 0112 decisions 1+2, story 910b). This is the
+# LAST of the four root generators, and the weakest of the caps: the reaper it installs can only
+# remove EXITED containers, because the one per-container ceiling overlay2 offers
+# (`--storage-opt size=`) is refused unless the filesystem backing /var/lib/docker is XFS mounted
+# with `pquota` — which on this ROOT filesystem needs rootflags=pquota and a reboot. The script
+# reports which regime the box is in rather than implying a ceiling it does not have.
+#
+# NON-FATAL, like all three caps above: a box without an exited-container reaper is a capacity
+# problem rebar-container-writable-usage-high and rebar-container-reaper-not-active alarm on, not
+# a reason to refuse to boot the stack.
+if ! bash "${SCRIPT_DIR}/container-cap.sh" --install; then
+  echo "compose-up: WARN — the writable-container-layer bound was not installed; exited-container debris is bounded only by the size of the root volume (see infra/runbooks/review-bot-ops.md)" >&2
+fi
+
 systemctl enable --now docker
 
 # The compose v2 plugin (`docker compose`). On AL2023 it is the docker-compose-plugin

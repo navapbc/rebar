@@ -24,6 +24,11 @@
 #      ceiling: `docker image prune -f` for dangling layers plus autodeploy.sh's
 #      `mcp_reconcile_orphans`, which sweeps superseded per-release tags while preserving the
 #      live backend and the recorded previous release. Weaker than a cap, and said so.
+#   2b. WRITABLE CONTAINER LAYER SHARE — bounded by a bounded oldest-first reaper over EXITED
+#      containers (container-cap.sh, story 910b), and NOT bounded at all for a RUNNING container:
+#      the only per-container ceiling overlay2 offers, `--storage-opt size=`, needs XFS with the
+#      `pquota` mount option on this filesystem, which needs rootflags=pquota and a reboot. The
+#      weakest of the three enforced shares, and container-cap.sh says so at length.
 #   3. ORPHANED overlay2 — bounded by NOTHING, and that is the point. At the outage
 #      `docker system df` reported ~9.5 GB with ZERO dangling images against 16G of real
 #      overlay2, so ~6.5 GB was invisible to Docker's own accounting and unreachable by any
@@ -60,6 +65,14 @@ set -uo pipefail
 #     promoted to one place so the on-demand prune and the daemon's GC cannot disagree.
 DOCKER_BUDGET_BYTES="${DOCKER_BUDGET_BYTES:-21474836480}"          # 20 GiB
 DOCKER_BUILDKIT_CACHE_BYTES="${DOCKER_BUILDKIT_CACHE_BYTES:-5368709120}"  # 5 GiB
+#   * 2 GiB writable container layers (story 910b). Carved OUT of the same 20 GiB rather than
+#     added beside it, because writable layers live INSIDE /var/lib/docker and two caps over one
+#     set of bytes are either double-counted or mutually violable. It is a STARTING POINT under
+#     ADR 0112 decision 6 and is labelled as one honestly: no writable-layer figure was captured
+#     at the 2026-09-02 outage (`docker system df`'s Containers row was never recorded), so
+#     unlike the two shares above this one is sized from the split rather than from a
+#     measurement this repo has.
+DOCKER_CONTAINER_WRITABLE_BYTES="${DOCKER_CONTAINER_WRITABLE_BYTES:-2147483648}"  # 2 GiB
 DOCKER_ROOT="${DOCKER_ROOT:-/var/lib/docker}"
 DOCKER_DAEMON_JSON="${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}"
 
@@ -80,12 +93,14 @@ warn() { printf 'docker-storage-cap: %s\n' "$*" >&2; }
 
 case "$DOCKER_BUDGET_BYTES" in ''|*[!0-9]*) die "DOCKER_BUDGET_BYTES must be an integer byte count" ;; esac
 case "$DOCKER_BUILDKIT_CACHE_BYTES" in ''|*[!0-9]*) die "DOCKER_BUILDKIT_CACHE_BYTES must be an integer byte count" ;; esac
+case "$DOCKER_CONTAINER_WRITABLE_BYTES" in ''|*[!0-9]*) die "DOCKER_CONTAINER_WRITABLE_BYTES must be an integer byte count" ;; esac
 # A split that does not fit inside its own budget is a typo, not a policy: the two shares are
 # ONE budget by construction, so refusing here is what keeps them from becoming two caps.
-if [ "$DOCKER_BUILDKIT_CACHE_BYTES" -ge "$DOCKER_BUDGET_BYTES" ]; then
-  die "BuildKit share ${DOCKER_BUILDKIT_CACHE_BYTES}B does not fit inside the /var/lib/docker budget ${DOCKER_BUDGET_BYTES}B"
+if [ $((DOCKER_BUILDKIT_CACHE_BYTES + DOCKER_CONTAINER_WRITABLE_BYTES)) -ge "$DOCKER_BUDGET_BYTES" ]; then
+  die "the BuildKit (${DOCKER_BUILDKIT_CACHE_BYTES}B) and writable-container-layer \
+(${DOCKER_CONTAINER_WRITABLE_BYTES}B) shares do not fit inside the /var/lib/docker budget ${DOCKER_BUDGET_BYTES}B"
 fi
-DOCKER_IMAGE_SHARE_BYTES=$((DOCKER_BUDGET_BYTES - DOCKER_BUILDKIT_CACHE_BYTES))
+DOCKER_IMAGE_SHARE_BYTES=$((DOCKER_BUDGET_BYTES - DOCKER_BUILDKIT_CACHE_BYTES - DOCKER_CONTAINER_WRITABLE_BYTES))
 
 # --- Is the installed policy actually in force? ------------------------------
 # `builder.gc` only becomes real when a dockerd process READS it, which happens at daemon
@@ -262,6 +277,7 @@ if [ "$mode" = "--print-env" ]; then
   # the same number by construction.
   printf 'DOCKER_BUDGET_BYTES=%s\n' "$DOCKER_BUDGET_BYTES"
   printf 'DOCKER_BUILDKIT_CACHE_BYTES=%s\n' "$DOCKER_BUILDKIT_CACHE_BYTES"
+  printf 'DOCKER_CONTAINER_WRITABLE_BYTES=%s\n' "$DOCKER_CONTAINER_WRITABLE_BYTES"
   printf 'DOCKER_IMAGE_SHARE_BYTES=%s\n' "$DOCKER_IMAGE_SHARE_BYTES"
   printf 'DOCKER_ROOT=%s\n' "$DOCKER_ROOT"
   exit 0

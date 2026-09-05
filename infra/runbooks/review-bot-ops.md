@@ -1063,3 +1063,145 @@ After step 3, `var_tmp_hard_quota_in_effect` flips to 1 and `/var/tmp` writers g
 the budget instead of the volume filling. The reaper stays in place; with a hard ceiling it
 becomes what it should always have been — a way of keeping the tree *useful*, rather than the
 only thing standing between `/var/tmp` and the root volume.
+
+## Writable container layers and their alarms (ADR 0112 / story `910b-2d43-4482-4c64`)
+
+The last of the four root generators. A container's **writable layer** is the overlay2
+`upperdir` it accumulates as it runs, under `/var/lib/docker/overlay2`. It is not an image
+layer and it is not build cache, so **no `docker image prune` or `docker builder prune` reaches
+it** — which is why the Docker caps above (story `9183`) can be working perfectly while this
+grows. On 2026-09-02 nothing measured it at all.
+
+### Read this section knowing what is enforced, because it is the weakest of the four
+
+`journald` has a writer that checks `SystemMaxUse`; `dockerd` enforces `builder.gc` itself.
+Writable layers have neither, and the one per-container ceiling overlay2 offers is **not
+available on this host**:
+
+```
+--storage-opt is supported only for overlay over xfs with 'pquota' mount option
+```
+
+`--storage-opt size=` (and its `storage-opts: ["overlay2.size=…"]` daemon default) is refused
+unless the filesystem backing `/var/lib/docker` is XFS mounted with `pquota`. That filesystem is
+**root**, XFS reads quota options at **mount** time, and so it needs `rootflags=pquota` and a
+**reboot** — the same constraint `/var/tmp` hit (story `2ba3`). Even after that reboot it is a
+**per-container** ceiling rather than an aggregate one, and it applies at container *creation*,
+so every live service has to be recreated to acquire one.
+
+`rebar/host:container_quota_enforceable` publishes which regime the box is in. It is **not
+alarmed**, deliberately: its honest value is 0 until that reboot is scheduled, and an alarm that
+pages continuously is muted within a day.
+
+### What the reaper does NOT guarantee
+
+`rebar-container-reaper.timer` runs `container-cap.sh --reap` every 5 minutes. Two limits, and
+the first is the one that matters most:
+
+1. **It cannot reclaim a RUNNING container's writable layer at all.** Only exited and dead
+   containers can be removed. So if `container_writable_bytes` is high because Gerrit or the
+   review-bot is writing into its own layer, this reaper does **nothing** about it and the
+   metric is your entire control. That is an application problem, not a cleanup one.
+2. For the debris it *can* reach, the enforced bound between two runs is
+   `share + fill_rate × interval`, not `share`. At the 2 GiB share and a 300 s period a
+   sustained net fill above **~7.2 MB/s** exceeds the share before the reaper next runs — and
+   this gp3 volume does 125 MB/s baseline, roughly **17×** that. A single runaway writer defeats
+   it; its real job is bounding steady debris accumulation.
+
+Nothing that exited inside the 900 s grace window is ever removed, so a burst of fresh exits is
+unreclaimable by design. When the reaper cannot get under the share it says so on stderr, naming
+how many bytes are running and how many are protected — it never exits quietly as though it had.
+
+### What the reaper will never touch
+
+A prune that takes Gerrit down is far worse than the debris it reclaims, so the candidate set is
+narrowed three independent ways and any one of them alone spares the live services:
+
+| Spared | Why |
+|---|---|
+| anything `com.docker.compose.project`-labelled | gerrit, review-bot, opcert, compose-mcp-1. An **exited** compose service is a **crashed** service, and its logs are the evidence. |
+| anything `rebar.service`-labelled | the stable identity `mcp_run_new` stamps on the blue-green containers, precisely because compose never sees them. |
+| anything named `rebar-mcp-*` or `compose-mcp-1` | `mcp_managed`'s own regex. `autodeploy.sh` reaps this set itself in `mcp_retire_sweep`, under a guard reading the nginx `/mcp/` upstream include that this reaper cannot replicate — bug `9ea3` reaped an exited container the include still named, and `--restart always` then had nothing to restart, so a transient exit became a permanent 502. |
+
+Plus two guarantees the **daemon** enforces rather than this shell: candidates come from
+`docker ps -a --filter status=exited --filter status=dead`, which never lists a running
+container, and removal is `docker rm` **without** `-f`, which the daemon refuses for a running
+container. It never passes `-v`/`--volumes`, so named and bind volumes are untouched, and it
+never runs `docker system prune`.
+
+`docker container prune --filter until=…` is *not* used, and could not be: its filters are
+`until` and `label` only, with **no name filter**, so it cannot express the `rebar-mcp-*`
+exclusion above.
+
+### Which alarm fired?
+
+| Alarm | Metric | What it means |
+|---|---|---|
+| `rebar-container-writable-usage-high` | `container_writable_used_percent` > 85 | writable layers are near their share of the Docker budget. Could be reclaimable debris **or** a live service growing — the next section separates them. |
+| `rebar-container-reaper-not-active` | `container_reaper_active` < 1 | nothing is reaping debris: the timer is dead or its units are stale. While this fires, the usage percentage is measured against a share nothing is holding. |
+
+Both are `treat_missing_data = "breaching"`. Silence is a page, because
+`container_writable_bytes` publishes **only** on a successful measurement — a fabricated 0 would
+read as "no containers at all" on a box that is filling (bug `3276` defect 2).
+
+### Diagnosis and safe remediation
+
+```bash
+# 1. Debris, or the live services? This is the question the alarm cannot answer.
+#    container_exited_bytes close to container_writable_bytes => reclaimable debris.
+docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}'
+
+# 2. Name the containers. --size makes the daemon compute the writable layer (SizeRw).
+docker ps -a --size
+
+# 3. Debris: force a reaper pass. Bounded, oldest-first, spares everything in the table above.
+bash infra/scripts/container-cap.sh --reap
+
+# 4. Confirm the reaper is actually in force (this is what the heartbeat alarms on).
+bash infra/scripts/container-cap.sh --check-active   # expect 1
+systemctl status rebar-container-reaper.timer
+bash infra/scripts/container-cap.sh --install        # idempotent; reports the state in words
+
+# 5. Is a hard ceiling even possible on this host?
+bash infra/scripts/container-cap.sh --check-quota    # 0 here until the pquota reboot
+```
+
+If step 1 shows the bytes belong to **running** services, stop: no cleanup will help. Find what
+that container is writing (`docker exec <name> du -sx /` on its writable paths) and fix it
+there, or give the service a volume so the writes leave the writable layer.
+
+### NEVER delete under `/var/lib/docker/overlay2`
+
+This bears repeating in this section because a writable layer is *visibly* a per-container
+directory, which makes hand-deletion look targeted and safe. It is neither. The layer metadata
+belongs to the daemon; removing an `upperdir` behind its back desynchronises its database from
+the tree and leaves a container the daemon can neither start nor remove — on the host whose
+whole purpose is keeping Gerrit up. Use the daemon-level operations above, and if a residue
+persists it is orphan state only the daemon can reconcile (`systemctl restart docker`, an
+operator-scheduled outage — see "NEVER delete under `/var/lib/docker`" above).
+
+### Enabling the real ceiling (operator, requires a reboot)
+
+```bash
+# 1. Add the mount option to the kernel command line.
+#    /etc/default/grub:  GRUB_CMDLINE_LINUX="... rootflags=pquota"
+grub2-mkconfig -o /boot/grub2/grub.cfg     # AL2023
+
+# 2. REBOOT. This is a scheduled Gerrit outage — announce it.
+reboot
+
+# 3. Confirm the kernel is enforcing, then set the per-container default.
+xfs_quota -x -c 'state -p' /                        # expect Enforcement: ON
+bash infra/scripts/container-cap.sh --check-quota   # expect 1
+#    daemon.json is owned by docker-storage-cap.sh — add the storage-opt THERE, never by hand:
+#      "storage-opts": ["overlay2.size=<the share from --print-env>"]
+#    then restart dockerd (another scheduled outage) so it reads the new option.
+
+# 4. RECREATE the containers. The quota is applied at container CREATION, so services running
+#    from before the change keep their unbounded layers until they are recreated.
+bash infra/scripts/compose-up.sh
+```
+
+The reaper stays in place afterwards. With a hard ceiling it becomes what it should always have
+been — a way of keeping the container set *tidy*, rather than the only thing standing between a
+runaway container and the root volume.

@@ -15,6 +15,14 @@
 #       (ADR 0112, story 2ba3; alarms in monitoring_autodeploy.tf). The last one is the
 #       point: /var/tmp has no native writer-enforced cap, so the box publishes whether it
 #       is holding a real XFS quota ceiling or only a timer-driven mitigation.
+#   2i. Writable CONTAINER layers, the last root generator and the part of §2f no image or
+#       build-cache prune can reach -> rebar/host:container_writable_bytes,
+#       container_exited_bytes, container_writable_used_percent, container_reaper_active and
+#       container_quota_enforceable (ADR 0112, story 910b; two alarms in
+#       monitoring_autodeploy.tf). The last two are the point: the share is held by a reaper that
+#       can only remove EXITED containers, and the one true per-container ceiling (overlay2
+#       --storage-opt size=) needs XFS pquota and a reboot — so the box publishes what is holding
+#       the line instead of a runbook asserting it.
 #   2c. Non-`site/` debris on the Gerrit data volume (bytes under /var/gerrit that are not
 #       the Gerrit site tree) -> rebar/host:data_disk_debris_bytes (task 3e92 alarm). Answers
 #       "full OF WHAT", which the used-percent reading in 2 structurally cannot.
@@ -504,7 +512,13 @@ docker_du_bytes() {
   printf '%s\n' "$raw"
 }
 
-# "<accounted_total> <build_cache>" in bytes from the daemon's ledger, or non-zero.
+# "<accounted_total> <build_cache> <containers> <containers_reclaimable>" in bytes from the
+# daemon's ledger, or non-zero. The last two are -1 when this engine's rendering did not carry a
+# parseable Containers row — §2i then publishes NOTHING rather than a plausible 0 (the §2e rule).
+#
+# ONE `docker system df` serves §2f and §2i. It is the expensive call in this probe (the daemon
+# walks every layer to size it), so the Containers row is taken from the walk §2f already pays
+# for rather than adding a second one.
 # `docker system df` renders HUMAN sizes through go-units, which emits SI suffixes (kB/MB/GB)
 # in some paths and binary ones (KiB/MiB/GiB) in others, so both families are parsed. An
 # unrecognised suffix in a KNOWN row fails the whole read rather than silently contributing
@@ -518,7 +532,7 @@ docker_du_bytes() {
 # residue then under-reports by that new row instead — visible, bounded, and recoverable.
 docker_ledger_bytes() {
   local rows out
-  rows="$(timeout "$DOCKER_DF_TIMEOUT" docker system df --format '{{.Type}}|{{.Size}}' 2>/dev/null)" || return 1
+  rows="$(timeout "$DOCKER_DF_TIMEOUT" docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}' 2>/dev/null)" || return 1
   [ -n "$rows" ] || return 1
   out="$(printf '%s\n' "$rows" | awk -F'|' '
     function tobytes(s,   n, u, m) {
@@ -539,6 +553,7 @@ docker_ledger_bytes() {
       else return -1
       return int(n * m + 0.5)
     }
+    BEGIN { containers = -1; reclaimable = -1 }
     {
       type = $1; gsub(/^[ \t]+|[ \t]+$/, "", type)
       known = (type == "Images" || type == "Containers" || type == "Build Cache" || type == "Local Volumes")
@@ -547,8 +562,21 @@ docker_ledger_bytes() {
       if (value < 0) { bad = 1; next }
       total += value; seen = 1
       if (type == "Build Cache") cache = value
+      if (type == "Containers") {
+        containers = value
+        # RECLAIMABLE renders as "1.2GB (100%)" — the parenthesised share is presentation, not a
+        # quantity. An engine that emits no third field (or an unparseable one) leaves this -1,
+        # which §2i reports as SILENCE; it never degrades to 0, which would read as "no
+        # exited-container debris" on a box accumulating it.
+        rc = $3
+        sub(/[ \t]*\(.*$/, "", rc)
+        if (rc != "") reclaimable = tobytes(rc)
+      }
     }
-    END { if (!seen || bad) exit 1; printf "%d %d\n", total, cache }
+    END {
+      if (!seen || bad) exit 1
+      printf "%d %d %d %d\n", total, cache, containers, reclaimable
+    }
   ')" || return 1
   [ -n "$out" ] || return 1
   printf '%s\n' "$out"
@@ -572,9 +600,15 @@ fi
 
 docker_ledger=""
 docker_ledger="$(docker_ledger_bytes)" || docker_ledger=""
+docker_container_bytes=""
+docker_container_reclaimable=""
 if [ -n "$docker_ledger" ]; then
-  docker_accounted_bytes="${docker_ledger%% *}"
-  docker_cache_bytes="${docker_ledger##* }"
+  # `read`, not `set --`: this script's own positional parameters are not scratch space.
+  read -r docker_accounted_bytes docker_cache_bytes _df_containers _df_reclaimable <<LEDGER
+$docker_ledger
+LEDGER
+  [ "${_df_containers:--1}" -ge 0 ] && docker_container_bytes="$_df_containers"
+  [ "${_df_reclaimable:--1}" -ge 0 ] && docker_container_reclaimable="$_df_reclaimable"
   aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
     --metric-name docker_buildkit_cache_bytes --unit Bytes --value "$docker_cache_bytes" 2>/dev/null || true
   logger -t rebar-health "docker buildkit cache bytes=${docker_cache_bytes} accounted=${docker_accounted_bytes}"
@@ -759,6 +793,96 @@ if [ -n "$var_tmp_bytes" ]; then
       --metric-name var_tmp_used_percent --unit Percent \
       --value "$(pct_of_cap "$var_tmp_bytes" "$VAR_TMP_MAX_BYTES")" 2>/dev/null || true
   fi
+fi
+
+# --- 2i. writable container layers, the last root generator (ADR 0112, story 910b) ------
+# §2f named the Docker accumulator as a whole and capped its BuildKit share. This names what is
+# INSIDE it that no image or build-cache prune can reach: each container's writable layer, the
+# overlay2 `upperdir` it accumulates as it runs. On 2026-09-02 nothing measured them, so the
+# only signal was "root disk high".
+#
+# FIVE readings, and they fail independently on purpose.
+#
+#   container_writable_bytes        every container's writable layer, running and exited.
+#   container_exited_bytes          the subset belonging to STOPPED containers, i.e. the debris.
+#   container_writable_used_percent the first of those against the share the box holds.
+#   container_reaper_active         1/0 HEARTBEAT: is anything reaping that debris at all?
+#   container_quota_enforceable     1/0: could a HARD per-container ceiling exist on this host?
+#
+# THE LAST TWO ARE NOT SPARE METRICS, and they answer different questions.
+#
+# `container_reaper_active` is the one that is ALARMED. A cap enforced by a timer with no
+# liveness signal is a cap that can silently stop existing while every other reading stays
+# nominal — usage sits at 40%, nothing is reaping, and the box looks healthy right up to the
+# volume filling. It follows the §2e heartbeat rule (bug bff5): a value on EVERY tick INCLUDING
+# the 0 path, so ABSENCE means the probe, the timer or the host is dead.
+#
+# `container_quota_enforceable` is published WITHOUT an alarm, deliberately, following
+# var_tmp_hard_quota_in_effect (§2h). overlay2's per-container `--storage-opt size=` is refused
+# unless the filesystem backing /var/lib/docker is XFS mounted with `pquota`, and XFS reads quota
+# options at MOUNT time — so on this root filesystem it needs rootflags=pquota and a REBOOT, and
+# the honest value is 0 until that reboot is scheduled. An alarm on it would page continuously
+# and be muted within a day. It is the capacity FACT an operator reads when interpreting
+# rebar-container-writable-usage-high, not an incident.
+#
+# READ THE PERCENTAGE KNOWING WHAT HOLDS IT. The reaper can only remove EXITED containers, so a
+# RUNNING container's writable layer is bounded by NOTHING here — for the live compose set this
+# is measurement and an alarm, not a ceiling. That is why both heartbeats exist rather than one.
+#
+# BOTH SIDES OF THE RATIO SPAN THE SAME BYTES, the §2f/§2g/§2h rule: the share is about writable
+# layers, so the numerator is the daemon's own SizeRw sum (the Containers row of the same
+# `docker system df` §2f already ran) and not a `du` of overlay2, which would count image layers
+# against a share that does not bound them.
+#
+# Every non-heartbeat reading is GATED ON ITS OWN MEASUREMENT SUCCEEDING (§2e/§2f/§2g/§2h): a
+# probe that could not measure publishes NOTHING, and treat_missing_data = "breaching" pages on
+# the silence — while a 0 would read as "no writable layers at all" on a box that is filling.
+#
+# DIMENSIONLESS on both sides, following root_disk_used_percent (§2b): CloudWatch keys a metric
+# by namespace+name+dimensions, so a dimension on only one side silently never matches.
+#
+# The share comes from infra/scripts/container-cap.sh, which reads it in turn from
+# docker-storage-cap.sh — ONE budget with an internal split (ADR 0112), so the published
+# percent-of-share and the share the reaper holds are the same number by construction.
+CONTAINER_CAP_SH="${CONTAINER_CAP_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/container-cap.sh}"
+eval "$(bash "$CONTAINER_CAP_SH" --print-env 2>/dev/null)" || true
+
+container_reaper="$(bash "$CONTAINER_CAP_SH" --check-active 2>/dev/null)"
+case "$container_reaper" in 1) ;; *) container_reaper=0 ;; esac
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name container_reaper_active --unit Count --value "$container_reaper" 2>/dev/null || true
+
+container_quota="$(bash "$CONTAINER_CAP_SH" --check-quota 2>/dev/null)"
+case "$container_quota" in 1) ;; *) container_quota=0 ;; esac
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name container_quota_enforceable --unit Count --value "$container_quota" 2>/dev/null || true
+logger -t rebar-health \
+  "container writable share=${CONTAINER_WRITABLE_BYTES:-unset}B reaper_active=${container_reaper} quota_enforceable=${container_quota}"
+if [ "$container_reaper" -eq 0 ]; then
+  logger -t rebar-health \
+    "NOTHING is reaping exited-container debris — rebar-container-reaper.timer is not running or its units are stale; see infra/runbooks/review-bot-ops.md"
+fi
+
+if [ -n "$docker_container_bytes" ]; then
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name container_writable_bytes --unit Bytes --value "$docker_container_bytes" 2>/dev/null || true
+  logger -t rebar-health "container writable layers bytes=${docker_container_bytes}"
+  # Independently gated from the size: losing the share must not also take the MAGNITUDE off the
+  # air, since container_writable_bytes is what an operator sizes the problem with.
+  if [ -n "${CONTAINER_WRITABLE_BYTES:-}" ] && [ "${CONTAINER_WRITABLE_BYTES:-0}" -gt 0 ]; then
+    aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+      --metric-name container_writable_used_percent --unit Percent \
+      --value "$(pct_of_cap "$docker_container_bytes" "$CONTAINER_WRITABLE_BYTES")" 2>/dev/null || true
+  fi
+fi
+
+# Published INDEPENDENTLY of the total above: the debris figure is the one that says whether the
+# reaper has anything to work with, so an engine rendering that costs us the total must not also
+# cost us the answer to "is this debris or is it the live services".
+if [ -n "$docker_container_reclaimable" ]; then
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name container_exited_bytes --unit Bytes --value "$docker_container_reclaimable" 2>/dev/null || true
+  logger -t rebar-health "exited-container debris bytes=${docker_container_reclaimable}"
 fi
 
 # --- 2c. Non-`site/` debris on the Gerrit DATA volume (task 3e92) ------------
