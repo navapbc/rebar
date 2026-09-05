@@ -17,12 +17,12 @@ the acquire fails loudly and never reaches the mkdir leg.*
 
 Two layers, because they prove different things.
 
-``test_no_leg_*`` run a child interpreter with ``fcntl`` hidden and NO substitute
-available (``sys.modules['fcntl'] = None`` makes ``import fcntl`` raise ``ImportError``,
-exactly as a missing module does — the idiom already used by
-``tests/unit/test_fcntl_import_guard.py``; a child is required because the parent has
-already imported rebar against the real ``fcntl``). They pin the degradation guard: with
-no leg to take, ``acquire`` must refuse and the mkdir lock must never appear.
+``test_no_leg_*`` run a child interpreter with NO exclusive leg of either kind — ``fcntl``
+hidden in ``sys.modules`` and ``lock_kernel``'s ``msvcrt`` handle blanked (see
+:data:`_NO_LEG` for why the two are hidden by different mechanisms, and why that keeps the
+premise true on Windows as well as on POSIX). A child is required because the parent has
+already imported rebar against the real primitive. They pin the degradation guard: with no
+leg to take, ``acquire`` must refuse and the mkdir lock must never appear.
 
 ``test_windows_leg_*`` stub the platform primitive in-process and drive the real code.
 Only ``rebar._store.lock_kernel``'s two module-level primitive handles are replaced —
@@ -33,7 +33,10 @@ the host's own ``flock``, which is what makes the assertions meaningful: the leg
 Windows branch takes is a real kernel lock, so "a second acquirer is refused" is an
 observation rather than a mock's say-so. (The stub is NOT installed into ``sys.modules``:
 the standard library detects Windows by importing ``msvcrt``, so a global injection would
-send ``subprocess`` looking for ``_winapi``.)
+send ``subprocess`` looking for ``_winapi``.) That ``flock`` delegation is also why they
+run on POSIX HOSTS ONLY: this layer is buildable exactly where the real primitive is
+missing, and on Windows the very same code paths run against the real ``msvcrt``
+throughout the default suite — so skipping it there drops a scaffold, not coverage.
 
 That simulation proves rebar's Windows BRANCH. It cannot prove the real
 ``msvcrt.locking``'s own guarantees, so those — cross-process visibility and
@@ -62,14 +65,30 @@ pytestmark = pytest.mark.unit
 
 # ── layer 1: no leg at all — the degradation guard ────────────────────────────────────
 
-_HIDE_FCNTL = """
+#: Make the child interpreter a platform with NO exclusive leg at all — on POSIX and on
+#: Windows alike, so the premise these tests rest on is true on both.
+#:
+#: ``fcntl`` is hidden the module way (``sys.modules[...] = None`` makes ``import fcntl``
+#: raise ``ImportError``, exactly as a missing module does — the idiom already used by
+#: ``tests/unit/test_fcntl_import_guard.py``), which also proves rebar still IMPORTS with no
+#: ``fcntl``. ``msvcrt`` cannot be hidden that way: on Windows the standard library itself
+#: imports it (``subprocess`` does, at module scope), so a ``sys.modules`` entry would break
+#: the interpreter rather than rebar. It is blanked at the ONE handle rebar reads instead —
+#: ``lock_kernel``'s module-level primitive, the same seam the layer-2 fixture patches. On
+#: POSIX that handle is already ``None``, so the assignment is a no-op and POSIX behaviour is
+#: exactly what it was. ``leg_name()`` then states the premise out loud and fails the child
+#: immediately if it is ever false again.
+_NO_LEG = """
 import sys
 sys.modules["fcntl"] = None   # `import fcntl` now raises ImportError, as on Windows
+from rebar._store import lock_kernel as _kernel
+_kernel.msvcrt = None         # and no Windows leg either: this platform offers NOTHING
+assert _kernel.leg_name() == "none", "premise broken: a leg is still available"
 """
 
 
-def _run_without_fcntl(body: str, tracker: str) -> subprocess.CompletedProcess[str]:
-    code = _HIDE_FCNTL + textwrap.dedent(body).replace("<TRACKER>", repr(tracker))
+def _run_without_any_leg(body: str, tracker: str) -> subprocess.CompletedProcess[str]:
+    code = _NO_LEG + textwrap.dedent(body).replace("<TRACKER>", repr(tracker))
     return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
 
 
@@ -90,7 +109,7 @@ def test_no_leg_acquire_refuses_loudly_and_never_takes_the_mkdir_leg(tmp_path) -
     unguarded ``None.flock``.
     """
     _assert_child_ok(
-        _run_without_fcntl(
+        _run_without_any_leg(
             """
             import os
             from rebar._store import lock as _lock
@@ -122,7 +141,7 @@ def test_no_leg_busy_probe_fails_open(tmp_path) -> None:
     answer "not busy" rather than raise — a probe failure may only degrade to today's
     behaviour (attempt the work, let the real acquire arbitrate)."""
     _assert_child_ok(
-        _run_without_fcntl(
+        _run_without_any_leg(
             """
             from rebar._store import lock as _lock
             assert _lock.write_lock_is_busy(<TRACKER>) is False
@@ -137,7 +156,7 @@ def test_no_leg_doctor_probe_reports_unknown(tmp_path) -> None:
     """``rebar doctor --locks`` is read-only diagnostics. With no leg it must report
     ``unknown`` — never raise, and never claim a lock is free."""
     _assert_child_ok(
-        _run_without_fcntl(
+        _run_without_any_leg(
             """
             import os
             from rebar._commands import doctor_locks as _doctor
@@ -192,7 +211,22 @@ def windows_leg(monkeypatch: pytest.MonkeyPatch) -> None:
     repo already uses for the same purpose — see
     ``tests/unit/store/test_git_locking_no_fcntl.py`` — and it keeps the stdlib's own
     ``import msvcrt`` platform sniff untouched.
+
+    POSIX HOSTS ONLY, and not as a convenience: the stub delegates to the host's own
+    ``flock`` (see :func:`_windows_shaped_msvcrt`) so that "a second acquirer is refused"
+    is an observation rather than a mock's say-so — and ``fcntl`` is precisely what
+    Windows does not have. This layer is the SIMULATION of the Windows branch, needed
+    only where the real primitive is unavailable; on Windows the very same code paths run
+    against the real ``msvcrt`` in the default suite, and the primitive's own guarantees
+    are proved by ``test_native_*`` below. Skipping here therefore removes no coverage
+    from Windows — it removes a POSIX-only scaffold that cannot be built there.
     """
+    if os.name == "nt":
+        pytest.skip(
+            "POSIX-host simulation of the Windows leg: the stub delegates to the host's "
+            "fcntl, which does not exist on Windows. The real primitive is exercised "
+            "natively here and proved by test_native_* below."
+        )
     monkeypatch.setattr(_kernel, "fcntl", None)
     monkeypatch.setattr(_kernel, "msvcrt", _windows_shaped_msvcrt())
 
