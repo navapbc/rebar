@@ -1,6 +1,6 @@
 Usage: rebar verify-identity [--all | --base <ref>] [--require-authenticated] [--since <ref>] [--format {text,json}] [--root <path>]
 
-Verify authenticated authorship of the store's mutating events against each author identity's epoch-scoped keyring. This is the authorship merge-gate, also available under the back-compat alias `rebar verify-authorship`. It is advisory unless identity.require_authenticated (or --require-authenticated) is on, in which case any enforced event that is not `verified` fails the gate with a non-zero exit. Events whose introducing commit predates --since or identity.enforce_since are grandfathered, which means they are reported but never fail the gate.
+Verify authenticated authorship of the store's mutating events against each author identity's epoch-scoped keyring. This is the authorship merge-gate. It is advisory unless identity.require_authenticated (or --require-authenticated) is on, in which case any enforced event that is not `verified` fails the gate with a non-zero exit. Events whose introducing commit predates --since or identity.enforce_since are grandfathered, which means they are reported but never fail the gate.
 
 options:
   -h, --help            show this help message and exit

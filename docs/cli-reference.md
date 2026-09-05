@@ -22,8 +22,7 @@ never consumed):
   `--output json` still prints the JSON.
 
 Bridge operations use the canonical nested forms `rebar bridge fsck`, `rebar bridge
-check-access`, and `rebar bridge setup`; the retained top-level `rebar bridge-fsck` spelling is
-kept for compatibility.
+check-access`, and `rebar bridge setup`.
 
 ## Mutation confirmations and global output flags
 
@@ -77,7 +76,7 @@ The golden record of the normalization: what each verb printed before the confir
 
 ## Command syntax
 
-One section per visible command that is not retired (76 in total), in registry order. Every section embeds its committed package help bytes.
+One section per visible command that is not retired (72 in total), in registry order. Every section embeds its committed package help bytes.
 
 ### `show`
 
@@ -1070,29 +1069,7 @@ options:
 ```
 Usage: rebar verify-identity [--all | --base <ref>] [--require-authenticated] [--since <ref>] [--format {text,json}] [--root <path>]
 
-Verify authenticated authorship of the store's mutating events against each author identity's epoch-scoped keyring. This is the authorship merge-gate, also available under the back-compat alias `rebar verify-authorship`. It is advisory unless identity.require_authenticated (or --require-authenticated) is on, in which case any enforced event that is not `verified` fails the gate with a non-zero exit. Events whose introducing commit predates --since or identity.enforce_since are grandfathered, which means they are reported but never fail the gate.
-
-options:
-  -h, --help            show this help message and exit
-  --all                 scan the whole store (default)
-  --base BASE           only events changed in <base>..HEAD on the tracker
-                        branch
-  --require-authenticated
-                        force enforcement on, regardless of the
-                        identity.require_authenticated config
-  --since SINCE         grandfather boundary. Only enforce events at or
-                        descending this ref (default: identity.enforce_since)
-  --format {text,json}  output format (default: text). json prints only a report
-                        array to stdout
-  --root ROOT           repo root that resolves the ticket store (default: cwd)
-```
-
-### `verify-authorship`
-
-```
-Usage: rebar verify-identity [--all | --base <ref>] [--require-authenticated] [--since <ref>] [--format {text,json}] [--root <path>]
-
-Verify authenticated authorship of the store's mutating events against each author identity's epoch-scoped keyring. This is the authorship merge-gate, also available under the back-compat alias `rebar verify-authorship`. It is advisory unless identity.require_authenticated (or --require-authenticated) is on, in which case any enforced event that is not `verified` fails the gate with a non-zero exit. Events whose introducing commit predates --since or identity.enforce_since are grandfathered, which means they are reported but never fail the gate.
+Verify authenticated authorship of the store's mutating events against each author identity's epoch-scoped keyring. This is the authorship merge-gate. It is advisory unless identity.require_authenticated (or --require-authenticated) is on, in which case any enforced event that is not `verified` fails the gate with a non-zero exit. Events whose introducing commit predates --since or identity.enforce_since are grandfathered, which means they are reported but never fail the gate.
 
 options:
   -h, --help            show this help message and exit
@@ -1210,27 +1187,6 @@ positional arguments:
 
 options:
   -h, --help  show this help message and exit
-```
-
-### `jira-onboard`
-
-```
-Usage: rebar jira-onboard [-h] [--url URL] [--user USER] [--project PROJECT] [--no-validate] [--reset] [--yes]
-
-Interactively configure Jira: detect existing settings, prompt for missing
-url/user/project, persist them to rebar.toml, and validate via bridge check-
-access. The secret JIRA_API_TOKEN stays an environment variable and is never
-written to a config file.
-
-options:
-  -h, --help         show this help message and exit
-  --url URL          Jira base URL (non-interactive)
-  --user USER        Jira account email (non-interactive)
-  --project PROJECT  default Jira project key (non-interactive)
-  --no-validate      skip the post-setup bridge check-access check
-  --reset            clear the persisted [jira] url/user/project and exit (no
-                     re-prompt)
-  --yes, -y          skip the --reset confirmation prompt
 ```
 
 ### `prompt`
@@ -1370,33 +1326,6 @@ commands:
     projects            Manage the store's bridge-projects sync mapping.
 ```
 
-### `bridge-fsck`
-
-```
-Usage: rebar bridge-fsck [-h] [--tickets-tracker TICKETS_TRACKER] [--repair]
-                         [--live-visibility]
-
-Audit committed bridge events and binding-store integrity offline.
-
-options:
-  -h, --help            show this help message and exit
-  --tickets-tracker TICKETS_TRACKER
-                        Path to the .tickets-tracker directory. Defaults to the
-                        REBAR_TRACKER_DIR env var or <repo-root>/.tickets-
-                        tracker.
-  --repair              Prune reverse bindings that have no forward entry
-                        (store_integrity / reverse_missing_forward). Refuses if
-                        any other integrity kind is present. This is the only
-                        writing mode; the audit itself never writes.
-  --live-visibility     Opt-in: additionally run a READ-ONLY, ADVISORY live
-                        check that the mapped project keys + legacy_default are
-                        visible to the bridge bot, reusing the reconcile-pass
-                        visibility helper. Requires live Jira credentials
-                        (JIRA_URL / JIRA_USER / JIRA_API_TOKEN); when absent it
-                        skips cleanly. The advisory is written to stderr and
-                        never changes the exit code.
-```
-
 ### `init`
 
 ```
@@ -1498,21 +1427,6 @@ options:
                         output format
   --repair              apply the safe fixes
   --dry-run             report fixes without applying
-```
-
-### `bridge-probe`
-
-```
-Usage: rebar bridge-probe [-h] ...
-
-Live Jira capability preflight (requires JIRA_URL, JIRA_USER, JIRA_API_TOKEN;
-optional JIRA_PROJECT). Creates and deletes a throwaway issue.
-
-positional arguments:
-  probe_args  arguments forwarded verbatim to the capability probe
-
-options:
-  -h, --help  show this help message and exit
 ```
 
 ### `grounding-info`

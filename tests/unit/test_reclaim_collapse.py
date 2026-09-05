@@ -404,7 +404,7 @@ def test_enforce_since_reanchor_makes_verify_authorship_clean(tmp_path: Path) ->
         }
     )
     completed = subprocess.run(
-        ["rebar", "verify-authorship", "--all"],
+        ["rebar", "verify-identity", "--all"],
         cwd=tmp_path,
         env=env,
         capture_output=True,

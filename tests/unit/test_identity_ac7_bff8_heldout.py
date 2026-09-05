@@ -1,6 +1,6 @@
 """HELD-OUT oracle for AC7 (bff8) — the implementation MUST NOT see this file.
 
-The enforcement-gate behaviour the happy path can't cover: the verify-authorship alias,
+The enforcement-gate behaviour the happy path can't cover: removed alias rejection,
 `--since` grandfathering (pre-cutover events don't fail; post-cutover do), the
 `--format json` report shape validated against verify_identity_report.schema.json, and the
 CI merge-gate workflow file.
@@ -53,12 +53,13 @@ def _head(repo: Path) -> str:
     ).stdout.strip()
 
 
-# ── alias ─────────────────────────────────────────────────────────────────────
-def test_verify_authorship_alias_still_works(repo: Path) -> None:
-    """The delivered `verify-authorship` name still dispatches the same gate (alias)."""
+# ── removed alias ─────────────────────────────────────────────────────────────
+def test_verify_authorship_alias_is_invalid_choice(repo: Path) -> None:
+    """The retired `verify-authorship` name is rejected before gate dispatch."""
     rebar.create_ticket("task", "t", repo_root=str(repo))
     res = _run(repo, "verify-authorship", "--all")
-    assert res.returncode == 0
+    assert res.returncode == 2
+    assert "invalid choice" in res.stderr
     both = _run(repo, "verify-identity", "--all")
     assert both.returncode == 0
 

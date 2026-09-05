@@ -129,7 +129,7 @@ of by fuzzy display-name/email search:
 
 Enforcement is **project-opt-in** via `identity.require_authenticated` (default off):
 
-- **The merge-gate is the real control.** `rebar verify-authorship` re-verifies every
+- **The merge-gate is the real control.** `rebar verify-identity` re-verifies every
   in-scope mutating event's signature against the author identity's commit-anchored
   keyring, emitting one of five verdicts per event:
   - `verified` — the in-toto Statement binds the event and the signature verifies
@@ -144,7 +144,7 @@ Enforcement is **project-opt-in** via `identity.require_authenticated` (default 
 
   The user-facing display groups these as **verified** / **unverified**
   (`bad-signature` | `key_not_valid_at_era` | `unknown-author`) / **unsigned**. (This
-  is the `verify-authorship` gate's own vocabulary; it is distinct from the separate
+  is the `verify-identity` gate's own vocabulary; it is distinct from the separate
   `verify-signature` manifest-attestation verdict set.) The gate exits non-zero (blocking
   the change) only when `require_authenticated` is on and any in-scope event is not
   verified; advisory (exit 0) when off. CI runs it as the merge gate. Gate-exempt
@@ -190,7 +190,7 @@ Every human or agent clone writes non-exempt tickets, so each needs its **own** 
 
 **Verify a signed write:** after setup, make any write (e.g. `rebar comment <id> "hi"`) and
 run `rebar show <id>` — the new event shows `authorship: {signed: ≥1}`; `rebar
-verify-authorship` emits a `verified` verdict for it. (Note: this is the SSH-authorship flow —
+verify-identity` emits a `verified` verdict for it. (Note: this is the SSH-authorship flow —
 distinct from `rebar verify-signature`, which certifies the *manifest* attestations produced by
 the `rebar sign` command — asymmetric operation certificates (DSSE/SSHSIG), not event authorship.)
 

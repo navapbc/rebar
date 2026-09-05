@@ -63,9 +63,11 @@ _TOKENISH_RE = re.compile(r"\b[A-Za-z0-9_-]{32,}\b")
 # conversion, where these tokens are semantically irrelevant, so they are mapped to
 # the canonical spellings on the way out rather than exempting the fixture.
 _VOCABULARY_SUBSTITUTIONS = (
+    ("bridge-status", "bridge status"),
     ("bridge-fsck", "bridge fsck"),
     ("bridge-probe", "bridge check-access"),
     ("jira-onboard", "bridge setup"),
+    ("verify-authorship", "verify-identity"),
     ("--force-close", '--force="<reason>"'),
 )
 

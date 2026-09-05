@@ -578,10 +578,8 @@ tracker, `store_integrity` validates both directions of `bindings.json`; malform
 operational exit 2, while an index inconsistency exits 1. Unknown types and the existing
 informational binding-drift cells remain non-gating.
 
-The compatibility `rebar bridge-fsck` entrypoint produces the identical new result and exit
-semantics as canonical `rebar bridge fsck`. Public library/MCP symbol names remain
-`bridge_fsck`; only their returned schema changes. The live `BRIDGE_ALERT` event/reducer path,
-the bridge-alert JSONL channel, and compatibility `rebar bridge-status` are unchanged.
+Public library/MCP symbol names remain `bridge_fsck`; only their returned schema changes. The
+live `BRIDGE_ALERT` event/reducer path and the bridge-alert JSONL channel are unchanged.
 
 ## Bridge maintenance commands are nested under `bridge`
 
@@ -590,14 +588,15 @@ The primary operator spellings replace the old vocabulary as follows:
 - `rebar bridge-fsck` -> `rebar bridge fsck` for the mapping audit;
 - `rebar bridge-probe` -> `rebar bridge check-access` for the live Jira capability round-trip;
 - `rebar jira-onboard` -> `rebar bridge setup` for the onboarding wizard.
+- `rebar bridge-status` -> `rebar bridge status` for durable bridge state.
+- `rebar verify-authorship` -> `rebar verify-identity` for the authorship merge-gate.
 
 `check-access` remains a distinct child, not an fsck option. The public library and MCP
 `bridge_fsck` symbol names are unchanged.
 
-This is an expand-contract migration: `rebar bridge-fsck`, `rebar bridge-probe`, and
-`rebar jira-onboard` remain compatibility entrypoints. Each alias and canonical command routes
-through the same implementation, so existing automation retains its parser, output, state
-effects, and exit policy while new scripts can adopt the nested vocabulary.
+This is a pre-1.0 contract migration: the old simple alias spellings now fail at parse time
+with argparse's invalid-choice exit `2`. Existing automation must invoke the canonical
+commands above.
 
 ## `bridge preview` / `bridge sync` are primary
 

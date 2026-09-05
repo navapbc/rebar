@@ -2,7 +2,7 @@
 
 These tests exercise generation mechanics with fakes. The committed fixture and
 ``test_wiki_render_hardening.py`` retain the real pinned-Pandoc evidence; this file
-must not pay for another 884 conversions in the ordinary suite.
+must not pay for another 1101 conversions in the ordinary suite.
 """
 
 from __future__ import annotations
@@ -273,10 +273,10 @@ def test_generator_prepares_the_exact_committed_order_without_running_pandoc(
 ) -> None:
     units = generator.renderable_units()
 
-    assert len(units) == 884
+    assert len(units) == 1101
     assert units[0]
     assert hashlib.sha256("".join(units).encode("utf-8")).hexdigest() == (
-        "f7b2c4d4300df8f2ae60c345cb1c5a4e332c96ba6e453840015c6954467c623b"
+        "e4c2a7447bc1d17d5d48e6077b2196b677e2f295ba05e9fecb47b5662c78a352"
     )
 
 

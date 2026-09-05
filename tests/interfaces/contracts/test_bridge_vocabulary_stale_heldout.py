@@ -16,11 +16,14 @@ pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
-_OLD = re.compile(r"(?<![A-Za-z0-9-])(bridge-fsck|bridge-probe|jira-onboard)(?![A-Za-z0-9-])")
+_OLD = re.compile(
+    r"(?<![A-Za-z0-9-])(bridge-status|bridge-fsck|bridge-probe|jira-onboard|verify-authorship)(?![A-Za-z0-9-])"
+)
 _HISTORY_PREFIXES = (
     "docs/adr/",
     "docs/archive/",
     "docs/experiments/",
+    "reports/stability/",
 )
 _WHOLE_FILE_ALLOWLIST = {
     "CHANGELOG.md",
@@ -29,10 +32,13 @@ _WHOLE_FILE_ALLOWLIST = {
     "tests/interfaces/facades/test_bridge_vocabulary.py",
     "tests/interfaces/facades/test_bridge_vocabulary_heldout.py",
     "tests/interfaces/facades/test_bridge_vocabulary_e2e_heldout.py",
+    "tests/interfaces/facades/test_bridge_status_heldout.py",
+    "tests/unit/test_identity_ac7_bff8_heldout.py",
 }
 _COMPATIBILITY_FILES = {
     "docs/cli-reference.md",
     "src/rebar/_cli/__init__.py",
+    "src/rebar/_cli/_help_route.py",
     "src/rebar/_cli/_jira_onboard.py",
     "src/rebar/_cli/_parsers/advanced/bridge_arms.py",
     "src/rebar/_cli/_parsers/advanced/jira.py",
@@ -108,6 +114,8 @@ def test_primary_docs_present_the_canonical_spellings() -> None:
         ("bridge-fsck", "bridge fsck"),
         ("bridge-probe", "bridge check-access"),
         ("jira-onboard", "bridge setup"),
+        ("bridge-status", "bridge status"),
+        ("verify-authorship", "verify-identity"),
     ],
 )
 def test_release_notes_map_each_compatibility_spelling_to_its_primary(

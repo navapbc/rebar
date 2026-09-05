@@ -236,7 +236,7 @@ def test_static_replay_covers_every_required_conversion_and_exact_body_output(
 @_NEEDS_PANDOC
 @pytest.mark.parametrize(
     ("stratum", "body_index"),
-    [("code_arrow", 0), ("table", 2), ("prose", 0)],
+    [("code_arrow", 0), ("table", 4), ("prose", 0)],
 )
 def test_live_pandoc_representative_body_matches_committed_passes(
     stratum: str,

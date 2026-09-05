@@ -307,12 +307,14 @@ def test_reset_clears_and_exits(tmp_path, monkeypatch, capsys) -> None:
     assert "jira" not in data
 
 
-def test_legacy_jira_onboard_alias_remains_functional(tmp_path, monkeypatch) -> None:
-    """The historical spelling remains a compatibility route to the same wizard."""
+def test_legacy_jira_onboard_alias_is_invalid_choice(tmp_path, monkeypatch, capsys) -> None:
+    """The historical spelling is rejected before the wizard can run."""
     p = _proj(tmp_path, monkeypatch)
     before = '[jira]\nurl = "x"\n'
     (p / "rebar.toml").write_text(before, encoding="utf-8")
     _answers(monkeypatch, ["n"])
     code = main(["jira-onboard", "--reset"])
-    assert code == 1
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "invalid choice" in captured.err
     assert (p / "rebar.toml").read_text(encoding="utf-8") == before

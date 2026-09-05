@@ -5,8 +5,8 @@ runtime *execution* still traversed hand-written ``if sub == ...`` ladders in
 ``rebar._cli`` with per-arm init policy and per-arm handler call shapes. S3 cuts
 the core + bridge execution over so the selected registry route is the single
 selection authority: each route carries a lazy handler reference, a bounded
-``adapter`` kind (the exact call shape), an ``init`` policy, and — for
-``bridge-status`` — an ``argv_prefix``. The top-level router resolves ONLY the
+``adapter`` kind (the exact call shape), and an ``init`` policy. The top-level router
+resolves ONLY the
 selected handler and invokes it through the closed adapter set; it never parses
 the command remainder a second time.
 
@@ -192,9 +192,6 @@ def test_every_adapter_kind_has_at_least_one_route() -> None:
         ("init", "none"),
         ("scratch", "none"),
         ("bridge", "none"),
-        ("bridge-status", "none"),
-        ("bridge-fsck", "none"),
-        ("bridge-probe", "none"),
         ("grounding-info", "none"),
     ],
 )
@@ -447,19 +444,6 @@ def test_legacy_output_verbs_reinject_the_extracted_format(
 # --- bridge vocabulary through the closed adapters ----------------------------
 
 
-def test_bridge_status_prefixes_status_through_the_bridge_adapter(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Hidden ``bridge-status`` dispatches ``bridge_cli(["status", *rest])``."""
-    seen: list[list[str]] = []
-    monkeypatch.setattr(
-        "rebar._cli._bridge_commands.bridge_cli", lambda argv: seen.append(argv) or 0
-    )
-    monkeypatch.setattr("rebar._cli.ensure_initialized", lambda **_k: None)
-    _execute.execute("bridge-status", ["--json"])
-    assert seen == [["status", "--json"]]
-
-
 def test_bridge_canonical_passes_the_remainder_verbatim(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -470,6 +454,36 @@ def test_bridge_canonical_passes_the_remainder_verbatim(
     monkeypatch.setattr("rebar._cli.ensure_initialized", lambda **_k: None)
     _execute.execute("bridge", ["status", "--json"])
     assert seen == [["status", "--json"]]
+
+
+@pytest.mark.parametrize(
+    "removed",
+    ["bridge-status", "bridge-fsck", "bridge-probe", "jira-onboard", "verify-authorship"],
+)
+def test_removed_simple_compatibility_aliases_are_parse_time_invalid_choices(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    removed: str,
+) -> None:
+    called: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(
+        "rebar._cli._execute.execute",
+        lambda name, rest: called.append((name, rest)) or 99,
+    )
+    monkeypatch.setattr(
+        "rebar._cli.ensure_store_mounted_best_effort",
+        lambda: called.append(("mount", [])),
+    )
+
+    code = main([removed])
+    captured = capsys.readouterr()
+
+    assert (code, called, "invalid choice" in captured.err, removed in captured.err) == (
+        2,
+        [],
+        True,
+        True,
+    )
 
 
 def test_purge_bridge_remains_unknown() -> None:

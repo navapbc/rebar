@@ -47,8 +47,8 @@ DEFAULT_OUTPUT = REPO_ROOT / "tests" / "fixtures" / "dc_wiki_legacy_outputs.json
 DEFAULT_REPLAY_OUTPUT = REPO_ROOT / "tests" / "fixtures" / "dc_wiki_replay"
 
 _STRATA = ("code_arrow", "table", "prose")
-_EXPECTED_UNIT_COUNT = 884
-_MAX_FIXTURE_BYTES = 500_000
+_EXPECTED_UNIT_COUNT = 1101
+_MAX_FIXTURE_BYTES = 600_000
 
 # Frozen historical conversion contract. Do not replace these with
 # ``wiki_render._PANDOC_*``: independence from those mutable values is the point

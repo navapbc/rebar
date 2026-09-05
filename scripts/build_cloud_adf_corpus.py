@@ -59,9 +59,11 @@ _TOKENISH_RE = re.compile(r"\b[A-Za-z0-9_-]{32,}\b")
 # are normalized to the canonical spellings on the way out rather than exempting the
 # fixture from the guards.
 _VOCABULARY_SUBSTITUTIONS = (
+    ("bridge-status", "bridge status"),
     ("bridge-fsck", "bridge fsck"),
     ("bridge-probe", "bridge check-access"),
     ("jira-onboard", "bridge setup"),
+    ("verify-authorship", "verify-identity"),
     ("Success Criteria", "Acceptance Criteria"),
     ("success criteria", "acceptance criteria"),
     ("SUCCESS CRITERIA", "ACCEPTANCE CRITERIA"),

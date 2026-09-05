@@ -134,13 +134,13 @@ def test_retired_routes_are_not_documented():
         assert f"### `{route.name}`" not in doc, f"retired {route.name!r} leaked into the doc"
 
 
-def test_hidden_aliases_are_not_documented():
-    """Hidden alias spellings (e.g. bridge-status) are not advertised as syntax sections."""
+def test_removed_simple_compatibility_aliases_are_not_documented():
+    """Removed simple compatibility aliases are not advertised as syntax sections."""
     doc = gen.render()
-    hidden = [r for r in _routes() if r.hidden]
-    assert hidden, "fixture guard: expected at least one hidden route"
-    for route in hidden:
-        assert f"### `{route.name}`" not in doc
+    removed = ("bridge-status", "bridge-fsck", "bridge-probe", "jira-onboard", "verify-authorship")
+    assert any(r.name == "bridge" for r in _routes()), "fixture guard: expected bridge route"
+    for name in removed:
+        assert f"### `{name}`" not in doc
 
 
 def test_section_count_equals_documented_route_count():

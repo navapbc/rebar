@@ -92,7 +92,7 @@ def _refs(repo: Path) -> str:
     ).stdout
 
 
-def test_canonical_and_legacy_status_are_byte_identical_and_read_only(
+def test_canonical_status_is_read_only(
     rebar_repo: Path,
 ) -> None:
     env_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text().strip()
@@ -105,13 +105,8 @@ def test_canonical_and_legacy_status_are_byte_identical_and_read_only(
     }
 
     canonical = _run_cli(rebar_repo, "bridge", "status", "--json")
-    legacy = _run_cli(rebar_repo, "bridge-status", "--json")
 
-    assert (legacy.returncode, legacy.stdout, legacy.stderr) == (
-        canonical.returncode,
-        canonical.stdout,
-        canonical.stderr,
-    )
+    assert canonical.returncode == 0
     assert _refs(rebar_repo) == before_refs
     after_tracker = {
         str(p.relative_to(rebar_repo / ".tickets-tracker")): p.read_bytes()
@@ -121,14 +116,14 @@ def test_canonical_and_legacy_status_are_byte_identical_and_read_only(
     assert after_tracker == before_tracker
 
 
-def test_status_help_is_canonical_while_legacy_stays_hidden(rebar_repo: Path) -> None:
+def test_status_help_is_canonical_while_removed_alias_is_invalid(rebar_repo: Path) -> None:
     nested = _run_cli(rebar_repo, "bridge", "--help")
     overview = _run_cli(rebar_repo, "--help")
     legacy = _run_cli(rebar_repo, "bridge-status", "--help")
     assert nested.returncode == 0 and "status" in nested.stdout
     assert "bridge-status" not in overview.stdout
-    assert legacy.returncode == 0
-    assert "usage: rebar bridge status" in legacy.stdout.lower()
+    assert legacy.returncode == 2
+    assert "invalid choice" in legacy.stderr
 
 
 def test_omitted_max_age_disables_age_failure_and_explicit_age_is_stale(

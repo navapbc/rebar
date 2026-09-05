@@ -28,7 +28,6 @@ AFFECTED = (
     "scan-spec",
     "explain",
     "verify-identity",
-    "verify-authorship",
     "verify-opcert",
     "verify-commit-ticket",
     "enrich",

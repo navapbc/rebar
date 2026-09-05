@@ -59,7 +59,6 @@ _INDIVIDUAL_ARMS = frozenset(
         "fsck-recover",
         "tracker-maintenance",
         "doctor",
-        "bridge-probe",
         "grounding-info",
         "audit",
     }
@@ -90,11 +89,12 @@ def test_every_current_spelling_has_a_route() -> None:
     assert missing == [], f"spellings with no route record: {missing}"
 
 
-def test_hidden_ships_but_retired_bridge_tokens_do_not() -> None:
-    # bridge-status is hidden (resolvable, undiscoverable): it must exist as a
-    # route record so policy derives correctly.
-    hidden = _registry.route_for("bridge-status")
-    assert hidden is not None and hidden.hidden is True
+def test_removed_bridge_compatibility_tokens_do_not_ship() -> None:
+    # Pre-1.0 compatibility bridge spellings are erased from the route table.
+    # Historical hidden/visible migration categories live in the help pre-scan.
+    assert _registry.route_for("bridge-status") is None
+    assert _registry.route_for("bridge-fsck") is None
+    assert _registry.route_for("bridge-probe") is None
     # Retired bridge verbs are erased from shipped source (the project's bridge
     # vocabulary contract), so the shipped table names none of them. The retired
     # mechanism itself is exercised on synthetic routes in the validation oracle.

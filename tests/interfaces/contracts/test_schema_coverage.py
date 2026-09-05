@@ -102,7 +102,6 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "validate": lambda s: ["validate"],
     "fsck": lambda s: ["fsck"],
     "doctor": lambda s: ["doctor"],
-    "bridge-fsck": lambda s: ["bridge", "fsck"],
     "grounding-info": lambda s: ["grounding-info"],
     "get-verify-commands": lambda s: ["get-verify-commands", s["task"]],
     "create": lambda s: ["create", "task", "Made by guard"],
@@ -140,11 +139,9 @@ def _output_advertisers() -> set[str]:
 # regenerated the package help from the argparse parser factories, so:
 #   * ``audit`` is a subparser group; its ``--output`` lives on ``audit show``, never in the
 #     top-level ``audit`` help; and
-#   * ``bridge-fsck`` (like the rest of the bridge family) has ``--output``/``-o`` consumed by
-#     ``parse_output`` BEFORE argparse, so it is absent from the parser-derived artifact.
 # These stay in CLI_OUTPUT_DRIVERS (their real-output tests still validate the flag); they are
 # exempt only from the "stale advertiser" guard.
-_OUTPUT_ABSENT_FROM_TOP_LEVEL_HELP = {"audit", "bridge-fsck"}
+_OUTPUT_ABSENT_FROM_TOP_LEVEL_HELP = {"audit"}
 
 
 def test_every_cli_output_advertiser_is_classified() -> None:

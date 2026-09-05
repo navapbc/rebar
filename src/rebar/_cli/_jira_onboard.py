@@ -80,7 +80,7 @@ def _detected_line(name: str, value: str) -> str:
 
 
 @guard_parse_errors
-def jira_onboard(argv: list[str], *, prog: str = "rebar jira-onboard") -> int:
+def jira_onboard(argv: list[str], *, prog: str = "rebar bridge setup") -> int:
     """Run the Jira setup wizard under its entrypoint-specific program name."""
     parser = _jira_parsers.build(prog=prog)
     args = parser.parse_args(argv)
