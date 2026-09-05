@@ -148,9 +148,20 @@ Three tiers cover the editor, escalating in fidelity:
   on Save**. This tier exists because editor changes that merely syntax-checked once shipped
   broken at render time — the browser is the only faithful oracle for the bundle.
 
-All E2E tiers are **opt-in and self-skipping**: they need Node + a one-time `npm install`
-(and the browser tier a Chromium download), and skip with a clear reason when those are
-unavailable, so the always-on Python unit suite is unaffected.
+The E2E tiers are **opt-in**: they need Node + a one-time `npm install` (and the browser
+tier a Chromium download), so the always-on Python unit suite is unaffected when those are
+missing. The round-trip tier self-skips with a clear reason.
+
+The **browser tier is local-only, and its non-execution is recorded rather than silent.**
+It is deliberately not provisioned in automated builds — a Playwright install plus a large
+Chromium download on every run buys little for a project whose shipped surface is a library,
+a CLI and an MCP server. That decision lives in `tests/e2e/browser-tier-optout.toml`, and
+`tests/e2e/_browser_tier.py` enforces it: every way the tier can fail to run consults the
+record, announcing a loud, licensed skip when it is present and **failing** when it is not.
+So a run that did not exercise the browser says so in its own summary, and the tier can
+never quietly drift back to an accidental skip. Delete the record and the browser tier turns
+red everywhere — with or without a CI provider, since nothing in the mechanism reads the
+environment (bug `337e-b558-17a2-49bd`).
 
 The IR↔BPMN round-trip was de-risked up front by
 [`visual_bpmn_roundtrip_poc.mjs`](experiments/workflow-remediation-pocs/visual_bpmn_roundtrip_poc.mjs)

@@ -4,7 +4,9 @@ These run the ACTUAL editor bundle in headless Chromium (Playwright) against a l
 server, because the failures that matter here are runtime ones a Python/headless check
 can't see: whether edges render, whether the diagram is laid out (not a single column),
 whether the properties panel reacts to selection, and whether an edit actually persists to
-the IR on Save. Self-skips when Node/Playwright/Chromium are unavailable.
+the IR on Save. When Node/Playwright/Chromium are unavailable the tier does not run, and
+that non-execution is licensed and announced by ``_browser_tier`` rather than silent
+(bug 337e-b558-17a2-49bd).
 
 This tier exists because earlier "verified" editor changes shipped broken — the bundle
 syntax-checked but threw at render time. The browser is the only faithful oracle.
