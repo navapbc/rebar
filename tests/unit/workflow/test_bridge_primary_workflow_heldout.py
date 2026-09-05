@@ -48,5 +48,6 @@ def test_current_operator_docs_lead_with_bridge_and_remove_legacy_cli_mapping() 
     assert "rebar bridge sync" in combined
     normalized = " ".join(combined.split())
     assert "The legacy top-level `rebar reconcile` adapter is removed" in combined
-    assert "direct `--mode reconcile-check`" in combined
-    assert "profile spelling `reconcile-check`" in normalized
+    assert "direct `--mode reconcile-check`" not in combined
+    assert "profile spelling `reconcile-check`" not in normalized
+    assert "`dry-run` to canonical preview" in combined

@@ -151,11 +151,11 @@ def load_snapshots(
     # -----------------------------------------------------------------------
     # Persistence gating (ticket yaw-plait-doe).
     #
-    # cap-0 modes (dry-run, reconcile-check) are documented as read-only: they
+    # cap-0 dry-run/preview passes are documented as read-only: they
     # run the full differ COMPUTATION and PRODUCE the report, but must write
     # NOTHING to the local store. Every write point below is gated on `persist`.
     #
-    # target_mode None defaults to LIVE → persists. dry-run / reconcile-check
+    # target_mode None defaults to LIVE → persists. dry-run/preview
     # → cap 0 → persist=False. bootstrap-* / live → non-zero/None cap → persist.
     # -----------------------------------------------------------------------
     mode_mod = load("rebar_reconciler.mode", "mode.py")

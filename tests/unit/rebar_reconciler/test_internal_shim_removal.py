@@ -42,7 +42,6 @@ def test_mode_ordering_remains_observable_without_rank() -> None:
     from rebar_reconciler.mode import Mode
 
     ordered = [
-        Mode.RECONCILE_CHECK,
         Mode.DRY_RUN,
         Mode.BOOTSTRAP_STRICT,
         Mode.BOOTSTRAP_THROTTLE,
@@ -50,7 +49,6 @@ def test_mode_ordering_remains_observable_without_rank() -> None:
     ]
     assert sorted(reversed(ordered)) == ordered
     assert Mode.DRY_RUN < Mode.BOOTSTRAP_STRICT < Mode.BOOTSTRAP_THROTTLE < Mode.LIVE
-    assert Mode.LIVE > Mode.RECONCILE_CHECK
 
 
 def test_reconcile_once_uses_canonical_runtime_composer(monkeypatch, tmp_path) -> None:

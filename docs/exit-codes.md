@@ -54,8 +54,7 @@ Canonical benign states return 0 with one stable stderr line:
 
 The remaining direct-engine compatibility route keeps argument-less live behavior and supported
 rollout modes (`dry-run`, `bootstrap-strict`, `bootstrap-throttle`, `live`). The top-level
-`rebar reconcile` route, direct `--mode reconcile-check`, and direct `--filter-local-ids`
-surface are removed. New automation should use canonical bridge routes and ordinary 0/1/2
+`rebar reconcile` route and direct `--filter-local-ids` surface are removed. New automation should use canonical bridge routes and ordinary 0/1/2
 handling: preview for proposed changes, fsck for offline binding/integrity audit, and status
 for operational state.
 

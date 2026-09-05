@@ -374,7 +374,7 @@ class BindingRecovery:
         Two conditions have to hold, and the guard lives HERE rather than at the call site
         so the spine carries one unconditional line and cannot drift from the policy:
 
-        * ``persist`` — a cap-0 mode (dry-run, reconcile-check) is documented read-only, and
+        * ``persist`` — cap-0 dry-run mode is documented read-only, and
           completing a retirement is a write. The overlap simply survives to the next
           write-bearing pass, which is the correct outcome: a read-only command that
           silently mutated the store would be the more surprising bug.

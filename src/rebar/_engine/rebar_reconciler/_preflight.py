@@ -39,14 +39,13 @@ def pass_may_mutate(target_mode: Any, route: str | None) -> bool:
     """True when this pass can issue outbound mutations (so the preflight applies).
 
     Read-only passes are identified by the ONLY signals available before
-    ``reconcile_once``: the ``preview`` route and the ``dry-run`` / ``reconcile-check``
-    modes (``reconcile-check`` is already short-circuited in ``main()``; ``no_write``
-    is computed INSIDE ``reconcile_once``, after this point, so it is not usable here).
+    ``reconcile_once``: the ``preview`` route and the ``dry-run`` mode. ``no_write``
+    is computed INSIDE ``reconcile_once``, after this point, so it is not usable here.
     ``target_mode is None`` defaults to LIVE, which mutates.
     """
     if route == "preview":
         return False
-    return getattr(target_mode, "value", None) not in {"dry-run", "reconcile-check"}
+    return getattr(target_mode, "value", None) != "dry-run"
 
 
 def _load_access_check() -> Any:

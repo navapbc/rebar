@@ -16,8 +16,8 @@ pipeline {
     parameters {
         choice(
             name: 'MODE',
-            choices: ['live', 'reconcile-check', 'dry-run', 'bootstrap-strict', 'bootstrap-throttle'],
-            description: 'Bridge operation profile (reconcile-check maps to preview)'
+            choices: ['live', 'dry-run', 'bootstrap-strict', 'bootstrap-throttle'],
+            description: 'Bridge operation profile (dry-run maps to preview)'
         )
     }
 

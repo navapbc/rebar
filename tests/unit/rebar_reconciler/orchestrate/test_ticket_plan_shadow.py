@@ -738,14 +738,14 @@ def test_parent_before_child_dependency(planner_mod, mutation_mod):
 
 
 def test_mode_cap_excludes_outbound_with_safety_aborted(planner_mod, mutation_mod):
-    """A NO-WRITE mode (``dry-run`` / ``reconcile-check``, canonical ``MODE_CAPS==0``) aborts
+    """A NO-WRITE mode (``dry-run``, canonical ``MODE_CAPS==0``) aborts
     every planned mutation pre-effect with ``safety_aborted`` — outbound and inbound alike,
     since such a pass performs no writes at all."""
     muts = [
         _mk(mutation_mod, "outbound", "update", "REB-out"),
         _mk(mutation_mod, "inbound", "clean_label", "REB-inb"),
     ]
-    for readonly_mode in ("dry-run", "reconcile-check"):
+    for readonly_mode in ("dry-run",):
         _obs, plans = _plan_pass(planner_mod, mutation_mod, mutations=muts, mode=readonly_mode)
         by = {p.identity: p for p in plans}
         assert by["REB-out"].defer_reason.value == "safety_aborted"

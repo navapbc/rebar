@@ -99,7 +99,7 @@ def normalize_request(argv: list[str] | None, mode_mod: Any) -> ReconcileRequest
         target_mode = mode_mod.Mode.LIVE
     else:
         mode_value = args.mode if args.mode is not None else mode_mod.Mode.LIVE.value
-        if mode_value == mode_mod.Mode.RECONCILE_CHECK.value:
+        if mode_value == "reconcile-check":
             raise RequestError(
                 "--mode reconcile-check has been removed; use preview for live Jira-vs-local "
                 "proposed changes, fsck for offline binding/integrity audit, and status for "
