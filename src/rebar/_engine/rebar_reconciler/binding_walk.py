@@ -127,7 +127,7 @@ def compute_binding_walk_mutations(
             probe + ``_DELETED`` / ``_TRANSPORT_ERROR`` sentinels are reused UNCHANGED).
         grace: consecutive-404 retire threshold (defaults to the env/3 resolution).
         probe_get: injectable direct-GET (defaults to ``outbound_differ._safe_get_issue``).
-        persist: when False (dry-run / reconcile-check), the walk COMPUTES the plan
+        persist: when False (dry-run/preview), the walk COMPUTES the plan
             (terminal-transition mutations + a predicted census) but performs NO
             binding-store side effects — no counter advance, no retirement. The
             terminal transitions ride the plan and are applied only by a persisting

@@ -656,8 +656,7 @@ The legacy top-level `rebar reconcile` adapter is removed. Use `rebar bridge pre
 Jira-vs-local proposed changes, `rebar bridge sync` for writes, `rebar bridge fsck` for offline
 binding/integrity audit, and `rebar bridge status` for operational state. Direct argument-less
 `python -m rebar_reconciler` still means live synchronization, and its supported rollout modes
-remain `dry-run`, `bootstrap-strict`, `bootstrap-throttle`, and `live`; direct
-`--mode reconcile-check` now rejects. The engine-only `--filter-local-ids` post-filter remains
+remain `dry-run`, `bootstrap-strict`, `bootstrap-throttle`, and `live`. The engine-only `--filter-local-ids` post-filter remains
 available on that direct legacy route for live-DC harness scoping. The legacy `jira-onboard`,
 `bridge-probe`, and `bridge-fsck` spellings have been removed; use `rebar bridge setup`,
 `rebar bridge check-access`, and `rebar bridge fsck`.
@@ -676,13 +675,13 @@ the store or found nothing to do, `1` when a guard refused, and `2` on operation
 
 Repository-scheduled synchronization is portable across GitHub Actions, Jenkins, and GitLab.
 Each provider prepares a full-history checkout and `.tickets-tracker`, then invokes
-the installed `rebar bridge run` command. The adapter retains the established `MODE` values
-(`reconcile-check`, `dry-run`, `bootstrap-strict`, `bootstrap-throttle`, and `live`) while
-routing new work through the noun-based `bridge preview` / `bridge sync` commands. It requires
+the installed `rebar bridge run` command. The adapter supports `MODE` values
+(`dry-run`, `bootstrap-strict`, `bootstrap-throttle`, and `live`) while routing
+new work through the noun-based `bridge preview` / `bridge sync` commands. It requires
 the Jira variables, `REBAR_ENV_ID`, `BRIDGE_RUN_ID`, and the bridge bot name/email before the
 pass starts; a shallow checkout is rejected because it cannot reconcile ticket history safely.
-This shared CI adapter keeps the `reconcile-check` profile spelling for provider compatibility;
-that profile now invokes canonical preview rather than the removed top-level reconcile route.
+This shared CI adapter routes `dry-run` to canonical preview and live/bootstrap
+profiles to canonical sync.
 
 For an explicit one-off selection, use `rebar bridge run --profile dry-run`. Provider
 templates normally omit `--profile` and supply the established `MODE` environment

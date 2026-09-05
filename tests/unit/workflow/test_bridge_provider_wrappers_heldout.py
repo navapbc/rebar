@@ -56,7 +56,6 @@ def test_runner_owns_shared_environment_and_timeout_contract() -> None:
 
     assert runner.TIMEOUT_SECONDS == 3600
     assert set(runner.MODE_COMMANDS) == {
-        "reconcile-check",
         "dry-run",
         "bootstrap-strict",
         "bootstrap-throttle",
@@ -172,7 +171,7 @@ def test_pinned_shellcheck_lints_all_provider_shell_bodies_without_skips(tmp_pat
         ("bare", {}),
     ],
 )
-def test_five_environment_matrix_has_identical_results_without_gh(
+def test_four_environment_matrix_has_identical_results_without_gh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, vendor_env: dict[str, str]
 ) -> None:
     # Load only the reusable setup harness; the expectations in this file remain held out.

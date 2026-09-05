@@ -441,7 +441,7 @@ def test_removed_legacy_route_does_not_consult_legacy_gate(
     assert _remote_blob(remote, "refs/reconciler/lock") is None
 
 
-def test_real_canonical_gate_is_benign_while_legacy_stays_4(
+def test_real_canonical_gate_is_benign_while_legacy_route_is_removed(
     rebar_repo: Path, tmp_path: Path
 ) -> None:
     remote = _configure_origin(rebar_repo, tmp_path)

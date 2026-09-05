@@ -97,7 +97,7 @@ class _NoOpSyncLogger:
     """No-op stand-in for SyncLogger used by cap-0 (no-write) passes.
 
     Implements the full surface ``reconcile_once`` calls on a sync logger
-    (``log`` and ``close``) but writes nothing — so a dry-run / reconcile-check
+    (``log`` and ``close``) but writes nothing — so a dry-run/preview
     pass produces no ``sync-log-<pass>.jsonl`` file.
     """
 
@@ -292,7 +292,7 @@ def bind_operation_runtime(ctx: Any, compose: Any) -> None:
     Composition must not crash a read-only pass whose Jira scope is absent: on a
     compose/build failure we re-raise for a persisting (write) pass (fail closed) but fall
     back to the ambient path (``client=None``) for a no-write pass, so dry-run /
-    reconcile-check passes keep working. Disabled entirely by AC6's toggle.
+    preview passes keep working. Disabled entirely by AC6's toggle.
     """
     if not _write_facade_enabled():
         return

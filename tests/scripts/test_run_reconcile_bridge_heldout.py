@@ -20,11 +20,11 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("legacy_rc", [3, 4, 75])
-def test_legacy_benign_results_translate_only_at_runner_boundary(
+def test_preview_benign_results_translate_only_at_runner_boundary(
     tmp_path: Path, legacy_rc: int
 ) -> None:
     checkout, _tracker, origin = bridge_workspace(tmp_path)
-    env = runner_env(tmp_path, checkout, mode="reconcile-check")
+    env = runner_env(tmp_path, checkout, mode="dry-run")
     env["STUB_RC"] = str(legacy_rc)
 
     completed = run_bridge(checkout, env)

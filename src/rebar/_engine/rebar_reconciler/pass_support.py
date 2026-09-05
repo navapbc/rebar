@@ -321,7 +321,7 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
 
     ``no_sync=True`` sets REBAR_SYNC_PULL=off for the subprocess so the read does not
     trigger the tickets-branch fetch/reconverge (a git working-tree mutation).
-    Cap-0 reconcile passes (dry-run/reconcile-check) pass this so a no-write
+    Cap-0 dry-run/preview passes set this so a no-write
     pass stays literally no-write on the local git tree (review M3).
     """
     import os as _os  # local import to avoid top-level dep

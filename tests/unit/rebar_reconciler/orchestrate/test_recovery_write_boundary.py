@@ -305,18 +305,6 @@ def test_a_dry_run_pass_leaves_the_overlap_alone(
     assert not _is_repaired(tmp_path)
 
 
-def test_a_reconcile_check_pass_leaves_the_overlap_alone(
-    reconcile_mod: Any, mode_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    _seed_overlap(tmp_path)
-
-    _drive_load_phase(
-        reconcile_mod, monkeypatch, tmp_path, target_mode=mode_mod.Mode.RECONCILE_CHECK
-    )
-
-    assert not _is_repaired(tmp_path)
-
-
 def test_a_selected_pass_leaves_the_overlap_alone(
     reconcile_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

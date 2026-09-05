@@ -84,7 +84,7 @@ def save(path: Path, stamps: dict[str, str]) -> bool:
 
     The caller owns when this is invoked: it must be called only from the
     binding store's established save boundary, never while merely inspecting
-    rotation state.  This preserves ``reconcile-check``'s read-only contract.
+    rotation state. This preserves the preview read-only contract.
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -50,7 +50,7 @@ DeferReason = _ticket_plan_mod.DeferReason
 LifecycleIntent = _ticket_plan_mod.LifecycleIntent
 ParityDelta = _ticket_plan_mod.ParityDelta
 ParityReport = _ticket_plan_mod.ParityReport
-# Modes that perform NO writes (canonical ``mode.MODE_CAPS == 0``: ``reconcile-check`` /
+# Modes that perform NO writes (canonical ``mode.MODE_CAPS == 0``:
 # ``dry-run``). A mutation planned under one of these is mode-capped (``safety_aborted``)
 # pre-effect. The WRITE-ENABLED modes — ``bootstrap-strict``, ``bootstrap-throttle`` (finite
 # blast-radius caps) and ``live`` (uncapped) — are NOT mode-capped here; their numeric caps
@@ -142,7 +142,7 @@ def _scope_excluded(target: str, selection: Mapping[str, Any]) -> bool:
 
 
 def _mode_capped(muts: Sequence[Any], mode: str) -> bool:
-    """True when the pass runs in a NO-WRITE mode (``reconcile-check`` / ``dry-run``) that
+    """True when the pass runs in a NO-WRITE mode (``dry-run``/preview) that
     aborts any planned mutation pre-effect. Write-enabled modes (``bootstrap-strict``,
     ``bootstrap-throttle``, ``live``) are NOT mode-capped — bootstrap warm-up modes permit
     outbound writes, so treating them as capping would wrongly defer real work."""

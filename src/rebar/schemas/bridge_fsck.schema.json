@@ -21,9 +21,9 @@
         "local_gone": { "type": "array", "items": { "type": "object" }, "description": "Bound but the local ticket is absent from the store (ALERT)." },
         "retired_overlap": { "type": "array", "items": { "type": "object" }, "description": "A jira_key present in BOTH the live and retired binding stores." },
         "dangling": { "type": "array", "items": { "type": "object" }, "description": "Confirmed binding whose Jira issue is gone (informational)." },
-        "orphaned_bindings": { "type": "array", "items": { "type": "object" }, "description": "Legacy reconcile-check orphaned bindings, annotated with a reason such as local_gone or confirmed_404 (informational)." },
-        "orphaned_jira": { "type": "array", "items": { "type": "object" }, "description": "Legacy reconcile-check Jira issues that still carry a rebar-id label but have no live binding (informational)." },
-        "unbound_local": { "type": "array", "items": { "type": "object" }, "description": "Local tickets with no confirmed Jira binding, surfaced for reconcile-check migration parity (informational)." },
+        "orphaned_bindings": { "type": "array", "items": { "type": "object" }, "description": "Bridge orphaned bindings, annotated with a reason such as local_gone or confirmed_404 (informational)." },
+        "orphaned_jira": { "type": "array", "items": { "type": "object" }, "description": "Jira issues that still carry a rebar-id label but have no live binding (informational)." },
+        "unbound_local": { "type": "array", "items": { "type": "object" }, "description": "Local tickets with no confirmed Jira binding, surfaced for bridge migration parity (informational)." },
         "absent_in_window_unprobed": { "type": "array", "items": { "type": "object" }, "description": "Binding absent from a windowed snapshot without a confirming probe (informational)." },
         "unbound_jira": { "type": "array", "items": { "type": "object" }, "description": "Jira-native issue with no binding." },
         "indeterminate": { "type": "array", "items": { "type": "object" }, "description": "Terminal-local binding whose Jira issue is present but whose key-set snapshot lacks the status needed to decide a terminal transition (informational; never alerts)." }

@@ -72,4 +72,4 @@ def test_removed_command_surfaces_stay_removed() -> None:
 
     assert _registry.route_for("reconcile") is None
     with pytest.raises(request_mod.RequestError, match="reconcile-check has been removed"):
-        request_mod.normalize_request(["--mode", mode_mod.Mode.RECONCILE_CHECK.value], mode_mod)
+        request_mod.normalize_request(["--mode", "reconcile-check"], mode_mod)

@@ -43,7 +43,6 @@ def _git_env() -> SubprocessEnv:
 
 
 MODE_COMMANDS = {
-    "reconcile-check": ["bridge", "preview"],
     "dry-run": ["bridge", "preview"],
     "bootstrap-strict": ["bridge", "sync", "--max-changes", "10"],
     "bootstrap-throttle": ["bridge", "sync", "--max-changes", "100"],
@@ -174,10 +173,10 @@ def run_bridge(checkout: Path, env: dict[str, str]) -> subprocess.CompletedProce
 
 
 @pytest.mark.parametrize(("mode", "expected"), MODE_COMMANDS.items())
-def test_every_legacy_mode_routes_and_delivers_through_one_runner(
+def test_every_mode_routes_and_delivers_through_one_runner(
     tmp_path: Path, mode: str, expected: list[str]
 ) -> None:
-    """The installed CLI selects each compatibility route and strictly delivers."""
+    """The installed CLI selects each supported provider profile and strictly delivers."""
     checkout, _tracker, origin = bridge_workspace(tmp_path)
     env = runner_env(tmp_path, checkout, mode=mode)
 

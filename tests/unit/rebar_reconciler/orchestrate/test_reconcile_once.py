@@ -434,7 +434,7 @@ def test_real_field_change_converges_after_one_pass(
 
 
 # ---------------------------------------------------------------------------
-# Ticket yaw-plait-doe: cap-0 (dry-run / reconcile-check) modes must run the
+# Ticket yaw-plait-doe: cap-0 dry-run mode must run the
 # full differ COMPUTATION but write NOTHING to the local store.
 # ---------------------------------------------------------------------------
 
@@ -551,31 +551,6 @@ def test_dry_run_reconcile_once_writes_nothing(
     # Plan entries carry useful per-mutation detail.
     for entry in result["plan"]:
         assert set(entry) >= {"direction", "action", "target", "local_id"}
-
-
-def test_reconcile_check_reconcile_once_writes_nothing(
-    tmp_path, reconcile_mod, fetcher_mod, applier_mod, mode_mod
-):
-    """RECONCILE_CHECK is also a cap-0 mode → reconcile_once must not write."""
-    issues = _make_stable_issues()
-    pass_id = "reconcile-check-no-write"
-
-    before = _snapshot_tree(tmp_path)
-
-    with _patch_partitioned(fetcher_mod, applier_mod, issues):
-        result = reconcile_mod.reconcile_once(
-            pass_id, repo_root=tmp_path, target_mode=mode_mod.Mode.RECONCILE_CHECK
-        )
-
-    after = _snapshot_tree(tmp_path)
-    new_files = sorted(after - before)
-
-    assert new_files == [], (
-        f"RECONCILE_CHECK reconcile_once must write NOTHING, but created: {new_files}"
-    )
-    assert result["mutation_count"] > 0
-    assert result["mutations_applied"] == 0
-    assert result.get("no_write") is True
 
 
 def test_live_mode_reconcile_once_still_persists(
