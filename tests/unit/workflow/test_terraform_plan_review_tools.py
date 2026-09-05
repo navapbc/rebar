@@ -147,12 +147,25 @@ def test_terraform_call_advertises_probe_source_as_third_tool(tmp_path: Path) ->
     } <= names
 
 
+def test_terraform_call_advertises_corroborate_diagnostic_as_fourth_tool(tmp_path: Path) -> None:
+    pytest.importorskip("hcl2")
+    (tmp_path / "infra").mkdir()
+    (tmp_path / "infra" / "main.tf").write_text('variable "a" {}\n', encoding="utf-8")
+    provider = terraform_seam.build_tool_provider(repo_root=str(tmp_path), usage_sink={})
+    step = RunnerAgentStep(extra_tools=[], tool_provider=provider)
+    ctx = _ctx({"findings": [{"criteria": ["T10"], "location": {"file": "infra/main.tf"}}]})
+    tools, _finalize = _run_resolve(step, ctx)
+    names = {getattr(t, "__name__", "") for t in tools}
+    assert "terraform_corroborate_diagnostic" in names
+
+
 def test_non_terraform_call_still_sees_no_probe_source(tmp_path: Path) -> None:
     provider = terraform_seam.build_tool_provider(repo_root=str(tmp_path), usage_sink={})
     step = RunnerAgentStep(extra_tools=[object()], tool_provider=provider)
     tools, finalize = _run_resolve(step, _ctx({"findings": [{"criteria": ["E4"]}]}))
     names = {getattr(t, "__name__", "") for t in tools}
     assert "terraform_probe_source" not in names
+    assert "terraform_corroborate_diagnostic" not in names
     assert finalize is None
 
 

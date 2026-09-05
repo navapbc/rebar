@@ -2,7 +2,9 @@
 
 **Status:** Accepted (epic `a374-849c-c8f2-4234`, task `forcible-diminished-lamb` /
 `08ab-60d2-3082-4b47`; §5 amended by task `depraved-classless-rooster` /
-`1c52-5e73-4d61-4124` to record V1 registry metadata probing)
+`1c52-5e73-4d61-4124` to record V1 registry metadata probing; §6 amended by task
+`schematic-gleesome-ballpython` / `c6ce-4d8d-1c12-47cc` to record optional
+terraform-config-inspect corroboration)
 **Date:** 2026-09-03
 
 ## Context
@@ -101,6 +103,39 @@ are bounded (1 MiB, 60 s worker deadline). Receipts, evidence, and logs record o
 keeps the network trust boundary §1 avoided for the *parse* path narrow, explicit, and gated —
 exactly the "explicit, gated, non-ambient step with its own ADR" the prior revision of this
 section required.
+
+### 6. Optional terraform-config-inspect corroborator
+
+Task `schematic-gleesome-ballpython` / `c6ce-4d8d-1c12-47cc` adds one deliberately narrow
+exception to §1's "no external process" rule: when an executable named exactly
+`terraform-config-inspect` is already on `PATH`, rebar may run HashiCorp's shallow inspector as
+an **independent corroborator**. The audited upstream basis is commit
+`2fb54c236733ee65ee877105d595c124c993c64d`.
+
+The trust boundary is executable-specific and snapshot-specific. rebar resolves only that basename,
+canonicalizes it once, rejects non-regular/non-executable or repo-contained candidates, hashes it
+before and after, and invokes it without a shell as:
+
+```text
+<absolute terraform-config-inspect> --json <fresh read-only snapshot>
+```
+
+The snapshot contains only the immutable indexed module's regular `.tf`/`.tf.json` files, no
+symlinks, and never the real repository path. Stdin is closed; a process group/session is used where
+the platform supports it; stdout/stderr are bounded; HOME/TMPDIR are temporary; Terraform/OpenTofu,
+provider/cloud credential, proxy, plugin, CLI-config, and repository variables are stripped.
+Malformed JSON, upstream diagnostics, schema skew, path escapes, nonzero exit, timeout, overflow,
+or binary replacement all produce one redacted abstention with no partial facts.
+
+Semantics are **match-only** and **positive-only**. A schema-valid entry can return `match@T1` for:
+declared variables/outputs/resources/data resources/module calls/required providers,
+`module_source_equals`, or `required_provider_present`. Missing/unequal/computed/absence claims
+abstain. The corroborator cannot originate a review finding, veto ordinary review, assert absence,
+or turn an abstention into negative evidence.
+
+The standing prohibition remains in force for every other Terraform-related executable:
+`terraform`, `opentofu`, `tfparse`, `tflint`, `trivy`, `terraform-ls`, and `terraform-docs` are not
+permitted grounding executables.
 
 ## Consequences
 

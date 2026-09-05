@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "terraform_config_inspect.schema.json",
+  "title": "Audited terraform-config-inspect JSON subset",
+  "description": "Producer-side contract for the pinned terraform-config-inspect --json stdout subset consumed by the REB-640 corroborator.",
+  "$defs": {
+    "pos": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename", "line", "column", "byte"],
+      "properties": {
+        "filename": { "type": "string" },
+        "line": { "type": "integer" },
+        "column": { "type": "integer" },
+        "byte": { "type": "integer" }
+      }
+    },
+    "variable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "pos"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": {},
+        "description": { "type": ["string", "null"] },
+        "default": {},
+        "required": { "type": "boolean" },
+        "sensitive": { "type": "boolean" },
+        "pos": { "$ref": "terraform_config_inspect.schema.json#/$defs/pos" }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "pos"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": ["string", "null"] },
+        "sensitive": { "type": "boolean" },
+        "pos": { "$ref": "terraform_config_inspect.schema.json#/$defs/pos" }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "type", "name", "pos"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["managed", "data"] },
+        "type": { "type": "string" },
+        "name": { "type": "string" },
+        "provider": { "type": ["string", "null"] },
+        "pos": { "$ref": "terraform_config_inspect.schema.json#/$defs/pos" }
+      }
+    },
+    "module_call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source", "pos"],
+      "properties": {
+        "name": { "type": "string" },
+        "source": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] },
+        "pos": { "$ref": "terraform_config_inspect.schema.json#/$defs/pos" }
+      }
+    },
+    "required_provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": ["string", "null"] },
+        "version_constraints": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "configuration_aliases": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity"],
+      "properties": {
+        "severity": { "type": "string" },
+        "summary": { "type": ["string", "null"] },
+        "detail": { "type": ["string", "null"] },
+        "pos": {
+          "anyOf": [
+            { "$ref": "terraform_config_inspect.schema.json#/$defs/pos" },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "variables",
+    "outputs",
+    "managed_resources",
+    "data_resources",
+    "module_calls",
+    "required_providers",
+    "required_core",
+    "provider_configs",
+    "diagnostics"
+  ],
+  "properties": {
+    "path": { "type": "string" },
+    "variables": {
+      "type": "object",
+      "additionalProperties": { "$ref": "terraform_config_inspect.schema.json#/$defs/variable" }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": { "$ref": "terraform_config_inspect.schema.json#/$defs/output" }
+    },
+    "managed_resources": {
+      "type": "object",
+      "additionalProperties": { "$ref": "terraform_config_inspect.schema.json#/$defs/resource" }
+    },
+    "data_resources": {
+      "type": "object",
+      "additionalProperties": { "$ref": "terraform_config_inspect.schema.json#/$defs/resource" }
+    },
+    "module_calls": {
+      "type": "object",
+      "additionalProperties": { "$ref": "terraform_config_inspect.schema.json#/$defs/module_call" }
+    },
+    "required_providers": {
+      "type": "object",
+      "additionalProperties": { "$ref": "terraform_config_inspect.schema.json#/$defs/required_provider" }
+    },
+    "required_core": { "type": ["array", "object", "null"] },
+    "provider_configs": { "type": "object" },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "terraform_config_inspect.schema.json#/$defs/diagnostic" }
+    }
+  }
+}

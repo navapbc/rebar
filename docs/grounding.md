@@ -25,6 +25,28 @@ part of the signed read set. As with plan-review, the `grounding-terraform` extr
 missing parser support makes each query abstain with a recorded reason instead of failing the
 gate or manufacturing a finding.
 
+### Optional terraform-config-inspect corroborator
+
+Terraform-routed plan-review and code-review calls also advertise
+`terraform_corroborate_diagnostic` when the Terraform grounding extra is present. This fourth tool
+is positive-only: if an executable named exactly `terraform-config-inspect` is already on `PATH`,
+rebar runs the audited HashiCorp inspector commit
+`2fb54c236733ee65ee877105d595c124c993c64d` over a fresh read-only copy of the indexed module and
+can emit `match@T1` for a supported structural diagnostic. Missing binaries, unsupported
+diagnostics, upstream diagnostics, malformed output, path escapes, timeout/overflow/nonzero exit,
+or binary replacement all produce a closed redacted abstention. The tool never runs Terraform,
+OpenTofu, providers, `tfparse`, `tflint`, `trivy`, `terraform-ls`, or `terraform-docs`, and it
+never passes the real repository path, credentials, proxy variables, plugin config, child streams,
+or Terraform literal payloads into evidence or receipts.
+
+Local opt-in canary (the normal suite skips it unless the environment variable is set):
+
+```sh
+go install github.com/hashicorp/terraform-config-inspect@2fb54c236733ee65ee877105d595c124c993c64d
+env PATH="$(go env GOPATH)/bin:$PWD/.venv/bin:$PATH" REBAR_TERRAFORM_CONFIG_INSPECT_CANARY=1 \
+  python -m pytest tests/unit/grounding/test_terraform_corroborator.py -k pinned_upstream_canary
+```
+
 ## The three query surfaces
 
 The public API is a thin facade, `rebar.grounding.oracle` (re-exported from

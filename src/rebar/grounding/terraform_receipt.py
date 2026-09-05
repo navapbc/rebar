@@ -22,6 +22,8 @@ PARSER = "python-hcl2"
 PARSER_VERSION = "8.1.3"
 ANALYZER = "rebar-terraform-structural"
 ANALYZER_VERSION = 1
+CONFIG_INSPECT = "terraform-config-inspect"
+CONFIG_INSPECT_ANALYZER = "rebar-terraform-config-inspect-corroborator"
 SCHEMA_VERSION = 1
 
 #: The CLOSED abstention-translation table: ``reason_detail`` (receipt) ->
@@ -60,6 +62,13 @@ ABSTENTIONS: dict[str, tuple[str, str]] = {
     "oversized_metadata": ("parse_error", "oversized_metadata"),
     "rejected_target": ("ambiguous", "rejected_target"),
     "non_registry_remote": ("ambiguous", "non_registry_remote"),
+    "invalid_detector": ("invalid_detector", "invalid_detector"),
+    "executable_not_resolvable": ("no_tool", "executable_not_resolvable"),
+    "rejected_executable": ("invalid_detector", "rejected_executable"),
+    "binary_replaced": ("invalid_detector", "binary_replaced"),
+    "nonzero_exit": ("other", "nonzero_exit"),
+    "upstream_diagnostics": ("parse_error", "upstream_diagnostics"),
+    "config_inspect_schema_skew": ("version_skew", "config_inspect_schema_skew"),
 }
 
 PROBE_REASON_DETAILS: tuple[str, ...] = (
@@ -116,8 +125,29 @@ def backend_block() -> dict[str, Any]:
     }
 
 
+def config_inspect_backend_block() -> dict[str, Any]:
+    return {
+        "parser": CONFIG_INSPECT,
+        "parser_version": "unknown",
+        "analyzer": CONFIG_INSPECT_ANALYZER,
+        "analyzer_version": ANALYZER_VERSION,
+        "config_digest": _content_digest(
+            {
+                "parser": CONFIG_INSPECT,
+                "parser_version": "unknown",
+                "analyzer": CONFIG_INSPECT_ANALYZER,
+                "analyzer_version": ANALYZER_VERSION,
+            }
+        ),
+    }
+
+
 def coverage_ran() -> dict[str, Any]:
     return ev.coverage(backend=PARSER, status="ran", version=PARSER_VERSION)
+
+
+def config_inspect_coverage_ran() -> dict[str, Any]:
+    return ev.coverage(backend=CONFIG_INSPECT, status="ran", version="unknown")
 
 
 def refuted_evidence(
@@ -144,15 +174,32 @@ def abstain_evidence(
     reference: dict[str, Any] | None = None,
     *,
     detail: str | None = None,
+    job: str = ev.JOB_REFUTE,
+    backend: str = PARSER,
+    version: str = PARSER_VERSION,
 ) -> dict[str, Any]:
     """An ``abstain`` grounding-evidence record with a generic closed ``reason``."""
     return ev.abstain(
         reason,
-        job=ev.JOB_REFUTE,
+        job=job,
         provenance_tier=ev.TIER_T1,
-        backend=PARSER,
-        version=PARSER_VERSION,
+        backend=backend,
+        version=version,
         reference=reference,
+        detail=detail,
+    )
+
+
+def match_evidence(
+    location: dict[str, Any] | None,
+    *,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    return ev.match(
+        job=ev.JOB_APPLIES,
+        provenance_tier=ev.TIER_T1,
+        coverage=config_inspect_coverage_ran(),
+        location=location,
         detail=detail,
     )
 
@@ -163,6 +210,19 @@ def _refuted_result_digest(reference: dict[str, Any], location: dict[str, Any] |
 
 def _abstain_result_digest(reason: str, reason_detail: str) -> str:
     return _content_digest({"outcome": "abstain", "reason": reason, "reason_detail": reason_detail})
+
+
+def _match_result_digest(
+    subject: dict[str, Any], location: dict[str, Any] | None, executable_hash: str
+) -> str:
+    return _content_digest(
+        {
+            "outcome": "match",
+            "subject": subject,
+            "location": location,
+            "executable_hash": executable_hash,
+        }
+    )
 
 
 def _receipt_common(
@@ -180,6 +240,18 @@ def _receipt_common(
         "backend": backend_block(),
         "limits": _limits(),
     }
+
+
+def _receipt_common_with_backend(
+    operation: str,
+    query: dict[str, Any],
+    snapshot_digest: str,
+    module_digest: str,
+    backend: dict[str, Any],
+) -> dict[str, Any]:
+    receipt = _receipt_common(operation, query, snapshot_digest, module_digest)
+    receipt["backend"] = backend
+    return receipt
 
 
 def _limits() -> dict[str, int]:
@@ -217,6 +289,8 @@ def abstain_receipt(
     snapshot_digest: str,
     module_digest: str,
     reason_detail: str,
+    *,
+    backend: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The canonical receipt for an ``abstain`` outcome.
 
@@ -224,11 +298,40 @@ def abstain_receipt(
     ``result_digest`` hashes EXACTLY ``{outcome, reason, reason_detail}``.
     """
     reason, detail = ABSTENTIONS[reason_detail]
-    receipt = _receipt_common(operation, query, snapshot_digest, module_digest)
+    if backend is None:
+        receipt = _receipt_common(operation, query, snapshot_digest, module_digest)
+    else:
+        receipt = _receipt_common_with_backend(
+            operation, query, snapshot_digest, module_digest, backend
+        )
     receipt.update(
         outcome="abstain",
         reason=reason,
         reason_detail=detail,
         result_digest=_abstain_result_digest(reason, detail),
+    )
+    return receipt
+
+
+def match_receipt(
+    operation: str,
+    query: dict[str, Any],
+    snapshot_digest: str,
+    module_digest: str,
+    subject: dict[str, Any],
+    location: dict[str, Any] | None,
+    executable: dict[str, Any],
+    invocation: dict[str, Any],
+) -> dict[str, Any]:
+    receipt = _receipt_common_with_backend(
+        operation, query, snapshot_digest, module_digest, config_inspect_backend_block()
+    )
+    receipt.update(
+        outcome="match",
+        reason=None,
+        reason_detail=None,
+        result_digest=_match_result_digest(subject, location, executable["sha256"]),
+        executable=executable,
+        invocation=invocation,
     )
     return receipt
