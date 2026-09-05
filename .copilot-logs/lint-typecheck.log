@@ -1,0 +1,757 @@
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	﻿2026-09-05T07:05:45.6767770Z Current runner version: '2.337.0'
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6792869Z ##[group]Runner Image Provisioner
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6793743Z Hosted Compute Agent
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6794492Z Version: 20260828.587
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6795138Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6795900Z Build Date: 2026-08-28T16:44:25Z
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6796612Z Worker ID: {b6c9ced5-6f3f-4e45-beef-60e4f3e33da9}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6797325Z Azure Region: westus2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6797968Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6799540Z ##[group]Operating System
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6800761Z Ubuntu
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6801420Z 24.04.4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6801937Z LTS
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6802573Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6803137Z ##[group]Runner Image
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6803726Z Image: ubuntu-24.04
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6804359Z Version: 20260831.293.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6805624Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260831.293/images/ubuntu/Ubuntu2404-Readme.md
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6807248Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260831.293
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6808199Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6809334Z ##[group]GITHUB_TOKEN Permissions
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6811704Z Contents: read
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6812435Z Metadata: read
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6812996Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6815096Z Secret source: Actions
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.6816250Z Prepare workflow directory
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.7153909Z Prepare all required actions
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:45.7201841Z Getting action download info
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.0606133Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.1894522Z Download action repository 'lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832' (SHA:f87b90a3370e62dad310797fedc7fd3700c75832)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.3603027Z Download action repository 'actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97' (SHA:5fda3b95a4ea91299a34e894583c3862153e4b97)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.5788985Z Getting action download info
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.6982039Z Download action repository 'actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10' (SHA:df4cb1c069e1874edd31b4311f1884172cec0e10)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.7989926Z Uses: navapbc/rebar/.github/workflows/_build-and-test.yml@refs/heads/main (a33333b8709a73b94d48dca6f9b9f42e562519f8)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.7994887Z ##[group] Inputs
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.7995450Z   gerrit-refspec: refs/changes/66/2666/1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.7996043Z   gerrit-project: rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.7996617Z   gerrit-url: https://rebar.solutions.navateam.com
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.7997251Z   GERRIT_BRANCH: main
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.7997739Z   GERRIT_CHANGE_ID: rebar~2666
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.7998262Z   GERRIT_CHANGE_NUMBER: 2666
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.7998967Z   GERRIT_CHANGE_URL: https://rebar.solutions.navateam.com/c/rebar/+/2666
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.7999761Z   GERRIT_EVENT_TYPE: patchset-created
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8000868Z   GERRIT_PATCHSET_NUMBER: 1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8001660Z   GERRIT_PATCHSET_REVISION: 90a807e8cbf40f69464f5954785208adbc071623
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8002373Z   GERRIT_PROJECT: rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8002872Z   GERRIT_REFSPEC: refs/changes/66/2666/1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8003435Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8004107Z Complete job name: build-and-test (gate + suite on the patchset) / lint + type-check
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8849010Z ##[group]Run lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8850515Z with:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8851003Z   gerrit-refspec: refs/changes/66/2666/1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8851566Z   gerrit-project: rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8852122Z   gerrit-url: https://rebar.solutions.navateam.com
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8852780Z   delay: 10s
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8853191Z   fetch-depth: 1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8853634Z   repository: navapbc/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8854157Z   ref: a33333b8709a73b94d48dca6f9b9f42e562519f8
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8858265Z   token: ***
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8858689Z   submodules: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8859433Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8953360Z ##[start-action display=Run sleep 10s;id=__lfreleng-actions_checkout-gerrit-change-action.delay-checkout]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8996922Z ##[group]Run sleep 10s
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.8997457Z ^[[36;1msleep 10s^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.9037175Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:46.9037875Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9235161Z ##[end-action id=__lfreleng-actions_checkout-gerrit-change-action.delay-checkout;outcome=success;conclusion=success;duration_ms=10027]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9242557Z ##[start-action display=Run actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10;id=__lfreleng-actions_checkout-gerrit-change-action.__actions_checkout]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9334977Z ##[group]Run actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9335460Z with:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9335721Z   fetch-depth: 1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9336034Z   repository: navapbc/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9336375Z   ref: a33333b8709a73b94d48dca6f9b9f42e562519f8
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9339378Z   token: ***
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9339649Z   submodules: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9339921Z   ssh-strict: true
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9340179Z   ssh-user: git
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9340745Z   persist-credentials: true
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9341044Z   clean: true
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9341343Z   sparse-checkout-cone-mode: true
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9341673Z   fetch-tags: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9341952Z   show-progress: true
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9342212Z   lfs: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9342464Z   set-safe-directory: true
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:56.9342746Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0297464Z Syncing repository: navapbc/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0298987Z ##[group]Getting Git version info
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0299448Z Working directory is '/home/runner/work/rebar/rebar'
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0300433Z [command]/usr/bin/git version
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0360804Z git version 2.55.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0383611Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0399005Z Temporarily overriding HOME='/home/runner/work/_temp/705f1ee1-3e2a-40e9-b08f-e10d695ff073' before making global git config changes
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0401025Z Adding repository directory to the temporary git global config as a safe directory
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0405077Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/rebar/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0455731Z Deleting the contents of '/home/runner/work/rebar/rebar'
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0459843Z ##[group]Determining repository object format
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0462746Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0463449Z ##[group]Initializing the repository
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0467902Z [command]/usr/bin/git init /home/runner/work/rebar/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0569875Z hint: Using 'master' as the name for the initial branch. This default branch name
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0571407Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0572533Z hint: to use in all of your new repositories, which will suppress this warning,
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0573535Z hint: call:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0573985Z hint:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0574494Z hint: 	git config --global init.defaultBranch <name>
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0575285Z hint:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0576041Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0577716Z hint: 'development'. The just-created branch can be renamed via this command:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0578721Z hint:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0579241Z hint: 	git branch -m <name>
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0579841Z hint:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0580845Z hint: Disable this message with "git config set advice.defaultBranchName false"
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0582248Z Initialized empty Git repository in /home/runner/work/rebar/rebar/.git/
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0587028Z [command]/usr/bin/git remote add origin https://github.com/navapbc/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0632797Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0633369Z ##[group]Disabling automatic garbage collection
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0638202Z [command]/usr/bin/git config --local gc.auto 0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0667192Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0668064Z ##[group]Setting up auth
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0668795Z Removing SSH command configuration
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0675900Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.0706785Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1029729Z Removing HTTP extra header
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1035494Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1069034Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1281119Z Removing includeIf entries pointing to credentials config files
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1287392Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1318332Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1541400Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1577661Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/rebar/rebar/.git.path /home/runner/work/_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1607977Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/rebar/rebar/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1644329Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1677748Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1706175Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1706732Z ##[group]Fetching the repository
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:57.1716303Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin a33333b8709a73b94d48dca6f9b9f42e562519f8
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0293716Z From https://github.com/navapbc/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0295435Z  * branch            a33333b8709a73b94d48dca6f9b9f42e562519f8 -> FETCH_HEAD
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0305204Z [command]/usr/bin/git rev-parse --verify --quiet a33333b8709a73b94d48dca6f9b9f42e562519f8^{object}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0330130Z a33333b8709a73b94d48dca6f9b9f42e562519f8
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0335203Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0336058Z ##[group]Determining the checkout info
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0337080Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0342608Z [command]/usr/bin/git sparse-checkout disable
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0388558Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0415210Z ##[group]Checking out the ref
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.0419900Z [command]/usr/bin/git checkout --progress --force a33333b8709a73b94d48dca6f9b9f42e562519f8
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3933705Z Note: switching to 'a33333b8709a73b94d48dca6f9b9f42e562519f8'.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3934751Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3935469Z You are in 'detached HEAD' state. You can look around, make experimental
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3936586Z changes and commit them, and you can discard any commits you make in this
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3937749Z state without impacting any branches by switching back to a branch.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3938668Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3939114Z If you want to create a new branch to retain commits you create, you may
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3941056Z do so (now or later) by using -c with the switch command. Example:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3941783Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3942206Z   git switch -c <new-branch-name>
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3942597Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3943167Z Or undo this operation with:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3943501Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3943673Z   git switch -
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3943970Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3944479Z Turn off this advice by setting config variable advice.detachedHead to false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3945157Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3945457Z HEAD is now at a33333b Remove reconciler internal shims
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.3965564Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4016258Z [command]/usr/bin/git log -1 --format=%H
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4044519Z a33333b8709a73b94d48dca6f9b9f42e562519f8
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4153811Z ##[end-action id=__lfreleng-actions_checkout-gerrit-change-action.__actions_checkout;outcome=success;conclusion=success;duration_ms=1490]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4161539Z ##[start-action display=Run set -x;id=__lfreleng-actions_checkout-gerrit-change-action.gerrit-checkout]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4183743Z ##[group]Run set -x
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4184009Z ^[[36;1mset -x^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4184208Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4184431Z ^[[36;1mreport_error_and_exit()^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4184677Z ^[[36;1m{^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4185034Z ^[[36;1m  default="fatal: couldn't find remote ref refs/changes/66/2666/1"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4185435Z ^[[36;1m  message=${1:-$default}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4185690Z ^[[36;1m  echo "$message"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4185932Z ^[[36;1m  # Log GitHub annotation^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4186198Z ^[[36;1m  echo "::error::$message"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4186443Z ^[[36;1m  exit 1^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4186635Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4186812Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4186999Z ^[[36;1mfetch_from_gerrit()^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4187227Z ^[[36;1m{^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4187523Z ^[[36;1m  if [ "https://rebar.solutions.navateam.comx" == "x" ]^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4187881Z ^[[36;1m  then^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4188092Z ^[[36;1m    report_error_and_exit "$1"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4188346Z ^[[36;1m  fi^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4188535Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4188962Z ^[[36;1m  error=$(git fetch https://rebar.solutions.navateam.com/rebar refs/changes/66/2666/1 2>&1 > /dev/null)^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4189511Z ^[[36;1m  exit_code=$?^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4189753Z ^[[36;1m  if [ $exit_code -ne 0 ]^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4190000Z ^[[36;1m  then^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4190522Z ^[[36;1m    report_error_and_exit "$error"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4190832Z ^[[36;1m  fi^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4191020Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4191203Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4191443Z ^[[36;1merror=$(git fetch origin refs/changes/66/2666/1)^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4191759Z ^[[36;1mexit_code=$?^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4191993Z ^[[36;1mif [ $exit_code -ne 0 ]^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4192235Z ^[[36;1mthen^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4192450Z ^[[36;1m  fetch_from_gerrit "$error"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4192708Z ^[[36;1mfi^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4192905Z ^[[36;1mgit checkout FETCH_HEAD^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4193142Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4193331Z ^[[36;1mif [[ false = [Tt]rue ]]^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4193567Z ^[[36;1mthen^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4193768Z ^[[36;1m  git submodule update^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4193998Z ^[[36;1mfi^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4229691Z shell: /usr/bin/bash --noprofile --norc {0}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4230018Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:05:58.4286786Z ++ git fetch origin refs/changes/66/2666/1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.2358961Z From https://github.com/navapbc/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.2359629Z  * branch              refs/changes/66/2666/1 -> FETCH_HEAD
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.2365272Z + error=
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.2365787Z + exit_code=0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.2366127Z + '[' 0 -ne 0 ']'
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.2366484Z + git checkout FETCH_HEAD
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4409086Z Warning: you are leaving 1 commit behind, not connected to
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4410027Z any of your branches:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4410596Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4410852Z   a33333b8 Remove reconciler internal shims
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4411235Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4411598Z If you want to keep it by creating a new branch, this may be a good time
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4412337Z to do so with:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4412569Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4412798Z  git branch <new-branch-name> a33333b8
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4413239Z 
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4413615Z HEAD is now at 90a807e8 Reland scanner integration as advisory
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4421833Z + [[ false = [Tt]rue ]]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4434979Z ##[end-action id=__lfreleng-actions_checkout-gerrit-change-action.gerrit-checkout;outcome=success;conclusion=success;duration_ms=3027]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4534641Z ##[group]Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4535058Z with:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4535265Z   python-version: 3.12
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4535500Z   check-latest: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4538088Z   token: ***
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4538297Z   update-environment: true
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4538540Z   allow-prereleases: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4538768Z   freethreaded: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.4538976Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.5687589Z ##[group]Installed versions
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.5774741Z Successfully set up CPython (3.12.14)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.5775443Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.5948846Z Prepare all required actions
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.5949398Z Getting action download info
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.7151694Z Download action repository 'actions/cache@v6' (SHA:55cc8345863c7cc4c66a329aec7e433d2d1c52a9)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8387755Z ##[group]Run ./.github/actions/setup-uv
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8388029Z with:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8388219Z   enable-cache: true
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8388424Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8388675Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8389133Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8389595Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8389980Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8390575Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8390958Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8391272Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8395874Z ##[start-action display=Install repository-pinned uv;id=__self.__run]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8409924Z ##[group]Run $ErrorActionPreference = 'Stop'
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8410512Z ^[[36;1m$ErrorActionPreference = 'Stop'^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8410782Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8411067Z ^[[36;1m$pyproject = Join-Path $env:GITHUB_WORKSPACE 'pyproject.toml'^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8411443Z ^[[36;1m$version = $null^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8411669Z ^[[36;1m$inToolUv = $false^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8411989Z ^[[36;1mforeach ($line in Get-Content -LiteralPath $pyproject) {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8412347Z ^[[36;1m  $trimmed = $line.Trim()^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8412639Z ^[[36;1m  if ($trimmed -match '^\[(.+)\]\s*$') {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8412957Z ^[[36;1m    $inToolUv = $Matches[1] -eq 'tool.uv'^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8413238Z ^[[36;1m    continue^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8413444Z ^[[36;1m  }^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8413858Z ^[[36;1m  if ($inToolUv -and $trimmed -match '^required-version\s*=\s*"==([0-9]+(?:\.[0-9]+)+)"\s*(?:#.*)?$') {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8414340Z ^[[36;1m    $version = $Matches[1]^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8414585Z ^[[36;1m    break^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8414776Z ^[[36;1m  }^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8414956Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8415146Z ^[[36;1mif (-not $version) {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8415519Z ^[[36;1m  throw 'pyproject.toml must define [tool.uv] required-version as "==X.Y.Z"'^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8415915Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8416087Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8416273Z ^[[36;1mswitch ($env:RUNNER_OS) {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8416629Z ^[[36;1m  'Linux' { $osTarget = 'unknown-linux-gnu'; $extension = 'tar.gz' }^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8417225Z ^[[36;1m  'macOS' { $osTarget = 'apple-darwin'; $extension = 'tar.gz' }^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8417661Z ^[[36;1m  'Windows' { $osTarget = 'pc-windows-msvc'; $extension = 'zip' }^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8418099Z ^[[36;1m  default { throw "Unsupported runner OS '$env:RUNNER_OS'" }^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8418449Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8418645Z ^[[36;1mswitch ($env:RUNNER_ARCH) {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8418912Z ^[[36;1m  'X64' { $archTarget = 'x86_64' }^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8419200Z ^[[36;1m  'ARM64' { $archTarget = 'aarch64' }^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8419594Z ^[[36;1m  default { throw "Unsupported runner architecture '$env:RUNNER_ARCH'" }^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8419973Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8420146Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8420557Z ^[[36;1m$target = "$archTarget-$osTarget"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8420838Z ^[[36;1m$asset = "uv-$target.$extension"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8421241Z ^[[36;1m$checksumName = "UV_SHA256_$($target.ToUpperInvariant().Replace('-', '_'))"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8421763Z ^[[36;1m$expectedHash = [Environment]::GetEnvironmentVariable($checksumName)^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8422191Z ^[[36;1mif ($expectedHash -notmatch '^[0-9a-f]{64}$') {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8422560Z ^[[36;1m  throw "Missing checksum for $asset ($checksumName)"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8422870Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8423208Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8423505Z ^[[36;1m$workRoot = Join-Path $env:RUNNER_TEMP "setup-uv-$version-$target"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8423913Z ^[[36;1m$extractDir = Join-Path $workRoot 'extract'^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8424325Z ^[[36;1mNew-Item -ItemType Directory -Force -Path $extractDir | Out-Null^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8424734Z ^[[36;1m$archive = Join-Path $workRoot $asset^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8425147Z ^[[36;1m$url = "https://github.com/astral-sh/uv/releases/download/$version/$asset"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8425594Z ^[[36;1mInvoke-WebRequest -Uri $url -OutFile $archive^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8425891Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8426275Z ^[[36;1m$actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8426775Z ^[[36;1mif ($actualHash -ne $expectedHash) {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8427214Z ^[[36;1m  throw "Checksum mismatch for ${asset}: expected $expectedHash, got $actualHash"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8427630Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8427804Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8428011Z ^[[36;1mif ($extension -eq 'zip') {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8428454Z ^[[36;1m  Expand-Archive -LiteralPath $archive -DestinationPath $extractDir -Force^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8428866Z ^[[36;1m  $uvExecutable = 'uv.exe'^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8429109Z ^[[36;1m} else {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8429335Z ^[[36;1m  tar -xzf $archive -C $extractDir^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8429614Z ^[[36;1m  $uvExecutable = 'uv'^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8429841Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8430012Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8430493Z ^[[36;1m$uv = Get-ChildItem -LiteralPath $extractDir -Recurse -File -Filter $uvExecutable |^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8430983Z ^[[36;1m  Where-Object { $_.FullName -like "*$target*" } |^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8431301Z ^[[36;1m  Select-Object -First 1^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8431548Z ^[[36;1mif (-not $uv) {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8431813Z ^[[36;1m  throw "Could not find $uvExecutable in $asset"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8432107Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8432284Z ^[[36;1m^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8432655Z ^[[36;1m$toolRoot = if ($env:RUNNER_TOOL_CACHE) { $env:RUNNER_TOOL_CACHE } else { $env:RUNNER_TEMP }^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8433213Z ^[[36;1m$installDir = Join-Path (Join-Path $toolRoot 'uv') "$version-$target"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8433707Z ^[[36;1mNew-Item -ItemType Directory -Force -Path $installDir | Out-Null^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8434139Z ^[[36;1m$installedUv = Join-Path $installDir $uvExecutable^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8434582Z ^[[36;1mCopy-Item -LiteralPath $uv.FullName -Destination $installedUv -Force^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8435123Z ^[[36;1mif ($env:RUNNER_OS -ne 'Windows') {^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8435416Z ^[[36;1m  chmod +x $installedUv^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8435652Z ^[[36;1m}^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8435845Z ^[[36;1m& $installedUv --version^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8436187Z ^[[36;1mAdd-Content -LiteralPath $env:GITHUB_PATH -Value $installDir^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8436638Z ^[[36;1mWrite-Host "Successfully installed uv $version from $asset"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8487345Z shell: /usr/bin/pwsh -command ". '{0}'"
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8487636Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8487907Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8488357Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8488785Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8489159Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8489553Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8489929Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8490601Z   UV_SHA256_AARCH64_APPLE_DARWIN: 127ebdda7ad953cdf198e964b570ea5771b85467ea93eb7cb6d6f8e6f55408f3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8491258Z   UV_SHA256_AARCH64_PC_WINDOWS_MSVC: 1611d0f4be72b0a354ad9a6ae954093dd4c91e93e36b8b490326a05a039ffe14
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8492073Z   UV_SHA256_AARCH64_UNKNOWN_LINUX_GNU: 66393193038dd7eb108abd7a218d9cec04ac70ab98242b0720fa94de19223b7c
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8492727Z   UV_SHA256_X86_64_APPLE_DARWIN: 06b8ae1da8c2661c5434507a66f8c2b0b835933bf955b5958a9ac357a37d1959
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8493345Z   UV_SHA256_X86_64_PC_WINDOWS_MSVC: bf1518af459a3915511a11fdc6e2f43ef9a2afa138b9d498eeb9642fe9d85218
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8493986Z   UV_SHA256_X86_64_UNKNOWN_LINUX_GNU: 788f18abea7c5f55d6216e4f5613fd89d4d59b631efeec117b2b07fe72f1da21
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:01.8494436Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9281208Z uv 0.12.7 (x86_64-unknown-linux-gnu)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9335772Z Successfully installed uv 0.12.7 from uv-x86_64-unknown-linux-gnu.tar.gz
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9895803Z ##[end-action id=__self.__run;outcome=success;conclusion=success;duration_ms=2149]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9899020Z ##[start-action display=Resolve uv cache directory;id=__self.uv-cache-dir]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9918513Z ##[group]Run $ErrorActionPreference = 'Stop'
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9918885Z ^[[36;1m$ErrorActionPreference = 'Stop'^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9919185Z ^[[36;1m$cacheDir = uv cache dir^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9919597Z ^[[36;1m"dir=$cacheDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9959213Z shell: /usr/bin/pwsh -command ". '{0}'"
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9959500Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9959765Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9960486Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9960967Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9961355Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9961757Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9962145Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:03.9962464Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.8364404Z ##[end-action id=__self.uv-cache-dir;outcome=success;conclusion=success;duration_ms=846]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.8366920Z ##[start-action display=Cache uv downloads and wheels;id=__self.__actions_cache]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9022461Z ##[group]Run actions/cache@v6
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9022700Z with:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9022899Z   path: /home/runner/.cache/uv
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9023308Z   key: Linux-X64-uv-25d7a83f3b3ed22db5ab24d3276beb6ab50709cc16853d5920b2394d9298cec4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9023755Z   restore-keys: Linux-X64-uv-
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9024016Z   enableCrossOsArchive: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9024268Z   fail-on-cache-miss: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9024507Z   lookup-only: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9024713Z   save-always: false
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9025079Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9025327Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9025758Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9026184Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9026562Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9026952Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9027337Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:04.9027662Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:05.5601273Z Cache hit for: Linux-X64-uv-25d7a83f3b3ed22db5ab24d3276beb6ab50709cc16853d5920b2394d9298cec4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:06.8629220Z Received 0 of 125153499 (0.0%), 0.0 MBs/sec
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:07.8635045Z Received 104857600 of 125153499 (83.8%), 50.0 MBs/sec
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:07.9567099Z Received 125153499 of 125153499 (100.0%), 57.0 MBs/sec
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:07.9568815Z Cache Size: ~119 MB (125153499 B)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:07.9674851Z [command]/usr/bin/tar -xf /home/runner/work/_temp/c6605581-3324-42b5-98da-190f732dc208/cache.tzst -P -C /home/runner/work/rebar/rebar --use-compress-program unzstd
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0354147Z Cache restored successfully
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0489158Z Cache restored from key: Linux-X64-uv-25d7a83f3b3ed22db5ab24d3276beb6ab50709cc16853d5920b2394d9298cec4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0572732Z ##[end-action id=__self.__actions_cache;outcome=success;conclusion=success;duration_ms=4220]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0599370Z ##[group]Run uv lock --check
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0599667Z ^[[36;1muv lock --check^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0636460Z shell: /usr/bin/bash -e {0}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0636720Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0636992Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0637453Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0637890Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0638281Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0638684Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0639080Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.0639409Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1607248Z Using CPython 3.12.14 interpreter at: /opt/hostedtoolcache/Python/3.12.14/x64/bin/python3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1645695Z Resolved 151 packages in 0.80ms
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1684921Z ##[group]Run uv sync --locked --extra dev
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1685279Z ^[[36;1muv sync --locked --extra dev^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1685592Z ^[[36;1mecho "$PWD/.venv/bin" >> "$GITHUB_PATH"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1720972Z shell: /usr/bin/bash -e {0}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1721224Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1721489Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1721950Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1722413Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1722817Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1723203Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1723607Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1723935Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1848943Z Using CPython 3.12.14 interpreter at: /opt/hostedtoolcache/Python/3.12.14/x64/bin/python3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1850113Z Creating virtual environment at: .venv
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1898826Z Resolved 151 packages in 0.83ms
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.1957235Z    Building nava-rebar @ file:///home/runner/work/rebar/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.8332141Z       Built nava-rebar @ file:///home/runner/work/rebar/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.8348938Z Prepared 1 package in 639ms
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9693041Z Installed 116 packages in 134ms
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9694509Z  + annotated-types==0.8.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9694940Z  + anthropic==1.2.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9695290Z  + anyio==4.14.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9695922Z  + ast-serialize==0.8.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9696295Z  + attrs==26.1.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9696624Z  + boto3==1.43.68
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9696958Z  + botocore==1.43.75
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9697320Z  + brotli==1.2.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9697646Z  + build==1.5.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9697987Z  + certifi==2026.7.22
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9698345Z  + cffi==2.1.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9698668Z  + cfgv==3.5.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9699034Z  + charset-normalizer==3.4.9
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9699543Z  + click==8.4.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9699884Z  + coverage==7.15.4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9700483Z  + cryptography==50.0.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9700908Z  + ddgs==9.14.4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9701363Z  + distlib==0.4.3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9701711Z  + distro==1.9.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9702256Z  + docstring-parser==0.18.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9702683Z  + execnet==2.1.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9703090Z  + fake-useragent==2.2.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9703517Z  + filelock==3.32.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9704061Z  + genai-prices==0.1.4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9704434Z  + griffelib==2.1.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9704877Z  + h11==0.16.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9705328Z  + h2==4.4.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9705813Z  + hatchling==1.32.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9706246Z  + hpack==4.2.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9706652Z  + httpcore==1.0.9
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9707134Z  + httpcore2==2.10.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9707582Z  + httpx==0.28.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9707965Z  + httpx-sse==0.4.3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9708510Z  + httpx2==2.10.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9708960Z  + hyperframe==6.1.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9709377Z  + identify==2.6.19
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9709732Z  + idna==3.18
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9710407Z  + iniconfig==2.3.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9710835Z  + jiter==0.16.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9711332Z  + jmespath==1.1.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9711823Z  + json-repair==0.63.3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9712192Z  + jsonschema==4.26.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9712731Z  + jsonschema-specifications==2025.9.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9713217Z  + libcst==1.9.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9713634Z  + librt==0.15.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9714152Z  + linkify-it-py==2.1.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9714635Z  + lizard==1.23.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9715127Z  + logfire-api==4.40.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9715533Z  + lxml==6.1.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9716079Z  + markdown-it-py==4.2.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9716499Z  + marklas==0.8.6
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9716885Z  + mcp==1.29.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9717398Z  + mdit-py-plugins==0.6.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9717818Z  + mdurl==0.1.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9718515Z  + mistune==3.3.4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9718864Z  + mutmut==3.7.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9719260Z  + mypy==2.3.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9719650Z  + mypy-extensions==1.1.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9720711Z  + nava-rebar==0.13.1 (from file:///home/runner/work/rebar/rebar)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9721316Z  + nodeenv==1.10.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9721654Z  + openai==2.53.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9722017Z  + opentelemetry-api==1.44.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9722442Z  + packaging==26.3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9722788Z  + pathspec==1.1.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9723244Z  + platformdirs==4.11.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9723677Z  + pluggy==1.6.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9724078Z  + pre-commit==4.6.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9724577Z  + primp==1.3.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9724969Z  + pycparser==3.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9725391Z  + pydantic==2.13.4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9725861Z  + pydantic-ai-slim==1.107.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9726360Z  + pydantic-core==2.46.4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9726810Z  + pydantic-graph==1.107.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9727294Z  + pydantic-settings==2.15.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9727697Z  + pygments==2.20.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9728120Z  + pyjwt==2.13.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9728611Z  + pypandoc-binary==1.17
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9729011Z  + pyproject-hooks==1.2.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9729482Z  + pytest==9.1.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9729874Z  + pytest-cov==7.1.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9730580Z  + pytest-split==0.11.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9730975Z  + pytest-timeout==2.4.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9731418Z  + pytest-xdist==3.8.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9732072Z  + python-dateutil==2.9.0.post0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9732509Z  + python-discovery==1.5.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9733130Z  + python-dotenv==1.2.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9733523Z  + python-multipart==0.0.32
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9733916Z  + pyyaml==6.0.3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9734341Z  + referencing==0.37.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9734728Z  + regex==2026.7.19
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9735250Z  + requests==2.34.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9735610Z  + rich==15.0.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9736174Z  + rpds-py==2026.6.3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9736593Z  + ruff==0.16.3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9737109Z  + s3transfer==0.19.2
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9737505Z  + setproctitle==1.3.7
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9737936Z  + shellcheck-py==0.11.0.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9738341Z  + six==1.17.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9738870Z  + sniffio==1.3.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9739295Z  + socksio==1.0.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9739704Z  + sse-starlette==3.4.8
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9740129Z  + starlette==1.6.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9740712Z  + tenacity==9.1.4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9741123Z  + textual==8.2.8
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9741542Z  + tiktoken==0.13.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9741985Z  + tomlkit==0.15.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9742431Z  + tqdm==4.70.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9743003Z  + trove-classifiers==2026.6.1.19
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9743432Z  + truststore==0.10.4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9743873Z  + typing-extensions==4.16.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9744342Z  + typing-inspection==0.4.3
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9744749Z  + uc-micro-py==2.0.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9745138Z  + urllib3==2.7.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9745651Z  + uvicorn==0.52.1
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9746141Z  + virtualenv==21.7.4
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9746592Z  + zizmor==1.29.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9862317Z ##[group]Run actual="$(shellcheck --version | awk '/^version:/ {print $2}')"
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9863070Z ^[[36;1mactual="$(shellcheck --version | awk '/^version:/ {print $2}')"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9863568Z ^[[36;1mif [ "$actual" != "0.11.0" ]; then^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9864138Z ^[[36;1m  echo "Expected ShellCheck 0.11.0, found ${actual:-missing}" >&2^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9864623Z ^[[36;1m  exit 1^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9864909Z ^[[36;1mfi^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9901367Z shell: /usr/bin/bash -e {0}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9901802Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9902180Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9902799Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9903470Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9903986Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9904642Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9905116Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:09.9905624Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0021303Z ##[group]Run make lint
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0021699Z ^[[36;1mmake lint^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0053899Z shell: /usr/bin/bash -e {0}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0054303Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0054732Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0055280Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0055929Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0056420Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0056999Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0057512Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0060752Z   GH_TOKEN: ***
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0061131Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.0140712Z ruff check src tests scripts
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.5251982Z All checks passed!
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.5272560Z ruff format --check src tests scripts
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.9935099Z 2724 files already formatted
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:10.9977626Z python scripts/check_complexity_baseline.py --check
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:11.7575721Z active=33 new=0 increased=0 stale=16
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:11.7881699Z python scripts/check_mechanism_delta.py --check
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:24.7294028Z active=680 new=2 increased=0 stale=0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:24.7296318Z   admitted  ci_gate::.github/workflows/_scanner-integration.yml::Install rebar from the committed lock (dev extra) — aa9e scanner lane needs repo dev dependencies before running pytest contracts.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:24.7298610Z   admitted  ci_gate::.github/workflows/_scanner-integration.yml::Run hash-locked scanner integration contracts — aa9e advisory lane executes the pinned native scanner contract target.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:24.7617380Z python scripts/check_config_ownership.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:30.3816554Z python scripts/check_config_reads.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:35.4731681Z Config-read gate: OK (_config_schema.py — all dataclass fields are read).
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:35.4971338Z python scripts/gen_env_registry.py --check
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:41.0667573Z python scripts/check_mcp_library_parity.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:42.6064363Z /home/runner/work/rebar/rebar/.venv/lib/python3.12/site-packages/pydantic_settings/sources/utils.py:47: IncompleteFieldDefinitionWarning: Field 'lifespan' has an incomplete definition: its annotation contains an unresolved forward reference, so settings sources may fail to correctly resolve its value. Call `model_rebuild()` on the model where the field is defined, once all the referenced types are defined.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:42.6067160Z   warnings.warn(
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:42.7729005Z MCP/library parity: OK (64 tools — 34 exact, 14 co_names, 16 MCP-only; normalized on ['repo_root']).
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:42.8544995Z python scripts/check_comment_hygiene.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:06:56.0171075Z python scripts/check_raw_git_writes.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:01.6181473Z python scripts/check_wall_clock_asserts.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:08.6772912Z wall-clock-asserts: clean
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:08.6919076Z python scripts/check_destructive_test_exec.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:14.5246915Z python scripts/check_tickets_boundary.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:14.8178612Z python scripts/check_repo_root_from_tracker.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:15.1021486Z python scripts/check_repo_root_from_package.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:15.2458458Z python scripts/check_cli_json_js_safe.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:15.3757370Z python scripts/check_dco_identity.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:15.4679265Z python scripts/check_criteria_vocabulary.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:17.7506489Z python scripts/check_skill_frontmatter.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:17.7972888Z PASS: 4 SKILL.md file(s) have valid frontmatter.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:17.8068435Z python scripts/check_fcntl_import_guard.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:18.9700098Z python scripts/check_shellcheck.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:24.2166645Z python scripts/check_deploy_manifest.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:24.2629785Z deploy-manifest completeness: OK. 7 derived deploy-relevant paths all covered by autodeploy.sh *_PATHS.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:24.2718987Z python scripts/check_templatefile_escapes.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:24.4873415Z python scripts/check_ssm_secret_state.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:24.5466785Z python scripts/check_uv_pin.py
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:25.0293670Z ^[[32m INFO^[[0m ^[[2mzizmor^[[0m^[[2m:^[[0m 🌈 zizmor v1.29.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:26.1448394Z ^[[32m INFO^[[0m ^[[1maudit^[[0m^[[2m:^[[0m ^[[2mzizmor^[[0m^[[2m:^[[0m 🌈 completed .github/workflows/_artifact-probe.yml
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:26.6801646Z ^[[32m INFO^[[0m ^[[1maudit^[[0m^[[2m:^[[0m ^[[2mzizmor^[[0m^[[2m:^[[0m 🌈 completed .github/workflows/_build-and-test.yml
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:26.6816957Z ^[[32m INFO^[[0m ^[[1maudit^[[0m^[[2m:^[[0m ^[[2mzizmor^[[0m^[[2m:^[[0m 🌈 completed .github/workflows/_eval-discipline.yml
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:26.9874975Z ^[[32m INFO^[[0m ^[[1maudit^[[0m^[[2m:^[[0m ^[[2mzizmor^[[0m^[[2m:^[[0m 🌈 completed .github/workflows/_mutation.yml
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:26.9915930Z ^[[32m INFO^[[0m ^[[1maudit^[[0m^[[2m:^[[0m ^[[2mzizmor^[[0m^[[2m:^[[0m 🌈 completed .github/workflows/_optionality.yml
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:26.9930598Z ^[[32m INFO^[[0m ^[[1maudit^[[0m^[[2m:^[[0m ^[[2mzizmor^[[0m^[[2m:^[[0m 🌈 completed .github/workflows/_scanner-integration.yml
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:27.7309214Z ^[[32m INFO^[[0m ^[[1maudit^[[0m^[[2m:^[[0m ^[[2mzizmor^[[0m^[[2m:^[[0m 🌈 completed .github/workflows/gerrit-verify.yaml
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:28.2031676Z ^[[32m INFO^[[0m ^[[1maudit^[[0m^[[2m:^[[0m ^[[2mzizmor^[[0m^[[2m:^[[0m 🌈 completed .github/workflows/reconcile-bridge.yml
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:28.8414424Z ^[[32m INFO^[[0m ^[[1maudit^[[0m^[[2m:^[[0m ^[[2mzizmor^[[0m^[[2m:^[[0m 🌈 completed .github/workflows/release.yml
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:28.8415492Z ^[[32mNo findings to report. Good job!^[[39m (^[[1m^[[93m26^[[39m suppressed^[[0m)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:28.8526899Z make[1]: Entering directory '/home/runner/work/rebar/rebar'
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:28.8533731Z actionlint not found — installing pinned v1.7.12 into .tools/bin
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:28.9876740Z /tmp/tmp.zxOxsb2DBW/actionlint.tar.gz: OK
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.0300070Z actionlint: installed .tools/bin/actionlint
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.0314413Z make[1]: Leaving directory '/home/runner/work/rebar/rebar'
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.0316590Z .tools/bin/actionlint (all workflows)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8096404Z ##[group]Run pre-commit run --all-files --show-diff-on-failure
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8096943Z ^[[36;1mpre-commit run --all-files --show-diff-on-failure^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8133378Z shell: /usr/bin/bash -e {0}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8133631Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8133926Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8134384Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8134847Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8135248Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8135640Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8136026Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8136385Z   SKIP: no-commit-to-branch,lint,typecheck
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:29.8136669Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:30.1056505Z [INFO] Initializing environment for https://github.com/pre-commit/pre-commit-hooks.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:30.6068128Z [INFO] Installing environment for https://github.com/pre-commit/pre-commit-hooks.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:30.6069120Z [INFO] Once installed this environment will be reused.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:30.6069516Z [INFO] This may take a few minutes...
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.3411194Z check yaml......................................................................Passed
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.5026980Z check toml......................................................................Passed
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.5827661Z check for merge conflicts.......................................................Passed
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.6822175Z check for added large files.....................................................Passed
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.6851906Z don't commit to branch.........................................................Skipped
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.6883645Z lint (ruff check + format --check; never mutates)..............................Skipped
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.6915793Z typecheck (mypy — full library + scripts/; never mutates)......................Skipped
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7151017Z ##[group]Run make typecheck
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7151339Z ^[[36;1mmake typecheck^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7186833Z shell: /usr/bin/bash -e {0}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7187080Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7187375Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7187826Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7188258Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7188644Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7189036Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7189421Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7189747Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:07:35.7262669Z mypy src/rebar scripts
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.4899380Z Success: no issues found in 764 source files
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5478525Z ##[group]Run make config-check
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5478829Z ^[[36;1mmake config-check^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5515028Z shell: /usr/bin/bash -e {0}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5515272Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5515535Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5516165Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5516595Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5516980Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5517354Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5517737Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5518059Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5589921Z bash infra/scripts/config-check.sh
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5620679Z config-check: 1. Gerrit git-config files parse
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5641871Z   ok: infra/gerrit/project.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5657012Z   ok: infra/gerrit/replication.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5658953Z config-check: 1b. Autosubmit label security invariants (epic f1fa / S1)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5674360Z   skip: Autosubmit label not present yet (pre-S1 cutover)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5674966Z config-check: 2. gerrit-to-platform ini template parses
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5911766Z   ok: infra/gerrit/gerrit_to_platform.ini.template
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.5912272Z config-check: 3. docker-compose.yml is valid YAML
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.6566557Z   ok: infra/compose/docker-compose.yml (yaml syntax)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.6567258Z config-check: 4. infra shell scripts are syntactically valid (bash -n)
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.7232837Z   checked 32 shell scripts
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.7233329Z config-check: 5. every external compose volume is provisioned by compose-up.sh
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.7766821Z   ok: self-test detects an unprovisioned external volume
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.8492472Z   ok: self-test fails loud when provisioning cannot be enumerated
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9243291Z   ok: all external volumes in infra/compose/docker-compose.yml are provisioned by infra/scripts/compose-up.sh
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9244319Z config-check: all infra configs valid.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9278207Z ##[group]Run if [ ! -f scripts/check_verify_gate_parity.py ]; then
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9278699Z ^[[36;1mif [ ! -f scripts/check_verify_gate_parity.py ]; then^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9279337Z ^[[36;1m  echo "scripts/check_verify_gate_parity.py not in checked-out tree (change predates the gate) — skipping;" \^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9279982Z ^[[36;1m       "the gate re-enforces on rebase and on every post-merge change"^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9280663Z ^[[36;1m  exit 0^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9280982Z ^[[36;1mfi^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9281238Z ^[[36;1mpython scripts/check_verify_gate_parity.py^[[0m
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9318262Z shell: /usr/bin/bash -e {0}
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9318521Z env:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9318790Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9319241Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9319681Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9320126Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9320797Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9321200Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:06.9321522Z ##[endgroup]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0548107Z ##[error]gerrit-verify.yaml vote.needs is NOT a superset of the jobs that gate main — a change breaking one would earn Verified +1 yet redden main.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0556430Z   MISSING from vote.needs (gate main but not the Verified vote): ['scanner-integration']
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0557012Z   Add each to the `vote` job's `needs` in gerrit-verify.yaml AND ensure the
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0557496Z   job actually runs in that lane (call the shared reusable with the Gerrit
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0557990Z   patchset inputs, as build-and-test/optionality do). The classifier and
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0558479Z   docs-only route are Gerrit-only but still mandatory in vote.needs.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0558880Z   If a job must NOT gate
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0559229Z   Verified, add it to EXCLUDED_JOBS in this script with a justification.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0593820Z ##[error]Process completed with exit code 1.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0726061Z Post job cleanup.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0729324Z ##[start-action display=Cache uv downloads and wheels;id=__3be71336-e48c-4fa4-9341-e6c36b1ffc43.__actions_cache]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0732655Z ##[end-action id=__3be71336-e48c-4fa4-9341-e6c36b1ffc43.__actions_cache;outcome=skipped;conclusion=skipped;duration_ms=0]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0803563Z Post job cleanup.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0806612Z ##[start-action display=Run actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10;id=__2f25271f-6451-4c9d-bd73-ece95d4e5d5d.__actions_checkout]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.0853951Z Post job cleanup.
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.1704256Z [command]/usr/bin/git version
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.1741973Z git version 2.55.0
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.1783729Z Temporarily overriding HOME='/home/runner/work/_temp/ab830d6c-d3e9-4141-b230-6e22b04001e2' before making global git config changes
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.1785177Z Adding repository directory to the temporary git global config as a safe directory
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.1790717Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/rebar/rebar
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.1822749Z Removing SSH command configuration
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.1828772Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.1863810Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2097543Z Removing HTTP extra header
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2103023Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2138137Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2368697Z Removing includeIf entries pointing to credentials config files
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2376202Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2400983Z includeif.gitdir:/home/runner/work/rebar/rebar/.git.path
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2401790Z includeif.gitdir:/home/runner/work/rebar/rebar/.git/worktrees/*.path
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2402523Z includeif.gitdir:/github/workspace/.git.path
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2403147Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2410459Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/rebar/rebar/.git.path
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2432082Z /home/runner/work/_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2442722Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/rebar/rebar/.git.path /home/runner/work/_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2479751Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/rebar/rebar/.git/worktrees/*.path
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2502460Z /home/runner/work/_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2512129Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/rebar/rebar/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2561309Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2566557Z /github/runner_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2582305Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2609354Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2630656Z /github/runner_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2638662Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2673814Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.2929362Z Removing credentials config '/home/runner/work/_temp/git-credentials-e6fe5f92-c777-496e-9ffd-d9394486bcb2.config'
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.3033813Z ##[end-action id=__2f25271f-6451-4c9d-bd73-ece95d4e5d5d.__actions_checkout;outcome=success;conclusion=success;duration_ms=222]
+build-and-test (gate + suite on the patchset) / lint + type-check	UNKNOWN STEP	2026-09-05T07:08:07.3099130Z Cleaning up orphan processes

@@ -67,6 +67,10 @@ EXCLUDED_JOBS = frozenset(
     {
         # test.yml: live, billable Jira+LLM tier; manual dispatch + canonical-repo only.
         "external",
+        # test.yml/gerrit-verify.yaml: native scanner contracts are advisory under ADR 0114
+        # until a separate promotion change cites a passing main run; a red scanner lane must
+        # surface visibly without blocking its own repair via Verified.
+        "scanner-integration",
         # prompt-eval.yml: live paid eval tier; manual dispatch / weekly schedule only,
         # and non-blocking (continue-on-error). The blocking eval DISCIPLINE runs in
         # `eval-discipline`, which IS required in vote.needs.
