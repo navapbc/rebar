@@ -37,7 +37,7 @@ _EXPECTED_NAMES: dict[str, str] = {
     "_artifact-probe.yml": "Artifact Provenance Probe (reusable)",
     "_eval-discipline.yml": "Prompt-Eval Discipline (reusable)",
     "_scanner-integration.yml": "Review Scanner Integration (reusable)",
-    "gerrit-scanner-verify.yml": "Gerrit Scanner Advisory Verify",
+    "gerrit-scanner-verify.yml": "Gerrit Scanner On-Demand Verify",
     "test.yml": "Test Suite (mirror)",
     "verify-identity.yml": "Verify Authorship Identity",
     "prompt-eval.yml": "Prompt Eval",

@@ -268,8 +268,8 @@ def test_derived_guarded_workflows_cover_the_manual_floor() -> None:
     )
     gerrit_only = _workflow_closure((".github/workflows/gerrit-verify.yaml",))
     assert ".github/workflows/_scanner-integration.yml" in gerrit_only, (
-        "scanner-integration must be reachable from gerrit-verify.yaml itself, not only "
-        "from the branch/mirror test.yml lane, before a later change can make it voting"
+        "scanner-integration is voting now; the Verified workflow must call the reusable "
+        "directly so its own introducing change cannot pass on a vacuous external/manual run"
     )
 
 

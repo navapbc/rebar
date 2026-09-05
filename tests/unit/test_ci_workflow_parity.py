@@ -260,8 +260,8 @@ def test_diff_coverage_step_present_gated_to_the_gerrit_coverage_cell_and_pinned
     )
 
 
-def test_scanner_gate_uses_one_reusable_in_both_lanes_and_stays_advisory() -> None:
-    """Stage A auto-runs the scanner on Gerrit patchsets without gating Verified yet."""
+def test_scanner_gate_uses_one_reusable_in_both_lanes_and_votes() -> None:
+    """Pinned scanner contracts must run on branch/PR plus the exact Gerrit patchset."""
     import yaml
 
     test_yml = yaml.safe_load(_read(_TEST_YML))
@@ -278,9 +278,10 @@ def test_scanner_gate_uses_one_reusable_in_both_lanes_and_stays_advisory() -> No
     assert scanner["with"]["gerrit-url"] == "https://${{ vars.GERRIT_SERVER }}"
     assert "route == 'full'" in scanner["if"]
     vote = gerrit["jobs"]["vote"]
-    assert "scanner-integration" not in vote["needs"]
+    assert "scanner-integration" in vote["needs"]
     conclusion = vote["steps"][2]["env"]["CONCLUSION"]
-    assert "needs.scanner-integration" not in conclusion
+    assert "needs.scanner-integration.result == 'success'" in conclusion
+    assert "needs.scanner-integration.result == 'skipped'" in conclusion
     assert "env.WORKFLOW_CONCLUSION" not in conclusion
 
 

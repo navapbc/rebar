@@ -1,8 +1,8 @@
-name: Gerrit Scanner Advisory Verify
+name: Gerrit Scanner On-Demand Verify
 
-# Gerrit exact-patchset scanner lane (ticket aa9e). ADR 0114 keeps this workflow separate
-# from gerrit-verify.yaml's vote aggregation: the Stage-A gerrit-verify job auto-runs the
-# scanner as advisory evidence, while this workflow remains an explicit on-demand probe.
+# Gerrit exact-patchset scanner lane (ticket aa9e). Kept as an operator on-demand probe;
+# the voting scanner-integration lane now runs inside gerrit-verify.yaml on every full-route
+# Gerrit patchset.
 "on":
   workflow_dispatch:
     inputs:
@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   scanner-integration:
-    name: scanner-integration (advisory pinned Semgrep + Gitleaks on the patchset)
+    name: scanner-integration (on-demand pinned Semgrep + Gitleaks on the patchset)
     uses: ./.github/workflows/_scanner-integration.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}

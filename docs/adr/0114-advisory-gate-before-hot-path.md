@@ -47,3 +47,13 @@ new tests under `tests/` that are exercised by an existing required suite.
   separate advisory period for each new test file or scenario.
 - The policy adds process latency for genuinely new required gates, but the cost is deliberate and
   smaller than recovering from another fleet-wide self-lock.
+
+
+## Postscript 2026-09-05 — scanner-integration promoted
+
+The scanner-integration lane is no longer an ADR-0114 advisory exception. Story
+`d645-8f51-0ff9-4070` promotes it into the Gerrit `Verified` full-route aggregate after
+the advisory lane landed green on `main` and the b973 predates-gate guard closed the
+vacuous-vote escape. The separate `gerrit-scanner-verify.yml` workflow remains only as an
+on-demand probe; the required pre-merge signal is the `scanner-integration` job inside
+`gerrit-verify.yaml`.
