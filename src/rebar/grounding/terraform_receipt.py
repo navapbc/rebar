@@ -47,7 +47,36 @@ ABSTENTIONS: dict[str, tuple[str, str]] = {
     "module_limit": ("other", "module_limit"),
     "file_limit": ("other", "file_limit"),
     "byte_limit": ("other", "byte_limit"),
+    "registry_not_found": ("private_or_internal_suspected", "registry_not_found"),
+    "registry_unauthorized": ("private_or_internal_suspected", "registry_unauthorized"),
+    "registry_rate_limited": ("rate_limited", "registry_rate_limited"),
+    "dns_error": ("network_error", "dns_error"),
+    "tls_error": ("network_error", "tls_error"),
+    "proxy_error": ("network_error", "proxy_error"),
+    "registry_server_error": ("network_error", "registry_server_error"),
+    "rejected_redirect": ("network_error", "rejected_redirect"),
+    "probe_timeout": ("timeout", "probe_timeout"),
+    "malformed_metadata": ("parse_error", "malformed_metadata"),
+    "oversized_metadata": ("parse_error", "oversized_metadata"),
+    "rejected_target": ("ambiguous", "rejected_target"),
+    "non_registry_remote": ("ambiguous", "non_registry_remote"),
 }
+
+PROBE_REASON_DETAILS: tuple[str, ...] = (
+    "registry_not_found",
+    "registry_unauthorized",
+    "registry_rate_limited",
+    "dns_error",
+    "tls_error",
+    "proxy_error",
+    "registry_server_error",
+    "rejected_redirect",
+    "probe_timeout",
+    "malformed_metadata",
+    "oversized_metadata",
+    "rejected_target",
+    "non_registry_remote",
+)
 
 #: Worker fail-open ``abstain_reason`` (from the harness) -> receipt reason_detail.
 WORKER_REASON_DETAIL: dict[str, str] = {
@@ -91,19 +120,31 @@ def coverage_ran() -> dict[str, Any]:
     return ev.coverage(backend=PARSER, status="ran", version=PARSER_VERSION)
 
 
-def refuted_evidence(reference: dict[str, Any], location: dict[str, Any]) -> dict[str, Any]:
+def refuted_evidence(
+    reference: dict[str, Any],
+    location: dict[str, Any] | None,
+    *,
+    tier: str = ev.TIER_T1,
+    detail: str | None = None,
+) -> dict[str, Any]:
     """A ``refuted`` grounding-evidence record (a real declaration disproves absence)."""
     record = ev.refuted(
-        provenance_tier=ev.TIER_T1,
+        provenance_tier=tier,
         coverage=coverage_ran(),
         reference=reference,
         location=location,
+        detail=detail,
     )
     record["reason"] = None
     return record
 
 
-def abstain_evidence(reason: str, reference: dict[str, Any] | None = None) -> dict[str, Any]:
+def abstain_evidence(
+    reason: str,
+    reference: dict[str, Any] | None = None,
+    *,
+    detail: str | None = None,
+) -> dict[str, Any]:
     """An ``abstain`` grounding-evidence record with a generic closed ``reason``."""
     return ev.abstain(
         reason,
@@ -112,10 +153,11 @@ def abstain_evidence(reason: str, reference: dict[str, Any] | None = None) -> di
         backend=PARSER,
         version=PARSER_VERSION,
         reference=reference,
+        detail=detail,
     )
 
 
-def _refuted_result_digest(reference: dict[str, Any], location: dict[str, Any]) -> str:
+def _refuted_result_digest(reference: dict[str, Any], location: dict[str, Any] | None) -> str:
     return _content_digest({"outcome": "refuted", "reference": reference, "location": location})
 
 
@@ -152,7 +194,9 @@ def refuted_receipt(
     snapshot_digest: str,
     module_digest: str,
     reference: dict[str, Any],
-    location: dict[str, Any],
+    location: dict[str, Any] | None,
+    *,
+    source_kind: str | None = None,
 ) -> dict[str, Any]:
     """The canonical receipt for a ``refuted`` outcome (hashes the safe facts)."""
     receipt = _receipt_common(operation, query, snapshot_digest, module_digest)
@@ -162,6 +206,8 @@ def refuted_receipt(
         reason_detail=None,
         result_digest=_refuted_result_digest(reference, location),
     )
+    if source_kind is not None:
+        receipt["source_kind"] = source_kind
     return receipt
 
 
