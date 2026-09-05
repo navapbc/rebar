@@ -27,7 +27,12 @@ class InsecureUrlError(ConfigError):
 
 
 _TRUE = {"true", "1", "yes", "on"}
-_FALSE = {"false", "0", "no", "off", ""}
+# The empty string is DELIBERATELY absent (bug b2ff-2588-9bb7-4bd2). It used to live here,
+# making `""` an accepted spelling of False — and because the env layer gates on key
+# PRESENCE (`_config_sources.env_overrides`), a `${VAR}` that expanded to nothing in a
+# compose/systemd/k8s env block silently outranked an explicit `readonly = true` and
+# brought the MCP server up writable. See `_as_bool` for the ruling this now follows.
+_FALSE = {"false", "0", "no", "off"}
 
 
 def _src(source: str) -> str:
@@ -130,6 +135,26 @@ def _validate_reconciler_tls(base_url: str, allow_insecure: bool) -> None:
 
 
 def _as_bool(v: Any, key: str) -> bool:
+    """Coerce a config value to a boolean, rejecting anything outside the accepted
+    vocabulary — INCLUDING the empty/whitespace-only string.
+
+    A set-but-empty value is a FAULT, not a synonym for "unset" and not a spelling of
+    False. Operator ruling 39f8-ae7c: *"a fault must error, never silently resolve to a
+    default, even a safe one."* Reading `""` as "unset" would itself be a silent
+    resolution, and it is not even safe in one direction: `False` means opposite things
+    across this schema's boolean gates. On a PROTECTION gate (`mcp.readonly`,
+    `mcp.auth_enabled`, `identity.require_authenticated`, the `verify.require_*` gates)
+    `False` turns a control OFF, so the old empty-string-is-False rule silently weakened
+    the deployment. On a CAPABILITY gate (`mcp.allow_llm`, `mcp.allow_jira_sync`) `False`
+    withholds the capability, so re-reading `""` as "unset" would let a file's `true`
+    through and silently turn one ON. Raising is the only answer that moves no gate in
+    either direction.
+
+    Genuinely-unset is untouched: the env layer only contributes a key that is PRESENT in
+    the environment, so an absent variable still leaves the file (and the built-in
+    default) in charge, preserving the capability gates' deliberate "unset means denied"
+    posture.
+    """
     if isinstance(v, bool):
         return v
     s = str(v).strip().lower()
@@ -137,6 +162,13 @@ def _as_bool(v: Any, key: str) -> bool:
         return True
     if s in _FALSE:
         return False
+    if not s:
+        raise ConfigError(
+            f"{key}: expected a boolean, got an empty value. An empty setting is a "
+            "fault, not a default: it is most often an env var expanded from an unset "
+            f"${{VAR}}. Set {key} to one of {sorted(_TRUE)} / {sorted(_FALSE)}, or "
+            "remove it entirely to fall back to the config file and the built-in default."
+        )
     raise ConfigError(f"{key}: expected a boolean, got {v!r}")
 
 
