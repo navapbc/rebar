@@ -248,6 +248,20 @@ jobs:
       gerrit-project: ${{ inputs.GERRIT_PROJECT }}
       gerrit-url: https://${{ vars.GERRIT_SERVER }}
 
+  scanner-integration:
+    # Pinned native scanner contracts ON THE PATCHSET (ticket aa9e): install Semgrep and
+    # Gitleaks from the checked-in hash locks, then run the nine real scanner integration
+    # contracts. ADR 0114 keeps this lane advisory-only: it runs on full-route patchsets for
+    # visibility, but the Verified vote does not wait for or normalize over its result.
+    name: scanner-integration (advisory pinned Semgrep + Gitleaks on the patchset)
+    needs: [clear-vote, require-ticket, classify]
+    if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
+    uses: ./.github/workflows/_scanner-integration.yml
+    with:
+      gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+      gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+      gerrit-url: https://${{ vars.GERRIT_SERVER }}
+
   optionality:
     # Run the clean-core-wheel + optional-extras (per-extra venvs + union) contract ON THE PATCHSET,
     # so a no-extras import leak or packaging regression BLOCKS Verified pre-merge (build-and-test
