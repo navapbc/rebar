@@ -25,7 +25,7 @@ Done already (the proven playbook):
   reads all go in-process through `src/rebar/_reads.py` →
   `rebar._engine_support.reads` → `rebar.reducer`; the bash read shims and
   their heredocs are deleted; the read-freshness policy (≤1/min best-effort
-  fetch, `--no-sync` / `REBAR_NO_SYNC` opt-out) is uniform across interfaces.
+  fetch and `--no-pull` opt-out) is uniform across interfaces.
 - **The kill-switch lifecycle is proven in-repo**: `REBAR_NATIVE_READS`
   (introduced 7d53bc5b, removed a93885ed) — port behind a switch, pin parity
   (`tests/interfaces/test_native_read_parity.py`, 26 cases), flip the default,

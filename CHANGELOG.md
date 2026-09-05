@@ -38,6 +38,19 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): canonical config spellings only.** ADR 0116 removes the
+  old config/env aliases as a clean operator-approved pre-1.0 break. Migrate
+  `REBAR_NO_SYNC` to `REBAR_SYNC_PULL=off`, `COMPACT_THRESHOLD` to
+  `REBAR_COMPACT_THRESHOLD`, `SCRATCH_BASE_DIR` to `REBAR_SCRATCH_BASE_DIR`,
+  `REBAR_ACLI_TIMEOUT` to `REBAR_JIRA_CLI_TIMEOUT`,
+  `RECONCILER_ABSENT_GET_BUDGET` to
+  `REBAR_RECONCILER_DELETION_PROBE_LIMIT`, `REBAR_ID_GUARD_MODE=warn` to
+  `REBAR_UNSAFE_ID_GUARD_BYPASS=true`, `REBAR_VERIFY_OVERLAP_ENABLED` to
+  `REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS`, and `verify.overlap_enabled` to
+  `verify.suggest_duplicate_tickets`. The sync and ID-guard rows are semantic
+  migrations, not identity renames: use the positive pull policy with `off` and
+  the boolean unsafe-bypass flag respectively.
+
 - **BREAKING (pre-1.0): legacy reconcile compatibility surfaces have been removed.**
   The top-level CLI `rebar reconcile` route, direct-engine `--mode reconcile-check`,
   Python `rebar.reconcile`, MCP `reconcile`, and the persisted `reconcile_diagnostics`

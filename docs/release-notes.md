@@ -8,6 +8,28 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — canonical config spellings only (ADR 0116)
+
+ADR 0116 retires eight old config/env aliases by clean pre-1.0 removal. They are no
+longer parsed or warned as live aliases; use the canonical spellings below:
+
+| Removed spelling | Use instead |
+|---|---|
+| `REBAR_NO_SYNC` | `REBAR_SYNC_PULL=off` |
+| `COMPACT_THRESHOLD` | `REBAR_COMPACT_THRESHOLD` |
+| `SCRATCH_BASE_DIR` | `REBAR_SCRATCH_BASE_DIR` |
+| `REBAR_ACLI_TIMEOUT` | `REBAR_JIRA_CLI_TIMEOUT` |
+| `RECONCILER_ABSENT_GET_BUDGET` | `REBAR_RECONCILER_DELETION_PROBE_LIMIT` |
+| `REBAR_ID_GUARD_MODE=warn` | `REBAR_UNSAFE_ID_GUARD_BYPASS=true` |
+| `REBAR_VERIFY_OVERLAP_ENABLED` | `REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS` |
+| `verify.overlap_enabled` | `verify.suggest_duplicate_tickets` |
+
+The first and sixth rows are not identity renames: the sync replacement is the
+positive pull policy with `off`, and the ID-guard replacement is a boolean unsafe
+bypass. This is the narrow operator-approved compatibility break recorded in
+[ADR 0116](adr/0116-retire-config-aliases.md); it does not weaken the stronger
+JSON/MCP/event/public-facade or persisted-data contracts.
+
 ## BREAKING (pre-1.0) — legacy reconcile compatibility surfaces are removed
 
 The public Python facade no longer exports `rebar.reconcile`, the MCP server no longer
@@ -726,10 +748,9 @@ replacement:
 | MCP `list_epics` tool | MCP tool | the `list_tickets` tool (`ticket_type="epic", status="open,in_progress", blocking_state="unblocked", …"`) |
 
 Notes: the `list_epics` output schema (`schemas/list_epics.schema.json`) and its
-`ListEpics` public TypedDict were removed with the surfaces. The permanent
-ergonomic env renames (`REBAR_NO_SYNC`, `COMPACT_THRESHOLD`, `SCRATCH_BASE_DIR`,
-`REBAR_ACLI_TIMEOUT`, `RECONCILER_ABSENT_GET_BUDGET`, `REBAR_ID_GUARD_MODE`) are
-unaffected and still honored. (ticket `unclear-verymad-sablefish`)
+`ListEpics` public TypedDict were removed with the surfaces. The config/env aliases
+that were still honored when this historical entry was written were later removed by
+the ADR 0116 breaking change above. (ticket `unclear-verymad-sablefish`)
 
 ## BREAKING (pre-1.0) — deprecated back-compat aliases removed (DE7)
 
@@ -753,10 +774,9 @@ Notes: at the time of DE7 the CLI `list-epics` command and the MCP `list_epics`
 tool were kept (composing `list_tickets` internally) and only the
 `rebar.list_epics()` *library* function was removed; the follow-up pass above
 (`unclear-verymad-sablefish`) has since removed those two surfaces as well. The
-permanent ergonomic env renames (`REBAR_NO_SYNC`,
-`COMPACT_THRESHOLD`, `SCRATCH_BASE_DIR`, `REBAR_ACLI_TIMEOUT`,
-`RECONCILER_ABSENT_GET_BUDGET`, `REBAR_ID_GUARD_MODE`) are unaffected and still
-honored. (ticket `imposing-petite-xenopus`)
+config/env aliases that were still honored when this historical entry was written
+were later removed by the ADR 0116 breaking change above. (ticket
+`imposing-petite-xenopus`)
 
 ## 0.7.1 — MCP Registry auto-published; first fully-automated release
 
