@@ -196,7 +196,7 @@ def init_core(repo_root=None, *, silent: bool = False, force_new_store: bool = F
 
     # ── Host repo is itself a linked worktree (.git is a file) → symlink ──────
     if os.path.isfile(os.path.join(repo, ".git")):
-        return _init_via_symlink(repo, tracker, silent)
+        return _init_via_symlink(repo, tracker, silent, force_new_store=force_new_store)
 
     # ── Clean up a partial/stale tracker dir ─────────────────────────────────
     if os.path.isdir(tracker) and not _git_ok(tracker, "rev-parse", "--is-inside-work-tree"):
@@ -562,7 +562,29 @@ def pending_init_remote_unreachable(repo_root=None) -> bool:
     )
 
 
-def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:
+def _init_via_symlink(
+    repo: str, tracker: str, silent: bool, *, force_new_store: bool = False
+) -> int:
+    if force_new_store:
+        # FAIL CLOSED. A linked worktree's tracker is a SYMLINK to the main repo's LIVE
+        # store, and rebar's worktree model deliberately SHARES one tracker across every
+        # worktree. So this branch cannot honour "create a new store" without silently
+        # DETACHING this worktree from the shared store — a split-brain strictly worse
+        # than the bug being fixed. Refusing is the only answer that is neither.
+        #
+        # What must never happen again is the SILENT degrade: this branch used to return
+        # before force_new_store was consulted at all, handing a caller that explicitly
+        # demanded a new store the REAL one without a word. A replay harness stepped on
+        # that and wrote 425 duplicate tickets into the live tracker
+        # (rebar-ticket 00c1-dc03-1f1f-4ffc).
+        sys.stderr.write(
+            "Error: --force-new-store cannot create a new store in a linked git "
+            "worktree — its tracker is a symlink to the main repo's existing store, "
+            "which every worktree deliberately shares. Run init in the main worktree "
+            "to mount that store, or use a standalone clone if you need an isolated "
+            "one.\n"
+        )
+        return 1
     main_tracker = _main_worktree_tracker(repo)
     if main_tracker is None:
         sys.stderr.write("Error: could not detect main worktree path via git worktree list\n")

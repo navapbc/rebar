@@ -33,6 +33,7 @@ findings), never re-derived.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import uuid
@@ -193,40 +194,64 @@ def _reconstruct_child(
     }
 
 
+# raw-git-ok: builds a disposable scratch sandbox repo, never the tickets tracker
+def _scratch_source_checkout(ticket_repo_root: str) -> str:
+    """The throwaway scratch root: a STANDALONE git repo (its own ``.git`` DIRECTORY)
+    holding ``ticket_repo_root``'s ``HEAD`` tree. Deliberately NOT a ``git worktree`` of
+    the ticket repo: a linked worktree has a ``.git`` *file*, which ``rebar init`` reads
+    as "attach to the main repo's store" and SYMLINKS the tracker at that LIVE store
+    (``_commands/init.py`` -> ``_init_via_symlink``), before ``force_new_store`` is ever
+    consulted -- so every ``create_ticket(repo_root=scratch_root)`` wrote into the REAL
+    store (~425 duplicate tickets, 2026-08-31/09-01). A real ``.git`` directory takes
+    init's ordinary path and mounts a fresh, PRIVATE orphan store. Still cheap: objects
+    are borrowed read-only via ``objects/info/alternates``; only the tree is written."""
+    import tempfile
+
+    scratch_root = tempfile.mkdtemp(prefix="tier2-scratch-")
+
+    def _rev_parse(*args: str) -> str:
+        cp = subprocess.run(
+            ["git", "rev-parse", *args],
+            cwd=ticket_repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return cp.stdout.strip()
+
+    head = _rev_parse("HEAD")
+    common_dir = _rev_parse("--path-format=absolute", "--git-common-dir")
+    subprocess.run(["git", "init", "-q", scratch_root], check=True)
+    alternates = os.path.join(scratch_root, ".git", "objects", "info", "alternates")
+    os.makedirs(os.path.dirname(alternates), exist_ok=True)
+    with open(alternates, "w", encoding="utf-8") as fh:
+        fh.write(os.path.join(common_dir, "objects") + "\n")
+    subprocess.run(["git", "reset", "--hard", "-q", head], cwd=scratch_root, check=True)
+    return scratch_root
+
+
 def materialize_reconstructed_ticket(
     row: dict[str, Any], tracker_path: str, *, ticket_repo_root: str
 ) -> tuple[str, str]:
     """Materialize ``row``'s reconstructed-at-review-time material (ticket_type,
     description, file_impact, direct children) into a FRESH, throwaway scratch
     tracker, and return ``(scratch_repo_root, target_ticket_id)`` for
-    ``ProductionBatchRunner`` to review. NEVER points at the real ticket store's live
-    state -- the ticket's own approved plan requires candidate Pass-1 to see
-    "reconstructed material", not whatever the real ticket looks like today (which may
-    have drifted, or even closed, since the corpus review that produced the STORED
-    findings being compared against).
+    ``ProductionBatchRunner`` to review. NEVER points at (nor WRITES to) the real ticket
+    store -- the ticket's approved plan requires candidate Pass-1 to see "reconstructed
+    material", not whatever the ticket looks like today (which may have drifted, or
+    closed, since the corpus review that produced the STORED findings compared against).
 
-    The scratch root is a real ``git worktree`` of ``ticket_repo_root`` at ``HEAD``
-    (not a bare empty repo) so ``ctx.repo_root``/``resolve_code_root``'s explicit-
-    override rule -- which ``assemble_context``'s single ``repo_root`` parameter feeds
-    for BOTH the ticket read and the code-grounding root, with no seam to split them --
-    still resolves to REAL project source for code-grounded criteria (G3/G4/T8/etc),
-    not an empty scratch dir. A fresh ticket tracker is then mounted onto that worktree
-    for the reconstructed ticket. This scratch tracker is disposable scaffolding, never
-    the real project tracker -- the "no ad-hoc raw git in the tickets tracker" policy
-    governs writes to THAT store, not this throwaway one. The caller owns cleanup via
-    :func:`cleanup_reconstructed_ticket` (``git worktree remove``, not a bare
-    ``shutil.rmtree``, so the main repo's worktree registration is not left dangling)."""
-    import tempfile
-
+    The scratch root is a STANDALONE checkout of ``ticket_repo_root`` at ``HEAD``
+    (:func:`_scratch_source_checkout`), not a bare empty dir, so
+    ``ctx.repo_root``/``resolve_code_root``'s explicit-override rule -- which
+    ``assemble_context``'s single ``repo_root`` parameter feeds for BOTH the ticket read
+    and the code root -- still resolves to REAL project source for code-grounded
+    criteria (G3/G4/T8/etc). A fresh, PRIVATE tracker is mounted inside it; standalone
+    rather than a worktree precisely so those writes cannot reach the real store. The
+    caller owns cleanup via :func:`cleanup_reconstructed_ticket`."""
     import rebar
 
-    scratch_root = tempfile.mkdtemp(prefix="tier2-scratch-")
-    shutil.rmtree(scratch_root)  # `git worktree add` requires the target to not exist
-    subprocess.run(
-        ["git", "worktree", "add", scratch_root, "HEAD", "--detach", "-q"],
-        cwd=ticket_repo_root,
-        check=True,
-    )
+    scratch_root = _scratch_source_checkout(ticket_repo_root)
     rebar.init_repo(repo_root=scratch_root, force_new_store=True)
 
     events_by_ticket = corpus._load_ticket_events(tracker_path)
@@ -264,10 +289,11 @@ def materialize_reconstructed_ticket(
 
 
 def cleanup_reconstructed_ticket(scratch_root: str, *, ticket_repo_root: str) -> None:
-    """Tear down a :func:`materialize_reconstructed_ticket` scratch root. Uses ``git
-    worktree remove`` (never a bare ``shutil.rmtree``) so the real repo's worktree
-    registration (``$GIT_DIR/worktrees/``) is not left dangling for every future
-    ``git worktree list`` in this repo."""
+    """Tear down a :func:`materialize_reconstructed_ticket` scratch root. Tries ``git
+    worktree remove`` FIRST (never a bare ``shutil.rmtree`` alone) so a scratch root left
+    over from the older worktree-based materialization never leaves the real repo's
+    worktree registration (``$GIT_DIR/worktrees/``) dangling. A standalone scratch root
+    is not registered, so that call fails and the ``rmtree`` + ``prune`` fallback runs."""
     result = subprocess.run(
         ["git", "worktree", "remove", "--force", scratch_root],
         cwd=ticket_repo_root,
