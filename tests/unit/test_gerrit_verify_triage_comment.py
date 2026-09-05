@@ -22,7 +22,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "gerrit-verify.yaml"
 
 # The jobs the Verified vote aggregates. Pinned so a future edit cannot quietly narrow the
-# gate while adding to the comment.
+# gate while adding to the comment. The scanner lane is advisory under ADR 0114 and must stay
+# outside this set.
 EXPECTED_VOTE_NEEDS = {
     "clear-vote",
     "require-ticket",
@@ -68,6 +69,25 @@ def test_cast_step_still_votes_the_normalized_conclusion(steps: list[dict[str, A
 
 def test_vote_needs_cover_every_verify_route(vote_job: dict[str, Any]) -> None:
     assert set(vote_job["needs"]) == EXPECTED_VOTE_NEEDS
+
+
+def test_scanner_integration_runs_full_route_but_is_advisory(vote_job: dict[str, Any]) -> None:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    scanner_workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "gerrit-scanner-verify.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    scanner = scanner_workflow["jobs"]["scanner-integration"]
+
+    assert "scanner-integration" not in vote_job["needs"]
+    assert "scanner-integration" not in workflow["jobs"]
+    assert scanner["uses"] == "./.github/workflows/_scanner-integration.yml"
+
+
+def test_vote_normalization_excludes_the_advisory_scanner(steps: list[dict[str, Any]]) -> None:
+    normalize = _step(steps, "Normalize the conclusion")
+    assert "scanner-integration" not in normalize["env"]["CONCLUSION"]
 
 
 def test_the_final_vote_uses_the_tolerant_local_helper(steps: list[dict[str, Any]]) -> None:
