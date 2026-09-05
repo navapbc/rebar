@@ -51,6 +51,20 @@
    absent config simply leaves the gate off — only a present config that cannot be
    parsed is a fault. A readable config resolves to `GateState.ENABLED`/`DISABLED`
    (`_commands/gates.py`), so a fault is never reported as a deliberate disable.
+   A **set-but-empty boolean** is likewise a fault, not a default: `REBAR_MCP_READONLY=`
+   (or any whitespace-only value) raises rather than resolving to `False`. The env layer
+   gates on key PRESENCE, so a `${VAR}` that expands to nothing in a compose/systemd/k8s
+   env block used to enter the stack as `""`, outrank an explicit `readonly = true`, and
+   bring the MCP server up with its full write surface — silently, while every other
+   malformed value was loud (bug `b2ff-2588-9bb7-4bd2`). Erroring is the only
+   direction-neutral answer, because `False` means opposite things across the schema:
+   on a **protection** gate (`mcp.readonly`, `mcp.auth_enabled`,
+   `identity.require_authenticated`, the `verify.require_*` gates) it turns a control
+   OFF, while on a **capability** gate (`mcp.allow_llm`, `mcp.allow_jira_sync`) it
+   withholds the capability. Re-reading `""` as "unset" would have fixed the first group
+   and broken the second. Genuinely-unset is unaffected — an absent variable contributes
+   no layer at all, so the capability gates keep their deliberate "unset means denied"
+   posture.
 
 ## Hard constraints (rebar-specific; deviations from the broader survey)
 
