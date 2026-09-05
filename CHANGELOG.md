@@ -64,9 +64,9 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   changes, `rebar bridge fsck` for offline binding/integrity audit, and `rebar bridge
   status` for operational state. The direct-engine legacy route restores
   `--filter-local-ids` as an engine-only post-filter for live-DC harness scoping that
-  primary `--only` cannot express for not-yet-bound inbound Jira keys. The scheduled
-  profile spelling `reconcile-check` remains accepted by bridge runners and maps to
-  canonical preview.
+  primary `--only` cannot express for not-yet-bound inbound Jira keys. Scheduled
+  bridge runners now use the canonical `dry-run` profile spelling for preview-only
+  runs.
 
 - **BREAKING (pre-1.0): `rebar.create_placeholder()` has been removed from the Python API.**
   Use `rebar.ensure_identity_for(provider, external_id, display_name)` instead. The

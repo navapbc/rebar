@@ -276,7 +276,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 | Step | rebar fact that requires it |
 |------|------------------------------|
 | **Mount `tickets` as a worktree** | The store lives on the `tickets` orphan branch at the repo root; `actions/checkout` lands you on `main`. The reconciler reads/writes `.tickets-tracker`, so the branch must be mounted there. We mount on the real `tickets` branch (`-B tickets`) so `tracker.branch` matches and `rebar fsck` doesn't WARN. |
-| **`rebar bridge preview` / `rebar bridge sync`** | These are the primary bridge entry points. They are lean-runtime capabilities — no `[agents]` extra needed. The workflow retains the `reconcile-check` profile spelling for compatibility, and that profile invokes preview. |
+| **`rebar bridge preview` / `rebar bridge sync`** | These are the primary bridge entry points. They are lean-runtime capabilities — no `[agents]` extra needed. The workflow routes `dry-run` to preview and live/bootstrap profiles to sync. |
 | **Exit-code handling (0 / 75 / 3 / other)** | `__main__.py` returns **75** (reschedule — rebase-retry exhausted; the next scheduled run retries) and **3** (another pass already holds the pass-lock). Both are operational, not errors, so we exit 0 on them; any other non-zero fails the job. |
 | **Commit-back + push when dirty *or ahead*** | **The reconciler does not push.** It writes inbound events as *uncommitted* files in the worktree and makes its own `.bridge_state/bindings.json` commit *without pushing*. So a clean worktree does **not** mean "nothing to push" — we push whenever the local `tickets` branch is ahead of `origin/tickets`. This is the single biggest divergence from a naive DSO copy (whose `git status --porcelain` gate would skip pushing the reconciler's own binding commit). |
 | **Strict core commit + push** | Multiple writers (this bridge, the canary, interactive `rebar` clients) share the orphan branch. The store core owns fetch→merge→immediate-repush recovery and makes a failed workflow delivery terminal. |
@@ -639,10 +639,9 @@ safety rails so it can be rolled out — and rolled back — without editing cod
 ### The rollback brake
 
 `.github/workflows/reconcile-bridge.yml` exposes a **`workflow_dispatch` `mode`
-input** (`reconcile-check → dry-run → bootstrap-strict → bootstrap-throttle →
-live`). This is the one-click brake: dispatch the workflow with `mode: dry-run`
-(computes the plan, applies nothing) or the compatibility `mode: reconcile-check`
-(also routed to preview) to **immediately stop all acting mutations** — terminal transitions,
+input** (`dry-run → bootstrap-strict → bootstrap-throttle → live`). This is
+the one-click brake: dispatch the workflow with `mode: dry-run` (computes the
+plan, applies nothing) to **immediately stop all acting mutations** — terminal transitions,
 GC retirements, and adoptions — on the next pass, without a revert. The
 self-rescheduling chain re-dispatches the chosen mode, so it sticks until you
 change it back.
@@ -667,8 +666,8 @@ warm-up window and the
 
 ### Rollback procedure (summary)
 
-1. Dispatch `reconcile-bridge.yml` with **`mode: dry-run`** (or compatibility `reconcile-check`)
-   — stops all acting mutations on the next pass.
+1. Dispatch `reconcile-bridge.yml` with **`mode: dry-run`** — stops all acting
+   mutations on the next pass.
 2. Retirements are a reversible soft-delete (`bindings-retired.json`, full history
    on the `tickets` branch); re-linking a wrongly-retired binding is a recovery,
    not a re-create.

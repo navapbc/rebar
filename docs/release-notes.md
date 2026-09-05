@@ -34,9 +34,8 @@ JSON/MCP/event/public-facade or persisted-data contracts.
 
 The public Python facade no longer exports `rebar.reconcile`, the MCP server no longer
 registers a `reconcile` tool, and the top-level CLI `rebar reconcile` route is no longer
-registered or advertised. Direct `python -m rebar_reconciler --mode reconcile-check`
-invocations now reject before operational work starts, and bridge status no longer reads stale
-`.bridge_state/reconcile-check.json` diagnostics. The engine-only `--filter-local-ids`
+registered or advertised. Bridge status no longer reads stale bridge-state diagnostics from the retired
+compatibility path. The engine-only `--filter-local-ids`
 post-filter remains available on the legacy route for active live-DC harness scoping that
 primary `--only` selection cannot express for not-yet-bound inbound Jira keys.
 
@@ -44,8 +43,7 @@ Use `rebar bridge preview` / `rebar.bridge_preview(...)` for live Jira-vs-local 
 changes, `rebar bridge sync` / `rebar.bridge_sync(...)` or `bridge_run(profile=...)` for
 mutating synchronization, `rebar bridge fsck` / `rebar.bridge_fsck(...)` for offline
 binding/integrity audit, and `rebar bridge status` / `rebar.bridge_status(...)` for operational
-state. Scheduled bridge runners may keep the profile spelling `reconcile-check`; it now invokes
-canonical preview.
+state. Scheduled bridge runners should use `dry-run` for canonical preview.
 
 ## `severity` is now OPTIONAL on `review_result` findings (epic `pink-complex-xenurine`)
 
@@ -527,9 +525,8 @@ same core; a checkout-relative script is no longer required.
 
 This is an automation-wrapper change; noun-based `rebar bridge preview` and
 `rebar bridge sync` are the supported operator CLI. The later reconcile-compatibility
-contraction removed top-level `rebar reconcile`, direct `--mode reconcile-check`, and direct
-`--filter-local-ids`; scheduled provider adapters retain the profile spelling
-`reconcile-check` only as a compatibility profile that invokes preview.
+contraction removed top-level routes and direct compatibility flags; scheduled provider adapters use
+`dry-run` as the profile that invokes preview.
 
 ## Destructive repairs now own a durable reconciler pause
 
@@ -608,14 +605,13 @@ selection (`--only` / `--except`) narrows examination. `rebar bridge pause REASO
 temporarily stops scheduled synchronization, and `rebar bridge resume` clears it.
 
 The expand-contract window originally retained `rebar reconcile`, direct engine `--mode`,
-and `--filter-local-ids`; that compatibility window has now closed for top-level
-`rebar reconcile`, direct `--mode reconcile-check`, and direct `--filter-local-ids`. Use
+and `--filter-local-ids`; that compatibility window has now closed for top-level compatibility routes and direct compatibility flags. Use
 canonical preview for proposed changes and `bridge fsck` for offline binding/integrity audit.
 See [ADR 0092](adr/0092-bridge-primary-vocabulary-compatibility-adapters.md) for the original
 compatibility decision.
 
-The production workflow maps its retained profiles exactly: `reconcile-check` →
-`bridge preview`, `dry-run` → `bridge preview`,
+The production workflow maps its retained profiles exactly: `dry-run` →
+`bridge preview`,
 `bootstrap-strict` → `bridge sync --max-changes 10`, `bootstrap-throttle` →
 `bridge sync --max-changes 100`, and `live` → `bridge sync`.
 
@@ -628,8 +624,7 @@ so repository and ref effects are identical.
 
 The remaining direct-engine compatibility route keeps argument-less live behavior, the
 engine-only `--filter-local-ids` post-filter, and the supported rollout modes (`dry-run`,
-`bootstrap-strict`, `bootstrap-throttle`, `live`). The removed `reconcile-check` diagnostic now
-rejects; callers should move to explicit bridge operations. The production workflow no longer
+`bootstrap-strict`, `bootstrap-throttle`, `live`). Callers should move to explicit bridge operations. The production workflow no longer
 carries a 3/75 whitelist; its paused-marker commit-skip remains unchanged.
 
 ## Durable reconciler status and last-pass witness

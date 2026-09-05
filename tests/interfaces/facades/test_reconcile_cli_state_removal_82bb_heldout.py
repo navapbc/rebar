@@ -40,8 +40,9 @@ def test_legacy_reconcile_cli_is_absent_and_engine_filter_is_retained() -> None:
     assert request.filter_local_ids == {"local-1"}
 
 
-def test_bridge_runner_reconcile_check_profile_invokes_canonical_preview() -> None:
-    assert _bridge_runner.MODE_COMMANDS["reconcile-check"] == ("rebar", "bridge", "preview")
+def test_bridge_runner_dry_run_profile_invokes_canonical_preview() -> None:
+    assert "reconcile-check" not in _bridge_runner.MODE_COMMANDS
+    assert _bridge_runner.MODE_COMMANDS["dry-run"] == ("rebar", "bridge", "preview")
 
 
 def test_bridge_status_ignores_retired_reconcile_check_artifact(
@@ -80,13 +81,18 @@ def test_bridge_status_ignores_retired_reconcile_check_artifact(
     assert "reconcile_diagnostics" not in bridge_status_schema["properties"]
 
 
-def test_reconcile_check_pause_sentinel_still_blocks_higher_modes(rebar_repo: Path) -> None:
+def test_retired_pause_sentinel_blocks_write_capable_modes(rebar_repo: Path) -> None:
     mode_mod = _load_module("heldout_82bb_mode_pause", "mode.py")
     _advisory_lock = _load_module("heldout_82bb_advisory_lock", "_advisory_lock.py")
     ref_lock = _advisory_lock._load_ref_lock()
 
-    ref_lock.set_gate(rebar_repo, mode_mod.Mode.RECONCILE_CHECK.value)
+    ref_lock.set_gate(rebar_repo, "reconcile-check")
 
     assert ref_lock.read_gate(rebar_repo) == "reconcile-check"
-    assert _advisory_lock.check_phase_gate(mode_mod.Mode.BOOTSTRAP_THROTTLE, rebar_repo) is True
-    assert _advisory_lock.check_phase_gate(mode_mod.Mode.RECONCILE_CHECK, rebar_repo) is False
+    for write_mode in (
+        mode_mod.Mode.BOOTSTRAP_STRICT,
+        mode_mod.Mode.BOOTSTRAP_THROTTLE,
+        mode_mod.Mode.LIVE,
+    ):
+        assert _advisory_lock.check_phase_gate(write_mode, rebar_repo) is True
+    assert _advisory_lock.check_phase_gate(mode_mod.Mode.DRY_RUN, rebar_repo) is False

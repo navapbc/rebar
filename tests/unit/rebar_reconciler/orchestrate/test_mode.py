@@ -34,12 +34,17 @@ def test_from_str_rejects_unknown_and_names_allowed_set():
         assert allowed in message, (
             f"Expected allowed value {allowed!r} in error message, got: {message!r}"
         )
+    assert "reconcile-check" not in message
 
 
-def test_mode_has_exactly_five_members():
-    """Mode enum must contain exactly the five rollout-safety modes."""
+def test_from_str_decodes_legacy_pause_sentinel_without_listing_it():
+    """Historical pause blobs decode to the live cap-0 read-only floor."""
+    assert Mode.from_str("reconcile-check") is Mode.DRY_RUN
+
+
+def test_mode_has_exactly_four_members():
+    """Mode enum must contain exactly the four rollout-safety modes."""
     assert {m.value for m in Mode} == {
-        "reconcile-check",
         "dry-run",
         "bootstrap-strict",
         "bootstrap-throttle",
@@ -47,10 +52,9 @@ def test_mode_has_exactly_five_members():
     }
 
 
-def test_mode_caps_preserve_all_five_legacy_limits():
-    """MODE_CAPS remains the exact compatibility contract for every mode."""
+def test_mode_caps_preserve_all_four_limits():
+    """MODE_CAPS remains the exact contract for every mode."""
     assert MODE_CAPS == {
-        Mode.RECONCILE_CHECK: 0,
         Mode.DRY_RUN: 0,
         Mode.BOOTSTRAP_STRICT: 10,
         Mode.BOOTSTRAP_THROTTLE: 100,
@@ -83,9 +87,8 @@ def test_mode_ordering_supports_comparison():
 
 
 def test_mode_rich_comparisons_follow_order_for_every_pair():
-    """Inherited string comparisons never replace the five-mode order contract."""
+    """Inherited string comparisons never replace the four-mode order contract."""
     ordered = [
-        Mode.RECONCILE_CHECK,
         Mode.DRY_RUN,
         Mode.BOOTSTRAP_STRICT,
         Mode.BOOTSTRAP_THROTTLE,
@@ -104,13 +107,13 @@ def test_mode_rich_comparisons_follow_order_for_every_pair():
 
 
 def test_mode_rich_comparisons_accept_equivalent_members_from_a_second_load():
-    """Dynamic loader aliases retain the same five-value comparison contract."""
+    """Dynamic loader aliases retain the same four-value comparison contract."""
     spec = importlib.util.spec_from_file_location("rebar_reconciler_mode_second_load", MODE_PATH)
     assert spec is not None and spec.loader is not None
     second = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = second
     spec.loader.exec_module(second)
 
-    assert Mode.BOOTSTRAP_THROTTLE > second.Mode.RECONCILE_CHECK
-    assert Mode.RECONCILE_CHECK <= second.Mode.RECONCILE_CHECK
+    assert Mode.BOOTSTRAP_THROTTLE > second.Mode.DRY_RUN
+    assert Mode.DRY_RUN <= second.Mode.DRY_RUN
     assert Mode.LIVE.__gt__("bootstrap-throttle") is NotImplemented

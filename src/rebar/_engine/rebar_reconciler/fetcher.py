@@ -642,7 +642,7 @@ def compute_snapshot(
     """Fetch the normalized Jira snapshot and RETURN it as a dict — writing NOTHING.
 
     Read-only counterpart to :func:`fetch_snapshot` for cap-0 (no-write) modes
-    (dry-run / reconcile-check). Performs the identical fetch + merge +
+    (dry-run/preview). Performs the identical fetch + merge +
     enrichment, but persists no snapshot file. The returned dict is byte-for-
     byte equivalent (after ``json.dumps(..., sort_keys=True)``) to what
     ``fetch_snapshot`` would have written, so the differ runs identically.
