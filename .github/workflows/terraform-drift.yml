@@ -7,6 +7,29 @@
 # Auth: GitHub OIDC -> the rebar-terraform-plan IAM role (infra/terraform/iam.tf), which is
 # ReadOnlyAccess + kms:Decrypt-via-SSM. `-lock=false` keeps the plan strictly read-only (no
 # S3 state-lock write needed). No AWS static keys are stored in the repo.
+#
+# TWO JOBS, ON PURPOSE (bugs fd2b-7af3 and eebc-6aa1). Both bugs are the same shape: the
+# workflow could FAIL TO LOOK for drift while its outcome stayed indistinguishable from a
+# healthy one. The structure below makes finishing without an answer impossible:
+#
+#   `fmt`   formatting only. It CANNOT abort the drift plan, because it is not upstream of
+#           it and the plan does not `needs:` it. It previously was the plan job's FIRST
+#           step; `terraform fmt -check` exits 3 on a cosmetic whitespace difference, which
+#           killed the job before `plan` ran and blinded drift detection for two days
+#           (22s and 29s runs against a healthy 6m07s) while a declared-but-unapplied EBS
+#           volume and two CloudWatch alarms went unreported (bug fd2b-7af3).
+#   `plan`  drift only, and it FIRST proves it is planning the tree it claims to plan. A
+#           plan from a checkout behind the tracked branch reports "No changes" for
+#           resources declared on that branch, byte-identical to converged infrastructure
+#           (bug eebc-6aa1). The currency assertion is a hard gate, not advisory.
+#
+# So a red run names WHICH thing is wrong from the job list alone: `fmt` red means whitespace,
+# `plan` red means drift (or an un-provable tree). Neither can masquerade as the other, and
+# neither can silence the other.
+#
+# Both jobs are outside the required `Verified` vote aggregate in gerrit-verify.yaml, so
+# ADR 0114's advisory-before-hot-path staging does not apply: this workflow cannot lock its
+# own repair out of the landing path.
 name: Terraform Drift
 
 # `main` CI on this mirror is SCHEDULED, not push-triggered (ticket 03ef-6fb5-158b-4abd).
@@ -27,6 +50,29 @@ permissions:
   contents: read
 
 jobs:
+  # Formatting. Deliberately its OWN job with no relationship to `plan`: a whitespace nit
+  # must be reported, and must never be able to stop the drift sweep from running.
+  fmt:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.11.4
+          terraform_wrapper: false
+
+      - name: terraform fmt -check
+        # Fail THIS job if any .tf file is not canonically formatted (story 76d2). It no
+        # longer gates the plan (bug fd2b-7af3); it still fails loudly on its own.
+        run: terraform fmt -check -recursive
+
   plan:
     runs-on: ubuntu-latest
     defaults:
@@ -34,6 +80,31 @@ jobs:
         working-directory: infra/terraform
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history: the currency assertion below computes a merge base against the
+          # freshly fetched tracked tip, which a shallow clone cannot reach (bug eebc-6aa1).
+          fetch-depth: 0
+
+      # mechanism-ok: ci_gate .github/workflows/terraform-drift.yml::Assert this tree is current with the tracked branch — bug eebc-6aa1-e45b-4325: a plan from a stale ref reports "No changes" indistinguishably from converged infrastructure, so the sweep must prove WHICH tree it planned
+      - name: Assert this tree is current with the tracked branch
+        working-directory: ${{ github.workspace }}
+        env:
+          # `tip` for the scheduled/dispatched sweep: it must plan the tracked tip itself.
+          # `ancestor` for a pull request, whose checkout is a merge commit that CONTAINS
+          # the base tip rather than being it — a PR built on a stale base still fails.
+          CURRENCY_MODE: ${{ github.event_name == 'pull_request' && 'ancestor' || 'tip' }}
+        # The branch is hardcoded rather than read from the event payload so that the
+        # question this job answers does not depend on the payload that triggered it.
+        #
+        # There is a narrow race: if `main` advances between this job's checkout and this
+        # step's fetch, HEAD is a strict ancestor of the tip and the step reports STALE.
+        # That is deliberate. The alternative is a tolerance window, which is a second
+        # mechanism whose whole job is to let some staleness through — the failure this
+        # workflow exists to stop. A rare, loud, investigable red is the right side of that
+        # trade; re-run the workflow and it passes against the new tip.
+        run: >-
+          python3 scripts/check_terraform_tree_currency.py
+          --remote origin --branch main --mode "$CURRENCY_MODE"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v6
@@ -50,15 +121,13 @@ jobs:
           terraform_version: 1.11.4
           terraform_wrapper: false
 
-      - name: terraform fmt -check
-        # Fail the check if any .tf file is not canonically formatted (story 76d2).
-        run: terraform fmt -check -recursive
-
       - name: terraform init
         run: terraform init -input=false
 
       - name: terraform validate
         # Offline configuration validation (types, references, required args) — story 76d2.
+        # Unlike fmt this IS a genuine precondition: an invalid configuration cannot be
+        # planned at all, so failing here is not a missed plan, it is an impossible one.
         run: terraform validate
 
       - name: terraform plan (fail on drift)
