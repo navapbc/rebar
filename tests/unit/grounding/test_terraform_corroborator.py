@@ -121,13 +121,22 @@ def _fixture_binary(
                     "kind": kind,
                     "mode": stat.S_IMODE(p.lstat().st_mode),
                 }})
-            capture.write_text(json.dumps({{
+            recorded = json.dumps({{
                 "argv": sys.argv,
                 "cwd": str(cwd),
                 "env": dict(os.environ),
                 "stdin": stdin,
                 "files": files,
-            }}, sort_keys=True), encoding="utf-8")
+            }}, sort_keys=True)
+            # Write the capture ATOMICALLY. `Path.write_text` opens "w" (truncating at once)
+            # and flushes only at close, so a SIGTERM from the parent's deadline landing in
+            # that window left a ZERO-BYTE capture.json — which `_corroborate` below then fed
+            # to `json.loads`, raising `Expecting value: line 1 column 1 (char 0)` instead of
+            # asserting anything (bug 5310-b51f-bba6-4e61). Staging + os.replace makes
+            # `capture.exists()` a sound readiness predicate by construction.
+            staging = capture.with_name(capture.name + ".partial")
+            staging.write_text(recorded, encoding="utf-8")
+            os.replace(staging, capture)
             if {mode!r} == "hang":
                 time.sleep(10)
             elif {mode!r} == "overflow":
@@ -333,7 +342,15 @@ def test_faults_abstain_redact_cleanup_and_retry(
 ) -> None:
     from rebar.grounding import terraform_corroborator as tc
 
-    monkeypatch.setattr(tc, "DEADLINE_SECONDS", 0.2)
+    # ONLY `hang` needs a shortened deadline — that fixture sleeps 10s on purpose. The other
+    # three faults are CONTENT faults, produced by a child that must RUN TO COMPLETION, and the
+    # fixture "binary" is a full CPython process. The old blanket 0.2s budget raced its ~40ms
+    # median spawn: on a contended 4-vCPU CI runner the tail crossed 200ms, `_run` timed the
+    # child out, and the assertion saw `worker_timeout` instead of the fault under test — or,
+    # when the SIGTERM landed inside the capture write, a JSONDecodeError from an empty capture
+    # (bug 5310-b51f-bba6-4e61). 1.0s is ~25x the measured median and far under the 10s sleep.
+    if mode == "hang":
+        monkeypatch.setattr(tc, "DEADLINE_SECONDS", 1.0)
     result, _capture, _ = _corroborate(repo, monkeypatch, mode=mode)
     assert result.evidence["outcome"] == ev.OUTCOME_ABSTAIN
     assert result.receipt["reason_detail"] == detail
