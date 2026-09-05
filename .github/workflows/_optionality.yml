@@ -331,7 +331,21 @@ jobs:
         env:
           REBAR_TERRAFORM_CONFIG_INSPECT_CANARY: "1"
         run: |
-          # predates-gate-ok: the terraform-config-inspect-canary job and this test file are introduced together in REB-640 c6ce, so the lane never runs against an older base that lacks tests/unit/grounding/test_terraform_corroborator.py
+          # If-present guard per bug d3d3-63b0-3f5d-4f93 (same class as 1909-c1a7-9f20-440f /
+          # 5bc6-5496-4e17-403a). The Verified lane takes this workflow DEFINITION from `main`
+          # but checks out the PATCHSET tree (gerrit-verify.yaml lines 23-27), so a change
+          # branched before this test file landed does not carry it, pytest exits 4, and the
+          # change takes a Verified -1 caused by the gate rather than by the change under
+          # review. The step previously asserted "job and test file are introduced together,
+          # so the lane never runs against an older base", which is true only when the
+          # definition and the tree come from the same commit — on this lane they do not. The
+          # guard precedes the pip installs so a pre-gate tree pays for neither.
+          if [ ! -f tests/unit/grounding/test_terraform_corroborator.py ]; then
+            echo "tests/unit/grounding/test_terraform_corroborator.py not in checked-out tree" \
+                 "(change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
           python -m pip install --upgrade pip
           python -m pip install '.[dev,grounding-terraform]'
           env PATH="$RUNNER_TEMP/tfci-bin:$PATH" python -m pytest \
