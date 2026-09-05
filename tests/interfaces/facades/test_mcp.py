@@ -20,6 +20,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 import rebar
 import rebar.llm
+from rebar.config import ConfigError
 from rebar.mcp_server import build_server
 
 
@@ -82,7 +83,6 @@ def test_write_tools_present_by_default(monkeypatch: pytest.MonkeyPatch) -> None
         ("YES", True),
         ("Yes", True),
         (" true ", True),
-        ("", False),
         ("0", False),
         ("no", False),
         ("false", False),
@@ -100,6 +100,37 @@ def test_readonly_truthy_parse_is_case_insensitive(
         assert not write_present, f"{val!r} must enable readonly (write tools hidden)"
     else:
         assert write_present, f"{val!r} must NOT enable readonly (write tools present)"
+
+
+@pytest.mark.parametrize("val", ["", "  ", "\t"])
+def test_readonly_empty_env_is_a_fault_not_a_disable(
+    monkeypatch: pytest.MonkeyPatch, val: str
+) -> None:
+    """An EMPTY ``REBAR_MCP_READONLY`` raises instead of bringing the write surface up.
+
+    The row ``("", False)`` used to sit in the case-insensitivity parametrize above,
+    asserting that an empty value left write tools PRESENT. That assertion encoded the
+    OLD contract, and bug b2ff-2588-9bb7-4bd2 changed that contract deliberately: the
+    env layer gates on key PRESENCE, so a ``${VAR}`` expanding to nothing in a
+    compose/systemd/k8s env block silently outranked an explicit ``readonly = true`` and
+    brought the server up writable. Operator ruling 39f8-ae7c ("a fault must error, never
+    silently resolve to a default, even a safe one") makes that a fault.
+
+    So this is a contract change, NOT a test weakened to let a bug pass — the assertion
+    here is strictly STRONGER than the row it replaces (a raise, versus tolerating the
+    write surface). Every other row of that parametrize is untouched: the
+    case-insensitivity coverage this test file exists for (TRUE/Yes/YES/" true ") is
+    fully retained, and only the empty-string row moved here.
+    """
+    monkeypatch.setenv("REBAR_MCP_READONLY", val)
+    with pytest.raises(ConfigError) as excinfo:
+        build_server()
+    message = str(excinfo.value)
+    assert "mcp.readonly" in message, f"the refusal does not name the gate: {message!r}"
+    assert "empty" in message.lower(), (
+        f"the refusal does not explain the EMPTY case, which is the whole point of the "
+        f"contract change: {message!r}"
+    )
 
 
 def test_mcp_reconcile_tool_is_removed_before_library_work(monkeypatch: pytest.MonkeyPatch) -> None:
