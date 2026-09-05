@@ -29,7 +29,7 @@ def _git_repo(path: Path) -> Path:
 
 
 def _ref_lock():
-    from rebar._engine import engine_dir
+    from _engine_path import engine_dir
 
     engine = str(engine_dir())
     if engine not in sys.path:

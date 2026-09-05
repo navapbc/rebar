@@ -458,6 +458,55 @@ def _no_repo_root_leaks() -> Iterator[None]:
             pytest.fail(_leak_failure_message(leaked))
 
 
+# --- Canonical reconciler engine root (bug bd2d-3e31-31d9-4a66) --------------------
+# ``rebar_reconciler`` can exist TWICE on disk: the checkout copy the tests tree owns
+# (``tests._engine_path.engine_dir()``) and, under a NON-editable install, a second copy
+# in site-packages that ``rebar._engine.engine_dir()`` resolves. ``sys.modules`` is keyed
+# by NAME, so a canonical ``rebar_reconciler.*`` key holds exactly one of them and which
+# one is decided by whichever test registered it first — after which every later test
+# silently operates on a module object the code under test does not hold. That is how bug
+# ``ae96-72a9-8145-4c85`` put three sweep lanes red while every editable lane, including
+# the merge gate, stayed green.
+#
+# This guard reads the resulting import STATE, not any call site, which is why it is
+# complete: the ~146 ``sys.modules[name] = mod`` writes across the tree, plus
+# ``setdefault``, plus a plain ``import_module``, plus a ``__path__`` append all show up
+# here identically, and living in the ROOT conftest means it applies to every tier.
+# Offenders are reported ONCE per process so the test that introduced the foreign binding
+# fails, rather than the nineteen thousand that merely inherit it.
+_REPORTED_FOREIGN_ENGINE: set[tuple[str, str]] = set()
+
+
+def _foreign_engine_failure_message(offenders: list[tuple[str, str]]) -> str:
+    from _engine_path import engine_dir as _canonical_engine_dir
+
+    listed = "\n".join(f"  {what} -> {path}" for what, path in offenders)
+    return (
+        "a canonical `rebar_reconciler.*` binding was registered from a NON-canonical "
+        "engine root:\n"
+        f"{listed}\n"
+        f"the one canonical root for the tests tree is {_canonical_engine_dir()}\n"
+        "Resolve the engine with `tests/_engine_path.py`'s `engine_dir()` (the CHECKOUT), "
+        'never `rebar._engine.engine_dir()` or `Path(rebar.__file__).parent / "_engine"` '
+        "(the INSTALLED copy). Under an editable install the two are the same directory, "
+        "so this failure appears only on a non-editable lane -- it is real there, and it "
+        "is why bug ae96 reached main red on three lanes at once. See tests/_engine_path.py."
+    )
+
+
+@pytest.fixture(autouse=True)
+# mechanism-ok: autouse_fixture tests/conftest.py::_one_engine_root — bd2d: state guard
+def _one_engine_root() -> Iterator[None]:
+    """Fail the test that binds a canonical ``rebar_reconciler.*`` key to a foreign copy."""
+    yield
+    from _engine_path import foreign_engine_registrations
+
+    offenders = [o for o in foreign_engine_registrations() if o not in _REPORTED_FOREIGN_ENGINE]
+    if offenders:
+        _REPORTED_FOREIGN_ENGINE.update(offenders)
+        pytest.fail(_foreign_engine_failure_message(offenders))
+
+
 @pytest.fixture(autouse=True)
 def _isolate_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Portability/isolation: config is now resolved on the read path via

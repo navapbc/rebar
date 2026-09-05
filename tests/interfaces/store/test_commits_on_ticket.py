@@ -182,14 +182,9 @@ def test_commits_not_a_jira_synced_field() -> None:
     # outbound_differ split), so attaching commits never produces an outbound Jira
     # change. The engine dir ships as package DATA (not an in-process import), so
     # read by path.
-    fields_mod = (
-        Path(rebar.__file__).resolve().parent
-        / "_engine"
-        / "rebar_reconciler"
-        / "adapters"
-        / "jira"
-        / "outbound_fields.py"
-    )
+    from _engine_path import engine_dir
+
+    fields_mod = engine_dir() / "rebar_reconciler" / "adapters" / "jira" / "outbound_fields.py"
     src = fields_mod.read_text(encoding="utf-8")
     assert '"commits"' not in src and "'commits'" not in src, (
         "commits leaked into the outbound differ — it must not be a Jira-synced field"

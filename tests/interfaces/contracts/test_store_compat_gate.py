@@ -315,12 +315,14 @@ def _load_reconcile():
     # fragile. Mirror tests/unit/rebar_reconciler/conftest.py: extend whichever
     # `rebar_reconciler` is bound with the engine dir on its __path__ so the engine's
     # `reconcile` submodule resolves regardless of collection order.
-    engine_dir = Path(rebar.__file__).resolve().parent / "_engine"
-    if str(engine_dir) not in sys.path:
-        sys.path.insert(0, str(engine_dir))
+    from _engine_path import engine_dir
+
+    engine = engine_dir()
+    if str(engine) not in sys.path:
+        sys.path.insert(0, str(engine))
     import rebar_reconciler  # may be the test-dir shadow package under pytest
 
-    engine_pkg = str(engine_dir / "rebar_reconciler")
+    engine_pkg = str(engine / "rebar_reconciler")
     if engine_pkg not in getattr(rebar_reconciler, "__path__", []):
         rebar_reconciler.__path__.append(engine_pkg)
     from rebar_reconciler import reconcile
