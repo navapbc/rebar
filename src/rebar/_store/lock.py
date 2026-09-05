@@ -65,14 +65,10 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from rebar._store import lock_kernel as _kernel
 from rebar._store import lock_owner as _owner
 from rebar._store.compat import check_store_compat
 from rebar._store.gitutil import _backoff_sleep, _jitter
-
-try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
-    import fcntl
-except ImportError:  # pragma: no cover - platform-dependent
-    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -198,20 +194,27 @@ def check_no_rebase_in_progress(tracker: str) -> None:
 
 
 def _acquire_fcntl(lock_path: str, deadline: float) -> int:
-    """Poll ``fcntl.flock(LOCK_EX|LOCK_NB)`` until acquired or ``deadline``. Returns
-    the held fd (caller closes to release). Raises :class:`LockTimeout`-signal via
-    returning -1 on timeout (caller maps to the right total_wait)."""
+    """Poll the platform's exclusive leg until acquired or ``deadline``. Returns the held
+    fd (caller closes to release). Raises :class:`LockTimeout`-signal via returning -1 on
+    timeout (caller maps to the right total_wait).
+
+    The leg is ``fcntl.flock(LOCK_EX|LOCK_NB)`` on POSIX and ``msvcrt.locking(LK_NBLCK)``
+    on Windows, selected by :mod:`rebar._store.lock_kernel`; the name is kept because this
+    IS the fcntl leg wherever ``fcntl`` exists. On a platform with NEITHER primitive the
+    selector raises :class:`~rebar._store.lock_kernel.NoExclusiveLegError` and it
+    propagates: acquiring the mkdir leg without an exclusive leg held would falsify
+    ``fcntl_held=True`` and let rebar reclaim a live holder's lock."""
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
     while True:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _kernel.take_exclusive(fd)
             return fd
         except OSError as exc:
             # Only genuine contention (the lock is held elsewhere) is waited out; any other
             # errno (ENOLCK/EIO/EBADF/…) is a real fault that must surface with its identity
             # rather than be masked as a spurious 30-60s LockTimeout. (EINTR does not reach
             # here: PEP 475 retries the interrupted syscall at the C level.)
-            if exc.errno not in (errno.EAGAIN, errno.EACCES):
+            if not _kernel.is_contention(exc):
                 os.close(fd)
                 raise
             if time.monotonic() >= deadline:
@@ -251,11 +254,16 @@ def write_lock_is_busy(tracker: str | os.PathLike) -> bool:
         return False
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _kernel.take_exclusive(fd)
+        except _kernel.NoExclusiveLegError:
+            # No primitive to probe WITH. This function is advisory and documented to fail
+            # OPEN, so report "not busy" and let the real acquire arbitrate — exactly the
+            # degradation an unexpected error already takes.
+            return False
         except OSError as exc:
             # Genuine contention answers the question; any other errno is a real fault
             # that must not masquerade as a busy lock (it would silently suppress work).
-            return exc.errno in (errno.EAGAIN, errno.EACCES)
+            return _kernel.is_contention(exc)
         try:
             os.mkdir(lock_dir)
         except FileExistsError:
@@ -330,20 +338,31 @@ def _acquire_mkdir(lock_dir: str, deadline: float) -> bool:
     :func:`rebar._store.lock_owner._mkdir_lock_is_stale`).
 
     **Precondition (load bearing, hence ``fcntl_held=True`` below):** this is only ever
-    reached from :func:`acquire` AFTER the exclusive ``fcntl.flock(LOCK_EX)`` leg on the
-    same tracker's ``.ticket-write.lock`` has been taken, and the dual-window contract
-    holds that leg for the entire lifetime of the mkdir leg (release order is mkdir then
-    fcntl). That makes reclamation race-safe — no other Python acquirer is between mkdir
-    and release — and, for a same-host owner in an unprobeable pid namespace, it is
-    positive proof of death: ``flock`` is kernel-mediated on the inode, so it is shared
-    across pid/mount namespaces on ONE kernel and the kernel drops it when its holder
-    dies. A v2 stamp is only ever written by an acquirer that took the fcntl leg first,
-    and the stamp's boot id says it was the same kernel; if that owner were still alive
-    it would still hold this fcntl lock and we could not be here. This is a STRONGER
-    proof than the pid probe it stands in for, not a weakening of it — and it does not
-    extend to a different boot id, where our hold says nothing about the other kernel,
-    which is why the foreign-host case stays refused (bugs castoff-tigerseye-ammonite,
-    yaw-gravel-linen)."""
+    reached from :func:`acquire` AFTER the exclusive leg on the same tracker's
+    ``.ticket-write.lock`` has been taken, and the dual-window contract holds that leg for
+    the entire lifetime of the mkdir leg (release order is mkdir then exclusive leg). That
+    makes reclamation race-safe — no other Python acquirer is between mkdir and release —
+    and, for a same-host owner in an unprobeable pid namespace, it is positive proof of
+    death. A v2 stamp is only ever written by an acquirer that took the exclusive leg
+    first, and the stamp's boot id says it was the same kernel; if that owner were still
+    alive it would still hold that leg and we could not be here. This is a STRONGER proof
+    than the pid probe it stands in for, not a weakening of it — and it does not extend to
+    a different boot id, where our hold says nothing about the other kernel, which is why
+    the foreign-host case stays refused (bugs castoff-tigerseye-ammonite,
+    yaw-gravel-linen).
+
+    The proof is PER-PLATFORM, because the two primitives earn it differently, and
+    ``fcntl_held`` names the POSIX instance of a platform-general fact (story
+    ``friendless-alabaster-cub``). On POSIX: ``flock`` is kernel-mediated on the INODE, so
+    it is shared across pid and mount namespaces on one kernel, and the kernel drops it
+    when its holder dies. On Windows: ``msvcrt.locking``'s byte-range lock lives on the
+    kernel's file object rather than in the process, so it is enforced against every other
+    handle machine-wide, and the kernel releases it when the owning handle closes — which
+    it does for every handle when the process terminates, abnormally included. Different
+    mechanisms, same two properties the reclamation argument needs: machine-wide
+    exclusivity and death with the holder. :mod:`rebar._store.lock_kernel` carries the
+    argument in full; a platform with NEITHER primitive raises there instead of reaching
+    this function, so ``fcntl_held=True`` is never passed with nothing held."""
     while True:
         try:
             os.mkdir(lock_dir)
