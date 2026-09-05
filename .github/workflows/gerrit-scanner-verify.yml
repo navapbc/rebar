@@ -1,8 +1,8 @@
 name: Gerrit Scanner Advisory Verify
 
 # Gerrit exact-patchset scanner lane (ticket aa9e). ADR 0114 keeps this workflow separate
-# from gerrit-verify.yaml: it is visible advisory evidence, but it is not in the Verified
-# vote run's job list and cannot affect that workflow's all-jobs conclusion snapshot.
+# from gerrit-verify.yaml's vote aggregation: the Stage-A gerrit-verify job auto-runs the
+# scanner as advisory evidence, while this workflow remains an explicit on-demand probe.
 "on":
   workflow_dispatch:
     inputs:

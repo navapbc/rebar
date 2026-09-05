@@ -73,21 +73,26 @@ def test_vote_needs_cover_every_verify_route(vote_job: dict[str, Any]) -> None:
 
 def test_scanner_integration_runs_full_route_but_is_advisory(vote_job: dict[str, Any]) -> None:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    scanner_workflow = yaml.safe_load(
-        (REPO_ROOT / ".github" / "workflows" / "gerrit-scanner-verify.yml").read_text(
-            encoding="utf-8"
-        )
-    )
-    scanner = scanner_workflow["jobs"]["scanner-integration"]
+    scanner = workflow["jobs"]["scanner-integration"]
 
     assert "scanner-integration" not in vote_job["needs"]
-    assert "scanner-integration" not in workflow["jobs"]
     assert scanner["uses"] == "./.github/workflows/_scanner-integration.yml"
+    assert scanner["needs"] == ["clear-vote", "require-ticket", "classify"]
+    assert "route == 'full'" in scanner["if"]
+    assert scanner["with"] == {
+        "gerrit-refspec": "${{ inputs.GERRIT_REFSPEC }}",
+        "gerrit-project": "${{ inputs.GERRIT_PROJECT }}",
+        "gerrit-url": "https://${{ vars.GERRIT_SERVER }}",
+    }
 
 
 def test_vote_normalization_excludes_the_advisory_scanner(steps: list[dict[str, Any]]) -> None:
     normalize = _step(steps, "Normalize the conclusion")
-    assert "scanner-integration" not in normalize["env"]["CONCLUSION"]
+    conclusion = normalize["env"]["CONCLUSION"]
+    assert "scanner-integration" not in conclusion
+    assert "env.WORKFLOW_CONCLUSION" not in conclusion
+    assert "needs.build-and-test.result == 'success'" in conclusion
+    assert "needs.docs-only.result == 'success'" in conclusion
 
 
 def test_the_final_vote_uses_the_tolerant_local_helper(steps: list[dict[str, Any]]) -> None:

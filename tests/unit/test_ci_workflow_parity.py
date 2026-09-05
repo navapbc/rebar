@@ -260,6 +260,30 @@ def test_diff_coverage_step_present_gated_to_the_gerrit_coverage_cell_and_pinned
     )
 
 
+def test_scanner_gate_uses_one_reusable_in_both_lanes_and_stays_advisory() -> None:
+    """Stage A auto-runs the scanner on Gerrit patchsets without gating Verified yet."""
+    import yaml
+
+    test_yml = yaml.safe_load(_read(_TEST_YML))
+    gerrit = yaml.safe_load(_read(_GERRIT_YML))
+
+    assert (
+        test_yml["jobs"]["scanner-integration"]["uses"]
+        == "./.github/workflows/_scanner-integration.yml"
+    )
+    scanner = gerrit["jobs"]["scanner-integration"]
+    assert scanner["uses"] == "./.github/workflows/_scanner-integration.yml"
+    assert scanner["with"]["gerrit-refspec"] == "${{ inputs.GERRIT_REFSPEC }}"
+    assert scanner["with"]["gerrit-project"] == "${{ inputs.GERRIT_PROJECT }}"
+    assert scanner["with"]["gerrit-url"] == "https://${{ vars.GERRIT_SERVER }}"
+    assert "route == 'full'" in scanner["if"]
+    vote = gerrit["jobs"]["vote"]
+    assert "scanner-integration" not in vote["needs"]
+    conclusion = vote["steps"][2]["env"]["CONCLUSION"]
+    assert "needs.scanner-integration" not in conclusion
+    assert "env.WORKFLOW_CONCLUSION" not in conclusion
+
+
 def test_mutation_gate_uses_one_reusable_in_both_lanes_and_votes() -> None:
     """Targeted mutation checks must run on branch/PR plus the exact Gerrit patchset."""
     test_yml = _read(_TEST_YML)
