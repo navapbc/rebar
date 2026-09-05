@@ -142,7 +142,7 @@ def test_the_parser_finds_the_alarms_it_is_meant_to_guard() -> None:
     assert all(alarm.period and alarm.evaluation_periods for alarm in probe)
 
 
-# ───────────────────────── I1: no unclearable alarms ─────────────────────────
+# ────────────────────── I1 + I2: no unclearable alarms ───────────────────────
 
 
 def test_breaching_alarms_require_every_period_in_the_window() -> None:
@@ -191,7 +191,7 @@ def test_breaching_windows_outlast_a_publish_gap() -> None:
     )
 
 
-# ────────────────────────── I2: no unfireable alarms ─────────────────────────
+# ───────────────────────── I3: no unfireable alarms ──────────────────────────
 
 
 def test_non_breaching_alarms_can_actually_reach_their_datapoint_count() -> None:
