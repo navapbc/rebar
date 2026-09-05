@@ -622,3 +622,96 @@ resource "aws_cloudwatch_metric_alarm" "journal_cap_not_in_effect" {
     Ticket  = "e956"
   }
 }
+
+# --- /var/tmp, the fourth root generator (ADR 0112 / story 2ba3-bf77-1303-4b2d) --------
+# Published dimensionless by observability.sh 2h on the 5-minute cadence, following
+# root_disk_used_percent. The budget behind the percent comes from infra/scripts/vartmp-cap.sh,
+# the same file that renders the tmpfiles drop-in and the reaper units.
+#
+# TWO alarms, not three. `var_tmp_hard_quota_in_effect` is published beside these and is
+# deliberately NOT alarmed: the XFS project quota it reports needs `rootflags=pquota` and a host
+# reboot, so its honest value is 0 until that reboot is scheduled, and an alarm that pages
+# continuously is muted within a day. It is a capacity fact to read when interpreting
+# rebar-var-tmp-usage-high, not an incident.
+
+resource "aws_cloudwatch_metric_alarm" "var_tmp_usage_high" {
+  alarm_name        = "rebar-var-tmp-usage-high"
+  alarm_description = <<-EOT
+    /var/tmp is above 85% of its configured byte budget (the value lives in
+    infra/scripts/vartmp-cap.sh, readable with `--print-env`). READ THIS DIFFERENTLY FROM THE
+    OTHER GENERATOR ALARMS: unless rebar/host:var_tmp_hard_quota_in_effect is 1, nothing
+    ENFORCES this number — /var/tmp is a directory on the root XFS filesystem with no
+    writer-side cap, and the budget is held by rebar-var-tmp-reaper.timer, which evicts
+    oldest-first every 5 minutes and can be outrun by a fast writer. So this can be the
+    early warning it looks like, or it can already be a root-volume incident in progress; check
+    rebar-root-disk-pressure alongside it. DIAGNOSIS: `du -sx --block-size=1 /var/tmp`, then
+    `du -sh /var/tmp/* | sort -h | tail` to name the generator. REMEDIATION: delete the
+    generator's own scratch, or run `bash infra/scripts/vartmp-cap.sh --reap` to force a pass.
+    Published as rebar/host:var_tmp_used_percent by observability.sh 2h.
+    Runbook: infra/runbooks/review-bot-ops.md.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "var_tmp_used_percent"
+  statistic   = "Maximum"
+
+  # The house 300/3/2 shape (root_disk_pressure above): 2 breaching datapoints in a 3-period
+  # window absorbs the ordinary timer jitter that makes ~2 of 24 periods absent on this box.
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 85
+  comparison_operator = "GreaterThanThreshold"
+
+  # observability.sh 2h publishes this ONLY on a successful measurement, so absence means the
+  # probe could not size /var/tmp — which is exactly when this must page rather than clear to OK
+  # (bug 3276 defect 2). Pinned by tests/unit/test_alarm_actions_terraform.py.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "2ba3"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "var_tmp_cleanup_not_active" {
+  alarm_name        = "rebar-var-tmp-cleanup-not-active"
+  alarm_description = <<-EOT
+    NOTHING is bounding /var/tmp. Either the tmpfiles drop-in is missing or no longer matches
+    what infra/scripts/vartmp-cap.sh renders, or rebar-var-tmp-reaper.timer is not running — and
+    with no XFS project quota in force (rebar/host:var_tmp_hard_quota_in_effect) that leaves the
+    tree bounded only by the size of the root volume, which is the 2026-09-02 outage exactly.
+    While this fires, rebar-var-tmp-usage-high is measured against a budget nothing is holding.
+    CONFIRM with `bash infra/scripts/vartmp-cap.sh --check-active` (prints 1/0). REMEDIATE with
+    `bash infra/scripts/vartmp-cap.sh --install`, which is idempotent and reports the state in
+    words, then `systemctl status rebar-var-tmp-reaper.timer`. Published as
+    rebar/host:var_tmp_cleanup_active, a 1/0 heartbeat on every probe tick.
+    Runbook: infra/runbooks/review-bot-ops.md.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "var_tmp_cleanup_active"
+  statistic   = "Minimum"
+
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+
+  # Heartbeat semantics (the gate_scratch_unmounted / journal_cap_not_in_effect shape): the
+  # healthy path publishes 1 on EVERY tick, so absence means the probe, the timer, or the host is
+  # dead — the one state this alarm most needs to announce.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "2ba3"
+  }
+}

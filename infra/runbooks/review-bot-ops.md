@@ -950,3 +950,116 @@ Never `rm` under `/var/log/journal`: journald tracks its own files, and deleting
 leaves the running daemon writing into a tree it no longer agrees with. Vacuuming only ever
 removes **archived** files, so it cannot reclaim the active one — if the journal is still large
 afterwards, the active file is the remainder and it rotates on its own.
+
+## The `/var/tmp` bound and its alarms (ADR 0112 / story `2ba3-bf77-1303-4b2d`)
+
+`/var/tmp` was **3.6G of the 28G root working set** at the 2026-09-02 outage — accreted job
+scratch that nothing observed and nothing bounded. `rebar-root-disk-pressure` could only say
+"root disk high".
+
+### Read this section differently from the two above
+
+The Docker and journald sections describe caps their own writer enforces. **`/var/tmp` has no
+writer to enforce anything.** It is an ordinary directory on the root **XFS** filesystem written
+by anything on the box, and `systemd-tmpfiles` — which the approved design names — has **no size
+verb for a directory on an ordinary filesystem** (its `q`/`Q` lines carry btrfs qgroup limits and
+do nothing on XFS). So the byte budget is held by two mechanisms of very unequal strength, and
+**the box publishes which one it is actually running**:
+
+| Mechanism | Strength | State on this host |
+|---|---|---|
+| Age cleanup (`/etc/tmpfiles.d/99-rebar-var-tmp.conf`, 7d) | bounds **age**, never bytes | installed by `compose-up.sh` on every deploy |
+| `rebar-var-tmp-reaper.timer` — oldest-first eviction every 5 min | **mitigation with a fill-rate assumption** | installed and enabled by `compose-up.sh` |
+| XFS **project quota** (`bhard`) | a real **ceiling** — the kernel returns `EDQUOT` | **NOT enabled** — needs `rootflags=pquota` and a reboot (below) |
+
+`bash infra/scripts/vartmp-cap.sh --print-env` reads the budget (default **4 GiB**, env-settable
+via `VAR_TMP_MAX_BYTES`). 4 GiB sits deliberately either side of the 3.6 GiB `/var/tmp` actually
+reached: above it, so steady state does not thrash the reaper, and its 85% alarm threshold
+(3.4 GiB) below it, so this configuration would have *named* `/var/tmp` before it reached its
+incident size.
+
+### What the reaper does NOT guarantee
+
+It runs on a 5-minute timer, so **between two runs `/var/tmp` is bounded only by the volume**.
+The enforced bound is `cap + fill_rate × interval`, not `cap`. At 4 GiB and a 300 s period, a
+sustained **net fill above ~14.6 MB/s** exceeds the budget before the reaper next runs — and this
+gp3 volume does 125 MB/s baseline, roughly 8.5× that. A single runaway writer defeats it. Its
+real job is bounding *steady accumulation*, which is the shape `/var/tmp` actually had at the
+outage.
+
+Second assumption: it never evicts anything younger than `VAR_TMP_MIN_AGE_SECONDS` (default
+**900 s**) — the snapshot janitor's grace window, for the same reason (a directory written
+seconds ago is almost certainly still being written *into*). A burst of fresh files is therefore
+unreclaimable **by design**; when the reaper cannot get under the budget it says so in the
+journal rather than exiting quietly as though it had.
+
+`/var/tmp/rebar-evidence/` is **descended into** rather than treated as one candidate, so a stale
+investigation's evidence is reclaimable while an active one is untouched.
+
+### Which alarm fired?
+
+| Alarm | Metric | What it means | First move |
+|---|---|---|---|
+| `rebar-var-tmp-usage-high` | `var_tmp_used_percent` | `/var/tmp` is >85% of its budget | check `var_tmp_hard_quota_in_effect` and `rebar-root-disk-pressure` — with no quota this may already be an incident, not a warning |
+| `rebar-var-tmp-cleanup-not-active` | `var_tmp_cleanup_active` | **nothing** is bounding `/var/tmp` | `--install`, below |
+
+Both are `treat_missing_data = "breaching"`. `var_tmp_used_percent` is published only on a
+SUCCESSFUL measurement, so its silence means the probe could not size the tree;
+`var_tmp_cleanup_active` is a heartbeat published on every tick including its `0` path, so ITS
+silence means the probe, the timer or the host is dead.
+
+`var_tmp_hard_quota_in_effect` is published beside them and is **deliberately not alarmed**: its
+honest value is `0` until an operator schedules the reboot below, and an alarm that pages
+continuously is muted within a day. Read it when interpreting the other two.
+
+### Diagnosis and safe remediation
+
+```bash
+du -sx --block-size=1 /var/tmp                  # the same tree, the same way the metric sizes it
+du -sh /var/tmp/* 2>/dev/null | sort -h | tail  # name the generator
+bash infra/scripts/vartmp-cap.sh --print-env    # the budget the percentage is measured against
+bash infra/scripts/vartmp-cap.sh --check-active # 1/0 — is anything bounding this tree?
+bash infra/scripts/vartmp-cap.sh --check-quota  # 1/0 — is that bound a real CEILING?
+bash infra/scripts/vartmp-cap.sh --reap         # force one oldest-first pass; logs what it removed
+bash infra/scripts/vartmp-cap.sh --install      # idempotent; reports the state in words
+systemctl status rebar-var-tmp-reaper.timer
+```
+
+**Delete the generator's own scratch, not the tree.** `rm -rf /var/tmp/*` will take out anything
+a running gate, build or investigation is holding open — the reaper's grace window exists
+precisely to avoid that, and a manual `rm` bypasses it. Identify the directory with the `du`
+above, confirm nothing is writing to it (`lsof +D <dir>`), then remove that one.
+
+**Never write investigation output to `/var/gerrit`.** That volume is Gerrit's git repositories,
+`All-Projects`, the review DB and the on-box MCP store; ~11G of one-off probe dumps under
+`/var/gerrit/rebar-quiet-window-evidence/` caused the 2026-08-26 fill (task 3e92, and see
+[**Disk full — `/var/gerrit` DATA volume**](#disk-full----vargerrit-data-volume-task-3e92)
+above). Stream evidence off the box, or stage it under
+`/var/tmp/rebar-evidence/<ticket>-<stamp>/` with a `trap`-based delete at spawn — that path is
+inside this budget and the reaper descends into it, so a forgotten dump is reclaimed rather than
+becoming the next outage.
+
+### Enabling the real ceiling (operator, requires a reboot)
+
+The one mechanism with **neither** the fill-rate nor the grace-window assumption is an XFS
+project quota. XFS reads its quota mount options at **mount** time and refuses to enable
+accounting on a remount, so on the **root** filesystem this cannot be done live:
+
+```bash
+# 1. Add the mount option to the kernel command line.
+#    /etc/default/grub:  GRUB_CMDLINE_LINUX="... rootflags=pquota"
+grub2-mkconfig -o /boot/grub2/grub.cfg     # AL2023
+
+# 2. REBOOT. This is a scheduled Gerrit outage — announce it.
+reboot
+
+# 3. Confirm the kernel is accounting, then let the deploy apply the limit.
+xfs_quota -x -c 'state -p' /               # expect Accounting: ON, Enforcement: ON
+bash infra/scripts/vartmp-cap.sh --install # defines the project and sets bhard
+bash infra/scripts/vartmp-cap.sh --check-quota   # expect 1
+```
+
+After step 3, `var_tmp_hard_quota_in_effect` flips to 1 and `/var/tmp` writers get `EDQUOT` at
+the budget instead of the volume filling. The reaper stays in place; with a hard ceiling it
+becomes what it should always have been — a way of keeping the tree *useful*, rather than the
+only thing standing between `/var/tmp` and the root volume.

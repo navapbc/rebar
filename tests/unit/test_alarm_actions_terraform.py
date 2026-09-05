@@ -275,6 +275,15 @@ def test_host_published_disk_alarms_treat_missing_data_as_breaching() -> None:
         # its 0 path, so ITS absence can only mean the probe, the timer or the host is dead.
         ("monitoring_autodeploy.tf", "journal_usage_high"),
         ("monitoring_autodeploy.tf", "journal_cap_not_in_effect"),
+        # The /var/tmp pair (story 2ba3-bf77-1303-4b2d). Same ADR 0112 obligation, and the
+        # sharpest reason of the set to PIN it: /var/tmp has no writer-enforced cap at all, so
+        # ``var_tmp_used_percent`` is a reading about a budget that (absent an XFS project
+        # quota) only a timer holds. ``notBreaching`` there would render "the probe can no
+        # longer size the one generator nothing enforces" as health. ``var_tmp_cleanup_active``
+        # is a heartbeat published on EVERY tick including its 0 path, so ITS absence can only
+        # mean the probe, the timer or the host is dead.
+        ("monitoring_autodeploy.tf", "var_tmp_usage_high"),
+        ("monitoring_autodeploy.tf", "var_tmp_cleanup_not_active"),
     }
     found: set[tuple[str, str]] = set()
     offenders: list[str] = []
@@ -501,4 +510,39 @@ def test_alarm_descriptions_fit_the_aws_limit() -> None:
     assert measured >= 18, (
         f"only {measured} alarm_description values were measured; the regexes have "
         "stopped matching and this guard is passing vacuously"
+    )
+
+
+def test_the_var_tmp_generator_alarms_exist_and_are_wired_to_sns() -> None:
+    """AC3 of story ``2ba3-bf77-1303-4b2d``, pinned by NAME.
+
+    Every other assertion in this file quantifies over the alarms that exist, so a DELETED
+    alarm satisfies all of them vacuously — and the epic's operator constraint is that each
+    capped generator has *its own* alarm, which is a statement about an alarm being present.
+    ``/var/tmp`` was 3.6G of the 28G working set on 2026-09-02 with nothing watching it; this is
+    what stops that state being reachable again by a merge that quietly drops a resource.
+    """
+    expected = {
+        "rebar-var-tmp-usage-high": "var_tmp_used_percent",
+        "rebar-var-tmp-cleanup-not-active": "var_tmp_cleanup_active",
+    }
+    found: dict[str, str] = {}
+    for file_name, _label, raw, masked in _alarm_blocks():
+        if file_name != "monitoring_autodeploy.tf":
+            continue
+        name = _quoted_attr(raw, masked, "alarm_name")
+        if name not in expected:
+            continue
+        metric = _quoted_attr(raw, masked, "metric_name")
+        assert metric is not None
+        found[name] = metric
+        assert "aws_sns_topic.alerts.arn" in masked, (
+            f"{name} does not route to the shared SNS topic, so it fires into nothing"
+        )
+
+    assert found == expected, (
+        "the /var/tmp generator alarms are missing or renamed: expected "
+        f"{expected}, found {found}. ADR 0112's operator constraint is that every capped "
+        "generator has its own alarm — without these, /var/tmp saturation is reported only as "
+        "'root disk high', which is what made the 2026-09-02 outage take five hours."
     )

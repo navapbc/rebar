@@ -85,6 +85,21 @@ if ! bash "${SCRIPT_DIR}/journald-cap.sh" --install; then
   echo "compose-up: WARN — the journald disk ceiling was not installed; the journal is bounded only by systemd's derived default (see infra/runbooks/review-bot-ops.md)" >&2
 fi
 
+# Install the /var/tmp bound (ADR 0112 decisions 1+2, story 2ba3). Like the journald cap this one
+# does not have to precede a start — systemd-tmpfiles and the reaper timer are independent of the
+# compose stack — but unlike it there is NO writer-enforced ceiling to switch on. /var/tmp is an
+# ordinary directory on the root XFS filesystem, so this installs age cleanup plus a bounded
+# oldest-first reaper timer, and applies a HARD XFS project quota only if the kernel is already
+# accounting project quota. It is not, unless an operator has added rootflags=pquota and
+# rebooted, and the script says exactly that rather than implying a ceiling it does not have.
+#
+# NON-FATAL, like both caps above: a box without a /var/tmp bound is a capacity problem
+# rebar-var-tmp-usage-high and rebar-var-tmp-cleanup-not-active alarm on, not a reason to refuse
+# to boot the stack.
+if ! bash "${SCRIPT_DIR}/vartmp-cap.sh" --install; then
+  echo "compose-up: WARN — the /var/tmp bound was not installed; /var/tmp is bounded only by the size of the root volume (see infra/runbooks/review-bot-ops.md)" >&2
+fi
+
 systemctl enable --now docker
 
 # The compose v2 plugin (`docker compose`). On AL2023 it is the docker-compose-plugin
