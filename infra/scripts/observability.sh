@@ -60,11 +60,16 @@ GATE_SCRATCH_MOUNT="${GATE_SCRATCH_MOUNT:-/var/lib/rebar/gate-scratch}"
 NS="rebar/host"
 
 # IMDSv2 region.
-TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token \
+# BOUNDED, the §2d rule (bug 1205-63b2-2c01-4e7f). IMDS is link-local and normally answers in
+# milliseconds, but these three run FIRST, before any metric is published, so a hang here takes
+# the whole probe with it — and a `Type=oneshot` that never exits deletes its timer's next
+# elapse rather than merely delaying it. The neighbouring health probes below were already
+# `--max-time 10`; these were the outliers.
+TOKEN=$(curl -s --max-time 5 -X PUT http://169.254.169.254/latest/api/token \
   -H 'X-aws-ec2-metadata-token-ttl-seconds: 120')
-REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region \
+REGION=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/placement/region \
   -H "X-aws-ec2-metadata-token: $TOKEN")
-IID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id \
+IID=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/instance-id \
   -H "X-aws-ec2-metadata-token: $TOKEN")
 
 # --- 1. Health probes ------------------------------------------------------
@@ -159,6 +164,15 @@ fi
 # even watching it. DIMENSIONLESS on both sides (the GerritReachable convention):
 # the rebar-root-disk-pressure alarm (monitoring_autodeploy.tf) declares no
 # dimensions, and CloudWatch keys metrics by namespace+name+dimensions.
+#
+# THIS GAUGE MEASURES SPACE, AND SPACE IS NOT THE ONLY WAY A DISK TAKES A HOST DOWN. On
+# 2026-09-04 Gerrit was completely unreachable for 41 minutes with root at 47% FULL: the
+# volume was IOPS-saturated, pinned flat at ~2,580 read IOPS (86% of its provisioned gp3
+# 3,000) for thirty minutes, while this gauge read healthy and the 85% threshold was nowhere
+# near tripping. Epic 6202 bounds disk SPACE — overlay2, BuildKit cache, journald, /var/tmp,
+# a dedicated scratch volume — and NONE of that would have prevented or detected it. A future
+# reader must not infer IOPS protection from the presence of these space metrics and caps;
+# there is no alarm on the dimension that actually saturated (bug 1205-63b2-2c01-4e7f).
 root_pct=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
 if [ -n "$root_pct" ]; then
   aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
@@ -295,6 +309,175 @@ DOCKER_ROOT="${DOCKER_ROOT:-/var/lib/docker}"
 # ceiling; exceeding it is indistinguishable from a failed read and is reported as silence.
 DOCKER_DU_TIMEOUT="${DOCKER_DU_TIMEOUT:-120}"
 DOCKER_DF_TIMEOUT="${DOCKER_DF_TIMEOUT:-20}"
+
+# --- BOUNDED JOURNAL COUNTING (bug 1205-63b2-2c01-4e7f) --------------------
+# Every marker counter below turns journald into a per-interval delta. The ORIGINAL shape
+# persisted a cumulative COUNT and published `total - prev`, and a cumulative total that is
+# RECOMPUTED can only be recomputed by reading from the start of the journal. So each counter
+# re-read the ENTIRE retained journal, twelve times per run across all of them.
+#
+# On 2026-09-04 that took Gerrit off the air for 41 minutes. Measured on a gp3-throttled corpus,
+# twelve unbounded scans exhaust this timer's 300-second period at ~1.37 GB of journal and the
+# host's real journal is 1.7 GB; the same journal read `-n 5000` instead of unbounded is 42.5x
+# faster. The journald field index does NOT reduce the bytes read — journalctl still traverses
+# every journal file — so an indexed matcher is not a bound.
+#
+# THE FIX IS NOT A `timeout` BOLTED ON. A truncated scan yields a truncated count, and
+# `total - prev` then publishes a PLAUSIBLE WRONG NUMBER, which is worse than publishing none:
+# an alarm cannot tell it from a healthy reading. `--since` alone is equally wrong — it turns
+# `total` into a window count that the same subtraction renders meaningless.
+#
+# So the total is no longer RECOMPUTED, it is MAINTAINED. Each counter persists a journald
+# CURSOR beside its total and reads only the entries after it, which is what journald's
+# `--after-cursor` exists for. Read volume becomes a function of the INTERVAL rather than of how
+# much journal the host retains, so it no longer grows as the box ages.
+#
+# STATE FILE: one file per counter holding `<total> <cursor>`, written temp-file-then-rename.
+# The pair must be committed atomically because TimeoutStartSec (install-observability.sh) can
+# now SIGKILL a run at any point, and a half-written pair is exactly the plausible wrong number
+# above. The format is also ROLLBACK-SAFE: the pre-fix reader tested
+# `case "$prev" in ''|*[!0-9]*)` and so classifies a two-field file as unreadable and reseeds,
+# publishing 0 rather than a bogus delta.
+#
+# READING ONE STREAM: `-o cat --show-cursor` emits the entries followed by a single
+# `-- cursor: <c>` line. That line is REMOVED before counting. This is not decoration — the g2p
+# counter (§4c) is a free-form phrase match rather than a record anchor, and would otherwise be
+# able to match cursor metadata.
+#
+# THE STATE LEGS, all of them:
+#   cold start (no file)        seed the cursor from the tail, publish 0. Inherited history
+#                               predates monitoring (bug e2a6-9ee4-8d5c-4290).
+#   upgrade (bare total)        identical to cold start for the cursor, so the FIRST run after
+#                               this change lands neither retro-counts the retention window nor
+#                               performs one last full scan. The total carries forward.
+#   nothing new                 an empty stream carries no cursor line: retain both fields
+#                               unchanged and publish 0. The common case.
+#   unusable cursor             journald rotated past it. A cheap bounded TAIL read
+#                               discriminates this from a wedged journal: if the tail read
+#                               works the journal is healthy and only the cursor is a casualty,
+#                               so reseed from the tail. Publishing nothing beats the tempting
+#                               recovery of re-reading from the beginning, which would reinstate
+#                               this very defect at the moment the journal is largest.
+#   unreadable                  neither field advances and nothing is published.
+#
+# PUBLISHING NOTHING is the honest value for an unmeasurable COUNTER. The pessimistic-value
+# convention the gauges use (§2c) has no analogue here: 0 reads as healthy and any positive
+# number is invented. The run still publishes its heartbeat gauges, so "the probe is alive" is
+# still signalled and the absence is scoped to the one metric that could not be measured.
+#
+# The scan is wall-clock bounded as well, and the bounds NEST: 12 scans x 10 s = 120 s < the
+# 240 s TimeoutStartSec < the 300 s timer period. This is the §2d rule the docker calls above
+# already follow — nothing in a periodic probe may hold its own timer open.
+# mechanism-ok: env_var JOURNAL_SCAN_TIMEOUT — 1205-63b2-2c01-4e7f: the §2d wall-clock bound on
+# every journald read, overridable only so the tests can drive the timeout path.
+JOURNAL_SCAN_TIMEOUT="${JOURNAL_SCAN_TIMEOUT:-10}"
+
+# `timeout` is coreutils and is present on the deployment host, but not on every host this
+# script is exercised on. When it is missing the wall-clock BELT is skipped, not the command:
+# the cursor is what removes the unbounded read, and refusing to run without `timeout` would
+# take these metrics off the air on a host where nothing is wrong. `bounded <secs> <cmd...>`
+# therefore degrades to running the command directly, and callers keep treating a non-zero exit
+# as "this interval could not be counted" either way.
+if command -v timeout >/dev/null 2>&1; then
+  bounded() { timeout "$@"; }
+else
+  bounded() { shift; "$@"; }
+fi
+
+# The journal's tail cursor, into JOURNAL_TAIL_CURSOR. `-n 1` is a seek to the end rather than
+# a traversal, so this costs one entry however large the journal. The RETURN STATUS is
+# journalctl's, kept separate from the cursor because they answer different questions: a status
+# of 0 with an empty cursor means the journal is readable but has no entries yet (a genuine
+# cold start on a fresh box), while a non-zero status means it could not be read at all.
+journal_tail_cursor() {
+  local out rc
+  out="$(bounded "$JOURNAL_SCAN_TIMEOUT" journalctl "$@" --no-pager -o cat -n 1 \
+    --show-cursor 2>/dev/null)"
+  rc=$?
+  JOURNAL_TAIL_CURSOR="$(printf '%s\n' "$out" | sed -n 's/^-- cursor: //p' | tail -1)"
+  return $rc
+}
+
+# Commit the (total, cursor) pair as one unit. A partial write would desynchronise them, and
+# TimeoutStartSec can now SIGKILL this script at any point.
+journal_state_write() {
+  local file="$1" total="$2" cursor="$3" tmp
+  mkdir -p "$(dirname "$file")" 2>/dev/null || true
+  tmp="${file}.tmp.$$"
+  printf '%s %s\n' "$total" "$cursor" >"$tmp" 2>/dev/null || return 1
+  mv -f "$tmp" "$file" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+}
+
+# Split one journalctl stream into JOURNAL_STREAM_COUNT (the matches) and
+# JOURNAL_STREAM_CURSOR (the `-- cursor:` trailer). Taking the trailer out before counting is
+# not decoration: the g2p counter (§4c) is a free-form phrase match rather than a record anchor
+# and could otherwise match cursor metadata.
+#
+# Results come back in globals rather than on stdout ON PURPOSE. A command substitution runs its
+# body in a SUBSHELL, so a function that returns one value on stdout can never also publish the
+# other through a variable — the assignment would be discarded with the subshell, and the caller
+# would silently keep reusing its previous cursor and recount the same entries every run.
+journal_count_stream() {
+  local stream="$1" flags="$2" pattern="$3" body
+  JOURNAL_STREAM_CURSOR="$(printf '%s\n' "$stream" | sed -n 's/^-- cursor: //p' | tail -1)"
+  body="$(printf '%s\n' "$stream" | grep -v '^-- cursor: ')" || true
+  JOURNAL_STREAM_COUNT="$(printf '%s\n' "$body" | grep -c $flags -- "$pattern")" || true
+  case "$JOURNAL_STREAM_COUNT" in '' | *[!0-9]*) JOURNAL_STREAM_COUNT=0 ;; esac
+}
+
+# journal_marker_delta <state_file> <grep_flags> <pattern> [journalctl selectors...]
+#
+# Sets JOURNAL_DELTA / JOURNAL_NEXT_TOTAL / JOURNAL_NEXT_CURSOR and returns 0 when the interval
+# was measured; returns non-zero when it was NOT, in which case the caller publishes nothing.
+# The caller commits the new state only after a successful publish, which preserves the existing
+# publish-then-persist ordering: a failed CloudWatch call must leave the delta to be republished
+# next tick rather than swallowing it (bug 6a65-*).
+journal_marker_delta() {
+  local state_file="$1" flags="$2" pattern="$3"
+  shift 3
+  local raw prev_total cursor out rc
+  JOURNAL_DELTA=0
+  JOURNAL_NEXT_TOTAL=0
+  JOURNAL_NEXT_CURSOR=""
+
+  raw="$(head -n 1 "$state_file" 2>/dev/null || true)"
+  read -r prev_total cursor <<<"$raw"
+  case "${prev_total:-}" in '' | *[!0-9]*) prev_total=0 ;; esac
+  cursor="${cursor:-}"
+  JOURNAL_NEXT_TOTAL="$prev_total"
+
+  if [ -z "$cursor" ]; then
+    # Cold start, or the upgrade from the pre-1205 bare-total format. Both seed and publish 0,
+    # so the first run after this lands neither retro-counts the retention window nor performs
+    # one last full scan. An empty journal seeds an empty cursor and simply tries again.
+    journal_tail_cursor "$@" || return 1
+    JOURNAL_NEXT_CURSOR="$JOURNAL_TAIL_CURSOR"
+    return 0
+  fi
+
+  out="$(bounded "$JOURNAL_SCAN_TIMEOUT" journalctl "$@" --no-pager -o cat \
+    --after-cursor "$cursor" --show-cursor 2>/dev/null)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    # Either the journal cannot be read at all, or journald rotated past this cursor. A cheap
+    # bounded tail read tells them apart. Either way this interval is unmeasured and nothing is
+    # published, but when the journal itself is healthy the cursor is RESEEDED so an entry
+    # journald no longer holds cannot stall the counter forever. The tempting alternative —
+    # giving up on the cursor and re-reading from the beginning — is the defect this change
+    # removes, and it would fire exactly when the journal is largest.
+    journal_tail_cursor "$@" || return 1
+    [ -n "$JOURNAL_TAIL_CURSOR" ] &&
+      journal_state_write "$state_file" "$prev_total" "$JOURNAL_TAIL_CURSOR"
+    return 1
+  fi
+
+  journal_count_stream "$out" "$flags" "$pattern"
+  JOURNAL_DELTA="$JOURNAL_STREAM_COUNT"
+  # An empty stream carries no cursor line: nothing arrived, so the old cursor still stands.
+  JOURNAL_NEXT_CURSOR="${JOURNAL_STREAM_CURSOR:-$cursor}"
+  JOURNAL_NEXT_TOTAL=$((prev_total + JOURNAL_DELTA))
+  return 0
+}
 
 # Percent of a cap, CLAMPED to 100 — shared by 2f and 2g. CloudWatch's `Percent` unit is
 # defined over 0-100, and a datapoint of 300 rescales every dashboard that shares the axis into
@@ -527,7 +710,9 @@ if [ -d "$DATA_MOUNT" ]; then
     [ "$allowed" -eq 1 ] && continue
     # `du -sk` (not -sb): -b is GNU-only and this must also run under the macOS du the
     # test suite invokes. KiB * 1024 is exact for the sizes involved.
-    entry_kb=$(du -sk "$entry" 2>/dev/null | tail -1 | awk '{print $1}')
+    # BOUNDED, the §2d rule (bug 1205-63b2-2c01-4e7f): debris is by definition something nobody
+    # planned, so its size is unknown and this walks it inside the 5-minute probe.
+    entry_kb=$(bounded "$JOURNAL_SCAN_TIMEOUT" du -sk "$entry" 2>/dev/null | tail -1 | awk '{print $1}')
     entry_kb=${entry_kb:-0}
     debris_bytes=$((debris_bytes + entry_kb * 1024))
     debris_names="${debris_names} ${name}"
@@ -835,22 +1020,21 @@ mkdir -p "$(dirname "$VOTER_OFFSET_FILE")"
 # Since bug f829-152a-b415-44a4 the emitters' logger-stream copy logs the JSON record body
 # WITHOUT the line-start token — only the stderr print emits `<TOKEN> {json}` — so configured
 # application logging (whose stdout also lands in journald) cannot double this count.
-vtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE '^VOTER_ERROR \{') || true
-vtotal=${vtotal:-0}
-vprev=$(cat "$VOTER_OFFSET_FILE" 2>/dev/null || true)
-# No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
-# replication_errors counter (§3).
-case "$vprev" in '' | *[!0-9]*) vprev=$vtotal ;; esac
-vnew=$((vtotal - vprev))
-# Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
-[ "$vnew" -lt 0 ] && vnew=0
+# Counted from the cursor, not from the start of the journal (bug 1205-63b2-2c01-4e7f).
 # Published WITHOUT dimensions to match the dimensionless alarm in monitoring_s4b.tf
 # (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
-if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-  --metric-name voter_errors --unit Count --value "$vnew" 2>/dev/null; then
-  echo "$vtotal" >"$VOTER_OFFSET_FILE"
+if journal_marker_delta "$VOTER_OFFSET_FILE" -E '^VOTER_ERROR \{' \
+  CONTAINER_NAME="$VOTER_CONTAINER"; then
+  vnew="$JOURNAL_DELTA"
+  if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name voter_errors --unit Count --value "$vnew" 2>/dev/null; then
+    journal_state_write "$VOTER_OFFSET_FILE" "$JOURNAL_NEXT_TOTAL" \
+      "$JOURNAL_NEXT_CURSOR"
+  fi
+  [ "$vnew" -gt 0 ] && logger -t rebar-health "review-bot voter failures (new this interval)=${vnew}"
+else
+  logger -t rebar-health "voter_errors NOT published: this interval could not be counted"
 fi
-[ "$vnew" -gt 0 ] && logger -t rebar-health "review-bot voter failures (new this interval)=${vnew}"
 
 # --- 4c. review-bot merge-change path failures (epic 88ab / S2) -------------
 # The merge-change review path (a merge revision reviewed on its auto-merge delta only)
@@ -863,18 +1047,18 @@ fi
 MERGE_OFFSET_FILE="${MERGE_OFFSET_FILE:-/var/lib/rebar/merge-change-fail-offset}"
 mkdir -p "$(dirname "$MERGE_OFFSET_FILE")"
 # Record-anchored like the voter counter above; rationale at section 4 (bug 8c2f-8377-5044-4650).
-mtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE '^MERGE_CHANGE_ERROR \{') || true
-mtotal=${mtotal:-0}
-mprev=$(cat "$MERGE_OFFSET_FILE" 2>/dev/null || true)
-# No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
-# replication_errors counter (§3).
-case "$mprev" in '' | *[!0-9]*) mprev=$mtotal ;; esac
-mnew=$((mtotal - mprev))
-# Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
-[ "$mnew" -lt 0 ] && mnew=0
-if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-  --metric-name review_bot_merge_change_errors --unit Count --value "$mnew" 2>/dev/null; then
-  echo "$mtotal" >"$MERGE_OFFSET_FILE"
+if journal_marker_delta "$MERGE_OFFSET_FILE" -E '^MERGE_CHANGE_ERROR \{' \
+  CONTAINER_NAME="$VOTER_CONTAINER"; then
+  mnew="$JOURNAL_DELTA"
+  if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name review_bot_merge_change_errors --unit Count --value "$mnew" 2>/dev/null; then
+    journal_state_write "$MERGE_OFFSET_FILE" "$JOURNAL_NEXT_TOTAL" \
+      "$JOURNAL_NEXT_CURSOR"
+  fi
+else
+  mnew=0
+  logger -t rebar-health \
+    "review_bot_merge_change_errors NOT published: this interval could not be counted"
 fi
 [ "$mnew" -gt 0 ] && logger -t rebar-health "review-bot merge-change failures (new this interval)=${mnew}"
 
@@ -891,20 +1075,18 @@ mkdir -p "$(dirname "$DEPLOY_OFFSET_FILE")"
 # Record-anchored like the voter counter (§4). This unit's journal is not LLM-written, but it
 # DOES echo captured review-bot output (autodeploy.sh capture_bot_logs), which is why that function
 # redacts the token — the anchor makes the counter robust regardless (bug 8c2f-8377-5044-4650).
-dtotal=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE '^AUTODEPLOY_ERROR \{') || true
-dtotal=${dtotal:-0}
-dprev=$(cat "$DEPLOY_OFFSET_FILE" 2>/dev/null || true)
-# No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
-# replication_errors counter (§3).
-case "$dprev" in '' | *[!0-9]*) dprev=$dtotal ;; esac
-dnew=$((dtotal - dprev))
-# Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
-[ "$dnew" -lt 0 ] && dnew=0
-if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-  --metric-name deploy_errors --unit Count --value "$dnew" 2>/dev/null; then
-  echo "$dtotal" >"$DEPLOY_OFFSET_FILE"
+if journal_marker_delta "$DEPLOY_OFFSET_FILE" -E '^AUTODEPLOY_ERROR \{' \
+  -u rebar-autodeploy.service; then
+  dnew="$JOURNAL_DELTA"
+  if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name deploy_errors --unit Count --value "$dnew" 2>/dev/null; then
+    journal_state_write "$DEPLOY_OFFSET_FILE" "$JOURNAL_NEXT_TOTAL" \
+      "$JOURNAL_NEXT_CURSOR"
+  fi
+  [ "$dnew" -gt 0 ] && logger -t rebar-health "auto-deploy failures (new this interval)=${dnew}"
+else
+  logger -t rebar-health "deploy_errors NOT published: this interval could not be counted"
 fi
-[ "$dnew" -gt 0 ] && logger -t rebar-health "auto-deploy failures (new this interval)=${dnew}"
 
 
 # --- 4e. review-drain outcomes: deferrals + interrupted reviews (bug 34cd) --
@@ -956,20 +1138,20 @@ mkdir -p "$(dirname "$DEFER_OFFSET_FILE")" "$(dirname "$INTERRUPT_OFFSET_FILE")"
   "$(dirname "$INTERRUPT_BOUND_OFFSET_FILE")" "$(dirname "$INTERRUPT_SIGNAL_OFFSET_FILE")" \
   "$(dirname "$DISK_PRESSURE_OFFSET_FILE")" "$(dirname "$DISK_PRESSURE_PERSIST_OFFSET_FILE")" \
   "$(dirname "$MCP_RETIRE_CAP_OFFSET_FILE")" "$(dirname "$MCP_MEM_ABORT_OFFSET_FILE")"
+# One journal read per CALL, and this is called once per marker — which is what made the scan
+# cost grow linearly with the number of published metrics (bug 1205). Each read is now scoped
+# to the counter's own cursor, so nine call sites cost nine INTERVALS, not nine retentions.
 publish_autodeploy_marker_delta() {
-  local token="$1" metric="$2" offset_file="$3" label="$4" total prev new
-  total=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE "$token") || true
-  total=${total:-0}
-  prev=$(cat "$offset_file" 2>/dev/null || true)
-  # No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at
-  # the replication_errors counter (§3).
-  case "$prev" in '' | *[!0-9]*) prev=$total ;; esac
-  new=$((total - prev))
-  # Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
-  [ "$new" -lt 0 ] && new=0
+  local token="$1" metric="$2" offset_file="$3" label="$4" new
+  if ! journal_marker_delta "$offset_file" -E "$token" -u rebar-autodeploy.service; then
+    logger -t rebar-health "${metric} NOT published: this interval could not be counted"
+    return 0
+  fi
+  new="$JOURNAL_DELTA"
   if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
     --metric-name "$metric" --unit Count --value "$new" 2>/dev/null; then
-    echo "$total" >"$offset_file"
+    journal_state_write "$offset_file" "$JOURNAL_NEXT_TOTAL" \
+      "$JOURNAL_NEXT_CURSOR"
   fi
   [ "$new" -gt 0 ] && logger -t rebar-health "${label} (new this interval)=${new}"
   return 0
@@ -1051,22 +1233,22 @@ mkdir -p "$(dirname "$G2P_OFFSET_FILE")"
 # single-line count and default-empty-to-0 instead.
 # NOT record-anchored (see §4, bug 8c2f-8377-5044-4650): the Gerrit container's journal is not
 # LLM-written and these are free-form phrase/level matches, not line-start records.
-gtotal=$(journalctl CONTAINER_NAME="$G2P_CONTAINER" --no-pager -o cat 2>/dev/null | grep -ciE "$G2P_PATTERN") || true
-gtotal=${gtotal:-0}
-gprev=$(cat "$G2P_OFFSET_FILE" 2>/dev/null || true)
-# No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
-# replication_errors counter (§3).
-case "$gprev" in '' | *[!0-9]*) gprev=$gtotal ;; esac
-gnew=$((gtotal - gprev))
-# Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
-[ "$gnew" -lt 0 ] && gnew=0
+# This counter is a free-form PHRASE match rather than a record anchor, which is exactly why
+# journal_marker_delta strips the `-- cursor:` line before counting (bug 1205).
 # Published WITHOUT dimensions to match the dimensionless alarm in monitoring_1fa8.tf
 # (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
-if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-  --metric-name g2p_dispatch_errors --unit Count --value "$gnew" 2>/dev/null; then
-  echo "$gtotal" >"$G2P_OFFSET_FILE"
+if journal_marker_delta "$G2P_OFFSET_FILE" -iE "$G2P_PATTERN" \
+  CONTAINER_NAME="$G2P_CONTAINER"; then
+  gnew="$JOURNAL_DELTA"
+  if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name g2p_dispatch_errors --unit Count --value "$gnew" 2>/dev/null; then
+    journal_state_write "$G2P_OFFSET_FILE" "$JOURNAL_NEXT_TOTAL" \
+      "$JOURNAL_NEXT_CURSOR"
+  fi
+  [ "$gnew" -gt 0 ] && logger -t rebar-health "g2p CI-dispatch failures (new this interval)=${gnew}"
+else
+  logger -t rebar-health "g2p_dispatch_errors NOT published: this interval could not be counted"
 fi
-[ "$gnew" -gt 0 ] && logger -t rebar-health "g2p CI-dispatch failures (new this interval)=${gnew}"
 
 # --- 5. Gerrit->GitHub mirror out-of-sync (WS7 / a774) ---------------------
 # After the mirror-lock cutover, GitHub `main` only advances via Gerrit replication.
@@ -1090,7 +1272,12 @@ GERRIT_BASE_URL="${GERRIT_BASE_URL:-https://rebar.solutions.navateam.com}"
 GITHUB_REPO_URL="${GITHUB_REPO_URL:-https://github.com/navapbc/rebar}"
 gerrit_sha=$(curl -fsS --max-time 10 "${GERRIT_BASE_URL}/projects/rebar/branches/main" 2>/dev/null \
   | sed "s/)]}'//" | grep -oE '"revision": ?"[0-9a-f]+"' | grep -oE '[0-9a-f]{40}')
-github_sha=$(git ls-remote "${GITHUB_REPO_URL}" refs/heads/main 2>/dev/null | awk '{print $1}')
+# BOUNDED, the §2d rule (bug 1205-63b2-2c01-4e7f). This reaches GitHub over the network with no
+# bound of its own, while the Gerrit REST read on the line above is correctly `--max-time 10`.
+# An empty result takes the same "comparison could not be made" path as a failed curl, so the
+# timeout degrades to the already-handled unknown case rather than to a wrong answer.
+github_sha=$(bounded 15 git ls-remote "${GITHUB_REPO_URL}" refs/heads/main 2>/dev/null \
+  | awk '{print $1}')
 if [ -n "$gerrit_sha" ] && [ -n "$github_sha" ]; then
   if [ "$gerrit_sha" = "$github_sha" ]; then oos=0; else oos=1; fi
 else

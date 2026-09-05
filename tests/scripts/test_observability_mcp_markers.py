@@ -24,6 +24,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
 from _subprocess_env import subprocess_env
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
@@ -100,16 +101,20 @@ def _environment(
 
     journal = tmp_path / "journal.txt"
     journal.write_text("".join(f"{line}\n" for line in journal_lines))
-    _stub(bin_dir, "journalctl", 'cat "$JOURNAL_FILE"; exit 0')
+    _stub(bin_dir, "journalctl", JOURNALCTL_EMULATOR)
+    _stub(bin_dir, "timeout", TIMEOUT_STUB)
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
     paths = {name: offsets / name.lower() for name in _OFFSET_VARIABLES}
     if seed_offsets:
-        # An explicit 0 in every offset: an ABSENT offset file is a cold start (seeds to the
-        # journal total and publishes 0 — bug e2a6, asserted separately below).
-        for path in paths.values():
-            path.write_text("0\n")
+        # `<total> <cursor>` since bug 1205. A cursor of 0 sits before the journal's first
+        # entry, so the counter is already observing and counts everything in it. An ABSENT
+        # file is a cold start (seeds a tail cursor and publishes 0 — bug e2a6, asserted
+        # separately below), and so is a BARE total, which is the pre-1205 format.
+        # REPL_OFFSET_FILE greps a log file rather than journald and keeps the bare form.
+        for name, path in paths.items():
+            path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
     env = subprocess_env()
     env.update(
         {
@@ -156,8 +161,8 @@ def test_each_mcp_marker_counts_into_its_own_metric(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert _values(aws_log, "mcp_retire_cap") == [2]
     assert _values(aws_log, "mcp_mem_abort") == [1]
-    assert paths["MCP_RETIRE_CAP_OFFSET_FILE"].read_text().strip() == "2"
-    assert paths["MCP_MEM_ABORT_OFFSET_FILE"].read_text().strip() == "1"
+    assert paths["MCP_RETIRE_CAP_OFFSET_FILE"].read_text().split()[0] == "2"
+    assert paths["MCP_MEM_ABORT_OFFSET_FILE"].read_text().split()[0] == "1"
 
 
 def test_prose_naming_a_marker_is_not_counted(tmp_path: Path) -> None:
@@ -188,8 +193,12 @@ def test_cold_start_seeds_offsets_and_publishes_zero(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert _values(aws_log, "mcp_retire_cap") == [0]
     assert _values(aws_log, "mcp_mem_abort") == [0]
-    assert paths["MCP_RETIRE_CAP_OFFSET_FILE"].read_text().strip() == "3"
-    assert paths["MCP_MEM_ABORT_OFFSET_FILE"].read_text().strip() == "2"
+    # Seeded with a tail CURSOR rather than a recomputed total (bug 1205): what makes the
+    # inherited journal un-republishable is that the next read starts after it.
+    for variable in ("MCP_RETIRE_CAP_OFFSET_FILE", "MCP_MEM_ABORT_OFFSET_FILE"):
+        total, cursor = paths[variable].read_text().split()
+        assert total == "0"
+        assert cursor
 
 
 def test_second_run_publishes_only_new_markers(tmp_path: Path) -> None:
@@ -204,5 +213,5 @@ def test_second_run_publishes_only_new_markers(tmp_path: Path) -> None:
     assert (first.returncode, second.returncode) == (0, 0)
     assert _values(aws_log, "mcp_retire_cap") == [1, 0]
     assert _values(aws_log, "mcp_mem_abort") == [1, 1]
-    assert paths["MCP_RETIRE_CAP_OFFSET_FILE"].read_text().strip() == "1"
-    assert paths["MCP_MEM_ABORT_OFFSET_FILE"].read_text().strip() == "2"
+    assert paths["MCP_RETIRE_CAP_OFFSET_FILE"].read_text().split()[0] == "1"
+    assert paths["MCP_MEM_ABORT_OFFSET_FILE"].read_text().split()[0] == "2"
