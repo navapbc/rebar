@@ -350,6 +350,26 @@ jobs:
         run: |
           uv venv --python 3.13
           uv pip install ".[dev,reviewbot,ui]"
+      # The store write lock's Windows exclusive leg (story 4cfc-2de2-747d-4388). Its two
+      # properties — the lock is visible ACROSS PROCESSES and the kernel releases it when
+      # the holder dies — are what let `fcntl_held=True` stay a proof rather than a lie on
+      # Windows, and windows-latest is the ONLY place they can be established. The default
+      # suite below already runs these tests, but under `-q` a pass prints nothing, so the
+      # proof would be readable only as absence-of-failure. This step runs the module on its
+      # own with `-v`, so each verdict is named in the log; it runs BEFORE the default suite
+      # because a failing step stops the ones after it, and this is the evidence to keep.
+      # mechanism-ok: ci_gate .github/workflows/test.yml::Prove the Windows exclusive leg (named verdicts) — story 4cfc-2de2-747d-4388 AC4: windows-latest is the only place the real msvcrt.locking's cross-process exclusivity and release-on-process-death can be established, and under the default suite's `-q` a passing proof prints NOTHING, so the evidence was readable only as absence. This step gates nothing (the job is continue-on-error) and adds no new coverage — it re-runs one already-running module so its verdicts are named in the log.
+      - name: Prove the Windows exclusive leg (named verdicts)
+        # If-present guard per ticket ee2a: a base predating this module has nothing to prove.
+        run: |
+          if [ ! -f tests/unit/store/test_windows_exclusive_leg.py ]; then
+            echo "tests/unit/store/test_windows_exclusive_leg.py not in checked-out tree" \
+                 "(change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          uv run --no-sync pytest tests/unit/store/test_windows_exclusive_leg.py \
+            -v -p no:cacheprovider --timeout=600 --timeout-method=thread
       - name: Run the default suite
         run: >-
           uv run --no-sync pytest -m "not integration and not external"
