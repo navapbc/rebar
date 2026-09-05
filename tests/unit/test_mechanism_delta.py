@@ -91,7 +91,10 @@ def test_check_passes_on_the_committed_tree(capsys):
     shape — a silent exit 0 cannot be told from a gate that scanned nothing."""
     assert ratchet.main(["--check"]) == 0
     out = capsys.readouterr().out
-    assert "new=0" in out and "increased=0" in out, out
+    # A mechanism carrying a `# mechanism-ok:` marker reports as `admitted`, not as `new=0`:
+    # the marker is the sanctioned contributor path, so admission is green at rest too.
+    assert "new=0" in out or "admitted" in out, out
+    assert "increased=0" in out, out
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +358,10 @@ def test_the_committed_baseline_matches_the_live_tree():
     """AC4, from the other side: the baseline is locked to what is actually there."""
     baseline = ratchet.parse_baseline(BASELINE.read_text())
     live = {f"{k}::{n}" for k, names in ratchet.detect_all(REPO_ROOT).items() for n in names}
-    assert set(baseline) == live
+    # A marker-admitted mechanism is deliberately NOT in the baseline — the marker carries its
+    # justification instead — so the baseline plus the admitted set is what must cover the tree.
+    admitted = set(ratchet.markers_for(REPO_ROOT))
+    assert set(baseline) | admitted == live
 
 
 def test_make_lint_runs_the_ratchet():
@@ -470,3 +476,56 @@ def test_the_reported_selection_passes_standalone(tmp_path):
     )
     assert "ModuleNotFoundError" not in proc.stdout + proc.stderr
     assert child_basetemp.is_dir(), "nested pytest did not use its parent-owned basetemp"
+
+
+def test_the_committed_tree_assertions_consult_marker_admission():
+    """Ticket affd-913c-3fb0-40fb — the contract must outlive a wholesale revert.
+
+    The two tests above assert the ratchet is green at rest on the REAL committed tree, so
+    each of them has to grant that a `# mechanism-ok:` marker admits a mechanism the
+    baseline does not carry. That is the whole contributor path: `--update-stale` refuses to
+    write while anything is new, and `AGENTS.md` forbids hand-editing the baseline, so the
+    marker is the only sanctioned route.
+
+    That grant was added by `6125c5345f01` and then LOST — `9c7d78127696` reverted that
+    commit wholesale for reasons that had nothing to do with the ratchet (a vacuous
+    `Verified` vote on an unrelated scanner gate) and took the marker-honouring assertions
+    with it. Nothing detected the loss, because the contract had no existence outside the
+    commit that happened to introduce it. A correct marker then failed this suite for
+    everyone, and change 2658 resolved it by hand-editing the baseline — the one thing the
+    guidance forbids.
+
+    This is a SOURCE-level pin on purpose. The behavioural alternative — asserting the tree
+    currently holds a marker-admitted, non-baselined mechanism — would only detect the
+    regression while such an example happens to exist, and keeping one alive would mean
+    forbidding its removal. That fights the shrink-only ratchet, whose entire point is to
+    reward deleting mechanisms. So the invariant is stated against the assertions themselves,
+    which is also how this repo pins its other cross-cutting contracts.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    for func in (
+        test_check_passes_on_the_committed_tree,
+        test_the_committed_baseline_matches_the_live_tree,
+    ):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+
+        # Read the AST, not the text: a comment mentioning admission must not satisfy this
+        # pin. Seeding the defect while leaving the explanatory comment in place is exactly
+        # how a text match passes over a reverted assertion.
+        def _consults(node: ast.AST) -> bool:
+            if isinstance(node, ast.Constant):
+                return isinstance(node.value, str) and "admitted" in node.value
+            if isinstance(node, ast.Attribute):
+                return node.attr == "markers_for"
+            return isinstance(node, ast.Name) and node.id == "markers_for"
+
+        consults = any(_consults(node) for node in ast.walk(tree))
+        assert consults, (
+            f"{func.__name__} no longer consults marker admission, so a correct "
+            "'# mechanism-ok:' marker fails this suite and the contributor has no sanctioned "
+            "path (--update-stale refuses while anything is new; hand-editing the baseline is "
+            "forbidden). Re-apply the intent of 6125c5345f01 rather than editing the baseline."
+        )
