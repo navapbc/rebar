@@ -10,6 +10,11 @@
 #      the materialized `upstream rebar_mcp` include) -> rebar/host:mcp_healthy, a 1/0
 #      heartbeat published on every tick (bug 9ea3-7d07-ea55-4496; alarm in monitoring_9ea3.tf).
 #   2. Gerrit data-volume disk-used-percent -> rebar/host:disk_used_percent (S2 alarm).
+#   2h. /var/tmp, the fourth root generator -> rebar/host:var_tmp_bytes,
+#       var_tmp_used_percent, var_tmp_cleanup_active and var_tmp_hard_quota_in_effect
+#       (ADR 0112, story 2ba3; alarms in monitoring_autodeploy.tf). The last one is the
+#       point: /var/tmp has no native writer-enforced cap, so the box publishes whether it
+#       is holding a real XFS quota ceiling or only a timer-driven mitigation.
 #   2c. Non-`site/` debris on the Gerrit data volume (bytes under /var/gerrit that are not
 #       the Gerrit site tree) -> rebar/host:data_disk_debris_bytes (task 3e92 alarm). Answers
 #       "full OF WHAT", which the used-percent reading in 2 structurally cannot.
@@ -668,6 +673,91 @@ if [ -n "$journal_bytes" ]; then
     aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
       --metric-name journal_used_percent --unit Percent \
       --value "$(pct_of_cap "$journal_bytes" "$JOURNAL_MAX_USE_BYTES")" 2>/dev/null || true
+  fi
+fi
+
+# --- 2h. /var/tmp, the fourth root generator (ADR 0112 decisions 1+2, story 2ba3) ------
+# §2b answers "how full is root". §2f named the Docker accumulator and §2g the journal; this
+# names the last one the 2026-09-02 measurement found: /var/tmp was 3.6G of the 28G working set,
+# accreted job scratch that nothing observed and nothing bounded.
+#
+# FOUR readings, and they fail independently on purpose.
+#
+#   var_tmp_bytes                the size of ${VAR_TMP_DIR}, from the filesystem.
+#   var_tmp_used_percent         that size against the byte budget the box is configured to hold.
+#   var_tmp_cleanup_active       1/0 HEARTBEAT: is anything bounding this tree at all?
+#   var_tmp_hard_quota_in_effect 1/0 HEARTBEAT: is that bound a CEILING or a mitigation?
+#
+# THE FOURTH READING IS THE POINT OF THIS SECTION, and it is what makes §2h different from §2g.
+# journald's SystemMaxUse is a real cap the writer checks as it extends a file, so §2g's
+# heartbeat only has to answer "did the daemon read the file". /var/tmp has NO such writer: it is
+# an ordinary directory on the root XFS filesystem, systemd-tmpfiles bounds AGE and never BYTES,
+# and the one true byte ceiling — an XFS project quota — cannot be turned on here without
+# rootflags=pquota on the kernel command line and a REBOOT of this host. So the box normally runs
+# on a timer-driven oldest-first reaper, which is a MITIGATION WITH A FILL-RATE ASSUMPTION: at
+# the 4 GiB default and a 300 s period, a sustained net fill above ~14.6 MB/s exceeds the budget
+# before the reaper next runs, and this gp3 volume does 125 MB/s. Publishing which regime is live
+# means "bounded" is a reading rather than a claim a runbook makes on the box's behalf — the
+# exact confusion this epic exists to remove.
+#
+# BOTH SIDES OF THE RATIO SPAN THE SAME BYTES, §2f/§2g's rule: the budget is about /var/tmp, so
+# the numerator is a `du` of exactly that tree. Measuring /var would count the Gerrit site tree
+# and the whole Docker root against a ceiling that bounds neither.
+#
+# Every non-heartbeat reading is GATED ON ITS OWN MEASUREMENT SUCCEEDING, the §2e/§2f/§2g rule: a
+# probe that could not measure publishes NOTHING rather than a plausible 0, and
+# treat_missing_data = "breaching" pages on the silence — while a 0 would read as an empty
+# /var/tmp on a box that is filling. The heartbeats are the deliberate exception (bug bff5): a
+# value on EVERY tick INCLUDING the 0 path, so ABSENCE means the probe, the timer or the host is
+# dead rather than the cleanup being fine.
+#
+# DIMENSIONLESS on both sides, following root_disk_used_percent (§2b): CloudWatch keys a metric
+# by namespace+name+dimensions, so a dimension on only one side silently never matches.
+#
+# The budget comes from infra/scripts/vartmp-cap.sh, the single source of truth that also renders
+# the tmpfiles drop-in and the reaper units — so the published "percent of cap" and the budget
+# the box is configured to hold can never drift apart.
+VARTMP_CAP_SH="${VARTMP_CAP_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vartmp-cap.sh}"
+eval "$(bash "$VARTMP_CAP_SH" --print-env 2>/dev/null)" || true
+VAR_TMP_DIR="${VAR_TMP_DIR:-/var/tmp}"
+# BOUNDED through the same `bounded` wrapper the journal reads use, the §2d rule (bug 1205): a
+# `du` over /var/tmp is a stat walk over a tree NOBODY PLANNED THE SIZE OF, which is the worst
+# possible thing to run unbounded inside a 5-minute timer. Exceeding it is indistinguishable from
+# a failed read and is reported as silence.
+VAR_TMP_DU_TIMEOUT="${VAR_TMP_DU_TIMEOUT:-60}"
+
+var_tmp_cleanup="$(bash "$VARTMP_CAP_SH" --check-active 2>/dev/null)"
+case "$var_tmp_cleanup" in 1) ;; *) var_tmp_cleanup=0 ;; esac
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name var_tmp_cleanup_active --unit Count --value "$var_tmp_cleanup" 2>/dev/null || true
+
+var_tmp_quota="$(bash "$VARTMP_CAP_SH" --check-quota 2>/dev/null)"
+case "$var_tmp_quota" in 1) ;; *) var_tmp_quota=0 ;; esac
+# Published WITHOUT an alarm, deliberately. The quota needs a host reboot to enable, so on this
+# box the honest value is 0 for as long as that reboot has not been scheduled — an alarm on it
+# would page continuously and be muted within a day, which is how a real signal becomes noise.
+# It is a capacity FACT an operator reads when interpreting var_tmp_used_percent, not an incident.
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name var_tmp_hard_quota_in_effect --unit Count --value "$var_tmp_quota" 2>/dev/null || true
+logger -t rebar-health \
+  "var_tmp ${VAR_TMP_DIR} budget=${VAR_TMP_MAX_BYTES:-unset}B cleanup_active=${var_tmp_cleanup} hard_quota=${var_tmp_quota}"
+if [ "$var_tmp_cleanup" -eq 0 ]; then
+  logger -t rebar-health \
+    "NOTHING is bounding ${VAR_TMP_DIR} — the tmpfiles drop-in is missing or stale, or rebar-var-tmp-reaper.timer is not running; see infra/runbooks/review-bot-ops.md"
+fi
+
+var_tmp_bytes="$(bounded "$VAR_TMP_DU_TIMEOUT" du -sx --block-size=1 "$VAR_TMP_DIR" 2>/dev/null | tail -1 | awk '{print $1}')"
+case "$var_tmp_bytes" in ''|*[!0-9]*) var_tmp_bytes="" ;; esac
+if [ -n "$var_tmp_bytes" ]; then
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name var_tmp_bytes --unit Bytes --value "$var_tmp_bytes" 2>/dev/null || true
+  logger -t rebar-health "var_tmp ${VAR_TMP_DIR} bytes=${var_tmp_bytes}"
+  # Independently gated from the size: losing the budget must not also take the MAGNITUDE off the
+  # air, since var_tmp_bytes is what an operator sizes the problem with.
+  if [ -n "${VAR_TMP_MAX_BYTES:-}" ] && [ "${VAR_TMP_MAX_BYTES:-0}" -gt 0 ]; then
+    aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+      --metric-name var_tmp_used_percent --unit Percent \
+      --value "$(pct_of_cap "$var_tmp_bytes" "$VAR_TMP_MAX_BYTES")" 2>/dev/null || true
   fi
 fi
 

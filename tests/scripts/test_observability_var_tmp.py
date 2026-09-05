@@ -1,0 +1,326 @@
+"""``/var/tmp`` usage against its budget, published as metrics (story ``2ba3-bf77-1303-4b2d``).
+
+``/var/tmp`` was 3.6G of the 28G root working set on 2026-09-02, and the only signal was
+``rebar-root-disk-pressure`` — "root disk high", which cannot name the generator.
+``observability.sh`` §2h publishes the tree's size, its percent of the configured budget, and
+**two** heartbeats — because unlike journald (§2g) this generator is held by two mechanisms of
+very different strength and an operator needs to know which one the box actually has.
+
+Three properties carry this file:
+
+**Silence, never a fabricated 0.** A probe that could not measure publishes NOTHING, and
+``rebar-var-tmp-usage-high`` is ``treat_missing_data = "breaching"`` (bug 3276 defect 2) so the
+silence pages. A 0 would read as an empty ``/var/tmp`` on a box that is filling.
+
+**The heartbeats publish on EVERY tick, including their 0 path** (bug bff5), so their ABSENCE
+means the probe, the timer or the host is dead rather than the ceiling being fine.
+
+**Every reading is BOUNDED.** Twelve unbounded journal rescans in this same probe took Gerrit
+off the air for 41 minutes on 2026-09-04 (bug 1205). ``/var/tmp`` is by definition a tree nobody
+planned the size of, so its ``du`` runs through the script's own ``bounded`` wrapper and a
+timeout is reported as silence.
+
+The tests drive the REAL ``observability.sh`` and the REAL ``vartmp-cap.sh`` over PATH stubs:
+no systemd, no XFS, no AWS, no CI provider.
+"""
+
+from __future__ import annotations
+
+import stat
+import subprocess
+import textwrap
+from pathlib import Path
+
+import pytest
+from _subprocess_env import subprocess_env
+
+pytestmark = pytest.mark.unit
+
+SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
+_SHA = "a" * 40
+
+GIB = 1024**3
+DEFAULT_CAP = 4 * GIB
+
+_OFFSET_VARIABLES = (
+    "REPL_OFFSET_FILE",
+    "VOTER_OFFSET_FILE",
+    "MERGE_OFFSET_FILE",
+    "DEPLOY_OFFSET_FILE",
+    "DEFER_OFFSET_FILE",
+    "INTERRUPT_OFFSET_FILE",
+    "INTERRUPT_BOUND_OFFSET_FILE",
+    "INTERRUPT_SIGNAL_OFFSET_FILE",
+    "DISK_PRESSURE_OFFSET_FILE",
+    "DISK_PRESSURE_PERSIST_OFFSET_FILE",
+    "G2P_OFFSET_FILE",
+)
+
+
+def _stub(bin_dir: Path, name: str, body: str) -> None:
+    path = bin_dir / name
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def _environment(
+    tmp_path: Path,
+    *,
+    var_tmp_bytes: int | None = GIB,
+    cap: int = DEFAULT_CAP,
+    cleanup_active: bool = True,
+    quota_enforced: bool = False,
+) -> tuple[dict[str, str], Path, Path]:
+    """Returns ``(env, aws_log, du_log)``."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    aws_log = tmp_path / "aws.log"
+    du_log = tmp_path / "du.log"
+    var_tmp = tmp_path / "var-tmp"
+    var_tmp.mkdir()
+
+    _stub(
+        bin_dir,
+        "curl",
+        f"""
+        for a in "$@"; do
+          case "$a" in
+            *projects/rebar/branches/main*)
+              printf ")]}}'\\n"; printf '{{"revision": "{_SHA}"}}\\n'; exit 0 ;;
+          esac
+        done
+        case "$*" in *http_code*) printf '200'; exit 0 ;; esac
+        printf 'dummy-token'; exit 0
+        """,
+    )
+    _stub(bin_dir, "git", f'printf "{_SHA}\\trefs/heads/main\\n"; exit 0')
+    _stub(bin_dir, "logger", "exit 0")
+    _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
+    _stub(bin_dir, "journalctl", "exit 0")
+    _stub(bin_dir, "docker", "exit 1")
+    _stub(bin_dir, "timeout", 'shift\nexec "$@"')
+    _stub(
+        bin_dir,
+        "systemctl",
+        f'case "$*" in *is-active*) exit {0 if cleanup_active else 3} ;; esac\nexit 0',
+    )
+    _stub(
+        bin_dir,
+        "xfs_quota",
+        f"""
+        case "$*" in
+          *"state -p"*)
+            printf '  Accounting: {"ON" if quota_enforced else "OFF"}\\n'
+            printf '  Enforcement: {"ON" if quota_enforced else "OFF"}\\n'
+            exit 0 ;;
+        esac
+        exit 0
+        """,
+    )
+
+    # `du` records EVERY path it is asked about, so a test can pin which tree the reading is
+    # taken over.
+    var_tmp_body = (
+        "exit 1" if var_tmp_bytes is None else f'printf "{var_tmp_bytes}\\t$1\\n"; exit 0'
+    )
+    _stub(
+        bin_dir,
+        "du",
+        f"""
+        for a in "$@"; do
+          case "$a" in -*) ;; *) printf '%s\\n' "$a" >> "$DU_LOG" ;; esac
+        done
+        case "$*" in
+          *var-tmp*) {var_tmp_body} ;;
+        esac
+        exit 1
+        """,
+    )
+
+    tmpfiles_conf = tmp_path / "tmpfiles.d" / "99-rebar-var-tmp.conf"
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    if cleanup_active:
+        # `--check-active` compares the installed drop-in against what the cap script renders,
+        # so the fixture renders it rather than hand-writing a copy that could drift.
+        rendered = subprocess.run(
+            [
+                "bash",
+                str(Path(SCRIPT).parent / "vartmp-cap.sh"),
+                "--print-conf",
+            ],
+            env=subprocess_env({"VAR_TMP_DIR": str(var_tmp), "VAR_TMP_MAX_BYTES": str(cap)}),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        tmpfiles_conf.parent.mkdir(parents=True, exist_ok=True)
+        tmpfiles_conf.write_text(rendered)
+        (unit_dir / "rebar-var-tmp-reaper.timer").write_text("[Timer]\n")
+
+    offsets = tmp_path / "offsets"
+    offsets.mkdir()
+    env = subprocess_env()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "AWS_LOG": str(aws_log),
+            "DU_LOG": str(du_log),
+            "REPL_LOG": str(tmp_path / "replication.log"),
+            "VAR_TMP_DIR": str(var_tmp),
+            "VAR_TMP_MAX_BYTES": str(cap),
+            "VAR_TMP_TMPFILES_CONF": str(tmpfiles_conf),
+            "VAR_TMP_UNIT_DIR": str(unit_dir),
+            **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
+        }
+    )
+    for name in _OFFSET_VARIABLES:
+        (offsets / name.lower()).write_text("0\n")
+    (tmp_path / "replication.log").write_text("")
+    return env, aws_log, du_log
+
+
+def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", str(SCRIPT)], env=env, timeout=180, check=False)
+
+
+def _values(log: Path, metric: str) -> list[int]:
+    values: list[int] = []
+    if not log.exists():
+        return values
+    for line in log.read_text().splitlines():
+        parts = line.split()
+        if "--metric-name" not in parts:
+            continue
+        if parts[parts.index("--metric-name") + 1] != metric:
+            continue
+        values.append(int(float(parts[parts.index("--value") + 1])))
+    return values
+
+
+def _one(log: Path, metric: str) -> int:
+    values = _values(log, metric)
+    assert len(values) == 1, f"expected exactly one {metric} datapoint, got {values}"
+    return values[0]
+
+
+# --------------------------------------------------------------------------------------
+# The reading
+# --------------------------------------------------------------------------------------
+
+
+def test_the_var_tmp_size_and_its_percent_of_the_budget_are_published(tmp_path: Path) -> None:
+    env, aws_log, _ = _environment(tmp_path, var_tmp_bytes=GIB, cap=4 * GIB)
+    assert _run(env).returncode == 0
+    assert _one(aws_log, "var_tmp_bytes") == GIB
+    assert _one(aws_log, "var_tmp_used_percent") == 25
+
+
+def test_the_percent_is_measured_over_the_tree_the_budget_governs(tmp_path: Path) -> None:
+    """The budget is about ``/var/tmp``. A numerator taken over ``/var`` would count the Gerrit
+    site tree and the whole Docker root against a ceiling that does not bound them, and the
+    ratio would be about no quantity at all — story 9183's mismatched minuend and subtrahend,
+    in ratio form."""
+    env, _, du_log = _environment(tmp_path)
+    assert _run(env).returncode == 0
+    measured = du_log.read_text().split()
+    assert env["VAR_TMP_DIR"] in measured
+    assert "/var" not in measured
+
+
+def test_the_percent_is_clamped_to_one_hundred(tmp_path: Path) -> None:
+    """CloudWatch's ``Percent`` unit is defined over 0-100. The unclamped ``var_tmp_bytes``
+    beside it carries the magnitude and the 85 threshold still fires."""
+    env, aws_log, _ = _environment(tmp_path, var_tmp_bytes=9 * GIB, cap=4 * GIB)
+    assert _run(env).returncode == 0
+    assert _one(aws_log, "var_tmp_used_percent") == 100
+    assert _one(aws_log, "var_tmp_bytes") == 9 * GIB
+
+
+# --------------------------------------------------------------------------------------
+# Silence, never a fabricated 0
+# --------------------------------------------------------------------------------------
+
+
+def test_an_unmeasurable_var_tmp_publishes_nothing_rather_than_zero(tmp_path: Path) -> None:
+    """A 0 would read as an empty ``/var/tmp`` on a filling box, and
+    ``rebar-var-tmp-usage-high`` is ``treat_missing_data = "breaching"`` so the silence pages
+    instead."""
+    env, aws_log, _ = _environment(tmp_path, var_tmp_bytes=None)
+    assert _run(env).returncode == 0
+    assert _values(aws_log, "var_tmp_bytes") == []
+    assert _values(aws_log, "var_tmp_used_percent") == []
+
+
+def test_the_size_is_still_published_when_the_budget_is_unreadable(tmp_path: Path) -> None:
+    """Independently gated: losing the budget must not also take the MAGNITUDE off the air,
+    since ``var_tmp_bytes`` is what an operator sizes the problem with."""
+    env, aws_log, _ = _environment(tmp_path)
+    env["VAR_TMP_MAX_BYTES"] = "0"
+    assert _run(env).returncode == 0
+    assert _one(aws_log, "var_tmp_bytes") > 0
+    assert _values(aws_log, "var_tmp_used_percent") == []
+
+
+# --------------------------------------------------------------------------------------
+# The two heartbeats: WHICH mechanism is holding the line?
+# --------------------------------------------------------------------------------------
+
+
+def test_the_cleanup_heartbeat_is_published_on_every_tick_including_its_zero_path(
+    tmp_path: Path,
+) -> None:
+    """The heartbeat rule (bug bff5). If the 0 path published nothing, "the cleanup stopped"
+    and "the probe stopped" would be the same signal — and only one of them is survivable."""
+    active, aws_active, _ = _environment(tmp_path / "on", cleanup_active=True)
+    assert _run(active).returncode == 0
+    assert _one(aws_active, "var_tmp_cleanup_active") == 1
+
+    dead, aws_dead, _ = _environment(tmp_path / "off", cleanup_active=False)
+    assert _run(dead).returncode == 0
+    assert _one(aws_dead, "var_tmp_cleanup_active") == 0
+
+
+def test_the_hard_quota_heartbeat_reports_the_regime_the_box_is_actually_in(
+    tmp_path: Path,
+) -> None:
+    """This is the metric that keeps the whole story honest. The reaper is a mitigation with a
+    fill-rate assumption; only an ENFORCED XFS project quota is a ceiling. Publishing which one
+    is live means nobody has to take a runbook's word for it."""
+    without, aws_without, _ = _environment(tmp_path / "no-quota", quota_enforced=False)
+    assert _run(without).returncode == 0
+    assert _one(aws_without, "var_tmp_hard_quota_in_effect") == 0
+
+    with_quota, aws_with, _ = _environment(tmp_path / "quota", quota_enforced=True)
+    assert _run(with_quota).returncode == 0
+    assert _one(aws_with, "var_tmp_hard_quota_in_effect") == 1
+
+
+def test_the_heartbeats_survive_a_var_tmp_that_cannot_be_measured(tmp_path: Path) -> None:
+    """The size and the heartbeats fail independently: a ``du`` that times out must not also
+    take "is anything bounding this tree" off the air."""
+    env, aws_log, _ = _environment(tmp_path, var_tmp_bytes=None, cleanup_active=True)
+    assert _run(env).returncode == 0
+    assert _values(aws_log, "var_tmp_bytes") == []
+    assert _one(aws_log, "var_tmp_cleanup_active") == 1
+    assert _one(aws_log, "var_tmp_hard_quota_in_effect") == 0
+
+
+# --------------------------------------------------------------------------------------
+# Bounding — the 2026-09-04 lesson (bug 1205)
+# --------------------------------------------------------------------------------------
+
+
+def test_the_var_tmp_walk_is_wall_clock_bounded(tmp_path: Path) -> None:
+    """Twelve unbounded journal rescans in this same probe took Gerrit off the air for 41
+    minutes. ``/var/tmp`` is by definition a tree nobody planned the size of, so its walk must
+    not be able to hold the 5-minute timer open. A bound that fires reports SILENCE, which
+    pages — never a truncated number, which does not."""
+    env, aws_log, _ = _environment(tmp_path)
+    bin_dir = tmp_path / "bin"
+    # A `timeout` that always reports the timeout exit status, without running the command.
+    _stub(bin_dir, "timeout", "exit 124")
+    assert _run(env).returncode == 0
+    assert _values(aws_log, "var_tmp_bytes") == []
+    assert _values(aws_log, "var_tmp_used_percent") == []
