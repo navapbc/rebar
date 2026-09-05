@@ -301,5 +301,37 @@ server {
         proxy_redirect default;
         proxy_redirect http://$host/ https://$host/;
         proxy_redirect http://127.0.0.1:8080/ https://$host/;
+        # --- git pack generation needs longer than nginx's 60s default (bug 5bba) ---
+        # Without the directive below nginx applies its compiled-in 60-second read default,
+        # and that ceiling sits INSIDE the normal duration distribution of a CI change-ref
+        # fetch on this host. Measured over the retained Gerrit httpd_log: anonymous CI
+        # git-upload-pack POSTs ran a median of 36.0s, p90 92.4s, max 143.9s, and 12 of 37
+        # (32.4%) exceeded 60s. Gerrit SERVED EVERY ONE SUCCESSFULLY — all 14 requests in
+        # the log that ran past 60s returned HTTP 200 — so the 504 the client saw was
+        # manufactured HERE, at the edge, out of a successful upstream response. Replicating
+        # CI's exact `git fetch <url> refs/changes/...` six times against the live host
+        # reproduced it at 2/6 = 33%, matching the 32.4% the log predicted.
+        #
+        # This is a GAP timeout, not a total: it caps the wait BETWEEN successive reads from
+        # upstream. That is why one fetch legitimately runs 89s and succeeds while another
+        # dies at 61s — a 504 needs a single SILENT phase (ref negotiation plus JGit's
+        # preparePack counting/delta-compression, which emits no bytes) to exceed the ceiling
+        # on its own. It is also why all 78 timeouts in nginx's error log read
+        # "while reading response header from upstream" and none are body-phase: the failure
+        # can only land before the first byte.
+        #
+        # 600s, NOT the 3600s used on the /mcp blocks above — the difference is deliberate,
+        # do NOT "unify" them. Those carry long-lived STREAMING gate operations that idle by
+        # design and need an effectively unbounded idle window. This location carries fetches
+        # with a MEASURED distribution, so it wants ample headroom over that distribution
+        # (600s is >4x the observed 143.9s max) while still failing in BOUNDED time when
+        # Gerrit is genuinely wedged; at 3600s a hung backend would hang every client for an
+        # hour instead of surfacing as a fault.
+        #
+        # Raising this is a FIX, not a workaround: the upstream work is legitimate and it
+        # completes. It is NOT a capacity fix — the host is a burstable t4g.large with an
+        # exhausted CPU credit balance, which is what inflates these durations and is tracked
+        # separately (filed discovered_from bug 5bba).
+        proxy_read_timeout 600s;
     }
 }
