@@ -4,6 +4,13 @@
 #
 # Run periodically by a systemd timer (install-observability.sh). Each run publishes
 # CloudWatch metrics + journald log lines:
+#   0. The probe's OWN liveness -> rebar/host:{probe_ok,probe_elapsed_seconds,probe_truncated}
+#      (bug 9313-1fac-9f32-4b07; two alarms in monitoring_9313.tf). Everything else here
+#      watches something this probe measures; nothing watched the probe, so when it was being
+#      SIGTERM-ed on its 240s TimeoutStartSec every run under load, the metrics published after
+#      the kill point simply vanished and read as "sparse publishing" for a day. probe_ok is
+#      emitted once, LAST, so its absence means the run did not reach the end; probe_truncated
+#      is emitted by the ExecStopPost hook, which systemd runs even after that SIGTERM.
 #   1. Health probe of Gerrit + the review-bot (/review/health) -> journald +
 #      rebar/host:{gerrit_healthy,reviewbot_healthy} (S2).
 #   1b. Health probe of the rebar MCP SERVING PATH (https://<domain>/mcp through nginx and
@@ -72,6 +79,58 @@ DATA_MOUNT="${DATA_MOUNT:-/var/gerrit}"
 GATE_SCRATCH_MOUNT="${GATE_SCRATCH_MOUNT:-/var/lib/rebar/gate-scratch}"
 NS="rebar/host"
 
+# --- WHOLE-PROBE DEADLINE (bug 9313-1fac-9f32-4b07) -------------------------
+# Every expensive call in this probe was bounded INDEPENDENTLY, and nothing composed those
+# bounds. The journal section reasons "12 scans x 10 s = 120 s < the 240 s TimeoutStartSec"
+# (§ BOUNDED JOURNAL COUNTING) while the docker section reasons about its own 120 s ceiling —
+# and the sum of the two arguments is larger than the budget both are spending. On
+# the production Gerrit host the docker walk alone reached that 240 s and systemd SIGTERM-ed the run,
+# so every section AFTER it published nothing at all: 55 timeout kills against 197 completed
+# runs in 24 h, clustered under I/O load, i.e. exactly when an operator reads these metrics.
+#
+# So the budget is now held in ONE place. PROBE_TAIL_RESERVE_SEC is carved out for the cheap
+# sections that come last (memory, the container census, the marker counters, the mirror
+# check), and `clamped` hands every bounded call the smaller of its own ceiling and what is
+# left after that reserve. An overrunning section can then degrade its OWN reading — reported
+# as silence, the §2e rule — but can no longer starve a later one. That is the answer to
+# "metric publication must not depend on position in the script": not a re-ordering, which only
+# moves which metric starves, but a reserve no earlier section can spend.
+#
+# THE INVARIANT THIS BUYS. `clamped` grants at most (PROBE_DEADLINE_SEC - elapsed -
+# PROBE_TAIL_RESERVE_SEC), so a call starting at t cannot end after PROBE_DEADLINE_SEC -
+# PROBE_TAIL_RESERVE_SEC no matter what it is, and no sequence of them can either. The clamped
+# portion of a run is therefore bounded at 240 - 80 = 160 s BY CONSTRUCTION rather than by
+# estimate, leaving 80 s of headroom under TimeoutStartSec for the unclamped arithmetic and the
+# `aws put-metric-data` calls. Before this, the same worst case summed to over 495 s — two
+# 120 s docker walks, a 20 s ledger read, two 60 s `du`s over /var/log/journal and /var/tmp, a
+# per-entry `du` loop, two 15 s docker calls, seven 10 s journal reads and a 15 s `git
+# ls-remote` — inside a 240 s timeout, with each ceiling defensible on its own and no one
+# adding them up.
+#
+# Measured tail cost on the production Gerrit host (2026-09-05, load average 3.45): docker ps 0.03 s,
+# docker stats 3.22 s, `free` 0.02 s, three health curls 0.69 s, git ls-remote 0.25 s, and the
+# seven cursor-anchored journal reads 0.49-1.69 s each — ~15 s in total against the 80 s
+# reserved for it.
+#
+# mechanism-ok: env_var PROBE_DEADLINE_SEC — 9313-1fac-9f32-4b07: the whole-probe wall-clock
+# budget, which must track TimeoutStartSec in install-observability.sh; overridable so the
+# tests can drive the exhausted-budget path without waiting four minutes.
+PROBE_DEADLINE_SEC="${PROBE_DEADLINE_SEC:-240}"
+# mechanism-ok: env_var PROBE_TAIL_RESERVE_SEC — 9313-1fac-9f32-4b07: the share of that budget
+# reserved for the sections after the expensive ones, so none can be starved by an overrun.
+PROBE_TAIL_RESERVE_SEC="${PROBE_TAIL_RESERVE_SEC:-80}"
+PROBE_STARTED_AT="$(date +%s)"
+
+# Seconds an expensive call may still spend without eating the tail reserve. Floored at 1
+# rather than 0: a clamped call must still RUN and fail fast, because "could not be measured"
+# is a publishable state and being SIGKILLed is not.
+probe_budget_left() {
+  local left
+  left=$(( PROBE_DEADLINE_SEC - ( $(date +%s) - PROBE_STARTED_AT ) - PROBE_TAIL_RESERVE_SEC ))
+  [ "$left" -lt 1 ] && left=1
+  printf '%s\n' "$left"
+}
+
 # IMDSv2 region.
 # BOUNDED, the §2d rule (bug 1205-63b2-2c01-4e7f). IMDS is link-local and normally answers in
 # milliseconds, but these three run FIRST, before any metric is published, so a hang here takes
@@ -84,6 +143,35 @@ REGION=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/placement/
   -H "X-aws-ec2-metadata-token: $TOKEN")
 IID=$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/instance-id \
   -H "X-aws-ec2-metadata-token: $TOKEN")
+
+# --- TRUNCATION IS PUBLISHED, NOT INFERRED (bug 9313-1fac-9f32-4b07) --------
+# `--report-exit` is the ExecStopPost hook installed by install-observability.sh. systemd runs
+# ExecStopPost after the main process has gone, INCLUDING when it went because TimeoutStartSec
+# SIGTERM-ed it — so a truncated run gets to publish its own death certificate.
+#
+# This is the property whose absence made the defect take a day to find. From the metric side,
+# "the section never ran because the probe was killed part-way through" and "the section ran
+# and had nothing to report" were IDENTICAL: both are a gap, and every alarm here is
+# treat_missing_data = "breaching", so both page for reasons an operator cannot tell apart.
+# Of six alarms in ALARM at 17:09 UTC on 2026-09-05, four were firing on gaps while their
+# underlying values were healthy — docker_unaccounted_bytes read 1.87 GB against a 2 GiB
+# threshold. probe_truncated separates the two cases at the source: a run that finishes
+# publishes probe_ok=1 and probe_truncated=0, and a run that is killed publishes
+# probe_truncated=1 and no probe_ok at all.
+#
+# $SERVICE_RESULT is set by systemd for ExecStopPost ("success", "timeout", "signal", ...). It
+# is empty when this is invoked by hand, which reports as untruncated rather than inventing a
+# failure — the §2e rule, applied to the probe's own liveness.
+if [ "${1:-}" = "--report-exit" ]; then
+  probe_result="${SERVICE_RESULT:-success}"
+  probe_truncated=1
+  [ "$probe_result" = "success" ] && probe_truncated=0
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name probe_truncated --unit Count --value "$probe_truncated" 2>/dev/null || true
+  logger -t rebar-health \
+    "probe exit report: SERVICE_RESULT=${probe_result} EXIT_CODE=${EXIT_CODE:-none} EXIT_STATUS=${EXIT_STATUS:-none} probe_truncated=${probe_truncated}"
+  exit 0
+fi
 
 # --- 1. Health probes ------------------------------------------------------
 gerrit_code=$(curl -sS -o /dev/null -w '%{http_code}' "https://${DOMAIN}/config/server/version" --max-time 10 2>/dev/null || echo 000)
@@ -320,8 +408,21 @@ DOCKER_ROOT="${DOCKER_ROOT:-/var/lib/docker}"
 # Both docker calls are BOUNDED, the §2d rule: a wedged daemon under disk pressure must not
 # hold the 5-minute timer open. `du` over a large overlay2 is a stat walk, hence the longer
 # ceiling; exceeding it is indistinguishable from a failed read and is reported as silence.
-DOCKER_DU_TIMEOUT="${DOCKER_DU_TIMEOUT:-120}"
-DOCKER_DF_TIMEOUT="${DOCKER_DF_TIMEOUT:-20}"
+#
+# 60, not the former 120 (bug 9313-1fac-9f32-4b07). The 120 was sized for a shape that walked
+# the tree TWICE, and two of them exactly equalled the unit's TimeoutStartSec=240. There is now
+# one walk (docker_du_census), and the ceiling is set from what the walk actually does on this
+# host rather than from hope: measured on the production Gerrit host at load average 3.45, the walk did
+# not finish at a 95 s bound or at a 125 s bound, twice each, while a cache-warm walk completes
+# in well under a minute (breadcrumbs at 17:48, 17:58, 18:03, 18:09, 18:42 on 2026-09-05). The
+# reading is therefore bimodal — fast, or unobtainable — and a 120 s attempt that fails costs a
+# further minute of the probe's budget over a 60 s attempt that fails, for no reading either
+# way. 60 captures the fast mode and fails fast in the stalled one, where the §2e rule applies:
+# a measurement that could not be taken is published as silence, and docker_du_seconds plus
+# probe_elapsed_seconds now say WHY. These are ceilings, not budgets — both calls also pass
+# through `clamped`, so neither can spend what a later section is owed.
+DOCKER_DU_TIMEOUT="${DOCKER_DU_TIMEOUT:-60}"
+DOCKER_DF_TIMEOUT="${DOCKER_DF_TIMEOUT:-15}"
 
 # --- BOUNDED JOURNAL COUNTING (bug 1205-63b2-2c01-4e7f) --------------------
 # Every marker counter below turns journald into a per-interval delta. The ORIGINAL shape
@@ -378,9 +479,11 @@ DOCKER_DF_TIMEOUT="${DOCKER_DF_TIMEOUT:-20}"
 # number is invented. The run still publishes its heartbeat gauges, so "the probe is alive" is
 # still signalled and the absence is scoped to the one metric that could not be measured.
 #
-# The scan is wall-clock bounded as well, and the bounds NEST: 12 scans x 10 s = 120 s < the
-# 240 s TimeoutStartSec < the 300 s timer period. This is the §2d rule the docker calls above
-# already follow — nothing in a periodic probe may hold its own timer open.
+# The scan is wall-clock bounded as well. That bound is now applied through `clamped`, not
+# `bounded`: this section's original argument — "12 scans x 10 s = 120 s < the 240 s
+# TimeoutStartSec" — was sound in isolation and wrong in composition, because the docker walk
+# above was separately entitled to 240 s of the same budget and nothing reconciled the two
+# claims (bug 9313-1fac-9f32-4b07). `clamped` reconciles them in one place.
 # mechanism-ok: env_var JOURNAL_SCAN_TIMEOUT — 1205-63b2-2c01-4e7f: the §2d wall-clock bound on
 # every journald read, overridable only so the tests can drive the timeout path.
 JOURNAL_SCAN_TIMEOUT="${JOURNAL_SCAN_TIMEOUT:-10}"
@@ -397,6 +500,18 @@ else
   bounded() { shift; "$@"; }
 fi
 
+# `bounded` with the whole-probe budget applied on top: the call gets the SMALLER of its own
+# ceiling and what `probe_budget_left` still allows. Every wall-clock-bounded call in this
+# script goes through here, so the composed worst case of all of them is the deadline rather
+# than the sum of their independent ceilings (bug 9313-1fac-9f32-4b07).
+clamped() {
+  local want="$1" left
+  shift
+  left="$(probe_budget_left)"
+  [ "$want" -gt "$left" ] && want="$left"
+  bounded "$want" "$@"
+}
+
 # The journal's tail cursor, into JOURNAL_TAIL_CURSOR. `-n 1` is a seek to the end rather than
 # a traversal, so this costs one entry however large the journal. The RETURN STATUS is
 # journalctl's, kept separate from the cursor because they answer different questions: a status
@@ -404,7 +519,7 @@ fi
 # cold start on a fresh box), while a non-zero status means it could not be read at all.
 journal_tail_cursor() {
   local out rc
-  out="$(bounded "$JOURNAL_SCAN_TIMEOUT" journalctl "$@" --no-pager -o cat -n 1 \
+  out="$(clamped "$JOURNAL_SCAN_TIMEOUT" journalctl "$@" --no-pager -o cat -n 1 \
     --show-cursor 2>/dev/null)"
   rc=$?
   JOURNAL_TAIL_CURSOR="$(printf '%s\n' "$out" | sed -n 's/^-- cursor: //p' | tail -1)"
@@ -468,7 +583,7 @@ journal_marker_delta() {
     return 0
   fi
 
-  out="$(bounded "$JOURNAL_SCAN_TIMEOUT" journalctl "$@" --no-pager -o cat \
+  out="$(clamped "$JOURNAL_SCAN_TIMEOUT" journalctl "$@" --no-pager -o cat \
     --after-cursor "$cursor" --show-cursor 2>/dev/null)"
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -509,12 +624,47 @@ pct_of_cap() {
   printf '%s\n' "$(( $1 * 100 / $2 ))"
 }
 
-# Blocks actually consumed under $1, or non-zero when nothing parseable came back.
-docker_du_bytes() {
-  local raw
-  raw="$(timeout "$DOCKER_DU_TIMEOUT" du -sx --block-size=1 "$1" 2>/dev/null | tail -1 | awk '{print $1}')"
-  case "$raw" in ''|*[!0-9]*) return 1 ;; esac
-  printf '%s\n' "$raw"
+# ONE traversal, BOTH readings (bug 9313-1fac-9f32-4b07). Sets DOCKER_DU_TOTAL (blocks under
+# the whole root) and DOCKER_DU_OVERLAY2 (the overlay2 subtotal, "" when that child was not in
+# the listing); non-zero when nothing parseable came back.
+#
+# WHAT THIS REPLACES, AND WHY IT WAS THE TIMEOUT. The previous shape called `du -sx` TWICE —
+# once over $DOCKER_ROOT and once over $DOCKER_ROOT/overlay2, which on this host is
+# essentially the same ~1.88M-file tree walked a second time. Each was bounded at
+# DOCKER_DU_TIMEOUT, whose default was 120, and 2 x 120 is EXACTLY the unit's
+# TimeoutStartSec=240: under I/O contention both walks hit their ceiling and systemd
+# SIGTERM-ed the probe with nothing left for any section after this one. Measured on
+# the production Gerrit host on 2026-09-05, a single walk took 124.18 s against a 130 s bound (i.e. it
+# did not finish) while the whole run consumed ~35 s of CPU. The walk BLOCKS; it does not
+# compute — which is why neither a longer timeout (it only moves the kill point) nor a faster
+# script (there is no CPU to save) is the fix. The unit compounds it deliberately:
+# install-observability.sh sets IOSchedulingClass=idle, so this walk is starved by design on a
+# box with IOPS-saturation history.
+#
+# `--max-depth=1` yields every immediate child of the root AND the grand total from a single
+# traversal, so the overlay2 subtotal now costs nothing. That reading was only ever a
+# breadcrumb in the log line at §2f ("deliberately no longer participates in the arithmetic"),
+# so the second walk was spending up to half of the probe's entire budget on a log message.
+docker_du_census() {
+  local root out parsed
+  root="${1%/}"
+  DOCKER_DU_TOTAL=""
+  DOCKER_DU_OVERLAY2=""
+  out="$(clamped "$DOCKER_DU_TIMEOUT" du -x --block-size=1 --max-depth=1 "$root" 2>/dev/null)" || return 1
+  # The grand-total row is the one whose path IS the root; every other row is a child. Matching
+  # on the path rather than on position keeps this correct whatever order the du implementation
+  # emits, and a `du` that printed only the total (the -s shape) still parses.
+  parsed="$(printf '%s\n' "$out" | awk -v root="$root" '
+    $2 == root            { total = $1 }
+    $2 == root "/overlay2" { overlay = $1 }
+    END { if (total == "") exit 1; printf "%s %s\n", total, (overlay == "" ? "-" : overlay) }
+  ')" || return 1
+  read -r DOCKER_DU_TOTAL DOCKER_DU_OVERLAY2 <<CENSUS
+$parsed
+CENSUS
+  case "$DOCKER_DU_TOTAL" in ''|*[!0-9]*) DOCKER_DU_TOTAL=""; return 1 ;; esac
+  case "$DOCKER_DU_OVERLAY2" in *[!0-9]*) DOCKER_DU_OVERLAY2="" ;; esac
+  return 0
 }
 
 # "<accounted_total> <build_cache> <containers> <containers_reclaimable>" in bytes from the
@@ -537,7 +687,7 @@ docker_du_bytes() {
 # residue then under-reports by that new row instead — visible, bounded, and recoverable.
 docker_ledger_bytes() {
   local rows out
-  rows="$(timeout "$DOCKER_DF_TIMEOUT" docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}' 2>/dev/null)" || return 1
+  rows="$(clamped "$DOCKER_DF_TIMEOUT" docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}' 2>/dev/null)" || return 1
   [ -n "$rows" ] || return 1
   out="$(printf '%s\n' "$rows" | awk -F'|' '
     function tobytes(s,   n, u, m) {
@@ -589,8 +739,16 @@ docker_ledger_bytes() {
 
 docker_total_bytes=""
 docker_overlay2_bytes=""
-docker_total_bytes="$(docker_du_bytes "$DOCKER_ROOT")" || docker_total_bytes=""
-docker_overlay2_bytes="$(docker_du_bytes "$DOCKER_ROOT/overlay2")" || docker_overlay2_bytes=""
+# ONE walk for both readings, and its cost is itself published (docker_du_seconds below) so the
+# call that caused bug 9313-1fac-9f32-4b07 can be watched instead of re-measured by hand.
+docker_du_started_at="$(date +%s)"
+if docker_du_census "$DOCKER_ROOT"; then
+  docker_total_bytes="$DOCKER_DU_TOTAL"
+  docker_overlay2_bytes="$DOCKER_DU_OVERLAY2"
+fi
+docker_du_seconds=$(( $(date +%s) - docker_du_started_at ))
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name docker_du_seconds --unit Seconds --value "$docker_du_seconds" 2>/dev/null || true
 
 if [ -n "$docker_total_bytes" ]; then
   aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
@@ -700,7 +858,7 @@ if [ "$journal_in_effect" -eq 0 ]; then
     "the journald ceiling is NOT the one the running systemd-journald read — journal_used_percent is measured against a cap that is not in force; see infra/runbooks/review-bot-ops.md"
 fi
 
-journal_bytes="$(timeout "$JOURNAL_DU_TIMEOUT" du -sx --block-size=1 "$JOURNAL_DIR" 2>/dev/null | tail -1 | awk '{print $1}')"
+journal_bytes="$(clamped "$JOURNAL_DU_TIMEOUT" du -sx --block-size=1 "$JOURNAL_DIR" 2>/dev/null | tail -1 | awk '{print $1}')"
 case "$journal_bytes" in ''|*[!0-9]*) journal_bytes="" ;; esac
 if [ -n "$journal_bytes" ]; then
   aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
@@ -785,7 +943,7 @@ if [ "$var_tmp_cleanup" -eq 0 ]; then
     "NOTHING is bounding ${VAR_TMP_DIR} — the tmpfiles drop-in is missing or stale, or rebar-var-tmp-reaper.timer is not running; see infra/runbooks/review-bot-ops.md"
 fi
 
-var_tmp_bytes="$(bounded "$VAR_TMP_DU_TIMEOUT" du -sx --block-size=1 "$VAR_TMP_DIR" 2>/dev/null | tail -1 | awk '{print $1}')"
+var_tmp_bytes="$(clamped "$VAR_TMP_DU_TIMEOUT" du -sx --block-size=1 "$VAR_TMP_DIR" 2>/dev/null | tail -1 | awk '{print $1}')"
 case "$var_tmp_bytes" in ''|*[!0-9]*) var_tmp_bytes="" ;; esac
 if [ -n "$var_tmp_bytes" ]; then
   aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
@@ -931,7 +1089,7 @@ if [ -d "$DATA_MOUNT" ]; then
     # test suite invokes. KiB * 1024 is exact for the sizes involved.
     # BOUNDED, the §2d rule (bug 1205-63b2-2c01-4e7f): debris is by definition something nobody
     # planned, so its size is unknown and this walks it inside the 5-minute probe.
-    entry_kb=$(bounded "$JOURNAL_SCAN_TIMEOUT" du -sk "$entry" 2>/dev/null | tail -1 | awk '{print $1}')
+    entry_kb=$(clamped "$JOURNAL_SCAN_TIMEOUT" du -sk "$entry" 2>/dev/null | tail -1 | awk '{print $1}')
     entry_kb=${entry_kb:-0}
     debris_bytes=$((debris_bytes + entry_kb * 1024))
     debris_names="${debris_names} ${name}"
@@ -1081,10 +1239,10 @@ aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
 # including 0, so their absence still means the probe is dead.
 container_stats_ok=0
 container_unparsed=0
-container_ps=$(timeout 15 docker ps --no-trunc \
+container_ps=$(clamped 15 docker ps --no-trunc \
   --format 'PS|{{.Names}}|{{.Label "rebar.service"}}|{{.Label "com.docker.compose.service"}}' \
   2>/dev/null) || true
-container_stats=$(timeout 15 docker stats --no-stream \
+container_stats=$(clamped 15 docker stats --no-stream \
   --format 'ST|{{.Name}}|{{.MemUsage}}' 2>/dev/null) || true
 container_census=$(printf '%s\n%s\n' "$container_ps" "$container_stats" | awk -F'|' '
   $1 == "PS" {
@@ -1495,7 +1653,7 @@ gerrit_sha=$(curl -fsS --max-time 10 "${GERRIT_BASE_URL}/projects/rebar/branches
 # bound of its own, while the Gerrit REST read on the line above is correctly `--max-time 10`.
 # An empty result takes the same "comparison could not be made" path as a failed curl, so the
 # timeout degrades to the already-handled unknown case rather than to a wrong answer.
-github_sha=$(bounded 15 git ls-remote "${GITHUB_REPO_URL}" refs/heads/main 2>/dev/null \
+github_sha=$(clamped 15 git ls-remote "${GITHUB_REPO_URL}" refs/heads/main 2>/dev/null \
   | awk '{print $1}')
 if [ -n "$gerrit_sha" ] && [ -n "$github_sha" ]; then
   if [ "$gerrit_sha" = "$github_sha" ]; then oos=0; else oos=1; fi
@@ -1510,6 +1668,18 @@ fi
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name mirror_out_of_sync --unit Count --value "$oos" 2>/dev/null || true
 [ "$oos" -gt 0 ] && logger -t rebar-health "mirror out-of-sync: gerrit=${gerrit_sha} github=${github_sha}"
+
+# --- COMPLETION HEARTBEAT (bug 9313-1fac-9f32-4b07) ------------------------
+# The counterpart to probe_truncated above, and the reason a gap is now readable. probe_ok is
+# published ONLY here, after every section has had its turn, so its presence means the whole
+# script ran and its absence means the run did not reach the end. probe_elapsed_seconds
+# carries how close that run came to TimeoutStartSec, which is the leading indicator this
+# probe was missing: the timeouts were visible in `systemctl` all along and in no metric.
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name probe_elapsed_seconds --unit Seconds \
+  --value "$(( $(date +%s) - PROBE_STARTED_AT ))" 2>/dev/null || true
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name probe_ok --unit Count --value 1 2>/dev/null || true
 
 # Always exit success on a completed probe run. Without this, the script's exit
 # status is that of its last statement — and every metric section ends in a
