@@ -274,16 +274,18 @@ def test_the_percentage_is_measured_against_the_share_the_reaper_holds(tmp_path:
     assert _one(aws_log, "container_writable_used_percent") == 50
 
 
-def test_the_percentage_is_clamped_to_one_hundred(tmp_path: Path) -> None:
-    """CloudWatch's ``Percent`` unit is defined over 0-100, and a datapoint of 300 rescales every
-    dashboard sharing the axis at exactly the moment somebody is reading it. Nothing is lost —
-    the companion bytes gauge is unclamped and carries the magnitude."""
+def test_a_share_overrun_publishes_its_true_ratio(tmp_path: Path) -> None:
+    """The reaper CANNOT reclaim a running container's writable layer at all, so the live set
+    can sit arbitrarily far above this share and nothing on the box will bring it down. That is
+    precisely the condition this percentage exists to report, and clamping it to 100 (bug
+    ``b380-3dfc-99fc-4a0e``) made it unable to distinguish "at the share" from "at three times
+    the share" — the second is an incident, the first is the design."""
     share = _share_bytes()
     env, aws_log = _environment(
         tmp_path, df_rows=_df_rows(containers=f"{share * 3}", reclaimable="0B")
     )
     _run(env)
-    assert _one(aws_log, "container_writable_used_percent") == 100
+    assert _one(aws_log, "container_writable_used_percent") == 300
     assert _one(aws_log, "container_writable_bytes") == share * 3
 
 

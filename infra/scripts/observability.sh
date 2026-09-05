@@ -492,16 +492,21 @@ journal_marker_delta() {
   return 0
 }
 
-# Percent of a cap, CLAMPED to 100 — shared by 2f and 2g. CloudWatch's `Percent` unit is
-# defined over 0-100, and a datapoint of 300 rescales every dashboard that shares the axis into
-# unreadability at exactly the moment someone is reading it. Nothing is lost: the companion
-# `*_bytes` gauge is unclamped and carries the magnitude, and the 85% alarm threshold fires
-# either way.
+# Percent of a cap, NOT clamped — shared by 2f, 2g, 2h and 2i. Every metric derived through
+# here exists to say whether a cap is HOLDING, so the one reading it must be able to produce is
+# a value over 100. This used to clamp (bug b380-3dfc-99fc-4a0e): on 2026-09-05 the build cache
+# sat at 5.875 GB against a 5.00 GiB `builder.gc.maxUsedSpace` — ~109% — and
+# docker_buildkit_cache_used_percent published 100, which the operator read as the cap pinning
+# the cache rather than as a half-gigabyte breach. Clamping is fine for a gauge whose semantics
+# stop at full (a disk cannot exceed its own size); these are BUDGETS, where over is not an
+# impossible state but the specific failure being watched for — `builder.gc.maxUsedSpace`,
+# `SystemMaxUse` and the /var/tmp and container-layer shares are all best-effort targets their
+# writers routinely exceed. The companion `*_bytes` gauges carry the magnitude, but nothing
+# alarms on those, and an operator comparing a percentage to a threshold cannot see a ceiling
+# that is applied silently. CloudWatch's `Percent` unit is a LABEL on a double, not a validated
+# range: it accepts 109 and the >85 alarms keep firing either way.
 pct_of_cap() {
-  local pct
-  pct=$(( $1 * 100 / $2 ))
-  [ "$pct" -gt 100 ] && pct=100
-  printf '%s\n' "$pct"
+  printf '%s\n' "$(( $1 * 100 / $2 ))"
 }
 
 # Blocks actually consumed under $1, or non-zero when nothing parseable came back.

@@ -218,13 +218,15 @@ def test_the_percent_is_measured_over_the_tree_the_ceiling_governs(tmp_path: Pat
     assert "/var/log" not in measured
 
 
-def test_the_percent_is_clamped_to_one_hundred(tmp_path: Path) -> None:
-    """CloudWatch's ``Percent`` unit is defined over 0-100; a datapoint of 200 rescales every
-    dashboard sharing the axis at the moment someone is reading it. The unclamped
-    ``journal_bytes`` beside it carries the magnitude and the 85 threshold still fires."""
+def test_a_ceiling_overrun_publishes_its_true_ratio(tmp_path: Path) -> None:
+    """The percent is the ONLY reading that can say the ceiling did not hold, so it must be able
+    to say 200 (bug ``b380-3dfc-99fc-4a0e``). It used to clamp to 100, which made "exactly at the
+    ceiling" and "at twice the ceiling" the same datapoint and turned a breach into what an
+    operator reads as a healthy pinned ceiling. ``SystemMaxUse`` is journald's own best-effort
+    target, not a hard wall, so the overrun is a real state and not an impossible one."""
     env, aws_log, _ = _environment(tmp_path, journal_bytes=6 * GIB, cap=3 * GIB)
     assert _run(env).returncode == 0
-    assert _one(aws_log, "journal_used_percent") == 100
+    assert _one(aws_log, "journal_used_percent") == 200
     assert _one(aws_log, "journal_bytes") == 6 * GIB
 
 

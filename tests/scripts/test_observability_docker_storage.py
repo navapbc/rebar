@@ -433,11 +433,15 @@ def test_an_unreadable_docker_root_publishes_no_residue(tmp_path: Path) -> None:
     assert _one(aws_log, "docker_buildkit_cache_bytes") > 0
 
 
-def test_a_budget_overrun_publishes_a_percent_that_is_still_a_percent(tmp_path: Path) -> None:
-    """CloudWatch's ``Percent`` unit is defined over 0-100; 300 rescales a whole dashboard.
+def test_a_budget_overrun_publishes_its_true_ratio(tmp_path: Path) -> None:
+    """Both percents must be able to exceed 100 (bug ``b380-3dfc-99fc-4a0e``).
 
-    Nothing is lost by clamping: the unclamped ``docker_storage_bytes`` gauge beside it carries
-    the magnitude, and the 85% alarm fires either way.
+    ``builder.gc.maxUsedSpace`` is a best-effort reclamation target, not a hard wall: on
+    2026-09-05 this host's build cache sat at 5.875 GB against a 5.00 GiB cap — ~109% — while
+    ``docker_buildkit_cache_used_percent`` published a clamped 100 and the operator read the
+    pinned ceiling as the cap working. A budget metric must be able to say 109. The companion
+    ``*_bytes`` gauges carry the magnitude too, but nobody alarms on those, and an operator
+    comparing a percentage to a threshold cannot see a ceiling that is silently applied.
     """
     env, aws_log = _environment(
         tmp_path,
@@ -450,8 +454,8 @@ def test_a_budget_overrun_publishes_a_percent_that_is_still_a_percent(tmp_path: 
         },
     )
     assert _run(env).returncode == 0
-    assert _one(aws_log, "docker_storage_used_percent") == 100
-    assert _one(aws_log, "docker_buildkit_cache_used_percent") == 100
+    assert _one(aws_log, "docker_storage_used_percent") == 300  # 60 of 20 GiB
+    assert _one(aws_log, "docker_buildkit_cache_used_percent") == 240  # 12 of 5 GiB
     assert _one(aws_log, "docker_storage_bytes") == 60 * GIB
 
 
