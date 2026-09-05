@@ -13,6 +13,17 @@ and empty is the reachable case — ``infra/runbooks/review-bot-ops.md`` tells a
 "re-run ``user_data.sh``'s mount steps", i.e. to source these functions by hand, under incident
 pressure, on a host whose other volumes hold the Gerrit data.
 
+This module has since become the single behavioural oracle for ``user_data.sh``'s mount path,
+because a second harness that extracted the same functions would drift from this one. It also
+covers:
+
+* **bug 9c93-754e-b641-48d1** — ``mount -a`` exits 0 for a ``nofail`` entry it SKIPPED, so a
+  successful ``mount -a`` was never evidence that the mount took. Gate scratch asserted it;
+  ``/var/gerrit``, the more valuable volume, asserted nothing at all.
+* **bug ad8d-4274-ef43-4f44** — the fstab guard tested only the NEW UUID, so replacing a volume
+  appended a second entry for the same mount point (F3); and the two resolution branches
+  returned different string forms for the same device (F5).
+
 **These tests EXECUTE the shipped shell.** They extract the two functions verbatim from
 ``user_data.sh`` and run them under ``bash`` against a fake device tree with a stubbed
 ``nvme``/``blkid``/``mkfs.xfs``/``mount`` on ``PATH``. Only the three absolute path roots are
@@ -87,7 +98,7 @@ def host(tmp_path: Path):
     ``serials/<dev>`` drives the ``nvme`` stub, ``blkid/<dev>`` the ``blkid`` stub; both are
     plain files so a test states the world by writing one line.
     """
-    root = tmp_path / "host"
+    root = tmp_path.resolve() / "host"
     for sub in ("dev/disk/by-id", "bin", "etc", "serials", "blkid"):
         (root / sub).mkdir(parents=True)
 
@@ -129,14 +140,44 @@ cat "$f"
 ''',
     )
     _stub(root / "bin" / "mkfs.xfs", f'echo "$@" >> {root}/mkfs.log\n')
-    _stub(root / "bin" / "mount", f'echo "$@" >> {root}/mount.log\n')
-    _stub(root / "bin" / "mountpoint", "exit 0\n")
+    # `mount -a` has THREE outcomes and the whole of bug 9c93 lives in the difference between
+    # the last two, so the stub models all three rather than always succeeding:
+    #   default          — the entries mount; `mounted` gains their mount points.
+    #   MOUNT_ERRORS=1   — mount refuses and says so (exit 32, mount(8)'s "mount failure").
+    #   MOUNT_SKIPS=1    — mount exits 0 having mounted NOTHING. That is not a contrived
+    #                      stub: it is precisely what `nofail` does for a missing volume,
+    #                      and it is the mode under which the old script reported success.
+    _stub(
+        root / "bin" / "mount",
+        f"""
+echo "$@" >> {root}/mount.log
+[ -n "${{MOUNT_ERRORS:-}}" ] && exit 32
+[ -n "${{MOUNT_SKIPS:-}}" ] && exit 0
+awk '$1 ~ /^UUID=/ {{ print $2 }}' {root}/etc/fstab >> {root}/mounted
+exit 0
+""",
+    )
+    _stub(
+        root / "bin" / "mountpoint",
+        f'grep -qxF "$2" {root}/mounted 2>/dev/null\n',
+    )
 
     return root
 
 
-def _run(root: Path, call: str, *, drop_lines: tuple[str, ...] = (), broken_nvme: bool = False):
-    """Source the extracted functions and make one call. Returns the CompletedProcess."""
+def _run(
+    root: Path,
+    call: str,
+    *,
+    drop_lines: tuple[str, ...] = (),
+    broken_nvme: bool = False,
+    mount_mode: str = "",
+):
+    """Source the extracted functions and make one call. Returns the CompletedProcess.
+
+    ``mount_mode`` selects the ``mount -a`` outcome: ``""`` mounts, ``"skips"`` is the silent
+    ``nofail`` skip, ``"errors"`` is a genuine mount failure.
+    """
     script = _shell_functions(root, drop_lines=drop_lines) + "\n" + call + "\n"
     # `subprocess_env` rather than `dict(os.environ, ...)`: pytest renders call arguments in a
     # long traceback, so a plain dict of the ambient environment would print every inherited
@@ -145,6 +186,12 @@ def _run(root: Path, call: str, *, drop_lines: tuple[str, ...] = (), broken_nvme
     env = subprocess_env(PATH=f"{root}/bin:{os.environ['PATH']}")
     if broken_nvme:
         env["NVME_BROKEN"] = "1"
+    if mount_mode == "skips":
+        env["MOUNT_SKIPS"] = "1"
+    elif mount_mode == "errors":
+        env["MOUNT_ERRORS"] = "1"
+    elif mount_mode:
+        raise AssertionError(f"unknown mount_mode {mount_mode!r}")
     return subprocess.run(
         ["bash", "-c", script],
         capture_output=True,
@@ -307,3 +354,313 @@ def test_removing_the_empty_uuid_guard_restores_the_malformed_fstab_line(host) -
 def test_bash_is_available_for_this_oracle() -> None:
     """The oracle is worthless if it silently skips; state the dependency."""
     assert shutil.which("bash"), "these tests execute the shipped shell and need bash"
+
+
+# ── bug 9c93: the mount is ASSERTED, for BOTH volumes ────────────────────────────────
+
+
+def _healthy(host: Path) -> Path:
+    """A resolvable device with a real filesystem UUID. Returns the mount point to use."""
+    (host / "blkid" / "nvme1n1").write_text(
+        "UUID=1111-2222-3333-4444\nTYPE=xfs\n", encoding="utf-8"
+    )
+    return host / "mnt" / "gerrit"
+
+
+def test_a_silently_skipped_nofail_mount_is_refused(host) -> None:
+    """9c93 AC1/AC2. ``mount -a`` exits 0 having mounted nothing — the real ``nofail`` skip.
+
+    The fstab entry is written, ``mount -a`` succeeds, and the mount point is still an
+    ordinary directory on the root filesystem. Before this fix the script reported success
+    here for ``/var/gerrit``, which is how Gerrit could come back from a stop/start writing
+    its repositories to the 60 GiB root disk with nothing raising.
+    """
+    mount_point = _healthy(host)
+
+    proc = _run(host, f'mount_ebs_volume "{GOOD_VOLUME}" "{mount_point}"', mount_mode="skips")
+
+    assert proc.returncode != 0, (
+        "mount_ebs_volume reported SUCCESS for a mount that never happened — the volume's "
+        "consumers would run on the root filesystem"
+    )
+    assert "not a mount point" in proc.stderr.lower(), proc.stderr
+
+
+def test_the_gerrit_data_volume_gets_the_same_assertion_as_gate_scratch(host) -> None:
+    """9c93. The bug was the ASYMMETRY, so assert the guard is per-volume, not per-call-site.
+
+    ``require_mounted`` lives inside ``mount_ebs_volume``, so it cannot be true of one volume
+    and absent for another — which is exactly how ``/var/gerrit`` came to have no assertion
+    while gate scratch had one.
+    """
+    for name in ("gerrit", "gate-scratch"):
+        (host / "blkid" / "nvme1n1").write_text("UUID=aaaa-bbbb\n", encoding="utf-8")
+        (host / "etc" / "fstab").write_text("", encoding="utf-8")
+        (host / "mounted").unlink(missing_ok=True)
+        mount_point = host / "mnt" / name
+
+        proc = _run(host, f'mount_ebs_volume "{GOOD_VOLUME}" "{mount_point}"', mount_mode="skips")
+
+        assert proc.returncode != 0, f"{name}: a skipped mount was reported as success"
+
+
+def test_a_genuine_mount_error_is_distinguishable_from_a_silent_skip(host) -> None:
+    """9c93 AC3. Two failures that look identical from outside must NOT read identically.
+
+    ``nofail`` is why: a mount that errored printed something, a mount that was skipped
+    printed nothing at all. An operator needs to know whether to look at the filesystem or at
+    the volume attachment, so the two get different messages AND different exit codes.
+    """
+    mount_point = _healthy(host)
+    call = f'mount_ebs_volume "{GOOD_VOLUME}" "{mount_point}"'
+
+    errored = _run(host, call, mount_mode="errors")
+    (host / "etc" / "fstab").write_text("", encoding="utf-8")
+    skipped = _run(host, call, mount_mode="skips")
+
+    assert errored.returncode != 0 and skipped.returncode != 0
+    assert errored.returncode != skipped.returncode, (
+        "a mount error and a silent nofail skip returned the SAME status — they need "
+        f"different operator responses (both were {errored.returncode})"
+    )
+    assert "reported an error" in errored.stderr.lower(), errored.stderr
+    assert "not a mount point" in skipped.stderr.lower(), skipped.stderr
+    assert "not a mount point" not in errored.stderr.lower()
+
+
+def test_a_mount_that_actually_takes_still_succeeds(host) -> None:
+    """Control for the assertion: the guard must not cost the working case."""
+    mount_point = _healthy(host)
+
+    proc = _run(host, f'mount_ebs_volume "{GOOD_VOLUME}" "{mount_point}"')
+
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_removing_the_mount_assertion_restores_the_silent_success(host) -> None:
+    """9c93 AC2, seeded. Delete the assertion and the reported defect returns, observably.
+
+    This is the test that gives the others teeth. The whole nature of 9c93 is that an ABSENT
+    assertion is invisible — so a test that would pass without the assertion proves nothing.
+    """
+    mount_point = _healthy(host)
+    call = f'mount_ebs_volume "{GOOD_VOLUME}" "{mount_point}"'
+
+    guarded = _run(host, call, mount_mode="skips")
+    assert guarded.returncode != 0
+
+    (host / "etc" / "fstab").write_text("", encoding="utf-8")
+    seeded = _run(host, call, mount_mode="skips", drop_lines=("ASSERT-MOUNT-TOOK",))
+
+    assert seeded.returncode == 0, (
+        "with the assertion removed the skipped mount should be reported as SUCCESS again — "
+        "if it is not, the tests above are passing for some reason other than the assertion"
+    )
+
+
+# ── bug ad8d F3: an fstab entry is REPLACED, not accumulated ─────────────────────────
+
+#: An unrelated entry that must survive every rewrite. If a fix drops this, the host does not
+#: boot, so it is the more important half of the assertion.
+ROOT_FSTAB_LINE = "UUID=0000-1111 / xfs defaults,noatime 0 1"
+
+
+def _fstab_lines(host: Path, mount_point: Path) -> list[str]:
+    text = (host / "etc" / "fstab").read_text(encoding="utf-8")
+    return [ln for ln in text.splitlines() if f" {mount_point} " in ln]
+
+
+def test_replacing_a_volume_leaves_exactly_one_entry_for_the_mount_point(host) -> None:
+    """ad8d F3 / AC1. The runbook's own "restore onto a fresh volume" path triggers this.
+
+    The old guard was ``grep -q "$uuid" /etc/fstab`` — the NEW uuid only — so a replacement
+    appended a second line and left the previous volume's behind. ``nofail`` hides that:
+    neither line errors and which volume wins becomes fstab-ORDER dependent, permanently.
+    """
+    mount_point = host / "mnt" / "gate-scratch"
+    stale = f"UUID=c814b8a1-dba9-4a59-b84c-0a6d6b6b38b2 {mount_point} xfs defaults,nofail 0 2"
+    (host / "etc" / "fstab").write_text(f"{ROOT_FSTAB_LINE}\n{stale}\n", encoding="utf-8")
+    (host / "blkid" / "nvme1n1").write_text(
+        "UUID=b1e23678-982c-4a83-b6ab-d5d144c1f57f\n", encoding="utf-8"
+    )
+
+    proc = _run(host, f'mount_ebs_volume "{GOOD_VOLUME}" "{mount_point}"')
+
+    assert proc.returncode == 0, proc.stderr
+    entries = _fstab_lines(host, mount_point)
+    assert len(entries) == 1, f"{len(entries)} entries for one mount point: {entries}"
+    assert "b1e23678-982c-4a83-b6ab-d5d144c1f57f" in entries[0]
+    assert "c814b8a1" not in entries[0]
+    fstab = (host / "etc" / "fstab").read_text(encoding="utf-8")
+    assert ROOT_FSTAB_LINE in fstab, (
+        "an unrelated fstab entry was destroyed — the host would not boot"
+    )
+
+
+def test_the_previous_fstab_is_backed_up_before_it_is_rewritten(host) -> None:
+    """ad8d AC2. A bad edit must be recoverable from the host itself, with no network."""
+    mount_point = host / "mnt" / "gate-scratch"
+    before = f"{ROOT_FSTAB_LINE}\n"
+    (host / "etc" / "fstab").write_text(before, encoding="utf-8")
+    (host / "blkid" / "nvme1n1").write_text("UUID=b1e23678\n", encoding="utf-8")
+
+    _run(host, f'mount_ebs_volume "{GOOD_VOLUME}" "{mount_point}"')
+
+    backup = host / "etc" / "fstab.rebar-bak"
+    assert backup.exists(), "no backup of the pre-edit fstab was kept"
+    assert backup.read_text(encoding="utf-8") == before
+
+
+def test_rewriting_an_unchanged_volume_is_idempotent(host) -> None:
+    """Re-running user_data.sh (the runbook tells operators to) must not grow fstab."""
+    mount_point = host / "mnt" / "gate-scratch"
+    (host / "etc" / "fstab").write_text(f"{ROOT_FSTAB_LINE}\n", encoding="utf-8")
+    (host / "blkid" / "nvme1n1").write_text("UUID=b1e23678\n", encoding="utf-8")
+    call = f'mount_ebs_volume "{GOOD_VOLUME}" "{mount_point}"'
+
+    _run(host, call)
+    _run(host, call)
+
+    assert len(_fstab_lines(host, mount_point)) == 1
+
+
+def test_removing_the_stale_entry_drop_restores_the_accumulation(host) -> None:
+    """ad8d F3, seeded. Without the drop, the replacement scenario grows a second entry."""
+    mount_point = host / "mnt" / "gate-scratch"
+    stale = f"UUID=c814b8a1-dba9-4a59-b84c-0a6d6b6b38b2 {mount_point} xfs defaults,nofail 0 2"
+    (host / "etc" / "fstab").write_text(f"{ROOT_FSTAB_LINE}\n{stale}\n", encoding="utf-8")
+    (host / "blkid" / "nvme1n1").write_text("UUID=b1e23678\n", encoding="utf-8")
+
+    _run(
+        host,
+        f'mount_ebs_volume "{GOOD_VOLUME}" "{mount_point}"',
+        drop_lines=("DROP-STALE-FSTAB-ENTRY",),
+    )
+
+    entries = _fstab_lines(host, mount_point)
+    assert len(entries) == 2, (
+        "the seeded defect must reproduce the reported accumulation (two entries for one "
+        f"mount point), got {entries}"
+    )
+
+
+# ── bug ad8d F5: both resolution branches answer in the same canonical form ───────────
+
+
+def test_both_resolution_branches_return_the_same_string_for_the_same_device(host) -> None:
+    """ad8d F5 / AC4. The nvme-cli path returned the glob path, the by-id path the realpath.
+
+    Same device, two spellings, so a log line — or any future device COMPARISON — depended on
+    which branch happened to fire. The reported evidence was ``/dev/nvme2n1`` from one branch
+    and ``/dev/loop2`` from the other, so the fixture reproduces that shape: the node the glob
+    finds is itself a link to the underlying device. Without this the two branches happen to
+    agree and the test has no teeth.
+    """
+    underlying = host / "dev" / "loop2"
+    underlying.write_bytes(b"\0" * 512)
+    node = host / "dev" / "nvme1n1"
+    node.unlink()
+    node.symlink_to(underlying)
+
+    via_nvme = _run(host, f'resolve_ebs_device "{GOOD_VOLUME}"')
+    via_by_id = _run(host, f'resolve_ebs_device "{GOOD_VOLUME}"', broken_nvme=True)
+
+    assert via_nvme.returncode == 0 and via_by_id.returncode == 0
+    assert via_nvme.stdout == via_by_id.stdout, (
+        "the two resolution branches disagree on how to spell the same device: "
+        f"{via_nvme.stdout.strip()!r} vs {via_by_id.stdout.strip()!r}"
+    )
+
+
+# ── bug ad8d F4: chmod precedes the marker writes ────────────────────────────────────
+
+
+def test_the_scratch_mount_is_tightened_before_the_markers_are_written() -> None:
+    """ad8d F4 / AC3. A sequence contract, so this one is deliberately a source-order test.
+
+    Both orders behave identically under root, so there is no observable difference to assert
+    on: the defect is an ORDER, and the only honest oracle for an order is the order itself.
+    Everything else in this module tests behaviour, and this docstring is the record of why
+    this one does not. (The ticket cited "the runbook" as the documented sequence; neither
+    ``review-bot-ops.md`` nor ``provision-restore.md`` mentions ``chmod``, so there was no
+    doc to correct and the script moved instead.)
+    """
+    src = USER_DATA.read_text(encoding="utf-8")
+    chmod_at = src.index('chmod 0700 "$GATE_SCRATCH_MOUNT"')
+    required_at = src.index('.gate-scratch-required"')
+    proof_at = src.index('.gate-scratch-mounted"')
+
+    assert chmod_at < required_at and chmod_at < proof_at, (
+        "the markers are written into the mount point before it is tightened to 0700"
+    )
+
+
+# ── bug 9c93 AC4: an operator-invokable running-host check ───────────────────────────
+
+CHECK_MOUNTS = REPO_ROOT / "infra" / "scripts" / "check-mounts.sh"
+
+
+def test_the_running_host_check_exists_and_is_executable() -> None:
+    """9c93 AC4. user_data.sh runs at FIRST BOOT only; every later boot has no witness."""
+    assert CHECK_MOUNTS.exists(), "no running-host mount check for an operator to invoke"
+    assert os.access(CHECK_MOUNTS, os.X_OK), "the check is not executable"
+
+
+def test_the_running_host_check_names_both_volumes_by_default() -> None:
+    """AC4 says BOTH volumes. It also pins the mount points against terraform's defaults.
+
+    ``var.gate_scratch_mount``'s own documentation says four things must agree on that path;
+    this check is a fifth consumer, so its default is pinned here rather than left to drift.
+    """
+    src = CHECK_MOUNTS.read_text(encoding="utf-8")
+    assert "/var/gerrit" in src
+    assert "/var/lib/rebar/gate-scratch" in src
+
+    tf_default = (REPO_ROOT / "infra" / "terraform" / "variables.tf").read_text(encoding="utf-8")
+    assert '"/var/lib/rebar/gate-scratch"' in tf_default
+
+
+def test_the_running_host_check_fails_on_a_plain_directory(tmp_path: Path) -> None:
+    """The dangerous state: the directory EXISTS, so every consumer looks healthy — on root.
+
+    A check that only noticed a missing directory would pass on exactly the host this ticket
+    is about, so the plain-directory case is the one worth executing.
+    """
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _stub(fake_bin / "mountpoint", "exit 1\n")  # nothing is a mount point
+    plain = tmp_path / "var" / "gerrit"
+    plain.mkdir(parents=True)
+
+    proc = subprocess.run(
+        ["bash", str(CHECK_MOUNTS), str(plain)],
+        capture_output=True,
+        text=True,
+        env=subprocess_env(PATH=f"{fake_bin}:{os.environ['PATH']}"),
+        timeout=60,
+        check=False,
+    )
+
+    assert proc.returncode != 0, "the check passed on a plain directory on the root filesystem"
+    assert "ROOT filesystem" in proc.stderr, proc.stderr
+
+
+def test_the_running_host_check_passes_when_the_volume_is_mounted(tmp_path: Path) -> None:
+    """Control: the check must not simply always fail."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _stub(fake_bin / "mountpoint", "exit 0\n")
+    _stub(fake_bin / "findmnt", "echo /dev/nvme1n1\n")
+    mounted = tmp_path / "var" / "gerrit"
+    mounted.mkdir(parents=True)
+
+    proc = subprocess.run(
+        ["bash", str(CHECK_MOUNTS), str(mounted)],
+        capture_output=True,
+        text=True,
+        env=subprocess_env(PATH=f"{fake_bin}:{os.environ['PATH']}"),
+        timeout=60,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
