@@ -1645,6 +1645,220 @@ def _lint_target_body(makefile_text: str) -> str:
     return "\n".join(body)
 
 
+_MAKE_WORKFLOW_CALL = re.compile(r"(?<![\w$])make(?P<args>(?:\s+[^;&|]+)+)")
+_MAKE_TARGET = re.compile(r"^[A-Za-z0-9_.-]+$")
+_MAKE_RECIPE_EDGE = re.compile(r"\$\(\s*MAKE\s*\)\s+(?P<target>[A-Za-z0-9_.-]+)")
+_MAKE_RECIPE_HEADER = re.compile(r"^([A-Za-z0-9_.-]+):(?:\s|$)")
+_MAKE_NON_POSIX_CONSTRUCTS = (
+    ("set -o pipefail", re.compile(r"\bset\s+-o\s+pipefail\b")),
+    ("double-bracket test", re.compile(r"\[\[")),
+    (
+        "indexed/associative array",
+        re.compile(
+            r"\b(?:declare|local|typeset|readonly)\s+-(?:a|A)\b|"
+            r"(?<![\w$])[A-Za-z_][A-Za-z0-9_]*\[[^\]\n]+\]="
+        ),
+    ),
+    ("here-string", re.compile(r"<<<")),
+    ("case-modification", re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]+\])?[\^,]{1,2}\}")),
+)
+
+
+def _live_make_lines(text: str) -> str:
+    """Recipe text with comment-only lines removed before static scans."""
+    live: list[str] = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        while stripped[:1] in {"@", "+", "-"}:
+            stripped = stripped[1:].lstrip()
+        if stripped.startswith("#"):
+            continue
+        live.append(line)
+    return "\n".join(live)
+
+
+def _targets_from_make_invocations(text: str) -> set[str]:
+    """Make targets named by every ``make`` invocation in ``text``."""
+    targets: set[str] = set()
+    for match in _MAKE_WORKFLOW_CALL.finditer(_live_make_lines(text)):
+        for token in match.group("args").split():
+            if token.startswith("-") or "=" in token:
+                continue
+            if _MAKE_TARGET.fullmatch(token):
+                targets.add(token)
+    return targets
+
+
+def _workflow_make_targets(*workflow_paths: Path) -> set[str]:
+    """The ``make`` targets invoked by the workflow commands in the supplied files."""
+    import yaml
+
+    targets: set[str] = set()
+    for path in workflow_paths:
+        workflow = yaml.safe_load(_read(path)) or {}
+        for job in (workflow.get("jobs") or {}).values():
+            for step in (job or {}).get("steps") or []:
+                body = str((step or {}).get("run", ""))
+                if not body:
+                    continue
+                targets.update(_targets_from_make_invocations(body))
+    return targets
+
+
+def _make_recipe_bodies(makefile_text: str) -> dict[str, str]:
+    """Top-level Makefile recipes keyed by target name."""
+    bodies: dict[str, list[str]] = {}
+    current_target: str | None = None
+    current_lines: list[str] = []
+    for line in makefile_text.splitlines():
+        header = _MAKE_RECIPE_HEADER.match(line)
+        if header and not line.startswith((" ", "\t")):
+            if current_target is not None:
+                bodies[current_target] = current_lines
+            current_target = header.group(1)
+            current_lines = []
+            continue
+        if current_target is not None:
+            if line and not line.startswith((" ", "\t")):
+                bodies[current_target] = current_lines
+                current_target = None
+                current_lines = []
+                continue
+            current_lines.append(line)
+    if current_target is not None:
+        bodies[current_target] = current_lines
+    return {target: "\n".join(lines) for target, lines in bodies.items()}
+
+
+def _reachable_make_targets(seed_targets: set[str], makefile_text: str) -> set[str]:
+    """The CI-reachable Makefile targets from workflow calls plus transitive ``$(MAKE)`` edges."""
+    bodies = _make_recipe_bodies(makefile_text)
+    seen: set[str] = set()
+    stack = list(seed_targets)
+    while stack:
+        target = stack.pop()
+        if target in seen:
+            continue
+        seen.add(target)
+        stack.extend(
+            match.group("target")
+            for match in _MAKE_RECIPE_EDGE.finditer(_live_make_lines(bodies.get(target, "")))
+        )
+    return seen
+
+
+def _bash_only_make_recipe_violations(
+    recipes: dict[str, str], *, include_match: bool = False
+) -> list[str]:
+    """Static bash-only constructs in already-selected recipe bodies."""
+    violations: list[str] = []
+    for target, body in sorted(recipes.items()):
+        live = _live_make_lines(body)
+        for label, pattern in _MAKE_NON_POSIX_CONSTRUCTS:
+            if match := pattern.search(live):
+                suffix = f": {match.group(0)}" if include_match else ""
+                violations.append(f"{target}: {label}{suffix}")
+    return violations
+
+
+def _make_recipe_violations(makefile_text: str, targets: set[str]) -> list[str]:
+    """Static non-POSIX-dash constructs in the recipes reachable from CI."""
+    bodies = _make_recipe_bodies(makefile_text)
+    recipes = {target: bodies[target] for target in sorted(targets) if target in bodies}
+    return _bash_only_make_recipe_violations(recipes, include_match=True)
+
+
+def _ci_reachable_make_recipes(workflow_text: str, makefile_text: str) -> dict[str, str]:
+    """CI-reachable Makefile recipe bodies, keyed by target name."""
+    import yaml
+
+    workflow = yaml.safe_load(workflow_text) or {}
+    seed_targets: set[str] = set()
+    for job in (workflow.get("jobs") or {}).values():
+        for step in (job or {}).get("steps") or []:
+            body = str((step or {}).get("run", ""))
+            if body:
+                seed_targets.update(_targets_from_make_invocations(body))
+    targets = _reachable_make_targets(seed_targets, makefile_text)
+    bodies = _make_recipe_bodies(makefile_text)
+    return {target: bodies[target] for target in sorted(targets) if target in bodies}
+
+
+def test_make_target_closure_follows_transitive_make_edges(tmp_path: Path) -> None:
+    """The closure helper follows nested ``$(MAKE)`` edges, not just direct children."""
+    repo = tmp_path / "repo"
+    workflows = repo / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "root.yml").write_text(
+        "jobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make root\n",
+        encoding="utf-8",
+    )
+    (repo / "Makefile").write_text(
+        "root:\n\t$(MAKE) mid\n\nmid:\n\t$(MAKE) leaf\n\nleaf:\n\t@printf ok\n",
+        encoding="utf-8",
+    )
+    assert _reachable_make_targets(
+        _workflow_make_targets(workflows / "root.yml"), _read(repo / "Makefile")
+    ) == {
+        "root",
+        "mid",
+        "leaf",
+    }
+
+
+def test_make_target_discovery_sees_multiple_targets_in_one_invocation() -> None:
+    """A single workflow ``make`` command can seed more than one target."""
+    assert _targets_from_make_invocations("make lint typecheck && make config-check") == {
+        "lint",
+        "typecheck",
+        "config-check",
+    }
+
+
+def test_ci_reachable_make_targets_follow_workflow_invocations_and_make_edges() -> None:
+    """The gating/mirror lanes seed Make targets from workflow commands, then follow
+    transitive ``$(MAKE)`` edges inside the Makefile."""
+    makefile = _read(_MAKEFILE)
+    reachable = _reachable_make_targets(_workflow_make_targets(_BAT_YML), makefile)
+    assert {"lint", "typecheck", "config-check", "e2e-deps"}.issubset(reachable), (
+        "the CI-reachable Makefile closure no longer includes one of the lane-invoked "
+        f"targets: {sorted(reachable)}"
+    )
+    assert "actionlint-bin" in reachable, (
+        "the CI-reachable Makefile closure no longer follows lint's transitive `$(MAKE)` "
+        "edge to actionlint-bin"
+    )
+    assert "worktree" not in reachable, (
+        "the CI-reachable Makefile closure now includes the dev-only worktree target, which "
+        "CI does not invoke"
+    )
+
+
+def test_ci_reachable_make_recipes_stay_posix_dash_static_text() -> None:
+    """Static recipe scans catch non-POSIX-dash shell constructs on the CI-reachable path."""
+    makefile = _read(_MAKEFILE)
+    reachable = _reachable_make_targets(_workflow_make_targets(_BAT_YML), makefile)
+    violations = _make_recipe_violations(makefile, reachable)
+    assert not violations, (
+        "the CI-reachable Makefile recipes use non-POSIX-dash shell constructs:\n  "
+        + "\n  ".join(violations)
+    )
+
+
+def test_static_recipe_scan_reaches_transitive_make_targets() -> None:
+    """A violation in a ``$(MAKE)`` child target is still on the CI-reachable path."""
+    makefile = _read(_MAKEFILE)
+    mutated = makefile.replace(
+        "actionlint-bin:  ## Ensure a pinned actionlint is available",
+        "actionlint-bin:  ## Ensure a pinned actionlint is available\n\tset -o pipefail",
+    )
+    reachable = _reachable_make_targets(_workflow_make_targets(_BAT_YML), mutated)
+    assert any(
+        violation.startswith("actionlint-bin: set -o pipefail")
+        for violation in _make_recipe_violations(mutated, reachable)
+    )
+
+
 def test_makefile_lint_runs_both_config_gates() -> None:
     """The portable, no-CI-required `make lint` path runs BOTH the ownership-direction gate
     and the field-consumption gate, so the trigger is operation-linked, not CI-only."""
@@ -1668,3 +1882,16 @@ def test_ci_runs_the_config_gates_through_make_lint_not_a_duplicate_step() -> No
     assert "scripts/check_config_ownership.py" not in bat, (
         "the ownership gate must run via `make lint`, not as a duplicate standalone workflow step."
     )
+
+
+def test_ci_reachable_make_recipes_reject_bash_only_constructs() -> None:
+    """CI-reachable Makefile recipes stay executable by POSIX /bin/sh."""
+    recipes = _ci_reachable_make_recipes(_read(_BAT_YML), _read(_MAKEFILE))
+    assert {"lint", "typecheck", "config-check", "e2e-deps", "actionlint-bin"} <= set(recipes)
+    assert "worktree" not in recipes
+
+    seeded = dict(recipes)
+    seeded["lint"] = "\tset -o pipefail\n" + seeded["lint"]
+    violations = _bash_only_make_recipe_violations(seeded)
+    assert violations == ["lint: set -o pipefail"]
+    assert not _bash_only_make_recipe_violations(recipes)
