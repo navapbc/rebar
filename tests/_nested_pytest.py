@@ -5,13 +5,21 @@ Every nested run built by hand re-decided basetemp, timeout, cache plugin and en
 as three separate bugs before this module existed.  Route every launch through
 :func:`run_nested_pytest` so ``--basetemp`` cannot be forgotten again.
 
-Two launches under ``tests/`` deliberately stay outside this helper, because routing them
+Some launches under ``tests/`` deliberately stay outside this helper, because routing them
 through ``python -m pytest`` would put the repository root on the child's ``sys.path`` and
-destroy the very thing they reproduce: ``tests/unit/test_scripts_import_convention.py`` and
-``tests/unit/test_tests_import_convention.py`` spawn the BARE ``pytest`` console script from a
-cwd outside the repository.  The ``pytester.runpytest*`` calls in
-``tests/unit/test_caplog_coverage_integrity.py`` and ``tests/unit/test_repo_isolation_guard.py``
-also stay as they are: pytest owns their basetemp already.
+destroy the very thing they reproduce: ``tests/unit/test_scripts_import_convention.py``,
+``tests/unit/test_tests_import_convention.py`` and ``tests/unit/test_mechanism_delta.py``
+spawn the BARE ``pytest`` console script.  They are admitted by passing ``--basetemp``
+themselves — the invariant is the child's temp root, not this module's monopoly — and
+``tests/unit/test_nested_pytest_uniqueness.py`` holds them to it.  The
+``pytester.runpytest*`` calls in ``tests/unit/test_caplog_coverage_integrity.py`` and
+``tests/unit/test_repo_isolation_guard.py`` also stay as they are: pytest owns their
+basetemp already.
+
+The guard reads argv STRUCTURALLY and knows three spellings of the same operation, because
+for a while it knew only the first: ``python -m pytest``, ``python -c`` with a payload that
+names pytest, and the bare console script.  A ``python -c`` launch evaded it long enough to
+be measured deleting four other sessions' shared numbered temp roots (bug 16e1-237d).
 """
 
 from __future__ import annotations

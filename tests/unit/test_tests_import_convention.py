@@ -103,6 +103,10 @@ def test_audit_page_modules_collect_under_bare_pytest(module: str, tmp_path: Pat
             "no:randomly",
             "-p",
             "no:cacheprovider",
+            # A child without this allocates into the SHARED numbered temp root and can
+            # delete another session's root as pytest prunes it (bug 16e1-237d).
+            "--basetemp",
+            str(tmp_path / "collect-only-pytest"),
         ],
         cwd=tmp_path,
         env=env,
