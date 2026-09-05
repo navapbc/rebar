@@ -41,6 +41,7 @@ from rebar_reconciler.fetch_paging import (  # noqa: F401
     _extract_issues,
     _iter_pages,
     collect,
+    drain,
 )
 
 # Split-JQL contract (bug f6cc-b174-9e9a-435c — single JQL hit 1000-issue
@@ -476,8 +477,7 @@ def _fetch_project(
     """
     issues: list[dict] = []
     for jql, cap in queries:
-        for page in _iter_pages(client, jql, page_size=100, cap=cap):
-            issues.extend(page)
+        issues.extend(drain(client, jql, page_size=100, cap=cap))
     return issues
 
 
