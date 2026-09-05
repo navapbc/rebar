@@ -1,0 +1,33 @@
+name: Gerrit Scanner Advisory Verify
+
+# Gerrit exact-patchset scanner lane (ticket aa9e). ADR 0114 keeps this workflow separate
+# from gerrit-verify.yaml: it is visible advisory evidence, but it is not in the Verified
+# vote run's job list and cannot affect that workflow's all-jobs conclusion snapshot.
+"on":
+  workflow_dispatch:
+    inputs:
+      GERRIT_BRANCH:            { description: "Gerrit target branch", required: true, type: string }
+      GERRIT_CHANGE_ID:         { description: "Gerrit Change-Id", required: true, type: string }
+      GERRIT_CHANGE_NUMBER:     { description: "Gerrit change number", required: true, type: string }
+      GERRIT_CHANGE_URL:        { description: "Gerrit change URL", required: true, type: string }
+      GERRIT_EVENT_TYPE:        { description: "Gerrit event type", required: true, type: string }
+      GERRIT_PATCHSET_NUMBER:   { description: "Gerrit patchset number", required: true, type: string }
+      GERRIT_PATCHSET_REVISION: { description: "Gerrit patchset revision", required: true, type: string }
+      GERRIT_PROJECT:           { description: "Gerrit project", required: true, type: string }
+      GERRIT_REFSPEC:           { description: "Gerrit refspec (refs/changes/NN/NNNN/P)", required: true, type: string }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scanner-integration-${{ inputs.GERRIT_CHANGE_ID }}
+  cancel-in-progress: true
+
+jobs:
+  scanner-integration:
+    name: scanner-integration (advisory pinned Semgrep + Gitleaks on the patchset)
+    uses: ./.github/workflows/_scanner-integration.yml
+    with:
+      gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+      gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+      gerrit-url: https://${{ vars.GERRIT_SERVER }}
