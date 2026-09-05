@@ -649,8 +649,8 @@ only genuinely multi-project stores.
 Use `--json` for automation, `--target ENVIRONMENT_ID` to select the expected producer, and
 `--max-age 2h` only when age should make an otherwise successful pass stale. Without
 `--max-age`, no implicit age threshold applies. Healthy, paused, and running exit zero; foreign,
-failed, stale, and never-run exit nonzero. The older `rebar bridge-status` spelling remains a
-hidden compatibility alias; `purge-bridge` remains retired.
+failed, stale, and never-run exit nonzero. The older `rebar bridge-status` spelling has been
+removed; `purge-bridge` remains retired.
 
 The legacy top-level `rebar reconcile` adapter is removed. Use `rebar bridge preview` for live
 Jira-vs-local proposed changes, `rebar bridge sync` for writes, `rebar bridge fsck` for offline
@@ -659,7 +659,8 @@ binding/integrity audit, and `rebar bridge status` for operational state. Direct
 remain `dry-run`, `bootstrap-strict`, `bootstrap-throttle`, and `live`; direct
 `--mode reconcile-check` now rejects. The engine-only `--filter-local-ids` post-filter remains
 available on that direct legacy route for live-DC harness scoping. The legacy `jira-onboard`,
-`bridge-probe`, and `bridge-fsck` spellings remain available as compatibility aliases.
+`bridge-probe`, and `bridge-fsck` spellings have been removed; use `rebar bridge setup`,
+`rebar bridge check-access`, and `rebar bridge fsck`.
 
 `rebar bridge fsck` is audit-only with one exception: `rebar bridge fsck --repair` prunes
 reverse bindings that have no forward entry (`store_integrity` findings of kind

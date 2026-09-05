@@ -1,12 +1,10 @@
-"""``rebar bridge setup`` / ``rebar jira-onboard`` parser factory (RP-05 S2c).
+"""``rebar bridge setup`` parser factory (RP-05 S2c).
 
-The interactive Jira onboarding wizard is reachable under two program names that
-differ ONLY by ``prog``: the primary ``rebar bridge setup`` and its retained
-compatibility alias ``rebar jira-onboard``. Both share ONE argument-definition
-function
-(:func:`_define`) via :func:`rebar._cli._parser.compose` (AC2), so their option
-surfaces cannot drift. Only the stdlib and :mod:`rebar._cli._parser` are imported
-at module top-level.
+The interactive Jira onboarding wizard is reachable under the canonical
+``rebar bridge setup`` spelling. The shared argument-definition function
+(:func:`_define`) via :func:`rebar._cli._parser.compose` keeps the option surface
+single-sourced. Only the stdlib and :mod:`rebar._cli._parser` are imported at
+module top-level.
 """
 
 from __future__ import annotations

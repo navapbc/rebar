@@ -1,4 +1,4 @@
-"""Held-out parity oracle for canonical and compatibility bridge spellings."""
+"""Held-out oracle for canonical bridge spellings and retired compatibility aliases."""
 
 from __future__ import annotations
 
@@ -21,23 +21,22 @@ def _invoke(
     return code, streams.out, streams.err
 
 
+@pytest.mark.parametrize("exit_code", [0, 3])
 @pytest.mark.parametrize(
-    ("canonical", "legacy", "patch_target"),
+    ("canonical", "patch_target"),
     [
-        (["bridge", "fsck"], ["bridge-fsck"], "rebar._engine_support.bridge_fsck.main"),
-        (["bridge", "check-access"], ["bridge-probe"], "rebar._cli._bridge_probe"),
+        (["bridge", "fsck"], "rebar._engine_support.bridge_fsck.main"),
+        (["bridge", "check-access"], "rebar._cli._bridge_probe"),
     ],
 )
-@pytest.mark.parametrize("exit_code", [0, 3])
-def test_canonical_and_legacy_commands_preserve_streams_arguments_and_exit(
+def test_canonical_bridge_commands_preserve_streams_arguments_and_exit(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     canonical: list[str],
-    legacy: list[str],
     patch_target: str,
     exit_code: int,
 ) -> None:
-    """Both names route the same options through the same implementation boundary."""
+    """Canonical names route options through the existing implementation boundary."""
     calls: list[list[str]] = []
 
     def fake(argv: list[str], **_kwargs: object) -> int:
@@ -52,22 +51,21 @@ def test_canonical_and_legacy_commands_preserve_streams_arguments_and_exit(
     options = ["--representative", "value"]
 
     new_result = _invoke(capsys, [*canonical, *options])
-    old_result = _invoke(capsys, [*legacy, *options])
 
-    assert new_result == old_result == (exit_code, "shared stdout\n", "shared stderr\n")
-    assert calls == [options, options]
+    assert new_result == (exit_code, "shared stdout\n", "shared stderr\n")
+    assert calls == [options]
 
 
 @pytest.mark.parametrize("exit_code", [0, 4])
-def test_setup_aliases_share_the_wizard_and_only_vary_parser_prog(
+def test_canonical_setup_uses_the_wizard_prog(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     exit_code: int,
 ) -> None:
-    """Normal setup behavior is identical while argparse can name each entrypoint."""
+    """Normal setup behavior keeps the canonical argparse program name."""
     calls: list[tuple[list[str], str]] = []
 
-    def fake(argv: list[str], *, prog: str = "rebar jira-onboard") -> int:
+    def fake(argv: list[str], *, prog: str = "rebar bridge setup") -> int:
         calls.append((argv, prog))
         print("shared wizard")
         return exit_code
@@ -76,13 +74,9 @@ def test_setup_aliases_share_the_wizard_and_only_vary_parser_prog(
     options = ["--project", "OPS", "--no-validate"]
 
     canonical = _invoke(capsys, ["bridge", "setup", *options])
-    legacy = _invoke(capsys, ["jira-onboard", *options])
 
-    assert canonical == legacy == (exit_code, "shared wizard\n", "")
-    assert calls == [
-        (options, "rebar bridge setup"),
-        (options, "rebar jira-onboard"),
-    ]
+    assert canonical == (exit_code, "shared wizard\n", "")
+    assert calls == [(options, "rebar bridge setup")]
 
 
 def test_setup_final_validation_preserves_the_persisted_settings_overlay(
@@ -141,16 +135,13 @@ def test_setup_final_validation_preserves_the_persisted_settings_overlay(
 @pytest.mark.parametrize(
     "option", ["--no-validate", "--reset", "--yes", "--url", "--user", "--project"]
 )
-def test_setup_help_exposes_the_same_option_set(option: str, cli_runner: Callable) -> None:
-    """Both setup spellings retain the complete onboarding option surface."""
+def test_setup_help_exposes_the_option_set(option: str, cli_runner: Callable) -> None:
+    """The canonical setup spelling retains the complete onboarding option surface."""
     canonical = cli_runner("bridge", "setup", "--help")
-    legacy = cli_runner("jira-onboard", "--help")
 
-    assert canonical.returncode == legacy.returncode == 0
+    assert canonical.returncode == 0
     assert canonical.stdout.lower().startswith("usage: rebar bridge setup")
-    assert legacy.stdout.lower().startswith("usage: rebar jira-onboard")
     assert option in canonical.stdout
-    assert option in legacy.stdout
 
 
 def test_check_access_is_a_command_not_an_fsck_flag(cli_runner: Callable) -> None:

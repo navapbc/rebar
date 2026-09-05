@@ -43,7 +43,6 @@ _NO_STORE_CASES = [
     ("sign-review", ("sign-review", "--help"), 0, "rebar sign-review"),
     ("explain", ("explain", "plan"), 0, "plan"),
     ("verify-identity", ("verify-identity", "--help"), 0, "rebar verify-identity"),
-    ("verify-authorship", ("verify-authorship", "--help"), 0, "rebar verify-authorship"),
     ("verify-opcert", ("verify-opcert", "--help"), 0, "rebar verify-opcert"),
     ("trusted-env", ("trusted-env", "--help"), 0, "rebar trusted-env"),
     ("remote-cert", ("remote-cert", "--help"), 0, "rebar remote-cert"),

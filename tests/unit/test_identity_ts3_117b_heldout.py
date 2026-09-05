@@ -65,7 +65,7 @@ def _verify_authorship(store: Path, priv: str | None = None) -> subprocess.Compl
     if priv:
         env["REBAR_IDENTITY_SIGNING_KEY"] = priv
     return subprocess.run(
-        ["rebar", "verify-authorship", "--all"],
+        ["rebar", "verify-identity", "--all"],
         cwd=store,
         env=env,
         capture_output=True,
@@ -115,7 +115,7 @@ def test_ledger_schema_and_verify_from_ledger_alone(tmp_path: Path, monkeypatch)
     assert rec["signer_pubkey"] == pub
     assert set(rec["position"].keys()) == {"commit_sha", "position"}
 
-    # verify-authorship must return verified FROM THE LEDGER ALONE (raw events retired).
+    # verify-identity must return verified FROM THE LEDGER ALONE (raw events retired).
     res = _verify_authorship(repo, priv)
     assert res.returncode == 0, res.stdout + res.stderr
     assert "verified" in (res.stdout + res.stderr).lower()

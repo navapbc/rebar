@@ -100,7 +100,7 @@ _REPORTED_NO_AC_FLOOR_CASES = (
         "- src/rebar/_cli/_registry.py `ROUTES` — 78 live routes\n"
         "- docs/exit-codes.md — 78 hand-maintained rows\n\n"
         "Equal counts, different sets (one addition and one stale row cancelling out):\n"
-        "- live route with no doc row: `bridge-status`\n"
+        "- live route with no doc row: `bridge status`\n"
         "- doc row for a non-route: `review` (docs/exit-codes.md:184) — not retired=True, "
         "absent from ROUTES\n\n"
         'Aggravating factor: docs/exit-codes.md:5-7 claims the file is "the single source of '

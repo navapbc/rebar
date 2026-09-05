@@ -392,7 +392,7 @@ def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_ro
     The ONE exception is the UX WRITE-GATE: when ``identity.require_authenticated`` is on and
     the event CANNOT be signed (no resolvable identity or no signing key), a non-exempt ticket
     type is REFUSED with a clear message. This gate is a CONVENIENCE (fast local feedback), NOT
-    the security boundary — the real enforcement is the merge-gate ``rebar verify-authorship``,
+    the security boundary — the real enforcement is the merge-gate ``rebar verify-identity``,
     which re-verifies signatures against the epoch-scoped keyring in CI. A determined writer can
     bypass this local gate, but cannot forge a signature the merge-gate will accept.
     """

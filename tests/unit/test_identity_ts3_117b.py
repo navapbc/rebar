@@ -4,7 +4,7 @@ ledger reworked to the approved in-toto + commit-ancestry design.
 The ONLY TS3 test the implementation sees. Pins the end-to-end happy path: with a current
 identity holding a valid key and `identity.signing_key` configured, an event written
 through the write seam (in-toto Statement `author_sig`) is classified `verified` by
-`rebar verify-authorship`. The ledger schema, `key_not_valid_at_era`, forged
+`rebar verify-identity`. The ledger schema, `key_not_valid_at_era`, forged
 `bad-signature`, and the untouched verify-signature schema are held out.
 """
 
@@ -75,7 +75,7 @@ def test_live_signed_event_verifies(store: Path, tmp_path: Path, monkeypatch) ->
         }
     )
     res = subprocess.run(
-        ["rebar", "verify-authorship", "--all"],
+        ["rebar", "verify-identity", "--all"],
         cwd=store,
         env=env,
         capture_output=True,

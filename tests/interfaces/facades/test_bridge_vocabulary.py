@@ -44,7 +44,7 @@ def test_bridge_setup_routes_the_existing_wizard(monkeypatch: pytest.MonkeyPatch
     """The canonical noun command is a pass-through into the onboarding parser."""
     captured: list[tuple[list[str], str]] = []
 
-    def fake_onboard(argv: list[str], *, prog: str = "rebar jira-onboard") -> int:
+    def fake_onboard(argv: list[str], *, prog: str = "rebar bridge setup") -> int:
         captured.append((argv, prog))
         return 5
 

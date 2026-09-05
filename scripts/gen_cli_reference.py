@@ -63,8 +63,7 @@ never consumed):
   `--output json` still prints the JSON.
 
 Bridge operations use the canonical nested forms `rebar bridge fsck`, `rebar bridge
-check-access`, and `rebar bridge setup`; the retained top-level `rebar bridge-fsck` spelling is
-kept for compatibility.
+check-access`, and `rebar bridge setup`.
 """
 
 

@@ -38,6 +38,12 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): simple CLI compatibility aliases have been removed.** Use
+  `rebar bridge status` instead of `rebar bridge-status`, `rebar bridge fsck`
+  instead of `rebar bridge-fsck`, `rebar bridge check-access` instead of
+  `rebar bridge-probe`, `rebar bridge setup` instead of `rebar jira-onboard`,
+  and `rebar verify-identity` instead of `rebar verify-authorship`.
+
 - **BREAKING (pre-1.0): canonical config spellings only.** ADR 0116 removes the
   old config/env aliases as a clean operator-approved pre-1.0 break. Migrate
   `REBAR_NO_SYNC` to `REBAR_SYNC_PULL=off`, `COMPACT_THRESHOLD` to

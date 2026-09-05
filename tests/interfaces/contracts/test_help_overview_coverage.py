@@ -26,9 +26,8 @@ import pytest
 from rebar._cli import _help
 
 # Arms intentionally NOT advertised in the overview. ``help`` is the top-level help
-# word (no .txt of its own); bridge-fsck and bridge-probe are retained compatibility
-# entrypoints whose canonical children are advertised by the bridge group.
-_OVERVIEW_ALLOWLIST = frozenset({"help", "bridge-fsck", "bridge-probe"})
+# word (no .txt of its own).
+_OVERVIEW_ALLOWLIST = frozenset({"help"})
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RETIRED_BRIDGE_COMMANDS = ("purge-bridge",)
 

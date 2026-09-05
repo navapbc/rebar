@@ -169,7 +169,7 @@ class VerifyConfig:
 @dataclass
 class IdentityConfig:
     # Opt-in authenticated-authorship enforcement (epic gnu-whale-ichor). When true,
-    # `rebar verify-authorship` (the CI merge-gate) FAILS if any in-scope mutating event
+    # `rebar verify-identity` (the CI merge-gate) FAILS if any in-scope mutating event
     # is not a `verified` authored signature, and the UX write-gate refuses a write that
     # cannot be signed (no resolvable identity / no signing key) for the gate-exempt types.
     # Default off ⇒ authorship is advisory (signed best-effort, never enforced). Turning it
