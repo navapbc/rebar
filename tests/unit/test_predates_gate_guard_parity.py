@@ -266,6 +266,11 @@ def test_derived_guarded_workflows_cover_the_manual_floor() -> None:
         "the derived closure no longer includes the artifact probe reusable, so the lane fan-out "
         "from the Verified/branch roots is stale"
     )
+    gerrit_only = _workflow_closure((".github/workflows/gerrit-verify.yaml",))
+    assert ".github/workflows/_scanner-integration.yml" in gerrit_only, (
+        "scanner-integration must be reachable from gerrit-verify.yaml itself, not only "
+        "from the branch/mirror test.yml lane, before a later change can make it voting"
+    )
 
 
 def test_empty_tree_every_guarded_step_skips_cleanly(tmp_path: Path) -> None:
