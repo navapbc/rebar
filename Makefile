@@ -399,6 +399,16 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# The rule is declared-variable-aware, not a blanket ban on `$${`: user_data.sh has four
 	@# legitimate `$${data_volume_id}` references, the one variable main.tf passes.
 	python scripts/check_templatefile_escapes.py
+	@# EC2 user_data size gate (bug a68c-9633-248c-4b06). Third sibling of the two gates
+	@# either side of it, and it catches what neither can: a template that is valid bash AND
+	@# correctly escaped can still be too BIG. EC2 caps UserData at 16,384 bytes, so when
+	@# user_data.sh rendered to 16,668 `terraform plan` could not GENERATE -- for the entire
+	@# configuration, because terraform evaluates everything before reporting -- and every
+	@# apply was blocked for a day while the daily drift sweep's red run read as "drift".
+	@# The gate measures the payload AWS actually receives (rendered, then base64gzip'd if
+	@# the HCL says so), never the raw file: raw under-reports a render and over-reports a
+	@# gzip, so it is wrong in both directions. Pure-Python and hermetic (no live AWS).
+	python scripts/check_user_data_size.py
 	@# SSM SecureString secret-in-state gate (bug eb67-b96c-dcf0-4f86, ADR 0105). Sibling to the
 	@# templatefile gate above and structured the same way. A SecureString secret written with a
 	@# plaintext `value` persists that value in CLEARTEXT in the remote terraform state — the
