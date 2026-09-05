@@ -325,6 +325,66 @@ def _warn_if_verify_cannot_resolve(
         )
 
 
+def _pinned_public_key_bodies(principal: str, repo_root) -> set[str]:
+    """The MATCHING bodies (``"<type> <base64>"``) of every key pinned for ``principal`` in
+    ``.rebar/trusted_environments.yaml``, or an EMPTY set when the principal is not pinned.
+
+    Fails soft by design: an absent, unreadable, or malformed pin config yields "nothing
+    pinned", exactly like :func:`rebar.attest.trusted_env.trusted_env_keyring`'s own fail-open
+    posture, so a broken pin file can never wedge signing. Imported lazily (and from
+    ``rebar.attest.trusted_env``, never ``rebar._opcert_verify``) to avoid an import cycle with
+    this module's end-of-file re-exports."""
+    try:
+        from rebar.attest import trusted_env
+
+        keyring = trusted_env.trusted_env_keyring(principal, repo_root)
+        if not keyring:
+            return set()
+        return {b for b in (_ssh_pub_body(k.get("public_key")) for k in keyring) if b}
+    except Exception:  # a broken pin config must never wedge signing
+        logger.debug(
+            "op-cert pinned-key lookup skipped (best-effort; principal=%s)",
+            principal,
+            exc_info=True,
+        )
+        return set()
+
+
+def _refuse_if_pinned_principal_key_mismatch(key_path: str, principal: str, repo_root) -> None:
+    """Bug ff4a guard: REFUSE to mint a cert that CLAIMS a pinned environment while being signed
+    under a key that environment does not pin.
+
+    That divergence is the ff4a class: an async gate daemon that lost its context-local signer
+    binding resolved ``principal`` from the process-global ``REBAR_OPCERT_ENV_ID`` (shared by
+    threads) but its KEY from the ``<tracker>/.opcert-key`` genesis path, which silently
+    auto-generates a fresh keypair. The cert then claims production and fails
+    ``ssh-keygen -Y verify`` against that environment's pinned public key — a silent,
+    hours-later close-gate refusal. :func:`_warn_if_verify_cannot_resolve` cannot catch it: it
+    checks the signing process's SELF-consistency (trivially true in the unbound daemon), never
+    principal-to-key consistency.
+
+    Raising is the fail-closed answer and reaches the caller IN BAND — the signing seam converts
+    :class:`OpcertKeyUnavailable` into a ``rebar.signing.SigningError`` so the call site records
+    ``{signed: false}`` without wedging the local op.
+
+    NO-OP when the principal is not pinned (every ordinary developer box, whose env-id appears in
+    no ``trusted_environments.yaml``), so the developer-local genesis path is unchanged. Also a
+    no-op when the signing key's own public half cannot be read at all — that diagnosis belongs
+    to the existing paths."""
+    pinned = _pinned_public_key_bodies(principal, repo_root)
+    if not pinned:
+        return
+    signed_body = _ssh_pub_body(_read_opcert_pub(key_path))
+    if signed_body is None or signed_body in pinned:
+        return
+    raise OpcertKeyUnavailable(
+        "Error: cannot mint op-cert signature: the certificate would claim the pinned "
+        f"environment {principal!r} but is signed under a key that environment does not pin "
+        f"(key_path={key_path}). Such a certificate cannot verify against that environment's "
+        "pinned public key. See bug ff4a-2832-def4-4e55."
+    )
+
+
 def _manifest_material_fingerprint(manifest) -> str | None:
     """Extract the bound ``material: <fingerprint>`` value from a manifest (the material both the
     plan-review and completion manifests carry), or None when absent."""
@@ -366,6 +426,7 @@ def mint_opcert_record(
 
     principal = opcert_principal(str(tracker), binding=binding)
     _warn_if_verify_cannot_resolve(tracker, key_path, principal)
+    _refuse_if_pinned_principal_key_mismatch(key_path, principal, repo_root)
     material_fingerprint = _manifest_material_fingerprint(steps) or ""
     # Bound commit: the manifest's signed `verified-at-sha:` when present (an attested review or
     # close), else current HEAD.
