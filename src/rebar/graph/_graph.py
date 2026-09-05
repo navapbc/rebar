@@ -18,9 +18,6 @@ from ._cache import (
 from ._relations import _BLOCKING_RELATIONS, bfs
 from ._status import _get_ticket_status
 
-# Use module-level accessor so tests can patch _loader_module.reducer.reduce_all_tickets
-reduce_ticket = _loader_module.reduce_ticket
-
 
 def build_dep_graph(
     ticket_id: str, tracker_dir: str, exclude_archived: bool = True
@@ -75,7 +72,7 @@ def _compute_dep_graph(
         # non-blocking links (relates_to / discovered_from) — reduce it singly.
         ticket_dir = os.path.join(tracker_dir, ticket_id)
         if os.path.isdir(ticket_dir):
-            single = reduce_ticket(ticket_dir)
+            single = _loader_module.reduce_ticket(ticket_dir)
             if single is not None and isinstance(single, dict):
                 state = single
     if state is not None and isinstance(state, dict):
@@ -126,7 +123,7 @@ def _reduce_or_none(ticket_dir: str) -> dict[str, Any] | None:
     skipped rather than aborting the walk.
     """
     try:
-        state = reduce_ticket(ticket_dir)
+        state = _loader_module.reduce_ticket(ticket_dir)
     except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket dir is skipped during traversal
         return None
     return state if isinstance(state, dict) else None

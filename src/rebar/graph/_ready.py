@@ -8,17 +8,17 @@ when:
      TERMINAL state -- closed, archived or deleted (or missing) -- per the shared
      ``rebar.reducer.is_terminal_status`` predicate.
 
-Kept dependency-light on purpose: it imports only ``reduce_all_tickets`` from the
-``ticket_reducer`` package and does not pull in the heavier ``ticket_graph``
-loader/graph modules.
+Kept dependency-light on purpose: it reaches the reducer through the graph loader
+and does not pull in the heavier graph modules.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from rebar.reducer import is_terminal_status, reduce_all_tickets
+from rebar.reducer import is_terminal_status
 
+from . import _loader
 from ._relations import build_blocked_by
 
 # The "open-ish" statuses that make a ticket eligible for readiness/dispatch.
@@ -60,7 +60,9 @@ def find_ready_tickets(
 
     # session_log tickets never participate in the dependency graph — exclude them
     # so ready-computation timings are unaffected by verbose log bodies.
-    all_states_list = reduce_all_tickets(str(tracker_dir), exclude_session_logs=True)
+    all_states_list = _loader.reducer.reduce_all_tickets(
+        str(tracker_dir), exclude_session_logs=True
+    )
 
     # Build a lookup dict, skipping error states.
     ticket_states: dict[str, dict] = {}

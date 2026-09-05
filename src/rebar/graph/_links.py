@@ -10,9 +10,9 @@ from collections.abc import Callable
 
 from rebar.reducer._sort import prefix_ts as _prefix_ts
 
+from . import _loader
 from ._graph import check_cycle_at_level, check_would_create_cycle
 from ._hierarchy import resolve_hierarchy_link
-from ._loader import reduce_ticket
 from ._relations import _BLOCKING_RELATIONS
 from ._status import _get_ticket_status
 
@@ -269,7 +269,7 @@ def add_dependency(
 
     resolved_source_dir = os.path.join(tracker_dir, resolved_source)
     resolved_source_state = (
-        reduce_ticket(resolved_source_dir) if os.path.isdir(resolved_source_dir) else None
+        _loader.reduce_ticket(resolved_source_dir) if os.path.isdir(resolved_source_dir) else None
     )
     level = (
         (resolved_source_state.get("ticket_type") or "").lower() if resolved_source_state else ""

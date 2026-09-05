@@ -62,16 +62,6 @@ def _store_mount_eligible(argv: list[str]) -> bool:
     return sub in _INTERCEPTS or sub in _help.known_subcommands()
 
 
-def _wants_help(rest: list[str]) -> bool:
-    """Deprecated shim — see :func:`rebar._cli._help_route.wants_help`."""
-    return _help_route.wants_help(rest)
-
-
-def _help_requested(sub: str, rest: list[str]) -> bool:
-    """Deprecated shim — see :func:`rebar._cli._help_route.help_requested`."""
-    return _help_route.help_requested(sub, rest)
-
-
 def _enrich(rest: list[str]) -> int:
     """``rebar enrich`` handler — the enrich drain/status intercept."""
     from rebar import config as _config
@@ -295,11 +285,6 @@ def _grounding_info(argv: list[str]) -> int:
         lines.append(f"    - {b['name']}: {mark}{ver}")
     sys.stdout.write("\n".join(lines) + "\n")
     return 0
-
-
-def _emit_subcommand_help(sub: str) -> int:
-    """Deprecated shim — see :func:`rebar._cli._help_route.emit_subcommand_help`."""
-    return _help_route.emit_subcommand_help(sub)
 
 
 # Mutating verbs that confirm their result on stdout (ticket 6bda-9d58-8546-4638).

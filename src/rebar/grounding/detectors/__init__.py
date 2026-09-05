@@ -11,8 +11,6 @@ Public surface (import from this subpackage, not the package ``__init__``):
 * :class:`Detector` — one loaded, parsed detector (id, envelope, backend, source).
 * :class:`Registry` — the read-only in-memory snapshot of all detectors.
 * :func:`load_registry` — the process-local, mtime-cached registry builder.
-* :data:`DIMENSIONS` — a mirror of the canonical closed dimension vocabulary owned
-  by :data:`rebar.grounding.oracle.DIMENSIONS` (kept in sync; see :mod:`registry`).
 """
 
 from __future__ import annotations
@@ -23,7 +21,6 @@ from .registry import (
     BACKEND_OPENGREP,
     BACKEND_SARIF,
     BACKENDS,
-    DIMENSIONS,
     Detector,
     Registry,
     load_registry,
@@ -35,7 +32,6 @@ __all__ = [
     "BACKEND_METRIC",
     "BACKEND_OPENGREP",
     "BACKEND_SARIF",
-    "DIMENSIONS",
     "Detector",
     "Registry",
     "load_registry",

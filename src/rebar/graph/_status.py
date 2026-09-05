@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 
-from ._loader import reduce_ticket
+from . import _loader
 from ._relations import _BLOCKING_RELATIONS  # re-exported for _blockers
 
 # ``_BLOCKING_RELATIONS`` is imported here solely so ``_blockers`` can resolve it
@@ -22,8 +22,8 @@ def _get_ticket_status(ticket_id: str, tracker_dir: str) -> str:
     Tombstone-awareness rules:
     - Directory absent → treat as "closed" (archived/tombstoned)
     - Directory contains .tombstone.json → read its 'status' field
-    - reduce_ticket() returns None → treat as "closed" (ghost ticket safety)
-    - reduce_ticket() returns error-state → treat as "closed"
+    - _loader.reduce_ticket() returns None → treat as "closed" (ghost ticket safety)
+    - _loader.reduce_ticket() returns error-state → treat as "closed"
     """
     ticket_dir = os.path.join(tracker_dir, ticket_id)
 
@@ -43,7 +43,7 @@ def _get_ticket_status(ticket_id: str, tracker_dir: str) -> str:
 
     # Reduce the ticket to get its compiled state
     try:
-        state = reduce_ticket(ticket_dir)
+        state = _loader.reduce_ticket(ticket_dir)
     except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket has no effective status, default closed
         return "closed"
 

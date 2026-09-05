@@ -156,7 +156,7 @@ def _run_review(
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     from rebar.llm.code_review import detectors as _det
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
     return gate_dispatch.produce_code_review_verdict(
         gate_dispatch.CodeReviewRequest(
             LLMConfig.from_env(repo_root=str(repo)),

@@ -75,7 +75,7 @@ def test_code_review_gate_runs_attested_with_code_and_ticket_roots(
     # The WS5 security detector is its own concern; keep this focused on the gate wrapping.
     from rebar.llm.code_review import detectors as _det
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
 
     seen: dict = {}
 
@@ -166,7 +166,7 @@ def test_code_review_gate_runner_is_rebuilt_from_rerooted_ticket_store(
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     from rebar.llm.code_review import detectors as _det
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
 
     class _RecordingRunner:
         """A runner whose ``_config`` is exactly the cfg it was built from — so the test can see
@@ -295,7 +295,7 @@ Review the change against the pinned project policy.
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     from rebar.llm.code_review import detectors as _det
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
     seen: dict = {}
 
     def _spy(doc, inputs, **kw):
@@ -351,7 +351,7 @@ def test_code_review_gate_local_aligns_agent_config_with_execution_root(
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     from rebar.llm.code_review import detectors as _det
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
     seen: dict = {}
 
     def _spy(doc, inputs, **kw):
@@ -399,7 +399,7 @@ def _stub_workflow(monkeypatch, verdict: dict) -> None:
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     from rebar.llm.code_review import detectors as _det
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
 
     def _spy(doc, inputs, **kw):
         class _R:
@@ -495,7 +495,7 @@ def test_pass1_finder_receives_no_prior_findings(repo_with_origin, monkeypatch):
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     from rebar.llm.code_review import detectors as _det
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
 
     def _spy(doc, inputs, **kw):
         captured["inputs"] = inputs
@@ -573,7 +573,7 @@ def test_carried_findings_reach_only_the_post_pass1_merge_input(repo_with_origin
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     from rebar.llm.code_review import detectors as _det
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
 
     def _spy(doc, inputs, **kw):
         captured["inputs"] = inputs

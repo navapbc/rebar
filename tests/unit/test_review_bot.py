@@ -386,7 +386,7 @@ def test_adapter_renders_named_finding_for_detector_match_block(monkeypatch, tmp
 
     monkeypatch.setattr(
         detectors,
-        "run_security_detectors",
+        "run_detectors",
         lambda **kw: {
             "high-critical-security": {
                 "abstained": [],

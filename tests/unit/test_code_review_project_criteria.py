@@ -577,7 +577,7 @@ def test_project_criterion_fan_in_executes_once_through_production_two_round_gat
     runner = _ProductionRecordingRunner()
     from rebar.llm.code_review import detectors
 
-    monkeypatch.setattr(detectors, "run_security_detectors", lambda **kwargs: {})
+    monkeypatch.setattr(detectors, "run_detectors", lambda **kwargs: {})
 
     verdict = gate_dispatch.produce_code_review_verdict(
         gate_dispatch.CodeReviewRequest(
@@ -637,7 +637,7 @@ def test_project_det_criterion_stays_outside_llm_fan_in(tmp_path, monkeypatch) -
     runner = _ProductionRecordingRunner()
     from rebar.llm.code_review import detectors
 
-    monkeypatch.setattr(detectors, "run_security_detectors", lambda **kwargs: {})
+    monkeypatch.setattr(detectors, "run_detectors", lambda **kwargs: {})
 
     verdict = gate_dispatch.produce_code_review_verdict(
         gate_dispatch.CodeReviewRequest(
@@ -743,7 +743,7 @@ def test_project_routing_controls_pass3_through_production_gate(tmp_path, monkey
     runner = _ProductionRecordingRunner()
     from rebar.llm.code_review import detectors
 
-    monkeypatch.setattr(detectors, "run_security_detectors", lambda **kwargs: {})
+    monkeypatch.setattr(detectors, "run_detectors", lambda **kwargs: {})
 
     verdict = gate_dispatch.produce_code_review_verdict(
         gate_dispatch.CodeReviewRequest(
@@ -794,7 +794,7 @@ def _verdict_with_changed_files(
 ) -> dict:
     from rebar.llm.code_review import detectors
 
-    monkeypatch.setattr(detectors, "run_security_detectors", lambda **kwargs: {})
+    monkeypatch.setattr(detectors, "run_detectors", lambda **kwargs: {})
     return gate_dispatch.produce_code_review_verdict(
         gate_dispatch.CodeReviewRequest(
             LLMConfig.from_env(repo_root=str(repo)),

@@ -9,11 +9,6 @@ Public re-exports:
     event_sort_key                        — from _sort
     compute_dir_hash, read_cache,
     write_cache                           — from _cache
-    process_create, process_status,
-    process_comment, process_link,
-    process_unlink, process_bridge_alert,
-    process_revert, process_edit,
-    process_archived, process_snapshot,
     scan_for_latest_snapshot, replay_events     — from _replay (the two-pass engine)
     to_llm                                — from llm_format
 """
@@ -27,18 +22,6 @@ from ._cache import (
 )
 from ._filters import apply_ticket_filters
 from ._inbound import find_inbound_relationships
-from ._processors import (
-    process_archived,
-    process_bridge_alert,
-    process_comment,
-    process_create,
-    process_edit,
-    process_link,
-    process_revert,
-    process_snapshot,
-    process_status,
-    process_unlink,
-)
 from ._replay import replay_events, scan_for_latest_snapshot
 from ._sort import event_sort_key
 from ._state import (
@@ -65,16 +48,6 @@ __all__ = [
     "make_error_dict",
     "make_initial_state",
     "prepare_event_files",
-    "process_archived",
-    "process_bridge_alert",
-    "process_comment",
-    "process_create",
-    "process_edit",
-    "process_link",
-    "process_revert",
-    "process_snapshot",
-    "process_status",
-    "process_unlink",
     "read_cache",
     "reduce_all_tickets",
     "reduce_ticket",

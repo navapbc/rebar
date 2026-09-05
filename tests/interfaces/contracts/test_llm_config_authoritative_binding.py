@@ -252,7 +252,7 @@ def test_review_code_composes_the_llm_config_exactly_once(
 
     monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
     monkeypatch.delenv("REBAR_GATE_REF", raising=False)
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
 
     calls: list[LLMConfig] = []
     real_from_env = LLMConfig.from_env

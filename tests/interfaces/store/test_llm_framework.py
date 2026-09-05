@@ -543,7 +543,7 @@ def test_review_code_runs_gate_without_config_key(monkeypatch: pytest.MonkeyPatc
     # _local_gate_source fixture in tests/unit/test_code_review_ws4.py).
     monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
     monkeypatch.delenv("REBAR_GATE_REF", raising=False)
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
     structured = {
         "findings": [],
         "recommend_overlays": [],

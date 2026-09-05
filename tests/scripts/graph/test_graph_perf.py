@@ -24,6 +24,13 @@ from _helpers import (
 
 @pytest.mark.unit
 @pytest.mark.scripts
+def test_private_reducer_shims_are_absent(graph: ModuleType) -> None:
+    assert not hasattr(graph, "_reduce_ticket")
+    assert not hasattr(graph, "_reducer")
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
 def test_graph_cache_invalidated_on_new_link(graph: ModuleType, tmp_path: Path) -> None:
     """Graph cache is invalidated when a new LINK event is added to a ticket.
 
@@ -116,7 +123,7 @@ def test_build_dep_graph_single_batch_scan(graph: ModuleType, tmp_path: Path) ->
 
     Expected: reduce_all_tickets is called exactly once during build_dep_graph.
 
-    Currently RED: build_dep_graph calls _reduce_ticket per-ticket via
+    Currently RED: build_dep_graph calls _loader.reduce_ticket per-ticket via
     _compute_dep_graph and _find_direct_blockers. It does not call reduce_all_tickets.
     """
     from unittest.mock import patch
@@ -132,7 +139,7 @@ def test_build_dep_graph_single_batch_scan(graph: ModuleType, tmp_path: Path) ->
     _write_blocks_link(tracker_dir, "ticket-a", "ticket-e")
 
     # Capture the real reduce_all_tickets so the patch can delegate to it
-    real_reduce_all = graph._reducer.reduce_all_tickets
+    real_reduce_all = graph._loader.reducer.reduce_all_tickets
 
     call_count = []
 
@@ -140,14 +147,14 @@ def test_build_dep_graph_single_batch_scan(graph: ModuleType, tmp_path: Path) ->
         call_count.append(1)
         return real_reduce_all(*args, **kwargs)
 
-    with patch.object(graph._reducer, "reduce_all_tickets", side_effect=counting_reduce_all):
+    with patch.object(graph._loader.reducer, "reduce_all_tickets", side_effect=counting_reduce_all):
         graph.build_dep_graph("ticket-e", str(tracker_dir))
 
     assert len(call_count) == 1, (
         f"Expected reduce_all_tickets to be called exactly once during build_dep_graph, "
         f"but it was called {len(call_count)} time(s). "
         "build_dep_graph must pre-load all ticket states via a single reduce_all_tickets "
-        "call instead of calling _reduce_ticket per-ticket in _find_direct_blockers and "
+        "call instead of calling _loader.reduce_ticket per-ticket in _find_direct_blockers and "
         "_compute_dep_graph."
     )
 
@@ -155,15 +162,15 @@ def test_build_dep_graph_single_batch_scan(graph: ModuleType, tmp_path: Path) ->
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_find_direct_blockers_no_per_ticket_scan(graph: ModuleType, tmp_path: Path) -> None:
-    """_find_direct_blockers must not call _reduce_ticket directly — use pre-loaded state.
+    """_find_direct_blockers must not call _loader.reduce_ticket directly — use pre-loaded state.
 
     Setup:
         - ticket-blocker: open, blocks ticket-target
         - ticket-target: open
 
-    Pre-loaded state dict is passed in. _reduce_ticket must NOT be called.
+    Pre-loaded state dict is passed in. _loader.reduce_ticket must NOT be called.
 
-    Currently RED: _find_direct_blockers calls _reduce_ticket directly for each
+    Currently RED: _find_direct_blockers calls _loader.reduce_ticket directly for each
     ticket dir it scans. After refactor, it must accept a pre-loaded all_states
     dict and use that instead.
     """
@@ -176,37 +183,38 @@ def test_find_direct_blockers_no_per_ticket_scan(graph: ModuleType, tmp_path: Pa
     _write_ticket(tracker_dir, "ticket-target", status="open")
     _write_blocks_link(tracker_dir, "ticket-blocker", "ticket-target")
 
+    real_reduce_ticket = graph._loader.reduce_ticket
     reduce_ticket_calls = []
 
     def spy_reduce_ticket(*args, **kwargs):  # type: ignore[no-untyped-def]
         reduce_ticket_calls.append(args)
-        return graph._reduce_ticket(*args, **kwargs)
+        return real_reduce_ticket(*args, **kwargs)
 
-    with patch.object(graph, "_reduce_ticket", side_effect=spy_reduce_ticket):
-        # After refactor, _find_direct_blockers should accept all_states and not call _reduce_ticket
+    with patch.object(graph._loader, "reduce_ticket", side_effect=spy_reduce_ticket):
+        # After refactor, _find_direct_blockers should accept all_states and not call reduce_ticket.
         graph._find_direct_blockers("ticket-target", str(tracker_dir))
 
     assert len(reduce_ticket_calls) == 0, (
-        f"Expected _reduce_ticket to be called 0 times in _find_direct_blockers "
+        f"Expected _loader.reduce_ticket to be called 0 times in _find_direct_blockers "
         f"(should use pre-loaded state), but it was called {len(reduce_ticket_calls)} time(s). "
         "_find_direct_blockers must be refactored to accept a pre-loaded all_states dict "
-        "and look up ticket states from it instead of calling _reduce_ticket per ticket."
+        "and look up ticket states from it instead of calling _loader.reduce_ticket per ticket."
     )
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_compute_dep_graph_children_use_preloaded_state(graph: ModuleType, tmp_path: Path) -> None:
-    """_compute_dep_graph must not call _reduce_ticket for children discovery.
+    """_compute_dep_graph must not call _loader.reduce_ticket for children discovery.
 
     Setup:
         - parent-epic: epic with 3 child stories
         - story-a, story-b, story-c: open stories with parent_id=parent-epic
 
-    Expected: _reduce_ticket is NOT called during _compute_dep_graph. All state
+    Expected: _loader.reduce_ticket is NOT called during _compute_dep_graph. All state
     lookups should use a pre-loaded all_states dict passed in from build_dep_graph.
 
-    Currently RED: _compute_dep_graph calls _reduce_ticket for each directory entry
+    Currently RED: _compute_dep_graph calls _loader.reduce_ticket for each directory entry
     to discover children. After refactor, it must use pre-loaded state.
     """
     from unittest.mock import patch
@@ -219,20 +227,21 @@ def test_compute_dep_graph_children_use_preloaded_state(graph: ModuleType, tmp_p
     _write_ticket(tracker_dir, "story-b", parent_id="parent-epic", ticket_type="story")
     _write_ticket(tracker_dir, "story-c", parent_id="parent-epic", ticket_type="story")
 
+    real_reduce_ticket = graph._loader.reduce_ticket
     reduce_ticket_calls = []
 
     def spy_reduce_ticket(*args, **kwargs):  # type: ignore[no-untyped-def]
         reduce_ticket_calls.append(args)
-        return graph._reduce_ticket(*args, **kwargs)
+        return real_reduce_ticket(*args, **kwargs)
 
-    with patch.object(graph, "_reduce_ticket", side_effect=spy_reduce_ticket):
+    with patch.object(graph._loader, "reduce_ticket", side_effect=spy_reduce_ticket):
         graph._compute_dep_graph("parent-epic", str(tracker_dir))
 
     assert len(reduce_ticket_calls) == 0, (
-        f"Expected _reduce_ticket to be called 0 times in _compute_dep_graph "
+        f"Expected _loader.reduce_ticket to be called 0 times in _compute_dep_graph "
         f"(should use pre-loaded state for children discovery), "
         f"but it was called {len(reduce_ticket_calls)} time(s). "
         "_compute_dep_graph must be refactored to receive a pre-loaded all_states dict "
         "and use it for both children discovery and blocker resolution instead of "
-        "calling _reduce_ticket per directory entry."
+        "calling _loader.reduce_ticket per directory entry."
     )

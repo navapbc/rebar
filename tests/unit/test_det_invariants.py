@@ -2,9 +2,9 @@
 
 Pins the generalization of the DET-invariant consumer:
 
-* the code-review consumer is DATA-DRIVEN (``run_detectors`` ≡ its ``run_security_detectors``
-  alias) and honors a per-criterion ``fail_mode`` (open records coverage; closed blocks on an
-  abstain);
+* the code-review consumer is DATA-DRIVEN (``run_detectors`` only; the old security-named
+  alias is absent) and honors a per-criterion ``fail_mode`` (open records coverage; closed
+  blocks on an abstain);
 * plan-review learns an ``exec: "DET"`` descriptor branch (prompt-less), keeps DET criteria OUT of
   the LLM batch, and runs a dynamic project-DET phase after the static P1–P9 floor (empty for a
   repo with no activated DET criterion; a file_impact-scoped match → a blocking DetResult).
@@ -66,8 +66,8 @@ def _ctx(repo_root, *, file_impact=None):
     )
 
 
-# ── (a) run_detectors / run_security_detectors alias equivalence ─────────────────
-def test_run_detectors_alias_equivalence(monkeypatch):
+# ── (a) run_detectors routes DET criteria and the old alias is gone ────────────
+def test_run_detectors_routes_det_criteria(monkeypatch):
     from rebar.llm.code_review import detectors
 
     class _Res:
@@ -86,8 +86,7 @@ def test_run_detectors_alias_equivalence(monkeypatch):
 
     monkeypatch.setattr("rebar.grounding.engine_b.scan", lambda *a, **k: _Res())
     a = detectors.run_detectors(changed_files=["app.py"], repo_root=None)
-    b = detectors.run_security_detectors(changed_files=["app.py"], repo_root=None)
-    assert a == b
+    assert not hasattr(detectors, "run_security_detectors")
     # And it routed by the data-driven selector: gitleaks → secret-detection (exact id wins),
     # the eval rule → high-critical-security (prefix class).
     assert a["high-critical-security"]["matches"][0]["location"]["file"] == "app.py"
@@ -110,7 +109,7 @@ def test_fail_mode_open_does_not_block_on_abstain(monkeypatch):
     monkeypatch.setattr(registry, "threshold_for", lambda crits: (0.5, True))
     monkeypatch.setattr(
         detectors,
-        "run_security_detectors",
+        "run_detectors",
         lambda **kw: {"project.inv": {"abstained": [{"reason": "no_tool"}], "matches": []}},
     )
     v = detectors.apply_failclosed(_pass_verdict(), changed_files=["app.py"], repo_root=None)
@@ -130,7 +129,7 @@ def test_fail_mode_closed_blocks_on_abstain(monkeypatch):
     monkeypatch.setattr(registry, "threshold_for", lambda crits: (0.5, True))
     monkeypatch.setattr(
         detectors,
-        "run_security_detectors",
+        "run_detectors",
         lambda **kw: {"project.inv": {"abstained": [{"reason": "no_tool"}], "matches": []}},
     )
     v = detectors.apply_failclosed(_pass_verdict(), changed_files=["app.py"], repo_root=None)
