@@ -715,3 +715,99 @@ resource "aws_cloudwatch_metric_alarm" "var_tmp_cleanup_not_active" {
     Ticket  = "2ba3"
   }
 }
+
+# --- writable CONTAINER layers, the last root generator (ADR 0112 / story 910b-2d43-4482-4c64) ---
+# Published dimensionless by observability.sh 2i on the 5-minute cadence, following
+# root_disk_used_percent. The share behind the percent comes from infra/scripts/container-cap.sh,
+# which reads it from docker-storage-cap.sh — ONE Docker budget with an internal split, never a
+# second cap over the same overlay2 bytes.
+#
+# TWO alarms, not three. `container_quota_enforceable` is published beside these and is
+# deliberately NOT alarmed: overlay2's per-container `--storage-opt size=` needs XFS with the
+# pquota mount option on the filesystem backing /var/lib/docker, which on this root filesystem
+# needs rootflags=pquota and a host reboot — so its honest value is 0 until that reboot is
+# scheduled, and an alarm that pages continuously is muted within a day. It is a capacity fact to
+# read when interpreting rebar-container-writable-usage-high, not an incident.
+
+resource "aws_cloudwatch_metric_alarm" "container_writable_usage_high" {
+  alarm_name        = "rebar-container-writable-usage-high"
+  alarm_description = <<-EOT
+    Writable container layers are above 85% of their share of the Docker budget (the value lives
+    in infra/scripts/container-cap.sh, readable with `--print-env`). READ THIS KNOWING WHAT HOLDS
+    IT: rebar-container-reaper.timer can only remove EXITED containers, so if the bytes belong to
+    a RUNNING service NOTHING here bounds them — only an overlay2 per-container quota would, and
+    rebar/host:container_quota_enforceable says whether this host can even have one. DIAGNOSIS:
+    `docker ps -a --size` names the containers; compare rebar/host:container_exited_bytes against
+    container_writable_bytes to see whether this is reclaimable debris or the live services.
+    REMEDIATION: `bash infra/scripts/container-cap.sh --reap` forces a pass; a live service
+    growing its own layer is an application problem, not a cleanup one. NEVER delete anything
+    under /var/lib/docker/overlay2 by hand. Published as
+    rebar/host:container_writable_used_percent by observability.sh 2i.
+    Runbook: infra/runbooks/review-bot-ops.md.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "container_writable_used_percent"
+  statistic   = "Maximum"
+
+  # The house 300/3/2 shape (root_disk_pressure above): 2 breaching datapoints in a 3-period
+  # window absorbs the ordinary timer jitter that makes ~2 of 24 periods absent on this box.
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 85
+  comparison_operator = "GreaterThanThreshold"
+
+  # observability.sh 2i publishes this ONLY when `docker system df` yielded a parseable Containers
+  # row, so absence means the probe could not size writable layers — exactly when this must page
+  # rather than clear to OK (bug 3276 defect 2). Pinned by tests/unit/test_alarm_actions_terraform.py.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "910b"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "container_reaper_not_active" {
+  alarm_name        = "rebar-container-reaper-not-active"
+  alarm_description = <<-EOT
+    NOTHING is reaping exited-container debris. Either rebar-container-reaper.timer is not
+    running or its units no longer match what infra/scripts/container-cap.sh renders — and since
+    no per-container overlay2 quota is in force on this host (see
+    rebar/host:container_quota_enforceable), that leaves writable layers bounded only by the size
+    of the root volume, which is the 2026-09-02 outage exactly. While this fires,
+    rebar-container-writable-usage-high is measured against a share nothing is holding. CONFIRM
+    with `bash infra/scripts/container-cap.sh --check-active` (prints 1/0). REMEDIATE with
+    `bash infra/scripts/container-cap.sh --install`, which is idempotent and reports the state in
+    words, then `systemctl status rebar-container-reaper.timer`. Published as
+    rebar/host:container_reaper_active, a 1/0 heartbeat on every probe tick.
+    Runbook: infra/runbooks/review-bot-ops.md.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "container_reaper_active"
+  statistic   = "Minimum"
+
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+
+  # Heartbeat semantics (the var_tmp_cleanup_not_active / journal_cap_not_in_effect shape): the
+  # healthy path publishes 1 on EVERY tick, so absence means the probe, the timer, or the host is
+  # dead — the one state this alarm most needs to announce.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "910b"
+  }
+}
