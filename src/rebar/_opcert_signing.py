@@ -325,6 +325,95 @@ def _warn_if_verify_cannot_resolve(
         )
 
 
+def _pinned_public_key_bodies(principal: str, repo_root) -> set[str] | None:
+    """The MATCHING bodies (``"<type> <base64>"``) of every ACTIVE key pinned for ``principal``
+    in ``.rebar/trusted_environments.yaml``, or ``None`` when ``principal`` is not pinned at all.
+
+    The ``None``-vs-``set()`` split is load-bearing, and so is the refusal below. Three states
+    must stay distinguishable, because two of them were previously collapsed into one:
+
+    * **not pinned** (no keyring for this env id) -> ``None``. The caller no-ops; this is every
+      ordinary developer box and the fail-open case ``load_trusted_environments`` returns
+      ``None`` for when the config is simply ABSENT.
+    * **pinned, with active keys** -> that set of bodies.
+    * **pinned, but every key REVOKED** -> an EMPTY set, which is NOT "not pinned": the caller
+      refuses. ``trusted_env_keyring`` returns every record regardless of
+      ``revoked_at_log_position``, and the verify path filters by key era
+      (``key_not_valid_at_era``) while this sign-time guard has no storage anchor to filter
+      against. But a revoked key is revoked as of a PAST log position and a signature made now
+      is necessarily later, so it can never yield a cert that verifies at its own anchor.
+
+    UNREADABLE IS NOT UNPINNED. ``load_trusted_environments`` raises
+    :class:`~rebar.attest.trusted_env.TrustedEnvError` for a present-but-malformed or unreadable
+    config, and swallowing that into "nothing pinned" would silently DISABLE this guard — the
+    very failure mode of bug ff4a-2832-def4-4e55 (an absence of enforcement reported as success)
+    reproduced inside its own fix. When the trust root cannot be read, whether this principal is
+    pinned is UNKNOWN, and unknown must not read as fine: raise, so the seam records
+    ``{signed: false}`` in band and an operator sees it. An ABSENT config still fails open, so
+    a checkout with no pin file is unaffected.
+
+    Imported lazily (and from ``rebar.attest.trusted_env``, never ``rebar._opcert_verify``) to
+    avoid an import cycle with this module's end-of-file re-exports."""
+    from rebar.attest import trusted_env
+
+    try:
+        keyring = trusted_env.trusted_env_keyring(principal, repo_root)
+    except Exception as exc:  # noqa: BLE001 — an undeterminable trust root must never read as "unpinned"
+        raise OpcertKeyUnavailable(
+            "Error: cannot mint op-cert signature: the trusted-environments pin config could "
+            f"not be read, so whether {principal!r} is a pinned environment is unknown "
+            f"({exc}). Refusing rather than signing an unverifiable certificate. "
+            "See bug ff4a-2832-def4-4e55."
+        ) from None
+    if not keyring:
+        return None
+    return {
+        b
+        for b in (
+            _ssh_pub_body(k.get("public_key"))
+            for k in keyring
+            if k.get("revoked_at_log_position") is None
+        )
+        if b
+    }
+
+
+def _refuse_if_pinned_principal_key_mismatch(key_path: str, principal: str, repo_root) -> None:
+    """Bug ff4a guard: REFUSE to mint a cert that CLAIMS a pinned environment while being signed
+    under a key that environment does not pin.
+
+    That divergence is the ff4a class: an async gate daemon that lost its context-local signer
+    binding resolved ``principal`` from the process-global ``REBAR_OPCERT_ENV_ID`` (shared by
+    threads) but its KEY from the ``<tracker>/.opcert-key`` genesis path, which silently
+    auto-generates a fresh keypair. The cert then claims production and fails
+    ``ssh-keygen -Y verify`` against that environment's pinned public key — a silent,
+    hours-later close-gate refusal. :func:`_warn_if_verify_cannot_resolve` cannot catch it: it
+    checks the signing process's SELF-consistency (trivially true in the unbound daemon), never
+    principal-to-key consistency.
+
+    Raising is the fail-closed answer and reaches the caller IN BAND — the signing seam converts
+    :class:`OpcertKeyUnavailable` into a ``rebar.signing.SigningError`` so the call site records
+    ``{signed: false}`` without wedging the local op.
+
+    NO-OP when the principal is not pinned (every ordinary developer box, whose env-id appears in
+    no ``trusted_environments.yaml``), so the developer-local genesis path is unchanged. Also a
+    no-op when the signing key's own public half cannot be read at all — that diagnosis belongs
+    to the existing paths. A principal that IS pinned but whose keys are all revoked yields an
+    empty set, not ``None``, and so refuses (see :func:`_pinned_public_key_bodies`)."""
+    pinned = _pinned_public_key_bodies(principal, repo_root)
+    if pinned is None:  # not a pinned environment — the developer-local path, unchanged
+        return
+    signed_body = _ssh_pub_body(_read_opcert_pub(key_path))
+    if signed_body is None or signed_body in pinned:
+        return
+    raise OpcertKeyUnavailable(
+        "Error: cannot mint op-cert signature: the certificate would claim the pinned "
+        f"environment {principal!r} but is signed under a key that environment does not pin "
+        f"(key_path={key_path}). Such a certificate cannot verify against that environment's "
+        "pinned public key. See bug ff4a-2832-def4-4e55."
+    )
+
+
 def _manifest_material_fingerprint(manifest) -> str | None:
     """Extract the bound ``material: <fingerprint>`` value from a manifest (the material both the
     plan-review and completion manifests carry), or None when absent."""
@@ -366,6 +455,7 @@ def mint_opcert_record(
 
     principal = opcert_principal(str(tracker), binding=binding)
     _warn_if_verify_cannot_resolve(tracker, key_path, principal)
+    _refuse_if_pinned_principal_key_mismatch(key_path, principal, repo_root)
     material_fingerprint = _manifest_material_fingerprint(steps) or ""
     # Bound commit: the manifest's signed `verified-at-sha:` when present (an attested review or
     # close), else current HEAD.

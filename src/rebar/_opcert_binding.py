@@ -21,7 +21,9 @@ without importing the FastAPI-adjacent service package. The binding is duck-type
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+import contextvars
+import threading
+from collections.abc import Callable, Iterator
 from contextvars import ContextVar
 from typing import Protocol, runtime_checkable
 
@@ -74,3 +76,29 @@ def bound_signer(binding: OpcertBinding | None, *, push_mode: str | None = "off"
     finally:
         _PUSH_MODE.reset(push_token)
         _BOUND.reset(bound_token)
+
+
+def spawn_context_daemon(
+    target: Callable[[], object], *, name: str | None = None
+) -> threading.Thread:
+    """Start ``target`` on a daemon thread running inside a COPY of the CALLER's context.
+
+    A bare :class:`threading.Thread` starts with a FRESH, EMPTY
+    :class:`~contextvars.Context`, so it does NOT inherit the ``_BOUND`` binding
+    :func:`bound_signer` set in the spawning thread. That loss is bug
+    ``ff4a-2832-def4-4e55``: a certified op running on such a thread resolved its PRINCIPAL
+    from the process-global ``REBAR_OPCERT_ENV_ID`` (which threads DO share) but its KEY from
+    the unbound ``<tracker>/.opcert-key`` genesis path — which silently AUTO-GENERATES a fresh
+    Ed25519 key. The resulting op-cert claimed the pinned production environment while being
+    signed under an untrusted key, so ``ssh-keygen -Y verify`` failed and the attestation read
+    as ``mismatch`` / "no certified plan-review attestation". The synchronous surface never had
+    this problem because ``anyio.to_thread.run_sync`` propagates the caller's context.
+
+    This module owns the ContextVar, so it also owns carrying it across a thread boundary.
+    A fresh :func:`contextvars.copy_context` is taken per call in the CALLER (a ``Context``
+    cannot be entered twice, and copying inside the thread would copy the wrong one).
+    """
+    ctx = contextvars.copy_context()
+    thread = threading.Thread(target=lambda: ctx.run(target), name=name, daemon=True)
+    thread.start()
+    return thread

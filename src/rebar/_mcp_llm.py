@@ -16,13 +16,13 @@ plain ``dict`` (a model-produced result), so no output models are imported here.
 from __future__ import annotations
 
 import functools
-import threading
 import time
 from collections.abc import Callable
 from typing import Any
 
 from rebar._mcp_inflight import GateJobHandle, begin_gate_job, run_gate_singleflight
 from rebar._mcp_models import tool_annotation_presets
+from rebar._opcert_binding import spawn_context_daemon
 
 
 def _structured_llm_failure(exc: Exception) -> dict:
@@ -191,7 +191,9 @@ def _spawn_gate_daemon(
             rebar.llm.record_gate_run(record)
             handle.complete(result=result, error=error)
 
-    threading.Thread(target=_bg, daemon=True).start()
+    # Context-propagating spawn: a bare threading.Thread would drop the op-cert signer
+    # binding and sign the bound principal under an unbound genesis key (bug ff4a).
+    spawn_context_daemon(_bg, name=f"rebar-gate-{gate_type}")
 
 
 def _start_gate_job(

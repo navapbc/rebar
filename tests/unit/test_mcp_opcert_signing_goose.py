@@ -237,11 +237,17 @@ def test_unregistered_key_cert_is_rejected(tmp_path: Path, monkeypatch: pytest.M
     commit = _head(repo)
     tid = rebar.create_ticket("task", "gated work", repo_root=str(repo))
     # Pin the TRUSTED key, but mint the cert under a FOREIGN key composed the same way.
-    _write_trusted_env(repo, ENV_ID, pinned_pub, _tip_position(repo))
+    # The pin is WRITTEN after the mint (with the same pre-mint era position, so the pinned
+    # config the verify walk reads is byte-identical to writing it up front): the sign-time
+    # principal/key-divergence guard added for bug ff4a-2832-def4-4e55 now REFUSES to mint a
+    # cert claiming a pinned environment under a key that environment does not pin, and this
+    # test's oracle is the VERIFY-side rejection, not the mint. Assertions are unchanged.
+    era_position = _tip_position(repo)
 
     binding = _compose_binding(repo, monkeypatch, ENV_ID, foreign_priv)
     assert binding is not None
     _mint_completion_cert_via_binding(repo, tid, binding, commit)
+    _write_trusted_env(repo, ENV_ID, pinned_pub, era_position)
     binding.cleanup()
     rebar.transition(tid, "open", "closed", repo_root=str(repo))
 
