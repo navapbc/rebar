@@ -1,4 +1,4 @@
-"""Held-out subprocess oracle for bridge vocabulary compatibility."""
+"""Held-out subprocess oracle for canonical bridge vocabulary."""
 
 from __future__ import annotations
 
@@ -27,17 +27,13 @@ def _run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_fsck_spellings_are_byte_for_byte_equivalent(rebar_repo: Path, tmp_path: Path) -> None:
-    """A real committed tracker produces the new result through either spelling."""
+def test_fsck_canonical_spelling_produces_json(rebar_repo: Path, tmp_path: Path) -> None:
+    """A real committed tracker produces the audit result through the canonical spelling."""
     tracker = rebar_repo / ".tickets-tracker"
     option = f"--tickets-tracker={tracker}"
 
     canonical = _run(rebar_repo, "bridge", "fsck", option, "--output", "json")
-    legacy = _run(rebar_repo, "bridge-fsck", option, "--output", "json")
 
-    assert canonical.returncode == legacy.returncode
-    assert canonical.stdout == legacy.stdout
-    assert canonical.stderr == legacy.stderr
     assert canonical.returncode == 0
     assert set(json.loads(canonical.stdout)) == {
         "unknown_event_types",
@@ -46,31 +42,37 @@ def test_fsck_spellings_are_byte_for_byte_equivalent(rebar_repo: Path, tmp_path:
     }
 
 
-def test_fsck_spellings_share_operational_failure_exit_two(
+def test_fsck_canonical_spelling_preserves_operational_failure_exit_two(
     rebar_repo: Path, tmp_path: Path
 ) -> None:
-    """Old workflows receive the same fail-closed behavior as the canonical command."""
+    """The canonical command preserves fail-closed behavior."""
     tracker = tmp_path / "not-a-store"
     tracker.mkdir()
     option = f"--tickets-tracker={tracker}"
 
     canonical = _run(rebar_repo, "bridge", "fsck", option, "--output", "json")
-    legacy = _run(rebar_repo, "bridge-fsck", option, "--output", "json")
 
-    assert canonical.returncode == legacy.returncode == 2
-    assert canonical.stdout == legacy.stdout == ""
-    assert canonical.stderr == legacy.stderr
+    assert canonical.returncode == 2
+    assert canonical.stdout == ""
     assert "tickets" in canonical.stderr.lower() or "git" in canonical.stderr.lower()
 
 
-def test_check_access_spellings_share_missing_credential_failure(rebar_repo: Path) -> None:
-    """The real probe boundary preserves failure streams and status for old callers."""
+def test_check_access_canonical_spelling_preserves_missing_credential_failure(
+    rebar_repo: Path,
+) -> None:
+    """The real probe boundary preserves failure streams and status."""
     canonical = _run(rebar_repo, "bridge", "check-access")
-    legacy = _run(rebar_repo, "bridge-probe")
 
-    assert canonical.returncode == legacy.returncode != 0
-    assert canonical.stdout == legacy.stdout
-    assert canonical.stderr == legacy.stderr
+    assert canonical.returncode != 0
+
+
+@pytest.mark.parametrize("removed", ["bridge-fsck", "bridge-probe"])
+def test_removed_bridge_aliases_are_invalid_choices(rebar_repo: Path, removed: str) -> None:
+    completed = _run(rebar_repo, removed)
+
+    assert completed.returncode == 2
+    assert "invalid choice" in completed.stderr
+    assert removed in completed.stderr
 
 
 def test_canonical_help_documents_distinct_mutating_access_check(rebar_repo: Path) -> None:

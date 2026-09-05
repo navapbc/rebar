@@ -2,7 +2,7 @@
 enforcement.
 
 The ONLY 3183 test the implementation sees. Pins the merge-gate on the happy path:
-with `identity.require_authenticated` ON, `rebar verify-authorship` FLAGS an unsigned
+with `identity.require_authenticated` ON, `rebar verify-identity` FLAGS an unsigned
 event and exits non-zero (the real control); with the config OFF it is advisory
 (exit 0). The write-gate, replay-never-rejects, and snapshot round-trip are held out.
 """
@@ -40,7 +40,7 @@ def _verify_authorship(store: Path, *, required: bool) -> subprocess.CompletedPr
     env = subprocess_env({"REBAR_ROOT": str(store)})
     env["REBAR_IDENTITY_REQUIRE_AUTHENTICATED"] = "1" if required else "0"
     return subprocess.run(
-        ["rebar", "verify-authorship", "--all"],
+        ["rebar", "verify-identity", "--all"],
         cwd=store,
         env=env,
         capture_output=True,
@@ -58,6 +58,6 @@ def test_verify_authorship_flags_unsigned_when_required(store: Path) -> None:
 
 
 def test_verify_authorship_advisory_when_off(store: Path) -> None:
-    """With require_authenticated OFF, verify-authorship is advisory (exit 0)."""
+    """With require_authenticated OFF, verify-identity is advisory (exit 0)."""
     res = _verify_authorship(store, required=False)
     assert res.returncode == 0, res.stdout + res.stderr

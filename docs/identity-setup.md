@@ -134,7 +134,7 @@ After configuring a signing key, make any write and check the event:
 ```
 rebar comment <ticket> "hello"
 rebar show <ticket>                 # the new event shows authorship: {signed: >=1}
-rebar verify-authorship             # emits a "verified" verdict for signed events
+rebar verify-identity               # emits a "verified" verdict for signed events
 ```
 The repo-wide CI merge-gate is `rebar verify-identity` (mount the ticket store first if your
 store lives on a separate branch). It reports counts of `verified` / `unsigned` /
@@ -168,7 +168,7 @@ Everything that represents real work is subject to attribution/signing.
       `.rebar/current_identity` pointer is set).
 - [ ] Each environment configures `identity.signing_key` / `REBAR_IDENTITY_SIGNING_KEY` to the
       writer's **private** key (materialized to a `0600` file in CI/containers; job-level env in CI).
-- [ ] `rebar show` shows `authorship: {signed: >=1}` and `rebar verify-authorship` reports
+- [ ] `rebar show` shows `authorship: {signed: >=1}` and `rebar verify-identity` reports
       `verified` for a test write in each environment.
 - [ ] (When ready) `identity.require_authenticated = true` + a sensible `enforce_since`
       boundary, flipped on only after every environment signs.

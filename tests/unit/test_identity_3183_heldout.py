@@ -144,7 +144,7 @@ def test_snapshot_roundtrip_signed_events_still_verify(
 
     env = subprocess_env({"REBAR_ROOT": str(repo), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"})
     res = subprocess.run(
-        ["rebar", "verify-authorship", "--all"],
+        ["rebar", "verify-identity", "--all"],
         cwd=repo,
         env=env,
         capture_output=True,
@@ -177,7 +177,7 @@ def test_verify_authorship_flags_unknown_author(store: Path) -> None:
 
     env = subprocess_env({"REBAR_ROOT": str(store), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"})
     res = subprocess.run(
-        ["rebar", "verify-authorship", "--all"],
+        ["rebar", "verify-identity", "--all"],
         cwd=store,
         env=env,
         capture_output=True,

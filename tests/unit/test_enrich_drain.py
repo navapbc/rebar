@@ -159,7 +159,7 @@ def test_successful_drain_batches_finalize_events_after_visible_claim(
             sys.executable,
             "-m",
             "rebar.cli",
-            "verify-authorship",
+            "verify-identity",
             "--require-authenticated",
             "--root",
             repo,

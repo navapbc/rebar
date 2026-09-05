@@ -24,7 +24,7 @@ while its peers sign is the live problem. Measured against the tracker this was 
 beb1's env, which kept writing unsigned alongside a signing peer.
 
 Presence only — like the store-wide line, this counts the PRESENCE of ``author_sig`` and never
-verifies a signature. Cryptographic verification is ``rebar verify-authorship``.
+verifies a signature. Cryptographic verification is ``rebar verify-identity``.
 """
 
 from __future__ import annotations
@@ -135,6 +135,6 @@ class EnvAuthorshipTally:
                 f"UNSIGNED_ENV: {env_id} — {' and '.join(reasons)}, yet this env wrote after "
                 "authorship signing was adopted in this store. Its writer has no usable "
                 "identity: check `rebar identity use <id>` and identity.signing_key on that "
-                "clone, then `rebar verify-authorship`."
+                "clone, then `rebar verify-identity`."
             )
         return out

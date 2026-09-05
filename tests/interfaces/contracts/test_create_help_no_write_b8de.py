@@ -87,25 +87,19 @@ def test_help_anywhere_before_terminator_shows_usage_no_write(
     assert _ticket_count(rebar_repo) == before, "help must not mutate the store"
 
 
-def test_flat_bridge_family_serves_pinned_help_for_nonleading_flag(
+def test_bridge_family_has_no_flat_compatibility_help_routes(
     rebar_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A FLAT compatibility command in the ``bridge`` group owns no nested children, so a
-    non-leading ``--help`` is ITS OWN usage request and must be served from the pinned,
-    capitalized artifact instead of falling through to argparse's lowercase ``usage: rebar``
-    with the wrong program name. Regression for the ``_NESTED_FAMILY`` over-inclusion
-    (deriving the set from
-    ``group == "bridge"`` wrongly swept in the flat, non-nested arm)."""
+    """Bridge compatibility commands are removed, so only nested bridge help remains."""
     from rebar._cli._registry import ROUTES
 
-    flat = next(
-        r.name for r in ROUTES if r.group == "bridge" and not r.hidden and r.name != "bridge"
-    )
-    rc = _cli.main([flat, "somearg", "--help"])
+    flats = [r.name for r in ROUTES if r.group == "bridge" and not r.hidden and r.name != "bridge"]
+    rc = _cli.main(["bridge", "--help"])
 
     out = capsys.readouterr().out
+    assert flats == []
     assert rc == 0
-    assert out.startswith(f"Usage: rebar {flat}"), out[:80]
+    assert out.startswith("Usage: rebar bridge"), out[:80]
 
 
 @pytest.mark.parametrize("child", ["create", "use", "key"])

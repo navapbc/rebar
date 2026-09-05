@@ -1,7 +1,7 @@
 """Verify-gate parser factories (RP-05 S2c).
 
 Prog-bound factories for the merge-gate verbs ``verify-opcert`` /
-``verify-commit-ticket`` / ``verify-identity`` (a.k.a. ``verify-authorship``),
+``verify-commit-ticket`` / ``verify-identity``,
 reproducing the parsers from :mod:`rebar._commands.verify_opcert`,
 :mod:`rebar._commands.verify_commit`, and :mod:`rebar._commands.verify_authorship`.
 
@@ -91,16 +91,16 @@ def build_commit_ticket(*, prog: str) -> argparse.ArgumentParser:
 
 
 def build_identity(*, prog: str) -> argparse.ArgumentParser:
-    """Build the ``rebar verify-identity`` / ``verify-authorship`` parser bound to ``prog``."""
+    """Build the ``rebar verify-identity`` parser bound to ``prog``."""
     parser = build_argument_parser(
         prog=prog,
         usage=IDENTITY_USAGE,
         description=(
             "Verify authenticated authorship of the store's mutating events against each "
-            "author identity's epoch-scoped keyring. This is the authorship merge-gate, also "
-            "available under the back-compat alias `rebar verify-authorship`. It is advisory "
-            "unless identity.require_authenticated (or --require-authenticated) is on, in which "
-            "case any enforced event that is not `verified` fails the gate with a non-zero "
+            "author identity's epoch-scoped keyring. This is the authorship merge-gate. It is "
+            "advisory unless identity.require_authenticated (or --require-authenticated) is "
+            "on, in which case any enforced event that is not `verified` fails the gate with a "
+            "non-zero "
             "exit. Events whose introducing commit predates --since or identity.enforce_since "
             "are grandfathered, which means they are reported but never fail the gate."
         ),

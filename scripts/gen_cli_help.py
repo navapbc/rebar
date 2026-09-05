@@ -37,10 +37,7 @@ from typing import cast
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HELP_DIR = REPO_ROOT / "src" / "rebar" / "_cli" / "help"
 
-# Compatibility entrypoints whose canonical children the bridge group already advertises;
-# they keep a rendered artifact but are omitted from the grouped overview (mirrors the
-# ``_OVERVIEW_ALLOWLIST`` in tests/interfaces/contracts/test_help_overview_coverage.py).
-_OVERVIEW_OMIT: frozenset[str] = frozenset({"bridge-fsck", "bridge-probe"})
+_OVERVIEW_OMIT: frozenset[str] = frozenset()
 
 _OVERVIEW_HEADER = (
     "Usage: rebar <subcommand> [args...]\n"

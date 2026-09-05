@@ -87,7 +87,7 @@ def _check_create_events(
     Returns ``(lines, issues, signed_total, unsigned_total)``: the store-wide authorship
     PRESENCE tally (3183) is summed from each ticket's reduced ``authorship`` summary, which is
     already computed by the reduction this check performs — presence only, never a crypto check
-    (see verify-authorship). Because that tally is STORE-WIDE, this check always reduces every
+    (see verify-identity). Because that tally is STORE-WIDE, this check always reduces every
     ticket; ``include_archived`` scopes only which dirs' findings are REPORTED (an archived
     ticket is terminally folded, so its reduction reads a SNAPSHOT plus a few events).
     """
@@ -275,7 +275,7 @@ def _advisory_lines(tracker: str, signed_total: int, unsigned_total: int) -> lis
 
     authorship_line = f"authorship: {signed_total} signed, {unsigned_total} unsigned event(s)"
     if unsigned_total:
-        authorship_line += " — run `rebar verify-authorship`"
+        authorship_line += " — run `rebar verify-identity`"
     return [ensures_line, authorship_line]
 
 

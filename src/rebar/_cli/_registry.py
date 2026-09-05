@@ -87,8 +87,7 @@ class Route:
     capabilities: tuple[str, ...] = ()
     # RP-05 S3 execution metadata. ``adapter`` names one of ADAPTER_KINDS (the
     # runtime call shape); ``init`` names one of INIT_POLICIES; ``argv_prefix`` is
-    # prepended to the command remainder before an ``argv`` handler is called
-    # (only ``bridge-status`` uses it, to reach ``bridge_cli(["status", ...])``).
+    # prepended to the command remainder before an ``argv`` handler is called.
     adapter: str = ""
     init: str = "none"
     argv_prefix: tuple[str, ...] = ()
@@ -429,13 +428,11 @@ def _intercepts() -> tuple[Route, ...]:
         "explain": f"{_P}.llm:build_explain",
         "verify-commit-ticket": f"{_P}.verify:build_commit_ticket",
         "verify-identity": f"{_P}.verify:build_identity",
-        "verify-authorship": f"{_P}.verify:build_identity",
         "verify-opcert": f"{_P}.verify:build_opcert",
         "trusted-env": f"{_P}.certs:build_trusted_env",
         "remote-cert": f"{_P}.certs:build_remote_cert",
         "workflow": f"{_P}.workflow:build",
         "llm": f"{_P}.llm_eval:build_llm",
-        "jira-onboard": f"{_P}.jira:build",
         "prompt": f"{_P}.llm_eval:build_prompt",
         "criteria": f"{_P}.llm_eval:build_criteria",
         "identity": f"{_P}.identity:build",
@@ -457,13 +454,11 @@ def _intercepts() -> tuple[Route, ...]:
         "explain": f"{_LLM}:_explain",
         "verify-commit-ticket": "rebar._commands.verify_commit:cli",
         "verify-identity": "rebar._commands.verify_authorship:cli",
-        "verify-authorship": "rebar._commands.verify_authorship:cli",
         "verify-opcert": "rebar._commands.verify_opcert:cli",
         "trusted-env": "rebar._commands.trusted_env_cmd:cli",
         "remote-cert": "rebar._commands.remote_cert:cli",
         "workflow": "rebar._cli._workflow_commands:_workflow",
         "llm": f"{_LLM}:_llm",
-        "jira-onboard": "rebar._cli._jira_onboard:jira_onboard",
         "prompt": f"{_LLM}:_prompt",
         "criteria": f"{_LLM}:_criteria",
         "identity": "rebar._cli:_identity_intercept",
@@ -532,24 +527,6 @@ def _bridge_and_arms() -> tuple[Route, ...]:
             init="none",
         ),
         Route(
-            "bridge-status",
-            group="bridge",
-            hidden=True,
-            parser_factory=f"{_P}.bridge:build",
-            handler=f"{_BRIDGE_CMDS}:bridge_cli",
-            adapter="argv",
-            init="none",
-            argv_prefix=("status",),
-        ),
-        Route(
-            "bridge-fsck",
-            group="bridge",
-            parser_factory=f"{_P}.bridge_arms:build_fsck",
-            handler=f"{_BRIDGE_CMDS}:bridge_fsck_cli",
-            adapter="argv",
-            init="none",
-        ),
-        Route(
             "init",
             group="bootstrap",
             no_auto_mount=True,
@@ -606,14 +583,6 @@ def _bridge_and_arms() -> tuple[Route, ...]:
             handler="rebar._commands.doctor:doctor_cli",
             adapter="argv",
             init="doctor",
-        ),
-        Route(
-            "bridge-probe",
-            group="repair",
-            parser_factory=f"{_P}.bridge_arms:build_probe",
-            handler="rebar._cli:_bridge_probe",
-            adapter="argv",
-            init="none",
         ),
         Route(
             "grounding-info",

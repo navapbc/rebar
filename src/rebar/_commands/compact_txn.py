@@ -80,7 +80,7 @@ def _build_authorship_ledger(
     """Independently scan the folded event files and build the SNAPSHOT authorship ledger
     (epic gnu-whale-ichor / 117b): one ``{event_uuid, content_hash, signature, signer_pubkey,
     position}`` record per folded event that carries an ``author_sig``. This preserves the
-    signed events so the merge-gate ``rebar verify-authorship`` can re-verify them AFTER the
+    signed events so the merge-gate ``rebar verify-identity`` can re-verify them AFTER the
     raw event files are retired (folded into the SNAPSHOT).
 
     Everything the gate needs is captured at compaction time (when the raw file + git history
@@ -517,7 +517,7 @@ def _compact_locked(
         _strip = _snapshot_strip_keys()
         compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
         # Authorship ledger (epic gnu-whale-ichor / 3183): independently scan the folded
-        # events and preserve each SIGNED one so verify-authorship can re-verify it after
+        # events and preserve each SIGNED one so verify-identity can re-verify it after
         # the raw files are retired. Derive repo_root from the tracker (no repo_root here).
         compiled_state["authorship_ledger"] = _build_authorship_ledger(
             fold_files,

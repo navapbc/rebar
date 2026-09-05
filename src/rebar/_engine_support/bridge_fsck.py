@@ -8,7 +8,7 @@ the materialized tracker state:
   - Existing offline binding-drift classifications
 
 Reached in-process via ``rebar.bridge_fsck()`` and the ``rebar bridge fsck`` CLI
-arm; the compatibility ``bridge-fsck`` alias uses the same route. ``main()``
+arm. ``main()``
 renders the byte-pinned CLI output (text / --output json).
 
 Module interface:

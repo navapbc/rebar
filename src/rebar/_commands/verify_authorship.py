@@ -1,4 +1,4 @@
-"""Authenticated-authorship merge-gate (``rebar verify-authorship``).
+"""Authenticated-authorship merge-gate (``rebar verify-identity``).
 
 The security boundary of the opt-in authenticated-authorship feature (epic
 gnu-whale-ichor / 3183). Where the write-time UX gate in ``_seam.append_event`` only

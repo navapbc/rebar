@@ -103,6 +103,11 @@ notably `metrics`, `doctor`, `fsck`, and the composer family (`create`,
 `edit`) — but they are **not yet pinned** by the test suite and therefore
 represent a larger validated (but uncontracted) set.
 
+The removed pre-1.0 simple compatibility aliases `bridge-status`, `bridge-fsck`,
+`bridge-probe`, `jira-onboard`, and `verify-authorship` are rejected by the
+top-level parser as invalid choices and exit `2`; use `bridge status`,
+`bridge fsck`, `bridge check-access`, `bridge setup`, and `verify-identity`.
+
 Other subcommands do **not** uniformly validate options: most mutation commands
 either silently ignore an unknown `--option` (e.g. `comment`, `tag`, `claim`,
 `check-ac` → exit `0`) or fail incidentally (e.g. `archive`, `unlink` →
@@ -124,8 +129,6 @@ guarantee `2`).
 |------------|:------:|:----:|:-----------:|-------|
 | `archive` | 0 | 1 | — | idempotent on an already-archived ticket (still 0) |
 | `bridge fsck` | 0 | — | — | audit; no ticket id |
-| `bridge-fsck` | 0 | — | — | compatibility alias for `bridge fsck`; preserves the same audit exit behavior |
-| `bridge-status` | 0 | — | — | compatibility alias for `bridge status`; no ticket id; reads the durable bridge status snapshot, and `--max-age` makes a stale snapshot a failure |
 | `bridge` | 0 | — | — | no ticket id; canonical `preview`/`sync` use 0/1/2 as documented above; `pause`/`resume` control scheduled reconciliation |
 | `check-ac` | 0 | 1 | — | **gate**: 0=has-AC, 1=missing-AC **or** not-found |
 | `claim` | 0 | 1 | 10 | 10 when the ticket is not open (already claimed) |
@@ -170,7 +173,6 @@ guarantee `2`).
 | `validate` | **0-4** | — | — | **exception**: exit is a health-severity bucket, not the standard contract; takes **no** ticket id (passing one → 1) |
 | `audit` | 0 | — | — | no ticket id; `audit show <ticket>` reads the audit trail; unknown subcommand or bad option → 2; `audit serve` with missing `[ui]` extra → 1 |
 | `bridge check-access` | 0 | — | — | no ticket id; subprocess passthrough (jira-capability-probe.py); 0 = PROBE_PASS, non-zero = PROBE_FAIL |
-| `bridge-probe` | 0 | — | — | compatibility alias for `bridge check-access`; preserves the same subprocess exit status |
 | `config` | 0 | — | — | no ticket id; reads or writes rebar config; error → 1 |
 | `criteria` | 0 | — | — | no ticket id; `criteria eval <id>` runs calibration fixtures live; `criteria eval --changed-since <ref>` prints selected criterion ids and exits 0 (a null/all-zero `before` SHA from a branch's first push selects nothing and exits 0 with a stderr note); an unmappable rubric path is named on stderr and still exits 0; with `--require-live`, selected criteria that cannot run live (no LLM backend/credentials) → 1 (otherwise a stderr warning and 0); positional id and `--changed-since` together → 2; empty or missing id with no `--changed-since` → 2; unknown criterion → 1 |
 | `doctor` | 0 | — | — | no ticket id; 0 = no outstanding findings (or all repaired); 1 = findings remain; bad args → 2 |
@@ -182,7 +184,6 @@ guarantee `2`).
 | `identity` | 0 | — | — | no ticket id; shows or configures operator identity; no args → 1; error → 1 |
 | `import` | 0 | — | — | no ticket id; NDJSON ticket import; bad args → 2 |
 | `bridge setup` | 0 | — | — | no ticket id; interactive Jira config wizard; error or user abort → 1 |
-| `jira-onboard` | 0 | — | — | compatibility alias for `bridge setup`; preserves the same wizard behavior and error or user-abort exit 1 |
 | `llm` | 0 | — | — | no ticket id; `llm setup` FakeRunner dry-run; 0 = dry-run OK, 1 = dry-run failed or write error; no subcommand → 1 |
 | `metrics` | 0 | — | — | no ticket id; repo-wide metrics report; bad args → 2 |
 | `prompt` | 0 | — | — | no ticket id; `prompt eval <id>` validates a prompt's eval spec; error → 1; no subcommand → 1 |
@@ -195,7 +196,6 @@ guarantee `2`).
 | `sign` | 0 | 1 | — | signs the ticket's current event manifest; bad args → 2 |
 | `sign-review` | 0 | 1 | — | cheap re-sign of an existing PASS verdict (no LLM); refused when sidecar absent, non-PASS, or plan changed → 1 |
 | `trusted-env` | 0 | — | — | no ticket id; maintains `.rebar/trusted_environments.yaml`; bad args → 2; error → 1 |
-| `verify-authorship` | 0 | — | — | back-compat alias for `verify-identity`; same codes: 0 = verified, 1 = not-verified, 2 = bad args |
 | `verify-commit-ticket` | 0 | — | — | no ticket id; 0 = commit has a valid rebar-ticket trailer, 1 = missing or invalid, 2 = bad args |
 | `verify-completion` | 0 | 1 | — | PASS → 0, ordinary FAIL → 1, nonretryable raised `LLMError` → 1, retryable raised `LLMError` → 11, `verdict_obtainable=false` → 11, insufficiency-only FAIL (`evidence_sufficient=false`) → 11 |
 | `verify-identity` | 0 | — | — | authenticated-authorship merge gate; 0 = verified, 1 = not-verified, 2 = bad args |

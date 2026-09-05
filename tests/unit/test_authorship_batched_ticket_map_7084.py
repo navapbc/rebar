@@ -6,7 +6,7 @@ Compaction used to resolve each signed event's introducing commit with its own
 branch, 47.5s of a measured 48.1s ``compact-on-close``, all of it inside the store write
 lock. R1 replaces that with ONE directory-scoped walk.
 
-This feeds ``rebar verify-authorship``, so a wrong or missing commit attribution is an
+This feeds ``rebar verify-identity``, so a wrong or missing commit attribution is an
 attestation-chain correctness failure, not a performance one. These tests therefore assert
 EQUIVALENCE against the old per-event resolver over a real git history — including the
 case ``--full-history`` exists for: an event whose introducing commit is OFF the

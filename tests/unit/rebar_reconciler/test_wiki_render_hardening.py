@@ -50,7 +50,7 @@ _CORPUS = Path(__file__).resolve().parents[2] / "fixtures" / "dc_wiki_corpus"
 _LEGACY_OUTPUTS = Path(__file__).resolve().parents[2] / "fixtures" / "dc_wiki_legacy_outputs.json"
 _REPLAY_OUTPUTS = Path(__file__).resolve().parents[2] / "fixtures" / "dc_wiki_replay"
 _STRATA = ("code_arrow", "table", "prose")
-_EXPECTED_RENDERABLE_UNITS = 884
+_EXPECTED_RENDERABLE_UNITS = 1101
 
 _PANDOC = _pandoc_path()
 _NEEDS_PANDOC = pytest.mark.skipif(_PANDOC is None, reason="the `wiki` extra is not installed")
@@ -438,7 +438,7 @@ _LEGACY_ENTRIES = _legacy_entries()
 
 
 def test_static_replay_covers_every_landed_renderable_unit() -> None:
-    """The replay cannot quietly drop or reorder the 884 historical inputs."""
+    """The replay cannot quietly drop or reorder the 1101 historical inputs."""
     units = _renderable_units()
     assert units, "the corpus produced no renderable units — fixture regression"
     assert len(units) == _EXPECTED_RENDERABLE_UNITS
@@ -482,7 +482,7 @@ def test_the_installed_pandoc_matches_the_legacy_fixture_provenance() -> None:
 
 
 def test_static_replay_output_is_byte_identical_to_the_landed_renderer() -> None:
-    """Committed product output vs immutable pre-hardening bytes for all 884 units.
+    """Committed product output vs immutable pre-hardening bytes for all 1101 units.
 
     This is what licenses the change: swapping ``subprocess.run`` for a ``Popen``
     + caller-side timeout + group reap must change WHEN pandoc is given up on,

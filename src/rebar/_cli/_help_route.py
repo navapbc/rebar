@@ -24,6 +24,7 @@ Everything else is a command invocation or a nested child help request. Those fo
 
 from __future__ import annotations
 
+import argparse
 import sys
 
 from rebar._cli import _help
@@ -45,6 +46,13 @@ _NESTED_FAMILY: frozenset[str] = frozenset(
 )
 # Hidden alias spellings (e.g. ``bridge-status``) are neither advertised nor help-served here.
 _HIDDEN_ALIASES: frozenset[str] = frozenset(r.name for r in ROUTES if r.hidden)
+_HISTORICAL_HIDDEN_ALIASES: frozenset[str] = frozenset({"bridge-status"})
+_HISTORICAL_VISIBLE_ALIASES: frozenset[str] = frozenset(
+    {"bridge-fsck", "bridge-probe", "jira-onboard", "verify-authorship"}
+)
+_REMOVED_SIMPLE_CLI_ALIASES: frozenset[str] = (
+    _HISTORICAL_HIDDEN_ALIASES | _HISTORICAL_VISIBLE_ALIASES
+)
 
 
 def _help_backed(route: Route) -> bool:
@@ -128,6 +136,20 @@ def _emit_unknown(sub: str) -> int:
     return 1
 
 
+def _emit_removed_alias_invalid_choice(sub: str) -> int:
+    """Render retired simple aliases through argparse's standard invalid-choice error."""
+    parser = argparse.ArgumentParser(prog="rebar")
+    parser.add_argument(
+        "subcommand",
+        choices=tuple(r.name for r in ROUTES if not r.hidden and not r.retired),
+    )
+    try:
+        parser.parse_args([sub])
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    return 1
+
+
 def pre_scan(argv: list[str]) -> int | None:
     """Serve a help/overview/unknown request from committed bytes, or ``None`` to fall through.
 
@@ -150,6 +172,8 @@ def pre_scan(argv: list[str]) -> int | None:
         return 0
 
     sub, rest = first, residual[1:]
+    if sub in _REMOVED_SIMPLE_CLI_ALIASES:
+        return _emit_removed_alias_invalid_choice(sub)
     route = route_for(sub)
     if route is not None and _help_backed(route) and sub not in _HIDDEN_ALIASES:
         if help_requested(sub, rest):
