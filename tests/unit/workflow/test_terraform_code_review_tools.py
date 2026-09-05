@@ -23,6 +23,7 @@ pytestmark = pytest.mark.unit
 
 _TF_TOOLS = {"terraform_lookup_declaration", "terraform_resolve_reference"}
 _TF_TOOLS_ALL = _TF_TOOLS | {"terraform_probe_source"}
+_TF_TOOLS_CORROBORATE = _TF_TOOLS_ALL | {"terraform_corroborate_diagnostic"}
 
 
 def _ctx(*, prompt: str, inputs: dict[str, Any] | None = None) -> SimpleNamespace:
@@ -266,6 +267,22 @@ def test_code_review_provider_advertises_probe_source_as_third_tool(tmp_path: Pa
     assert provided is not None
     tools, _finalize = provided
     assert _TF_TOOLS_ALL <= _tool_names(tools)
+
+
+def test_code_review_provider_advertises_corroborate_diagnostic_as_fourth_tool(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("hcl2")
+    from rebar.llm.code_review.terraform_grounding import build_code_review_tf_provider
+
+    _write(tmp_path, "infra/main.tf", 'variable "region" {}\n')
+    provider = build_code_review_tf_provider(
+        repo_root=str(tmp_path), changed_files=["infra/main.tf"], usage_sink={}
+    )
+    provided = provider(_ctx(prompt="code-review-iac"))
+    assert provided is not None
+    tools, _finalize = provided
+    assert _TF_TOOLS_CORROBORATE <= _tool_names(tools)
 
 
 def test_ac1_round_a_iac_overlay_routing_gets_tools_and_base_disjoint(
