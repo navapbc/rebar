@@ -1,16 +1,11 @@
-"""EV-3a: core config-backed env renames — the PERMANENT ergonomic aliases
-COMPACT_THRESHOLD->REBAR_COMPACT_THRESHOLD (compact.threshold) and
-SCRATCH_BASE_DIR->REBAR_SCRATCH_BASE_DIR (scratch.base_dir). Verifies canonical
-names, the permanent aliases (warn + map), canonical-wins precedence, and the
-consumers (scratch.base_dir, the MCP jira-sync gate fail-safe).
+"""EV-3a: core config-backed env names after alias retirement.
 
-(The scheduled REBAR_MCP_ALLOW_RECONCILE_LIVE alias of REBAR_MCP_ALLOW_JIRA_SYNC was
-removed pre-1.0 — DE7 — so it is now ignored; only REBAR_MCP_ALLOW_JIRA_SYNC works.)
+COMPACT_THRESHOLD and SCRATCH_BASE_DIR are retired by ADR 0116's clean-removal
+policy: only REBAR_COMPACT_THRESHOLD and REBAR_SCRATCH_BASE_DIR are honored.
 """
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -49,19 +44,14 @@ def test_compact_canonical_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert cfg.load_config(root=_proj(tmp_path)).compact.threshold == 42
 
 
-def test_compact_legacy_alias_warns(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+def test_compact_legacy_alias_ignored_without_alias_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setenv("COMPACT_THRESHOLD", "7")
-    with caplog.at_level(logging.WARNING, logger="rebar.config"):
+    with caplog.at_level("WARNING", logger="rebar.config"):
         c = cfg.load_config(root=_proj(tmp_path))
-    assert c.compact.threshold == 7
-    # COMPACT_THRESHOLD -> REBAR_COMPACT_THRESHOLD is a PERMANENT ergonomic rename, not a
-    # scheduled removal, so the central deprecation signal must NOT claim it is
-    # "deprecated" (ticket 5274, AC4) — it names the alias as a permanent alias instead.
-    msgs = [r.getMessage() for r in caplog.records]
-    assert any("COMPACT_THRESHOLD" in m and "permanent alias" in m for m in msgs)
-    assert not any("COMPACT_THRESHOLD" in m and "deprecated" in m for m in msgs)
+    assert c.compact.threshold == 10
+    assert not any("COMPACT_THRESHOLD" in r.getMessage() for r in caplog.records)
 
 
 def test_compact_canonical_beats_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,13 +67,15 @@ def test_compact_config_file(tmp_path: Path) -> None:
 
 
 # ── scratch.base_dir ──────────────────────────────────────────────────────────
-def test_scratch_canonical_and_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REBAR_SCRATCH_BASE_DIR", "/tmp/canon")
-    assert cfg.load_config(root=_proj(tmp_path)).scratch.base_dir == "/tmp/canon"
-    monkeypatch.delenv("REBAR_SCRATCH_BASE_DIR")
-    monkeypatch.setenv("SCRATCH_BASE_DIR", "/tmp/legacy")
-    cfg.reset_config_cache()
-    assert cfg.load_config(root=_proj(tmp_path / "b")).scratch.base_dir == "/tmp/legacy"
+def test_scratch_canonical_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    scratch_dir = tmp_path / "canon"
+    monkeypatch.setenv("REBAR_SCRATCH_BASE_DIR", str(scratch_dir))
+    assert cfg.load_config(root=_proj(tmp_path)).scratch.base_dir == str(scratch_dir)
+
+
+def test_scratch_legacy_alias_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCRATCH_BASE_DIR", str(tmp_path / "legacy"))
+    assert cfg.load_config(root=_proj(tmp_path)).scratch.base_dir == ""
 
 
 def test_scratch_base_dir_consumer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,11 +88,10 @@ def test_scratch_base_dir_consumer(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("REBAR_SCRATCH_BASE_DIR", str(tmp_path / "sx"))
     cfg.reset_config_cache()
     assert scratch.base_dir(repo_root=str(p)) == str(tmp_path / "sx")
-    # legacy alias
     monkeypatch.delenv("REBAR_SCRATCH_BASE_DIR")
     monkeypatch.setenv("SCRATCH_BASE_DIR", str(tmp_path / "sy"))
     cfg.reset_config_cache()
-    assert scratch.base_dir(repo_root=str(p)) == str(tmp_path / "sy")
+    assert scratch.base_dir(repo_root=str(p)).endswith("/.rebar/scratch")
 
 
 # ── mcp.allow_jira_sync gate ──────────────────────────────────────────────────

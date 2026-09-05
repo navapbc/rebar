@@ -1,6 +1,7 @@
-"""EV-3c: reconciler/LLM tunable renames + id-guard value-flip, each with an
-old-name deprecation alias. The reconciler engine is on sys.path via the package
-conftest, so the modules import flat.
+"""EV-3c: reconciler/LLM tunable canonical env names.
+
+Old aliases are cleanly removed. The reconciler engine is on sys.path via the
+package conftest, so the modules import flat.
 """
 
 from __future__ import annotations
@@ -34,9 +35,9 @@ def test_acli_timeout_canonical(monkeypatch: pytest.MonkeyPatch) -> None:
     assert acli_subprocess._acli_call_timeout() == 45
 
 
-def test_acli_timeout_legacy_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_acli_timeout_legacy_alias_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REBAR_ACLI_TIMEOUT", "33")
-    assert acli_subprocess._acli_call_timeout() == 33
+    assert acli_subprocess._acli_call_timeout() == acli_subprocess._DEFAULT_ACLI_TIMEOUT
 
 
 def test_acli_timeout_canonical_beats_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,13 +64,10 @@ def test_id_guard_canonical_bypass(monkeypatch: pytest.MonkeyPatch, val: str, ex
     assert rebar_id_audit._resolve_id_guard_bypass() is expect
 
 
-@pytest.mark.parametrize(("mode", "expect"), [("warn", True), ("raise", False)])
-def test_id_guard_legacy_env_value_flip(
-    monkeypatch: pytest.MonkeyPatch, mode: str, expect: bool
-) -> None:
-    """Deprecated REBAR_ID_GUARD_MODE maps warn->bypass(True), raise->guard(False)."""
+@pytest.mark.parametrize("mode", ["warn", "raise"])
+def test_id_guard_legacy_env_ignored(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     monkeypatch.setenv("REBAR_ID_GUARD_MODE", mode)
-    assert rebar_id_audit._resolve_id_guard_bypass() is expect
+    assert rebar_id_audit._resolve_id_guard_bypass() is False
 
 
 def test_id_guard_canonical_beats_legacy(monkeypatch: pytest.MonkeyPatch) -> None:

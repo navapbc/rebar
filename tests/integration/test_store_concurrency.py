@@ -40,9 +40,9 @@ def _clean_env(**extra: str) -> dict:
     inherited ``REBAR_ROOT``/``REBAR_FORCE_MKDIR_LOCK``/``REBAR_SYNC_PUSH``/… from the
     caller's shell would silently steer the writers at a different store or lock mode and
     make the storm assertions meaningless. We start from a REBAR-free environment
-    and add back only the knobs each test sets explicitly (plus REBAR_NO_SYNC)."""
+    and add back only the knobs each test sets explicitly (plus REBAR_SYNC_PULL)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("REBAR_")}
-    env["REBAR_NO_SYNC"] = "1"
+    env["REBAR_SYNC_PULL"] = "off"
     env.update(extra)
     return env
 

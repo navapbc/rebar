@@ -8,7 +8,7 @@ would review brand-new material with old gate code, silently.
 
 The failure mode is quiet by construction. In the incident that motivated this module
 (ticket b273-e0ba-f719-4f1c) a build predating the commit that renamed
-``verify.overlap_enabled`` to ``verify.suggest_duplicate_tickets`` read the CURRENT base
+``verify.suggest_duplicate_tickets`` reads the CURRENT base
 ref's ``rebar.toml``, did not recognise the current key name, and fell back to a default —
 the only trace being a config warning that said "typo?" about a key that was not a typo.
 

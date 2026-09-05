@@ -235,7 +235,6 @@ def test_config_reference_reflects_cfg_deprecation_aliases():
 
     doc = gen.render_config_reference()
     cfg_deps = [d for d in REGISTRY.values() if d.kind == "cfg"]
-    assert cfg_deps, "fixture guard: expected at least one cfg-kind deprecation"
     for dep in cfg_deps:
         row = _row_for(doc, dep.name)
         assert row, f"deprecated cfg key {dep.name!r} missing from a reference table row"

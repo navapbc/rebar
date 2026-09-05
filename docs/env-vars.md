@@ -14,7 +14,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `ANTHROPIC_API_KEY` | `src/rebar/llm/config.py` |  |
 | `ANTHROPIC_BASE_URL` | `src/rebar/llm/anthropic_model.py` |  |
 | `BOT_USER` | `src/rebar/review_bot/config.py` |  |
-| `COMPACT_THRESHOLD` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_COMPACT_THRESHOLD` |
 | `DEDUP_DB_PATH` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_BASE_URL` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_BOT_TOKEN` | `src/rebar/review_bot/config.py` |  |
@@ -32,7 +31,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `LLM_REVIEW_MAX_VALUE` | `src/rebar/review_bot/config.py` |  |
 | `OPENAI_API_KEY` | `src/rebar/llm/config.py` |  |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `src/rebar/_config_resolvers.py` |  |
-| `REBAR_ACLI_TIMEOUT` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_JIRA_CLI_TIMEOUT` |
 | `REBAR_ALLOW_ENV_REIDENTIFY` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_AUTHOR` | `src/rebar/config.py` |  |
 | `REBAR_CONFIG` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
@@ -55,7 +53,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_GATE_SOURCE` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_TMPDIR` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_HLC_NOW` | `src/rebar/_store/hlc.py` |  |
-| `REBAR_ID_GUARD_MODE` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_UNSAFE_ID_GUARD_BYPASS` |
 | `REBAR_LLM_ALLOW_LOCAL_PROXY` | `src/rebar/llm/anthropic_model.py` |  |
 | `REBAR_LLM_API_KEY` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_BASE_URL` | `src/rebar/llm/config_readers.py` |  |
@@ -133,7 +130,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_MCP_HTTP_TLS_AT_EDGE` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_READONLY` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_TRANSPORT` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_NO_SYNC` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_SYNC_PULL` |
 | `REBAR_OPCERT_ENV_ID` | `src/rebar/_opcert_signing.py`, `src/rebar/mcp_server.py`, `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_GUARD` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_JOB_TIMEOUT_SECONDS` | `src/rebar/opcert_service/config.py` |  |
@@ -162,9 +158,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact_txn.py` |  |
 | `REBAR_TRACKER_DIR` | `src/rebar/_config_sources.py`, `src/rebar/llm/evals/plan_replay/labels.py` |  |
 | `REBAR_USAGE_LOG` | `src/rebar/_config_resolvers.py` |  |
-| `REBAR_VERIFY_OVERLAP_ENABLED` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS` |
 | `REBAR_VERIFY_PREFETCH` | `src/rebar/llm/workflow/gate_ops.py` |  |
-| `RECONCILER_ABSENT_GET_BUDGET` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_RECONCILER_DELETION_PROBE_LIMIT` |
 | `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_config_resolvers.py` |  |
 | `RECONCILE_CURSOR_PATH` | `src/rebar/review_bot/config.py` |  |
 | `RECONCILE_INTERVAL_SECONDS` | `src/rebar/review_bot/config.py` |  |
@@ -173,7 +167,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REVIEW_BOT_LOG_LEVEL` | `src/rebar/review_bot/config.py` |  |
 | `REVIEW_BOT_PORT` | `src/rebar/review_bot/app.py` |  |
 | `REVIEW_TIMEOUT_SECONDS` | `src/rebar/review_bot/config.py` |  |
-| `SCRATCH_BASE_DIR` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_SCRATCH_BASE_DIR` |
 | `SHUTDOWN_CANCEL_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `SHUTDOWN_DRAIN_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `TICKETS_REMOTE` | `src/rebar/review_bot/config.py` |  |
@@ -181,7 +174,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_169 variables._
+_162 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

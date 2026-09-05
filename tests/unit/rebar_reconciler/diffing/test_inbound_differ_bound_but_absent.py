@@ -379,7 +379,7 @@ def test_inbound_respects_outbound_get_budget(od, ib, monkeypatch):
             "labels": [],
         }
     }
-    monkeypatch.setenv("RECONCILER_ABSENT_GET_BUDGET", str(K))
+    monkeypatch.setenv("REBAR_RECONCILER_DELETION_PROBE_LIMIT", str(K))
     _ob, inbound, absent = _run_pass(
         od,
         ib,
