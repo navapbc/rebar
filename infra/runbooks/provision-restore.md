@@ -278,6 +278,39 @@ grow, or swap in a restored volume):
 5. **Immediately restore `prevent_destroy = true`** and apply again so the guard
    is back on. Never leave the guard off on `main`.
 
+## Check tree currency BEFORE you plan or apply (bug eebc-6aa1)
+
+`terraform plan` answers "does the live world match **this tree**", but it is read as
+"does the live world match the declaration". Those diverge silently the moment your
+checkout is behind `origin/main`:
+
+- **Under-application.** Observed 2026-09-05: a checkout 14 commits behind planned
+  `0 to add, 0 to change, 0 to destroy` while five CloudWatch alarms declared on `main`
+  did not exist in AWS. The same plan from a tree at `origin/main`, against the same
+  remote state, returned `5 to add, 1 to change`. The stale output is indistinguishable
+  from a converged one.
+- **Un-deletion — the dangerous direction.** A tree that predates a commit REMOVING a
+  resource proposes **recreating** it, so an apply from a stale tree does not merely fail
+  to converge: it undoes an intended deletion.
+
+So, from the checkout you are about to plan from, and **before** step 1 below:
+
+```sh
+python3 scripts/check_terraform_tree_currency.py            # HEAD must BE origin/main
+python3 scripts/check_terraform_tree_currency.py --mode ancestor   # feature branch: must CONTAIN it
+```
+
+Exit `0` = current, `1` = stale (the message names which direction), `2` = currency could
+not be established (no remote, fetch failed) — which is **not** the same as current and
+must not be treated as one. The check fetches the remote ref itself rather than trusting
+the tree's own `origin/main`, so a stale checkout cannot make itself look current. It is
+plain Python + `git`: no CI provider, no terraform binary, no AWS call. The daily
+Terraform Drift workflow runs this same script before its plan.
+
+If it reports stale, plan from a worktree at the tip
+(`git worktree add ../tf-current origin/main`) rather than fast-forwarding a shared
+checkout that may hold uncommitted work.
+
 ## plan-before-apply on the shared remote backend
 
 State lives in the S3 backend `rebar-tfstate-896586841071`
