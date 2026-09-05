@@ -137,6 +137,40 @@ jobs:
         run: terraform validate
 
       - name: terraform plan (fail on drift)
-        # -detailed-exitcode: 0 = no changes, 2 = a diff (un-applied drift) -> the step
-        # exits non-zero and FAILS the check; 1 = error. -lock=false keeps it read-only.
-        run: terraform plan -input=false -lock=false -detailed-exitcode
+        # -detailed-exitcode: 0 = no changes, 2 = a diff (un-applied drift), 1 = the plan
+        # could not be produced at all. -lock=false keeps it read-only.
+        #
+        # THE THREE OUTCOMES ARE NAMED, not merged into one red (bug a68c-9633-248c-4b06).
+        # Exit 1 and exit 2 are opposite conditions wearing the same colour: exit 2 means
+        # "we looked, and the infrastructure differs from the HCL"; exit 1 means "we could
+        # not look, and NOTHING here is known". When user_data.sh outgrew EC2's 16 KiB
+        # UserData cap, terraform could not evaluate the configuration at all, and this
+        # sweep went red for a day reading as ordinary drift while every apply was blocked.
+        # A conflation like that is the same class as erratic-sunny-genet (Mirror Guard
+        # reporting healthy:false when it could not reach the host) and
+        # deistic-conventual-blackmamba (a cancelled run voting Verified-1 FAILURE): the
+        # check must never let "no answer" pass for an answer.
+        #
+        # Both non-zero cases still FAIL — this changes what the failure SAYS, not whether
+        # it fails, so the sweep's gating behaviour is unchanged.
+        shell: bash
+        run: |
+          set -o pipefail
+          terraform plan -input=false -lock=false -detailed-exitcode -no-color \
+            | tee "$RUNNER_TEMP/plan.txt" && rc=0 || rc=$?
+          {
+            case "$rc" in
+              0) echo "### Terraform drift: NONE" ;;
+              2) echo "### Terraform drift: DETECTED — the plan is non-empty" ;
+                 echo "Committed HCL that has not been applied, or live infrastructure that" ;
+                 echo "has moved away from it. Read the plan above and apply, or reconcile." ;;
+              *) echo "### Terraform PLAN COULD NOT BE GENERATED (exit $rc) — this is NOT drift" ;
+                 echo "" ;
+                 echo "No statement about drift was made: the configuration could not be" ;
+                 echo "evaluated, so nothing in it is known to be converged. Fix the error" ;
+                 echo "before reading anything into this run. A payload-size overflow on" ;
+                 echo "\`aws_instance.gerrit\`'s user_data is one known cause —" ;
+                 echo "\`python scripts/check_user_data_size.py\` reports it offline." ;;
+            esac
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
