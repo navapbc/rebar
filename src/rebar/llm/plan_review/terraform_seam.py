@@ -13,7 +13,8 @@ the per-CALL tool provider the :class:`~rebar.llm.workflow.runs.RunnerAgentStep`
   verification).
 * :func:`build_tool_provider` — a ``tool_provider(ctx) -> (tools, finalize) | None`` closure
   for ``RunnerAgentStep``: it mints a FRESH grounding session per agent call (owning an
-  immutable parse cache + query ledger), exposes its two refutation queries as function tools,
+  immutable parse cache + query ledger), exposes its three refutation queries plus the optional
+  config-inspect corroborator as function tools,
   and — on finalize — folds the session's concrete + membership reads into a caller-supplied
   usage sink so they join the signed read-set deterministically
   (:func:`rebar.llm.usage_log.merge_synthetic_reads`).
@@ -227,11 +228,12 @@ def _open_session_tools(
 
 
 def _session_tools(session: Any) -> list:
-    """The three refutation queries of a session exposed as agent function tools.
+    """The session's Terraform grounding function tools.
 
-    Each is a thin, self-documenting callable returning the query's grounding evidence +
-    canonical receipt; the runner wraps a plain callable as a function tool. Only refutation
-    queries are exposed — the session NEVER emits ``match`` and NEVER asserts an absence."""
+    The first three tools are refutation-only and never emit ``match``. The optional
+    corroborator is positive-only: it can emit ``match`` for an independently observed
+    config-inspect fact, but cannot originate a finding, veto review, assert absence, or turn an
+    abstention into negative evidence."""
 
     def terraform_lookup_declaration(address: str, module_path: str = "") -> dict:
         """Refute an asserted ABSENCE of a Terraform declaration by structural address.
@@ -262,7 +264,24 @@ def _session_tools(session: Any) -> list:
         result = session.probe_source(source, from_module=from_module)
         return {"evidence": result.evidence, "receipt": result.receipt}
 
-    return [terraform_lookup_declaration, terraform_resolve_reference, terraform_probe_source]
+    def terraform_corroborate_diagnostic(
+        module: str, diagnostic: str, subject: object, expected: str = ""
+    ) -> dict:
+        """Corroborate a positive Terraform structural diagnostic when config-inspect is present.
+
+        ``diagnostic`` is closed to declaration/source/provider presence checks. A matching
+        schema-valid config-inspect fact returns ``{evidence, receipt}`` with ``outcome=match``
+        at T1. Missing, unequal, unsupported, or execution-fault cases abstain; they never
+        assert absence or block the ordinary review path."""
+        result = session.corroborate_diagnostic(
+            module, diagnostic=diagnostic, subject=subject, expected=expected
+        )
+        return {"evidence": result.evidence, "receipt": result.receipt}
+
+    tools = [terraform_lookup_declaration, terraform_resolve_reference, terraform_probe_source]
+    if getattr(session, "_pending", None) != "missing_extra":
+        tools.append(terraform_corroborate_diagnostic)
+    return tools
 
 
 def _fold_usage(usage_sink: dict[str, Any], usage: Any) -> None:

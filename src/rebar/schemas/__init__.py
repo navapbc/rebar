@@ -75,6 +75,7 @@ __all__ = [
     "SIGN_RESULT",
     "SIGN_REVIEW_RESULT",
     "SUMMARY",
+    "TERRAFORM_CONFIG_INSPECT",
     "TERRAFORM_GROUNDING_RECEIPT",
     "TICKET_DIGEST",
     # name constants
@@ -215,6 +216,9 @@ GROUNDING_INFO = "grounding_info"
 # directly via schemas.validator(TERRAFORM_GROUNDING_RECEIPT), never a command --output,
 # so it is exempt from OUTPUT_SCHEMAS via INPUT_SCHEMAS below.
 TERRAFORM_GROUNDING_RECEIPT = "terraform_grounding_receipt"
+# rebar.grounding.terraform_corroborator — producer-side validation of the audited
+# terraform-config-inspect stdout subset. Internal, direct validator use only.
+TERRAFORM_CONFIG_INSPECT = "terraform_config_inspect"
 # rebar.llm.workflow — the per-step I/O CONTRACT schemas (workflow authoring v2,
 # walking skeleton 5e78). A scripted step DECLARES an input + output schema BY NAME
 # via `@register_step(input_schema=…, output_schema=…)`; the names resolve to these
@@ -249,6 +253,7 @@ INPUT_SCHEMAS: frozenset[str] = frozenset(
         WORKFLOW_V3,
         GROUNDING,
         TERRAFORM_GROUNDING_RECEIPT,
+        TERRAFORM_CONFIG_INSPECT,
         JIRA_SNAPSHOT_ENTRY,
     }
 )

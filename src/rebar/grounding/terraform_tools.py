@@ -5,11 +5,10 @@ forcible-diminished-lamb).
 cache + a query ledger over a bounded, frozen snapshot. Each query
 (:meth:`~TerraformSession.lookup_declaration`,
 :meth:`~TerraformSession.resolve_reference`) returns a three-valued grounding
-:class:`Result` — ``refuted`` (a real declaration disproves an asserted absence) or
-``abstain`` (a closed reason) — plus a canonical, credential-redacting receipt.
-The session NEVER emits ``match`` and NEVER asserts an absence, and it NEVER runs
-Terraform/OpenTofu/a provider/any external process: the ONLY subprocess is the
-grounding worker boundary that runs the pure ``python-hcl2`` parse fail-open.
+:class:`Result` — ``refuted`` (a real declaration disproves an asserted absence),
+``match`` (only for optional config-inspect corroboration), or ``abstain`` (a
+closed reason) — plus a canonical, credential-redacting receipt. The refutation
+queries NEVER emit ``match`` or assert an absence.
 
 ``hcl2``/``lark`` are imported LAZILY (only inside the worker, via
 :mod:`rebar.grounding.terraform_parse`) so ``import rebar`` and non-Terraform
@@ -139,6 +138,24 @@ class TerraformSession:
         from . import terraform_source as tfs
 
         return tfs.probe(session=self, source=source, from_module=from_module)
+
+    def corroborate_diagnostic(
+        self,
+        module: str,
+        diagnostic: str,
+        subject: Any,
+        expected: str | None = "",
+    ) -> Result:
+        """Positively corroborate one supported Terraform structural diagnostic."""
+        from . import terraform_corroborator as tfc
+
+        return tfc.corroborate(
+            session=self,
+            module=module,
+            diagnostic=diagnostic,
+            subject=subject,
+            expected=expected,
+        )
 
     def finalize(self) -> Usage:
         """Free the cache/ledger and return the deterministic read :class:`Usage`."""
@@ -371,6 +388,56 @@ class TerraformSession:
                 tfi.snapshot_digest(self._snapshot),
                 tfi.module_digest(self._snapshot, module_dir),
                 reason_detail,
+            ),
+        )
+
+    def _result_from_corroborator(
+        self,
+        *,
+        query: dict[str, Any],
+        module_dir: str,
+        subject: dict[str, Any],
+        location: dict[str, Any] | None,
+        detail: str,
+        executable: dict[str, Any],
+        invocation: dict[str, Any],
+    ) -> Result:
+        return Result(
+            evidence=tr.match_evidence(location, detail=detail),
+            receipt=tr.match_receipt(
+                "corroborate_diagnostic",
+                query,
+                tfi.snapshot_digest(self._snapshot),
+                tfi.module_digest(self._snapshot, module_dir),
+                subject,
+                location,
+                executable,
+                invocation,
+            ),
+        )
+
+    def _abstain_from_corroborator(
+        self,
+        *,
+        query: dict[str, Any],
+        reason_detail: str,
+        module_dir: str,
+    ) -> Result:
+        reason = tr.ABSTENTIONS[reason_detail][0]
+        return Result(
+            evidence=tr.abstain_evidence(
+                reason,
+                job=ev.JOB_APPLIES,
+                backend=tr.CONFIG_INSPECT,
+                version="unknown",
+            ),
+            receipt=tr.abstain_receipt(
+                "corroborate_diagnostic",
+                query,
+                tfi.snapshot_digest(self._snapshot),
+                tfi.module_digest(self._snapshot, module_dir),
+                reason_detail,
+                backend=tr.config_inspect_backend_block(),
             ),
         )
 

@@ -25,6 +25,28 @@ part of the signed read set. As with plan-review, the `grounding-terraform` extr
 missing parser support makes each query abstain with a recorded reason instead of failing the
 gate or manufacturing a finding.
 
+### Optional terraform-config-inspect corroborator
+
+Terraform-routed plan-review and code-review calls also advertise
+`terraform_corroborate_diagnostic` when the Terraform grounding extra is present. This fourth tool
+is positive-only: if an executable named exactly `terraform-config-inspect` is already on `PATH`,
+rebar runs the audited HashiCorp inspector commit
+`2fb54c236733ee65ee877105d595c124c993c64d` over a fresh read-only copy of the indexed module and
+can emit `match@T1` for a supported structural diagnostic. Missing binaries, unsupported
+diagnostics, upstream diagnostics, malformed output, path escapes, timeout/overflow/nonzero exit,
+or binary replacement all produce a closed redacted abstention. The tool never runs Terraform,
+OpenTofu, providers, `tfparse`, `tflint`, `trivy`, `terraform-ls`, or `terraform-docs`, and it
+never passes the real repository path, credentials, proxy variables, plugin config, child streams,
+or Terraform literal payloads into evidence or receipts.
+
+Local opt-in canary (the normal suite skips it unless the environment variable is set):
+
+```sh
+go install github.com/hashicorp/terraform-config-inspect@2fb54c236733ee65ee877105d595c124c993c64d
+env PATH="$(go env GOPATH)/bin:$PWD/.venv/bin:$PATH" REBAR_TERRAFORM_CONFIG_INSPECT_CANARY=1 \
+  python -m pytest tests/unit/grounding/test_terraform_corroborator.py -k pinned_upstream_canary
+```
+
 ## The three query surfaces
 
 The public API is a thin facade, `rebar.grounding.oracle` (re-exported from
@@ -279,13 +301,18 @@ rebar's other read tools (a canonical `.schema.json` registered in
 
 A separate, opt-in surface (`rebar.grounding.terraform_tools`, epic
 `a374-849c-c8f2-4234`) grounds the plan-review infra/IaC overlay (`T10`) in real
-Terraform structure. Like the oracle above it is **refutation-only** and
-**fail-open**, but it is a per-agent-call **session** rather than a stateless query,
+Terraform structure. Like the oracle above it is **fail-open**, and its core queries are
+**refutation-only**, but it is a per-agent-call **session** rather than a stateless query,
 and it parses **`.tf`/`.tf.json`** with the pinned pure-Python `python-hcl2==8.1.3`
 parser — **in process, never** shelling out to `terraform`/`opentofu`/a provider/
-`tfparse`/`tflint`/`trivy`/`terraform-ls`/`terraform-docs` (ADR 0115). The only
+`tfparse`/`tflint`/`trivy`/`terraform-ls`/`terraform-docs` (ADR 0115). The core parse's only
 subprocess is the shared grounding worker (`run_in_worker`, 60 s) that runs the pure
-parse fail-open.
+parse fail-open. The one sanctioned exception is the opt-in, positive-only
+`terraform_corroborate_diagnostic` corroborator (see *Optional terraform-config-inspect
+corroborator* above), which — only when the audited `terraform-config-inspect` binary is
+already on `PATH` — may shell out to it under a hardened, network-free, environment-stripped
+subprocess contract (ADR 0115 §6) to emit `match`; it can never originate a finding, assert
+absence, or turn an abstention into negative evidence.
 
 ### Install & routing
 
@@ -321,11 +348,12 @@ query returns a closed `no_tool`/`missing_extra` abstention — never a raise.
   `concrete_reads` (the `.tf`/`.tf.json` actually read) + `membership_globs` (e.g.
   `infra/**/*.tf`) for the signed read-set.
 
-Each query returns a `Result` with `.evidence` (a grounding record — `refuted` or
-`abstain`, **never** `match`, **never** an asserted absence; validated against the
-`GROUNDING` schema) and `.receipt` (the canonical, credential-redacting receipt,
-validated against `TERRAFORM_GROUNDING_RECEIPT`). All digests are `sha256:`-prefixed;
-attribute literals and `default` values are redacted.
+Each query returns a `Result` with `.evidence` (a grounding record — the three refutation
+queries emit only `refuted` or `abstain`, **never** `match` and **never** an asserted absence;
+the opt-in `corroborate_diagnostic` may additionally emit a positive `match`, but likewise never
+asserts absence — validated against the `GROUNDING` schema) and `.receipt` (the canonical,
+credential-redacting receipt, validated against `TERRAFORM_GROUNDING_RECEIPT`). All digests are
+`sha256:`-prefixed; attribute literals and `default` values are redacted.
 
 ### Source probing — local containment + registry metadata (V1) vs remote fetch (deferred)
 

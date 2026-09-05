@@ -147,12 +147,51 @@ def test_terraform_call_advertises_probe_source_as_third_tool(tmp_path: Path) ->
     } <= names
 
 
+def test_terraform_call_advertises_corroborate_diagnostic_as_fourth_tool(tmp_path: Path) -> None:
+    pytest.importorskip("hcl2")
+    (tmp_path / "infra").mkdir()
+    (tmp_path / "infra" / "main.tf").write_text('variable "a" {}\n', encoding="utf-8")
+    provider = terraform_seam.build_tool_provider(repo_root=str(tmp_path), usage_sink={})
+    step = RunnerAgentStep(extra_tools=[], tool_provider=provider)
+    ctx = _ctx({"findings": [{"criteria": ["T10"], "location": {"file": "infra/main.tf"}}]})
+    tools, _finalize = _run_resolve(step, ctx)
+    names = {getattr(t, "__name__", "") for t in tools}
+    assert "terraform_corroborate_diagnostic" in names
+
+
+def test_corroborate_diagnostic_withheld_when_terraform_extra_missing() -> None:
+    # REB-640 c6ce: the positive corroborator is the ONLY session tool that can emit `match` and
+    # the only one that shells out. When the optional `grounding-terraform` extra is absent the
+    # session reports `_pending == "missing_extra"`, and the seam must WITHHOLD the corroborator
+    # while still advertising the three refutation-only queries (which fail-open to closed
+    # abstentions). This pins the extra-less gate directly, without needing the extra installed.
+    class _MissingExtraSession:
+        _pending = "missing_extra"
+
+    class _ReadySession:
+        _pending = None
+
+    missing = {
+        getattr(t, "__name__", "") for t in terraform_seam._session_tools(_MissingExtraSession())
+    }
+    assert "terraform_corroborate_diagnostic" not in missing
+    assert {
+        "terraform_lookup_declaration",
+        "terraform_resolve_reference",
+        "terraform_probe_source",
+    } <= missing
+
+    ready = {getattr(t, "__name__", "") for t in terraform_seam._session_tools(_ReadySession())}
+    assert "terraform_corroborate_diagnostic" in ready
+
+
 def test_non_terraform_call_still_sees_no_probe_source(tmp_path: Path) -> None:
     provider = terraform_seam.build_tool_provider(repo_root=str(tmp_path), usage_sink={})
     step = RunnerAgentStep(extra_tools=[object()], tool_provider=provider)
     tools, finalize = _run_resolve(step, _ctx({"findings": [{"criteria": ["E4"]}]}))
     names = {getattr(t, "__name__", "") for t in tools}
     assert "terraform_probe_source" not in names
+    assert "terraform_corroborate_diagnostic" not in names
     assert finalize is None
 
 
