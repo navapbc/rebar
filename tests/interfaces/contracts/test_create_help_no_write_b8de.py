@@ -21,6 +21,7 @@ import pytest
 
 import rebar
 from rebar import _cli
+from rebar._cli import _help_route
 
 pytestmark = pytest.mark.interface
 
@@ -42,6 +43,12 @@ def rebar_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _ticket_count(repo: Path) -> int:
     return len(rebar.list_tickets(repo_root=str(repo)))
+
+
+def test_private_help_forwarding_shims_are_absent() -> None:
+    assert not hasattr(_cli, "_wants_help")
+    assert not hasattr(_cli, "_help_requested")
+    assert not hasattr(_cli, "_emit_subcommand_help")
 
 
 def test_create_task_help_shows_usage_and_writes_nothing(
@@ -254,7 +261,7 @@ def test_ordinary_create_still_writes(rebar_repo: Path, capsys: pytest.CaptureFi
 )
 def test_wants_help_scans_before_the_terminator(rest: list[str], expected: bool) -> None:
     """The dispatcher help scan honours a flag in any position up to a ``--`` terminator."""
-    assert _cli._wants_help(rest) is expected
+    assert _help_route.wants_help(rest) is expected
 
 
 @pytest.mark.parametrize(
@@ -274,4 +281,4 @@ def test_wants_help_scans_before_the_terminator(rest: list[str], expected: bool)
 )
 def test_help_requested_respects_nested_dispatch(sub: str, rest: list[str], expected: bool) -> None:
     """Nested-dispatch families honour only a leading flag; leaf commands scan any position."""
-    assert _cli._help_requested(sub, rest) is expected
+    assert _help_route.help_requested(sub, rest) is expected

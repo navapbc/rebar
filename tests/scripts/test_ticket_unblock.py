@@ -753,13 +753,12 @@ def test_batch_close_single_reduce_call(unblock: ModuleType) -> None:
     _write_ticket(tracker_dir, "ticket-a", status="open")
     _write_ticket(tracker_dir, "ticket-b", status="open")
 
-    # Tier E E3: the unblock logic moved into rebar.graph._unblock, which imports
-    # reduce_all_tickets directly (no more _get_reducer importlib shim). Patch it
-    # at its new home; the engine ticket-unblock.py re-exports batch_close_operations.
+    # Tier E E3: the unblock logic reaches the canonical graph loader; patch that
+    # owner rather than a removed _unblock compatibility import.
     with unittest.mock.patch.object(
-        _pkg_unblock,
+        _pkg_unblock._loader.reducer,
         "reduce_all_tickets",
-        wraps=_pkg_unblock.reduce_all_tickets,
+        wraps=_pkg_unblock._loader.reducer.reduce_all_tickets,
     ) as mock_reduce:
         unblock.batch_close_operations(
             ticket_ids=["ticket-a", "ticket-b"],

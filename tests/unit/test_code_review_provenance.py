@@ -67,7 +67,7 @@ def _stub_gate_run(monkeypatch) -> None:
     from rebar.llm.workflow import executor as _executor
 
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
 
     def _fake_run_workflow(doc, inputs, **kw):
         class _R:

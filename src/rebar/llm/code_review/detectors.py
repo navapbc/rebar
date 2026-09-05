@@ -126,13 +126,6 @@ def run_detectors(
     return out
 
 
-def run_security_detectors(*, changed_files: list[str], repo_root: Any = None) -> dict[str, dict]:
-    """Deprecated alias for :func:`run_detectors` (story 7f0d renamed it once the detector→
-    criterion routing became data-driven — the "security" framing is now just one class of DET
-    criterion). Delegates verbatim; kept for the existing WS5 call sites/tests."""
-    return run_detectors(changed_files=changed_files, repo_root=repo_root)
-
-
 def apply_failclosed(
     verdict: dict[str, Any], *, changed_files: list[str], repo_root: Any = None
 ) -> dict[str, Any]:
@@ -151,9 +144,7 @@ def apply_failclosed(
     No DET signal → the verdict is unchanged (the oracle's fail-OPEN posture is untouched)."""
     from rebar.llm.code_review import registry
 
-    # Call via the alias so a monkeypatch of EITHER `run_detectors` (the alias delegates through
-    # the module global) or `run_security_detectors` is honored by the existing WS5 test suite.
-    det = run_security_detectors(changed_files=changed_files, repo_root=repo_root)
+    det = run_detectors(changed_files=changed_files, repo_root=repo_root)
     det_map = registry.det_criteria()
     notes: list[dict[str, Any]] = []
     block = False

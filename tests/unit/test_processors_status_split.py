@@ -3,8 +3,9 @@
 ``process_status`` and its three exclusive folds moved from
 ``rebar.reducer._processors`` into ``rebar.reducer._processors_status``. The move is
 behaviour-preserving, so the oracle proves (a) every moved name still resolves through the
-old paths its consumers use, (b) the split is one-way (no import back into ``_processors``),
-and (c) replaying a status sequence still folds status, plan-review phase, claimed session
+old ``_processors`` path its consumers use, (b) the reducer package root no longer exports
+processor shims, (c) the split is one-way (no import back into ``_processors``), and
+(d) replaying a status sequence still folds status, plan-review phase, claimed session
 and close metadata identically.
 """
 
@@ -27,15 +28,27 @@ _MOVED = (
 
 def test_moved_names_resolve_from_processors_and_are_object_identical() -> None:
     """Every moved name still resolves from ``_processors`` and is the SAME object as in
-    ``_processors_status`` — this is the form ``_replay`` and ``reducer.__init__`` import."""
+    ``_processors_status`` — this is the form ``_replay`` imports."""
     for name in _MOVED:
         assert hasattr(processors, name), f"{name} no longer resolves from _processors"
         assert getattr(processors, name) is getattr(processors_status, name)
 
 
-def test_process_status_resolves_from_reducer_package() -> None:
-    """``rebar.reducer.process_status`` (the public re-export) survives the move."""
-    assert reducer_pkg.process_status is processors_status.process_status
+def test_process_status_absent_from_reducer_package() -> None:
+    """``rebar.reducer`` no longer exposes processor compatibility re-exports."""
+    for name in (
+        "process_archived",
+        "process_bridge_alert",
+        "process_comment",
+        "process_create",
+        "process_edit",
+        "process_link",
+        "process_revert",
+        "process_snapshot",
+        "process_status",
+        "process_unlink",
+    ):
+        assert not hasattr(reducer_pkg, name)
 
 
 def test_split_is_one_way_no_import_of_processors() -> None:

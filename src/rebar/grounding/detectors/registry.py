@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# ── Backends + the closed dimension vocabulary ───────────────────────────────
+# ── Backends ─────────────────────────────────────────────────────────────────
 
 BACKEND_OPENGREP = "opengrep"
 BACKEND_ASTGREP = "ast-grep"
@@ -62,21 +62,6 @@ def _canonical_dimensions() -> frozenset[str]:
 
     return _CANON
 
-
-#: Backward-compatible module-level alias of the canonical vocabulary. Resolved at
-#: import time of :mod:`..oracle`; kept so existing ``registry.DIMENSIONS`` readers
-#: (and the ``detectors`` re-export) keep working. The authority is S5's
-#: :data:`rebar.grounding.oracle.DIMENSIONS`.
-DIMENSIONS: frozenset[str] = frozenset(
-    {
-        "web_frontend",
-        "has_iac",
-        "touches_auth",
-        "has_migrations",
-        "has_tests",
-        "smell_generic",
-    }
-)
 
 #: File extensions we treat as detector files in a detector dir.
 _OPENGREP_SUFFIXES = (".yaml", ".yml")

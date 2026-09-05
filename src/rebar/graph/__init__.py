@@ -4,9 +4,8 @@ and link writes.
 Re-exports the flat public API (build/cycle/hierarchy/link helpers) so the
 library, CLI, and tests share ONE surface. Submodules are
 imported eagerly so ``rebar.graph._graph`` / ``._links`` / ``._cache`` resolve as
-attributes, and ``_reducer`` is the single loader instance ``_graph``/``_blockers``
-use (so a test patch on ``rebar.graph._reducer.reduce_all_tickets`` intercepts real
-calls).
+attributes. Reducer patch points live on the canonical loader module:
+``rebar.graph._loader.reduce_ticket`` and ``rebar.graph._loader.reducer``.
 """
 
 from rebar.graph import _blockers, _cache, _graph, _hierarchy, _links, _loader
@@ -26,10 +25,6 @@ from rebar.graph._links import (
 )
 from rebar.graph._loader import reduce_ticket
 
-# Backward-compat aliases (tests access these directly).
-_reduce_ticket = reduce_ticket
-_reducer = _loader.reducer
-
 __all__ = [
     "CyclicDependencyError",
     # Submodules imported eagerly so ``rebar.graph._graph`` / ``._links`` / etc.
@@ -42,6 +37,7 @@ __all__ = [
     "_hierarchy",
     "_is_active_link",
     "_links",
+    "_loader",
     "add_dependency",
     "build_dep_graph",
     "check_cycle_at_level",

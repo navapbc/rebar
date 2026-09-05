@@ -156,7 +156,7 @@ def test_failclosed_forces_block_on_detector_abstain(monkeypatch):
 
     monkeypatch.setattr(
         detectors,
-        "run_security_detectors",
+        "run_detectors",
         lambda **kw: {"secret-detection": {"abstained": [{"reason": "no_tool"}], "matches": []}},
     )
     v = detectors.apply_failclosed(_pass_verdict(), changed_files=["app.py"], repo_root=None)
@@ -171,7 +171,7 @@ def test_failclosed_forces_block_on_detector_match(monkeypatch):
 
     monkeypatch.setattr(
         detectors,
-        "run_security_detectors",
+        "run_detectors",
         lambda **kw: {
             "high-critical-security": {
                 "abstained": [],
@@ -206,7 +206,7 @@ def test_failclosed_match_names_no_blocking_when_criterion_advisory(monkeypatch)
 
     monkeypatch.setattr(
         detectors,
-        "run_security_detectors",
+        "run_detectors",
         lambda **kw: {
             "high-critical-security": {
                 "abstained": [],
@@ -224,7 +224,7 @@ def test_failclosed_match_names_no_blocking_when_criterion_advisory(monkeypatch)
 def test_failclosed_is_a_noop_when_no_security_signal(monkeypatch):
     from rebar.llm.code_review import detectors
 
-    monkeypatch.setattr(detectors, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(detectors, "run_detectors", lambda **kw: {})
     v = detectors.apply_failclosed(_pass_verdict(), changed_files=["app.py"], repo_root=None)
     assert v["verdict"] == "PASS"  # the oracle's fail-open posture is untouched
     assert "security_detectors" not in v["coverage"]
@@ -250,7 +250,7 @@ def test_matches_are_diff_scoped_to_changed_files(monkeypatch):
         )
 
     monkeypatch.setattr("rebar.grounding.engine_b.scan", lambda *a, **k: _Res())
-    out = detectors.run_security_detectors(changed_files=["app.py"], repo_root=None)
+    out = detectors.run_detectors(changed_files=["app.py"], repo_root=None)
     matches = out["high-critical-security"]["matches"]
     assert len(matches) == 1 and matches[0]["location"]["file"] == "app.py"
 
@@ -270,7 +270,7 @@ def test_empty_changed_files_keeps_no_matches(monkeypatch):
         )
 
     monkeypatch.setattr("rebar.grounding.engine_b.scan", lambda *a, **k: _Res())
-    out = detectors.run_security_detectors(changed_files=[], repo_root=None)
+    out = detectors.run_detectors(changed_files=[], repo_root=None)
     assert out.get("secret-detection", {}).get("matches", []) == []
 
 
@@ -366,7 +366,7 @@ def test_planted_secret_blocks_end_to_end_real_gitleaks():
     )  # gitleaks:allow — assembled at runtime, no committed literal
     with tempfile.TemporaryDirectory() as t:
         Path(t, "app.py").write_text(f'GH = "{fake_pat}"\n')
-        out = detectors.run_security_detectors(changed_files=["app.py"], repo_root=t)
+        out = detectors.run_detectors(changed_files=["app.py"], repo_root=t)
         matches = out.get("secret-detection", {}).get("matches", [])
         assert matches, "real gitleaks should surface the planted secret"
         assert all(m["location"]["file"] == "app.py" for m in matches)
@@ -406,9 +406,7 @@ def test_repo_gitleaks_config_allowlists_doc_throwaway_but_not_real_secret():
                 _shutil.copy(repo_config, Path(t, ".gitleaks.toml"))
             Path(t, "doc_example.md").write_text(throwaway_line)
             Path(t, "app.py").write_text(f'GH = "{fake_pat}"\n')
-            out = detectors.run_security_detectors(
-                changed_files=["doc_example.md", "app.py"], repo_root=t
-            )
+            out = detectors.run_detectors(changed_files=["doc_example.md", "app.py"], repo_root=t)
             matches = out.get("secret-detection", {}).get("matches", [])
             return {m["location"]["file"] for m in matches}
 

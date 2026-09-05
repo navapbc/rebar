@@ -35,10 +35,13 @@ def test_dimension_vocabulary_is_closed_and_versioned() -> None:
         assert required in oracle.DIMENSIONS
 
 
-def test_registry_dimensions_mirror_the_canonical_set() -> None:
-    # The detector registry's module-level mirror must equal S5's canonical set
-    # (the single source of truth), and the lazy accessor must resolve to it.
-    assert det_registry.DIMENSIONS == oracle.DIMENSIONS
+def test_registry_dimensions_resolve_through_lazy_accessor() -> None:
+    # The detector registry no longer mirrors S5's single source of truth at module level;
+    # consumers that need the closed vocabulary use the lazy cycle-safe accessor.
+    from rebar.grounding import detectors
+
+    assert not hasattr(det_registry, "DIMENSIONS")
+    assert not hasattr(detectors, "DIMENSIONS")
     assert det_registry._canonical_dimensions() == oracle.DIMENSIONS
 
 

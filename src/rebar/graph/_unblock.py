@@ -1,9 +1,9 @@
 """Detect tickets newly unblocked when a set of tickets is closed (Tier E).
 
 Faithful in-package port of ``_engine/ticket-unblock.py`` (the bash-era helper
-that ``ticket-transition.sh`` subprocessed for ``--batch-close``). Uses
-``rebar.reducer`` directly instead of the importlib-loaded engine reducer. The
-ordering contract is load-bearing for byte-parity: ``reduce_all_tickets`` iterates
+that ``ticket-transition.sh`` subprocessed for ``--batch-close``). Uses the graph
+loader instead of the importlib-loaded engine reducer. The ordering contract is
+load-bearing for byte-parity: ``reduce_all_tickets`` iterates
 ``sorted(os.listdir(...))`` so ``newly_unblocked`` (hence the comma-joined
 ``unblocked: a,b,c`` confirmation segment and the JSON array) is deterministic.
 
@@ -19,8 +19,9 @@ import json
 import os
 from pathlib import Path
 
-from rebar.reducer import is_terminal_status, reduce_all_tickets, reduce_ticket
+from rebar.reducer import is_terminal_status
 
+from . import _loader
 from ._relations import build_blocked_by
 
 _VALID_EVENT_SOURCES = {"local-close", "sync-resolution"}
@@ -59,7 +60,7 @@ def _load_states_with_tombstones(tracker_path: Path) -> dict[str, dict]:
         if not entry.is_dir() or entry.name.startswith("."):
             continue
         tombstone_status = _read_tombstone_status(entry.path)
-        state = reduce_ticket(entry.path)
+        state = _loader.reduce_ticket(entry.path)
         if state is None:
             if tombstone_status is not None:
                 states[entry.name] = {"status": tombstone_status}
@@ -165,7 +166,7 @@ def batch_close_operations(
 
     # Exclude session_logs: they never block/unblock anything, and a lifecycle-exempt
     # session_log child must never count as an "open child" that blocks a parent close.
-    all_states = reduce_all_tickets(
+    all_states = _loader.reducer.reduce_all_tickets(
         tracker_dir, exclude_archived=exclude_archived, exclude_session_logs=True
     )
 

@@ -86,7 +86,7 @@ def test_review_code_runs_gate_even_when_config_key_is_off(monkeypatch):
     from rebar.llm.code_review import detectors as _det
     from rebar.llm.code_review import review_code
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
     runner = _CountingRunner(structured=_STRUCTURED)
     r = review_code(diff_text=_DIFF, changed_files=["x.py"], runner=runner)
     schemas.validator(schemas.REVIEW_RESULT).validate(r)
@@ -102,7 +102,7 @@ def test_produce_verdict_enabled_runs_gate_and_validates(monkeypatch):
     # without a repo it would otherwise scan the cwd. Stub it to a no-op here.
     from rebar.llm.code_review import detectors as _det
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})
     v = gate_dispatch.produce_code_review_verdict(
         gate_dispatch.CodeReviewRequest(
             LLMConfig.from_env(),
@@ -122,7 +122,7 @@ def test_produce_verdict_enabled_override_forces_run_when_config_disabled(monkey
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: False)
     from rebar.llm.code_review import detectors as _det
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})  # focus on the gate path
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})  # focus on the gate path
     v = gate_dispatch.produce_code_review_verdict(
         gate_dispatch.CodeReviewRequest(
             LLMConfig.from_env(),
@@ -155,7 +155,7 @@ def test_review_code_enabled_translates_verdict_to_review_result(monkeypatch):
     from rebar.llm.code_review import detectors as _det
     from rebar.llm.code_review import review_code
 
-    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})  # focus on LLM path
+    monkeypatch.setattr(_det, "run_detectors", lambda **kw: {})  # focus on LLM path
     r = review_code(
         diff_text=_DIFF, changed_files=["x.py"], runner=FakeRunner(structured=_STRUCTURED)
     )

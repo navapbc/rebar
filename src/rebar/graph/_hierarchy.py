@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 from ..reducer._api import _NON_GRAPH_ARTIFACT_TYPES
-from ._loader import reduce_all_tickets, reduce_ticket
+from . import _loader
 from ._relations import _BLOCKING_RELATIONS
 
 # Relations whose links represent BLOCKING dependencies (single source of truth in
@@ -38,7 +38,7 @@ def _get_ancestors(ticket_id: str, tracker_dir: str) -> list[str]:
         if not os.path.isdir(ticket_dir):
             break
         try:
-            state = reduce_ticket(ticket_dir)
+            state = _loader.reduce_ticket(ticket_dir)
         except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ancestor stops the hierarchy walk
             state = None
         if state is None:
@@ -143,7 +143,7 @@ def resolve_hierarchy_link(
         return {"error": f"ticket '{target_id}' does not exist", "ticket_id": target_id}
 
     try:
-        source_state = reduce_ticket(source_dir)
+        source_state = _loader.reduce_ticket(source_dir)
     except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible source is reported as not-reducible
         source_state = None
     if source_state is None:
@@ -153,7 +153,7 @@ def resolve_hierarchy_link(
         }
 
     try:
-        target_state = reduce_ticket(target_dir)
+        target_state = _loader.reduce_ticket(target_dir)
     except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible target is reported as not-reducible
         target_state = None
     if target_state is None:
@@ -231,7 +231,9 @@ def compute_archive_eligible(tracker_dir: str) -> list[str]:
     via depends_on or blocks edges (traversed bidirectionally), and is not
     already archived.
     """
-    all_tickets = reduce_all_tickets(tracker_dir, exclude_archived=False, exclude_session_logs=True)
+    all_tickets = _loader.reducer.reduce_all_tickets(
+        tracker_dir, exclude_archived=False, exclude_session_logs=True
+    )
 
     ticket_map: dict[str, dict[str, Any]] = {}
     for t in all_tickets:
