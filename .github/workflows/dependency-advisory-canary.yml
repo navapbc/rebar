@@ -131,6 +131,13 @@ jobs:
         # `continue-on-error` so a blocking verdict does NOT skip the escalation step —
         # the ticket is the point of this lane. The run is still reddened by the final
         # step below.
+        #
+        # A step that fails also sets NO outputs, so on a CRASH `steps.audit.outputs.blocking`
+        # is "" — which means the final "Fail the run" step below (`== 'true'`) does not fire
+        # either, and the run would conclude SUCCESS. That is why `advisory-alert` refuses an
+        # absent/empty BLOCKING with exit 1 (bug 7147-6ea7-90b4-44b1): the escalation step is
+        # NOT continue-on-error, so a crashed audit reddens this run there. Do not add
+        # `continue-on-error` to that step without replacing that signal.
         continue-on-error: true
         run: |
           set -uo pipefail

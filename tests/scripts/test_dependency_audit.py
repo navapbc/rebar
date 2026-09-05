@@ -473,6 +473,100 @@ def test_advisory_alert_close_argv_survives_the_real_transition_parser(
     )
 
 
+# ── A missing audit verdict is NOT an all-clear (bug 7147-6ea7-90b4-44b1) ──────────
+#
+# `BLOCKING` is `${{ steps.audit.outputs.blocking }}` and the audit step is
+# `continue-on-error`, so a CRASHED audit sets no output and BLOCKING arrives "". The
+# original `environ.get("BLOCKING", "false") == "true"` read that as False and took the
+# CLOSE arm — force-closing the open p1 vulnerability ticket with "advisories cleared",
+# run green. These oracles pin the tri-state: only an explicit verdict may drive an arm.
+
+
+def _open_advisory_ticket_runner() -> FakeRunner:
+    return FakeRunner(
+        {("rebar", "list"): (0, json.dumps([{"ticket_id": "abcd-0000-1111-2222"}]), "")}
+    )
+
+
+@pytest.mark.parametrize(
+    ("overlay", "expected_rc", "expected_transitions"),
+    [
+        pytest.param({}, 1, 0, id="output-never-set-refuses"),
+        pytest.param({"BLOCKING": ""}, 1, 0, id="empty-output-refuses"),
+        pytest.param({"BLOCKING": "TRUE"}, 1, 0, id="unrecognised-casing-refuses"),
+        pytest.param({"BLOCKING": "0"}, 1, 0, id="unrecognised-value-refuses"),
+        pytest.param({"BLOCKING": "false"}, 0, 1, id="explicit-false-closes"),
+        pytest.param(
+            {"BLOCKING": "true", "ADVISORY_IDS": "PYSEC-2026-2132"},
+            0,
+            0,
+            id="explicit-true-does-not-close",
+        ),
+    ],
+)
+def test_only_an_explicit_false_verdict_may_close_the_advisory_ticket(
+    mod: ModuleType, overlay: dict[str, str], expected_rc: int, expected_transitions: int
+) -> None:
+    """Pin exactly which BLOCKING values may close an open advisory ticket.
+
+    The whole defect is that this table used to have `{}` and `""` in the same row as
+    `"false"`. An absent or unrecognised verdict must reach NO arm at all.
+    """
+    runner = _open_advisory_ticket_runner()
+    env = {"ADVISORY_IDS": "", "ADVISORY_SUMMARY": "", "RUN_URL": ""} | overlay
+    rc = mod.main(["advisory-alert"], runner=runner, environ=env, now_epoch=0)
+    assert rc == expected_rc
+    assert len(_rebar_calls(runner, "transition")) == expected_transitions
+
+
+@pytest.mark.parametrize("overlay", [{}, {"BLOCKING": ""}], ids=["unset", "empty"])
+def test_a_missing_verdict_writes_nothing_at_all(mod: ModuleType, overlay: dict[str, str]) -> None:
+    """Refusing means refusing: no close, and no file/comment either."""
+    runner = _open_advisory_ticket_runner()
+    env = {"ADVISORY_IDS": "", "ADVISORY_SUMMARY": "", "RUN_URL": ""} | overlay
+    assert mod.main(["advisory-alert"], runner=runner, environ=env, now_epoch=0) == 1
+    assert _rebar_calls(runner, "transition") == []
+    assert _rebar_calls(runner, "create") == []
+    assert _rebar_calls(runner, "comment") == []
+
+
+def test_a_crashed_audit_is_distinguishable_from_a_genuine_all_clear(
+    mod: ModuleType,
+) -> None:
+    """The sharpest form of the regression: the two used to be BYTE-IDENTICAL.
+
+    Before the fix both paths emitted the same `rebar transition ... --force=Fixed:
+    dependency advisories cleared at <ts> ...` argv, so nothing downstream — a human
+    reading the ticket included — could tell "the audit crashed" from "the advisory
+    cleared". Comparing the two argv lists is what makes that indistinguishability the
+    thing under test, rather than a return code that could drift apart for other reasons.
+    """
+    crashed = _open_advisory_ticket_runner()
+    crashed_rc = mod.main(
+        ["advisory-alert"], runner=crashed, environ={"ADVISORY_IDS": ""}, now_epoch=0
+    )
+    cleared = _open_advisory_ticket_runner()
+    cleared_rc = mod.main(
+        ["advisory-alert"],
+        runner=cleared,
+        environ={"BLOCKING": "false", "ADVISORY_IDS": ""},
+        now_epoch=0,
+    )
+
+    assert (crashed_rc, cleared_rc) == (1, 0)
+    assert _rebar_calls(crashed, "transition") != _rebar_calls(cleared, "transition")
+    assert _rebar_calls(crashed, "transition") == []
+    assert len(_rebar_calls(cleared, "transition")) == 1
+
+
+def test_a_missing_verdict_is_still_silent_under_dry_run(mod: ModuleType) -> None:
+    """DRY_RUN precedes the verdict guard, so a dry run stays a no-op, not an error."""
+    runner = FakeRunner()
+    env = {"DRY_RUN": "true"}
+    assert mod.main(["advisory-alert"], runner=runner, environ=env, now_epoch=0) == 0
+    assert runner.calls == []
+
+
 def test_advisory_alert_refuses_to_file_a_hollow_ticket(mod: ModuleType) -> None:
     runner = FakeRunner({("rebar", "list"): (0, "[]", "")})
     env = {"BLOCKING": "true", "ADVISORY_IDS": "  ", "RUN_URL": ""}
