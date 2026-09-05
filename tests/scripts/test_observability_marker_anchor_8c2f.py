@@ -20,6 +20,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
 from _subprocess_env import subprocess_env
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
@@ -110,15 +111,19 @@ def _environment(
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
     journal = tmp_path / "journal.txt"
     journal.write_text("".join(f"{line}\n" for line in journal_lines))
-    _stub(bin_dir, "journalctl", 'cat "$JOURNAL_FILE"; exit 0')
+    _stub(bin_dir, "journalctl", JOURNALCTL_EMULATOR)
+    _stub(bin_dir, "timeout", TIMEOUT_STUB)
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
     paths = {name: offsets / name.lower() for name in _OFFSET_VARIABLES}
-    # Explicit 0: an absent offset is a cold start, which seeds and publishes 0 regardless of the
-    # pattern (bug e2a6-9ee4-8d5c-4290) and would mask what these tests measure.
-    for path in paths.values():
-        path.write_text("0\n")
+    # `<total> <cursor>` since bug 1205: a cursor of 0 sits before the
+    # journal's first entry, so the counter is already observing and counts everything in
+    # it. A BARE total, like an absent file, is a cold start — it seeds a tail cursor and
+    # publishes 0 (bug e2a6-9ee4-8d5c-4290), which would mask what these tests measure.
+    # REPL_OFFSET_FILE greps a log file rather than journald and keeps the bare form.
+    for name, path in paths.items():
+        path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
     repl_log = tmp_path / "replication.log"
     repl_log.write_text("")
 
@@ -195,22 +200,33 @@ def test_real_markers_are_counted_alongside_the_prose(tmp_path: Path) -> None:
         assert _values(paths["aws_log"], metric) == [per_set], metric
 
 
-def test_offsets_inflated_by_false_counts_self_heal(tmp_path: Path) -> None:
+def test_offsets_inflated_by_false_counts_cannot_distort_a_delta(tmp_path: Path) -> None:
     """The banked false counts need no manual correction on the box.
 
-    The live offsets are inflated by the false positives (voter 222 against 221 real markers,
-    merge-change 1 against 0). Once the pattern tightens, the total drops BELOW the offset — a
-    negative delta, which the lost-history clamp (bug 2dc7-31b7-ecbb-4cd2) publishes as 0 while
-    re-basing the offset to the true count. One probe run, no box action.
+    The live counters were inflated by the false positives (voter 222 against 221 real markers,
+    merge-change 1 against 0). Under the original design that inflation MATTERED, because the
+    published delta was `recomputed_total - banked_total`: once the pattern tightened the total
+    dropped below the banked offset and only the lost-history clamp (bug 2dc7-31b7-ecbb-4cd2)
+    kept it from publishing nonsense, re-basing on the way through.
+
+    Since bug 1205 the banked total is never subtracted from anything — the delta is what the
+    journal holds after the counter's cursor — so an inflated count is inert by construction.
+    This pins that: a counter carrying the false-positive inflation publishes 0 while nothing
+    new arrives, and then publishes exactly the one marker that does, not the difference against
+    its banked number.
     """
     env, paths = _environment(tmp_path, [_REVIEW_PROSE, _record("VOTER_ERROR")])
-    paths["VOTER_OFFSET_FILE"].write_text("2\n")  # counted the prose line as a second error
-    paths["MERGE_OFFSET_FILE"].write_text("1\n")  # its only count in history was the prose
+    # Inflated totals, with the cursor at the end of what they have already seen.
+    paths["VOTER_OFFSET_FILE"].write_text("2 2\n")  # counted the prose line as a second error
+    paths["MERGE_OFFSET_FILE"].write_text("1 2\n")  # its only count in history was the prose
 
-    result = _run(env)
-
-    assert result.returncode == 0
+    assert _run(env).returncode == 0
     assert _values(paths["aws_log"], "voter_errors") == [0]
     assert _values(paths["aws_log"], "review_bot_merge_change_errors") == [0]
-    assert paths["VOTER_OFFSET_FILE"].read_text().strip() == "1"
-    assert paths["MERGE_OFFSET_FILE"].read_text().strip() == "0"
+
+    journal = Path(env["JOURNAL_FILE"])
+    journal.write_text(journal.read_text() + _record("VOTER_ERROR") + "\n")
+
+    assert _run(env).returncode == 0
+    assert _values(paths["aws_log"], "voter_errors") == [0, 1]
+    assert _values(paths["aws_log"], "review_bot_merge_change_errors") == [0, 0]
