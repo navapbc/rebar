@@ -114,7 +114,16 @@ These follow the established house idiom rather than inventing one: a custom
 `rebar/host:<metric>` published by `scripts/observability.sh` on the 5-minute cadence, `Maximum`
 statistic, `period = 300` with `evaluation_periods = 3` / `datapoints_to_alarm = 2` (absorbing
 ordinary timer jitter), `treat_missing_data = "breaching"`, and both `alarm_actions` and
-`ok_actions` on `aws_sns_topic.alerts`. Per-mount metrics carry the `InstanceId` + `mount`
+`ok_actions` on `aws_sns_topic.alerts`.
+
+> **Amended by ticket `a9d1-c7f3-cfd9-44ff`.** The `3` / `2` half of this idiom did not absorb
+> timer jitter — with `treat_missing_data = "breaching"` it made two EMPTY periods sufficient to
+> alarm on their own, and made a fired alarm unclearable whenever the publisher was slower than
+> the window. The alarms named here now run `evaluation_periods = 6` /
+> `datapoints_to_alarm = 6`. The decision this ADR actually records — a per-generator custom
+> metric with `treat_missing_data = "breaching"`, `Maximum` statistic, the dimension rules, and
+> SNS on both edges — is unchanged and was correct; only the M-of-N count moved. See
+> [infra/runbooks/alarm-window-tuning.md](../../infra/runbooks/alarm-window-tuning.md). Per-mount metrics carry the `InstanceId` + `mount`
 dimension pair; dimensionless host gauges stay dimensionless on **both** sides.
 
 The direct precedent is `rebar-gerrit-data-disk-debris` (task `3e92`): its whole argument is that

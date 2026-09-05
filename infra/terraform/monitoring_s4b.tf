@@ -53,8 +53,8 @@ resource "aws_cloudwatch_metric_alarm" "voter_errors" {
   metric_name = "voter_errors"
   statistic   = "Sum"
 
-  # Sustained-failure shape (ticket ea5d-4932-8554-4544): 3 of 5 five-minute periods
-  # with any voter-error lines. The single-period shape this replaces paged 5 times
+  # Sustained-failure shape (ticket ea5d-4932-8554-4544, rewindowed by a9d1-c7f3-cfd9-44ff):
+  # 3 of 6 five-minute periods with any voter-error lines. The single-period shape this replaces paged 5 times
   # in 48h, every one a transient self-healed by a designed recovery path; the
   # operator ruling made PERSISTENCE the discriminator, not magnitude. Sizing:
   #   - datapoints_to_alarm = 3 so an isolated transient — at most 1 breaching
@@ -64,25 +64,45 @@ resource "aws_cloudwatch_metric_alarm" "voter_errors" {
   #     attempt — the webhook queue and the backfill reconciler retry continuously
   #     (RECONCILE_INTERVAL_SECONDS = 300) — so a continuous stream reaches its 3rd
   #     breaching period at ~15 min, the ruling's detection bound.
-  #   - evaluation_periods = 5 (N-of-M, not N-of-N consecutive) because the marker
+  #   - evaluation_periods = 6 (N-of-M, not N-of-N consecutive) because the marker
   #     stream is not phase-aligned with CloudWatch period boundaries: a sustained
   #     outage can land two markers in one period and none in the next, and a
-  #     consecutive-N streak would reset on that gap. 3-of-5 tolerates up to two
-  #     gap periods (worst-case page at 25 min, nominal 15).
+  #     consecutive-N streak would reset on that gap. This was 5; a9d1 widened it to
+  #     6 so that 3 REAL datapoints fit inside the window once missing periods stopped
+  #     counting toward the total (worst-case page at 30 min, nominal 15).
+  # PROFILE B (error counter), 3-of-6 over 30 minutes — infra/runbooks/alarm-window-tuning.md.
+  #
+  # 3-of-5 was the shape ticket a9d1-c7f3-cfd9-44ff was opened for: with treat_missing_data =
+  # "breaching" (below) an empty period IS a breaching datapoint, so three ordinary scheduling
+  # gaps satisfied datapoints_to_alarm on their own, with the counter reading 0 throughout.
+  # Observed 2026-09-05: four counters in ALARM at once, each StateReason reading "1 datapoint was
+  # received for 3 periods and 2 missing datapoints were treated as [Breaching]".
+  #
+  # datapoints_to_alarm is UNCHANGED at 3, deliberately. This alarm must keep catching an
+  # INTERMITTENT error stream — one that is not phase-aligned with CloudWatch period boundaries
+  # and lands markers in one period and none in the next — which an N-of-N streak would reset on.
+  # So the M < N sensitivity stays and the missing-data rule changes instead (below). Only
+  # evaluation_periods widens, to 6, so that 3 REAL datapoints are reachable inside the window
+  # at the publisher's contractual 5-9 minute inter-arrival (install-observability.sh:
+  # OnUnitActiveSec=5min measured from the last COMPLETED run, plus TimeoutStartSec=240). An
+  # alarm that cannot fire is as useless as one that always fires.
   period              = 300
-  evaluation_periods  = 5
+  evaluation_periods  = 6
   datapoints_to_alarm = 3
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
-  # publishes voter_errors' per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
-  # period publishes 0 — the metric is continuously present. Missing data therefore means the
-  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
-  # The rationale this replaces — "no voter errors published in a period is the healthy
-  # steady state" — described a probe that stays silent when healthy. This one publishes 0.
-  # The 3-of-5 window above already absorbs the jitter this setting introduces.
-  treat_missing_data = "breaching"
+  # PROFILE B, ticket a9d1-c7f3-cfd9-44ff: absence of a delta report is not evidence of errors.
+  # rebar:allow-missing-data-notbreaching: liveness is carried by the dead-man alarms, which keep
+  # treat_missing_data = "breaching" with datapoints_to_alarm == evaluation_periods and span
+  # observability.sh from §1 (GerritReachable) and §1b (mcp_healthy) through §2e/§2g/§2h/§2i (the
+  # mount / journal-cap / var-tmp-cleanup / container-reaper heartbeats) to §5 (mirror_out_of_sync).
+  # A stopped probe, and a run truncated by the unit's 240s TimeoutStartSec, therefore still page —
+  # ONCE, with an accurate message, instead of once per counter with a false one. bff5's premise
+  # (this counter publishes 0 unconditionally, so silence means a dead publisher) is still true;
+  # what bff5 got wrong was making EVERY counter say so, which is what turned one gap into a
+  # multi-alarm page. This is the conflation of liveness with condition the ticket names.
+  treat_missing_data = "notBreaching"
 
   # Notify the shared alerts topic on BOTH edges (ticket 9baf). This alarm previously declared
   # neither, so it transitioned OK -> ALARM and told nobody — the "silent-alarm gap" named in
