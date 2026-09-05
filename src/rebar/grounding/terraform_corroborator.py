@@ -283,7 +283,13 @@ def _run(exe: Path, snapshot: Path) -> _Execution:
     home = Path(tempfile.mkdtemp(prefix=".rebar-tfci-home-"))
     try:
         proc = subprocess.Popen(
-            [str(exe), "--json", str(snapshot)],
+            # "." not str(snapshot): upstream stamps pos.filename as
+            # filepath.Join(dir, name) (tfconfig/load.go dirFiles), so an ABSOLUTE dir
+            # argument comes back as an absolute filename that _validate_positions then
+            # rejects as path_outside_snapshot. cwd is already the snapshot, so "." names
+            # the same directory and keeps filenames relative — and keeps the snapshot
+            # path out of argv entirely (bug f95d-19f6-7e58-4a8e).
+            [str(exe), "--json", "."],
             cwd=str(snapshot),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -425,7 +431,7 @@ def _match_result(
         "version": "unknown",
     }
     invocation = {
-        "argv": [TOOL_NAME, "--json", "<snapshot>"],
+        "argv": [TOOL_NAME, "--json", "."],
         "shell": False,
         "stdin": "closed",
         "start_new_session": os.name != "nt",

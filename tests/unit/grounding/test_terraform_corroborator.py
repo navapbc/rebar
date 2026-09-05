@@ -42,7 +42,7 @@ def _module_json(**overrides: Any) -> dict[str, Any]:
                 "default": SECRET,
                 "required": False,
                 "sensitive": False,
-                "pos": {"filename": "main.tf", "line": 1, "column": 1, "byte": 0},
+                "pos": {"filename": "main.tf", "line": 1},
             }
         },
         "outputs": {
@@ -50,7 +50,7 @@ def _module_json(**overrides: Any) -> dict[str, Any]:
                 "name": "bucket",
                 "description": SECRET,
                 "sensitive": False,
-                "pos": {"filename": "main.tf", "line": 2, "column": 1, "byte": 20},
+                "pos": {"filename": "main.tf", "line": 2},
             }
         },
         "managed_resources": {
@@ -58,8 +58,8 @@ def _module_json(**overrides: Any) -> dict[str, Any]:
                 "mode": "managed",
                 "type": "aws_s3_bucket",
                 "name": "logs",
-                "provider": "aws",
-                "pos": {"filename": "main.tf", "line": 3, "column": 1, "byte": 40},
+                "provider": {"name": "aws"},
+                "pos": {"filename": "main.tf", "line": 3},
             }
         },
         "data_resources": {
@@ -67,8 +67,8 @@ def _module_json(**overrides: Any) -> dict[str, Any]:
                 "mode": "data",
                 "type": "aws_ami",
                 "name": "base",
-                "provider": "aws",
-                "pos": {"filename": "main.tf", "line": 4, "column": 1, "byte": 60},
+                "provider": {"name": "aws"},
+                "pos": {"filename": "main.tf", "line": 4},
             }
         },
         "module_calls": {
@@ -76,7 +76,7 @@ def _module_json(**overrides: Any) -> dict[str, Any]:
                 "name": "vpc",
                 "source": "../modules/vpc",
                 "version": None,
-                "pos": {"filename": "main.tf", "line": 5, "column": 1, "byte": 80},
+                "pos": {"filename": "main.tf", "line": 5},
             }
         },
         "required_providers": {
@@ -279,10 +279,11 @@ def test_subprocess_contract_strips_environment_and_copies_readonly_snapshot(
     result, capture, _ = _corroborate(repo, monkeypatch)
     assert result.evidence["outcome"] == ev.OUTCOME_MATCH
     assert Path(capture["argv"][0]).name == "terraform-config-inspect"
-    assert [capture["argv"][1], str(Path(capture["argv"][2]).resolve())] == [
-        "--json",
-        str(Path(capture["cwd"]).resolve()),
-    ]
+    # The directory argument is "." — the child's cwd IS the snapshot, so this names the same
+    # directory while keeping the snapshot path out of argv and keeping the tool's pos.filename
+    # relative (bug f95d-19f6-7e58-4a8e).
+    assert capture["argv"][1:] == ["--json", "."]
+    assert Path(capture["cwd"]).name.startswith(".rebar-tfci-")
     assert capture["stdin"] == ""
     assert not any(str(repo) in arg for arg in capture["argv"])
     assert str(repo) not in capture["cwd"]
@@ -357,7 +358,7 @@ def test_faults_abstain_redact_cleanup_and_retry(
                 variables={
                     "region": {
                         "name": "region",
-                        "pos": {"filename": "../x.tf", "line": 1, "column": 1, "byte": 0},
+                        "pos": {"filename": "../x.tf", "line": 1},
                     }
                 }
             ),

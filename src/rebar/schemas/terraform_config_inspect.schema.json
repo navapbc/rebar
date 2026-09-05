@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "terraform_config_inspect.schema.json",
   "title": "Audited terraform-config-inspect JSON subset",
-  "description": "Producer-side contract for the pinned terraform-config-inspect --json stdout subset consumed by the REB-640 corroborator.",
+  "description": "Producer-side contract for the pinned terraform-config-inspect --json stdout subset consumed by the REB-640 corroborator. Shapes are taken from the PINNED binary's real output, not from its docs: SourcePos carries only filename+line (column and byte stay optional so a later revision that adds them still validates), required_core/provider_configs/diagnostics are omitempty and absent on a clean module, and a resource provider is a {name, alias} object. Asserting otherwise made every real invocation abstain config_inspect_schema_skew (bug f95d-19f6-7e58-4a8e).",
   "$defs": {
     "pos": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["filename", "line", "column", "byte"],
+      "required": ["filename", "line"],
       "properties": {
         "filename": { "type": "string" },
         "line": { "type": "integer" },
@@ -48,7 +48,14 @@
         "mode": { "type": "string", "enum": ["managed", "data"] },
         "type": { "type": "string" },
         "name": { "type": "string" },
-        "provider": { "type": ["string", "null"] },
+        "provider": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "alias": { "type": "string" }
+          }
+        },
         "pos": { "$ref": "terraform_config_inspect.schema.json#/$defs/pos" }
       }
     },
@@ -104,10 +111,7 @@
     "managed_resources",
     "data_resources",
     "module_calls",
-    "required_providers",
-    "required_core",
-    "provider_configs",
-    "diagnostics"
+    "required_providers"
   ],
   "properties": {
     "path": { "type": "string" },
