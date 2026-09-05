@@ -674,6 +674,15 @@ ls -la /var/lib/rebar/gate-scratch/.gate-scratch-mounted       # the proof marke
 lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT                           # is the EBS volume attached?
 ```
 
+**`mount -a` only helps if there IS an fstab entry.** If `lsblk` shows the volume attached with
+NO FSTYPE and `grep gate-scratch /etc/fstab` finds nothing, the volume was never put into
+service at all — it was attached by a `terraform apply` after this instance's first boot, so
+`user_data.sh` (first-boot only) never formatted or mounted it. That is a different procedure,
+not a longer version of this one: the mount point already holds live scratch that must be moved
+aside rather than mounted over, and the review-bot container must be RECREATED afterwards
+because it binds `/var/lib/rebar` (the parent) and will not otherwise see the new mount. Follow
+[gate-scratch-mount.md](gate-scratch-mount.md); do not improvise from this block.
+
 Markers are markers, not data, so a reformat or a restore onto a fresh volume loses them and
 you recreate them by hand. **Recreate the PROOF marker only after `mountpoint -q` succeeds.**
 Writing it while the volume is unmounted lands it in the underlying ROOT directory, which
