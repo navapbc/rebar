@@ -22,6 +22,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 from rebar._store import freshness, push_state
 
@@ -39,7 +40,7 @@ def store(tmp_path: Path) -> Path:
     """A tracker level with its origin's ``tickets`` branch: the healthy baseline."""
     origin = tmp_path / "origin.git"
     tracker = tmp_path / "tracker"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True, capture_output=True)
+    init_bare_remote(origin)
     tracker.mkdir()
     _git(tracker, "init", "-q")
     _git(tracker, "config", "user.email", "t@e.com")

@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 from rebar._commands import tracker_maintenance as _tm
 
@@ -37,7 +38,7 @@ def _commit(cwd: Path, msg: str) -> None:
 def tracker(tmp_path: Path) -> Path:
     """A tickets tracker with an origin, polluted by a source tree."""
     remote = tmp_path / "remote.git"
-    _git(tmp_path, "init", "--quiet", "--bare", "-b", "tickets", str(remote))
+    init_bare_remote(remote, initial_branch="tickets")
     seed = tmp_path / "seed"
     _git(tmp_path, "clone", "--quiet", str(remote), str(seed))
     tdir = seed / "aaaa-bbbb-cccc-dddd"

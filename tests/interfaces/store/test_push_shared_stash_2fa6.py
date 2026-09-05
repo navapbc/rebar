@@ -25,6 +25,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 from rebar._store import push as _push
 
@@ -44,7 +45,7 @@ def _commit(cwd: Path, message: str) -> None:
 def tracker_with_remote(tmp_path: Path) -> tuple[Path, Path]:
     """A ``tickets`` checkout whose ``origin`` has advanced on a shared file."""
     remote = tmp_path / "remote.git"
-    _git(tmp_path, "init", "--quiet", "--bare", "-b", "tickets", str(remote))
+    init_bare_remote(remote, initial_branch="tickets")
 
     seed = tmp_path / "seed"
     _git(tmp_path, "clone", "--quiet", str(remote), str(seed))

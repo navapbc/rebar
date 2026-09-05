@@ -41,6 +41,17 @@ This REMOVES the concurrent mutator rather than tolerating it: no retry, no slee
 timing bound, no ignore predicate, and no assertion weakened. A push that genuinely
 cannot succeed still fails.
 
+**The second amplifier: a LOCAL ``git clone``** (bug 57d2-e356-7eb4-4bf5). A clone whose
+source is a local path does not use the transport; it hardlinks or copies every entry it
+finds under the source's ``objects/``, exactly the wholesale walk ``copytree`` performs.
+Entries the detached maintenance child prunes between readdir and copy make git die with
+exit 128 -- ``failed to copy file to '<dst>/.git/objects/<sha>'``, ``unable to read sha1
+file``, or ``unable to parse commit``, one race with three faces. Measured on git 2.55,
+push-then-local-clone in a loop against one bare remote seeded like a ticket store, 8
+concurrent workers x 120 iterations on a loaded host: **unpinned 5/960 clones exited 128;
+pinned 0/960**. ``tests/unit/test_bare_clone_source_upkeep_sweep.py`` is the tree sweep
+that keeps a new fixture from cloning an unpinned remote.
+
 Import it bare (``from _git_upkeep import init_bare_remote``) like the other shared root
 helpers — ``tests/`` is on ``sys.path`` (see tests/conftest.py).
 """
@@ -50,7 +61,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 # The upkeep posture a fixture bare remote is pinned to BEFORE anything is pushed into
@@ -63,36 +74,54 @@ BARE_REMOTE_UPKEEP_PINS: dict[str, str] = {
 }
 
 
-def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def _git(
+    repo: Path,
+    *args: str,
+    check: bool = True,
+    env: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "--git-dir", str(repo), *args],
         check=check,
         capture_output=True,
         text=True,
+        env=None if env is None else dict(env),
     )
 
 
-def apply_upkeep_pins(remote: Path) -> Path:
+def apply_upkeep_pins(remote: Path, *, env: Mapping[str, str] | None = None) -> Path:
     """Pin *remote* to a posture that leaves no background upkeep behind a push."""
     for key, value in BARE_REMOTE_UPKEEP_PINS.items():
-        _git(remote, "config", key, value)
+        _git(remote, "config", key, value, env=env)
     return remote
 
 
-def init_bare_remote(remote: Path) -> Path:
+def init_bare_remote(
+    remote: Path,
+    *,
+    initial_branch: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> Path:
     """Create a bare repository at *remote*, pinned before anything can be pushed.
 
     The pins are applied in the same call that creates the repository, so there is no
     window in which a push could reach an unpinned remote.
+
+    *initial_branch* names the repository's initial ``HEAD`` branch, the
+    ``--initial-branch=tickets`` that several ticket-store fixtures need. It is a
+    parameter rather than a reason to hand-roll ``git init --bare`` beside this
+    helper, because hand-rolling is what leaves a remote unpinned.
     """
     remote.parent.mkdir(parents=True, exist_ok=True)
+    branch = [f"--initial-branch={initial_branch}"] if initial_branch else []
     subprocess.run(
-        ["git", "init", "-q", "--bare", str(remote)],
+        ["git", "init", "-q", "--bare", *branch, str(remote)],
         check=True,
         capture_output=True,
         text=True,
+        env=None if env is None else dict(env),
     )
-    return apply_upkeep_pins(remote)
+    return apply_upkeep_pins(remote, env=env)
 
 
 def missing_upkeep_pins(repo: Path) -> list[str]:

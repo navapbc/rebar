@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 from rebar._store import push
 
@@ -59,9 +60,7 @@ def diverged_tracker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     """
     monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
     origin, tracker, up = tmp_path / "origin.git", tmp_path / "tracker", tmp_path / "upstream"
-    subprocess.run(
-        ["git", "init", "--bare", "-b", "tickets", str(origin)], check=True, capture_output=True
-    )
+    init_bare_remote(origin, initial_branch="tickets")
     subprocess.run(["git", "clone", str(origin), str(tracker)], check=True, capture_output=True)
     _ident(tracker)
     _git(tracker, "checkout", "-q", "-b", "tickets")

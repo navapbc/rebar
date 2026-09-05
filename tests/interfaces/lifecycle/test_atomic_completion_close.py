@@ -8,6 +8,7 @@ cleanliness, and a clean retry.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import uuid
 from concurrent.futures import ProcessPoolExecutor
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 import rebar
 from rebar import config, signing
@@ -38,7 +40,22 @@ from rebar.llm.plan_review.attest import current_material_fingerprint
 
 
 def _run_git(*argv: str) -> str:
-    proc = subprocess.run(["git", *argv], check=True, capture_output=True, text=True)
+    """Run git, surfacing git's own diagnosis on failure.
+
+    NOT ``check=True``: ``CalledProcessError`` renders only ``returned non-zero
+    exit status 128`` and drops the captured stderr, which is the only place git
+    states the cause [rebar:57d2-e356-7eb4-4bf5].
+    """
+    proc = subprocess.run(["git", *argv], check=False, capture_output=True, text=True)
+    if proc.returncode != 0:
+        try:
+            cwd = os.getcwd()
+        except OSError as exc:  # the worker's cwd was deleted underneath us
+            cwd = f"<unavailable: {exc}>"
+        raise AssertionError(
+            f"git {' '.join(argv)} failed (exit {proc.returncode}); cwd={cwd}\n"
+            f"stdout: {proc.stdout}\nstderr: {proc.stderr}"
+        )
     return proc.stdout.strip()
 
 
@@ -114,7 +131,7 @@ def _ticket_remote(repo: Path, tmp_path: Path) -> tuple[Path, Path]:
     """Attach a real bare tickets remote and return it with an independent writer clone."""
     tracker = Path(config.tracker_dir(str(repo)))
     remote = tmp_path / "tickets-remote.git"
-    _git(tmp_path, "init", "--bare", "--quiet", "--initial-branch=tickets", str(remote))
+    init_bare_remote(remote, initial_branch="tickets")
     remotes = _git(tracker, "remote").splitlines()
     if "origin" in remotes:
         _git(tracker, "remote", "set-url", "origin", str(remote))
@@ -122,7 +139,7 @@ def _ticket_remote(repo: Path, tmp_path: Path) -> tuple[Path, Path]:
         _git(tracker, "remote", "add", "origin", str(remote))
     _git(tracker, "push", "origin", "HEAD:refs/heads/tickets")
     writer = tmp_path / "remote-writer"
-    _git(tmp_path, "clone", "--quiet", "-b", "tickets", str(remote), str(writer))
+    _git(tmp_path, "clone", "-b", "tickets", str(remote), str(writer))
     _git(writer, "config", "user.name", "Remote Writer")
     _git(writer, "config", "user.email", "remote-writer@example.test")
     return remote, writer

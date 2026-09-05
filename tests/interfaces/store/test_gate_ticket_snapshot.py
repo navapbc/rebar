@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 import rebar
 from rebar._snapshot import materialize_tickets
@@ -45,7 +46,7 @@ def repo_with_origin(tmp_path, monkeypatch):
     ``test_gate_source_threading.py``): a code commit on ``main`` is pushed to origin, and a
     rebar ticket is created (auto-committed + auto-pushed to ``origin/tickets``)."""
     remote = tmp_path / "remote.git"
-    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+    init_bare_remote(remote)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main")

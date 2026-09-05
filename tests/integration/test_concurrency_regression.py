@@ -895,7 +895,7 @@ def test_reconverge_waits_for_a_lock_owned_push_recovery_merge(tmp_path: Path) -
         _g(repo, "add", name)
         _g(repo, "commit", "--no-verify", "-m", message)
 
-    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    init_bare_remote(remote)
     subprocess.run(["git", "init", "-q", "--initial-branch=tickets", str(seed)], check=True)
     _g(seed, "config", "user.email", "t@t")
     _g(seed, "config", "user.name", "t")

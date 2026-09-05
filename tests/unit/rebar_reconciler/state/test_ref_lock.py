@@ -24,6 +24,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 REF_LOCK_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_ref_lock.py"
@@ -84,7 +85,7 @@ def tmp_git_repo(tmp_path: Path) -> Path:
 def tmp_git_repo_with_remote(tmp_path: Path) -> tuple[Path, Path]:
     """A work repo with a bare 'origin' remote (for the distributed CAS path)."""
     bare = tmp_path / "bare.git"
-    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+    init_bare_remote(bare)
     work = tmp_path / "work"
     subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
     _git(["config", "user.email", "test@example.com"], work)

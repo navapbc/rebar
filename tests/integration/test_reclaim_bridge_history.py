@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 SCRIPT = Path(__file__).parents[2] / "infra" / "scripts" / "reclaim_bridge_history.py"
 PROTECTED_TAG = "refs/tags/pre-heal-a118-20260710T005736Z"
@@ -108,8 +109,7 @@ def reclaim_fixture(tmp_path: Path) -> ReclaimFixture:
     )
     assert not (seed / ".bridge_state.bak-retarget").exists()
 
-    remote.mkdir()
-    _git(remote, "init", "-q", "--bare")
+    init_bare_remote(remote)
     _git(seed, "remote", "add", "origin", str(remote))
     _git(seed, "push", "-q", "origin", "tickets:tickets")
     _git(seed, "tag", PROTECTED_TAG.removeprefix("refs/tags/"), protected_tag_tip)
@@ -378,8 +378,7 @@ def test_rewritten_branch_accepts_small_representative_writer_push(
 
     published = tmp_path / "published.git"
     writer = tmp_path / "writer"
-    published.mkdir()
-    _git(published, "init", "-q", "--bare")
+    init_bare_remote(published)
     _git(
         fixture.scratch,
         "push",

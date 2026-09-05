@@ -30,6 +30,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 
 import rebar
 from rebar._store import push
@@ -55,7 +56,7 @@ def repo_with_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     """A rebar repo whose tickets store pushes to a real local bare origin."""
     origin = tmp_path / "origin.git"
     repo = tmp_path / "work"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True, capture_output=True)
+    init_bare_remote(origin)
     repo.mkdir()
     _git(repo.parent, "init", "-q", str(repo))
     _git(repo, "config", "user.email", "t@t.co")
