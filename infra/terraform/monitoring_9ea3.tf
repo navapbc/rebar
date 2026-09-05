@@ -60,7 +60,7 @@ resource "aws_cloudwatch_metric_alarm" "mcp_serving_path_down" {
   statistic           = "Minimum"
   period              = 300
   evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  datapoints_to_alarm = 3
   threshold           = 1
   comparison_operator = "LessThanThreshold"
 
@@ -71,11 +71,20 @@ resource "aws_cloudwatch_metric_alarm" "mcp_serving_path_down" {
   # notice that /mcp has stopped serving.
   treat_missing_data = "breaching"
 
-  # 300 / 3 / 2 is root_disk_pressure's shape, required by the guard in
-  # tests/unit/test_alarm_actions_terraform.py: with breaching missing data, a live sample
-  # showed ~22 of 24 five-minute periods present, so an isolated jittered interval is NORMAL
-  # and a 1-of-N latch would page on it. Two breaching datapoints inside 15 minutes is well
-  # under the 12-hour detection gap this alarm closes.
+  # PROFILE A (dead-man), 3-of-3 over 15 minutes — infra/runbooks/alarm-window-tuning.md.
+  #
+  # This was 3 / 2, and ticket a9d1-c7f3-cfd9-44ff established that 2-of-3 with breaching missing
+  # data pages on TWO EMPTY BUCKETS ALONE, with no unhealthy reading of any kind. Its stated
+  # justification ("~22 of 24 five-minute periods present") measured 87%, not 92%, and the
+  # publisher's contractual inter-arrival is 5-9 minutes (OnUnitActiveSec=5min measured from
+  # completion + TimeoutStartSec=240), so empty 5-minute buckets are guaranteed, not unlucky.
+  #
+  # datapoints_to_alarm == evaluation_periods is what makes silence safe to keep treating as
+  # bad: a page now requires 15 minutes with NO published 1, which is beyond the 9-minute bound
+  # with margin, and any single healthy datapoint returns the alarm to OK immediately.
+  # mcp_healthy is published in §1b, near the top of observability.sh, so it is the least
+  # gap-prone signal in the namespace and can hold the tightest dead-man window here.
+  # Detection stays 15 minutes, still far under the 12-hour gap this alarm closes.
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]

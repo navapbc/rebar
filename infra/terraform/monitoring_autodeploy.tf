@@ -52,12 +52,22 @@ resource "aws_cloudwatch_metric_alarm" "deploy_errors" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
-  # publishes deploy_errors' per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
-  # period publishes 0 — the metric is continuously present. Missing data therefore means the
-  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
-  # The 2-of-4 window above already absorbs the jitter this setting introduces.
-  treat_missing_data = "breaching"
+  # PROFILE B, ticket a9d1-c7f3-cfd9-44ff: absence of a delta report is not evidence of errors.
+  # rebar:allow-missing-data-notbreaching: liveness is carried by the dead-man alarms, which keep
+  # treat_missing_data = "breaching" with datapoints_to_alarm == evaluation_periods and span
+  # observability.sh from §1 (GerritReachable) and §1b (mcp_healthy) through §2e/§2g/§2h/§2i (the
+  # mount / journal-cap / var-tmp-cleanup / container-reaper heartbeats) to §5 (mirror_out_of_sync).
+  # A stopped probe, and a run truncated by the unit's 240s TimeoutStartSec, therefore still page —
+  # ONCE, with an accurate message, instead of once per counter with a false one.
+  #
+  # bff5's premise (this counter publishes 0 unconditionally, so silence means a dead publisher)
+  # is still true; what bff5 got wrong was making EVERY counter say so. At 900s periods that made
+  # 30 MINUTES OF SILENCE a page with the counter reading 0 throughout — reachable whenever the
+  # probe run is cut short before §4d/§4e, which is exactly the publisher fault filed as
+  # ignitable-fuchsia-kawala. The window above is unchanged: datapoints_to_alarm must stay below
+  # evaluation_periods so an INTERMITTENT stream, which an N-of-N streak would reset on, is still
+  # caught, and 2 real datapoints inside 4x900s is reachable at any plausible publish cadence.
+  treat_missing_data = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
@@ -150,11 +160,22 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_bound_exceeded" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
-  # publishes review_interrupts_bound_exceeded's per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
-  # period publishes 0 — the metric is continuously present. Missing data therefore means the
-  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
-  treat_missing_data = "breaching"
+  # PROFILE B, ticket a9d1-c7f3-cfd9-44ff: absence of a delta report is not evidence of errors.
+  # rebar:allow-missing-data-notbreaching: liveness is carried by the dead-man alarms, which keep
+  # treat_missing_data = "breaching" with datapoints_to_alarm == evaluation_periods and span
+  # observability.sh from §1 (GerritReachable) and §1b (mcp_healthy) through §2e/§2g/§2h/§2i (the
+  # mount / journal-cap / var-tmp-cleanup / container-reaper heartbeats) to §5 (mirror_out_of_sync).
+  # A stopped probe, and a run truncated by the unit's 240s TimeoutStartSec, therefore still page —
+  # ONCE, with an accurate message, instead of once per counter with a false one.
+  #
+  # bff5's premise (this counter publishes 0 unconditionally, so silence means a dead publisher)
+  # is still true; what bff5 got wrong was making EVERY counter say so. At 900s periods that made
+  # 30 MINUTES OF SILENCE a page with the counter reading 0 throughout — reachable whenever the
+  # probe run is cut short before §4d/§4e, which is exactly the publisher fault filed as
+  # ignitable-fuchsia-kawala. The window above is unchanged: datapoints_to_alarm must stay below
+  # evaluation_periods so an INTERMITTENT stream, which an N-of-N streak would reset on, is still
+  # caught, and 2 real datapoints inside 4x900s is reachable at any plausible publish cadence.
+  treat_missing_data = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
@@ -195,11 +216,22 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_signal_unavailable" {
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
-  # DEAD-PUBLISHER, not "quiet when healthy" (ticket bff5-9163-cddd-4158). The host probe
-  # publishes review_interrupts_signal_unavailable's per-interval delta UNCONDITIONALLY every 5 minutes, so a healthy
-  # period publishes 0 — the metric is continuously present. Missing data therefore means the
-  # PROBE, its timer, or the host is dead, which is exactly when this alarm must page.
-  treat_missing_data = "breaching"
+  # PROFILE B, ticket a9d1-c7f3-cfd9-44ff: absence of a delta report is not evidence of errors.
+  # rebar:allow-missing-data-notbreaching: liveness is carried by the dead-man alarms, which keep
+  # treat_missing_data = "breaching" with datapoints_to_alarm == evaluation_periods and span
+  # observability.sh from §1 (GerritReachable) and §1b (mcp_healthy) through §2e/§2g/§2h/§2i (the
+  # mount / journal-cap / var-tmp-cleanup / container-reaper heartbeats) to §5 (mirror_out_of_sync).
+  # A stopped probe, and a run truncated by the unit's 240s TimeoutStartSec, therefore still page —
+  # ONCE, with an accurate message, instead of once per counter with a false one.
+  #
+  # bff5's premise (this counter publishes 0 unconditionally, so silence means a dead publisher)
+  # is still true; what bff5 got wrong was making EVERY counter say so. At 900s periods that made
+  # 30 MINUTES OF SILENCE a page with the counter reading 0 throughout — reachable whenever the
+  # probe run is cut short before §4d/§4e, which is exactly the publisher fault filed as
+  # ignitable-fuchsia-kawala. The window above is unchanged: datapoints_to_alarm must stay below
+  # evaluation_periods so an INTERMITTENT stream, which an N-of-N streak would reset on, is still
+  # caught, and 2 real datapoints inside 4x900s is reachable at any plausible publish cadence.
+  treat_missing_data = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
@@ -243,11 +275,39 @@ resource "aws_cloudwatch_metric_alarm" "root_disk_pressure" {
   metric_name = "root_disk_used_percent"
   statistic   = "Maximum"
 
-  # Probe cadence is 5 min; 2-of-3 periods over 85% pages within ~15 min of
-  # sustained pressure without paging on one anomalous sample.
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes. This is the house shape the other
+  # rebar/host gauges and heartbeats in this file point at; the full derivation, the measured
+  # publish cadence behind it, and the per-alarm table are in
+  # infra/runbooks/alarm-window-tuning.md (ticket a9d1-c7f3-cfd9-44ff).
+  #
+  # WHAT WAS WRONG WITH 300/3/2. treat_missing_data is "breaching" here (correctly — see below),
+  # which makes an EMPTY period a breaching datapoint. datapoints_to_alarm = 2 of
+  # evaluation_periods = 3 therefore paged on TWO EMPTY BUCKETS ALONE, with no reading of any
+  # kind. On 2026-09-05 that put 19 alarms in ALARM, about 17 of them false — root_disk_used_percent
+  # was publishing 73 throughout. The comment this replaces called the gaps "ordinary timer
+  # jitter that makes ~2 of 24 periods absent"; the measured figure is 6 of 47 (13%), and the
+  # gaps are STRUCTURAL, not jitter: install-observability.sh sets OnUnitActiveSec=5min measured
+  # from the last COMPLETED run with TimeoutStartSec=240, so the publish interval is 5-9 minutes
+  # against 5-minute buckets and empty buckets are guaranteed.
+  #
+  # The same shape had a second, worse failure: when the publisher is slower than the window,
+  # EVERY evaluation holds two empty buckets, so the alarm re-arms itself forever and no value
+  # the metric can publish clears it. rebar-docker-buildkit-cache-high sat in ALARM for 10.5
+  # hours that way while its cache went from 9% over budget to 0, noticing neither.
+  #
+  # WHY 6-of-6 FIXES BOTH. datapoints_to_alarm == evaluation_periods means missing buckets can
+  # never OUT-VOTE a real reading: a page requires the ENTIRE 30-minute window to be breaching
+  # or empty, so one scheduling gap is harmless, and ONE healthy datapoint returns the alarm to
+  # OK however slow the publisher is. The unclearable state is unreachable by construction.
+  #
+  # WHY NOT LOWER datapoints_to_alarm INSTEAD. Because that is the pair that broke. M < N is
+  # kept only where an INTERMITTENT breach is the real condition (the error counters above,
+  # which moved to notBreaching for exactly that reason). Disk fullness is not intermittent: a
+  # volume at or above 85% reads so on every run, so 6-of-6 detects it and pages within 30
+  # minutes. Detection is slower than the nominal 15 minutes and loses nothing.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 85
   comparison_operator = "GreaterThanThreshold"
 
@@ -298,12 +358,21 @@ resource "aws_cloudwatch_metric_alarm" "gate_scratch_disk_high" {
     mount      = var.gate_scratch_mount
   }
 
-  # The house 300/3/2 shape (root_disk_pressure above, gerrit_data_disk_high in
-  # monitoring.tf): 2 breaching datapoints in a 3-period window absorbs the ordinary
-  # timer jitter that makes ~2 of 24 periods absent on this box.
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # This alarm's condition — the gate scratch volume at or above 85% — reads breaching on every
+  # run while it holds, so 6-of-6 detects it within 30 minutes. Its co-located heartbeat is
+  # gate_scratch_unmounted below, published by the same §2e block, which is what pages if §2e is
+  # never reached at all.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 85
   comparison_operator = "GreaterThanThreshold"
 
@@ -336,9 +405,21 @@ resource "aws_cloudwatch_metric_alarm" "gate_scratch_unmounted" {
   metric_name = "gate_scratch_mounted"
   statistic   = "Minimum"
 
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # This is a HEARTBEAT: §2e publishes gate_scratch_mounted on every run, 1 mounted / 0 not, so a
+  # healthy period is a published 1 and silence means §2e was never reached. Keeping "breaching"
+  # is the point of the alarm; 6-of-6 is what stops an ordinary gap from being mistaken for it.
+  # A genuinely unmounted volume publishes 0 on every run and still pages within 30 minutes.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 1
   comparison_operator = "LessThanThreshold"
 
@@ -407,11 +488,21 @@ resource "aws_cloudwatch_metric_alarm" "docker_storage_cap_high" {
   metric_name = "docker_storage_used_percent"
   statistic   = "Maximum"
 
-  # The house 300/3/2 shape (root_disk_pressure above): 2 breaching datapoints in a 3-period
-  # window absorbs the ordinary timer jitter that makes ~2 of 24 periods absent on this box.
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # §2f publishes this ONLY on a successful measurement, so silence here is a real condition —
+  # a `du` that could not run, a wedged docker daemon — and "breaching" must stay (the pin in
+  # tests/unit/test_alarm_actions_terraform.py). 6-of-6 keeps that meaning while requiring the
+  # whole window to be silent, which no ordinary scheduling gap achieves.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 85
   comparison_operator = "GreaterThanThreshold"
 
@@ -446,9 +537,24 @@ resource "aws_cloudwatch_metric_alarm" "docker_buildkit_cache_high" {
   metric_name = "docker_buildkit_cache_used_percent"
   statistic   = "Maximum"
 
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # THIS IS THE ALARM THAT COULD NOT CLEAR. It sat in ALARM from 2026-09-04T17:51:49 for 10.5
+  # hours on "no datapoints were received for 3 periods and 3 missing datapoints were treated as
+  # [Breaching]", while the BuildKit cache went from 5.877 GB against a 5.00 GiB budget to 0 and
+  # published 0 — and it noticed neither, because two missing buckets re-satisfied
+  # datapoints_to_alarm = 2 on every evaluation. Under 6-of-6 that single published 0 clears it.
+  # §2f publishes only on a successful measurement, so "breaching" still carries the real
+  # "the probe can no longer see the cache" condition.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 85
   comparison_operator = "GreaterThanThreshold"
 
@@ -486,9 +592,20 @@ resource "aws_cloudwatch_metric_alarm" "docker_unaccounted_bytes" {
   metric_name = "docker_unaccounted_bytes"
   statistic   = "Maximum"
 
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # §2f publishes only on a successful measurement, so silence is the real "the probe can no
+  # longer size the Docker root" condition and "breaching" stays. 6-of-6 is what distinguishes
+  # that from one ordinary scheduling gap.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   # 2 GiB. Some divergence between `du` and the ledger is NORMAL — `du` counts allocated
   # blocks including per-layer directory and whiteout overhead plus the daemon's own metadata
   # (image/, network/, buildkit/*.db, tmp/), while the ledger reports layer sizes with sharing
@@ -562,11 +679,20 @@ resource "aws_cloudwatch_metric_alarm" "journal_usage_high" {
   metric_name = "journal_used_percent"
   statistic   = "Maximum"
 
-  # The house 300/3/2 shape (root_disk_pressure above): 2 breaching datapoints in a 3-period
-  # window absorbs the ordinary timer jitter that makes ~2 of 24 periods absent on this box.
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # §2g publishes journal_used_percent only on a successful measurement, so "breaching" carries
+  # the real "the probe can no longer size the journal" condition and stays. 6-of-6 separates
+  # that from a scheduling gap; a journal genuinely at or above 85% reads so on every run.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 85
   comparison_operator = "GreaterThanThreshold"
 
@@ -603,9 +729,21 @@ resource "aws_cloudwatch_metric_alarm" "journal_cap_not_in_effect" {
   metric_name = "journal_cap_in_effect"
   statistic   = "Minimum"
 
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # This is a HEARTBEAT: §2g publishes journal_cap_in_effect on EVERY tick including its 0 path,
+  # so its absence can only mean the probe, the timer or the host is dead. That is why it keeps
+  # "breaching" while the counters do not, and why 6-of-6 rather than a lower datapoint count is
+  # the right way to stop a gap from imitating it.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 1
   comparison_operator = "LessThanThreshold"
 
@@ -655,11 +793,20 @@ resource "aws_cloudwatch_metric_alarm" "var_tmp_usage_high" {
   metric_name = "var_tmp_used_percent"
   statistic   = "Maximum"
 
-  # The house 300/3/2 shape (root_disk_pressure above): 2 breaching datapoints in a 3-period
-  # window absorbs the ordinary timer jitter that makes ~2 of 24 periods absent on this box.
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # /var/tmp has no writer-enforced cap absent an XFS project quota, so this READING is the whole
+  # control and §2h publishes it only on a successful measurement: "breaching" stays. 6-of-6
+  # separates a failed measurement from a scheduling gap.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 85
   comparison_operator = "GreaterThanThreshold"
 
@@ -696,9 +843,21 @@ resource "aws_cloudwatch_metric_alarm" "var_tmp_cleanup_not_active" {
   metric_name = "var_tmp_cleanup_active"
   statistic   = "Minimum"
 
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # This is a HEARTBEAT: §2h publishes var_tmp_cleanup_active on EVERY tick including its 0 path,
+  # so its absence can only mean the probe, the timer or the host is dead. It is currently 0 for
+  # a real reason (the pending rootflags=pquota reboot), and 6-of-6 keeps it firing on that: a
+  # genuine 0 breaches on every run, so the whole window breaches.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 1
   comparison_operator = "LessThanThreshold"
 
@@ -750,11 +909,21 @@ resource "aws_cloudwatch_metric_alarm" "container_writable_usage_high" {
   metric_name = "container_writable_used_percent"
   statistic   = "Maximum"
 
-  # The house 300/3/2 shape (root_disk_pressure above): 2 breaching datapoints in a 3-period
-  # window absorbs the ordinary timer jitter that makes ~2 of 24 periods absent on this box.
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # The reaper behind this metric can only remove EXITED containers, so when the bytes belong to
+  # a RUNNING service nothing bounds them and the READING is the entire control; §2i publishes it
+  # only on a successful measurement, so "breaching" stays. 6-of-6 separates a failed measurement
+  # from a scheduling gap.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 85
   comparison_operator = "GreaterThanThreshold"
 
@@ -792,9 +961,21 @@ resource "aws_cloudwatch_metric_alarm" "container_reaper_not_active" {
   metric_name = "container_reaper_active"
   statistic   = "Minimum"
 
+  # PROFILE A (silence is evidence), 6-of-6 over 30 minutes — the house shape derived on
+  # root_disk_pressure above and in infra/runbooks/alarm-window-tuning.md. This was 300/3/2,
+  # which ticket a9d1-c7f3-cfd9-44ff showed pages on TWO EMPTY BUCKETS ALONE (missing data is
+  # breaching here, so an empty period is a breaching datapoint) and, when the publisher is
+  # slower than the window, re-arms forever. datapoints_to_alarm == evaluation_periods stops
+  # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
+  # or empty, and one healthy datapoint always clears it.
+  #
+  # This is a HEARTBEAT: §2i publishes container_reaper_active on EVERY tick including its 0
+  # path, so its absence can only mean the probe, the timer or the host is dead. §2i is the LAST
+  # of the four mid-script heartbeats, which makes it the sentinel for a run truncated anywhere
+  # between §2e and §2i by the unit's 240s TimeoutStartSec.
   period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 2
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 1
   comparison_operator = "LessThanThreshold"
 
