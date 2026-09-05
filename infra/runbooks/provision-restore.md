@@ -118,16 +118,26 @@ Order matters — secrets before the instance, infra before compose.
      replication deploy key + plugin config so the GitHub mirror resumes.
    - `infra/scripts/install-observability.sh` — re-arm the 5-min probe timer.
    - `infra/scripts/install-certbot-timer.sh` — TLS renewal.
-4b. **Confirm the gate-scratch volume mounted** (ADR 0112 decision 3, story
-   `aa40-cbda-ee38-481c`). `user_data.sh` mounts `aws_ebs_volume.gate_scratch` at
-   `var.gate_scratch_mount` (`/var/lib/rebar/gate-scratch`) and exits non-zero if it did
-   not take, so a clean boot has already proved this — but a restore that reuses an
-   existing instance has not:
+4b. **Confirm BOTH EBS volumes mounted** (ADR 0112 decision 3, story
+   `aa40-cbda-ee38-481c`; bug `9c93-754e-b641-48d1`). `user_data.sh` mounts both
+   `aws_ebs_volume.data` at `/var/gerrit` and `aws_ebs_volume.gate_scratch` at
+   `var.gate_scratch_mount` (`/var/lib/rebar/gate-scratch`), and now asserts each one took
+   before exiting — so a clean FIRST boot has already proved this. **A later boot has not.**
+   `user_data.sh` runs once; every subsequent boot just re-runs `mount -a` from `/etc/fstab`
+   with no witness, and both entries carry `nofail`, which means `mount -a` exits 0 whether or
+   not the mount happened. So run the check after any instance stop/start, instance
+   replacement, or volume restore:
    ```bash
-   mountpoint -q /var/lib/rebar/gate-scratch && \
-     ls /var/lib/rebar/.gate-scratch-required /var/lib/rebar/gate-scratch/.gate-scratch-mounted
+   sudo infra/scripts/check-mounts.sh
    ```
-   **This volume is REBUILDABLE scratch, not data.** It carries the review-gate snapshot
+   It exits non-zero and names the offending mount point. **Do not use "Gerrit responds" as
+   evidence that its data volume is mounted** — an unmounted `/var/gerrit` is an ordinary
+   directory, so Gerrit comes up happily on the 60 GiB root disk while the DLM snapshots go on
+   backing up an empty data volume. Then confirm the scratch markers:
+   ```bash
+   ls /var/lib/rebar/.gate-scratch-required /var/lib/rebar/gate-scratch/.gate-scratch-mounted
+   ```
+   **The gate-scratch volume is REBUILDABLE scratch, not data.** It carries the review-gate snapshot
    store and the review-bot's per-review clones; it has no `prevent_destroy`, takes no DLM
    snapshots, and needs no restore step — a fresh empty volume is a correct one. If the
    markers are missing, recreate them — the declaration first, and the proof ONLY after
