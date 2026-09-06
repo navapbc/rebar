@@ -323,6 +323,14 @@ def test_missing_message_file_is_a_loud_failure(stamped_repo: Path, tmp_path: Pa
     assert _git("rev-parse", "HEAD", cwd=stamped_repo).strip() == before
 
 
+def test_fixed_tmp_message_file_is_refused_before_git_can_read_it() -> None:
+    """Ticket 919d-7994: a fixed shared scratch path must fail before last-writer-wins."""
+    module = _load_script()
+
+    with pytest.raises(module._Failure, match="shared scratch.*unique"):  # noqa: RUF043
+        module._read_message_file("/tmp/commitmsg.txt")
+
+
 def test_strip_change_id_lines_removes_every_variant() -> None:
     """The pure part of the composition, exercised without touching git."""
     module = _load_script()
