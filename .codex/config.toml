@@ -50,19 +50,11 @@ include_only = [
   "HOMEBREW_*",
 ]
 
-[mcp_servers.serena]
-command = "uvx"
-args = [
-  "--from",
-  "git+https://github.com/oraios/serena@c7dbe3bd1198cf451bf7aa8fdeeab88571fa3a6e",
-  "serena",
-  "start-mcp-server",
-  "--context",
-  "codex",
-  "--project-from-cwd",
-]
-startup_timeout_sec = 120
-enabled = true
-
-[mcp_servers.serena.tools.write_memory]
-approval_mode = "approve"
+# Serena is deliberately NOT configured here. This tracked, repo-level config takes
+# precedence over the user-level ~/.codex/config.toml, so a `--project-from-cwd` entry
+# here forced every Codex session to index the full multi-GB checkout (~1.3GB RSS per
+# Serena server; incident 2ab6-bae5-8ca4-429c, bug 7495-36ea-df75-4a3d). Serena is
+# host-local tooling: configure it per-machine in ~/.codex/config.toml pointing at the
+# host's read-only origin/main mirror — the same pattern Copilot (~/.copilot/
+# mcp-config.json) and Claude Code (~/.claude.json) already use. See AGENTS.md
+# §"Navigating the codebase" for the mirror semantics.
