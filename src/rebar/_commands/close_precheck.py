@@ -1,10 +1,4 @@
-"""The completion-verification close gate's PRE-close cluster (extracted from
-transition_close.py at the existing call-graph seam — ticket 74a3; the file had crossed the
-locked 800-LOC module-size cap).
-
-It owns deterministic completion checks followed by the billable verifier. ``transition_close``
-re-imports its public seam names so established monkeypatch and library paths remain stable.
-"""
+"""Completion-verification close gate pre-close checks."""
 
 from __future__ import annotations
 
@@ -20,17 +14,13 @@ from rebar._commands._seam import CommandError
 from rebar._store import freshness
 
 logger = logging.getLogger(__name__)
-
-#: The close classes that are DISPOSITIONS rather than completed work. An ALIAS of
-#: :data:`close_disposition.DISPOSITION_CLASSES`, not a second frozenset kept in sync by an
-#: equality assertion — that kind of drift is what bug ``frolicky-dependable-peccary`` was, and
-#: one object cannot drift. The NAME is load-bearing: the 738a suite reads it from this module.
 _NON_COMPLETION_BUG_CLASSES = close_disposition.DISPOSITION_CLASSES
-
-#: A sentinel distinguishing "this close is not a disposition at all" (keep normal completion
-#: verification) from a disposition path that yielded no sign signal (``None`` — the close
-#: proceeds unsigned). See :func:`_administrative_disposition`.
 _NO_DISPOSITION = object()
+_STALE_REF_MESSAGE = (
+    "this checkout could not refresh or see its remote refs before deciding whether a "
+    "referencing commit exists. Fetch the code clone or retry from a current worktree; "
+    "this is distinct from a proven absence of a rebar-ticket trailer."
+)
 
 
 def _is_live_ticket(ticket_id: str, tracker: str) -> bool:
@@ -59,18 +49,7 @@ def _has_live_replacement_link(
     close_class: str,
     tracker: str,
 ) -> bool:
-    """True when a non-completion bug close names a live replacement.
-
-    A thin wrapper over :func:`close_disposition.replacement_of`; the two guards below are NOT
-    shared, and stay here on purpose. A non-bug close reaches the disposition path only through
-    the ADMINISTRATIVE subset (ticket fc20) — ``not_a_bug``/``escalated`` stay bug-only
-    vocabulary, which ``transition_core`` also refuses authoritatively at write time — so this
-    predicate is strictly LESS permissive for non-bug tickets than ``find_replacement``.
-
-    The NAME is a monkeypatch seam: the 738a suite patches it with ``raising=False``, so a
-    rename would go unnoticed and leave that test green while it no longer tested its claim.
-    ``on_subject_unreadable="stop"`` keeps the path fail-closed, since it gates a bypass.
-    """
+    """True when a non-completion bug close names a live replacement."""
     if close_class not in _NON_COMPLETION_BUG_CLASSES:
         return False
     if ticket_type != "bug" and close_class not in close_disposition.ADMINISTRATIVE_CLASSES:
@@ -84,20 +63,7 @@ def _has_live_replacement_link(
 
 
 def _recorded_replacement_target(ticket_id: str, tracker: str) -> str | None:
-    """The replacement ticket this bug NAMES, ignoring whether that target is usable.
-
-    :func:`_has_live_replacement_link` answers "is there a usable replacement?"; this answers
-    the strictly weaker "was one ever recorded?" — hence ``require_live=False``. The two differ
-    in exactly one case, a link whose target is archived, deleted, or no longer resolvable, and
-    that case earns a different remedy ("re-link to a live canonical") from having recorded
-    nothing at all ("run ``rebar link``"). Observed on bug 9b70.
-
-    It carries NO class guard: its caller :func:`_ensure_duplicate_close_is_linked` has already
-    narrowed to ``{duplicate, superseded}``, and adding one here would change which remedy an
-    operator is shown. ``on_subject_unreadable="continue"`` is likewise deliberate — this reader
-    picks between two message strings rather than gating a bypass, so a partially readable store
-    should still name what the inbound graph knows. No LLM, no network.
-    """
+    """The replacement ticket this bug NAMES, ignoring whether that target is usable."""
     return close_disposition.replacement_of(
         ticket_id, tracker, require_live=False, on_subject_unreadable="continue"
     )
@@ -106,29 +72,7 @@ def _recorded_replacement_target(ticket_id: str, tracker: str) -> str | None:
 def _ensure_duplicate_close_is_linked(
     ticket_id: str, ticket_type: str, close_class: str, tracker: str
 ) -> None:
-    """Block a ``--class duplicate`` close that names no usable canonical, naming the remedy.
-
-    Before this existed the close fell through to the completion verifier, which correctly
-    FAILED (a duplicate's defect is not resolved by the duplicate) but offered only two
-    impossible remedies: finish work that belongs to the canonical ticket, or mark the criterion
-    ``[operator-attested]`` — a false attestation. The one action that works, recording the
-    link, was never named. Observed on bug 9b70, where the fix was a single
-    ``rebar link 9b70 6a81 duplicates``.
-
-    Deliberately NOT a claim about the canonical's status: a duplicate of an ALREADY-CLOSED
-    canonical is the common case, so the gate asks only that the link exist.
-
-    Scoped to the REPLACEMENT-BEARING classes — ``duplicate`` and (ticket fc20) ``superseded``,
-    on ANY ticket type — rather than the whole ``_NON_COMPLETION_BUG_CLASSES`` set: ``not_a_bug``
-    asserts there is no defect and ``escalated`` may point outside the tracker, so neither owes a
-    link — since bug d54b both are reason-required instead (a live replacement link still
-    satisfies them first), and the reason-only administrative classes (obsolete/wontfix) are
-    justified by their ``--reason``; those keep their own paths.
-
-    A GUARD FUNCTION, not an inline branch, on purpose — ``_completion_precheck`` sits at its
-    recorded ceiling in ``.github/complexity-baseline.json``, which is shrink-only, so the
-    decision points live here and the call site stays unconditional.
-    """
+    """Block a ``--class duplicate`` close that names no usable canonical."""
     del ticket_type  # both classes owe a link on every ticket type (ticket fc20)
     if close_class not in ("duplicate", "superseded"):
         return
@@ -214,17 +158,48 @@ def _check_work_landed(
         if metrics is not None:
             metrics["landing_check_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
         return
-    metrics_kw = {"metrics": metrics} if metrics is not None else {}
-    referencing = _referencing_commits(
-        accepted_ids, tracker, code_root, **view_kwargs, **metrics_kw
+    referencing = (
+        _referencing_commits(accepted_ids, tracker, code_root)
+        if metrics is None and ticket_view is None
+        else _referencing_commits(accepted_ids, tracker, code_root, metrics=metrics)
+        if ticket_view is None
+        else _referencing_commits(
+            accepted_ids, tracker, code_root, metrics=metrics, ticket_view=ticket_view
+        )
     )
     attached = _attached_commit_shas(accepted_ids, tracker, **view_kwargs)
     landed = [*attached, *referencing]
+    metrics_kw = {"metrics": metrics} if metrics is not None else {}
     own_impact = (
         ticket_view.field_value(ticket_id, "file_impact")
         if ticket_view is not None
         else field_reads.file_impact(ticket_id, tracker)
     )
+    if own_impact and not landed:
+        from rebar._commands import link_revert
+
+        probe = link_revert._remote_probe(code_root)
+        if probe == "present":
+            if link_revert._refresh_remote_refs(code_root):
+                referencing = _referencing_commits(
+                    accepted_ids,
+                    tracker,
+                    code_root,
+                    metrics=metrics,
+                    ticket_view=ticket_view,
+                    include_upstream=True,
+                )
+            else:
+                raise CommandError(
+                    f"Error: cannot close {ticket_id}: {_STALE_REF_MESSAGE}",
+                    returncode=1,
+                )
+        elif probe == "unknown":
+            raise CommandError(
+                f"Error: cannot close {ticket_id}: {_STALE_REF_MESSAGE}",
+                returncode=1,
+            )
+        landed = [*attached, *referencing]
     if own_impact and not landed:
         raise CommandError(
             f"Error: cannot close {ticket_id}: it records file_impact (a code change) but no "
@@ -367,22 +342,22 @@ def _referencing_commits(
     repo_root,
     metrics: dict[str, int] | None = None,
     ticket_view: Any | None = None,
+    include_upstream: bool = False,
 ) -> list[str]:
-    """SHAs of commits referencing ANY of ``accepted_ids``, newest first.
-
-    A thin delegate over the ONE implementation of the scan
-    (:func:`rebar._engine_support.commit_impact.referencing_commits`), which is shared with
-    the ``caused_by`` link-time check. The name is kept because it is the documented
-    monkeypatch target for the close-gate tests, and the ``or []`` preserves this function's
-    long-standing contract: a git failure (not a repo, no commits) yields ``[]`` — "no
-    referencing commit found" — where the shared scan reports ``None``.
-    """
+    """SHAs of commits referencing ANY of ``accepted_ids``, newest first."""
     from rebar._engine_support import commit_impact
 
-    resolver_kwargs = {} if ticket_view is None else {"resolver": ticket_view.resolve}
+    scan_kwargs: dict[str, Any] = {"metrics": metrics}
+    if ticket_view is not None:
+        scan_kwargs["resolver"] = ticket_view.resolve
+    if include_upstream:
+        scan_kwargs["include_upstream"] = True
     commits = (
         commit_impact.referencing_commits(
-            accepted_ids, tracker, str(repo_root), metrics=metrics, **resolver_kwargs
+            accepted_ids,
+            tracker,
+            str(repo_root),
+            **scan_kwargs,
         )
         or []
     )

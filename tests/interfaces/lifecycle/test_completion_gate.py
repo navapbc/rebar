@@ -369,6 +369,69 @@ def test_file_impact_with_referencing_commit_closes(rebar_repo: Path, monkeypatc
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
 
 
+def test_file_impact_close_fetches_before_rejecting_stale_clone(
+    rebar_repo: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """A server clone whose HEAD lags its remote must fetch before claiming no commit exists."""
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
+    tid = _make(rebar_repo)
+    _set_impact(tid, rebar_repo)
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=upstream, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=upstream, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=upstream, check=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", f"work\n\nrebar-ticket: {tid}"],
+        cwd=upstream,
+        check=True,
+    )
+    subprocess.run(["git", "remote", "add", "origin", str(upstream)], cwd=rebar_repo, check=True)
+
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+
+    assert _status(tid, rebar_repo) == "closed"
+
+
+def test_file_impact_close_distinguishes_refreshed_absence(
+    rebar_repo: Path, tmp_path: Path, monkeypatch
+) -> None:
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
+    tid = _make(rebar_repo)
+    _set_impact(tid, rebar_repo)
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=upstream, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=upstream, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=upstream, check=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", "unrelated"], cwd=upstream, check=True
+    )
+    subprocess.run(["git", "remote", "add", "origin", str(upstream)], cwd=rebar_repo, check=True)
+
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+
+    assert "no commit references it" in ei.value.stderr
+
+
+def test_file_impact_close_distinguishes_unrefreshable_clone(rebar_repo: Path, monkeypatch) -> None:
+    from rebar._commands import link_revert
+
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
+    monkeypatch.setattr(link_revert, "_remote_probe", lambda _root: "unknown")
+    tid = _make(rebar_repo)
+    _set_impact(tid, rebar_repo)
+
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+
+    assert "could not refresh or see its remote refs" in ei.value.stderr
+
+
 def test_file_impact_commit_check_resolves_root_when_repo_root_is_none(
     rebar_repo: Path, monkeypatch
 ) -> None:
