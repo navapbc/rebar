@@ -326,3 +326,77 @@ def test_the_var_tmp_walk_is_wall_clock_bounded(tmp_path: Path) -> None:
     assert _run(env).returncode == 0
     assert _values(aws_log, "var_tmp_bytes") == []
     assert _values(aws_log, "var_tmp_used_percent") == []
+
+
+# --------------------------------------------------------------------------------------
+# Resolving the cap script the probe has to execute (bug 5fb0-89ab-4466-41cc)
+# --------------------------------------------------------------------------------------
+
+
+def test_the_probe_finds_the_cap_script_under_its_installed_name(tmp_path: Path) -> None:
+    """The INSTALLED layout, which no other test in this file exercises.
+
+    Every case above runs ``infra/scripts/observability.sh`` in place, where ``vartmp-cap.sh``
+    is a sibling — so they all drive the CHECKOUT layout and none of them can see the defect.
+    In production the probe is installed as ``/usr/local/bin/rebar-observability.sh`` and
+    ``vartmp-cap.sh`` is never written beside it: the cap script self-installs as
+    ``rebar-vartmp-cap.sh``, because that path is the ``ExecStart`` of the reaper unit it
+    renders. The sibling lookup therefore resolved a path nothing creates, ``--print-env`` and
+    ``--check-active`` both failed with rc 127, and the result was NOT silence — it was
+    ``var_tmp_used_percent`` off the air entirely plus a confident, false
+    ``var_tmp_cleanup_active=0`` on a host whose reaper was genuinely running.
+
+    Here the probe is copied to a directory holding ONLY the installed name, which is exactly
+    what the box looks like. Reverting ``resolve_cap_sh`` to the bare sibling makes this fail.
+    """
+    env, aws_log, _ = _environment(tmp_path, var_tmp_bytes=GIB, cap=4 * GIB)
+
+    installed = tmp_path / "usr-local-bin"
+    installed.mkdir()
+    probe = installed / "rebar-observability.sh"
+    probe.write_bytes(SCRIPT.read_bytes())
+    probe.chmod(probe.stat().st_mode | stat.S_IXUSR)
+    cap = installed / "rebar-vartmp-cap.sh"
+    cap.write_bytes((SCRIPT.parent / "vartmp-cap.sh").read_bytes())
+    cap.chmod(cap.stat().st_mode | stat.S_IXUSR)
+
+    # The defining property of the layout: the name the OLD code looked for is absent.
+    assert not (installed / "vartmp-cap.sh").exists()
+
+    env["VAR_TMP_INSTALLED_PATH"] = str(cap)
+    # The budget must come from the cap script's `--print-env`, exactly as on the box. Leaving
+    # the fixture's VAR_TMP_MAX_BYTES in the environment would satisfy the percent's guard
+    # without the script ever being executed, and the percent half of this defect would pass
+    # against an unreachable cap script. The cap script's own default is 4 GiB, so the expected
+    # percentage is unchanged.
+    env.pop("VAR_TMP_MAX_BYTES", None)
+    assert subprocess.run(["bash", str(probe)], env=env, timeout=180, check=False).returncode == 0
+
+    # The budget was readable, so the percent is on the air rather than silently skipped.
+    assert _one(aws_log, "var_tmp_used_percent") == 25
+    # And the heartbeat reports the truth instead of a coerced 0.
+    assert _one(aws_log, "var_tmp_cleanup_active") == 1
+
+
+def test_an_explicit_cap_script_override_still_beats_every_candidate(tmp_path: Path) -> None:
+    """``VARTMP_CAP_SH`` is the seam the other suites inject a stub through, so the candidate
+    list must never outrank it — otherwise a machine that happens to have a real cap script in
+    ``/usr/local/bin`` would silently steer tests at the host's copy."""
+    env, aws_log, _ = _environment(tmp_path, var_tmp_bytes=GIB, cap=4 * GIB)
+
+    override = tmp_path / "override-cap.sh"
+    override.write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$1" in\n'
+        "  --print-env) printf 'VAR_TMP_MAX_BYTES=%s\\n' 2147483648 ;;\n"
+        "  --check-active) printf '1\\n' ;;\n"
+        "  --check-quota) printf '0\\n' ;;\n"
+        "esac\nexit 0\n"
+    )
+    override.chmod(override.stat().st_mode | stat.S_IXUSR)
+
+    env["VARTMP_CAP_SH"] = str(override)
+    assert _run(env).returncode == 0
+    # 1 GiB against the override's 2 GiB budget — proof the override's number, not the
+    # sibling's 4 GiB, is what the percent was measured against.
+    assert _one(aws_log, "var_tmp_used_percent") == 50

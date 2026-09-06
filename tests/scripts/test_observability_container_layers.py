@@ -389,3 +389,54 @@ def test_the_probe_never_reaps(tmp_path: Path) -> None:
     calls = log.read_text() if log.exists() else ""
     assert "docker rm" not in calls, calls
     assert "prune" not in calls, calls
+
+
+# --------------------------------------------------------------------------------------
+# Resolving the cap script the probe has to execute (bug 5fb0-89ab-4466-41cc)
+# --------------------------------------------------------------------------------------
+
+
+def test_the_probe_finds_the_cap_script_under_its_installed_name(tmp_path: Path) -> None:
+    """The INSTALLED layout, which no other case in this file exercises.
+
+    Every case above runs ``infra/scripts/observability.sh`` in place, where
+    ``container-cap.sh`` is a sibling — so they all drive the CHECKOUT layout and none can see
+    the defect. In production the probe is installed as
+    ``/usr/local/bin/rebar-observability.sh`` and ``container-cap.sh`` is never written beside
+    it: the cap script self-installs as ``rebar-container-cap.sh``, because that path is the
+    ``ExecStart`` of the reaper unit it renders. The sibling lookup therefore resolved a path
+    nothing creates, and the result was ``container_writable_used_percent`` off the air
+    entirely plus a confident, false ``container_reaper_active=0`` on a host whose reaper was
+    genuinely running.
+    """
+    installed = tmp_path / "usr-local-bin"
+    installed.mkdir()
+    cap = installed / "rebar-container-cap.sh"
+    cap.write_bytes((REPO_ROOT / "infra" / "scripts" / "container-cap.sh").read_bytes())
+    cap.chmod(cap.stat().st_mode | stat.S_IXUSR)
+    # container-cap.sh reads the writable-layer SHARE from docker-storage-cap.sh as its own
+    # sibling (ONE budget with an internal split, ADR 0112), so the installed layout has to
+    # carry that script too. install-observability.sh now deploys it under its repo basename —
+    # the only name it has, since it defines no installed path of its own — and this fixture
+    # models that layout rather than a half-installed box.
+    docker_cap = installed / "docker-storage-cap.sh"
+    docker_cap.write_bytes((REPO_ROOT / "infra" / "scripts" / "docker-storage-cap.sh").read_bytes())
+    docker_cap.chmod(docker_cap.stat().st_mode | stat.S_IXUSR)
+
+    env, aws_log = _environment(
+        tmp_path, reaper_active=True, env_extra={"CONTAINER_INSTALLED_PATH": str(cap)}
+    )
+
+    probe = installed / "rebar-observability.sh"
+    probe.write_bytes(SCRIPT.read_bytes())
+    probe.chmod(probe.stat().st_mode | stat.S_IXUSR)
+
+    # The defining property of the layout: the name the OLD code looked for is absent.
+    assert not (installed / "container-cap.sh").exists()
+
+    assert subprocess.run(["bash", str(probe)], env=env, timeout=180, check=False).returncode == 0
+
+    # The share was readable, so the percent is on the air rather than silently skipped.
+    assert _values(aws_log, "container_writable_used_percent")
+    # And the heartbeat reports the truth instead of a coerced 0.
+    assert _one(aws_log, "container_reaper_active") == 1

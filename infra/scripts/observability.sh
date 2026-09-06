@@ -564,6 +564,34 @@ fi
 # ceiling and what `probe_budget_left` still allows. Every wall-clock-bounded call in this
 # script goes through here, so the composed worst case of all of them is the deadline rather
 # than the sum of their independent ceilings (bug 9313-1fac-9f32-4b07).
+# The cap script a metrics section must EXECUTE, resolved from an ordered candidate list.
+#
+# The probe is installed as /usr/local/bin/rebar-observability.sh, so a bare sibling name
+# resolves into /usr/local/bin — a directory only SOME cap scripts ever occupy.
+# `vartmp-cap.sh` and `container-cap.sh` self-install under a `rebar-` PREFIXED name (that path
+# is the ExecStart of the reaper units they write), so the sibling name is one nothing ever
+# creates: executing it fails with rc 127, which takes the gated percent metric off the air AND
+# pins the ungated heartbeat to a confident, false 0 (bug 5fb0-89ab-4466-41cc). Proven on the
+# host: with both reaper timers installed and genuinely running, the probe still published 0.
+#
+# The SIBLING is tried FIRST so this is strictly additive — wherever the old single-candidate
+# path existed it still wins, which keeps the checkout layout the tests drive unchanged — and
+# the installed name is a FALLBACK reached only when the sibling is absent. Exactly one copy of
+# each script therefore has to exist on the box; nothing is duplicated to satisfy the lookup.
+#
+# When no candidate exists the LAST is returned rather than the empty string, so the failure
+# still names a path an operator can act on instead of `bash: : No such file or directory`.
+resolve_cap_sh() {
+  local candidate=""
+  for candidate in "$@"; do
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  printf '%s\n' "$candidate"
+}
+
 clamped() {
   local want="$1" left
   shift
@@ -996,7 +1024,7 @@ fi
 # The budget comes from infra/scripts/vartmp-cap.sh, the single source of truth that also renders
 # the tmpfiles drop-in and the reaper units — so the published "percent of cap" and the budget
 # the box is configured to hold can never drift apart.
-VARTMP_CAP_SH="${VARTMP_CAP_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vartmp-cap.sh}"
+VARTMP_CAP_SH="${VARTMP_CAP_SH:-$(resolve_cap_sh "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vartmp-cap.sh" "${VAR_TMP_INSTALLED_PATH:-/usr/local/bin/rebar-vartmp-cap.sh}")}"
 eval "$(bash "$VARTMP_CAP_SH" --print-env 2>/dev/null)" || true
 VAR_TMP_DIR="${VAR_TMP_DIR:-/var/tmp}"
 # BOUNDED through the same `bounded` wrapper the journal reads use, the §2d rule (bug 1205): a
@@ -1089,7 +1117,7 @@ fi
 # The share comes from infra/scripts/container-cap.sh, which reads it in turn from
 # docker-storage-cap.sh — ONE budget with an internal split (ADR 0112), so the published
 # percent-of-share and the share the reaper holds are the same number by construction.
-CONTAINER_CAP_SH="${CONTAINER_CAP_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/container-cap.sh}"
+CONTAINER_CAP_SH="${CONTAINER_CAP_SH:-$(resolve_cap_sh "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/container-cap.sh" "${CONTAINER_INSTALLED_PATH:-/usr/local/bin/rebar-container-cap.sh}")}"
 eval "$(bash "$CONTAINER_CAP_SH" --print-env 2>/dev/null)" || true
 
 container_reaper="$(bash "$CONTAINER_CAP_SH" --check-active 2>/dev/null)"
