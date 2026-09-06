@@ -28,6 +28,59 @@ from rebar._engine_support.resolver import resolve_ticket_id
 logger = logging.getLogger(__name__)
 
 
+#: Wall-clock bound on the refresh a refusal has to justify itself with. Generous enough
+#: for a real fetch, short enough that a wedged remote degrades to "unverifiable" instead
+#: of hanging a link write.
+_REFRESH_TIMEOUT_S = 60.0
+
+
+def _has_remote(code_root: str) -> bool:
+    """Whether the scanning checkout has any remote configured.
+
+    A checkout with NO remote IS the whole of the project's history as far as it can ever
+    know, so absence there is proof. One with a remote is a replica, and a replica's
+    silence proves nothing until it has been refreshed.
+    """
+    from rebar._store.gitutil import run_git
+
+    try:
+        proc = run_git(code_root, "remote", check=False, timeout=_REFRESH_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 — an unprobeable checkout is simply not provably complete
+        return False
+    return proc.returncode == 0 and bool(proc.stdout.strip())
+
+
+def _refresh_remote_refs(code_root: str) -> bool:
+    """Best-effort ``git fetch`` of the checkout's remote-tracking refs. ``True`` on success.
+
+    Deliberately UNFILTERED: passing ``--filter=blob:none`` here would permanently latch an
+    ordinary clone into a promisor remote, and a partial clone re-applies its own configured
+    filter anyway. Serialized behind the existing cross-process fetch-coordination lock so
+    this never races a snapshot or sync-leg fetch on the same object database, and bounded so
+    an unreachable remote fails fast instead of hanging the write.
+    """
+    from rebar._store.git_locking import fetch_coordination_lock
+    from rebar._store.gitutil import run_git_bounded
+
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        with fetch_coordination_lock(code_root):
+            proc = run_git_bounded(
+                code_root, "fetch", "--quiet", timeout=_REFRESH_TIMEOUT_S, env=env
+            )
+    except Exception:  # a failed refresh is a non-verdict, never an error
+        logger.debug("caused_by refresh of %s failed", code_root, exc_info=True)
+        return False
+    return proc.returncode == 0
+
+
+def _scan(target_id: str, tracker: str, code_root: str) -> list[str] | None:
+    """The referencing-commit scan the ``caused_by`` guard reasons over (HEAD + upstream)."""
+    from rebar._engine_support import commit_impact
+
+    return commit_impact.referencing_commits({target_id}, tracker, code_root, include_upstream=True)
+
+
 def caused_by_refusal(relation: str, target_id: str, tracker: str, code_root: str) -> str | None:
     """The reason a ``caused_by`` link to ``target_id`` must be refused, or ``None``.
 
@@ -43,6 +96,19 @@ def caused_by_refusal(relation: str, target_id: str, tracker: str, code_root: st
     that allows the link. A refusal must always mean "this target has no commit", never
     "this checkout has no history".
 
+    That contract needs TWO things the original HEAD-only scan did not provide
+    (bug ambitious-creative-ovenbird). The scan walks HEAD *and* the remote-tracking refs
+    for the checkout's own branch, because a checkout that is fetched but never checked out
+    — the rebar MCP server's code clone is cloned once at container boot and thereafter
+    advanced only on ``refs/remotes/origin/*`` by the snapshot machinery — holds the
+    referencing commit while HEAD does not. And when even that finds
+    nothing, absence is only PROVEN by a checkout that is the whole history: one with no
+    remote qualifies outright, while a replica must first be refreshed. A refresh that
+    cannot be completed leaves absence unestablished, which is the same epistemic position
+    as an unreadable history and takes the same answer — allow. Otherwise the sanctioned
+    surface would refuse a correct, evidence-backed attribution and offer ``--force`` as its
+    only remedy, which is the failure this reasoning exists to prevent.
+
     This is a PREDICATE rather than an inline check because ``link``'s write path
     (:func:`link_core`) and its preview path (:func:`_link_dry_run`) do not share a code
     path — the preview never calls ``link_core`` — so a shared predicate is the only thing
@@ -50,11 +116,15 @@ def caused_by_refusal(relation: str, target_id: str, tracker: str, code_root: st
     """
     if relation != "caused_by":
         return None
-    from rebar._engine_support import commit_impact
-
-    found = commit_impact.referencing_commits({target_id}, tracker, code_root)
+    found = _scan(target_id, tracker, code_root)
     if found is None or found:
         return None
+    if _has_remote(code_root):
+        if not _refresh_remote_refs(code_root):
+            return None
+        found = _scan(target_id, tracker, code_root)
+        if found is None or found:
+            return None
     return (
         f"target ticket '{target_id}' has no commit referencing it, so it cannot be shown "
         "to have introduced anything"
