@@ -924,6 +924,32 @@ SUCCESSFUL measurement, so its silence means the probe could not size the journa
 `journal_cap_in_effect` is a heartbeat published on every tick including its `0` path, so ITS
 silence means the probe, the timer or the host is dead.
 
+**Reading a cap heartbeat: three values, not two.** Every cap-compliance heartbeat
+(`journal_cap_in_effect`, `var_tmp_cleanup_active`, `container_reaper_active`, and the unalarmed
+`var_tmp_hard_quota_in_effect` / `container_quota_enforceable`) reports one of:
+
+| value | means | what to do |
+|---|---|---|
+| `1` | the mechanism is in force | nothing |
+| `0` | it was MEASURED and is not in force | the per-generator remediation below |
+| `-1` | the check could not be answered at all | the probe could not run the cap script — check that the script it resolves exists on the box |
+
+`-1` is `HEARTBEAT_UNKNOWN` in `observability.sh`. It exists because these checks used to coerce
+every non-`1` answer to `0`, so "the check said no" and "the check never ran" published the same
+confident number — which is how `var_tmp_cleanup_active` and `container_reaper_active` read "the
+reapers are dead" for hours on a host where the reaper units did not exist to be asked
+(bug `5fb0-89ab-4466-41cc`). A `-1` therefore points at the PROBE's dependencies, not at the
+generator's ceiling; the matching `rebar-health` log line says `could NOT determine` and names
+the script that did not answer.
+
+Every alarm on these metrics is `LessThanThreshold 1.0`, so `-1` pages exactly as `0` does — the
+sentinel changes what you READ, never whether anyone is woken, and no alarm needed retuning to
+keep catching it. That property is enforced by
+`tests/scripts/test_observability_cap_deps.py::test_the_unknown_sentinel_still_breaches_every_alarm_on_that_heartbeat`
+against the real Terraform, so flipping a comparison operator fails the build rather than
+silently turning an unmeasured cap into a non-event. Silence still means the publisher died
+(bug `bff5-9163-cddd-4158`); that meaning is reserved and is NOT spent on "unknown".
+
 ```bash
 # Size the journal the way the metric does — the SAME tree the ceiling governs. Do not
 # substitute /var/log: SystemMaxUse does not bound it, so that ratio would be about no

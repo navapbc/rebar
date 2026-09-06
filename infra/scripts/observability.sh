@@ -564,6 +564,65 @@ fi
 # ceiling and what `probe_budget_left` still allows. Every wall-clock-bounded call in this
 # script goes through here, so the composed worst case of all of them is the deadline rather
 # than the sum of their independent ceilings (bug 9313-1fac-9f32-4b07).
+# A cap-compliance HEARTBEAT's value, with THREE outcomes rather than two.
+#
+# `--check-active` / `--check-quota` print exactly `1` or `0`. Anything else — an empty string
+# from a script that could not be executed, a non-zero exit, a truncated read — is UNKNOWN, and
+# the old `case "$x" in 1) ;; *) x=0` coerced every one of those to a confident `0`. Those are
+# different claims: `0` asserts the mechanism was MEASURED and is not in force, while silence
+# from the check means nobody looked. Reporting the second as the first is what let
+# `var_tmp_cleanup_active` and `container_reaper_active` read "the reapers are dead" for hours
+# on a box where the reaper units did not exist at all (bug 5fb0-89ab-4466-41cc).
+#
+# The distinction is carried IN THE VALUE, not by withholding it. Every heartbeat still
+# publishes on EVERY tick including its 0 path, because bug bff5-9163-cddd-4158 reserves ABSENCE
+# to mean "the publisher died" — under treat_missing_data = "breaching" that is what makes the
+# dead-man construction trustworthy, and spending it on "healthy but unknown" would make every
+# dead-man alarm on this box ambiguous to buy a local readability win. The three outcomes follow
+# scripts/assert_volumes_in_service.py (dcc3), where UNKNOWN stays distinct from NOT-IN-SERVICE
+# and both fail.
+#
+# -1 pages IDENTICALLY to 0: every alarm on these metrics is `LessThanThreshold 1.0`, so the
+# sentinel is below the threshold by construction and no alarm needs retuning to keep catching
+# it. It reads honestly to an operator instead of asserting a measurement that never happened.
+HEARTBEAT_UNKNOWN=-1
+
+heartbeat_value() {
+  case "$1" in
+    1) printf '1\n' ;;
+    0) printf '0\n' ;;
+    *) printf '%s\n' "$HEARTBEAT_UNKNOWN" ;;
+  esac
+}
+
+# The cap script a metrics section must EXECUTE, resolved from an ordered candidate list.
+#
+# The probe is installed as /usr/local/bin/rebar-observability.sh, so a bare sibling name
+# resolves into /usr/local/bin — a directory only SOME cap scripts ever occupy.
+# `vartmp-cap.sh` and `container-cap.sh` self-install under a `rebar-` PREFIXED name (that path
+# is the ExecStart of the reaper units they write), so the sibling name is one nothing ever
+# creates: executing it fails with rc 127, which takes the gated percent metric off the air AND
+# pins the ungated heartbeat to a confident, false 0 (bug 5fb0-89ab-4466-41cc). Proven on the
+# host: with both reaper timers installed and genuinely running, the probe still published 0.
+#
+# The SIBLING is tried FIRST so this is strictly additive — wherever the old single-candidate
+# path existed it still wins, which keeps the checkout layout the tests drive unchanged — and
+# the installed name is a FALLBACK reached only when the sibling is absent. Exactly one copy of
+# each script therefore has to exist on the box; nothing is duplicated to satisfy the lookup.
+#
+# When no candidate exists the LAST is returned rather than the empty string, so the failure
+# still names a path an operator can act on instead of `bash: : No such file or directory`.
+resolve_cap_sh() {
+  local candidate=""
+  for candidate in "$@"; do
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  printf '%s\n' "$candidate"
+}
+
 clamped() {
   local want="$1" left
   shift
@@ -930,14 +989,16 @@ JOURNAL_DIR="${JOURNAL_DIR:-/var/log/journal}"
 # silence.
 JOURNAL_DU_TIMEOUT="${JOURNAL_DU_TIMEOUT:-60}"
 
-journal_in_effect="$(bash "$JOURNALD_CAP_SH" --check-active 2>/dev/null)"
-case "$journal_in_effect" in 1) ;; *) journal_in_effect=0 ;; esac
+journal_in_effect="$(heartbeat_value "$(bash "$JOURNALD_CAP_SH" --check-active 2>/dev/null)")"
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name journal_cap_in_effect --unit Count --value "$journal_in_effect" 2>/dev/null || true
 logger -t rebar-health "journal ceiling ${JOURNAL_MAX_USE_BYTES:-unset}B in_effect=${journal_in_effect}"
 if [ "$journal_in_effect" -eq 0 ]; then
   logger -t rebar-health \
     "the journald ceiling is NOT the one the running systemd-journald read — journal_used_percent is measured against a cap that is not in force; see infra/runbooks/review-bot-ops.md"
+elif [ "$journal_in_effect" -lt 0 ]; then
+  logger -t rebar-health \
+    "could NOT determine whether the journald ceiling is in force — ${JOURNALD_CAP_SH} did not answer; this is an unmeasured state, not a cap known to be absent; see infra/runbooks/review-bot-ops.md"
 fi
 
 journal_bytes="$(clamped "$JOURNAL_DU_TIMEOUT" du -sx --block-size=1 "$JOURNAL_DIR" 2>/dev/null | tail -1 | awk '{print $1}')"
@@ -996,7 +1057,7 @@ fi
 # The budget comes from infra/scripts/vartmp-cap.sh, the single source of truth that also renders
 # the tmpfiles drop-in and the reaper units — so the published "percent of cap" and the budget
 # the box is configured to hold can never drift apart.
-VARTMP_CAP_SH="${VARTMP_CAP_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vartmp-cap.sh}"
+VARTMP_CAP_SH="${VARTMP_CAP_SH:-$(resolve_cap_sh "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vartmp-cap.sh" "${VAR_TMP_INSTALLED_PATH:-/usr/local/bin/rebar-vartmp-cap.sh}")}"
 eval "$(bash "$VARTMP_CAP_SH" --print-env 2>/dev/null)" || true
 VAR_TMP_DIR="${VAR_TMP_DIR:-/var/tmp}"
 # BOUNDED through the same `bounded` wrapper the journal reads use, the §2d rule (bug 1205): a
@@ -1005,13 +1066,11 @@ VAR_TMP_DIR="${VAR_TMP_DIR:-/var/tmp}"
 # a failed read and is reported as silence.
 VAR_TMP_DU_TIMEOUT="${VAR_TMP_DU_TIMEOUT:-60}"
 
-var_tmp_cleanup="$(bash "$VARTMP_CAP_SH" --check-active 2>/dev/null)"
-case "$var_tmp_cleanup" in 1) ;; *) var_tmp_cleanup=0 ;; esac
+var_tmp_cleanup="$(heartbeat_value "$(bash "$VARTMP_CAP_SH" --check-active 2>/dev/null)")"
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name var_tmp_cleanup_active --unit Count --value "$var_tmp_cleanup" 2>/dev/null || true
 
-var_tmp_quota="$(bash "$VARTMP_CAP_SH" --check-quota 2>/dev/null)"
-case "$var_tmp_quota" in 1) ;; *) var_tmp_quota=0 ;; esac
+var_tmp_quota="$(heartbeat_value "$(bash "$VARTMP_CAP_SH" --check-quota 2>/dev/null)")"
 # Published WITHOUT an alarm, deliberately. The quota needs a host reboot to enable, so on this
 # box the honest value is 0 for as long as that reboot has not been scheduled — an alarm on it
 # would page continuously and be muted within a day, which is how a real signal becomes noise.
@@ -1023,6 +1082,9 @@ logger -t rebar-health \
 if [ "$var_tmp_cleanup" -eq 0 ]; then
   logger -t rebar-health \
     "NOTHING is bounding ${VAR_TMP_DIR} — the tmpfiles drop-in is missing or stale, or rebar-var-tmp-reaper.timer is not running; see infra/runbooks/review-bot-ops.md"
+elif [ "$var_tmp_cleanup" -lt 0 ]; then
+  logger -t rebar-health \
+    "could NOT determine whether anything bounds ${VAR_TMP_DIR} — ${VARTMP_CAP_SH} did not answer; this is an unmeasured state, not a bound known to be absent; see infra/runbooks/review-bot-ops.md"
 fi
 
 var_tmp_bytes="$(clamped "$VAR_TMP_DU_TIMEOUT" du -sx --block-size=1 "$VAR_TMP_DIR" 2>/dev/null | tail -1 | awk '{print $1}')"
@@ -1089,16 +1151,14 @@ fi
 # The share comes from infra/scripts/container-cap.sh, which reads it in turn from
 # docker-storage-cap.sh — ONE budget with an internal split (ADR 0112), so the published
 # percent-of-share and the share the reaper holds are the same number by construction.
-CONTAINER_CAP_SH="${CONTAINER_CAP_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/container-cap.sh}"
+CONTAINER_CAP_SH="${CONTAINER_CAP_SH:-$(resolve_cap_sh "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/container-cap.sh" "${CONTAINER_INSTALLED_PATH:-/usr/local/bin/rebar-container-cap.sh}")}"
 eval "$(bash "$CONTAINER_CAP_SH" --print-env 2>/dev/null)" || true
 
-container_reaper="$(bash "$CONTAINER_CAP_SH" --check-active 2>/dev/null)"
-case "$container_reaper" in 1) ;; *) container_reaper=0 ;; esac
+container_reaper="$(heartbeat_value "$(bash "$CONTAINER_CAP_SH" --check-active 2>/dev/null)")"
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name container_reaper_active --unit Count --value "$container_reaper" 2>/dev/null || true
 
-container_quota="$(bash "$CONTAINER_CAP_SH" --check-quota 2>/dev/null)"
-case "$container_quota" in 1) ;; *) container_quota=0 ;; esac
+container_quota="$(heartbeat_value "$(bash "$CONTAINER_CAP_SH" --check-quota 2>/dev/null)")"
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name container_quota_enforceable --unit Count --value "$container_quota" 2>/dev/null || true
 logger -t rebar-health \
@@ -1106,6 +1166,9 @@ logger -t rebar-health \
 if [ "$container_reaper" -eq 0 ]; then
   logger -t rebar-health \
     "NOTHING is reaping exited-container debris — rebar-container-reaper.timer is not running or its units are stale; see infra/runbooks/review-bot-ops.md"
+elif [ "$container_reaper" -lt 0 ]; then
+  logger -t rebar-health \
+    "could NOT determine whether anything reaps exited-container debris — ${CONTAINER_CAP_SH} did not answer; this is an unmeasured state, not a reaper known to be absent; see infra/runbooks/review-bot-ops.md"
 fi
 
 if [ -n "$docker_container_bytes" ]; then

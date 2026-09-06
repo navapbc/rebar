@@ -11,6 +11,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 install -m 0755 "${SCRIPT_DIR}/observability.sh" /usr/local/bin/rebar-observability.sh
 
+# The probe EXECUTES cap scripts to read each generator's budget, and resolves them relative to
+# its OWN path — so an installed probe looks for them in /usr/local/bin. Installing only the
+# probe left those reads failing with rc 127, which silenced every gated percent metric and
+# pinned `journal_cap_in_effect` to a confident, false 0 (bug 5fb0-89ab-4466-41cc).
+#
+# These two are installed HERE because the repo basename is the only name they have: neither
+# defines an installed path of its own. `vartmp-cap.sh` and `container-cap.sh` are deliberately
+# NOT in this list — they self-install under a `rebar-` prefixed name that is the ExecStart of
+# the reaper units they write, and observability.sh's `resolve_cap_sh` falls back to that name.
+# Copying them here as well would put a SECOND copy of each on the box, with the probe reading
+# one and the reaper timer executing the other, free to drift on the next partial deploy.
+for cap in docker-storage-cap.sh journald-cap.sh; do
+  install -m 0755 "${SCRIPT_DIR}/${cap}" "/usr/local/bin/${cap}"
+done
+
 # Where the units are written. Overridable ONLY so a test can render them and assert the
 # relationship between the service's start timeout and the timer's period; production is
 # unchanged.
