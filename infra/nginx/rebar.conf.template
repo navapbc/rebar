@@ -1,56 +1,25 @@
-# ---------------------------------------------------------------------------
-# nginx site for rebar.solutions.navateam.com (epic d251 / story S2).
-#
-# This is a TEMPLATE: ${REVIEW_BOT_PORT} is substituted at boot
-# via envsubst, e.g. (in the deploy/boot script):
-#     export REVIEW_BOT_PORT
-#     envsubst '${REVIEW_BOT_PORT}' \
-#       < infra/nginx/rebar.conf.template \
-#       > /etc/nginx/conf.d/rebar.conf
-#     nginx -t && systemctl reload nginx
-# Only ${REVIEW_BOT_PORT} is templated; the single-quoted envsubst
-# arg above ensures nginx's own $variables (e.g. $host, $remote_addr) are left untouched.
-#
-# nginx runs as a HOST package (dnf nginx) — NOT a container — so host certbot can
-# manage the Let's Encrypt cert and reload it in place (see ADR-0007 and
-# infra/scripts/install-certbot-timer.sh). It proxies to the loopback-published
-# container ports: Gerrit on 127.0.0.1:8080, review-bot on 127.0.0.1:${REVIEW_BOT_PORT},
-# op-cert gate on 127.0.0.1:8090 (story 76d2).
-# ---------------------------------------------------------------------------
+# nginx site template for rebar.solutions.navateam.com.
+# Boot substitutes only `${REVIEW_BOT_PORT}`. The single-quoted `envsubst`
+# variable list leaves nginx variables such as `$host` and `$remote_addr` literal.
+# Host nginx lets certbot renew certificates and reload nginx. It proxies to loopback
+# container ports 8080 for Gerrit, `${REVIEW_BOT_PORT}` for review-bot, and 8090
+# for the op-cert gate.
 
-# --- op-cert origin guard (story 76d2) — FAIL-CLOSED, STRUCTURAL deny-all ---
-# The trusted op-cert gate service is reached ONLY through the SigV4-authenticated API
-# Gateway, which injects a static `X-Opcert-Guard: <secret>` header on every proxied
-# request. This map turns that header into $opcert_guard_ok (1 iff the header matches the
-# materialized secret); the /opcert/ location below returns 403 when it is 0.
-#
-# DENY-ALL IS STRUCTURAL, IN THE TEMPLATE ITSELF: `default 0` means an UNKNOWN/missing
-# header => 0 => 403. The secret's matching entry (`"<value>" 1;`) lives in the SEPARATE
-# file /etc/nginx/opcert-guard.map.conf, written from SSM by
-# infra/scripts/materialize-opcert-guard.sh. The include is a GLOB
-# (`opcert-guard*.conf`) precisely because nginx tolerates a ZERO-MATCH glob include
-# (unlike a missing literal include, which is a config error): so on a FRESH boot with no
-# materialized file, nginx STILL STARTS CLEANLY and /opcert/ serves 403 to everyone until
-# the guard is materialized. A guard rotation just rewrites that one file + reloads nginx.
-# The guard value is a 48-char random token, longer than nginx's default 64-byte map hash
-# bucket — raise it so `nginx -t` can build the map hash (else: "could not build map_hash,
-# you should increase map_hash_bucket_size").
+# Op-cert origin guard. The SigV4-authenticated API Gateway supplies the secret
+# `X-Opcert-Guard` header. `default 0` makes missing or unknown headers fail closed
+# with 403 before proxying. Terraform rotates the SSM source secret and API Gateway
+# header. `materialize-opcert-guard.sh` writes the current SSM value to the globbed
+# include and reloads nginx. A zero-match glob keeps fresh boots valid with every
+# request denied. The 128-byte bucket accommodates the 48-character guard token.
 map_hash_bucket_size 128;
 map $http_x_opcert_guard $opcert_guard_ok {
     default 0;
     include /etc/nginx/opcert-guard*.conf;
 }
 
-# --- MCP switchable upstream (ADR deft-evolutive-mosasaur / story esok) ------
-# The rebar MCP HTTP service is reached at /mcp/ through a NAMED upstream whose single
-# `server` line lives in a SEPARATE, materialized include — the atomic-flip seam the
-# blue-green autodeploy slice (panicky-sylphish-foxterrier) re-points. The include is a
-# GLOB (`mcp-upstream*.conf`) but, UNLIKE the /opcert/ map's zero-match-safe `default 0`,
-# an `upstream {}` with ZERO `server` lines is a config error — so the committed seed
-# infra/nginx/mcp-upstream.conf MUST be installed to /etc/nginx/mcp-upstream.conf before
-# `nginx -t`. infra/scripts/materialize-mcp-upstream.sh (wired into compose-up.sh) copies
-# that seed only-if-absent on a fresh boot; a flip then rewrites that one installed file +
-# `nginx -s reload`.
+# Switchable MCP upstream. An upstream with no server fails `nginx -t`.
+# `materialize-mcp-upstream.sh` installs the committed seed only when the installed
+# file is absent. Blue-green deploys atomically rewrite that file and reload nginx.
 upstream rebar_mcp {
     include /etc/nginx/mcp-upstream*.conf;
 }
@@ -86,15 +55,9 @@ server {
     # Gerrit pushes/clones can be large; lift the body cap.
     client_max_body_size 0;
 
-    # --- HSTS (bug 79b2) -------------------------------------------------
-    # Tell every client that this host is HTTPS-only, so a subsequent plain-http
-    # attempt (a typo'd URL, a stale bookmark, or an http:// Location an upstream
-    # emits) is rewritten to https BY THE CLIENT and the bearer PAT never leaves
-    # the machine in plaintext. SERVER level, not per-location, so every surface
-    # (/review/, /opcert/, /mcp, Gerrit) inherits it. `always` is REQUIRED: without
-    # it nginx emits add_header only on 2xx/3xx-class responses, and the MCP
-    # endpoint answers an unauthenticated client with 401 — precisely the first
-    # response a new client sees, and the one that most needs to pin https.
+    # HSTS belongs at server scope so every route inherits it. `always` includes
+    # errors such as MCP's unauthenticated 401, which prevents later plain HTTP
+    # requests from exposing bearer credentials.
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     # --- review-bot: /review/ -> the FastAPI receiver --------------------
@@ -106,38 +69,20 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-        # Location-scheme backstop (bug a61d). `proxy_redirect default;` is restated
-        # FIRST because nginx drops a location's implicit default as soon as ANY explicit
-        # rule appears here, and this block's default — derived from its own proxy_pass —
-        # is load-bearing. Rules are evaluated in order, so the two http->https upgrades
-        # follow it. Per-location, never server level: a server-level rule would REPLACE
-        # that default for every surface at once (79b2's binding precedent). This rewrites
-        # only the Location/Refresh RESPONSE headers; it is not a rewrite and adds no URI
-        # to proxy_pass, so request-URI handling is untouched.
+        # Keep `proxy_redirect default` first because explicit rules disable nginx's
+        # implicit default. These per-location rules upgrade only `Location` and
+        # `Refresh` response headers and do not rewrite request URIs.
         proxy_redirect default;
         proxy_redirect http://$host/ https://$host/;
         proxy_redirect http://127.0.0.1:${REVIEW_BOT_PORT}/ https://$host/;
-        # Prefix backstop (bug 4d8c-c1f9-5ea4-454d). The prefix-STRIPPING proxy_pass mounts
-        # the review-bot at the server root, so the app's absolute self-redirects come back
-        # WITHOUT the /review/ prefix (e.g. Location: https://$host/health); this restores
-        # the lost /review/ prefix on those same-host absolute redirects. Ordered LAST: its
-        # https://$host/ left-hand side overlaps none of a61d's http://... rules above, so it
-        # neither shadows nor is shadowed by them. This broad same-host rewrite is safe ONLY
-        # because the review-bot's SOLE absolute redirects are Starlette slash-307s to its OWN
-        # routes (plain `uvicorn rebar.review_bot.app:app` — no root_path/--root-path, no
-        # redirect_slashes override, no RedirectResponse). If the app ever emitted an absolute
-        # redirect to a genuine non-/review/ same-host target, this rule would wrongly prefix
-        # it, so that precondition is pinned by a test.
+        # Restore `/review/` on same-host absolute redirects after `proxy_pass` strips
+        # the prefix. Keep this rule last. It is safe only while the app's sole absolute
+        # redirects are Starlette slash redirects to its own routes, as pinned by tests.
         proxy_redirect https://$host/ https://$host/review/;
     }
 
-    # --- op-cert gate: /opcert/ -> the FastAPI gate service (story 76d2) --
-    # FAIL-CLOSED: any request whose X-Opcert-Guard header does not match the materialized
-    # secret gets 403 BEFORE proxying (a direct-to-origin request that bypasses API Gateway
-    # has no valid guard header, so it is rejected here). The proxy_pass has NO trailing
-    # slash / path, so the /opcert/ prefix is PRESERVED — the service's own routes are
-    # /opcert/jobs and /opcert/jobs/{id} (see rebar.opcert_service.app), so the prefix must
-    # reach the app intact.
+    # Op-cert gate. Reject invalid guard headers before proxying. The pathless
+    # `proxy_pass` preserves `/opcert/` for the service's `/opcert/jobs` routes.
     location /opcert/ {
         if ($opcert_guard_ok = 0) {
             return 403;
@@ -147,58 +92,29 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-        # Location-scheme backstop (bug a61d). `proxy_redirect default;` is restated
-        # FIRST because nginx drops a location's implicit default as soon as ANY explicit
-        # rule appears here, and this block's default — derived from its own proxy_pass —
-        # is load-bearing. Rules are evaluated in order, so the two http->https upgrades
-        # follow it. Per-location, never server level: a server-level rule would REPLACE
-        # that default for every surface at once (79b2's binding precedent). This rewrites
-        # only the Location/Refresh RESPONSE headers; it is not a rewrite and adds no URI
-        # to proxy_pass, so request-URI handling is untouched.
+        # Keep `proxy_redirect default` first because explicit rules disable nginx's
+        # implicit default. These per-location rules upgrade only `Location` and
+        # `Refresh` response headers and do not rewrite request URIs.
         proxy_redirect default;
         proxy_redirect http://$host/ https://$host/;
         proxy_redirect http://127.0.0.1:8090/ https://$host/;
     }
 
-    # --- rebar MCP: /mcp -> the Streamable-HTTP service via the switchable upstream ---
-    # TLS terminates HERE (nginx edge); the MCP service is loopback-published and speaks
-    # plain HTTP behind it (REBAR_MCP_HTTP_TLS_AT_EDGE=true acknowledges this). proxy_pass
-    # to the NAMED upstream `rebar_mcp` (materialized include = the blue-green flip seam).
-    # THREE locations: two EXACT-MATCH blocks that serve the documented external forms
-    # `/mcp/` and `/mcp` directly (mapped onto the app's /mcp), and the PREFIX
-    # `location /mcp` that still carries `/mcp/...` sub-paths URI-preserved. The
-    # DNS-rebinding guard checks the forwarded Host, so pass the public $host through; the
-    # allowlist (REBAR_MCP_HTTP_ALLOWED_HOSTS/_ORIGINS) must name this host/origin.
-    #
-    # EXACT-MATCH first (bug 79b2 — HTTPS->HTTP downgrade of the bearer PAT).
-    # The documented client URL is `https://<host>/mcp/` WITH a trailing slash, but the
-    # app mounts its Streamable-HTTP endpoint at `/mcp` (REBAR_MCP_HTTP_PATH). Under the
-    # URI-preserving prefix location below, `/mcp/` reached the app verbatim and
-    # Starlette's default `redirect_slashes=True` answered 307 with an ABSOLUTE
-    # `Location: http://<host>/mcp` — a same-host SCHEME DOWNGRADE. A 307 preserves
-    # method AND body, and clients differ on whether they keep `Authorization` across a
-    # same-host scheme change, so a client that keeps it retransmits its bearer PAT in
-    # PLAINTEXT. Fix: serve both external forms DIRECTLY at the edge with exact-match
-    # locations mapped onto the app's `/mcp`, so the app is never asked to redirect a
-    # trailing slash and NO Location header is produced for the documented URL. The
-    # `/mcp` PATH on proxy_pass is what performs that mapping (this is the pattern
-    # docs/mcp-auth.md documents, specialized to the named `rebar_mcp` upstream).
-    #
-    # Both blocks MUST carry the same Streamable-HTTP/SSE settings and forwarded headers
-    # as the prefix location — an exact-match location inherits nothing from it, so
-    # omitting them would break real MCP traffic (HTTP/1.0 upstream, buffered SSE) and
-    # drop the X-Forwarded-Proto the app derives absolute URLs from.
+    # MCP TLS terminates at nginx. The loopback service speaks HTTP through the
+    # switchable `rebar_mcp` upstream. Forward the public host for DNS-rebinding checks.
+    # Exact locations map both `/mcp` and `/mcp/` to app path `/mcp`. This prevents
+    # Starlette's absolute slash redirect from downgrading HTTPS requests and bearer
+    # credentials to HTTP. The prefix location preserves other `/mcp/...` URIs.
+    # Each exact location repeats the forwarded headers and SSE settings because it
+    # does not inherit them from the prefix location.
     location = /mcp/ {
         proxy_pass http://rebar_mcp/mcp;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-        # Belt-and-braces: rewrite any http:// Location an upstream might still emit up
-        # to https, so no future upstream redirect can re-open the downgrade. Location
-        # level, NOT server level: proxy_redirect defaults to `default`, which is derived
-        # from each location's own proxy_pass, and a server-level rule would REPLACE that
-        # default for /review/ and /opcert/ and could break their relative redirects.
+        # Upgrade upstream HTTP redirects. Keep these rules per location so they do not
+        # replace the defaults derived by `/review/` and `/opcert/`.
         proxy_redirect http://$host/ https://$host/;
         proxy_redirect http://rebar_mcp/ https://$host/;
         proxy_http_version 1.1;
@@ -246,23 +162,10 @@ server {
         proxy_read_timeout 3600s;
     }
 
-    # --- RFC 9728 protected-resource metadata (bug 71fe-2579-28cc-409c) ---
-    # The MCP app's 401 challenge advertises
-    #   resource_metadata="https://<host>/.well-known/oauth-protected-resource/mcp"
-    # and the app SERVES that document (probed on the box: app-direct 200, edge 404).
-    # It is a SIBLING of /mcp, not a sub-path, so none of the /mcp locations above
-    # matched it and it fell through to `location /` -> Gerrit, which 404s. An
-    # OAuth-capable client that follows the advertised URL therefore cannot discover
-    # the resource server. Route it to the same named upstream.
-    #
-    # EXACT match, not a prefix: it must cover this one document only, and must not
-    # widen or reorder anything else under /.well-known/ — in particular the
-    # `location /.well-known/acme-challenge/` on the port-80 server that certbot needs
-    # for issuance and renewal. NO URI path on proxy_pass, so the request URI reaches
-    # the app verbatim at exactly the path it already answers. Like the /mcp blocks,
-    # this names the `rebar_mcp` upstream rather than a port, so a blue-green flip
-    # re-points it atomically; and it repeats their headers/settings because an
-    # exact-match location inherits nothing from them.
+    # Route the exact RFC 9728 metadata URL advertised by MCP 401 responses to the
+    # switchable MCP upstream. A pathless `proxy_pass` preserves the URI. Exact
+    # matching does not widen `/.well-known/` or affect port 80 ACME handling.
+    # Repeat the MCP headers because exact locations do not inherit them.
     location = /.well-known/oauth-protected-resource/mcp {
         proxy_pass http://rebar_mcp;
         proxy_set_header Host $host;
@@ -275,63 +178,25 @@ server {
         proxy_set_header Connection "";
     }
 
-    # --- Gerrit: everything else -----------------------------------------
-    # CRITICAL — %2F-safe proxying. Gerrit project/change refs contain encoded
-    # slashes (e.g. /a/projects/foo%2Fbar), and Gerrit must receive the request URI
-    # with %2F INTACT. nginx preserves the raw, un-decoded request URI ONLY when
-    # proxy_pass has NO URI path component (no trailing slash, no path) AND there is
-    # no rewrite in this location. So we deliberately use a bare
-    # `proxy_pass http://127.0.0.1:8080;` (host:port only) — adding even a trailing
-    # `/` here would make nginx normalize/decode the URI and corrupt %2F. Do NOT add
-    # a path to this proxy_pass or a rewrite to this block.
+    # Preserve encoded `%2F` in Gerrit request URIs. A pathless `proxy_pass` with no
+    # rewrite prevents nginx from normalizing or decoding the URI.
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-        # Location-scheme backstop (bug a61d). `proxy_redirect default;` is restated
-        # FIRST because nginx drops a location's implicit default as soon as ANY explicit
-        # rule appears here, and this block's default — derived from its own proxy_pass —
-        # is load-bearing. Rules are evaluated in order, so the two http->https upgrades
-        # follow it. Per-location, never server level: a server-level rule would REPLACE
-        # that default for every surface at once (79b2's binding precedent). This rewrites
-        # only the Location/Refresh RESPONSE headers; it is not a rewrite and adds no URI
-        # to proxy_pass, so request-URI handling is untouched.
+        # Keep `proxy_redirect default` first because explicit rules disable nginx's
+        # implicit default. These per-location rules upgrade only `Location` and
+        # `Refresh` response headers and do not rewrite request URIs.
         proxy_redirect default;
         proxy_redirect http://$host/ https://$host/;
         proxy_redirect http://127.0.0.1:8080/ https://$host/;
-        # --- git pack generation needs longer than nginx's 60s default (bug 5bba) ---
-        # Without the directive below nginx applies its compiled-in 60-second read default,
-        # and that ceiling sits INSIDE the normal duration distribution of a CI change-ref
-        # fetch on this host. Measured over the retained Gerrit httpd_log: anonymous CI
-        # git-upload-pack POSTs ran a median of 36.0s, p90 92.4s, max 143.9s, and 12 of 37
-        # (32.4%) exceeded 60s. Gerrit SERVED EVERY ONE SUCCESSFULLY — all 14 requests in
-        # the log that ran past 60s returned HTTP 200 — so the 504 the client saw was
-        # manufactured HERE, at the edge, out of a successful upstream response. Replicating
-        # CI's exact `git fetch <url> refs/changes/...` six times against the live host
-        # reproduced it at 2/6 = 33%, matching the 32.4% the log predicted.
-        #
-        # This is a GAP timeout, not a total: it caps the wait BETWEEN successive reads from
-        # upstream. That is why one fetch legitimately runs 89s and succeeds while another
-        # dies at 61s — a 504 needs a single SILENT phase (ref negotiation plus JGit's
-        # preparePack counting/delta-compression, which emits no bytes) to exceed the ceiling
-        # on its own. It is also why all 78 timeouts in nginx's error log read
-        # "while reading response header from upstream" and none are body-phase: the failure
-        # can only land before the first byte.
-        #
-        # 600s, NOT the 3600s used on the /mcp blocks above — the difference is deliberate,
-        # do NOT "unify" them. Those carry long-lived STREAMING gate operations that idle by
-        # design and need an effectively unbounded idle window. This location carries fetches
-        # with a MEASURED distribution, so it wants ample headroom over that distribution
-        # (600s is >4x the observed 143.9s max) while still failing in BOUNDED time when
-        # Gerrit is genuinely wedged; at 3600s a hung backend would hang every client for an
-        # hour instead of surfacing as a fault.
-        #
-        # Raising this is a FIX, not a workaround: the upstream work is legitimate and it
-        # completes. It is NOT a capacity fix — the host is a burstable t4g.large with an
-        # exhausted CPU credit balance, which is what inflates these durations and is tracked
-        # separately (filed discovered_from bug 5bba).
+        # Gerrit fetches exceeded nginx's 60-second read default while the upstream still
+        # completed successfully. `proxy_read_timeout` bounds the gap between upstream
+        # reads, not total request duration. The 600-second gap allows more than four times
+        # the measured 143.9-second maximum while still exposing a wedged backend. Keep it
+        # distinct from MCP's 3600-second streaming idle window.
         proxy_read_timeout 600s;
     }
 }
