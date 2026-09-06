@@ -588,6 +588,8 @@ def steal(
 
 _GATE_FIELD = "gated_mode"
 _PAUSE_FIELDS = ("gated_mode", "paused", "reason", "who", "paused_at")
+_PAUSE_GATED_MODE = "dry-run"
+_PAUSE_LEGACY_GATED_MODES = {"reconcile-check"}
 
 
 def _encode_gate(mode: str) -> bytes:
@@ -655,7 +657,11 @@ def _decode_pause(raw: bytes) -> dict[str, object] | None:
         raise RefLockCorruptError("gate blob is not a JSON object", raw=raw)
     if "paused" not in doc:
         return None
-    if set(doc) != set(_PAUSE_FIELDS) or doc.get("gated_mode") != "reconcile-check":
+    gated_mode = doc.get("gated_mode")
+    if set(doc) != set(_PAUSE_FIELDS) or gated_mode not in {
+        _PAUSE_GATED_MODE,
+        *_PAUSE_LEGACY_GATED_MODES,
+    }:
         raise RefLockCorruptError("pause blob has an invalid schema", raw=raw)
     if doc["paused"] is not True or any(
         not isinstance(doc[name], str) or not doc[name] for name in _PAUSE_FIELDS[2:]
@@ -714,7 +720,7 @@ def set_pause(
             return old
         else:
             raise _pause_conflict(repo_root, ref, remote)
-    doc = dict(zip(_PAUSE_FIELDS, ("reconcile-check", True, reason, who, paused_at), strict=True))
+    doc = dict(zip(_PAUSE_FIELDS, (_PAUSE_GATED_MODE, True, reason, who, paused_at), strict=True))
     new_oid = _hash_object(repo_root, (json.dumps(doc) + "\n").encode("utf-8"))
     if not _cas_advance(repo_root, ref, new_oid=new_oid, old_oid=old or _ZERO_OID, remote=remote):
         raise _pause_conflict(repo_root, ref, remote)

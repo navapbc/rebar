@@ -268,7 +268,7 @@ def test_pause_and_resume_dispatch_happy_path(rebar_repo: Path, tmp_path: Path) 
     state = json.loads(_remote_blob(remote) or b"{}")
     assert state["reason"] == "planned maintenance"
     assert state["who"] == "test@example.com"
-    assert state["gated_mode"] == "reconcile-check"
+    assert state["gated_mode"] == "dry-run"
     assert state["paused"] is True
     assert _cli.main(["bridge", "resume"]) == 0
     assert _remote_blob(remote) is None
@@ -281,7 +281,7 @@ def test_pause_and_resume_real_cli_subprocess_round_trip(rebar_repo: Path, tmp_p
     assert paused.returncode == 0
     state = json.loads(_remote_blob(remote) or b"{}")
     assert state == {
-        "gated_mode": "reconcile-check",
+        "gated_mode": "dry-run",
         "paused": True,
         "reason": 'release "cutover"\nphase two',
         "who": "test@example.com",

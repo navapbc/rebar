@@ -153,7 +153,7 @@ def _gate_blob(ref_lock: ModuleType, repo: Path) -> bytes:
     return _git(["cat-file", "blob", oid], repo).stdout.encode()
 
 
-def test_pause_blob_retains_the_legacy_gate_field(
+def test_pause_blob_writes_current_gate_field(
     ref_lock: ModuleType, repo: Path, ref_backend
 ) -> None:
     paused_at = "2026-08-08T17:00:00Z"
@@ -166,7 +166,7 @@ def test_pause_blob_retains_the_legacy_gate_field(
 
     assert _git(["rev-parse", ref_lock.GATE_REF], repo).stdout.strip() == oid
     assert json.loads(_gate_blob(ref_lock, repo)) == {
-        "gated_mode": "reconcile-check",
+        "gated_mode": "dry-run",
         "paused": True,
         "reason": "planned maintenance",
         "who": "operator@example.com",
@@ -180,12 +180,15 @@ def test_read_pause_with_oid_uses_one_observation_and_preserves_legacy_read(
     ref_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    first_oid = ref_lock.set_pause(
-        repo,
-        reason="repair:fsck:owned",
-        who="operator@example.com",
-        paused_at="2026-08-09T17:00:00Z",
-    )
+    legacy_doc = {
+        "gated_mode": "reconcile-check",
+        "paused": True,
+        "reason": "repair:fsck:owned",
+        "who": "operator@example.com",
+        "paused_at": "2026-08-09T17:00:00Z",
+    }
+    first_oid = ref_lock._hash_object(repo, (json.dumps(legacy_doc) + "\n").encode())
+    _git(["update-ref", ref_lock.GATE_REF, first_oid], repo)
     legacy = ref_lock.read_pause(repo)
     observed: list[str | None] = []
     original_ref_oid = ref_lock._ref_oid
@@ -245,7 +248,7 @@ def test_pre_pause_decoder_accepts_every_new_pause_blob(
         paused_at="2026-08-08T17:00:00Z",
     )
 
-    assert _legacy_decode_gate(_gate_blob(ref_lock, repo)) == "reconcile-check"
+    assert _legacy_decode_gate(_gate_blob(ref_lock, repo)) == "dry-run"
 
 
 def test_same_reason_repause_preserves_exact_blob_and_metadata(
