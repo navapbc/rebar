@@ -291,6 +291,114 @@ def build_alias_index(tracker_dir: str) -> dict[str, list[str]] | None:
     return None if scanned is None else scanned.alias_to_dirs
 
 
+# Process-local memo of the resolver scan index, per tracker directory. Not a
+# configurable mechanism: no config key, no env var, no lock, no on-disk
+# artifact — purely a memo of a pure function of the store's on-disk state,
+# invisible to every caller except in the I/O it avoids.
+_SCAN_INDEX_CACHE: dict[str, tuple[int, ResolverScanIndex]] = {}
+_SCAN_INDEX_CACHE_MAX = 8
+
+
+def _tracker_fingerprint(tracker_dir: str) -> int | None:
+    """Cheap change-detector over every input to a ticket's effective alias.
+
+    ONE :func:`os.scandir` pass collecting ``(name, st_mtime_ns)`` per ticket
+    directory — no ``open``, no ``json.load``. Two independent components:
+
+    * the ticket-directory NAME SET, which changes whenever a ticket is created
+      or removed. Creating a ticket is the only operation that introduces a new
+      alias, and it necessarily adds a directory, so this component detects
+      every new alias regardless of filesystem timestamp granularity.
+    * each directory's mtime, which a filesystem bumps when an event file is
+      added to it — covering an in-place alias source change (compaction
+      retiring the CREATE in favour of a SNAPSHOT).
+
+    Returns ``None`` when the tracker cannot be scanned, so the caller falls
+    back to the uncached scan (which reports the listing failure itself).
+    """
+    digest = 0
+    count = 0
+    try:
+        with os.scandir(tracker_dir) as entries:
+            for entry in entries:
+                if entry.name.startswith("."):
+                    continue
+                try:
+                    if not entry.is_dir():
+                        continue
+                    mtime = entry.stat().st_mtime_ns
+                except OSError:
+                    continue
+                count += 1
+                digest ^= hash((entry.name, mtime))
+    except OSError:
+        return None
+    return hash((count, digest))
+
+
+def _cached_resolver_scan_index(tracker_dir: str) -> ResolverScanIndex | None:
+    """The :func:`build_resolver_scan_index` result for ``tracker_dir``, reused
+    for as long as :func:`_tracker_fingerprint` says the store is unchanged.
+
+    Without this, resolving a SINGLE alias costs a full-store pass — one
+    ``listdir`` plus a CREATE/SNAPSHOT read and JSON parse per ticket — on EVERY
+    call, so a long-lived process (the MCP server) re-parses the whole store on
+    every single-ticket read, and ``show_ticket`` pays it twice. Revalidation is
+    one ``scandir`` pass with no parsing.
+
+    The cached value is the same index the ``alias_index=`` / ``dir_names=``
+    parameters already accept, so a cache hit yields exactly the match set and
+    ambiguity behaviour of a fresh scan. Each rebuild publishes a NEW
+    :class:`ResolverScanIndex` by a single dict assignment, so a concurrent
+    reader sees either the old or the new whole index, never a partial one.
+
+    Returns ``None`` when the tracker cannot be scanned or listed; callers then
+    take the uncached path.
+    """
+    fingerprint = _tracker_fingerprint(tracker_dir)
+    if fingerprint is None:
+        return None
+    key = os.path.normpath(tracker_dir)
+    cached = _SCAN_INDEX_CACHE.get(key)
+    if cached is not None and cached[0] == fingerprint:
+        return cached[1]
+    index = _scan_tracker_root(tracker_dir)
+    if index is None:
+        return None
+    if key not in _SCAN_INDEX_CACHE and len(_SCAN_INDEX_CACHE) >= _SCAN_INDEX_CACHE_MAX:
+        _SCAN_INDEX_CACHE.clear()
+    _SCAN_INDEX_CACHE[key] = (fingerprint, index)
+    return index
+
+
+def _alias_candidates(
+    ticket_id: str,
+    tracker_dir: str,
+    alias_index: dict[str, list[str]] | None,
+    dir_names: list[str] | None,
+) -> tuple[list[str] | None, list[str] | None]:
+    """Alias matches for ``ticket_id``, plus the ``dir_names`` the prefix
+    fallback should reuse.
+
+    A caller-supplied ``alias_index`` wins — it is that caller's own one-pass
+    view of the store. Otherwise the process-local validated cache serves the
+    index, and its sorted directory listing is handed on so the prefix fallback
+    need not re-list the tracker. When neither is available the uncached
+    :func:`_scan_alias` runs exactly as before, preserving its
+    ``None``-on-hard-failure contract (which the caller distinguishes from an
+    empty match list).
+    """
+    if alias_index is not None:
+        return alias_index.get(ticket_id, []), dir_names
+    cached = _cached_resolver_scan_index(tracker_dir)
+    if cached is None:
+        return _scan_alias(ticket_id, tracker_dir), dir_names
+    return (
+        cached.alias_to_dirs.get(ticket_id, []),
+        cached.sorted_dir_names if dir_names is None else dir_names,
+    )
+
+
 def _dir_prefix_matches(sorted_names: list[str], prefix: str) -> list[str]:
     """Ticket-dir names in ``sorted_names`` that start with ``prefix``.
 
@@ -454,11 +562,7 @@ def resolve_ticket_id(
         if bound is not None:
             return bound
 
-    alias_matches = (
-        alias_index.get(ticket_id, [])
-        if alias_index is not None
-        else _scan_alias(ticket_id, tracker_dir)
-    )
+    alias_matches, dir_names = _alias_candidates(ticket_id, tracker_dir, alias_index, dir_names)
     if alias_matches is not None:
         if len(alias_matches) == 1:
             return alias_matches[0]
