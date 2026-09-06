@@ -292,6 +292,24 @@ def _warn_force_no_effect(reason: str) -> None:
 def _mount_or_create_branch(repo: str, tracker: str, *, force_new_store: bool = False) -> int:
     from rebar.config import tickets_branch, tickets_remote
 
+    # Pin the auto-maintenance posture BEFORE the store's first commit, not after it.
+    # ``_gc_config_unit`` is also run by the post-bootstrap ensure sweep, but that sweep
+    # lands AFTER this function and ``_commit_precommit`` have already committed. Inside
+    # that window git is at its DEFAULTS, so each ``git commit`` spawns
+    # ``git maintenance run --auto --quiet --detach`` -- a background child that OUTLIVES
+    # the command and repacks the object database this tracker worktree SHARES with the
+    # host repo, outside rebar's write lock. That is exactly the hazard ADR 0051 / bug 88eb
+    # forced foreground, and the concurrent mutator behind the fixture-remote flakes
+    # documented in ``tests/_git_upkeep.py`` (bugs dca1, b394, 5b74, 57d2). Measured with
+    # GIT_TRACE2_EVENT on git 2.55, a fresh ``rebar init`` spawned two ``--detach`` children,
+    # both attributed to a ``commit`` in this window; with this pin it spawns none.
+    #
+    # The unit is addressed at *repo* because the tracker does not exist yet -- a linked
+    # worktree shares the host repo's ``.git/config``, so this writes the same three
+    # settings to the same file the later sweep targets, which then converges as a no-op.
+    # ``_gc_config_unit`` stays their single definition; nothing is restated here.
+    _gc_config_unit(repo)
+
     branch = tickets_branch(repo)  # configured tracker.branch (default "tickets")
     remote_name = tickets_remote(repo)  # configured sync.remote (default "origin")
     _init_probe.require_s3_helper_if_s3_remote(repo, remote_name, run_git_fn=run_git)
