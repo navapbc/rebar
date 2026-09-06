@@ -1,19 +1,9 @@
-"""The one git failure classifier and its two uniqueness guards (story d6e3-548c-37eb-4c45).
+"""Git failure classification remains operation-sensitive across registry consumers.
 
-The store used to classify git stderr at five sites with five private marker tables, and
-the SAME text got different verdicts at each. These tests pin three things:
-
-1. **the registry** — every marker resolves to exactly one kind FOR A GIVEN OPERATION, and
-   the three deliberately different verdicts for ``cannot lock ref`` are PRESERVED (merging
-   them would re-open bugs 4afc and ebee);
-2. **the actions** — a kind still drives the same behaviour at each caller: a transient
-   runner-FS fault is retried by the sync and push-recovery merges, and the invalid-object
-   kind still triggers the index-rebuild RECOVERY rather than failing the write;
-3. **the guards** — the marker strings live only in the owner module, and the synthetic
-   rc-124 timeout result is CONSTRUCTED in only one place.
-
-Both guards are exercised against synthetic trees as well as the real one, so a guard that
-can no longer fail is itself caught.
+Each marker resolves to one ``GitKind`` for its operation. Policy declines remain terminal
+and are excluded from non-fast-forward and transport retry predicates. ``GitKind.INVALID_OBJECT``
+retains index-rebuild recovery. Static guards keep marker strings and synthetic timeout
+construction in their owners.
 """
 
 from __future__ import annotations
@@ -103,10 +93,7 @@ def test_marker_resolves_to_exactly_one_kind(
 
 
 def test_policy_decline_wins_over_a_bare_rejected() -> None:
-    """The subtractive rule, applied once: a stderr carrying BOTH ``rejected`` and a
-    policy marker is POLICY_DECLINE, never NON_FF — bug 2a76, where classifying a
-    permanent hook decline as a non-fast-forward burned all three retries on the remote
-    and then reported only "failed after 3 retries"."""
+    """A policy marker overrides broad ``rejected`` text and yields ``POLICY_DECLINE``."""
     both = "! [remote rejected] HEAD -> tickets (push declined due to repository rule violations)"
     assert git_outcome.classify(both, operation=git_outcome.PUSH).kind is GitKind.POLICY_DECLINE
 
@@ -321,12 +308,7 @@ INVALID_OBJECT_STDERR = (
 def test_invalid_object_is_its_own_kind_and_keeps_the_rebuild_recovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """INVALID_OBJECT must NOT be folded into FATAL: its action is a RECOVERY (rebuild the
-    index from HEAD, re-stage, retry), so folding it would turn a self-healing
-    vanished-object commit into an outright write failure (bug 4c1c).
-
-    Inject the exact stderr into a commit and assert the write still lands, having gone
-    through the index rebuild."""
+    """``INVALID_OBJECT`` remains distinct so recovery rebuilds the index and retries."""
     assert (
         git_outcome.classify(INVALID_OBJECT_STDERR, operation=git_outcome.COMMIT).kind
         is GitKind.INVALID_OBJECT
@@ -392,11 +374,7 @@ def test_push_classify_predicates_are_registry_lookups() -> None:
 
 
 def test_a_policy_decline_is_subtracted_from_both_retriable_predicates() -> None:
-    """The SUBTRACTIVE rule where it is load-bearing: the push loop asks these two
-    predicates directly, and a ``False`` from each is what makes a permanent decline
-    terminal after ONE attempt instead of burning the retry budget on the remote (bug
-    2a76 for the non-FF path, bug f61c for the transport one). Both texts carry the broad
-    marker AND a policy cause, so each predicate must subtract."""
+    """Policy declines are excluded from non-fast-forward and transport retry predicates."""
     declined_ff = "! [remote rejected] HEAD -> tickets (pre-receive hook declined)"
     assert push_classify._is_non_fast_forward(declined_ff.replace("hook declined", "")) is True
     assert push_classify._is_non_fast_forward(declined_ff) is False

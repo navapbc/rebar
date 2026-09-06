@@ -1,15 +1,9 @@
-"""One derivation of every store-relative path (story 6f18-05de-beaf-42be).
+"""``StorePaths`` centralizes store-relative derivations for sidecar consumers.
 
-Five modules independently answered "where is ``.rebar`` for this store?", and three of them
-carried the SAME defect in turn — a bare ``dirname`` that stops at the CALLER, so a ``make
-worktree`` view (whose ``.tickets-tracker`` is a SYMLINK into the canonical store while its
-``.rebar`` is a real per-worktree directory) keyed its sidecars on the view instead of the
-store. Each was fixed one site per ticket: ``da68-fc7c-068c-4c53`` (``nuclear-calm-heron``),
-``93a9-66cf-e681-4f49`` (``intangible-ladyish-vicuna``), ``conscious-weighable-spittlebug``.
-
-These tests pin the consolidation the way ``tests/unit/test_spawn_detached.py`` pins the
-detached-spawn one: the behaviour is correct, AND the construct exists in exactly one place,
-so a sixth copy cannot re-enter by imitation.
+Canonical tracker resolution follows symlinks so worktree views share the canonical store's
+``.rebar`` directory. Plain paths remain canonical, and unreadable paths retain their
+established fallback. Frozen derivations prevent mutation. Static guards keep tracker-sibling
+derivation in ``_store/paths.py``, and end-to-end coverage checks every sidecar helper.
 """
 
 from __future__ import annotations
@@ -31,9 +25,6 @@ _SRC_REBAR = Path(rebar.__file__).resolve().parent
 _OWNER = _SRC_REBAR / "_store" / "paths.py"
 
 
-# --------------------------------------------------------------------------------------
-# Fixtures — the canonical-store/worktree-view pair, as ``make worktree`` provisions it.
-# --------------------------------------------------------------------------------------
 def _canonical_store(tmp_path: Path) -> str:
     """A canonical store: ``<root>/canonical-repo/.tickets-tracker``. Returns the tracker."""
     tracker = Path(os.path.realpath(tmp_path)) / "canonical-repo" / ".tickets-tracker"
@@ -50,9 +41,6 @@ def _worktree_tracker(tmp_path: Path, tracker: str, name: str) -> str:
     return str(wt / ".tickets-tracker")
 
 
-# ======================================================================================
-# HAPPY PATH
-# ======================================================================================
 def test_a_symlinked_worktree_view_derives_the_canonical_stores_sidecars(tmp_path: Path) -> None:
     """Independence from the caller, proved by INVARIANCE: two worktree views of one store
     derive the SAME sidecar path, and it is the canonical store's — not either worktree's."""
@@ -103,9 +91,6 @@ def test_store_paths_exposes_the_documented_derivations(tmp_path: Path) -> None:
         assert isinstance(value, str), f"{value!r} is not a str"
 
 
-# ======================================================================================
-# HELD OUT — edge / boundary / contrast
-# ======================================================================================
 def test_a_plain_tracker_is_its_own_canonical(tmp_path: Path) -> None:
     """Negative control: with NO symlink in play the derivation must not move. This is the
     input where behaviour must NOT change, and it is what proves the symlink test above
@@ -184,9 +169,6 @@ def test_git_dir_falls_back_to_dot_git_when_the_pointer_is_unreadable(tmp_path: 
     assert StorePaths(str(tracker)).git_dir == str(tracker / ".git")
 
 
-# ======================================================================================
-# HELD OUT — the construct-uniqueness guards
-# ======================================================================================
 _MARKER_RE = re.compile(r"#\s*store-path-ok:(.*)$")
 
 
@@ -211,9 +193,7 @@ def _tracker_sibling_offenders() -> list[str]:
 
 
 def test_the_tracker_sibling_rebar_derivation_appears_only_in_paths() -> None:
-    """A STATIC scan, not a runtime assertion: a sixth copy-pasted derivation that no test
-    happens to execute must still fail here. This is what makes the consolidation durable —
-    the class (one omission, replicated by imitation) cannot re-enter by copy-paste."""
+    """A static scan keeps tracker-sibling ``.rebar`` derivation in ``_store/paths.py``."""
     assert _tracker_sibling_offenders() == [], (
         "a tracker-sibling '.rebar' derivation leaked outside _store/paths.py — route it "
         "through rebar._store.paths.StorePaths instead, or annotate the line with "
@@ -248,18 +228,9 @@ def test_the_guard_marker_requires_a_reason(tmp_path: Path) -> None:
     assert bare is not None and bare.group(1).strip() == ""
 
 
-# ======================================================================================
-# HELD OUT — end to end through the five REAL call sites
-# ======================================================================================
 def test_every_real_sidecar_helper_lands_in_the_one_canonical_rebar(tmp_path: Path) -> None:
-    """The teeth. Path equality on ``StorePaths`` alone would pass even if no call site were
-    rewired, so this drives the FIVE production helpers on a symlinked worktree view and
-    asserts every artifact lands in the canonical store's ``.rebar`` — the end-to-end contract
-    the three original bugs each broke at one site.
-
-    Note this drives ONLY production helpers — it deliberately does not import ``StorePaths``,
-    so it is a true end-to-end pin: it passed before the consolidation (every site already
-    resolved, per the leaf's recorded convergence status) and must keep passing after."""
+    """The ``compact_trigger``, ``doctor_locks``, ``enrich_drain``, and overlap queue consumers
+    place sidecars in the canonical store behind a symlinked worktree view."""
     from rebar._commands import compact_trigger, doctor_locks
     from rebar.llm import enrich_drain
     from rebar.llm.overlap import queue

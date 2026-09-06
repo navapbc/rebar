@@ -1,20 +1,9 @@
-"""One stamped-file advisory lock, shared by the three workers (story 1cf6-f902-5bfa-438f).
+"""Stamped file locking serves the drain, compaction, and snapshot workers.
 
-The "``O_EXCL``-create a lock file, write a v2 ownership stamp, reclaim ONCE if the shared
-staleness table condemns the holder" loop existed **three** times — ``llm/enrich_drain.py``,
-``_commands/compact_trigger.py`` and ``_snapshot/gc_trigger.py``. Copying it is what spread the
-unresolved-path defect (``da68-fc7c-068c-4c53``) and what let the three dialects drift apart
-(``aadc-9af6-0e67-4e2a``).
-
-These tests pin the consolidation the way ``tests/unit/store/test_store_paths.py`` pins the
-store-path one: the behaviour is correct, AND the construct exists in exactly one place, so a
-fourth copy cannot re-enter by imitation.
-
-The drift the merge had to ADJUDICATE rather than average was the release path: the drain put
-``os.close`` and ``os.unlink`` in ONE ``try``, so a failing close SKIPPED the unlink and leaked
-the lock until the 3600 s ceiling; the other two used two independent ``try`` blocks. The
-shared implementation takes the two-block form — a deliberate fix to the drain, pinned by
-``test_release_unlinks_even_when_close_fails``.
+Acquisition and reclamation remain bounded, ownership stamps must match, and concurrent
+workers remain excluded. Release closes and unlinks independently so a close failure cannot
+retain the lock. Static guards keep acquisition in ``rebar._store.stamped_lock`` and require
+reasons for exceptions.
 """
 
 from __future__ import annotations
@@ -70,9 +59,6 @@ def _plant(path: str, stamp: str, *, age_s: float = 0.0) -> str:
     return path
 
 
-# ======================================================================================
-# HAPPY PATH
-# ======================================================================================
 def test_acquire_stamps_the_file_and_release_removes_it(tmp_path: Path) -> None:
     """The whole cycle, asserted on the artifact: the file appears carrying THIS process's
     v2 stamp, and release takes it away so the next worker can have it."""
@@ -113,16 +99,10 @@ def test_a_second_acquire_is_refused_while_the_first_is_held(tmp_path: Path) -> 
     assert stamped_file_lock(path, label="test worker") is not None
 
 
-# ======================================================================================
-# HELD OUT — edge / boundary / contrast
-# ======================================================================================
 def test_release_unlinks_even_when_close_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """THE behaviour delta the consolidation adjudicates. The drain wrapped close+unlink in one
-    ``try``, so an ``OSError`` from ``os.close`` skipped the unlink and leaked the lock until
-    the 3600 s ceiling — every drain in that hour silently skipped. Two independent ``try``
-    blocks: the unlink always runs."""
+    """Release unlinks the stamped lock even when ``os.close`` raises."""
     from rebar._store.stamped_lock import release_stamped_lock, stamped_file_lock
 
     path = _lock_path(tmp_path)
@@ -319,20 +299,14 @@ def test_the_stamp_is_strip_equal_and_doctor_resolves_a_holder_from_it(tmp_path:
     os.close(fd)
 
 
-# ======================================================================================
-# HELD OUT — the construct-uniqueness guard
-# ======================================================================================
 _MARKER_RE = re.compile(r"#\s*stamped-lock-ok:(.*)")
 
 
 def _acquire_offenders() -> list[str]:
-    """Every unsanctioned stamped-lock acquire under ``src/rebar`` outside the owner.
+    """Return stamped lock acquires outside the owner.
 
-    The rule itself lives in ``rebar._store.stamped_lock._offending_source`` and is unit-tested
-    directly below; re-implementing the matcher here would make this guard a second copy of the
-    very construct it exists to keep singular. The anchor is the CONJUNCTION named in the plan
-    — ``os.O_CREAT`` and ``stamped_file_is_stale`` — because a bare ``O_EXCL`` scan over-matches
-    seven legitimate lines and still flags ``doctor_locks``, the diagnostic READER.
+    The shared scanner matches the ``os.O_CREAT`` and ``stamped_file_is_stale`` conjunction.
+    It ignores readers and unrelated ``O_EXCL`` uses while requiring a reason on each marker.
     """
     offenders: list[str] = []
     from rebar._store.stamped_lock import _offending_source
@@ -347,10 +321,7 @@ def _acquire_offenders() -> list[str]:
 
 
 def test_the_stamped_lock_acquire_appears_only_in_its_owner() -> None:
-    """A STATIC scan, not a runtime assertion: a fourth copy-pasted acquire that no test
-    happens to execute must still fail here. This is what makes the consolidation durable —
-    the class (one loop, replicated by imitation, then drifting) cannot re-enter by copy-paste.
-    """
+    """A static scan keeps stamped lock acquisition in its owner or behind a reasoned marker."""
     assert _acquire_offenders() == [], (
         "a stamped-file lock acquire leaked outside _store/stamped_lock.py — route it through "
         "rebar._store.stamped_lock.stamped_file_lock instead, or annotate the module with "
@@ -427,9 +398,6 @@ def test_a_reason_less_marker_is_itself_an_offence() -> None:
     assert got is not None and "requires a reason" in got
 
 
-# ======================================================================================
-# HELD OUT — end to end through the three REAL workers
-# ======================================================================================
 def _tracker(tmp_path: Path, name: str) -> str:
     tracker = Path(os.path.realpath(tmp_path)) / name / ".tickets-tracker"
     tracker.mkdir(parents=True)
@@ -437,10 +405,7 @@ def _tracker(tmp_path: Path, name: str) -> str:
 
 
 def test_every_worker_still_excludes_a_second_holder_and_releases(tmp_path: Path) -> None:
-    """The teeth. Testing the helper alone would pass even if no worker were rewired, so this
-    drives all SIX production functions: acquire, prove a second acquire is refused, release,
-    prove the file is gone and the lock re-acquirable. The exclusion is what every one of these
-    triggers exists for, and it is asserted on real acquires, not on internals."""
+    """Each drain, compaction, and snapshot worker excludes, releases, and reacquires."""
     from rebar._commands import compact_trigger
     from rebar._snapshot import gc_trigger
     from rebar.llm import enrich_drain

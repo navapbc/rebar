@@ -1,20 +1,9 @@
-"""The one merge-abort recovery toolkit and its uniqueness guard (story da84-924e-0f49-470a).
+"""Merge recovery serves ``sync.reconverge`` and ``push_recovery`` through one toolkit.
 
-``sync.reconverge`` and ``push_recovery``'s non-fast-forward retry both have to survive
-the same recoverable ``git merge`` aborts. The parser and the quarantine path arithmetic
-used to live in ``sync`` with ``push_recovery`` reaching sideways for them, and the
-quarantine MOVER was written TWICE — the two copies having already drifted, since only
-push_recovery's verified that a named path is genuinely untracked before relocating it
-(bugs ``small-delicious-loris`` / ``sulfuryl-suicidal-osprey``).
-
-These tests pin two things:
-
-1. **the toolkit** — the shared mover's three refusal fences and its move, the parser's
-   marker fence, and the CONVERGENCE: the untracked fence now answers on sync's door too,
-   which is the one behaviour this consolidation deliberately adds;
-2. **the guard** — a second quarantine mover anywhere under ``src/rebar`` cannot merge
-   without a reasoned escape marker. Exercised against synthetic sources as well as the
-   real tree, so a guard that can no longer fail is itself caught.
+The mover distinguishes tracked and untracked paths, resolves the git common directory,
+tolerates vanished paths, and requires reasons for exceptions. The parser rejects malformed
+markers. Static guards keep the implementation singular, and both callers retain the same
+convergence contract.
 """
 
 from __future__ import annotations
