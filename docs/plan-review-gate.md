@@ -1162,6 +1162,17 @@ this precheck is attestation-safe: checkbox state is normalized out of the mater
 fingerprint (330c; the single normalization seam covers both the plan-review claim gate and
 the completion-verifier staleness check), so the flips do not invalidate a signed plan review.
 
+### Referencing-commit precheck (deterministic, pre-LLM)
+
+When a ticket records `file_impact`, the close gate requires a reachable commit whose message
+names that ticket (or a descendant) with a `rebar-ticket:` trailer or leading ticket-id
+subject. A checkout with a configured remote refreshes before turning "no matching commit in
+my current view" into the ordinary "no commit references it" refusal. If that refresh cannot
+run or cannot make the remote refs visible, the error names checkout freshness instead; from
+an agent session, retry after `git fetch` in the code clone or use the sanctioned local-CLI
+fallback from a worktree that already contains the merged commit. That condition is distinct
+from a proven missing trailer and must not be bypassed with `--force`.
+
 ### Attested-item validity precheck (deterministic, pre-LLM)
 
 The tag that earns the exemption above is itself validated by a second deterministic
