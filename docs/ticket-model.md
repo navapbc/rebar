@@ -201,7 +201,15 @@ epic's child rather than the epic. The rule applies identically on the CLI, the 
 
 Two deliberate limits. When git history cannot be read at all — no code repo, or no commits
 yet — the link is **allowed**: a refusal must mean "this target has no commit", never "this
-checkout has no history". And `--force[=<reason>]` (`force=` on the library and MCP) is the
+checkout has no history". That same reasoning bounds *which* checkout may refuse. The scan
+walks HEAD **and** the remote-tracking refs for the checkout's own branch, because a clone
+that is fetched but never checked out — every server-side clone, the rebar MCP server's
+included — holds the referencing commit on `refs/remotes/<remote>/<branch>` while HEAD still
+points at the clone-time commit. And when even that finds nothing, absence counts as proven
+only from a checkout that is the whole history: one with no remote qualifies outright, while
+a replica is refreshed once (a bounded `git fetch`) and rescanned first. A refresh that
+cannot be completed leaves absence unestablished, so the link is allowed rather than refused
+(bug `ambitious-creative-ovenbird`). And `--force[=<reason>]` (`force=` on the library and MCP) is the
 escape hatch, for the case where attribution is genuinely by scope of work rather than by
 introducing commit. The `--caused-by=<id>` flag on a bug *close* writes through a different
 path and is **not** gated by this rule.

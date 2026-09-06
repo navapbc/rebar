@@ -163,6 +163,36 @@ def invalid_commit_shas(shas: list[str], repo_root: str) -> list[str]:
     return invalid
 
 
+def upstream_branch_refs(repo_root: str) -> list[str]:
+    """Remote-tracking refs for the checkout's CURRENT branch (``origin/main`` and peers).
+
+    Named by branch rather than taken wholesale from ``refs/remotes/``: rebar's default
+    layout puts the ticket event log on a ``tickets`` branch of the same repository, whose
+    remote-tracking ref is emphatically not code history. Empty on a detached HEAD, in a
+    non-repo, or when nothing tracks this branch — the caller then walks HEAD alone,
+    exactly as before.
+    """
+    branch = subprocess.run(
+        ["git", "-C", str(repo_root), "symbolic-ref", "--short", "-q", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    name = branch.stdout.strip()
+    if branch.returncode != 0 or not name:
+        return []
+    listed = subprocess.run(
+        ["git", "-C", str(repo_root), "for-each-ref", "--format=%(refname)", "refs/remotes/"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if listed.returncode != 0:
+        return []
+    suffix = f"/{name}"
+    return [ref for ref in listed.stdout.split() if ref.endswith(suffix)]
+
+
 def referencing_commits(
     ticket_ids: set[str] | list[str],
     tracker: str,
@@ -170,6 +200,7 @@ def referencing_commits(
     *,
     metrics: dict[str, int] | None = None,
     resolver: Callable[[str], str | None] | None = None,
+    include_upstream: bool = False,
 ) -> list[str] | None:
     """SHAs of commits referencing ANY of ``ticket_ids``, newest first.
 
@@ -185,18 +216,33 @@ def referencing_commits(
     the history could not be read at all (not a repo, no commits yet). A caller that refuses
     on "no referencing commit" must not refuse on "this clone has no history", and the close
     gate — whose long-standing contract is a plain list — collapses ``None`` to ``[]``.
+
+    ``include_upstream`` selects WHICH history is walked, and it is opt-in because the two
+    callers ask different questions. The default walks HEAD only: that is the close gate's
+    long-standing contract ("a commit reachable from your worktree's current HEAD"), and
+    widening it would silently accept work sitting elsewhere. The ``caused_by`` guard opts
+    IN, adding the remote-tracking refs for the checkout's OWN branch, because its question
+    is "did this ticket ever ship a commit?" and a checkout that is fetched but never
+    checked out — the shape of every server-side clone, including the rebar MCP server's —
+    holds the referencing commit on ``refs/remotes/<remote>/<branch>`` while HEAD still
+    points at the clone-time commit (bug ambitious-creative-ovenbird).
+
+    It is deliberately NOT ``--all``. rebar's default store layout keeps the ticket event
+    log on a ``tickets`` BRANCH OF THE SAME REPOSITORY, so ``--all`` would walk one commit
+    per ticket event — the wrong history, and an unbounded amount of it.
     """
     from rebar._commands.verify_commit import extract_ticket_refs
     from rebar._engine_support.resolver import build_resolver_scan_index, resolve_ticket_id
 
     accepted = set(ticket_ids)
+    log_argv = ["git", "-C", str(repo_root), "log", "--format=%H%x1f%B%x00"]
+    if include_upstream:
+        # Resolved BEFORE the clock starts: ``git_history_read_ms`` names the history READ,
+        # and folding two ref lookups into it would quietly change what the metric measures
+        # for one caller only.
+        log_argv += ["HEAD", *upstream_branch_refs(repo_root)]
     git_started_ns = time.monotonic_ns() if metrics is not None else 0
-    proc = subprocess.run(
-        ["git", "-C", str(repo_root), "log", "--format=%H%x1f%B%x00"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = subprocess.run(log_argv, capture_output=True, text=True, check=False)
     if metrics is not None:
         metrics["git_history_read_ms"] = (time.monotonic_ns() - git_started_ns) // 1_000_000
     if proc.returncode != 0:
