@@ -52,6 +52,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 _TIMEOUT = 120
+_SHARED_SCRATCH_ROOTS = {
+    root for path in (Path("/tmp"), Path("/var/tmp")) for root in (path, path.resolve(strict=False))
+}
 
 # Gerrit's own hook matches ``^Change-Id: I[0-9a-f]{40}$``. This is deliberately looser
 # (any token, any case) so a hand-written or malformed trailer is still recognised as
@@ -80,6 +83,15 @@ ERROR: HEAD carries no Change-Id trailer, so there is nothing to carry forward.
 
 class _Failure(Exception):
     """A message printed to stderr before a non-zero exit."""
+
+
+def _is_direct_shared_scratch_file(path: Path) -> bool:
+    """Return whether *path* is a fixed file directly in a host-shared scratch root."""
+    try:
+        absolute = path.expanduser().resolve(strict=False)
+    except RuntimeError:
+        absolute = path.expanduser().absolute()
+    return absolute.parent in _SHARED_SCRATCH_ROOTS
 
 
 def extract_change_id(message: str) -> str | None:
@@ -174,6 +186,14 @@ def amend_head(message: str) -> int:
 
 def _read_message_file(raw: str) -> str:
     path = Path(raw)
+    if _is_direct_shared_scratch_file(path):
+        raise _Failure(
+            "ERROR: refusing commit-message file in shared scratch root: "
+            f"{path}\n"
+            "A shared scratch file must be under a per-session or per-invocation "
+            "unique directory; a fixed file can be overwritten by another agent "
+            "before git reads it."
+        )
     if not path.is_file():
         raise _Failure(f"ERROR: no such commit-message file: {path}")
     text = path.read_text(encoding="utf-8")

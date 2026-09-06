@@ -105,6 +105,13 @@ git log -1   # confirm a "Change-Id: I…" line is present in the footer
 
 Use the [documentation policy](docs/documentation-policy.md) to identify ownership, select the canonical source, apply the documented correction path, and follow the writing guidance.
 
+When staging a commit-message body for `git commit -F` or `make amend-msg FILE=…`,
+write it in a per-session/per-invocation unique directory, not as a fixed file
+directly under host-shared `/tmp` or `/var/tmp`. Multiple agent sessions on this
+host run as the same OS user, so a fixed scratch path is silent last-writer-wins:
+Git exits successfully while the permanent commit record now describes another
+session's diff.
+
 **Check whether you edited a generated file.** Several checked-in files are derived from a source elsewhere in the tree. CI regenerates these files and fails on differences. Each generated file identifies its regeneration command through a banner or a top-level `_generated_by` key. The [Generated artifacts catalog](docs/generated-artifacts.md) lists each file with its source, regeneration command, and enforcement gate. Change the source and run the regeneration command when a generated file needs correction.
 
 **Every commit must reference a rebar ticket.** CI's `Verified` gate rejects a commit to
