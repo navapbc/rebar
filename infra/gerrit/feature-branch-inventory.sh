@@ -6,15 +6,17 @@
 # long-term development" and Qt abandoned routine long-lived-branch merges. Gerrit
 # does not auto-prune a merged-back or abandoned `feature/*` branch, so this scripted
 # check flags branches inactive beyond the lifetime cap — whether MERGED-BACK (already
-# folded into main) or ABANDONED (never landed) — for owner-confirmed deletion, and is
-# the tooling half of the S6 lifetime/cadence policy (the prose lives in CONTRIBUTING §4
-# and infra/runbooks/review-bot-ops.md).
+# folded into main), MERGED-REBASED (same bytes landed under a rewritten SHA), or
+# NOT-IN-MAIN — for owner-confirmed deletion, and is the tooling half of the S6
+# lifetime/cadence policy (the prose lives in CONTRIBUTING §4 and
+# infra/runbooks/review-bot-ops.md).
 #
-# READ-ONLY by default (prints the inventory). Deletion is never automatic — it prints
-# the exact `curl -X DELETE` per stale branch for an OWNER to confirm and run, because a
-# feature branch may be paused rather than dead (the policy is owner-confirmed, not a cron
-# that reaps). Pass --delete to delete AFTER you have confirmed ownership (still one branch
-# at a time, each logged).
+# READ-ONLY by default (prints the inventory). Deletion is age/owner-confirmed; the
+# state column is advisory context for that confirmation, not an automatic deletion
+# gate. The script prints the exact `curl -X DELETE` per stale branch for an OWNER to
+# confirm and run, because a feature branch may be paused rather than dead (the policy
+# is owner-confirmed, not a cron that reaps). Pass --delete to delete AFTER you have
+# confirmed ownership (still one branch at a time, each logged).
 #
 # Drives over HTTPS/REST as an operator (feature-branch-drivers / admin), same auth model
 # as feature-branch-e2e.sh: the credential comes from `git credential fill`, never echoed.
@@ -43,6 +45,20 @@ PW="$(printf '%s' "$_cred" | sed -n 's/^password=//p')"
 
 api() { curl -sS -u "${GERRIT_USER}:${PW}" "https://${GERRIT_HOST}/a$1" | sed "1s/^)]}'//"; }
 urlenc() { printf '%s' "$1" | sed 's#/#%2F#g'; }
+
+content_matches_main() {
+	rev="$1"
+	paths="$(git diff --name-only "${main_sha}...${rev}" 2>/dev/null)" || return 1
+	[ -z "$paths" ] && return 0
+	oldIFS="$IFS"; IFS='
+'
+	set -f
+	# shellcheck disable=SC2086 # intentional newline-only splitting after setting IFS above
+	set -- $paths
+	set +f
+	IFS="$oldIFS"
+	git diff --quiet "$main_sha" "$rev" -- "$@" 2>/dev/null
+}
 
 main_sha="$(git ls-remote "https://${GERRIT_USER}@${GERRIT_HOST}/a/${PROJECT}" refs/heads/main | awk '{print $1}')"
 
@@ -80,8 +96,10 @@ except Exception:
 	# merged-back? tip is an ancestor of main  =>  already folded in, safe to prune.
 	if git merge-base --is-ancestor "$rev" "$main_sha" 2>/dev/null; then
 		state="MERGED-BACK"
+	elif content_matches_main "$rev"; then
+		state="MERGED-REBASED"
 	else
-		state="ABANDONED?"   # not in main's history — either in-flight or truly abandoned
+		state="NOT-IN-MAIN"
 	fi
 	flag=""
 	if [ "$age_days" -ge "$CAP_DAYS" ]; then flag="  <== STALE (>= ${CAP_DAYS}d)"; stale+=("$fb"); fi
