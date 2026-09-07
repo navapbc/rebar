@@ -1,21 +1,13 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# opcert-plan-assertions.sh — the AC1 structural assertions for the op-cert edge
-# (story 76d2). Each sub-claim is a literal, self-failing `jq -e` query against a single
-# `terraform show -json tf.plan` output; ANY violation exits non-zero (and this script
-# exits non-zero), so it can gate the deploy / CI.
+# Verify the op-cert edge with self-failing `jq -e` assertions against one
+# `terraform show -json` plan. Any violation exits non-zero for deploy/CI gating.
 #
-# REQUIRES AWS CREDENTIALS: it runs a real `terraform plan`. The OPERATOR runs it (the
-# hermetic unit test test_opcert_deploy_infra.py asserts the .tf SOURCE offline).
+# Requires AWS credentials. test_opcert_deploy_infra.py covers the source offline.
 #
-# RUN IT POST-APPLY (idempotency re-plan). Two attributes are computed and only KNOWN in
-# planned_values once the resources exist in state:
-#   - the integration's `X-Opcert-Guard` header value = random_password.opcert_guard.result
-#     (any unknown value nulls the WHOLE request_parameters map in planned_values), and
-#   - the invoke policy's Resource = the API execution ARN.
-# On a FRESH plan (nothing applied yet) both are known-after-apply, so assertions (b) and the
-# invoke-policy check read null. After `terraform apply`, re-running `terraform plan` yields a
-# no-change plan whose planned_values carry the now-known values, and every assertion passes.
+# Run it post-apply against a no-change re-plan. The integration's generated
+# `X-Opcert-Guard` value and the API execution ARN are unknown on a fresh plan. Those unknowns
+# null the request-parameter map and invoke-policy resource needed by their assertions.
 #
 # Usage:
 #   cd infra/terraform
@@ -45,12 +37,8 @@ assert() {
   fi
 }
 
-# NOTE: the queries below are scoped BY ADDRESS to the op-cert resources
-# (`aws_apigatewayv2_integration.opcert`, `aws_apigatewayv2_route.opcert`, the two op-cert SSM
-# params). The terraform module is multi-API — it also declares the auth_host SSO API and its
-# own routes/integrations/params — so an unscoped `select(.type == ...)` would aggregate those
-# unrelated resources (e.g. auth_host's public `$default` route, authorization_type NONE) and
-# wrongly fail. Scoping asserts exactly the op-cert edge the AC is about.
+# Scope queries by resource address. This multi-API module also has auth_host resources whose
+# public `$default` route and `NONE` auth would make type-only aggregation fail incorrectly.
 
 # (a) integration URI is HTTPS (the box's TLS nginx origin, not http://:80).
 assert "(a) integration_uri is https://" \
@@ -94,15 +82,9 @@ assert "invoke: exactly one execute-api:Invoke policy, labelled opcert_admin_inv
      | select([.s.Action] | flatten | any(. == "execute-api:Invoke"))]
    | length == 1 and .[0].label == "opcert_admin_invoke"'
 
-# (f) the KEY parameter uses terraform WRITE-ONLY arguments (`value_wo` + `value_wo_version`)
-#     so its value is NEVER persisted to terraform state (ADR 0105) and an apply never clobbers
-#     the operator-seeded key (the provider re-sends value_wo only when value_wo_version
-#     changes). It must NOT carry a plaintext `value = "..."` or `lifecycle { ignore_changes =
-#     [value] }` — that antipattern read the live cleartext into state on every refresh (bug
-#     eb67-b96c-dcf0-4f86). The configuration representation of `terraform show -json` exposes the
-#     `value_wo_version` expression; we run that as the PRIMARY assertion and, when the field is
-#     absent (older Terraform JSON schemas), fall back to a source-contract check on opcert.tf.
-#     Both prove the key parameter is write-only and NOT ignore_changes-guarded.
+# (f) The operator-seeded key uses `value_wo` + `value_wo_version`. Its value never enters
+# state or gets resent until the version changes. Plaintext `value` and `ignore_changes =
+# [value]` are forbidden. Prefer the plan's expression. Older JSON schemas use the source check.
 f_json='.configuration.root_module.resources[]
           | select(.address == "aws_ssm_parameter.opcert_ed25519_key")
           | .expressions.value_wo_version? // empty | length > 0'
