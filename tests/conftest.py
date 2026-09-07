@@ -584,7 +584,7 @@ def _rebar_root_sandbox_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def _default_rebar_root_to_sandbox(
     _rebar_root_sandbox_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Default ``REBAR_ROOT`` to a sandbox repo for every test (bug dd62 fallout).
+    """Default repo/gate storage to a sandbox for every test (bug dd62 fallout).
 
     Without this, any test that drives the CLI/library WITHOUT setting ``REBAR_ROOT``
     resolves the repo root to the developer/CI CHECKOUT (git toplevel of the cwd) — and a
@@ -596,8 +596,14 @@ def _default_rebar_root_to_sandbox(
     Precedence is preserved: a test-owned fixture (``rebar_repo`` et al.) monkeypatches
     ``REBAR_ROOT`` AFTER this autouse default and wins; a test that ``delenv``s it still
     gets the cwd fallback it asked for. Only the implicit
-    tests-run-against-the-checkout default is removed."""
+    tests-run-against-the-checkout default is removed.
+
+    The same sandbox also keeps gate-admission tests off the host-global operator slots:
+    child CLI/library processes inherit ``REBAR_GATE_TMPDIR`` from the test environment,
+    while test-owned fixtures can still monkeypatch a narrower gate store after this
+    autouse default."""
     monkeypatch.setenv("REBAR_ROOT", str(_rebar_root_sandbox_repo))
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(_rebar_root_sandbox_repo.parent / "gate-store"))
 
 
 @pytest.fixture(autouse=True)
