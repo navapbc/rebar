@@ -487,6 +487,24 @@ def _rendered_description(match: re.Match[str]) -> str:
     return textwrap.dedent(body) if match.group("squash") else body
 
 
+def test_review_interrupt_signal_description_names_configured_window() -> None:
+    block = next(
+        raw
+        for _file_name, label, raw, _masked in _alarm_blocks()
+        if label == "review_interrupts_signal_unavailable"
+    )
+    description_match = _HEREDOC_DESCRIPTION_RE.search(block)
+    if description_match is None:
+        pytest.fail("review_interrupts_signal_unavailable has no heredoc alarm_description")
+    description = _rendered_description(description_match)
+    masked = _mask_noncode(block)
+    configured_window = (
+        f"{_int_attr(masked, 'datapoints_to_alarm')}-of-{_int_attr(masked, 'evaluation_periods')}"
+    )
+
+    assert configured_window in description
+
+
 def test_alarm_descriptions_fit_the_aws_limit() -> None:
     """Every heredoc alarm_description stays under AWS's 1024-character cap.
 

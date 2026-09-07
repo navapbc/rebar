@@ -199,7 +199,7 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_signal_unavailable" {
     green, so no other alarm can see it. REMEDIATION: confirm the review-bot is up and its
     /health is reachable FROM THE HOST and still returns an `in_flight` field — autodeploy.sh
     bot_in_flight_reviews echoes -1 for unreachable/missing/unparseable and that fail-open path
-    is what fires this. It recurs on every deploy while broken, hence the 1-datapoint latch.
+    is what fires this. It recurs on every deploy while broken, hence the tight 2-of-4 window.
   EOT
 
   namespace   = "rebar/host"
