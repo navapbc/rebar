@@ -6,6 +6,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "infra" / "gerrit" / "feature-branch-inventory.sh"
 
@@ -15,7 +17,9 @@ def _write_executable(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-def test_rebased_content_equivalent_branch_reports_merged(tmp_path: Path) -> None:
+def test_rebased_content_equivalent_branch_reports_merged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fakebin = tmp_path / "bin"
     fakebin.mkdir()
     calls = tmp_path / "git-calls"
@@ -75,6 +79,9 @@ case "$url" in
 esac
 """,
     )
+    bash_env = tmp_path / "bash-env"
+    bash_env.write_text("exit 0\n")
+    monkeypatch.setenv("BASH_ENV", str(bash_env))
     env = os.environ | {
         "PATH": f"{fakebin}:{os.environ['PATH']}",
         "GERRIT_HOST": "example.test",
@@ -82,13 +89,21 @@ esac
         "PROJECT": "rebar",
         "NOW_EPOCH": "1788652800",
     }
+    env.pop("BASH_ENV", None)
+    env.pop("ENV", None)
 
     result = subprocess.run(
         ["bash", str(SCRIPT)], env=env, text=True, capture_output=True, check=False
     )
 
-    assert re.findall(r"^(feature/\S+)\s+(\S+)", result.stdout, re.MULTILINE) == [
+    rows = re.findall(r"^(feature/\S+)\s+(\S+)", result.stdout, re.MULTILINE)
+    assert rows == [
         ("feature/rebased", "MERGED-REBASED"),
         ("feature/direct", "MERGED-BACK"),
         ("feature/unmerged", "NOT-IN-MAIN"),
-    ]
+    ], (
+        f"returncode={result.returncode}\n"
+        f"stdout={result.stdout!r}\n"
+        f"stderr={result.stderr!r}\n"
+        f"git calls={calls.read_text() if calls.exists() else '<none>'!r}"
+    )
