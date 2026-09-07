@@ -672,6 +672,161 @@ def test_truncation_hook_does_not_rerun_the_prologue(tmp_path: Path) -> None:
     assert _values(aws_log, "gerrit_healthy") == []
 
 
+def test_main_probe_uses_cached_metadata_when_imds_fails(tmp_path: Path) -> None:
+    """A transient IMDS miss must not turn every head metric into ``--region ''``.
+
+    The head-gap ticket's independent failure mode is whole-run metadata loss, not the docker
+    truncation fixed by 9313: the health probes can succeed while the earlier IMDS calls fail,
+    and then every CloudWatch publish silently drops because it was invoked with an empty
+    region or instance id. The stop hook already uses cached metadata; the main path must too.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    aws_log = tmp_path / "aws.log"
+    logger_log = tmp_path / "logger.log"
+    region_cache = tmp_path / "probe-region"
+    instance_cache = tmp_path / "probe-instance-id"
+    region_cache.write_text("us-east-1\n")
+    instance_cache.write_text("i-cached123\n")
+
+    _stub(
+        bin_dir,
+        "curl",
+        f"""
+        for a in "$@"; do
+          case "$a" in
+            *169.254.169.254*) exit 1 ;;
+            *projects/rebar/branches/main*)
+              printf ")]}}'\\n"; printf '{{"revision": "{_SHA}"}}\\n'; exit 0 ;;
+          esac
+        done
+        case "$*" in *http_code*) printf '200'; exit 0 ;; esac
+        exit 1
+        """,
+    )
+    _stub(bin_dir, "git", f'printf "{_SHA}\\trefs/heads/main\\n"; exit 0')
+    _stub(bin_dir, "logger", 'printf \'%s\\n\' "$*" >> "$LOGGER_LOG"; exit 0')
+    _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 42')
+    _stub(bin_dir, "journalctl", "exit 0")
+    _stub(bin_dir, "timeout", 'shift; exec "$@"')
+    _stub(
+        bin_dir,
+        "docker",
+        """
+        case "$*" in
+          *"system df"*)
+            printf 'Images|1GB\\nContainers|1GB\\n'
+            printf 'Local Volumes|1GB\\nBuild Cache|1GB\\n'
+            exit 0 ;;
+        esac
+        exit 0
+        """,
+    )
+    _stub(bin_dir, "du", "printf '1024\\t%s\\n' \"${@: -1}\"; exit 0")
+    _stub(bin_dir, "free", 'printf "        total used free\\nMem:     1000 400 600\\n"; exit 0')
+
+    import os
+
+    offsets = tmp_path / "offsets"
+    offsets.mkdir()
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "AWS_LOG": str(aws_log),
+        "LOGGER_LOG": str(logger_log),
+        "REGION_CACHE": str(region_cache),
+        "INSTANCE_ID_CACHE": str(instance_cache),
+        "DOCKER_DU_OVERLAY2_DEVCHECK_SKIP": "1",
+        "REPL_LOG": str(tmp_path / "replication.log"),
+        **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
+    }
+    for name in _OFFSET_VARIABLES:
+        (offsets / name.lower()).write_text("0\n")
+    (tmp_path / "replication.log").write_text("")
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    published = aws_log.read_text()
+    assert "--metric-name GerritReachable" in published
+    assert "--region us-east-1" in published
+    assert "InstanceId=i-cached123" in published
+    assert "--region  " not in published
+    logged = logger_log.read_text()
+    assert "cloudwatch put-metric-data FAILED metric=gerrit_healthy" in logged
+
+
+def test_main_probe_refreshes_cached_metadata_from_imds(tmp_path: Path) -> None:
+    """The fallback cache is maintained by successful main probes."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    aws_log = tmp_path / "aws.log"
+    region_cache = tmp_path / "state" / "probe-region"
+    instance_cache = tmp_path / "other-state" / "probe-instance-id"
+
+    _stub(
+        bin_dir,
+        "curl",
+        f"""
+        for a in "$@"; do
+          case "$a" in
+            *latest/api/token*) printf 'token'; exit 0 ;;
+            *placement/region*) printf 'us-east-1'; exit 0 ;;
+            *instance-id*) printf 'i-fresh456'; exit 0 ;;
+            *projects/rebar/branches/main*)
+              printf ")]}}'\\n"; printf '{{"revision": "{_SHA}"}}\\n'; exit 0 ;;
+          esac
+        done
+        case "$*" in *http_code*) printf '200'; exit 0 ;; esac
+        exit 1
+        """,
+    )
+    _stub(bin_dir, "git", f'printf "{_SHA}\\trefs/heads/main\\n"; exit 0')
+    _stub(bin_dir, "logger", "exit 0")
+    _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
+    _stub(bin_dir, "journalctl", "exit 0")
+    _stub(bin_dir, "timeout", 'shift; exec "$@"')
+    _stub(bin_dir, "docker", "exit 1")
+    _stub(bin_dir, "du", "printf '1024\\t%s\\n' \"${@: -1}\"; exit 0")
+    _stub(bin_dir, "free", 'printf "        total used free\\nMem:     1000 400 600\\n"; exit 0')
+
+    import os
+
+    offsets = tmp_path / "offsets"
+    offsets.mkdir()
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "AWS_LOG": str(aws_log),
+        "REGION_CACHE": str(region_cache),
+        "INSTANCE_ID_CACHE": str(instance_cache),
+        "DOCKER_DU_OVERLAY2_DEVCHECK_SKIP": "1",
+        "REPL_LOG": str(tmp_path / "replication.log"),
+        **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
+    }
+    for name in _OFFSET_VARIABLES:
+        (offsets / name.lower()).write_text("0\n")
+    (tmp_path / "replication.log").write_text("")
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert region_cache.read_text() == "us-east-1\n"
+    assert instance_cache.read_text() == "i-fresh456\n"
+    assert "InstanceId=i-fresh456" in aws_log.read_text()
+
+
 def test_unit_bounds_the_stop_path_explicitly() -> None:
     """The stop path gets a stated ceiling, not an inherited default.
 
