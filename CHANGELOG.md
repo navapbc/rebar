@@ -38,6 +38,12 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): MCP `ready_tickets` now defaults to compact discovery
+  rows.** The default row contains ticket id, alias, title, type, status,
+  priority, and blocking summary. Pass `full: true` to keep receiving the
+  previous full ticket-state shape. `list_tickets` is unchanged because its
+  filters make an over-budget response actionable.
+
 - **BREAKING (pre-1.0): MCP `declare_no_file_impact` now returns the shared
   structured write acknowledgement.** MCP clients should read `result == "ok"`
   instead of comparing the whole tool result to the bare string `"ok"`. The

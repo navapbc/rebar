@@ -35,6 +35,8 @@ Structured via `--output json`:
 | command(s)                       | schema                    |
 |----------------------------------|---------------------------|
 | `show` / `list` / `ready` / `session-logs` | `ticket_state` |
+| MCP `ready_tickets` default      | `ready_ticket_summary`    |
+| MCP `ready_tickets` with `full: true` | `ticket_state`       |
 | `search` (default JSON; CLI/library/MCP) | `search_result` |
 | `search --full`                  | `ticket_state`              |
 | `show`/`list`/`ready`/`session-logs` `--output llm` | `ticket_state_llm` |

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/ready_ticket_summary.schema.json",
+  "title": "ReadyTicketSummary",
+  "description": "Bounded MCP ready_tickets discovery row. The default call is for choosing work; pass full=true to the MCP tool for the complete ticket_state shape.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ticket_id",
+    "alias",
+    "title",
+    "ticket_type",
+    "status",
+    "priority",
+    "blocking_summary"
+  ],
+  "properties": {
+    "ticket_id": { "type": "string" },
+    "alias": { "type": ["string", "null"] },
+    "title": { "type": "string" },
+    "ticket_type": { "$ref": "common.schema.json#/$defs/ticket_type" },
+    "status": { "$ref": "common.schema.json#/$defs/ticket_status" },
+    "priority": { "$ref": "common.schema.json#/$defs/priority" },
+    "blocking_summary": { "type": ["string", "null"] }
+  }
+}

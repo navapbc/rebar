@@ -224,6 +224,19 @@ try:
         summary: str | None
         snippet: str | None
 
+    class ReadyTicketSummaryOut(_Out):
+        """Bounded ready-work discovery projection; full state is available via full=True."""
+
+        model_config = ConfigDict(extra="forbid")
+
+        ticket_id: str
+        alias: str | None
+        title: str
+        ticket_type: str
+        status: str
+        priority: int
+        blocking_summary: str | None
+
     class DepsGraphOut(_Out):
         ticket_id: str
         deps: list[dict] = []
