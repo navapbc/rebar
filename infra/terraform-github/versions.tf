@@ -21,8 +21,10 @@ terraform {
       # >= 6.8.0 is REQUIRED: that release added the native DeployKey bypass
       # actor (`actor_type = "DeployKey"` with no actor_id) used by the locks in
       # main.tf. On an older provider, `terraform validate`/`apply` rejects the
-      # DeployKey bypass — fall back to infra/github/apply-mirror-lock.sh
-      # (the gh-api path), which has no provider-version dependency.
+      # DeployKey bypass. The shell fallback at infra/github/apply-mirror-lock.sh
+      # has no provider-version dependency, but it is NOT behavior-identical:
+      # Terraform intentionally locks only `main`, while the shell fallback locks
+      # `main` and `refs/tags/**`.
       version = ">= 6.8.0"
     }
   }
