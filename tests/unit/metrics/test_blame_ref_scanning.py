@@ -1,15 +1,8 @@
-"""Commit-message ref scanning in the post-close `caused_by` derivation.
+"""Commit-message reference scanning for post-close ``caused_by`` derivation.
 
-Regression cover for bug ``c50e-7326-9cac-45e4`` (postwar-bardic-walleye): closing a bug ran
-``derive_caused_by`` over the WHOLE branch history and, for every commit, re-resolved the bug
-id and every candidate that ``extract_ticket_refs`` harvested from the commit subject. Those
-candidates are not user-supplied, so unrelated ambiguity was printed as an error; and because
-any non-full/non-short candidate falls through to ``rebar._ids._scan_alias`` (which opens up
-to two JSON files PER ticket directory), the scan cost O(commits x tickets) and appeared to
-hang after the close had already committed.
-
-These tests pin the two properties that fix it — SILENCE and BOUNDED WORK — plus the
-behaviour-preservation guarantee that no id form gained or lost the ability to resolve.
+The scanner resolves every supported identifier form without reporting unrelated candidates.
+Candidate filtering avoids store lookups, so work remains bounded by commit count rather than
+ticket count.
 """
 
 from __future__ import annotations
@@ -87,12 +80,7 @@ def _counting_resolver(monkeypatch) -> list[str]:
 
 @pytest.mark.parametrize("commits", [10, 200])
 def test_distinct_unrelated_subjects_cost_no_store_lookups(tracker, monkeypatch, commits) -> None:
-    """The original hang: N commits with DISTINCT 4-hex subjects meant N alias scans.
-
-    None of these fragments is a prefix of the target, so none of them can resolve to it —
-    the short-circuit proves that without touching the store. Only the loop-invariant bug-id
-    resolution remains, and its cost does not grow with the history length.
-    """
+    """Distinct unrelated subjects require no store lookups beyond target resolution."""
     subjects = [f"{i:04x}: unrelated commit {i}" for i in range(1, commits + 1)]
     monkeypatch.setattr(blame, "_git", lambda *args: _log(*subjects))
     seen = _counting_resolver(monkeypatch)

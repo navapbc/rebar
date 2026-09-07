@@ -1,12 +1,8 @@
-"""Happy-path contract for the Claude-transcript mining adapter (ticket 538c).
+"""Contract tests for deterministic Claude transcript mining.
 
-Tier: unit (fixture JSONL; no network, no LLM — the classifier is deterministic).
-Pins the core: a transcript line carrying an env-failure signature is mined and
-classified into a labeled low-confidence record. Enum / isolation / script held out.
-
-Public surface (from ``rebar.metrics.adapters.claude_transcripts``):
-- ``mine_transcript(path) -> list[dict]`` — records
-  ``{"kind","signature","ts","source":"backfill_classified","confidence":"classified"}``.
+``mine_transcript`` extracts environment-failure records with ``kind``, ``signature``, and
+``ts`` fields. It labels them with ``source="backfill_classified"`` and
+``confidence="classified"``.
 """
 
 from __future__ import annotations

@@ -81,13 +81,7 @@ def test_empty_analysis_is_unavailable_not_a_confident_zero(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Measuring NO file must be Unavailable: a zero means "measured zero" (ticket 6067).
-
-    This test previously asserted the zero-valued ``AnalyzerResult`` — it encoded the defect.
-    ``complexity_summary`` publishes with ``source: structural, confidence: high``, so an
-    empty file map published as zeros tells a reader the repository has no complexity when in
-    fact nothing was measured. Same invariant c5b3 established for scc.
-    """
+    """An empty lizard analysis yields unavailable because zero requires measured files."""
 
     subject = _subject()
     fake_lizard = SimpleNamespace(analyze=lambda _paths: [])
@@ -101,11 +95,7 @@ def test_empty_analysis_is_unavailable_not_a_confident_zero(
 
 
 def test_root_without_any_language_lizard_supports_is_unavailable(tmp_path: Path) -> None:
-    """The reported scenario, through the REAL library rather than a fake (ticket 6067).
-
-    A polyglot client whose sources lizard cannot parse is exactly who epic 839b's adoption of
-    lizard was meant to serve, and exactly who got a fabricated zero.
-    """
+    """An unsupported-language root yields unavailable through the installed lizard library."""
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()

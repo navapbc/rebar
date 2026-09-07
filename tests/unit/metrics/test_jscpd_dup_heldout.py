@@ -115,16 +115,7 @@ def test_failed_jscpd_is_unavailable_not_zero(
 
 
 def _js_source(prefix: str, statements: int) -> str:
-    """Build a JS function large enough to clear jscpd's default token floor.
-
-    The adapter runs ``jscpd`` with its own defaults, and jscpd only reports a
-    clone once the duplicated fragment reaches ``--min-tokens`` (**50** by
-    default, unchanged across @jscpd/core 3.x, 4.x and 5.x). A fixture below
-    that floor yields ``clones: 0`` no matter how perfectly duplicated it is —
-    which is exactly what made this test fail from the day it was written
-    (ticket 4bf4). Each statement below is ~9 tokens, so the default
-    ``statements`` count leaves several times the required margin.
-    """
+    """Build duplicated JavaScript well above jscpd's default 50-token floor."""
 
     body = "".join(
         f"  const {prefix}_{index} = ({prefix}_seed + {index}) * {index + 2};\n"
@@ -137,12 +128,7 @@ def test_zero_scanned_sources_is_unavailable_not_a_confident_zero(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A duplication zero over ZERO scanned files is the same fabricated zero (ticket 6067).
-
-    Real jscpd reports ``statistics.total.sources: 0`` for an empty/unsupported root and a
-    positive count otherwise, so the report DOES distinguish "no duplication" from "nothing
-    measured" — the runner just has to stop discarding the field.
-    """
+    """A jscpd report with zero scanned sources yields unavailable instead of zero."""
 
     shared = _runner_subject()
     adapter = _adapter_subject()

@@ -1,20 +1,9 @@
-"""Held-out validation for task 7504 — authored independently of the implementation.
+"""Deleting unused parameters restores two observable contracts.
 
-Three values accepted by a signature and never read. Deletion was the approved
-remediation for all three, because every "wire it up" alternative invents a capability
-no caller asked for. But two of the three are not merely inert, and those consequences
-are what this file pins:
-
-* `timeout_s` sat as a NAMED keyword-only parameter in front of `**kwargs` on
-  `_call_with_retry` — the wrapper on the path for EVERY Jira write. A caller passing
-  `timeout_s=60` for the wrapped client had it SWALLOWED rather than forwarded. Deleting
-  the parameter is what restores forwarding, so the fix is observable, not cosmetic.
-
-* The two metric seeds held their ids with a `compute` that always returned `None`.
-  Every registrar appends under `if spec.id not in existing`, so a future REAL
-  implementation would find the id taken and be SILENTLY skipped — no error, no warning,
-  metric `Unavailable` forever. `module_size_trend` now has a real implementation; the
-  remaining freed-id guard pins only the still-unclaimed `commit_cadence_trend` id.
+Removing ``timeout_s`` from ``_call_with_retry`` forwards that keyword to Jira clients.
+Removing inert metric seeds leaves registry IDs available for implementations.
+``module_size_trend`` retains its implemented ownership, while ``commit_cadence_trend``
+remains available.
 """
 
 from __future__ import annotations
@@ -38,12 +27,7 @@ def test_run_eval_rejects_dirty() -> None:
 
 
 def test_a_real_spec_can_now_claim_the_remaining_freed_id() -> None:
-    """The latent trap, tested directly: with the seed present this registration was a
-    silent no-op. It must now succeed, and the registered spec must be the REAL one.
-
-    Registration is simulated with the same `if spec.id not in existing` rule the
-    registrars use, against a copy — so the process-wide registry is not mutated.
-    """
+    """An implementation can claim ``commit_cadence_trend`` without mutating the registry."""
     import rebar.metrics  # noqa: F401  (import-time hydration)
     from rebar.metrics.registry import REGISTRY, MetricSpec
 

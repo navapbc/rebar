@@ -1,15 +1,7 @@
-"""Happy-path contract for the going-forward metrics snapshot store (ticket 3275).
+"""Contract tests for the metrics snapshot store.
 
-Tier: unit (real temp dir). Pins the core round-trip: a snapshot written with a
-timestamp is read back when the query range includes that timestamp, and excluded
-when it does not. Malformed-line tolerance and the tracked-path (non-gitignored)
-contract live in the held-out companion.
-
-Public surface (from ``rebar.metrics.snapshot``):
-- ``write_snapshot(record: dict, *, repo_root, ts: str)`` — append one record,
-  tagged with ISO-8601 ``ts``, to ``<repo_root>/.rebar/metrics-snapshots.ndjson``.
-- ``read_snapshots(since: str, until: str, *, repo_root) -> list[dict]`` — records
-  whose timestamp falls within [since, until].
+``write_snapshot`` appends timestamped records to ``.rebar/metrics-snapshots.ndjson``.
+``read_snapshots`` returns records whose timestamps fall within the inclusive requested range.
 """
 
 from __future__ import annotations

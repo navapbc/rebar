@@ -1,13 +1,8 @@
-"""Happy-path contract for the GitHub-Actions coverage/CI-health adapter (ticket 1f77).
+"""Contract tests for the GitHub Actions metrics adapter.
 
-Tier: unit (fixture log text + run-metadata; no network). Pins the core parse:
-coverage % from a pytest-cov TOTAL line, and a red->green recovery interval from
-two runs. Persistence path / isolation are held out.
-
-Public surface (from ``rebar.metrics.adapters.github_actions``):
-- ``parse_coverage(log_text: str) -> float | None``
-- ``red_to_green_recovery(runs: list[dict]) -> int | None`` (seconds/units between a
-  failing run and the next passing run)
+Local fixture logs and run metadata exercise both parsers without network access.
+``parse_coverage`` reads the pytest-cov total percentage. ``red_to_green_recovery`` returns the
+interval from a failed run to the next passing run. Missing evidence returns ``None``.
 """
 
 from __future__ import annotations

@@ -72,14 +72,7 @@ def _write_minimal_report(command: list[str], clones: int = 1, percentage: float
 def test_default_run_resolves_subprocess_run_at_call_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A ``subprocess.run`` patch applied AFTER the module is imported must reach
-    ``run_jscpd``'s default runner (bug 9118, same frozen-default class as 2c4b/5ea3).
-
-    The hostile order: the module is already resident in ``sys.modules``, THEN the
-    test patches ``subprocess.run`` on its defining module. A frozen
-    ``run: Runner = subprocess.run`` default captured the original function at
-    import and silently escapes the patch (invoking the REAL external jscpd).
-    """
+    """Resolve ``subprocess.run`` at call time so later patches control the jscpd runner."""
     subject = _runner_subject()
     calls: list[list[str]] = []
 

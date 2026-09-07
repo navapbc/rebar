@@ -1,13 +1,8 @@
-"""Happy-path contract for the gate-sidecar economics/env-diagnosis readers (ticket 3c07).
+"""Contract tests for gate sidecar metric readers.
 
-Tier: unit (real temp store; sidecar event files crafted directly). Pins the core
-cost derivation that must read llm_calls from REVIEW_RESULT only (COMPLETION_VERDICT
-has no metrics), and the env-diagnosis ERROR→PASS pairing. Gate-match / first-pass /
-zero-accepted contracts are held out.
-
-Public surface (from ``rebar.metrics.sidecar_metrics``):
-- ``cost_per_accepted_change(repo_root, since=None, until=None) -> float | None``
-- ``env_diagnosis_intervals(repo_root, since=None, until=None) -> list`` (each carries a duration)
+``cost_per_accepted_change`` reads LLM calls only from ``REVIEW_RESULT`` records within the
+requested range and returns ``None`` without accepted data. ``env_diagnosis_intervals`` pairs
+environment errors with later passes and reports durations.
 """
 
 from __future__ import annotations
