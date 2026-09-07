@@ -218,12 +218,14 @@ def _check_work_landed(
     referencing = _referencing_commits(
         accepted_ids, tracker, code_root, **view_kwargs, **metrics_kw
     )
+    attached = _attached_commit_shas(accepted_ids, tracker, **view_kwargs)
+    landed = [*attached, *referencing]
     own_impact = (
         ticket_view.field_value(ticket_id, "file_impact")
         if ticket_view is not None
         else field_reads.file_impact(ticket_id, tracker)
     )
-    if own_impact and not referencing:
+    if own_impact and not landed:
         raise CommandError(
             f"Error: cannot close {ticket_id}: it records file_impact (a code change) but no "
             f"commit references it (nor any of its descendants). Add a "
@@ -234,7 +236,7 @@ def _check_work_landed(
         )
     _check_file_impact_vs_diff(
         accepted_ids,
-        referencing,
+        landed,
         tracker,
         code_root,
         **view_kwargs,
@@ -324,12 +326,17 @@ def _check_file_impact_vs_diff(
             metrics["diff_validation_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
         return  # nothing declared anywhere in scope — out of scope for this check
 
-    for sha in _attached_commit_shas(accepted_ids, tracker, **view_kwargs) + list(referencing):
+    attached = _attached_commit_shas(accepted_ids, tracker, **view_kwargs)
+    checked: set[str] = set()
+    for sha in attached + list(referencing):
+        if sha in checked:
+            continue
+        checked.add(sha)
         if commit_impact.is_merge_commit(sha, code_root):
             continue  # a merge authors nothing of its own; its parents are scanned instead
         paths = commit_impact.changed_paths(sha, code_root)
         if paths is None:
-            if sha in referencing:
+            if sha not in attached:
                 raise CommandError(
                     f"Error: cannot close: commit {sha} references this ticket but could not "
                     "be read from this repository, so its changed paths cannot be verified "

@@ -145,6 +145,27 @@ def test_work_landed_still_discovers_commits_for_descendant_impact(monkeypatch):
     assert checked == [(accepted, ["child-sha"], "/tracker", "/code")]
 
 
+def test_work_landed_credits_valid_attached_commit_for_presence(monkeypatch):
+    """Ticket 5623-98ad: attached commits satisfy the landing-proof presence check."""
+    from rebar._engine_support import field_reads
+
+    checked: list[list[str]] = []
+
+    monkeypatch.setattr(close_precheck, "_union_file_impact", lambda *a, **k: ["src/a.py"])
+    monkeypatch.setattr(field_reads, "file_impact", lambda *a, **k: ["src/a.py"])
+    monkeypatch.setattr(close_precheck, "_referencing_commits", lambda *a, **k: [])
+    monkeypatch.setattr(close_precheck, "_attached_commit_shas", lambda *a, **k: ["attached-sha"])
+    monkeypatch.setattr(
+        close_precheck,
+        "_check_file_impact_vs_diff",
+        lambda ids, commits, tracker, root: checked.append(list(commits)),
+    )
+
+    close_precheck._check_work_landed("ticket", "ticket", {"ticket"}, "/tracker", "/code")
+
+    assert checked == [["attached-sha"]]
+
+
 @pytest.fixture
 def det(monkeypatch):
     """Drive `_check_file_impact_vs_diff` with injected impact/commit data."""
