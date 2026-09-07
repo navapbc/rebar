@@ -454,7 +454,10 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
 - **Push for review:** `git push gerrit HEAD:refs/for/main` (the magic ref creates a Gerrit
   change; it does not touch `main`). Tag the change with your session hashtag
   (`rebar-session-<session-id>`) so ownership is visible under the shared Gerrit
-  bot account. Iterate on findings with `git commit --amend --no-edit`
+  bot account. Shared credentials are a permanent operating constraint and
+  per-session Gerrit identities are deliberately rejected: duplicating the bot
+  account's access per session is higher-risk than visible native metadata.
+  Iterate on findings with `git commit --amend --no-edit`
   (keeps the `Change-Id`) + re-push. To REWRITE the message, use
   **`make amend-msg FILE=<path>`**, never `git commit --amend -m/-F`: those REPLACE the whole
   message and so DROP the `Change-Id`, the `commit-msg` hook then stamps a FRESH one, and the
@@ -486,7 +489,9 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   equivalent `POST /a/changes/<n>/revisions/<full-sha>/submit`), not change-scoped
   `/submit`: the SHA is the patch set whose live votes you inspected, and Gerrit
   returns 409 instead of submitting if another session uploaded a newer revision.
-  `main` is
+  Do not re-push a green change unnecessarily: a new patch set marks prior
+  `LLM-Review` and `Verified` votes Outdated, resets the live gates, and
+  re-queues the change, so it is destructive rather than neutral. `main` is
   Rebase-If-Necessary: Gerrit rebases + submits server-side, so you do **not** pre-rebase
   except on a textual conflict it cannot resolve. Do **not** close a ticket until its change
   is `Verified +1` — a passing completion-verifier is **not** a substitute for green CI.
