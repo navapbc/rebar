@@ -21,6 +21,7 @@ Everything is local and mocked at the model boundary: ZERO real Bedrock / Anthro
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -54,6 +55,14 @@ def _throttle_429() -> ModelHTTPError:
     )
 
 
+def _overloaded_5xx() -> ModelHTTPError:
+    return ModelHTTPError(
+        status_code=503,
+        model_name=_PRIMARY,
+        body={"error": {"type": "overloaded_error", "message": "overloaded"}},
+    )
+
+
 def _keyless_auth_error() -> TypeError:
     """The exact failure a keyless direct-Anthropic fallback raises at auth resolution."""
     return TypeError("Could not resolve authentication method")
@@ -77,14 +86,14 @@ def _raising_model(exc: BaseException) -> FunctionModel:
     return FunctionModel(_fn)
 
 
-def _throttle_then_keyless_chain():
+def _transient_then_keyless_chain(primary_exc: BaseException):
     """The real production chain (``build_fallback_model`` → real ``should_fall_back``) whose
-    primary throttles (429) and whose sole fallback is keyless (auth ``TypeError``)."""
+    primary is transient and whose sole fallback is keyless (auth ``TypeError``)."""
     targets = (FallbackTarget(model=_FALLBACK_MODEL, provider=_FALLBACK_PROVIDER),)
     fallback_id = _resolve_target(_FALLBACK_MODEL, _FALLBACK_PROVIDER)
     session = _FakeSession(
         {
-            _PRIMARY: _raising_model(_throttle_429()),
+            _PRIMARY: _raising_model(primary_exc),
             fallback_id: _raising_model(_keyless_auth_error()),
         }
     )
@@ -92,20 +101,31 @@ def _throttle_then_keyless_chain():
     return chain, candidates
 
 
-def test_a_bedrock_throttle_does_not_mask_as_indeterminate(monkeypatch):
-    """END-TO-END through the real chain: a retryable primary throttle behind a keyless
-    fallback surfaces as ``exit 11`` retryable, NOT a hard INDETERMINATE."""
+@pytest.mark.parametrize(
+    "primary_exc",
+    [
+        pytest.param(_throttle_429(), id="throttle-429"),
+        pytest.param(httpx.ReadTimeout("read timed out"), id="timeout"),
+        pytest.param(_overloaded_5xx(), id="5xx"),
+    ],
+)
+def test_provider_transients_do_not_mask_as_indeterminate(monkeypatch, primary_exc):
+    """END-TO-END through the real chain: retryable primary transients behind a keyless
+    fallback surface as ``exit 11`` retryable, NOT a hard INDETERMINATE."""
     monkeypatch.setattr(pydantic_ai_models, "ALLOW_MODEL_REQUESTS", True)
     ensure_current_event_loop()  # the loop the runner pre-installs, so run_sync warns nothing
-    chain, candidates = _throttle_then_keyless_chain()
+    chain, candidates = _transient_then_keyless_chain(primary_exc)
     assert candidates == [_PRIMARY, f"{_FALLBACK_PROVIDER}:{_FALLBACK_MODEL}"]
 
     with pytest.raises(Exception) as excinfo:
         Agent(chain).run_sync("go")
 
     outcome = classify_llm_failure(excinfo.value)
-    assert outcome.retryable is True, "a retryable throttle was masked as non-retryable"
-    assert outcome.resolution_class is ResolutionClass.WAIT_AND_RETRY
+    assert outcome.retryable is True, "a retryable transient was masked as non-retryable"
+    assert outcome.resolution_class in (
+        ResolutionClass.WAIT_AND_RETRY,
+        ResolutionClass.RETRY_NOW,
+    )
     assert outcome.resolution_class is not ResolutionClass.NEEDS_INVESTIGATION
 
 
@@ -149,3 +169,4 @@ def test_an_all_non_retryable_group_stays_change_provider_or_model():
     outcome = classify_llm_failure(group)
     assert outcome.resolution_class is ResolutionClass.CHANGE_PROVIDER_OR_MODEL
     assert outcome.retryable is False
+    assert outcome.resolution_class is not ResolutionClass.NEEDS_INVESTIGATION
