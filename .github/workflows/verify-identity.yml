@@ -1,29 +1,13 @@
 name: Verify Authorship Identity
 
-# Authenticated-authorship merge-gate (epic gnu-whale-ichor, AC7). Re-verifies every
-# in-scope mutating event's signature against its author identity's commit-ancestry-scoped
-# keyring, so a forged / unsigned / wrong-key event cannot land on `main`.
-#
-# Enforcement follows PROJECT CONFIG, not a CI-forced flag: the gate enforces (non-zero
-# exit on any unverified in-scope event) only when `identity.require_authenticated` is on
-# in rebar.toml, and is advisory (exit 0, report-only) otherwise. The grandfather boundary
-# is `identity.enforce_since` in rebar.toml — events introduced up to that ref are
-# reported but never fail the gate. This lets the gate go live report-only today (nothing
-# is signed yet) and become blocking the moment write-signing is rolled out and the config
-# flag is flipped, with all pre-rollout events already grandfathered.
+# Verify each mutating event against its author's ancestry-scoped keyring. Project config—not
+# CI overrides—selects report-only or fail-closed authenticated authorship and its
+# `identity.enforce_since` grandfather boundary, so rollout-era events remain advisory.
 
-# CI-trigger audit (op-cert lane, story 4214): every on: trigger is classified so no
-# merge path silently skips the gate.
-#   push              — INCLUDED (branches-ignore feature/** and main; NO_FILTER — no paths filter)
-#   pull_request      — INCLUDED (NO_FILTER: no paths filter, so every PR runs the gate)
-#   workflow_dispatch — INCLUDED (manual; the on-demand "is main healthy?" button)
-#   schedule          — INCLUDED (NO_FILTER: the 6-hourly branch-health tick that replaced the
-#                       per-push `main` run, ticket 03ef-6fb5-158b-4abd)
-#
-# `main` left the push filter because branch CI on the mirror now reports branch HEALTH on a
-# schedule rather than a per-commit verdict (cancelled superseded runs rendered a healthy
-# `main` as red X's). This gate still runs against `main` — four times a day and on demand —
-# and the pre-merge Verified gate is untouched.
+# Trigger audit: push is INCLUDED/NO_FILTER except its branch exclusions; pull_request is
+# INCLUDED/NO_FILTER; workflow_dispatch is INCLUDED; schedule is INCLUDED/NO_FILTER.
+# Push excludes `feature/**` and `main`: Gerrit retains exact-patchset pre-merge verification,
+# while scheduled/manual runs replace misleading same-ref-cancelled main pushes.
 on:
   push:
     # `tickets` is rebar's event log: every ticket write auto-pushes it, so a trigger here
@@ -44,13 +28,9 @@ jobs:
     name: verify-identity (authenticated-authorship gate)
     runs-on: ubuntu-latest
     env:
-      # TEMPORARY BRIDGE — restore ticket: fluorspar-comparable-zeren (0894-b9b8-6590-4904).
-      # Raised from 102400 (100 MiB) to 563200 (550 MiB) while epic 536b's causal-stability
-      # history reclaim + structural fixes (W1 batch write lane, W2 root-tree shard) land. The
-      # ~481 MiB blobless tickets pack cannot be brought under 100 MiB by safe compaction alone
-      # (even an N=30d horizon lands ~365-380 MiB — see 536b), so this bridge keeps the health
-      # lane green in the interim. Restore to 102400 once the reclaim lands and the blobless
-      # checkout pack is verified < 100 MiB.
+      # Temporary 550 MiB bridge for the ~481 MiB blobless tickets pack while epic 536b lands
+      # history reclamation and structural fixes. Safe compaction alone cannot meet 100 MiB.
+      # Restore 102400 after the pack verifies below that limit (0894-b9b8-6590-4904).
       REBAR_CHECKOUT_PACK_LIMIT_KIB: 563200
     steps:
       - uses: actions/checkout@v7
@@ -80,12 +60,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
       - name: Mount tickets branch as a worktree
-        # The store lives on the `tickets` orphan branch at the repo root, materialized
-        # as the gitignored `.tickets-tracker` worktree. A plain code checkout does not
-        # contain it, so verify-identity would exit 2 ("ticket store not found").
-        # Mount it on the ACTUAL `tickets` branch (not detached) so tracker.branch
-        # matches. Full fetch (no --depth) so merge-base / commit-ancestry scoping works
-        # against the whole tickets history. Mirrors reconcile-bridge.yml.
+        # Materialize the orphan `tickets` store as its actual branch in `.tickets-tracker`;
+        # the code checkout lacks it. Fetch full history for merge-base and ancestry-scoped key
+        # verification, matching reconcile-bridge.yml.
         run: |
           set -euo pipefail
           git fetch origin '+tickets:refs/remotes/origin/tickets'
