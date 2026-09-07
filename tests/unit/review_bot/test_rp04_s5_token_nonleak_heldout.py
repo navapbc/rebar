@@ -1,11 +1,7 @@
-"""HELD-OUT edge oracle for RP-04 S5 (5851) — AC2 MCP token non-leakage.
+"""Operation snapshots exclude inbound authentication material.
 
-The implementer does NOT see this file. It asserts the OBSERVABLE contract that inbound
-MCP bearer/OAuth material can NEVER enter a composed non-secret ``OperationSnapshot``:
-the validating constructor rejects secret-typed / non-JSON leaves, and a snapshot composed
-for an operation carries no ambient bearer token in its canonical bytes.
-
-Run: copy into ``tests/unit/review_bot/`` as ``test_rp04_s5_token_nonleak_heldout.py``.
+Inbound bearer and OAuth material cannot enter ``OperationSnapshot``. The constructor rejects
+secret-typed and non-JSON leaves. Canonical snapshot bytes contain no ambient token.
 """
 
 from __future__ import annotations
