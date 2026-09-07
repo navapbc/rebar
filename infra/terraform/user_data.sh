@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# user_data.sh — cloud-init for the rebar Gerrit host (AL2023, arm64/Graviton)
+# user_data.sh configures the arm64 AL2023 Gerrit host through cloud-init.
 # ===========================================================================
-# Rendered by Terraform's templatefile(). The ONLY Terraform interpolation in
-# this file is the data_volume_id, written with a SINGLE dollar + braces. Every
-# LITERAL bash brace-expansion is escaped with a DOUBLE dollar + braces, so
-# templatefile passes a single-dollar brace form through to the shell.
-# IMPORTANT: the double-dollar escape only applies before a brace, so brace-LESS
-# bash refs must be plain $VAR (a double-dollar $VAR would render literally and
-# break). Likewise do NOT double-dollar the data_volume_id — that would emit the
-# literal text and break NVMe device resolution.
+# Terraform renders this file with templatefile before cloud-init executes it. The template
+# arguments declare `${data_volume_id}`, `${gate_scratch_volume_id}`, and
+# `${gate_scratch_mount}` as Terraform expressions. Bash brace expansions use `$${...}` in
+# this source so Terraform emits a single-dollar brace form for Bash. Bash references without
+# braces remain `$VAR` because templatefile does not parse that form. Writing `$$VAR` would
+# make Bash concatenate its process ID with `VAR` instead of expanding the variable. Do not
+# escape the declared Terraform arguments because the script needs their substituted values
+# for volume discovery and mounting.
 # ===========================================================================
 set -euo pipefail
 
@@ -253,17 +253,17 @@ umask 077
 : > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
-# param name -> env var key. (Brace expansions below are escaped as $${...}
-# because they survive templatefile to run in bash.)
-# PARAMS is consumed below as $${!PARAMS[@]} / $${PARAMS[$name]}; templatefile turns
-# each $$ into a literal $, so bash receives a real brace expansion.
-# Do NOT spell the post-render form out in prose here. templatefile() interpolates the
-# WHOLE file -- comments included, since # means nothing to it -- so an unescaped brace
-# expansion in a COMMENT is parsed as HCL and breaks every terraform operation in the
-# repo, not just this file (bug dd30-f10d-69f3-4c36; -target does not help, because
-# terraform evaluates the whole configuration first). Only $${...} is safe in this file;
-# the sole exception is ${data_volume_id}, which main.tf actually declares.
-# ShellCheck reads the escaped pre-render form and so cannot see the use.
+# Map SSM parameter names to environment keys. Terraform's templatefile function parses the
+# entire template before Bash runs, including comment text. A literal Bash brace expansion
+# must therefore use `$${...}` in this source. Terraform converts `$$` to `$` in the rendered
+# script. The loop uses `$${!PARAMS[@]}` to enumerate keys and `$${PARAMS[$name]}` to read each
+# value. Terraform expressions stay unescaped only at declared substitution sites. The
+# template arguments in `main.tf` declare `${data_volume_id}`, `${gate_scratch_volume_id}`,
+# and `${gate_scratch_mount}` for those sites. An unescaped Bash expression in prose would be
+# parsed as HCL and would prevent Terraform from evaluating the configuration. ShellCheck
+# reads the source before Terraform renders it, so it cannot infer that the escaped array
+# expressions become Bash expansions. The adjacent directives suppress only those
+# template-related false positives.
 # shellcheck disable=SC2034
 declare -A PARAMS=(
   ["/rebar/prod/gerrit-admin-password"]="GERRIT_ADMIN_PASSWORD"

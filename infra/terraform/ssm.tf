@@ -1,20 +1,12 @@
 # ---------------------------------------------------------------------------
 # SSM SecureString parameters — secret slots under /rebar/prod/*
 # ---------------------------------------------------------------------------
-# These are created as PLACEHOLDERS with the write-only value "CHANGEME". An operator MUST
-# populate the real values (e.g. via `aws ssm put-parameter --overwrite`)
-# BEFORE the S2 apply that brings up the instance. `user_data.sh` FAILS FAST if
-# any fetched value is still the "CHANGEME" sentinel — cloud-init marks the
-# instance failed rather than writing a broken config.
+# Required `CHANGEME` slots must be seeded before the S2 instance apply. user_data.sh makes
+# those placeholders boot-fatal. Optional MCP/Jira slots below degrade without aborting boot.
 #
-# These secret slots use terraform WRITE-ONLY arguments — `value_wo` + `value_wo_version`
-# (ADR 0105). value_wo is, by provider design, NEVER persisted to terraform state (the old
-# `value = "CHANGEME"` + `lifecycle { ignore_changes = [value] }` contract suppressed the
-# diff but NOT the refresh, so the provider read the live cleartext into state on every
-# plan/import — bug eb67-b96c-dcf0-4f86). The provider re-sends value_wo only when
-# value_wo_version changes, so an operator-seeded value is never reverted to "CHANGEME" on
-# the next apply. Terraform owns the parameter's existence + type, not its value. Seed and
-# rotate per infra/runbooks/ssm-secret-write-only.md.
+# `value_wo` keeps secrets out of Terraform state. The provider sends it only on create or a
+# `value_wo_version` bump. Terraform owns each slot's existence and type, not its value.
+# Seed and rotate per infra/runbooks/ssm-secret-write-only.md (ADR 0105).
 # ---------------------------------------------------------------------------
 
 locals {
@@ -32,62 +24,33 @@ locals {
     # client-secret into secure.config. See infra/runbooks/gerrit-auth-hardening.md.
     "/rebar/prod/github-oauth-client-id",
     "/rebar/prod/github-oauth-client-secret",
-    # CI Verified-vote gate (epic 1fa8 / story S4). Two secret slots for the
-    # gerrit-to-platform → GitHub Actions → Gerrit `Verified` vote path (ADR-0022,
-    # ADR-0023). NEITHER is consumed via the container .env (they are NOT in
-    # fetch-secrets.sh / user_data.sh's curated map):
-    #   - g2p-github-pat: the fine-grained, single-repo GitHub PAT that g2p uses to
-    #     workflow_dispatch gerrit-verify.yaml. MATERIALISED at boot into
-    #     gerrit_to_platform.ini (0600) by infra/gerrit/materialize-g2p-config.sh
-    #     (fail-closed) — like the replication deploy key, never via env/ps.
-    #   - ci-gerrit-ssh-key: the CI Gerrit service account's SSH PRIVATE key. The box
-    #     never reads it; an operator copies its value into the GitHub Actions secret
-    #     GERRIT_SSH_PRIVKEY so the workflow can SSH back into Gerrit :29418 to cast
-    #     Verified. See infra/runbooks/g2p-ci-credentials.md for the operator steps.
+    # Verified-vote credentials bypass the container environment under ADRs 0022 and 0023. The g2p
+    # PAT is materialized fail-closed into 0600 gerrit_to_platform.ini for workflow dispatch.
+    # The box never reads the CI SSH key. The operator copies it to GitHub's
+    # GERRIT_SSH_PRIVKEY so CI can vote over Gerrit SSH. See infra/runbooks/g2p-ci-credentials.md.
     "/rebar/prod/g2p-github-pat",
     "/rebar/prod/ci-gerrit-ssh-key",
-    # Code-review data capture (epic foliaged-merry-collie / story limestone-unethical-zebrafinch).
-    # A fine-grained GitHub PAT with contents:write on the tickets repo ONLY — the reviewbot uses
-    # it (via a URL-scoped git credential helper materialized from the container .env, see
-    # fetch-secrets.sh's reviewbot-tickets-pat -> REVIEWBOT_TICKETS_PAT mapping) to push the
-    # code_review artifact ticket events to origin/tickets. Operator populates this SecureString.
+    # A tickets-only contents:write PAT lets reviewbot push code_review events through its
+    # URL-scoped credential helper (REVIEWBOT_TICKETS_PAT). The operator supplies it.
     "/rebar/prod/reviewbot-tickets-pat",
-    # Authenticated-authorship signing key (epic cummy-monkeyish-dassie / story 297d, task bffe).
-    # The Rebar Bot's ed25519 PRIVATE key. Materialized at boot to a 0600 file for the AWS
-    # review-bot + auto-lander containers (identity.signing_key), following the ci-gerrit-ssh-key /
-    # g2p-github-pat materialize-to-file precedent (NOT the container .env, which holds only
-    # single-line tokens). The same private key is also stored as the GitHub Actions secret
-    # REBAR_BOT_SIGNING_KEY for the reconcile-bridge + canary workflows. Operator populates the value.
+    # The operator-supplied Rebar Bot Ed25519 key becomes a 0600 identity.signing_key file for
+    # review-bot/auto-lander, not an environment value. GitHub stores the same key as
+    # REBAR_BOT_SIGNING_KEY for reconcile-bridge and canary workflows.
     "/rebar/prod/rebar-bot-signing-key",
-    # Per-client MCP bearer PATs (epic jira-reb-3527 "Enable MCP on AWS" / ADR 0104 §1). One
-    # SecureString per client (copilot/codex/claude): the bearer token each client presents to
-    # the nginx `/mcp/` TLS edge, which the `static` verifier authenticates. OPTIONAL at the
-    # container boundary — fetch-secrets.sh reads them via get_param_optional and OMITS a blank
-    # slot from the materialized tokens file (so the verifier never fails on an empty token_env).
-    # Materialized on-box each boot (the .env is rsync-EXCLUDED, gotcha f600): the raw value lands
-    # in the 0600 .env as MCP_CLIENT_PAT_*, and mcp-static-tokens.json references it via token_env.
-    # Rotation is operator-driven (re-materialize + restart rebar-mcp; a value-only rotation does
-    # NOT advance main so autodeploy no-ops) — see infra/runbooks/mcp-client-pats.md.
+    # Optional per-client PATs authenticate the nginx `/mcp/` edge through the static verifier.
+    # Blank slots are omitted. Nonblank values become MCP_CLIENT_PAT_* entries in a 0600,
+    # rsync-excluded environment file referenced by mcp-static-tokens.json. Rotation requires
+    # re-materialization and a rebar-mcp restart. See infra/runbooks/mcp-client-pats.md.
     "/rebar/prod/mcp-client-pat-copilot",
     "/rebar/prod/mcp-client-pat-codex",
     "/rebar/prod/mcp-client-pat-claude",
-    # The MCP server's ticket-store PAT. A fine-grained GitHub PAT with contents:write on the
-    # tickets repo ONLY — the mcp container's entrypoint uses it (via a URL-scoped git credential
-    # helper materialized from the container .env, see fetch-secrets.sh's mcp-tickets-pat ->
-    # MCP_TICKETS_PAT mapping) to clone the `tickets` branch into REBAR_TRACKER_DIR and push the
-    # ticket events its tools write. OPTIONAL at the container boundary: fetch-secrets.sh reads it
-    # via get_param_optional and a blank slot only DEFERS the clone (the container still boots).
-    # Operator populates this SecureString.
+    # The optional tickets-only contents:write PAT lets MCP's URL-scoped helper
+    # (MCP_TICKETS_PAT) clone `tickets` into REBAR_TRACKER_DIR and push events. A blank slot
+    # defers the clone without failing the container. The operator supplies the value.
     "/rebar/prod/mcp-tickets-pat",
-    # The Jira API token the bridge tools authenticate with (bug colourless-hasteless-lamb).
-    # The ONLY Jira leaf that is a secret: GitHub Actions models it as `secrets.JIRA_API_TOKEN`
-    # while JIRA_URL/JIRA_USER/JIRA_PROJECT are non-secret `vars.*`
-    # (.github/workflows/reconcile-bridge.yml), and rebar's own _child_env.py secret registry
-    # lists JIRA_API_TOKEN as the sole jira child-env secret. That split is preserved here
-    # rather than flattened: making the other three SecureStrings would cost rotation and
-    # debuggability for no security gain. OPTIONAL at the container boundary --
-    # fetch-secrets.sh reads it via get_param_optional, so a blank slot degrades softly (the
-    # bridge tools report unavailable) instead of aborting the boot for every container.
+    # JIRA_API_TOKEN is the bridge's only secret. URL, user, and project remain non-secret
+    # workflow variables. It is optional at the container boundary. A blank token makes bridge
+    # tools unavailable without aborting boot.
     "/rebar/prod/jira-api-token",
   ]
 }
@@ -97,10 +60,8 @@ resource "aws_ssm_parameter" "rebar_secrets" {
 
   name = each.value
   type = "SecureString"
-  # Write-only (ADR 0105): value_wo is NEVER persisted to terraform state. The provider
-  # sends it on create and whenever value_wo_version changes, storing only the version
-  # integer. An operator seeds the real value out-of-band; bump value_wo_version to push a
-  # terraform-driven rotation. See infra/runbooks/ssm-secret-write-only.md.
+  # State stores only the version for write-only values. The operator seeds values out of band.
+  # Bump value_wo_version for a Terraform-driven rotation under ADR 0105. See the runbook.
   value_wo         = "CHANGEME"
   value_wo_version = 1
 
@@ -112,27 +73,14 @@ resource "aws_ssm_parameter" "rebar_secrets" {
 # ---------------------------------------------------------------------------
 # SSM String parameters — NON-SECRET config slots under /rebar/prod/*
 # ---------------------------------------------------------------------------
-# Plaintext `String`, deliberately NOT SecureString. These mirror the GitHub
-# Actions `vars.*` half of the Jira configuration; only the API token above is a
-# `secrets.*`. Keeping the split means an operator can read and correct a wrong
-# Jira URL or account without decrypting anything, and rotating the token does
-# not disturb them.
+# Plaintext Jira URL, user, and project mirror workflow variables. Only the API token above is
+# secret, so operators can inspect these values independently of token rotation.
 #
-# jira-url / jira-user were SEEDED OUT OF BAND by an operator (AWS CLI, not
-# terraform), so they carry both an `import` block (below) to adopt the existing
-# parameter instead of colliding with `ParameterAlreadyExists`, and an
-# `ignore_changes = [value]` guard — terraform owns their existence and type,
-# never their value. (These are non-secret `String` params, so they keep the
-# ignore_changes contract; the SecureString SECRET slots above instead use
-# write-only `value_wo` per ADR 0105, which never reaches state at all.)
+# Operator-seeded jira-url/jira-user use imports plus `ignore_changes = [value]`. Terraform
+# owns their existence and type, not their values. SecureStrings instead use write-only values.
 #
-# jira-project is the exception: it is a public project key, not an operator
-# secret, so it is FULLY terraform-managed (a real value, no `ignore_changes`,
-# no import) following the `opcert_origin_guard` precedent. It exists because
-# `access_check._resolve_probe_scope` fails closed with `missing_project`
-# without it, and `rebar.config.resolve_jira_probe_scope` reads the ENVIRONMENT
-# ONLY — the committed `rebar.toml` `[jira] project` never reaches the probe.
-# Its value is asserted equal to `rebar.toml`'s by test so the two cannot drift.
+# jira-project is fully Terraform-managed. The access probe reads it only from the environment
+# and fails closed when missing. A test pins it to rebar.toml's project key.
 # ---------------------------------------------------------------------------
 
 locals {
@@ -172,11 +120,8 @@ resource "aws_ssm_parameter" "jira_project" {
 }
 
 # --- Adopt the out-of-band-seeded Jira parameters into state ----------------
-# An operator created these three with `aws ssm put-parameter` before terraform
-# ever declared them, so a plain apply would fail `ParameterAlreadyExists`.
-# These import blocks adopt them instead. They are idempotent (terraform skips an
-# import for a resource already in state) and can be deleted after the adopting
-# apply. NO credential value appears here — only the parameter names.
+# These idempotent imports adopt three operator-created parameters instead of failing with
+# `ParameterAlreadyExists`. They contain names only and may be removed after adoption.
 import {
   to = aws_ssm_parameter.rebar_plain_seeded["/rebar/prod/jira-url"]
   id = "/rebar/prod/jira-url"
@@ -193,13 +138,8 @@ import {
 }
 
 # --- Adopt the out-of-band-seeded per-client MCP bearer PATs into state -------
-# The three `mcp-client-pat-*` SecureString slots were seeded in AWS by an
-# operator (each exists at version 1) before terraform declared them, so a plain
-# apply fails `ParameterAlreadyExists` on all three. These import blocks adopt
-# the live parameters instead. Under the write-only `value_wo` contract (ADR
-# 0105) the provider stores only the version integer, never the secret value, so
-# adoption records existence + type without reading the live token into state.
-# NO credential value appears here — only the parameter names.
+# These imports adopt the three operator-seeded MCP PATs without reading their values into
+# state. Write-only adoption records only existence, type, and version under ADR 0105.
 import {
   to = aws_ssm_parameter.rebar_secrets["/rebar/prod/mcp-client-pat-copilot"]
   id = "/rebar/prod/mcp-client-pat-copilot"
