@@ -21,12 +21,16 @@ single-quoted `envsubst` argument is load-bearing — it stops `envsubst` from e
 `$host`, `$remote_addr`, `$proxy_add_x_forwarded_for` and friends.
 
 ```sh
-cd /opt/rebar            # the checkout autodeploy maintains
-git fetch origin && git checkout origin/main -- infra/nginx/rebar.conf.template
+# /opt/rebar is the rsync copy autodeploy runs from, not a git checkout. Read the
+# template from autodeploy's mirror clone instead; do not fetch or checkout under
+# /opt/rebar.
+git -C /var/lib/rebar/mirror fetch origin
+git -C /var/lib/rebar/mirror show origin/main:infra/nginx/rebar.conf.template \
+  > /var/lib/rebar/rebar.conf.template
 
 export REVIEW_BOT_PORT   # the port the review-bot container publishes on loopback
 envsubst '${REVIEW_BOT_PORT}' \
-  < infra/nginx/rebar.conf.template \
+  < /var/lib/rebar/rebar.conf.template \
   > /etc/nginx/conf.d/rebar.conf
 
 nginx -t                 # MUST pass before you reload
@@ -43,12 +47,21 @@ Do not trust the reload's exit code alone. Assert on the running config:
 ```sh
 grep -c proxy_read_timeout /etc/nginx/conf.d/rebar.conf     # expect 4 (3x /mcp @3600s, 1x Gerrit @600s)
 grep -n proxy_read_timeout /etc/nginx/conf.d/rebar.conf     # confirm the values, not just the count
+grep -c '127.0.0.1:[0-9][0-9]*/' /etc/nginx/conf.d/rebar.conf   # expect 2 (proxy_pass + proxy_redirect)
+if grep -n '\${REVIEW_BOT_PORT}' /etc/nginx/conf.d/rebar.conf; then echo "unsubstituted braced REVIEW_BOT_PORT"; exit 1; else echo "braced REVIEW_BOT_PORT fully substituted"; fi
 systemctl is-active nginx                                   # expect: active
 curl -sS -o /dev/null -w '%{http_code}\n' https://rebar.solutions.navateam.com/   # expect 200
 ```
 
 A count of **3** means the render did not happen — the Gerrit `location /` is still on nginx's
 compiled-in 60-second read default and bug `5bba-45dd-3bfc-42f1` is still live.
+The loopback count proves the review-bot port was positively rendered into both functional
+upstream references without depending on the shell variable still being set in this verification
+block. A remaining **braced** `${REVIEW_BOT_PORT}` means the render did not use the single-quoted
+`envsubst '${REVIEW_BOT_PORT}'` variable list above. A bare `REVIEW_BOT_PORT` in a comment is not
+a render failure: it has no `${...}` wrapper, so `envsubst` correctly leaves it alone. On a
+template that includes only that comment, an unsubstituted count of **1** is normal; investigate
+only a braced hit or additional functional references.
 
 End-to-end check for that bug specifically — a CI-shaped change-ref fetch should no longer 504:
 
