@@ -28,6 +28,8 @@ pytestmark = pytest.mark.unit
 _REPO = Path(__file__).resolve().parents[2]
 _COMPOSE = _REPO / "infra" / "compose" / "docker-compose.yml"
 _DOCKERFILE = _REPO / "infra" / "compose" / "Dockerfile.mcp"
+_REVIEWBOT_DOCKERFILE = _REPO / "infra" / "compose" / "Dockerfile.reviewbot"
+_OPCERT_DOCKERFILE = _REPO / "infra" / "compose" / "Dockerfile.opcert"
 _NGINX = _REPO / "infra" / "nginx" / "rebar.conf.template"
 _SEED = _REPO / "infra" / "nginx" / "mcp-upstream.conf"
 _MATERIALIZE = _REPO / "infra" / "scripts" / "materialize-mcp-upstream.sh"
@@ -769,21 +771,28 @@ def _configured_llm_providers() -> set[str]:
     return providers
 
 
-def _dockerfile_mcp_installed_extras() -> set[str]:
-    """The extras Dockerfile.mcp's locked `uv sync` actually installs."""
+def _dockerfile_installed_extras(dockerfile: Path) -> set[str]:
+    """The extras a Dockerfile's locked `uv sync` actually installs."""
     line = next(
         (
             ln
-            for ln in _DOCKERFILE.read_text(encoding="utf-8").splitlines()
+            for ln in dockerfile.read_text(encoding="utf-8").splitlines()
             if "uv sync" in ln and not ln.lstrip().startswith("#")
         ),
         None,
     )
-    assert line is not None, "Dockerfile.mcp must install its dependencies with `uv sync`"
+    assert line is not None, f"{dockerfile.name} must install its dependencies with `uv sync`"
     return set(re.findall(r"--extra[= ]([A-Za-z0-9_-]+)", line))
 
 
-def test_dockerfile_mcp_installs_an_extra_for_every_configured_llm_provider() -> None:
+@pytest.mark.parametrize(
+    "dockerfile",
+    [_DOCKERFILE, _REVIEWBOT_DOCKERFILE, _OPCERT_DOCKERFILE],
+    ids=lambda path: path.name,
+)
+def test_gate_running_dockerfiles_install_an_extra_for_every_configured_llm_provider(
+    dockerfile: Path,
+) -> None:
     """The image must be able to SERVE every provider the config can SELECT.
 
     This is the defect behind bug d43e-c24f-dd39-44e9: `rebar.toml` pins
@@ -799,7 +808,7 @@ def test_dockerfile_mcp_installs_an_extra_for_every_configured_llm_provider() ->
     than just this instance of it.
     """
     configured = _configured_llm_providers()
-    installed = _dockerfile_mcp_installed_extras()
+    installed = _dockerfile_installed_extras(dockerfile)
 
     unserviceable = sorted(p for p in configured if p not in _EXTRA_SUPPLYING_PROVIDER)
     assert not unserviceable, (
@@ -811,7 +820,7 @@ def test_dockerfile_mcp_installs_an_extra_for_every_configured_llm_provider() ->
         {_EXTRA_SUPPLYING_PROVIDER[p] for p in configured} - installed,
     )
     assert not missing, (
-        f"Dockerfile.mcp installs extras {sorted(installed)}, which cannot serve every "
+        f"{dockerfile.name} installs extras {sorted(installed)}, which cannot serve every "
         f"provider configured in rebar.toml ({sorted(configured)}): missing extra(s) "
         f"{missing}. Add them to the `uv sync` line, or the deployed MCP server degrades to "
         "the deterministic floor and mints no op-cert."
@@ -1251,7 +1260,6 @@ def test_compose_sibling_services_trust_the_edge_forwarded_proto(service: str) -
 # shadowed by them, and `default` stays first. Confirmed behaviourally on nginx 1.27-alpine.
 
 _REVIEW_BOT_DIR = _REPO / "src" / "rebar" / "review_bot"
-_REVIEWBOT_DOCKERFILE = _REPO / "infra" / "compose" / "Dockerfile.reviewbot"
 
 
 def test_nginx_review_location_restores_the_review_prefix_on_absolute_redirects() -> None:
