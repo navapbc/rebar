@@ -394,6 +394,7 @@ def test_absent_pydantic_declares_every_mcp_model_placeholder(
         "BridgeControlOut",
         "BridgeAccessStepOut",
         "BridgeAccessCheckOut",
+        "ReadyTicketSummaryOut",
     ):
         assert getattr(fallback_models, name) is None
 
