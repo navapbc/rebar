@@ -319,6 +319,23 @@ These rules are mandatory:
 
 The incident evidence, detector instructions, output interpretation, and operator recovery procedure live in [docs/orphaned-processes.md](docs/orphaned-processes.md).
 
+## Use per-session scratch paths for evidence
+
+Never redirect logs or evidence to a fixed `/tmp/<name>` path. Concurrent sessions routinely
+run gates and verifies on the same host; a shared fixed filename lets one session overwrite
+or interleave another session's evidence while leaving a plausible-looking log behind. In
+other words, the broken pattern overwrites or interleaves another session's evidence.
+
+Use a path that is unique to this process and session, and keep it inside the worktree unless
+a documented runbook requires a host-level evidence directory:
+
+```sh
+scratch_dir="${PWD}/.rebar/scratch/${REBAR_SESSION_ID:-manual}-$$"
+mkdir -p "$scratch_dir"
+verify_log="$scratch_dir/make-verify.log"
+env PATH="$PWD/.venv/bin:$PATH" make verify >"$verify_log" 2>&1
+```
+
 ## Module-size policy (when editing rebar itself)
 
 rebar is built to be edited by agents that load a unit whole. **Target 200–500 LOC per file;
