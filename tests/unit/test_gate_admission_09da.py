@@ -120,6 +120,14 @@ def test_xdist_worker_gate_slots_do_not_share_operator_slots(gate_host, monkeypa
             pass
 
 
+def test_unit_suite_gate_tmpdir_defaults_to_the_pytest_sandbox(
+    _rebar_root_sandbox_repo: Path,
+) -> None:
+    sandbox = _rebar_root_sandbox_repo.parent / "gate-store"
+    assert Path(os.environ["REBAR_GATE_TMPDIR"]) == sandbox
+    assert ga._slot_dir().is_relative_to(sandbox / "rebar-gate-snapshots" / "locks")
+
+
 def test_a_freed_slot_is_admitted_again(gate_host):
     root = gate_host(1)
     with ga.gate_admission("plan_review", "t-1", root):
