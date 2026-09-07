@@ -1,52 +1,23 @@
-"""Managed-reference provenance: the compaction-surviving removal-sync primitive.
+"""Compaction-stable provenance for cross-system reference removal.
 
-Cross-system sync (Jira today; Linear / GitHub Issues planned) must propagate a
-LOCAL removal of a reference — detach a parent, unlink a dependency — WITHOUT it
-being resurrected by the next inbound pass. To decide REMOVE-vs-ADOPT for a peer
-reference that is present on the peer but absent locally, the outbound differ asks
-one question: *did our side ever manage this reference?* If yes, the local absence
-is a deliberate removal and we propagate a delete; if no, the peer added it and we
-ADOPT it inbound (never clobber a human-created reference).
+``managed_refs`` records every local ``(kind, target)`` ever managed. When a peer retains a
+managed reference that is absent locally, outbound sync deletes it. Unknown peer references
+are adopted to preserve human changes. Storing the monotonic projection in ``compiled_state``
+preserves removal intent across compaction.
 
-That question is answered by ``managed_refs``: a **strictly-monotonic** projection,
-maintained by the reducer in ``compiled_state``, of every logical reference this
-ticket has *ever* managed. Because it lives in ``compiled_state`` it is restored by
-``process_snapshot`` and therefore **survives ``compact_ticket``** — closing the
-durability hole that a raw-event projection (cf. ``local_label_intent`` for labels)
-fails closed across (a removal performed at/after a compaction boundary would
-otherwise be re-resurrected because the compacted log no longer proves we'd managed
-the ref).
+Kinds represent ``parent`` or a synced link relation. Targets use local ticket IDs for provider
+translation. Snapshots sort ``[kind, target]`` pairs for stable bytes.
 
-A "logical reference" is normalized, **provider-agnostic**, as ``(kind, target)``:
-
-  - ``kind``    one of :data:`MANAGED_REF_KINDS` — ``parent`` or a link relation
-                (``blocks`` / ``depends_on`` / ``relates_to``).
-  - ``target``  the LOCAL ticket id the reference points at (the parent id, or the
-                dependency target). Never a Jira key — each provider maps the local
-                ref to its own entity at sync time, so this primitive is reused
-                unchanged by future peers.
-
-Serialized as a deterministically-sorted list of ``[kind, target]`` pairs so the
-SNAPSHOT ``compiled_state`` stays byte-stable across rebuilds.
-
-Reclamation: ``managed_refs`` is strictly monotonic here (never pruned by
-UNLINK/detach — pruning in the reducer would re-open the resurrection window). A
-*safe* prune needs the PEER snapshot (a ref is reclaimable only once it is absent
-both locally AND on the peer) and so must be a reconcile-time step emitting an
-explicit prune event — a documented FUTURE hook, deliberately out of scope here.
-Per-ticket ref cardinality is small (tens), so the unbounded-growth concern is not
-a practical one at this scale.
+The reducer never prunes provenance because safe reclamation requires confirmed absence both
+locally and on the peer.
 """
 
 from __future__ import annotations
 
 from typing import Any, TypeGuard
 
-# The closed, provider-agnostic kind vocabulary. ``parent`` is the single-valued
-# containment reference; the rest are the link relations that map to a peer
-# issue-link. Relations with no reliable peer link type (duplicates / supersedes /
-# discovered_from) are intentionally absent — they are never synced, so they are
-# never "managed" for removal-propagation purposes.
+# Managed kinds have peer mappings. ``parent`` represents containment. Duplicate, supersede,
+# and discovery relations remain local and do not participate in removal propagation.
 MANAGED_REF_KINDS: tuple[str, ...] = ("parent", "blocks", "depends_on", "relates_to")
 
 # A managed reference, normalized.
@@ -60,14 +31,10 @@ def _is_kind(kind: Any) -> TypeGuard[str]:
 
 
 def parse_managed_refs(raw: Any) -> set[Ref]:
-    """Parse a stored ``managed_refs`` value into a set of ``(kind, target)`` tuples.
+    """Parse valid ``(kind, target)`` pairs from persisted state.
 
-    Tolerant by design (this reads persisted, possibly-legacy state): a missing /
-    malformed value yields the empty set, and individual malformed entries are
-    skipped rather than raising. An empty set means "nothing managed" — under which
-    :func:`should_propagate_removal` returns False for every ref (fail-open: no
-    delete is propagated, so a transient/absent projection can only delay
-    convergence, never fire an irreversible wrong removal or clobber a human ref).
+    Malformed containers and entries are ignored. An empty result proves no managed ownership,
+    so synchronization adopts peer refs instead of deleting them.
     """
     out: set[Ref] = set()
     if not isinstance(raw, (list, tuple)):
@@ -90,11 +57,10 @@ def serialize_managed_refs(refs: set[Ref]) -> list[list[str]]:
 
 
 def add_managed_ref(state: dict, kind: str, target: Any) -> None:
-    """Fold one logical reference into ``state['managed_refs']`` (idempotent, monotonic).
+    """Add a valid ref idempotently without removing prior refs.
 
-    A no-op when ``kind`` is not a managed kind or ``target`` is falsy. Idempotent:
-    re-folding the same ref (e.g. a duplicate-delivered event) does not change the
-    set, so the projection is safe under at-least-once replay. Never removes.
+    Invalid kinds and empty or non-string targets do nothing. Replaying a duplicate event leaves
+    the serialized set unchanged.
     """
     if not _is_kind(kind) or not target or not isinstance(target, str):
         return
@@ -104,17 +70,10 @@ def add_managed_ref(state: dict, kind: str, target: Any) -> None:
 
 
 def seed_managed_refs_from_current(state: dict) -> list[list[str]]:
-    """Build a managed-refs list from a ticket's CURRENT ``parent_id`` + ``deps``.
+    """Seed missing snapshot provenance from the current parent and dependencies.
 
-    The migration path for pre-feature / old-SNAPSHOT tickets whose persisted
-    ``compiled_state`` predates this field: their current references are treated as
-    managed (a ref already in ``deps`` was created locally or inbound-ADOPTED — rebar
-    owns it, so a later local removal should propagate; a Jira-only ref never in
-    ``deps`` is simply not present here and is still ADOPTED inbound, never clobbered).
-
-    Known limitation (documented): a removal performed BEFORE this feature shipped is
-    already gone from current state and from a compacted log, so it cannot be
-    recovered here — only post-feature removals self-heal.
+    Current local and adopted refs become managed. Peer-only refs remain eligible for adoption.
+    References removed before compaction cannot be recovered from current state.
     """
     refs: set[Ref] = set()
     parent_id = state.get("parent_id") or None
@@ -139,15 +98,10 @@ def managed_ref_set(local_ticket: dict) -> set[Ref]:
 
 
 def should_propagate_removal(kind: str, target: str, local_ticket: dict) -> bool:
-    """Decide whether a peer reference absent locally should be DELETED on the peer.
+    """Return whether a locally absent reference should be deleted from its peer.
 
-    The shared, provider-agnostic removal gate consumed by both the parent and the
-    link outbound paths. Returns True (propagate the delete) iff ``(kind, target)`` is
-    in the ticket's managed-ref set — i.e. we managed the reference and its local
-    absence is a deliberate removal. Returns False otherwise, including when
-    ``managed_refs`` is absent/empty — degrading to additive-only (the peer ref is
-    left for inbound ADOPT, never clobbered, and the removal is simply not yet
-    propagated rather than wrongly fired).
+    Deletion requires a valid ref in the managed set. Missing provenance preserves the peer ref
+    for inbound adoption.
     """
     if not _is_kind(kind) or not isinstance(target, str) or not target:
         return False
