@@ -143,6 +143,16 @@ _SCRATCH_REQUIRED_MARKER = ".gate-scratch-required"
 _SCRATCH_MOUNTED_MARKER = ".gate-scratch-mounted"
 
 
+def _test_slot_namespace() -> str | None:
+    from rebar._config_resolvers import resolve_pytest_xdist_worker
+
+    worker = resolve_pytest_xdist_worker()
+    if not worker:
+        return None
+    safe = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in worker)
+    return f"pytest-{safe}"
+
+
 def max_concurrent_gates(repo_root: str | os.PathLike[str] | None = None) -> int:
     """The configured concurrent-gate cap: ``[snapshot].max_concurrent_gates`` > default.
 
@@ -216,6 +226,9 @@ def _slot_dir() -> Path:
     from rebar._snapshot.repo_snapshot import store_root
 
     d = store_root() / "locks"
+    namespace = _test_slot_namespace()
+    if namespace is not None:
+        d = d / namespace
     d.mkdir(parents=True, exist_ok=True)
     return d
 

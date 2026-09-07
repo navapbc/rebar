@@ -110,6 +110,16 @@ def test_plan_review_and_completion_verifier_share_one_counter(gate_host):
                 pytest.fail("verify_completion was admitted against plan_review's slot")
 
 
+def test_xdist_worker_gate_slots_do_not_share_operator_slots(gate_host, monkeypatch):
+    """A pytest worker must not fail because an unrelated real gate holds the host cap."""
+    root = gate_host(1)
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    with ga.gate_admission("plan_review", "operator-gate", root):
+        monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
+        with ga.gate_admission("plan_review", "pytest-worker-gate", root):
+            pass
+
+
 def test_a_freed_slot_is_admitted_again(gate_host):
     root = gate_host(1)
     with ga.gate_admission("plan_review", "t-1", root):
