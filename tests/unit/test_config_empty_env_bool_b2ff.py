@@ -261,3 +261,106 @@ def test_as_bool_passes_through_real_booleans() -> None:
     vocabulary."""
     assert _as_bool(True, "some.key") is True
     assert _as_bool(False, "some.key") is False
+
+
+_EMPTY_ENV_FAULT_CASES = (
+    ("verify", "require_environment", "prod-env", "REBAR_VERIFY_REQUIRE_ENVIRONMENT"),
+    ("verify", "opcert_enforce_since", "refs/tags/opcert", "REBAR_VERIFY_OPCERT_ENFORCE_SINCE"),
+    ("identity", "enforce_since", "refs/tags/identity", "REBAR_IDENTITY_ENFORCE_SINCE"),
+    (
+        "mcp",
+        "auth_required_scopes",
+        ("tickets:read", "tickets:write"),
+        "REBAR_MCP_AUTH_REQUIRED_SCOPES",
+    ),
+    ("mcp", "auth_jwt_expected_typ", "at+jwt", "REBAR_MCP_AUTH_JWT_EXPECTED_TYP"),
+)
+
+_EMPTY_ENV_MEANINGFUL_CASES = (
+    ("ticket", "default_assignee", "agent@example.com", "REBAR_DEFAULT_ASSIGNEE", ""),
+    ("ticket", "display_mode", "canonical", "REBAR_TICKET_DISPLAY_MODE", "auto"),
+    ("mcp", "auth_proxy_scopes", ("rebar.use",), "REBAR_MCP_AUTH_PROXY_SCOPES", ()),
+)
+
+
+def _toml_value(value: object) -> str:
+    if isinstance(value, tuple):
+        return "[" + ", ".join(repr(item) for item in value) + "]"
+    return repr(value)
+
+
+@pytest.fixture
+def string_residue_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None
+) -> Path:
+    root = tmp_path / "string-residue"
+    (root / ".git").mkdir(parents=True)
+    by_section: dict[str, list[str]] = {}
+    for section, key, file_value, _env in _EMPTY_ENV_FAULT_CASES:
+        by_section.setdefault(section, []).append(f"{key} = {_toml_value(file_value)}")
+    for section, key, file_value, _env, _expected in _EMPTY_ENV_MEANINGFUL_CASES:
+        by_section.setdefault(section, []).append(f"{key} = {_toml_value(file_value)}")
+    body = "\n\n".join(
+        "\n".join([f"[{section}]", *entries]) for section, entries in by_section.items()
+    )
+    (root / "rebar.toml").write_text(body + "\n", encoding="utf-8")
+    monkeypatch.chdir(root)
+    cfg.reset_config_cache()
+    return root
+
+
+@pytest.mark.parametrize(("section", "key", "file_value", "env"), _EMPTY_ENV_FAULT_CASES)
+def test_selected_protection_string_keys_reject_empty_env_overrides(
+    string_residue_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+    key: str,
+    file_value: object,
+    env: str,
+) -> None:
+    """An expanded-to-empty env var must not erase an explicit file-set protection."""
+    del string_residue_project, file_value
+    _set(monkeypatch, env, "")
+    with pytest.raises(ConfigError, match=f"{section}\\.{key}.*empty environment override"):
+        cfg.load_config()
+
+
+@pytest.mark.parametrize(("section", "key", "file_value", "env"), _EMPTY_ENV_FAULT_CASES)
+def test_selected_protection_string_keys_still_accept_non_empty_env_overrides(
+    string_residue_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+    key: str,
+    file_value: object,
+    env: str,
+) -> None:
+    del string_residue_project, file_value
+    value: str = "replacement"
+    if key.endswith("since"):
+        value = "refs/tags/replacement"
+    if key == "auth_required_scopes":
+        value = "tickets:admin,tickets:read"
+    _set(monkeypatch, env, value)
+    resolved = getattr(getattr(cfg.load_config(), section), key)
+    if key == "auth_required_scopes":
+        assert resolved == ("tickets:admin", "tickets:read")
+    else:
+        assert resolved == value
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "file_value", "env", "expected"),
+    _EMPTY_ENV_MEANINGFUL_CASES,
+)
+def test_documented_meaningful_empty_env_values_keep_their_policy(
+    string_residue_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+    key: str,
+    file_value: object,
+    env: str,
+    expected: object,
+) -> None:
+    del string_residue_project, file_value
+    _set(monkeypatch, env, "")
+    assert getattr(getattr(cfg.load_config(), section), key) == expected
