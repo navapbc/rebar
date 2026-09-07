@@ -686,6 +686,9 @@ memory pressure, and it holds the MCP client's request past its deadline. The re
 `GateCongestedError`, never a verdict: over MCP it arrives as a structured `retryable: true`
 payload with error code `gate_congested`, and the CLI exits **11** ("transient — retry"). One
 `GATE_CONGESTED` journald marker is emitted per refusal so congestion is visible in aggregate.
+Under pytest-xdist, test-worker gate runs use worker-scoped slot files below the same
+snapshot store so `make verify` does not consume — or get starved by — the operator-facing
+host slots held by real `rebar review-plan` / `verify-completion` processes.
 
 Degradation splits by fault. A missing `fcntl` or a single unusable slot file **admits** the
 gate — one local fault must not become a total gate outage — but announces itself with a

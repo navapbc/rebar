@@ -31,6 +31,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `LLM_REVIEW_MAX_VALUE` | `src/rebar/review_bot/config.py` |  |
 | `OPENAI_API_KEY` | `src/rebar/llm/config.py` |  |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `src/rebar/_config_resolvers.py` |  |
+| `PYTEST_XDIST_WORKER` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_ALLOW_ENV_REIDENTIFY` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_AUTHOR` | `src/rebar/config.py` |  |
 | `REBAR_CONFIG` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
@@ -175,14 +176,14 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_163 variables._
+_164 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
 These reads pass a non-literal name argument, so the concrete variable name is not statically resolvable:
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
-- `src/rebar/_config_resolvers.py:361` — `os.environ.get(<non-literal>)`
+- `src/rebar/_config_resolvers.py:366` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:368` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:381` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:385` — `os.environ.get(<non-literal>)`

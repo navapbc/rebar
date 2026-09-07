@@ -104,6 +104,11 @@ def resolve_gate_tmpdir() -> str:
     return os.environ.get("REBAR_GATE_TMPDIR") or ""
 
 
+def resolve_pytest_xdist_worker() -> str:
+    """Current pytest-xdist worker id, or ``""`` outside an xdist worker."""
+    return os.environ.get("PYTEST_XDIST_WORKER") or ""
+
+
 def resolve_allow_env_reidentify() -> bool:
     """``REBAR_ALLOW_ENV_REIDENTIFY`` re-identification acknowledgement — true for
     ``1``/``true``/``yes``/``on`` (case/space-insensitive), else false."""
