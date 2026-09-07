@@ -157,6 +157,23 @@ def test_run_fetch_error_exit_2(monkeypatch) -> None:
     assert code == 2 and verdicts[-1]["check"] == "io"
 
 
+def test_repeated_fetch_errors_remain_visible(monkeypatch) -> None:
+    """Repeated IO failures must stay fail-loud and classified, not be swallowed."""
+
+    def _boom(*a, **k):
+        raise urllib.error.URLError("gerrit unreachable")
+
+    monkeypatch.setattr(mirror_guard, "fetch_gerrit_main_sha", _boom)
+
+    outcomes = [
+        mirror_guard.run(check_replication=True, check_ruleset=False, github_token="t")
+        for _ in range(2)
+    ]
+
+    assert [code for _verdicts, code in outcomes] == [2, 2]
+    assert [verdicts[-1]["check"] for verdicts, _code in outcomes] == ["io", "io"]
+
+
 # --- Behavioral: I/O fetcher parsing (monkeypatch the _http_get seam) -------
 def test_strip_xssi_robust_to_pretty_and_missing_newline() -> None:
     assert mirror_guard._strip_xssi(b')]}\'{"a":1}') == '{"a":1}'  # no newline after prefix
