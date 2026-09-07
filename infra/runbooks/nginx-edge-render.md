@@ -21,12 +21,16 @@ single-quoted `envsubst` argument is load-bearing — it stops `envsubst` from e
 `$host`, `$remote_addr`, `$proxy_add_x_forwarded_for` and friends.
 
 ```sh
-cd /opt/rebar            # the checkout autodeploy maintains
-git fetch origin && git checkout origin/main -- infra/nginx/rebar.conf.template
+# /opt/rebar is the rsync copy autodeploy runs from, not a git checkout. Read the
+# template from autodeploy's mirror clone instead; do not fetch or checkout under
+# /opt/rebar.
+git -C /var/lib/rebar/mirror fetch origin
+git -C /var/lib/rebar/mirror show origin/main:infra/nginx/rebar.conf.template \
+  > /var/lib/rebar/rebar.conf.template
 
 export REVIEW_BOT_PORT   # the port the review-bot container publishes on loopback
 envsubst '${REVIEW_BOT_PORT}' \
-  < infra/nginx/rebar.conf.template \
+  < /var/lib/rebar/rebar.conf.template \
   > /etc/nginx/conf.d/rebar.conf
 
 nginx -t                 # MUST pass before you reload
@@ -49,6 +53,11 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://rebar.solutions.navateam.com/ 
 
 A count of **3** means the render did not happen — the Gerrit `location /` is still on nginx's
 compiled-in 60-second read default and bug `5bba-45dd-3bfc-42f1` is still live.
+If you inspect the rendered file for `REVIEW_BOT_PORT`, a single remaining bare mention inside a
+comment-only operator hint (for example `# export REVIEW_BOT_PORT`) is normal: it has no `${...}`
+wrapper, so `envsubst '${REVIEW_BOT_PORT}'` correctly leaves it alone. Treat braced
+`${REVIEW_BOT_PORT}` text, or any functional occurrence outside that one comment, as a partial
+render.
 
 End-to-end check for that bug specifically — a CI-shaped change-ref fetch should no longer 504:
 
