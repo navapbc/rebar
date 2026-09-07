@@ -1,17 +1,10 @@
-"""Story a3d7 (cultivated-aquatic-crow): ``rebar audit serve`` — HELD-OUT oracle.
+"""Held-out tests for ``rebar audit serve``.
 
-These edge/E2E tests are withheld from the implementation subagent (which sees only
-the happy-path suite ``test_audit_serve.py``). They separate a real implementation
-from one that fakes the happy path:
-
-* AC2 — disabled (default) refuses to start, NAMING the ``[ui] enabled`` flag, and
-  ``import rebar`` pulls no web dependency.
-* AC3 — with the ``ui`` extra absent, ``audit serve`` exits with an actionable
-  "install nava-rebar[ui]" message (not a traceback).
-* AC4 — ``--host 0.0.0.0`` warns on stderr before binding; ``--host 127.0.0.1``
-  (default) does not.
-* AC5/AC6 — with the feature enabled, the server binds 127.0.0.1 on the given
-  ``--port`` (ephemeral) and serves an index (HTTP 200) listing a seeded ticket.
+They verify that the disabled default names ``[ui] enabled`` and importing ``rebar`` loads no
+web dependency. A missing ``ui`` extra yields an installation message instead of a traceback.
+Non-loopback hosts warn before binding, while the default loopback host does not. An enabled
+server binds ``127.0.0.1`` on the requested ephemeral port and returns an HTTP 200 index with
+a seeded ticket.
 """
 
 from __future__ import annotations

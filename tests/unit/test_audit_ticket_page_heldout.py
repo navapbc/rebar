@@ -1,10 +1,7 @@
-"""Story ff6f (depressant-amethyst-wasp): the ``/ticket/<id>`` audit page — HELD-OUT oracle.
+"""Held-out tests for the finding-centric ``/ticket/<id>`` audit page.
 
-Withheld from the implementation subagent (which sees only ``test_audit_ticket_page.py``).
-These assert the contracted, per-AC behaviour of the finding-centric audit page against
-the DOM markers the plan pins (``conv-bars`` / ``conv-bar`` / ``conv-line`` / ``polyline``,
-the sticky gate strip's in-page anchors, decision-grouped ``<details>``) plus observable
-rendered content.
+They verify rendered content, the ``conv-bars``, ``conv-bar``, ``conv-line``, and ``polyline``
+DOM markers, sticky gate-strip anchors, and decision-grouped ``<details>`` elements.
 """
 
 from __future__ import annotations
@@ -82,14 +79,11 @@ def test_gate_strip_shows_all_three_states_counts_and_anchors(store: Path) -> No
 
 
 def test_both_out_of_codebase_kind_spellings_render(store: Path) -> None:
-    """ADR 0101 renamed the out-of-codebase criterion `kind` to `non-codebase`, keeping
-    `operator-attested` accepted because 827 tickets in the live store hold that value in
-    immutable COMPLETION_VERDICT events. The page must flag an unmet criterion of EITHER
-    spelling as lacking its attestation, and must not flag a codebase-verifiable one.
+    """Render both accepted spellings for out-of-codebase evidence.
 
-    Deliberately its own ticket and fixture rather than extra rows on the gate-strip test's:
-    that test pins a `1/2` met-count, so adding criteria there would break an assertion that
-    is about counting, not about evidence kinds.
+    ADR 0101 renamed ``operator-attested`` to ``non-codebase`` while immutable verdicts retain
+    the former value. Both flag a missing attestation, while ``codebase`` does not. A separate
+    fixture preserves the gate-strip test's ``1/2`` count.
     """
     r = str(store)
     tid = _new_ticket(r, "kind-spellings")

@@ -1,11 +1,8 @@
-"""Story 7c84: code-review sidecar -> lossless v2 (all buckets + thresholds).
+"""Tests for lossless code-review v2 sidecars.
 
-code_review_result_v1 persisted only the SURFACED buckets (blocking + advisory + coaching)
-and omitted the dropped / indeterminate findings Pass-3 produced, plus the numeric
-block_threshold/blocking_enabled each finding was judged against. v2 pools every bucket the
-code-review gate produces — blocking, advisory, dropped, indeterminate — with each finding's
-Pass-2 verification + Pass-3 determination + resolved threshold, while keeping the SURFACED
-(blocking+advisory) reader byte-unchanged. (Code review has NO overflow bucket.)
+Version two persists blocking, advisory, dropped, and indeterminate buckets with each
+finding's pass-two verification, pass-three determination, and resolved threshold. The
+blocking and advisory reader remains byte-identical. Code review has no overflow bucket.
 """
 
 from __future__ import annotations

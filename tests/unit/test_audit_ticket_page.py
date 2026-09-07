@@ -1,12 +1,9 @@
-"""Story ff6f (depressant-amethyst-wasp): the ``/ticket/<id>`` audit page — HAPPY PATH.
+"""Happy-path tests for the read-only ``/ticket/<id>`` audit page.
 
-A read-only, finding-centric page that renders a ticket's audit trail (plan-review,
-completion, code-review) from ``rebar.audit.read.audit_trail``. This file holds the
-happy-path oracle shared with the implementer: the page renders (HTTP 200) with the
-three gate sections present and a seeded finding's content visible. The detailed
-per-AC behaviour (gate strip counts + anchors, fixed section order, four-pass values,
-threshold meter, decision grouping, convergence viz, round selector, completion
-panel, empty states) lives in the held-out companion suite.
+The page renders ``rebar.audit.read.audit_trail`` with HTTP 200, all three gate sections,
+and seeded finding content. The held-out companion covers gate-strip counts and anchors,
+section order, four-pass values, thresholds, decision grouping, convergence, round selection,
+completion, and empty states.
 """
 
 from __future__ import annotations

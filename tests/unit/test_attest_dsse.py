@@ -1,22 +1,15 @@
-"""Happy-path spec for the DSSE v1.0.0 envelope + PAE module (task 9fd5).
+"""Happy-path DSSE v1.0.0 tests.
 
-These are the behavioral tests the implementer works against: the PAE spec worked
-example and a basic envelope encode/decode round-trip. Edge cases, the
-byte-identity (no-re-serialization) contract, and error inputs live in the
-held-out companion suite ``test_attest_dsse_heldout.py`` and are validated by the
-orchestrator after implementation.
+These tests cover the worked PAE example and an envelope encode and decode round trip.
+Edge cases, byte identity, and malformed inputs live in ``test_attest_dsse_heldout.py``.
 
-Contract under test (observable behavior only):
+``pae(payload_type: str, body: bytes) -> bytes`` implements this encoding::
 
-* ``pae(payload_type: str, body: bytes) -> bytes`` implements DSSE v1.0.0
-  Pre-Authentication Encoding::
+    PAE(type, body) = "DSSEv1" SP LEN(type) SP type SP LEN(body) SP body
 
-      PAE(type, body) = "DSSEv1" SP LEN(type) SP type SP LEN(body) SP body
-
-  where SP is a single ASCII space (0x20) and LEN is the ASCII-decimal *byte*
-  length of the following field.
-* ``encode(payload_type, body, signatures) -> str`` and ``decode(text) -> Envelope``
-  round-trip a DSSE envelope whose ``payload``/``sig`` fields are base64-encoded.
+SP is one ASCII space. LEN is the ASCII-decimal byte length of the following field.
+``encode`` and ``decode`` round-trip envelopes with base64-encoded ``payload`` and ``sig``
+fields.
 """
 
 from __future__ import annotations

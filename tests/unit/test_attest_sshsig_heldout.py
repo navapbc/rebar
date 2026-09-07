@@ -1,13 +1,8 @@
-"""Held-out oracle for the SSHSIG scheme (task 56d9) — the fail-closed matrix.
+"""Held-out SSHSIG fail-closed tests.
 
-The implementer does NOT see this file. It pins that ``ssh-keygen -Y verify``
-fails closed on tampered bytes, wrong namespace, unknown principal, a substituted
-key, and an expired validity window — and that an absent/old ssh-keygen fails
-closed rather than silently passing.
-
-Signatures are produced by shelling out to ``ssh-keygen -Y sign`` directly (not
-through the module under test), so the verify contract is exercised independently
-of the module's own ``sign`` implementation.
+They verify rejection of tampered bytes, wrong namespaces, unknown principals, substituted
+keys, expired windows, and absent or old ``ssh-keygen``. Signatures come directly from
+``ssh-keygen -Y sign`` so verification is independent of the module's ``sign`` function.
 """
 
 from __future__ import annotations
