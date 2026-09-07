@@ -136,6 +136,53 @@ def test_a_store_merely_AHEAD_is_not_reported_behind(store: Path) -> None:
     assert freshness.store_freshness(str(store))["verdict"] == "fresh"
 
 
+def test_write_divergence_probe_ignores_repointing_tracker_remote(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fixture copies may repair a tracker remote on write; do not pre-empt that path."""
+    from rebar import config
+    from rebar._store import gitutil
+
+    monkeypatch.setattr(config, "repo_root_or_none", lambda *_a, **_k: str(store.parent))
+    monkeypatch.setattr(config, "tickets_branch", lambda *_a, **_k: "tickets")
+    monkeypatch.setattr(config, "tickets_remote", lambda *_a, **_k: "origin")
+
+    def _run_git(cwd, *args, **_kwargs):
+        if args == ("remote", "get-url", "origin"):
+            url = "file:///code-origin" if Path(cwd) == store.parent else "file:///tracker-origin"
+            return subprocess.CompletedProcess(["git", *args], 0, url + "\n", "")
+        raise AssertionError(f"unexpected git probe after remote mismatch: {args}")
+
+    monkeypatch.setattr(gitutil, "run_git", _run_git)
+
+    assert freshness.write_blocking_divergence(str(store)) is None
+
+
+def test_write_divergence_probe_ignores_non_store_remote_ref(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A copied fixture may briefly have origin/tickets pointing at a code tree."""
+    from rebar import config
+    from rebar._store import gitutil
+
+    monkeypatch.setattr(config, "repo_root_or_none", lambda *_a, **_k: str(store.parent))
+    monkeypatch.setattr(config, "tickets_branch", lambda *_a, **_k: "tickets")
+    monkeypatch.setattr(config, "tickets_remote", lambda *_a, **_k: "origin")
+
+    def _run_git(_cwd, *args, **_kwargs):
+        if args == ("remote", "get-url", "origin"):
+            return subprocess.CompletedProcess(["git", *args], 0, "file:///same\n", "")
+        if args == ("rev-parse", "--verify", "origin/tickets"):
+            return subprocess.CompletedProcess(["git", *args], 0, "abc\n", "")
+        if args == ("cat-file", "-e", "origin/tickets:.store-compat.json"):
+            return subprocess.CompletedProcess(["git", *args], 1, "", "missing\n")
+        raise AssertionError(f"unexpected git probe after non-store ref: {args}")
+
+    monkeypatch.setattr(gitutil, "run_git", _run_git)
+
+    assert freshness.write_blocking_divergence(str(store)) is None
+
+
 def test_the_probe_fails_OPEN_on_its_own_error(
     store: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
