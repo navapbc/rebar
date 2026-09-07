@@ -292,7 +292,12 @@ must be the current revision whose live `LLM-Review` and `Verified` votes you
 inspected; if another session uploads a newer patch set, Gerrit returns 409 and
 the helper refuses rather than submitting stale state. Also stamp the change with
 your `rebar-session-<session-id>` hashtag so ownership is visible under the shared
-bot account. `main` is **Rebase-If-Necessary** (ADR-0047): Gerrit fast-forwards
+bot account. Shared credentials are a permanent operating constraint and
+per-session Gerrit identities are deliberately rejected: duplicating the bot
+account's access per session is higher-risk than visible native metadata. Do
+not re-push a green change unnecessarily: a new patch set marks prior
+`LLM-Review` and `Verified` votes Outdated, resets the live gates, and re-queues
+the change, so it is destructive rather than neutral. `main` is **Rebase-If-Necessary** (ADR-0047): Gerrit fast-forwards
 when it can and otherwise **rebases your change onto the current `main` tip and submits it
 server-side, atomically, under its own lock** — so you do **not** pre-rebase for the ordinary
 (non-conflicting) case. Gerrit then merges and **replicates the new `main` to GitHub** (that

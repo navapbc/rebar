@@ -330,6 +330,7 @@ git commit -s -m "<ticket-alias>: release X.Y.Z" -m "rebar-ticket: <ticket-alias
 git push gerrit HEAD:refs/for/main
 # wait for live LLM-Review +1 AND Verified +1 on the current SHA, then
 # submit with scripts/gerrit_safe_submit.py <change> --revision <current-full-sha>
+# Do not re-push after votes are green: a new patch set marks them Outdated.
 ```
 (Local sanity before pushing: `make lint && make typecheck && make test`, and
 `python -m build && python -m twine check dist/*`.) The release is dispatched from
