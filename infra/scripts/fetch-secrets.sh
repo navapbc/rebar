@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
 # fetch-secrets.sh — write the container .env from SSM Parameter Store (ADR-0008).
+# A change to this file is intentionally a secrets-only deploy signal for autodeploy's MCP delta
+# gate: the MCP container consumes the generated .env and static-token digest file at startup.
 #
 # Reads the SUBSET of /rebar/prod/* SecureString params the containers need and
 # writes them to infra/compose/.env (0600), authenticating via the EC2 INSTANCE
