@@ -1,19 +1,7 @@
-"""One parent-first cascade shared by claim, transition and the inbound writer (story 4329).
+"""Test the parent-first cascade shared by claim, transition, and inbound reconciliation.
 
-Three call sites walk a ticket's ancestors pulling an eligible parent along the same lifecycle
-edge, and each grew its own copy of the walk:
-
-* ``transition._cascade_parent_first`` — the reference implementation, driven by the
-  ``_CASCADING_EDGES`` table (``open -> in_progress``, ``closed -> open``,
-  ``closed -> in_progress``), recursing into ``transition_compute``;
-* ``claim._claim_compute`` — its own walk, hardcoded to the ``open`` edge, recursing into
-  ``claim_compute``;
-* ``apply_inbound_events._cascade_inbound_status_parents`` (Gerrit 2044) — an iterative walk
-  that already single-sources the DECISION but writes through the reconciler's own primitive.
-
-What actually differs between them is the WRITE PRIMITIVE, not the walk. These tests pin the
-extracted walk's contract directly, so the three sites can share it without any of them losing
-the benign-race re-check or the error attribution that make it safe.
+The callers retain distinct write primitives while sharing recursive ordering, benign-race
+rechecks, and parent-specific error identity.
 """
 
 from __future__ import annotations
@@ -49,9 +37,7 @@ class _Chain:
             self.on_advance(parent_id)
 
 
-# ======================================================================================
-# HAPPY PATH
-# ======================================================================================
+# Ordering.
 def test_an_eligible_parent_is_advanced_before_the_child(monkeypatch: pytest.MonkeyPatch) -> None:
     """The whole point: the parent moves FIRST, so a child is never left ahead of it."""
     from rebar._commands import lifecycle_cascade
@@ -95,9 +81,7 @@ def test_an_ineligible_or_absent_parent_is_left_alone(monkeypatch: pytest.Monkey
     assert orphan.advanced == []
 
 
-# ======================================================================================
-# HELD OUT
-# ======================================================================================
+# Robustness.
 def test_a_multi_level_chain_cascades_all_the_way_up() -> None:
     """Grandparent included: the walk recurses, it does not stop at one level."""
     from rebar._commands import lifecycle_cascade
@@ -223,9 +207,7 @@ def test_the_cascading_edge_table_is_unchanged() -> None:
     assert ("in_progress", "closed") not in _CASCADING_EDGES
 
 
-# ======================================================================================
-# TABLE-DRIVEN COVERAGE (parent epic airborne-wellloved-kingfisher, story AC2)
-# ======================================================================================
+# Edge coverage.
 def _cascading_edges() -> dict[tuple[str, str], str]:
     from rebar._commands.transition import _CASCADING_EDGES
 
@@ -288,14 +270,9 @@ def test_no_edge_disturbs_a_parent_in_the_wrong_status(
 
 
 def test_claim_cascades_only_the_open_edge_and_says_so() -> None:
-    """The story's AC2 as first written — "every edge exercised for both `claim` and
-    `transition`" — is not satisfiable, and pinning WHY here is more useful than an AC nobody
-    can meet. `claim` moves a ticket `open -> in_progress` and nothing else, so it can only
-    ever walk the `(open, in_progress)` row; the two `closed`-source rows belong to
-    `transition`/`reopen` alone.
+    """Claim covers only ``open -> in_progress``; closed-source edges belong to transition.
 
-    This asserts that narrowness deliberately. If `claim` ever grows a second edge, this test
-    fails and the surface-parity question gets asked on purpose rather than by accident.
+    A new claim edge must fail this guard so its surface parity is reviewed explicitly.
     """
     edges = _cascading_edges()
     assert edges[("open", "in_progress")] == "open"

@@ -1,24 +1,8 @@
-"""One replacement-link walker for close disposition (story 111a-4626-8d2c-42bf).
+"""Test the shared replacement-link walk used by close disposition.
 
-Three near-identical walkers ask the same question — "which ticket replaces this one?" — by
-iterating ``deps`` for a ``duplicates`` target, then ``find_inbound_relationships`` for a
-``supersedes`` source: ``close_precheck._has_live_replacement_link``,
-``close_precheck._recorded_replacement_target`` and ``close_disposition.find_replacement``.
-Bug ``frolicky-dependable-peccary`` came from ``verdict()`` consulting only one of them.
-
-They are NOT interchangeable, and these tests pin the three differences a naive merge would
-erase:
-
-* only ``_has_live_replacement_link`` narrows a NON-BUG ticket to ``ADMINISTRATIVE_CLASSES``;
-* only ``_recorded_replacement_target`` answers the weaker "was one ever RECORDED?" — it
-  ignores liveness entirely, and continues to the inbound pass after a subject reduce failure
-  where the two live-mode callers fail closed;
-* ``find_replacement`` returns the id (it is named in the signed manifest), the others a bool
-  and an optional id.
-
-The readers are stubbed exactly as ``tests/unit/test_close_precheck_duplicate_link_c8fd.py``
-does — patching ``reduce_ticket`` and ``find_inbound_relationships``, not the walkers — so the
-tests exercise the real walk rather than a mock of it.
+The walk checks outbound ``duplicates`` targets before inbound ``supersedes`` sources. Its
+callers retain distinct non-bug narrowing, recorded-versus-live failure policies, and return
+shapes. Reader seams are patched so the real walk remains under test.
 """
 
 from __future__ import annotations
@@ -76,9 +60,7 @@ def _live(tid: str) -> dict:
     return {"ticket_id": tid, "status": "open"}
 
 
-# ======================================================================================
-# HAPPY PATH
-# ======================================================================================
+# Directions.
 def test_the_walker_finds_a_live_outbound_duplicates_target(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -105,9 +87,7 @@ def test_the_walker_finds_a_live_inbound_supersedes_source(
     assert close_disposition.find_replacement(_BUG, "superseded", str(tmp_path)) == _CANON
 
 
-# ======================================================================================
-# HELD OUT
-# ======================================================================================
+# Policies.
 def test_recorded_mode_returns_a_dead_target_that_live_mode_rejects(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -183,11 +163,11 @@ def test_a_non_replacement_class_never_walks(monkeypatch: pytest.MonkeyPatch, tm
 
 
 def test_the_three_seams_keep_their_names_and_signatures() -> None:
-    """RENAME HAZARD. ``tests/unit/test_close_disposition_attestation_738a.py`` patches
-    ``_has_live_replacement_link`` with ``raising=False`` at :94 and :130 — so a rename would
-    NOT fail at patch time; it would install an unused attribute and leave
-    ``test_a_force_close_is_still_never_signed_even_for_a_linked_duplicate`` GREEN while it no
-    longer tests its claim. Patching with raising=True here is what makes that impossible."""
+    """Keep the three monkeypatch seams and ``find_replacement`` positional arity stable.
+
+    The 738a tests patch one seam with ``raising=False`` and call the finder positionally, so
+    silent API drift would invalidate their coverage.
+    """
     import inspect
 
     for mod, name in (
@@ -239,9 +219,7 @@ def test_the_dead_target_remedy_differs_from_the_named_none_remedy(
     assert _CANON not in none_exc.value.message
 
 
-# --------------------------------------------------------------------------------------
-# Construct-uniqueness guard (parent epic airborne-wellloved-kingfisher, AC1)
-# --------------------------------------------------------------------------------------
+# Uniqueness guard.
 
 _SRC = pathlib.Path(rebar.__file__).resolve().parent
 _OWNER = "_commands/close_disposition.py"
@@ -250,17 +228,10 @@ _WALK_OK_RE = re.compile(r"#\s*replacement-walk-ok:(.*)$", re.MULTILINE)
 
 
 def _replacement_walk_offenders() -> list[str]:
-    """Every module outside the owner that re-implements the replacement-link WALK.
+    """Find modules containing both walk atoms without a reasoned escape marker.
 
-    The construct is the CONJUNCTION of both atoms in one file — iterating inbound links AND
-    selecting the ``supersedes`` relation. Neither atom alone is the construct: plenty of
-    modules mention ``supersedes`` (it is a link relation name) and several legitimately call
-    ``find_inbound_relationships`` for unrelated questions. Matching either one alone would
-    make the guard fire on innocent code, and a guard that cries wolf gets deleted.
-
-    A legitimate second walk escapes with ``# replacement-walk-ok: <why>`` on one of the lines
-    carrying an atom. The reason is MANDATORY — a bare marker is itself an offence — so the
-    exception argues for itself in review instead of being a silent opt-out.
+    Either atom alone is legitimate; only their conjunction identifies a duplicate walk. A
+    bare ``replacement-walk-ok`` marker remains an offence.
     """
     offenders: list[str] = []
     for module in parsed_python_files(_SRC):
@@ -284,14 +255,7 @@ def _replacement_walk_offenders() -> list[str]:
 
 
 def test_the_replacement_link_walk_has_exactly_one_body() -> None:
-    """The durability half of this story: consolidating the three walkers is worth nothing if
-    a fourth can merge next week. That is the failure this epic exists to end — the defect
-    review found families arriving as three-ticket instalments precisely because a fix landed
-    in one copy while its twins stayed broken.
-
-    This asserts how MANY implementations exist, never how the one implementation works, so a
-    behaviour-preserving refactor inside ``close_disposition`` cannot fail it.
-    """
+    """Prevent another walker without constraining the owner's implementation."""
     assert _replacement_walk_offenders() == [], (
         "the duplicates/supersedes walk was re-implemented outside "
         f"{_OWNER}; call rebar._commands.close_disposition.replacement_of instead, or mark "
@@ -300,9 +264,7 @@ def test_the_replacement_link_walk_has_exactly_one_body() -> None:
 
 
 def test_the_owner_module_carries_the_reasoned_escape_marker() -> None:
-    """The marker convention is only credible if the owner itself demonstrates it, and if a
-    REASONLESS marker is rejected. Without this, someone could silence the guard with a bare
-    ``# replacement-walk-ok:`` and the epic's guarantee would quietly evaporate."""
+    """Require the owner's escape marker to carry a reason, as all exceptions must."""
     owner_text = (_SRC / _OWNER).read_text(encoding="utf-8")
     owner_marker = _WALK_OK_RE.search(owner_text)
     assert owner_marker is not None, f"{_OWNER} should document its ownership with the marker"
