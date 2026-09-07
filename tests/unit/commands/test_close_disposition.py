@@ -1,24 +1,8 @@
-"""A `not_a_bug`/`escalated` close without a replacement is reason-required (bug d54b).
+"""Require a reason or live replacement for `not_a_bug` and `escalated` closes.
 
-THE DEFECT. `close_disposition.verdict()` minted a deterministic disposition verdict for
-`not_a_bug`/`escalated` ONLY from a live replacement link. But `not_a_bug` inherently names no
-replacement (it asserts there is no defect) and `escalated` may point outside the tracker, so
-those closes fell through to FULL completion verification — which demands proof that a
-nonexistent (or out-of-tracker) defect was fixed, an unpassable gate. Operators were forced
-to `--force`, producing exactly the unsigned state the reopen ruling forbids.
-
-THE FIX, reusing ticket fc20's reason-required machinery verbatim: both classes join
-`REASON_REQUIRED_CLASSES`, with one refinement — `REPLACEMENT_SATISFIES_REASON_CLASSES`
-({not_a_bug, escalated}) lets a live replacement link satisfy the requirement INSTEAD of
-`--reason`, and the replacement is checked FIRST so the pre-d54b linked path is preserved
-byte-for-byte. Neither present -> refused at write time naming both doors; the close never
-reaches the completion verifier.
-
-THE ESCALATED DECISION (advisory from plan-review, resolved here): `escalated` is
-reason-required THE SAME WAY as `not_a_bug` — the structural problem is identical (no defect
-fixed in-repo, verification unpassable), and replacement-preferred is preserved because a
-live replacement link still short-circuits first. The `--reason` names where the work was
-escalated to.
+A live replacement retains precedence. Otherwise the reason justifies a deterministic,
+signed disposition, so write-side validation rejects an unreasoned close before the billable
+completion verifier. For `escalated`, the reason names the external destination.
 """
 
 from __future__ import annotations

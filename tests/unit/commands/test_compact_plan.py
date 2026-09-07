@@ -1,15 +1,7 @@
-"""One compaction planner (story 3436-71db-ceff-4ac0).
+"""Test the compaction planner shared by normal folds, rebuilds, and recovery.
 
-The normal fold, the fsck rebuild and crash recovery each re-derived the same decisions in
-their own code, which is how the compaction family arrived as six separate bug tickets: a fix
-landed in one copy and its twin stayed broken. ``aea0`` is the cautionary one — the rebuild
-path skipped a folded prior SNAPSHOT when listing sources from day one, and the fold had to be
-taught the same rule years later, after fsck spent that time reporting six healthy tickets as
-damaged.
-
-These tests pin the consolidation the way ``tests/unit/test_spawn_detached.py`` and
-``tests/unit/store/test_store_paths.py`` pin theirs: the behaviour is correct on BOTH engines,
-AND the construct exists in exactly one place, so a third copy cannot re-enter by imitation.
+Both engines must select the same sources and envelopes, exclude consumed snapshots, and use
+one implementation so their behavior cannot drift.
 """
 
 from __future__ import annotations
@@ -32,10 +24,7 @@ _SRC_REBAR = Path(rebar.__file__).resolve().parent
 _OWNER = _SRC_REBAR / "_commands" / "compact_plan.py"
 
 
-# ======================================================================================
-# Fixtures — a real store, real folds, real rebuilds. No seam is injected: a test that
-# only exercised an injected planner would pass for any wiring, including none.
-# ======================================================================================
+# Real-store fixtures exercise both engines without injecting the shared planner.
 @pytest.fixture
 def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     repo = tmp_path / "repo"
@@ -103,9 +92,7 @@ def _snapshot_uuids(repo: Path, tid: str) -> set[str]:
     }
 
 
-# ======================================================================================
-# HAPPY PATH — the two engines agree on source_event_uuids and on the envelope
-# ======================================================================================
+# Both engines must select the same sources and snapshot envelope.
 def test_fold_and_rebuild_cite_the_same_source_set(store: Path) -> None:
     """The AC, on live engines and on identical input: over a never-folded ticket the fold's
     candidate set and the rebuild's full log are the same events, so the two must cite the
@@ -126,10 +113,7 @@ def test_fold_and_rebuild_cite_the_same_source_set(store: Path) -> None:
 
 
 def test_neither_engine_cites_a_consumed_prior_snapshot(store: Path) -> None:
-    """Bug ``aea0``, pinned on BOTH paths. A folded prior SNAPSHOT is absorbed STATE, never a
-    source: citing it makes fsck's ``snapshot_missing_sources`` report a perfectly healthy
-    ticket as damaged the moment the consumed file goes away. The rebuild had this rule from
-    day one; the fold had to be taught it years later."""
+    """Both engines exclude consumed snapshots to prevent false missing-source damage."""
     repo = store
     folded, rebuilt = _seed(repo, "second fold"), _seed(repo, "rebuild over snapshot")
     for tid in (folded, rebuilt):
@@ -175,14 +159,9 @@ def test_both_engines_stamp_the_same_snapshot_envelope(store: Path) -> None:
             assert key in env["data"], f"envelope data is missing {key}"
 
 
-# ======================================================================================
-# EDGE — the recorded convergence, and the boolean that gates data loss
-# ======================================================================================
+# Filtering and restore edges protect event data.
 def test_a_rebuild_ignores_a_stray_non_event_file(store: Path) -> None:
-    """Recorded convergence. The rebuild's old scan filtered only dotfiles and
-    ``-SYNC.json``, so a stray non-JSON file was cited in ``source_event_uuids`` under its own
-    BASENAME and renamed to ``*.retired``. The shared listing requires the ``.json`` suffix the
-    fold's listing always required."""
+    """Rebuild leaves non-JSON files uncited and unretired."""
     repo = store
     tid = _seed(repo, "stray file")
     stray = _tdir(repo, tid) / "operator-notes.txt"
@@ -250,13 +229,9 @@ def test_has_snapshot_reports_an_unreadable_dir_as_unknown(tmp_path: Path) -> No
     assert compact_plan.has_snapshot(str(tmp_path)) is True
 
 
-# ======================================================================================
-# CONSTRUCT-UNIQUENESS GUARD — a static scan, so a copy no test executes still fails
-# ======================================================================================
+# Static guards keep snapshot construction and restore logic single-sourced.
 def test_the_snapshot_envelope_and_rename_back_appear_only_in_compact_plan() -> None:
-    """A STATIC scan of the whole package: a second copy-pasted builder or rename-back that
-    no test happens to execute must still fail here. That is what makes the consolidation
-    durable — the class (one copy fixed, its twin left broken) cannot re-enter by imitation."""
+    """Reject duplicate snapshot builders or restore renames outside the shared planner."""
     offenders: list[str] = []
     for module in parsed_python_files(_SRC_REBAR):
         if module.path == _OWNER:
