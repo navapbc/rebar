@@ -250,7 +250,9 @@ restated here:
 - **MCP tool set** — the read/write tool inventory and their `outputSchema`s →
   `docs/mcp-reference.md`.
 - **Concurrency** — optimistic concurrency, the parent-first claim/transition cascade, and
-  "the store shares every write immediately" (auto-commit + auto-push to `sync.remote`) →
+  "the store shares every write immediately" (auto-commit + auto-push to `sync.remote`);
+  `PUSH_PENDING` is recoverable on later writes, but a no-common-ancestor `DIVERGED` store
+  refuses the first new write so findings are not stranded locally →
   `docs/concurrency.md`.
 - **Mutating the tracker** — the rule is **no AD-HOC raw git in the tickets tracker** (route
   writes through rebar; `git stash` there is banned outright because the stash stack is

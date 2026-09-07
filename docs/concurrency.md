@@ -557,7 +557,7 @@ compaction `*.retired` renames conflict under rebase where merge unions cleanly)
 > own repository does exactly this, and pins it with a test that enumerates every
 > workflow file so a newly added one cannot reintroduce the trigger.
 
-**Every** rebar write (`create`/`edit`/`transition`/`claim`/`link`/…) auto-commits its event and then auto-pushes, so local ticket activity, including test and scratch tickets, propagates to the shared tickets branch immediately without a separate push step. `rebar._store.push.push_tickets_branch` pushes `HEAD` to the configured tickets branch when the configured remote exists. A missing remote makes the operation a no-op and leaves the commit local. On a non-fast-forward rejection, `push_tickets_branch` calls its `_recover_non_fast_forward` shim, which delegates to `rebar._store.push_recovery._recover_non_fast_forward`. That implementation fetches and merges the remote tickets branch as a union before a bounded retry. Its locked merge checks `rebar._store.lock.check_no_rebase_in_progress` and refuses to merge through a rebase or merge recovery state. Push is best-effort by default. A failed push caused by network loss, unresolved non-fast-forward state, or a recovery state does not fail existing callers. It warns and preserves local commits. `rebar._commands.fsck_tracker_health._tracker_sync_status` reports a local-ahead backlog as `PUSH_PENDING` and incompatible divergence as `DIVERGED`. Existing callers inherit five push-first recovery cycles and one final push after a clean fifth merge. Other outcomes retain their prior warning and return behavior.
+**Every** rebar write (`create`/`edit`/`transition`/`claim`/`link`/…) auto-commits its event and then auto-pushes, so local ticket activity, including test and scratch tickets, propagates to the shared tickets branch immediately without a separate push step. `rebar._store.push.push_tickets_branch` pushes `HEAD` to the configured tickets branch when the configured remote exists. A missing remote makes the operation a no-op and leaves the commit local. On a non-fast-forward rejection, `push_tickets_branch` calls its `_recover_non_fast_forward` shim, which delegates to `rebar._store.push_recovery._recover_non_fast_forward`. That implementation fetches and merges the remote tickets branch as a union before a bounded retry. Its locked merge checks `rebar._store.lock.check_no_rebase_in_progress` and refuses to merge through a rebase or merge recovery state. Push is best-effort by default. A failed push caused by network loss, unresolved non-fast-forward state, or a recovery state does not fail existing callers. It warns and preserves local commits. `rebar._commands.fsck_tracker_health._tracker_sync_status` reports a local-ahead backlog as `PUSH_PENDING` and incompatible divergence as `DIVERGED`. The one write-side exception is a tracker that has no common ancestor with the already-fetched shared branch: `rebar._commands._seam.finalize_event` refuses before committing the first new event, because that store cannot publish by retrying and another local-only commit would be stranded. The check is local-only (no network fetch on the write path); normal CLI reads/writes already run the ordinary freshness sync before this point. Existing callers inherit five push-first recovery cycles and one final push after a clean fifth merge. Other outcomes retain their prior warning and return behavior.
 
 `push_tickets_branch(..., strict=True)` is the opt-in delivery contract. It raises
 `PushDeliveryError` rather than writing process output, with a stable `reason`,
@@ -600,9 +600,16 @@ On the `async` policy the marker is written by the detached CHILD, so a failure 
 after the parent's call returns. The guarantee is that the failure becomes visible to a
 subsequent write or read, not that it is visible within the same call.
 
-This is a SIGNAL, never an exception: the best-effort contract above is unchanged, and a
-marker that cannot be written (an unwritable tracker) degrades to "no status" rather than
-failing the write.
+This is a SIGNAL, never an exception: the best-effort contract above is unchanged for
+ordinary delivery failures, and a marker that cannot be written (an unwritable tracker)
+degrades to "no status" rather than failing the write. It is not a recovery queue: the
+events are already durable as local commits. If `fsck` reports `PUSH_PENDING`, a later
+successful write/push publishes them. If `fsck` reports `DIVERGED`, stop writing from
+that store; `fsck-recover` preserves dangling `ticket: ...` commits from stale
+rebase/merge recovery by cherry-picking them, but it does not rewrite a live, unrelated
+local branch into the shared store. Do that only through `rebar tracker-maintenance` (or
+an isolated operator clone) while other sessions are quiesced, because this host runs many
+worktrees against one shared `tickets` branch.
 
 #### Where the signal STOPS being advisory — the gate freshness assertion
 
@@ -635,11 +642,14 @@ inputs must not convince a healthy store that it is broken (the same posture
 `push_state.read_status` takes), but once staleness is *established* the gate declines,
 because a gate that cannot trust its input has no business certifying with it.
 
-`rebar._store.freshness` is a READ-side concern only. The blanket alternative — refusing
-every write while the push is failing — was considered and rejected: it converts a
-degraded-but-usable system into an outage, and the write path's B4 contract above
+`rebar._store.freshness` is primarily a gate-read concern. The blanket alternative —
+refusing every write while the push is failing — was considered and rejected: it converts
+a degraded-but-usable system into an outage, and the write path's B4 contract above
 (a signal, never an exception) is unchanged, pinned by
 `tests/unit/test_gate_store_freshness.py::test_a_stale_store_does_not_make_an_ordinary_write_raise`.
+The narrow no-common-ancestor refusal is different: it is a proven split-brain that cannot
+self-heal by the normal fetch+merge+retry path, so it fails before adding another stranded
+commit.
 
 **Push policy.** `REBAR_SYNC_PUSH` is resolved by `rebar._store.push.push_tickets_branch`, so CLI, library, and MCP callers honor it uniformly. Values are insensitive to case and surrounding spaces. The default is `always`.
 

@@ -30,7 +30,7 @@ def _git_q(*args: str, cwd: Path) -> subprocess.CompletedProcess:
 @pytest.fixture
 def repo_with_origin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[tuple[Path, Path]]:
+) -> Iterator[tuple[Path, Path, str]]:
     """Initialized rebar repo wired to a real local bare origin; origin/tickets
     seeded so divergence is observable. Yields (repo, tracker)."""
     origin = tmp_path / "origin.git"
@@ -52,9 +52,9 @@ def repo_with_origin(
     tracker = repo / ".tickets-tracker"
     # Seed origin/tickets (REBAR_SYNC_PUSH=always) so a later un-pushed commit diverges.
     monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
-    rebar.create_ticket("task", "seed", repo_root=str(repo))
+    seed = rebar.create_ticket("task", "seed", repo_root=str(repo))
     _git_q("fetch", "origin", "tickets", cwd=tracker)
-    return repo, tracker
+    return repo, tracker, seed
 
 
 def _ahead(tracker: Path) -> int:
@@ -63,11 +63,11 @@ def _ahead(tracker: Path) -> int:
 
 
 def test_fsck_reports_push_pending_and_stays_exit_0(
-    repo_with_origin: tuple[Path, Path],
+    repo_with_origin: tuple[Path, Path, str],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo, tracker = repo_with_origin
+    repo, tracker, _seed = repo_with_origin
     # A local-only commit: push off so origin does not advance.
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     rebar.create_ticket("task", "unpushed local ticket", repo_root=str(repo))
@@ -83,10 +83,10 @@ def test_fsck_reports_push_pending_and_stays_exit_0(
 
 
 def test_fsck_quiet_when_in_sync(
-    repo_with_origin: tuple[Path, Path],
+    repo_with_origin: tuple[Path, Path, str],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _repo, tracker = repo_with_origin
+    _repo, tracker, _seed = repo_with_origin
     # Push HEAD to origin so local and origin/tickets are level.
     _git_q("push", "origin", "HEAD:tickets", cwd=tracker)
     _git_q("fetch", "origin", "tickets", cwd=tracker)
@@ -108,11 +108,11 @@ def test_fsck_quiet_when_in_sync(
 
 
 def test_fsck_reports_diverged_on_unrelated_history(
-    repo_with_origin: tuple[Path, Path],
+    repo_with_origin: tuple[Path, Path, str],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _repo, tracker = repo_with_origin
+    _repo, tracker, _seed = repo_with_origin
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     # Rewrite the local tracker onto an orphan branch that shares NO history with
     # origin/tickets — exactly the divergent empty/independent store bug 01e8 produced.
@@ -135,12 +135,12 @@ def test_fsck_reports_diverged_on_unrelated_history(
 
 
 def test_fsck_reports_diverged_on_non_fast_forward(
-    repo_with_origin: tuple[Path, Path],
+    repo_with_origin: tuple[Path, Path, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from rebar._commands import fsck
 
-    _repo, tracker = repo_with_origin
+    _repo, tracker, _seed = repo_with_origin
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     # Advance origin/tickets by one commit the local tracker never sees, then make a
     # divergent local commit atop the shared base: common ancestor exists, but neither
@@ -174,3 +174,27 @@ def test_fsck_reports_diverged_on_non_fast_forward(
         f"classifier did not report a non-fast-forward divergence; got {line!r}"
     )
     assert is_issue is True, "a non-fast-forward divergence must be a counted issue"
+
+
+def test_first_write_refuses_unrelated_diverged_store(
+    repo_with_origin: tuple[Path, Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, tracker, seed = repo_with_origin
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
+    _git("checkout", "-q", "--orphan", "independent-ticket-store", cwd=tracker)
+    _git("add", "-A", cwd=tracker)
+    _git("commit", "-qm", "independently rebuilt ticket store", cwd=tracker)
+    _git("branch", "-qM", "tickets", cwd=tracker)
+    _git_q("fetch", "origin", "tickets", cwd=tracker)
+    before = _git_q("rev-parse", "HEAD", cwd=tracker).stdout.strip()
+
+    with pytest.raises(rebar.RebarError) as exc:
+        rebar.comment(seed, "this write must not be stranded", repo_root=str(repo))
+
+    after = _git_q("rev-parse", "HEAD", cwd=tracker).stdout.strip()
+    assert after == before, "the refusal must happen before committing a stranded event"
+    msg = str(exc.value)
+    assert "ticket write refused" in msg
+    assert "DIVERGED" in msg
+    assert "fsck-recover" in msg
