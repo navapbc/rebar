@@ -1,16 +1,9 @@
-"""Plan review must not silently pass a container whose hierarchy failed to load (ticket
-b24d-a840-ea8a-4a54 / epic 6eca-183e-1cd2-4fb9).
+"""Ensures plan review fails closed when a container hierarchy cannot be loaded.
 
-``_assemble_context_uncached`` swallowed child-enumeration/per-child-fetch failures with a bare
-``except Exception`` and continued with an empty/partial ``children`` list. Since ``has_children``
-is ``bool(self.children)``, a total enumeration failure flips ``has_children`` False, so
-container-scoped DET checks (P5) trivially pass instead of reporting incompleteness. The fix:
-bounded retry (2 attempts, fixed delay) on both the ``list_tickets`` enumeration and each per-child
-``show_ticket`` fetch; on exhaustion, ``PlanContext.hierarchy_incomplete`` is set True with a
-``hierarchy_incomplete_detail`` list (``["enumeration"]`` for total failure, the failing child's id
-for a per-child failure). The flag threads through every ``finalize_verdict`` call site (the
-precheck/coach workflow ops and all three ``gate_dispatch`` recovery/degrade paths) and the
-drift-floor's post-drop re-derivation, forcing the verdict to INDETERMINATE rather than PASS.
+Context assembly makes two attempts at enumeration and each child read, then records
+``hierarchy_incomplete`` plus ``["enumeration"]`` or failed child IDs. Every verdict and
+recovery path, including drift-floor recomputation, must preserve the flag and return
+INDETERMINATE rather than letting an empty or partial child list pass container checks.
 """
 
 from __future__ import annotations

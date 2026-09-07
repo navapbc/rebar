@@ -72,10 +72,8 @@ steps:
 
 
 def test_batch_criterion_when_ref_is_name_checked() -> None:
-    # GAP 1 (bug runny-pip-lure / f18b): a batch criterion's `when:` expression is
-    # a control guard over upstream outputs, but was never routed through the ref
-    # linter (batch is not a CONTROL_KIND). A bogus `steps.ghost...` ref must be
-    # flagged just as an `if:`/`with:` ref is — not pass and misbehave at run time.
+    # Batch-criterion ``when`` guards require the same upstream-reference validation as
+    # ``if`` and ``with``. A nonexistent step must fail linting.
     wf = """\
 schema_version: "3"
 name: x
@@ -92,10 +90,8 @@ steps:
 
 
 def test_pattern_properties_output_ref_is_honored() -> None:
-    # GAP 2 (bug runny-pip-lure / f18b): an output whose dynamic keys live in a
-    # schema's `patternProperties` (overlay_union's include_<overlay>) must be
-    # recognized as produced — not falsely flagged — while a genuine typo that
-    # matches no pattern IS still flagged.
+    # ``patternProperties`` admits dynamic outputs such as ``include_<overlay>`` while
+    # keys matching neither a property nor a pattern must still fail linting.
     import rebar.llm.code_review.workflow_ops  # noqa: F401 — register overlay_union contract
 
     good = """\

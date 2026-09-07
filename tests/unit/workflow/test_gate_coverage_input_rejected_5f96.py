@@ -1,15 +1,10 @@
-"""5f96-25aa-af9d-4f57 — split the overloaded ``coverage.llm_unavailable`` boolean.
+"""Tests distinct degradation signals for LLM availability and input rejection.
 
-Option B (operator-approved): ``coverage.llm_unavailable`` is reserved for a genuine
-availability fault (RETRYABLE — waiting can help). A deterministic ``LLMInputRejectedError``
-(the provider answered and rejected the INPUT: oversized prompt / content-policy refusal) is a
-DISTINCT, NON-retryable cause and gets its own ``coverage.input_rejected`` signal so downstream
-readers can treat it honestly (fail-closed, not defer-and-retry) — never conflated with an
-outage and never a hollow PASS.
-
-This file is the HAPPY-PATH oracle (the single ``degrade_cause_flags`` helper contract and the
-code-review degrade builder that applies it). Edge/E2E/reader coverage lives in the held-out
-companion.
+``coverage.llm_unavailable`` marks retryable availability faults. Deterministic
+``LLMInputRejectedError`` failures instead set ``coverage.input_rejected`` so consumers fail
+closed without treating them as outages. This happy-path oracle covers
+``degrade_cause_flags`` and the code-review degrade builder. Companion tests cover edge,
+end-to-end, and reader behavior.
 """
 
 from __future__ import annotations

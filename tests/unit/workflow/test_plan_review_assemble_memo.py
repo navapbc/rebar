@@ -1,15 +1,9 @@
-"""Run-scoped memoization of ``assemble_context`` on the plan-review gate
-(rancid-vane-wreak).
+"""Tests run-scoped memoization of plan-review context assembly.
 
-Each plan-review workflow op (``precheck`` / ``assemble_criteria`` / ``verify_inputs`` /
-``coach_inputs``) independently calls ``context_assembly.assemble_context``, an N+1 store read
-(``show_ticket`` + ``list_tickets(parent=)`` + one ``show_ticket`` per child). Pre-change one
-gate run re-assembled the graph ~4× → ~4·(2+K) reads (K = direct children). The fix wraps the
-run in :func:`context_assembly.assemble_context_cache`, collapsing those repeated identical calls to
-a SINGLE graph read while returning an IDENTICAL ``PlanContext`` (verdict bytes unchanged).
-
-These tests are OFFLINE: ``rebar.show_ticket`` / ``rebar.list_tickets`` are spied (no git store),
-and a branching :class:`FakeRunner` drives the finder/verify/coach steps (no model / network).
+The precheck, criteria, verify, and coach operations request the same ticket graph.
+``assemble_context_cache`` must reduce those calls to one ``2 + K`` read assembly without
+changing the resulting ``PlanContext`` or verdict. Spied store reads and a branching
+``FakeRunner`` keep the tests offline.
 """
 
 from __future__ import annotations
@@ -112,12 +106,9 @@ def _cfg() -> LLMConfig:
 def _run_gate(monkeypatch, *, children: bool) -> tuple[dict, _ReadSpy]:
     spy = _ReadSpy()
     spy.install(monkeypatch, children=children)
-    # Neutralize the mid-run cancel probes (story 2c89): a probe performs a DELIBERATE
-    # fresh single-ticket read OUTSIDE the assemble memo (it must observe an edit the
-    # memo would hide), which would perturb this test's exact read accounting — and the
-    # hand-built ctx below diverges from the spy store, so an un-neutralized probe would
-    # (correctly, for its own contract) cancel the run. The probe's read behavior is
-    # covered in test_plan_review_cancel.py.
+    # Cancellation probes intentionally bypass the cache and would reject this synthetic
+    # context. Disable them so this test measures assembly reads only. Their fresh-read
+    # behavior is covered in test_plan_review_cancel.py.
     monkeypatch.setattr(
         "rebar.llm.plan_review.generation.own_material_changed", lambda *a, **k: False
     )
@@ -144,9 +135,10 @@ def test_one_gate_run_assembles_graph_at_most_once_leaf(monkeypatch) -> None:
 
 
 def test_one_gate_run_assembles_graph_at_most_once_with_child(monkeypatch) -> None:
-    """A parent with K=1 child costs 2+K = 3 reads (show parent + list + show child). Across the
-    four ops that is 4·(2+K)=12 pre-change; the run-scoped memo keeps it at 3 (a single graph
-    read), proving the redundant re-assembly is eliminated for containers too."""
+    """A one-child graph requires one parent read, one listing, and one child read.
+
+    All four workflow consumers must share that three-read assembly.
+    """
     verdict, spy = _run_gate(monkeypatch, children=True)
 
     assert verdict["verdict"] == "PASS", verdict.get("coverage")

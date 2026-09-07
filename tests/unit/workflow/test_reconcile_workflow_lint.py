@@ -157,14 +157,10 @@ def test_provider_shell_bodies_pass_pinned_shellcheck(
 
 
 def _redispatch_script() -> str:
-    """The opt-in continuous-loop re-dispatch step's shell.
+    """Return the opt-in continuous-loop re-dispatch shell.
 
-    Bug 8aed: this step is the LAST thing an already-converged pass runs, so its failure
-    policy decides whether a transient re-dispatch problem reds an otherwise-good run.
-
-    Ticket 1c70 moved `${{ github.ref_name }}` out of the run body into a `REF_NAME`
-    env var (a zizmor template-injection fix), so the step's shell text now references
-    the shell variable `${REF_NAME}` directly — `_run_redispatch` supplies its value.
+    The step runs last, so only a disabled-workflow 422 is benign. ``REF_NAME`` is supplied
+    as an environment variable rather than interpolated into the shell body.
     """
     step = next(
         step
@@ -226,12 +222,7 @@ _DISABLED_422 = (
 
 
 def test_redispatch_treats_a_disabled_workflow_422_as_a_benign_no_op(tmp_path: Path) -> None:
-    """A converged pass stays GREEN when the loop cannot re-seed onto a disabled workflow.
-
-    The hourly schedule documented in the workflow header is the backstop, so failing the
-    job adds no recovery — only a false red that trips heartbeat alerting (runs
-    31129551929 / 31129431096).
-    """
+    """A disabled-workflow 422 is benign because the hourly schedule restarts the loop."""
     completed = _run_redispatch(tmp_path, _DISABLED_422)
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
@@ -282,11 +273,8 @@ def test_redispatch_succeeds_quietly_when_the_dispatch_is_accepted(tmp_path: Pat
     assert "::error::" not in combined
 
 
-# --- Chain pacing (ticket f59a-2d16-68c5-450c) ---------------------------------------------
-#
-# Re-dispatching immediately made the chain's inter-invocation period one pass duration.
-# Sleeping for the pass's own elapsed time first makes it two — the doubling the operator
-# asked for. These cover the three branches the pacing block can take.
+# Chain pacing waits one elapsed pass before re-dispatch and doubles the
+# inter-invocation period. Tests cover all pacing branches.
 
 _DISPATCH_OK = "exit 0"
 

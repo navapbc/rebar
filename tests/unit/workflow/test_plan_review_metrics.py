@@ -1,13 +1,8 @@
-"""Per-pass latency/cost telemetry on the WORKFLOW plan-review gate (toy-kink-ire).
+"""Tests plan-review workflow latency and usage telemetry.
 
-B-RETIRE removed bespoke ``run_review`` — the only producer of ``coverage['metrics']``
-(db7b AC5: det_ms / llm_ms / total_ms / llm_calls / claim_path) — so the workflow gate
-emitted an empty sidecar ``metrics``. These tests prove the metrics are reinstated on the
-workflow path: the interpreter records per-step ``duration_ms``, ``gate_dispatch`` reconstructs
-the tier split + a cost proxy into ``coverage['metrics']``, and the sidecar lifts it again.
-
-Driven fully OFFLINE: a single branching FakeRunner returns schema-valid (empty) payloads for
-the finder / verify / coach steps, so the whole pipeline succeeds without a model.
+The interpreter records step durations. ``gate_dispatch`` reconstructs timing, call-count,
+cost, and claim-path data in ``coverage["metrics"]``. The sidecar exposes those metrics. A
+branching ``FakeRunner`` keeps the workflow offline.
 """
 
 from __future__ import annotations

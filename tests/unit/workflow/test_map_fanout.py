@@ -120,9 +120,8 @@ def test_commits_are_serialized_even_under_concurrency():
 
 
 def test_map_actually_runs_concurrently():
-    # A barrier requiring `bound` parties to proceed: under TRUE concurrency the first
-    # `bound` iterations rendezvous and pass; under serial execution the first
-    # iteration would block forever (the others never start) -> barrier times out.
+    # Requiring all ``bound`` barrier parties distinguishes concurrent execution from serial
+    # execution, which times out before later iterations can start.
     bound = 4
     barrier = threading.Barrier(bound, timeout=5)
 
@@ -131,9 +130,7 @@ def test_map_actually_runs_concurrently():
         return _ex.StepResult(outputs={"ok": True})
 
     res, rec = _run(_map_wf(bound, bound=bound), {"work": work}, list(range(bound)))
-    # Reaching "succeeded" IS the proof: a serial executor would block the first
-    # iteration on the barrier forever and the others would never start (timeout ->
-    # BrokenBarrierError -> failed run).
+    # Success proves all barrier parties ran. Serial execution would fail on timeout.
     assert res.status == "succeeded"
     assert {f"M#{j}/work" for j in range(bound)} <= set(rec.store)
 

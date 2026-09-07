@@ -1,12 +1,9 @@
-"""Held-out oracle for the insufficient-evidence sibling marker (ticket 1d71-a76c-04f6-4642).
+"""Tests the explicit marker for exhausted evidence searches.
 
-When the bounded evidence search exhausts without finding evidence, the framework used to
-bank a bare ``met=false`` — indistinguishable from a positive refutation. These tests pin
-the fix: a framework-set ``evidence_sufficient: false`` sibling marker (modeled on the
-``verdict_obtainable`` precedent) that rides on bank entries, criteria records, and the
-top-level verdict, changing ONLY message rendering and the recorded evidence class. The
-verdict vocabulary stays {PASS, FAIL}; ``met`` stays bool; every fail-closed consumer still
-blocks. Offline only — no live LLM.
+Framework-generated ``evidence_sufficient: false`` distinguishes an unproven criterion from
+a refutation throughout bank entries, criterion records, and the top-level verdict. It
+changes rendering and evidence classification only. Verdicts remain PASS/FAIL, ``met``
+remains boolean, and fail-closed consumers still block. All tests are offline.
 """
 
 from __future__ import annotations
@@ -330,9 +327,8 @@ def test_reconcile_derives_top_level_marker_and_remediation() -> None:
     assert result["evidence_sufficient"] is False
     assert result["remediation"] == INSUFFICIENT_EVIDENCE_REMEDIATION
     assert result["remediation"] != COMPLETION_REMEDIATION_GUIDANCE
-    # Operator-directed steering (field incidents): exhaustion is not refutation; the fix is
-    # an UNTAGGED comment citing exact tests/paths/SHAs + re-verify — never misclassifying
-    # code-verifiable criteria as [non-codebase] to satisfy an exhausted search.
+    # Exhaustion is not refutation. Remediation asks for an untagged comment with exact
+    # test/path/SHA evidence and re-verification, never a false `[non-codebase]` tag.
     guidance = result["remediation"].casefold()
     assert "not refutation" in guidance
     assert "untagged comment" in guidance
@@ -495,21 +491,10 @@ def test_finalizer_prompt_states_sufficiency_rule() -> None:
     assert "insufficient" in lowered
 
 
-# ── bug 2dcb-5468: a runaway/exhaustion-truncated run is a re-runnable FAULT, not a block ──
-#
-# Two seams left a truncated run masquerading as a blocking substantive FAIL (exit 1),
-# forcing --force. Both trace to ticket 1d71's own scope (the marker it introduced):
-#   Fix A — merge_finalizer_with_bank echoed a met=false for a criterion NEVER banked
-#     (entry is None = truncated / never evaluated) as a BARE refutation, popping the marker.
-#     The OMITTED-criterion branch already marks un-banked criteria insufficient
-#     (test_merge_placeholder_branch_carries_marker); the ECHO branch must be consistent.
-#     NB: keys on `entry is None` (never banked), NOT the bank-entry `truncated` evidence-cap
-#     flag — a present markerless entry is a GENUINE refutation and must stay bare.
-#   Fix B — an insufficiency-only FAIL (top-level evidence_sufficient=False, already derived
-#     by reconcile_verdict since 1d71) must dispose as the RETRYABLE exit-11 fault, not the
-#     fail-closed exit 1. Routed via the existing evidence_sufficient marker (NOT by
-#     overloading verdict_obtainable, whose schema is the no-criterion fault) through a single
-#     shared disposition helper both the close gate and the standalone verb call.
+# An echoed ``met=false`` with no bank entry is insufficient and keeps a truncated run
+# retryable. A present markerless entry remains a refutation.
+# Insufficiency-only FAIL uses exit 11 via ``evidence_sufficient``. ``verdict_obtainable``
+# remains reserved for no-criterion faults in the shared close and standalone disposition.
 
 
 def test_merge_unbanked_finalizer_echo_is_insufficiency_not_bare_refutation(tmp_path) -> None:
