@@ -766,7 +766,7 @@ Keeping it held out is what lets a green result *prove* something — a fix tail
 oracle it can read proves only that it can read.
 
 **Set the test aside (orchestrator, before launching the fix subagent).** Move the RED test
-*out of the fix subagent's working tree* (stash/save it aside) — omitting it from the prompt
+*out of the fix subagent's working tree* (move it under `$(git rev-parse --git-path heldout)/`) — omitting it from the prompt
 is not enough, since the subagent can read and edit files. Declare the test path off-limits.
 
 **Hand the fix subagent only:** the confirmed root cause (precise, mechanistic), the evidence,
