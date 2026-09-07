@@ -8,7 +8,7 @@ plan-review P1 check, so the two surfaces cannot drift on plan structure.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _ACTIVE_SECTIONS = frozenset({"approach", "scope", "testing", "acceptance criteria"})
 _AC_SECTION = "acceptance criteria"
@@ -49,6 +49,7 @@ class PlanClarityFloor:
     empty_ac_items: tuple[int, ...]
     sentinel_assignments: tuple[SentinelAssignment, ...]
     unchecked_ac_lines: tuple[str, ...] = ()
+    ac_item_chars: tuple[int, ...] = ()
 
     @property
     def passes(self) -> bool:
@@ -94,6 +95,50 @@ def _sentinel_assignment(line: str, *, section: str, line_number: int) -> Sentin
     )
 
 
+@dataclass
+class _PlanClarityAccumulator:
+    ac_items: list[str] = field(default_factory=list)
+    ac_item_chars: list[int] = field(default_factory=list)
+    empty_ac_items: list[int] = field(default_factory=list)
+    sentinels: list[SentinelAssignment] = field(default_factory=list)
+    unchecked: list[str] = field(default_factory=list)
+    item_lines: list[str] | None = None
+    item_verbatim_lines: list[str] | None = None
+    item_unchecked: bool = False
+    item_verbatim: str = ""
+
+    def finish_item(self) -> None:
+        if self.item_lines is None:
+            return
+        body = "\n".join(self.item_lines).strip()
+        self.ac_items.append(body)
+        if self.item_verbatim_lines is not None:
+            self.ac_item_chars.append(sum(len(line) + 1 for line in self.item_verbatim_lines))
+        if not body:
+            self.empty_ac_items.append(len(self.ac_items))
+        if self.item_unchecked and self.item_verbatim:
+            self.unchecked.append(self.item_verbatim)
+        self.item_lines = None
+        self.item_verbatim_lines = None
+        self.item_unchecked = False
+        self.item_verbatim = ""
+
+    def start_item(self, checkbox: re.Match[str], line: str) -> None:
+        self.finish_item()
+        self.item_unchecked = checkbox.group(1) == " "
+        self.item_verbatim = line
+        self.item_lines = [checkbox.group(2) or ""]
+        self.item_verbatim_lines = [line]
+
+    def append_item_line(self, line: str, *, charged_to_item: bool) -> None:
+        if self.item_lines is None:
+            return
+        self.item_lines.append(line)
+        if charged_to_item:
+            assert self.item_verbatim_lines is not None
+            self.item_verbatim_lines.append(line)
+
+
 def evaluate_plan_clarity(text: str) -> PlanClarityFloor:
     """Parse *text* and evaluate the shared deterministic plan floor.
 
@@ -102,70 +147,50 @@ def evaluate_plan_clarity(text: str) -> PlanClarityFloor:
     the next standard checklist item or H2.  Sentinel assignments are scanned
     only in the four exact active section names, outside fenced and inline code.
     """
-    ac_items: list[str] = []
-    empty_ac_items: list[int] = []
-    sentinels: list[SentinelAssignment] = []
-    unchecked: list[str] = []
-
+    acc = _PlanClarityAccumulator()
     section: str | None = None
     fence: str | None = None
-    item_lines: list[str] | None = None
-    item_unchecked: bool = False
-    item_verbatim: str = ""
-
-    def finish_item() -> None:
-        nonlocal item_lines, item_unchecked, item_verbatim
-        if item_lines is None:
-            return
-        body = "\n".join(item_lines).strip()
-        ac_items.append(body)
-        if not body:
-            empty_ac_items.append(len(ac_items))
-        if item_unchecked and item_verbatim:
-            unchecked.append(item_verbatim)
-        item_lines = None
-        item_unchecked = False
-        item_verbatim = ""
+    text_ends_with_newline = text.endswith(("\n", "\r"))
 
     for line_number, line in enumerate(text.splitlines(), start=1):
         marker = _fence_marker(line)
         if fence is not None:
-            if section == _AC_SECTION and item_lines is not None:
-                item_lines.append(line)
+            if section == _AC_SECTION:
+                acc.append_item_line(line, charged_to_item=True)
             if marker is not None and marker[0] == fence[0] and _closes_fence(line, fence):
                 fence = None
             continue
         if marker is not None:
-            if section == _AC_SECTION and item_lines is not None:
-                item_lines.append(line)
+            if section == _AC_SECTION:
+                acc.append_item_line(line, charged_to_item=True)
             fence = marker
             continue
 
         heading = _heading(line)
         if heading is not None:
-            finish_item()
+            acc.finish_item()
             section = heading
             continue
 
         if section == _AC_SECTION:
             checkbox = _CHECKBOX_RE.fullmatch(line)
             if checkbox is not None:
-                finish_item()
-                item_unchecked = checkbox.group(1) == " "
-                item_verbatim = line
-                item_lines = [checkbox.group(2) or ""]
-            elif item_lines is not None:
-                item_lines.append(line)
+                acc.start_item(checkbox, line)
+            else:
+                acc.append_item_line(line, charged_to_item=not line.strip() or line[:1].isspace())
 
         if section in _ACTIVE_SECTIONS:
             sentinel = _sentinel_assignment(line, section=section, line_number=line_number)
             if sentinel is not None:
-                sentinels.append(sentinel)
+                acc.sentinels.append(sentinel)
 
-    finish_item()
+    acc.finish_item()
+    if acc.ac_item_chars and not text_ends_with_newline:
+        acc.ac_item_chars[-1] = max(acc.ac_item_chars[-1] - 1, 0)
     return PlanClarityFloor(
-        ac_items=tuple(ac_items),
-        empty_ac_items=tuple(empty_ac_items),
-        sentinel_assignments=tuple(sentinels),
-        unchecked_ac_lines=tuple(unchecked),
+        ac_items=tuple(acc.ac_items),
+        empty_ac_items=tuple(acc.empty_ac_items),
+        sentinel_assignments=tuple(acc.sentinels),
+        unchecked_ac_lines=tuple(acc.unchecked),
+        ac_item_chars=tuple(acc.ac_item_chars),
     )

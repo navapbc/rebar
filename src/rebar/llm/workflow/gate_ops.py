@@ -51,12 +51,14 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     (force-closed) direct child does NOT block: it emits ``certifiable=False`` and the LLM still
     runs on the parent's OWN criteria (the parent may close but not certify).
 
-    EPIC closes additionally run the epic-close bug screen (ticket 4b54): the deterministic
-    ``caused_by`` floor short-circuits exactly like an unclosed child (an open/in_progress bug
-    the epic's own work broke is delegated work unfinished), and the candidate screen appends
-    its compact A-verdict block INSIDE the fenced context below — the screen degrades open on
-    non-systemic failures, but a provider error (``LLMUnavailableError``) propagates so the
-    close FAILS CLOSED (bug 1019)."""
+    The plan-review description cap is not a completion criterion: completion verifies the
+    already-reviewed work and relies on the plan-review cap plus whole-context budget to bound
+    review cost. EPIC closes additionally run the epic-close bug screen (ticket 4b54): the
+    deterministic ``caused_by`` floor short-circuits exactly like an unclosed child (an
+    open/in_progress bug the epic's own work broke is delegated work unfinished), and the
+    candidate screen appends its compact A-verdict block INSIDE the fenced context below — the
+    screen degrades open on non-systemic failures, but a provider error (``LLMUnavailableError``)
+    propagates so the close FAILS CLOSED (bug 1019)."""
     from rebar import _reads
     from rebar.llm.completion import (
         child_closure_findings,
@@ -74,43 +76,6 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     root = _reads.show_ticket(str(tid), repo_root=ctx.repo_root)
     canonical = root.get("ticket_id", str(tid))
     is_epic = root.get("ticket_type") == "epic"
-    from rebar import config as _config
-
-    description_limit = _config.compose_config(ctx.repo_root).verify.max_ticket_description_chars
-    description_chars = len(root.get("description") or "")
-    if description_chars > description_limit:
-        cfg = resolve_gate_config(ctx.repo_root)
-        finding = {
-            "criterion": f"ticket description is at most {description_limit:,} characters",
-            "severity": "high",
-            "dimension": "completion",
-            "detail": (
-                f"the authoritative ticket description is {description_chars:,} characters, "
-                f"above the {description_limit:,}-character completion admission limit; reduce "
-                "it before verification, usually by splitting independent work into coherent "
-                "child tickets"
-            ),
-            "citations": [
-                {
-                    "kind": "source",
-                    "description": f"authoritative ticket {canonical} description length",
-                }
-            ],
-        }
-        oversize_summary = (
-            f"Ticket description is {description_chars:,} characters; completion verification "
-            f"accepts at most {description_limit:,}. Reduce the description before retrying."
-        )
-        verdict = deterministic_child_failure(canonical, [finding], cfg, summary=oversize_summary)
-        return {
-            "run_verify": False,
-            "precheck_failed": True,
-            "canonical_id": canonical,
-            "verdict": verdict,
-            "context": "",
-            "certifiable": False,
-            "completion_prefetch_manifest": [],
-        }
     blocking, uncertified = child_closure_findings(canonical, ctx.repo_root)
     floor: list[dict] = []
     if is_epic and not blocking:

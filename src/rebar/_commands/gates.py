@@ -314,11 +314,11 @@ def description_cap_warning(
 ) -> str | None:
     """The save-time heads-up for a description the plan-review gate will not admit.
 
-    The review guard (``llm.plan_review.det_floor`` P4) and the completion precheck
-    reject a description above ``verify.max_ticket_description_chars``, but they only
-    run at ``review-plan``/close time — so an oversized description was historically
-    discovered long after it was written. When a create/edit writes a description over
-    that same configured cap AND the plan-review START-WORK gate applies to this ticket
+    The review guard (``llm.plan_review.det_floor`` P4) rejects review-bounded
+    description prose above ``verify.max_ticket_description_chars``, but it only runs
+    at ``review-plan`` time — so an oversized description was historically discovered
+    long after it was written. When a create/edit writes review-bounded prose over that
+    same configured cap AND the plan-review START-WORK gate applies to this ticket
     (:func:`_plan_review_gate_applies` — the very probe the claim path uses, so the
     warning cannot promise a block the gate would not make), this returns the operator
     warning; otherwise ``None``.
@@ -336,7 +336,9 @@ def description_cap_warning(
         from rebar.config import compose_config
 
         limit = int(compose_config(cfg_root).verify.max_ticket_description_chars)
-        chars = len(description)
+        from rebar.llm.plan_review.det_floor import review_bounded_description_chars
+
+        chars = review_bounded_description_chars(description)
         if chars <= limit:
             return None
         if not _plan_review_gate_applies(cfg_root, ticket_type, ticket_id=ticket_id):
@@ -345,12 +347,13 @@ def description_cap_warning(
         logger.debug("could not evaluate the description cap for %s", ticket_id, exc_info=True)
         return None
     return (
-        f"description for {ticket_id} is {chars:,} characters, above the "
-        f"{limit:,}-character plan-review admission cap "
+        f"description for {ticket_id} has {chars:,} characters of review-bounded prose, "
+        f"above the {limit:,}-character plan-review admission cap "
         f"(verify.max_ticket_description_chars). The plan-review start-work gate is "
         f"enabled for this project, so claiming {ticket_id} requires a passing review — "
-        f"and review-plan will refuse admission until the description is shortened, "
-        "usually by moving independent work into child tickets."
+        f"and review-plan will refuse admission until the non-acceptance-criteria prose is "
+        "shortened, usually by moving narration to comments or independent work into child "
+        "tickets."
     )
 
 

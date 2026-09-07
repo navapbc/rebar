@@ -121,9 +121,9 @@ by `rebar -c SECTION.KEY=VALUE`. Each is consumed by routing through `load_confi
 verify.verify_window_headroom      = 0.8     # plan-review Pass-2 verify: fraction of the verifier
                                              # model window a single verify request may use before
                                              # the findings are split into multiple calls (0.1–1.0)
-verify.max_ticket_description_chars = 8000   # blocking plan-review and completion admission limit;
-                                             # 8,000 is allowed, 8,001 blocks. Positive integer. Also
-                                             # drives the create/edit save-time warning.
+verify.max_ticket_description_chars = 8000   # blocking plan-review limit for review-bounded prose;
+                                             # 8,000 charged chars are allowed, 8,001 blocks.
+                                             # Positive integer. Also drives the create/edit warning.
 # Progressive drift-refresh of drifted findings during plan review is now
 # always-on (unconditional; no config toggle).
 verify.require_completion_verification_for_close = false  # gate work-ticket close on a PASS completion
@@ -281,23 +281,29 @@ warnings.cross_session = true        # emit a warning when this session mutates 
 
 The default description limit is calibrated just above the historical p99 (7,500 characters):
 8,000 affected 18 of 2,202 work tickets (0.82%) while capturing the tail with materially slower
-plan reviews and less reliable completion verification. This is admission control, not content
-transformation: rebar does not truncate, summarize, or elide the ticket to fit. Reduce the
-description, usually by moving independent work into child tickets. A human operator can still use
-the existing lifecycle `--force=<reason>` escape hatch to claim or close without the corresponding
-attestation; force does not make the oversized description pass either review gate.
+plan reviews. The limit charges the free-form plan prose outside the `## Acceptance Criteria`
+block; AC text is separately constrained by the AC-count floor and the whole-review context
+budget, so correcting a factually wrong criterion on a near-cap reviewed ticket does not force the
+operator to delete explanatory prose merely to regain admission. This is admission control, not
+content transformation: rebar does not truncate, summarize, or elide the ticket to fit. Reduce the
+description, usually by moving narration to comments or independent work into child tickets. A
+human operator can still use the existing lifecycle `--force=<reason>` escape hatch to claim or
+close without the corresponding attestation; force does not make oversized review-bounded prose
+pass plan review. Completion verification no longer treats this review-admission cap as a close
+criterion.
 
 **Save-time warning.** The same key drives an early heads-up so the limit is not discovered only
-at `review-plan` time: when a `create` or `edit` writes a description longer than
+at `review-plan` time: when a `create` or `edit` writes review-bounded prose longer than
 `verify.max_ticket_description_chars` **and** the plan-review start-work gate applies to that
 ticket (`verify.require_plan_review_for_claim` is on and the type is not gate-exempt), rebar warns
-that claiming the ticket will need a passing review which refuses admission until the description
-shrinks. It is a **warning, never a rejection** — the write has already committed and is unaltered,
-and nothing is emitted when the gate is off or the description is within the cap. Each surface uses
-its own channel: the **CLI** prints it to stderr (stdout stays pure in text and json modes, exit
-code unchanged), the **library** logs it on the `rebar` logger (and `edit_ticket` additionally
-returns it; `create_ticket(return_alias=True)` carries it as `description_warning`), and **MCP**
-returns it as the `description_warning` result field, mirroring `push_status`.
+that claiming the ticket will need a passing review which refuses admission until the prose outside
+`## Acceptance Criteria` shrinks. It is a **warning, never a rejection** — the write has already
+committed and is unaltered, and nothing is emitted when the gate is off or the review-bounded prose
+is within the cap. Each surface uses its own channel: the **CLI** prints it to stderr (stdout stays
+pure in text and json modes, exit code unchanged), the **library** logs it on the `rebar` logger
+(and `edit_ticket` additionally returns it; `create_ticket(return_alias=True)` carries it as
+`description_warning`), and **MCP** returns it as the `description_warning` result field, mirroring
+`push_status`.
 
 > **Resolution change (tracker.dir).** `tracker_dir()` (and the new `tickets_branch()`) now
 > resolve through the full precedence chain (`-c` flag > `REBAR_<KEY>` env > project > user >
