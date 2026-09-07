@@ -25,6 +25,28 @@ from rebar._deprecations import (
 
 logger = logging.getLogger("rebar.config")
 
+_EMPTY_ENV_FAULT_KEYS = frozenset(
+    {
+        ("verify", "require_environment"),
+        ("verify", "opcert_enforce_since"),
+        ("identity", "enforce_since"),
+        ("mcp", "auth_required_scopes"),
+        ("mcp", "auth_jwt_expected_typ"),
+    }
+)
+
+
+def _reject_empty_env_fault(sect: str, key: str, value: object) -> None:
+    if (sect, key) not in _EMPTY_ENV_FAULT_KEYS:
+        return
+    if isinstance(value, str) and not value.strip():
+        raise ConfigError(
+            f"{sect}.{key}: empty environment override is invalid. "
+            "Remove the environment variable to inherit lower-priority "
+            "configuration, or set an explicit non-empty value."
+        )
+
+
 # section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
 _SECTIONS: dict[str, dict] = {
     "verify": {
@@ -229,6 +251,8 @@ def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -
         coerced: dict = {}
         for key, coercer in _SECTIONS[sect].items():
             if key in d:
+                if source == "env":
+                    _reject_empty_env_fault(sect, key, d[key])
                 coerced[key] = coercer(d.pop(key), f"{sect}.{key}")
         _warn_unknown(sect, d, source, strict=strict)
         if coerced:
