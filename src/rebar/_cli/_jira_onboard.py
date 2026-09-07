@@ -1,22 +1,9 @@
-"""Implement the interactive Jira onboarding wizard for ``rebar bridge setup``.
+"""Implement interactive Jira onboarding for ``rebar bridge setup``.
 
-Top-level help is served from the committed parser artifact.
-It DETECTS the current Jira settings the same way the reconciler's
-``resolve_jira_settings`` does — ``load_config().jira.*`` with the Atlassian env
-vars overriding and the token read env-only — but resolves them in-process via
-:mod:`rebar.config` (the engine ``rebar_reconciler`` package is import-path-scoped
-to subprocesses, so the wizard must NOT import it directly). It PROMPTS for whatever
-connection coordinate is missing (``url`` / ``user`` / ``project``), PERSISTS the
-three
-non-secret values to a rebar-owned ``rebar.toml`` ``[jira]`` section
-(:func:`rebar.config.write_jira_config`), GUIDES the operator that the secret
-``JIRA_API_TOKEN`` stays an environment variable (never written to disk), and
-VALIDATES end-to-end by invoking ``rebar bridge check-access`` with the resolved settings
-injected into the probe's environment.
-
-Config persistence + the reconciler read path already existed (story b5db); this
-module only adds the missing interactive UX, mirroring the ``rebar llm setup``
-precedent in :mod:`rebar._cli._llm_commands`.
+Resolve non-secret coordinates with the reconciler's environment-over-file
+precedence, prompt for missing values, and persist them to owned ``rebar.toml``.
+``JIRA_API_TOKEN`` remains environment-only. Validation invokes the Jira capability
+probe with the persisted settings, without importing the subprocess-scoped engine.
 """
 
 from __future__ import annotations
@@ -40,18 +27,12 @@ class _Detected:
 
 
 def _detect() -> _Detected:
-    """Resolve the current Jira settings in-process through the owned config seam
-    (:func:`rebar.config.resolve_jira_detection`), which mirrors the reconciler's
-    ``resolve_jira_settings`` precedence (env ``JIRA_URL/USER/PROJECT`` over
-    ``load_config().jira.*``; the secret ``JIRA_API_TOKEN`` is env-only, resolved at the
-    credential boundary and reported only as a presence flag). The engine
-    ``rebar_reconciler`` package is import-path-scoped to subprocesses, so detection
-    reuses the composed typed config rather than importing it. A malformed config
-    degrades to env-only there (matching the resolver's fail-soft behavior), including a
-    non-https ``jira.url`` rejection (``InsecureUrlError``, a ``ConfigError`` subclass):
-    detection is best-effort so the wizard stays usable to FIX a bad url — the loud
-    enforcement lives on the WRITE path (``write_jira_config`` refuses to persist a
-    cleartext url) and in the reconciler resolver (bug bdb8)."""
+    """Resolve Jira coordinates and token presence through the owned config seam.
+
+    Environment values override file values, and the token remains environment-only.
+    Malformed configuration degrades to environment-only detection so the wizard can
+    repair it. HTTPS enforcement remains on write and reconciliation paths.
+    """
     from rebar import config
 
     url, user, project, token_present = config.resolve_jira_detection()
@@ -59,11 +40,10 @@ def _detect() -> _Detected:
 
 
 def _prompt_value(label: str, current: str) -> str:
-    """Prompt for one required value, re-prompting on empty input.
+    """Prompt until a required value is supplied.
 
-    A pre-existing ``current`` value is offered as the default (Enter keeps it). An
-    EOF (Ctrl-D) or interrupt raises ``EOFError`` / ``KeyboardInterrupt`` to the
-    caller, which aborts the wizard cleanly with no partial write.
+    Enter accepts an existing default. EOF or interruption propagates so the caller
+    can abort before writing.
     """
     suffix = f" [{current}]" if current else ""
     while True:
@@ -117,9 +97,8 @@ def jira_onboard(argv: list[str], *, prog: str = "rebar bridge setup") -> int:
     token_state = f"set (env {_TOKEN_ENV})" if token_present else "(missing — env only)"
     sys.stdout.write(f"  token    {token_state}\n\n")
 
-    # Collect the three connection coordinates: CLI flags win; else prompt for the
-    # missing ones (offering any detected value as the default). All input is
-    # gathered BEFORE any write, so an EOF/Ctrl-C abort never leaves a partial file.
+    # CLI values win. Otherwise prompt with detected defaults. Gather every coordinate
+    # before writing so EOF or interruption cannot leave partial configuration.
     non_interactive = any(v is not None for v in (args.url, args.user, args.project))
     try:
         if non_interactive:

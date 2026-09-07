@@ -1,19 +1,9 @@
-"""Immutable CLI route registry and execution metadata for RP-05.
+"""Define immutable routing authority and execution metadata for the CLI.
 
-``ROUTES`` is the single authority for recognized top-level command spellings
-and their execution policy. Each ``Route`` stores lazy ``"module.path:attr"``
-strings for its handler and parser factory. Importing this module does not
-resolve those strings or import command handlers or optional dependencies.
-
-Runtime dispatch calls :func:`route_for` and resolves only the selected handler
-through ``rebar._cli._execute``. Help generation walks ``ROUTES``, resolves
-parser factories during generation, and writes the committed artifacts that
-runtime help serves. :func:`derive_policy_sets` exports compatibility policy
-sets from the same table.
-
-Route capability names come from ``rebar._capabilities.CAPABILITIES``. They
-describe capabilities that a route may exercise. Capability checks remain at
-the selected execution boundary after the mode or backend is known.
+Each route stores lazy handler and parser-factory references, so imports remain
+light and dispatch resolves only the selected handler. Help generation walks the
+same table and commits its artifacts. Compatibility policy sets derive from it.
+Capability names are descriptive until enforced at the selected execution boundary.
 """
 
 from __future__ import annotations
@@ -29,11 +19,8 @@ from ._registry_checks import (
     Finding,
 )
 
-#: The surface consumers actually import from this module, pinned so the
-#: ``_registry_checks`` split cannot silently drop a re-export. Derived from a census of
-#: every in-tree reference (22 files, named imports and module-handle access alike):
-#: these eight names, and no others, are read from outside. ``Finding`` is listed because
-#: it is ``validate``'s element type, not because anything imports it — nothing does.
+#: This list pins the public registry surface from the in-tree consumer census so the
+#: validation split cannot drop re-exports.
 __all__ = [
     "ADAPTER_KINDS",
     "INIT_POLICIES",
@@ -77,17 +64,14 @@ class Route:
     intercept: bool = False
     no_auto_mount: bool = False
     confirmable: bool = False
-    # Advisory cross-session warning: this spelling takes a single ticket id, so another
-    # session holding it is worth surfacing before the command runs (mirror F11). WHICH
-    # verbs warn is a policy judgement; the flag only makes the set BE route names.
+    # Warn when another session holds the route's single ticket. The flag derives only set
+    # membership. Choosing which routes enable it remains explicit policy.
     warn_cross_session: bool = False
     legacy_output: bool = False
     handler: str | None = None
     parser_factory: str | None = None
     capabilities: tuple[str, ...] = ()
-    # RP-05 S3 execution metadata. ``adapter`` names one of ADAPTER_KINDS (the
-    # runtime call shape); ``init`` names one of INIT_POLICIES; ``argv_prefix`` is
-    # prepended to the command remainder before an ``argv`` handler is called.
+    # ``adapter`` and ``init`` select closed policies. ``argv_prefix`` precedes argv dispatch.
     adapter: str = ""
     init: str = "none"
     argv_prefix: tuple[str, ...] = ()
@@ -411,12 +395,8 @@ def _writes_full() -> tuple[Route, ...]:
 
 
 def _intercepts() -> tuple[Route, ...]:
-    # Pure-intercept subcommands routed above the set-based arms. ``metrics`` and
-    # ``audit`` are also individually-routed arms; they carry a non-policy group
-    # but keep intercept=True so ``_INTERCEPTS`` derives correctly.
-    #
-    # Each advanced family carries a lazy ``parser_factory`` reference (RP-05 S2c):
-    # a ``"module:attr"`` string resolved only at build time, never at import.
+    # Pure intercepts, including individually routed metrics and audit, still derive
+    # ``_INTERCEPTS`` membership. Parser factories remain lazy build-time references.
     _P = "rebar._cli._parsers.advanced"
     factories: dict[str, str] = {
         "review-code": f"{_P}.llm:build_review_code",
@@ -438,11 +418,8 @@ def _intercepts() -> tuple[Route, ...]:
         "identity": f"{_P}.identity:build",
         "config": f"{_P}.config:build",
     }
-    # RP-05 S6 execution metadata: each intercept names a LAZY ``"module:attr"``
-    # handler (resolved only at dispatch, never at registry construction), invoked
-    # through the ``argv`` adapter (``handler(rest)``) with no auto-init — the two
-    # intercepts that need init or an extra argument (``identity``/``enrich``) do it
-    # inside their own ``rebar._cli`` wrapper.
+    # Every intercept uses a lazy handler reference and shared argv adapter. Identity and
+    # enrich perform their exceptional initialization or extra-argument work internally.
     _LLM = "rebar._cli._llm_commands"
     handlers: dict[str, str] = {
         "review-code": f"{_LLM}:_review_code",
@@ -625,15 +602,11 @@ _BY_NAME, _BY_ALIAS = _index(ROUTES)
 
 
 def route_for(spelling: str, routes: tuple[Route, ...] = ROUTES) -> Route | None:
-    """Return the :class:`Route` for a canonical name or alias ``spelling`` (or ``None``).
+    """Resolve a canonical route name or non-retired alias.
 
-    Canonical names take precedence over aliases: a canonical spelling always wins,
-    and an alias resolves only when no route claims it as a canonical name.
-    (Validation forbids an alias colliding with a live canonical name, so this
-    precedence is defensive.) An alias never resolves to a retired route, since the
-    alias index excludes retired routes; a retired route's own canonical name still
-    resolves via the name index. Pass ``routes`` to resolve against a table other
-    than the shipped ``ROUTES``.
+    Canonical names win defensively. Aliases never target retired routes, though a
+    retired canonical name remains directly resolvable. Supplying ``routes`` builds
+    an index for that alternate table.
     """
     by_name, by_alias = (_BY_NAME, _BY_ALIAS) if routes is ROUTES else _index(routes)
     return by_name.get(spelling) or by_alias.get(spelling)
