@@ -250,6 +250,7 @@ def gate_ref_hash_basis(repo_root=None) -> GateRefBasis:
     working = str(_config.repo_root(repo_root))
     ref: str | None = None
     try:
+        from rebar._snapshot import SnapshotFetchError, SnapshotRefError
         from rebar._snapshot import cache as _cache
         from rebar._snapshot.repo_snapshot import resolve_ref
         from rebar.llm import gate_source
@@ -257,8 +258,26 @@ def gate_ref_hash_basis(repo_root=None) -> GateRefBasis:
         if gate_source.default_source(working) != gate_source.SOURCE_ATTESTED:
             return GateRefBasis(working)
         ref = gate_source.default_ref(working)
-        sha = resolve_ref(ref, working, fetch=False)
-        handle = _cache.acquire(sha, source_mode="attested", repo_root=working, fetch=False)
+        try:
+            sha = resolve_ref(ref, working, fetch=False)
+        except (SnapshotFetchError, SnapshotRefError):
+            logger.warning(
+                "gate ref %r could not be resolved; hashing the working tree",
+                ref,
+                exc_info=True,
+            )
+            return GateRefBasis(working, ref=ref, degraded=True)
+        try:
+            handle = _cache.acquire(sha, source_mode="attested", repo_root=working, fetch=False)
+        except Exception:
+            logger.warning(
+                "gate ref %r resolved to %s but could not be materialized; "
+                "hashing the working tree",
+                ref,
+                sha,
+                exc_info=True,
+            )
+            return GateRefBasis(working, ref=ref, degraded=True)
         return GateRefBasis(str(handle.path))
     except Exception:
         logger.warning(
