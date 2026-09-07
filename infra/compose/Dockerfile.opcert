@@ -30,10 +30,13 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Install the package with the agents (rebar.llm gate runtime) + reviewbot (fastapi +
-# uvicorn[standard] ASGI server) extras THROUGH the committed uv.lock (ticket ce5d) — same
-# verified dependency set as CI/local dev. The op-cert key is materialized OUTSIDE the app
-# (fetch-secrets.sh) and bind-mounted in, so the app runtime needs no boto3/SSM/AWS (story 6f14).
+# Install the package with the agents (rebar.llm gate runtime), reviewbot (fastapi +
+# uvicorn[standard] ASGI server), and bedrock extras THROUGH the committed uv.lock (ticket ce5d)
+# — same verified dependency set as CI/local dev. `bedrock` is declared for explicitness, not
+# because the import is currently missing: `reviewbot` also carries boto3 for CloudWatch, but the
+# gate-serving image must intentionally lock the provider dependency it can select at runtime.
+# The op-cert key is materialized OUTSIDE the app (fetch-secrets.sh) and bind-mounted in, so the
+# app runtime needs no boto3/SSM/AWS (story 6f14).
 # The tag MUST equal [tool.uv] required-version in pyproject.toml: uv reads that key itself
 # and refuses to run on a mismatch. `:latest` here was a time bomb — it fired the moment
 # upstream published 0.12.9 against the 0.12.7 pin and took every image build down
@@ -41,7 +44,7 @@ WORKDIR /app
 # if this tag ever drifts from pyproject.toml, so the two cannot silently diverge.
 COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv
 COPY . /app
-RUN uv sync --locked --no-dev --extra agents --extra reviewbot
+RUN uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock
 ENV PATH="/app/.venv/bin:$PATH"
 
 ENV REBAR_OPCERT_PORT=8080
