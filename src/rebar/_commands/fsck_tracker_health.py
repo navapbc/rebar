@@ -1,20 +1,10 @@
-"""Tracker-LEVEL fsck checks — the store as a whole, not ticket by ticket.
+"""Run tracker-wide ``fsck`` checks through ``_tracker_health``.
 
-Checks 4.5–4.7 and 4.9, extracted from ``fsck.py`` (which fused four concerns and sat at the
-800-LOC hard cap), plus check 4.10 (the dirty-tracker wedge class). They belong together
-because they share a shape the per-ticket validators in ``fsck_scan`` do not: each inspects
-the tracker as a whole through git/config, and each decides for itself whether its lines are
-counted integrity issues or informational. ``_tracker_health`` is the single entry point;
-``fsck_scan._scan`` is its only caller.
-
-* 4.5 tracker-vs-origin sync status — PUSH_PENDING informational, DIVERGED a counted issue;
-* 4.6 configured-vs-mounted ``tracker.branch`` — informational;
-* 4.7 FOREIGN_STORE_PATH — source paths polluting the tracker (bug 2fa6), a counted issue;
-* 4.9 ENV_ID_MISMATCH — environment-identity divergence, a counted issue;
-* 4.10 TRACKER_DIRTY_* — the dirty working-tree wedge class (ticket c925-7669-ded8-43a3):
-  tracked deletions restorable from HEAD and untracked regenerable compaction leftovers are
-  counted issues (``rebar doctor --repair`` heals them); orphaned ``.tmp-event-*`` staging
-  files are informational (report-only, never auto-touched).
+Checks cover configured-remote divergence, configured branch mismatch, foreign store paths,
+environment identity mismatch, and dirty tracker state. Divergence, pollution, identity
+mismatch, tracked deletions, and regenerable leftovers are counted. A pending push, branch
+mismatch, and temporary event staging files are informational. ``fsck_scan._scan`` is the sole
+caller.
 """
 
 from __future__ import annotations
@@ -35,23 +25,12 @@ _FSCK_GIT_TIMEOUT = 120
 
 
 def _tracker_health(tracker: str, repo_root=None, authorship=None) -> tuple[list[str], int]:
-    """The four TRACKER-level checks (4.5–4.7, 4.9), as ``(lines, issue_count)``.
+    """Return tracker-level report lines and their counted issue total.
 
-    Grouped out of ``_scan`` because they share a shape the per-ticket checks do not:
-    each inspects the tracker as a whole, each yields at most one line, and each decides
-    for itself whether that line is a counted integrity issue or informational. Keeping
-    them inline grew ``_scan`` — already the largest branch cluster in this module — for
-    every check added.
-
-    * 4.5 tracker-vs-origin: PUSH_PENDING informational, DIVERGED a counted issue;
-    * 4.6 configured-vs-mounted ``tracker.branch``: informational;
-    * 4.7 source paths polluting the store (bug 2fa6): a counted issue, because
-      ``origin/tickets`` holds no source tree, so any such path means something wrote to
-      the store outside the event-append path;
-    * 4.9 environment-identity divergence (bug gold-distinct-lacewing): a counted issue —
-      a re-clone that dropped ``.env-id`` silently orphaned its own attestations;
-    * 4.10 the dirty-tracker wedge class (ticket c925-7669-ded8-43a3): up to three lines,
-      one per class — see :func:`_dirty_tracker_lines`.
+    A pending push and branch mismatch are informational. Configured-remote divergence,
+    foreign paths, environment identity divergence, and counted dirty-tree classes increment
+    the total. Dirty state can contribute one line per class through
+    :func:`_dirty_tracker_lines`.
     """
     lines: list[str] = []
     issues = 0
@@ -109,15 +88,12 @@ def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
 
 
 def foreign_store_path_list(tracker: str) -> list[str]:
-    """Top-level tracker entries that cannot be ticket data, as a plain list.
+    """List top-level entries that cannot be ticket data.
 
-    THE single classifier for "is this path store pollution?" — :func:`_foreign_store_paths`
-    renders it for fsck's report and ``tracker-maintenance`` acts on it. Two copies of the
-    rule would be free to drift, and a repair that disagreed with the report it was shown
-    could delete something fsck never named.
-
-    A top-level entry is ticket data iff it is a directory holding at least one event file
-    (active or ``*.retired``); store artifacts all begin with a dot and are skipped."""
+    This shared classifier drives both ``fsck`` reporting and ``tracker-maintenance`` repair.
+    Ticket directories contain an active or retired event file. Dot-prefixed store artifacts
+    are excluded.
+    """
 
     def _holds_events(path: str) -> bool:
         try:
@@ -139,23 +115,13 @@ def foreign_store_path_list(tracker: str) -> list[str]:
 
 
 def _foreign_store_paths(tracker: str) -> str | None:
-    """Report top-level tracker entries that cannot be ticket data (bug 2fa6).
+    """Report top-level tracker entries that cannot be ticket data.
 
-    ``origin/tickets`` legitimately holds NOTHING but ticket directories and the store's
-    own dotfiles, so a ``src/``, ``tests/`` or ``.rebar/…`` path in the tracker is
-    pollution — the signature of raw git run in the store, or of a foreign ``git stash``
-    applied there. The push recovery now HEALS such a path when it strands the index; this
-    check exists so the condition is also REPORTED, because silent healing would hide the
-    fact that something is writing source files into the store.
-
-    Classification is deliberately structural rather than a filename denylist, and it uses
-    the same "is this a ticket?" test as the rest of fsck: a top-level entry is ticket data
-    if it is a directory holding at least one event file. Matching on the ticket-id SHAPE
-    instead would be wrong — ticket directories are not required to be id-shaped, and doing
-    so reports healthy stores as polluted. Store artifacts (``.git``, ``.bridge_state``,
-    ``.env-id``, ``.opcert-key``…) all begin with a dot and are skipped. Entries the branch
-    actually TRACKS are called out separately: those were committed into the tickets branch
-    and will propagate on the next push, which is strictly worse than a working-tree stray."""
+    The tickets branch may contain ticket directories and dot-prefixed store artifacts, but
+    not source paths. Classification is structural because ticket directory names need not
+    resemble ticket IDs. Tracked foreign entries are identified separately because they will
+    propagate with the branch.
+    """
 
     strays = foreign_store_path_list(tracker)
     if not strays:
@@ -286,30 +252,16 @@ _DIRTY_LINE_SPECS: tuple[tuple[str, str, str, bool], ...] = (
 
 
 def dirty_tracker_classes(tracker: str) -> dict[str, list[str]]:
-    """Classify the tracker's ``git status --porcelain`` into the dirty-tree wedge classes.
+    """Classify porcelain status into sorted deletions, leftovers, and temporary events.
 
-    THE single classifier — fsck renders it (:func:`_dirty_tracker_lines`) and
-    ``doctor --repair`` acts on it (same one-rule discipline as
-    :func:`foreign_store_path_list`). Returns ``{"deletions", "leftovers", "tmp_events"}``,
-    each a sorted list of tracker-relative paths:
+    Deletions are tracked files removed from the worktree or index. Leftovers are untracked
+    snapshots and retired files whose source is already folded. Temporary ``.tmp-event-*``
+    files are report-only because an append may own them. This classifier is shared by
+    ``fsck`` and ``doctor --repair``.
 
-    * ``deletions`` — tracked files deleted in the worktree (`` D``) or index (``D ``).
-      The tickets branch holds nothing but store data, so every such path is a store
-      artifact whose bytes are intact at HEAD (the P0 wedge: 119 tracked deletions left
-      by an interrupted compaction fold).
-    * ``leftovers`` — untracked (``??``) regenerable compaction leftovers: any
-      ``*-SNAPSHOT.json`` (a snapshot is derived state by definition), and a ``*.retired``
-      only when its retired-source is already folded (:func:`_retired_source_folded`) —
-      otherwise the stray could be the only copy of an event and stays unclassified.
-    * ``tmp_events`` — orphaned ``.tmp-event-*`` staging files (``_store/staging``'s
-      mkstemp prefix). Report-only: a live one belongs to an in-flight append.
-
-    ``--untracked-files=all`` is load-bearing: without it git collapses an untracked
-    directory to one ``dir/`` entry and the leftover files inside are never named.
-    ``-z`` is too: porcelain v1 C-quotes paths containing spaces/quotes/non-ASCII, but
-    the NUL-terminated form carries every path verbatim (renames/copies append the
-    ORIGINAL path as an extra NUL record, skipped below).
-    Best-effort: a failed/hung ``git status`` classifies nothing.
+    ``--untracked-files=all`` preserves files inside untracked directories. NUL-delimited
+    porcelain preserves path bytes and permits skipping original rename records. A failed or
+    hung status command returns empty classes.
     """
     empty: dict[str, list[str]] = {"deletions": [], "leftovers": [], "tmp_events": []}
     try:

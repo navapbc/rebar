@@ -1,17 +1,15 @@
-"""In-process ``init`` — bootstrap the event-sourced ticket store.
+"""Create or mount the event-sourced ticket store.
 
-Creates or mounts the ``tickets`` branch as a linked worktree at
-``.tickets-tracker/``. Fresh stores commit their bootstrap files, generate local
-identity/signing material, and normalize GC plus merge-driver configuration through
-the ensure registry. Existing stores converge idempotently on re-init. Remote branch
-discovery fails closed when reachability is unknown so a transient fetch problem
-cannot split ticket history. A 30-second mkdir lock serializes concurrent inits.
+``init`` attaches the tickets branch at configured ``tracker.dir`` (``.tickets-tracker/`` by
+default). Main-worktree mounts and creations ensure local identity and signing material; new
+stores also commit bootstrap files. Existing stores converge through the ensure registry.
+Unknown remote reachability fails closed, and a 30-second directory lock serializes the
+main-worktree mount/create/bootstrap path; already-mounted and linked-worktree paths return
+earlier.
 
-init resolves the repo from the git toplevel of ``repo_root`` (or cwd) — it
-deliberately ignores an inherited repo-root override (it must initialize the
-target repo, not a shim's project root).
-
-Output contract pinned by ``tests/interfaces/store/test_e4_init.py``.
+Repository resolution prefers an explicit ``repo_root``, then ``REBAR_ROOT``, then the git
+toplevel of the current directory. Explicit and environment paths are realpath-normalized but
+not replaced by their git toplevel. The output contract is covered by ``test_e4_init.py``.
 """
 
 from __future__ import annotations
@@ -24,12 +22,8 @@ import uuid
 
 from rebar._commands import _init_probe
 
-# The tickets-branch convergence units and their content templates live in
-# ``_init_ensures`` (see that module's docstring for the boundary). They are re-exported
-# here because the ``init._<name>`` access path is load-bearing: ``ensures._registry()``
-# dispatches through it, ``tests/interfaces/store/test_ensure_drift_matrix.py`` imports
-# ``_GITIGNORE`` through it, and ADR 0051, ``docs/migrations.md``,
-# ``docs/scale-envelope.md`` and ``_store/sync.py`` cite the units through it.
+# Re-export convergence units from ``_init_ensures``. The registry dispatches through these
+# module attributes, and tests plus maintained documentation reference this access path.
 from rebar._commands._init_ensures import (  # noqa: F401  (re-export)
     _GITATTRIBUTES,
     _GITIGNORE,
@@ -60,16 +54,9 @@ def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
     return run_git_write(cwd, *args, check=False)
 
 
-# A cold first fetch of the tickets branch into a freshly-initialised store can
-# legitimately take MINUTES (the shared branch is a large event-sourced history —
-# tens of thousands of commits — and may travel over an agent proxy). Bound it with the
-# shared COLD-materialize precedent: the generous, tunable
-# ``rebar._snapshot.git_fetch.fetch_timeout`` backstop (bug curly-open-swan) — NOT the 30s
-# _store incremental-op bound (push.py/sync.py), and no longer a FIXED 300s cap that failed
-# an honest large/cold fetch closed. The throughput-keyed stall-abort remains the guard
-# against a wedged remote. A timeout surfaces as a synthetic failed CompletedProcess(124)
-# naming the op + bound (never a bare TimeoutExpired, never a hang), mirroring
-# _store/push.py._git.
+# A cold branch fetch can transfer a large event history through a proxy. Use the tunable
+# materialization timeout rather than the 30-second incremental bound. Throughput detection
+# handles stalls, and timeout returns ``CompletedProcess(124)`` to the caller's failure path.
 def _git_fetch(cwd: str, *args: str) -> subprocess.CompletedProcess:
     return _init_probe.run_bounded_git(
         cwd,
@@ -186,10 +173,7 @@ def init_core(repo_root=None, *, silent: bool = False, force_new_store: bool = F
                 elif kind == "MERGE_HEAD":
                     _emit("WARNING: Aborting stale merge on tickets branch", silent)
                     _git(tracker, "merge", "--abort")
-            # Converge the store via the ensure registry (idempotent, drift-
-            # correcting) so a config fix shipped after this store was initialized
-            # reaches it on re-init — the migration these hand-listed calls once
-            # performed, generalized (epic odd-vortex-elbow).
+            # Run idempotent ensure units so re-init corrects store configuration drift.
             _run_ensures_logged(tracker, silent)
             _emit("Ticket system already initialized.", silent)
             return 0
@@ -224,10 +208,7 @@ def init_core(repo_root=None, *, silent: bool = False, force_new_store: bool = F
         _exclude_scratch_in_tracker(tracker)
         _commit_precommit(tracker)
         _gen_local_files(tracker)  # writes .env-id (env-id unit then no-ops below)
-        # Converge via the ensure registry (gitignore, gitattributes, gc-config,
-        # merge-ours, env-id), AFTER the bootstrap so ordering is preserved. This
-        # replaces the hand-listed _commit_gitignore/_commit_gitattributes/
-        # _migrate_gc_config/_ensure_merge_ours_driver calls (epic odd-vortex-elbow).
+        # Run gitignore, attributes, GC, merge-driver, and environment ensures after bootstrap.
         _run_ensures_logged(tracker, silent)
         _emit("Ticket system initialized.", silent)
         return 0
@@ -431,18 +412,12 @@ _UNTRACK_BATCH = 200
 
 # raw-git-ok: store-maintenance command, seam-internal
 def _untrack_runtime_markers_unit(tracker: str) -> EnsureOutcome:
-    """Untrack per-ticket runtime markers (``*/.archived``, ``*/.write.lock``) that
-    were COMMITTED before ``.gitignore`` covered them (ensure-registry unit; epic
-    becoming-berserk-grunion S1). gitignore never un-tracks tracked files, so their
-    churn surfaced as tracked working-tree deletions — dirtying ``git status`` and
-    breaking the strict tracker-head check. Check = one ``git ls-files`` call (empty
-    on a converged store → ``ok``, zero commits); act = batched ``git rm --cached``
-    (index only — worktree copies untouched, so local cache behavior is unchanged)
-    + ONE commit. Enumerates ls-files output rather than raw pathspecs so a store
-    tracking only one marker kind never fails on an unmatched pathspec. Peers
-    merging the commit have git delete their worktree marker copies; that is safe
-    (archival's source of truth is ARCHIVED events) and the reader self-heals the
-    fast-path marker (see ``reduce_all_tickets``)."""
+    """Untrack archived and write-lock runtime markers through an ensure unit.
+
+    One ``git ls-files`` call detects tracked markers. A batched ``git rm --cached`` preserves
+    local copies and produces one commit. Enumerating matches avoids unmatched pathspec errors.
+    ARCHIVED events remain authoritative, and readers recreate optional cache markers.
+    """
     uid = "untrack-runtime-markers"
     ls = _git(tracker, "ls-files", "--", f"*/{ARCHIVE_MARKER_NAME}", f"*/{MARKER_LOCK_NAME}")
     tracked = [ln for ln in ls.stdout.splitlines() if ln]
@@ -478,12 +453,9 @@ def _commit_precommit(tracker: str) -> None:
 
 
 def _gen_local_files(tracker: str) -> None:
-    # .env-id: per-environment identity. .signing-key: the manifest-signature gate
-    # key (chmod 600). The legacy .closure-key (verdict-hash gate) is NO LONGER
-    # minted — the signature system supersedes it — but stays gitignored for
-    # back-compat with stores that still carry one.
-    # Guarded: mints only when the store is genuinely new. At genesis it always is;
-    # routed through the shared guard so a mount of an existing store cannot slip past.
+    # Mint .env-id only when absent; the guard warns if existing events identify other
+    # environments. Create the mode-600 signing key when absent. The retired closure key is
+    # not minted here and remains covered by the store's ignore configuration.
     mint_env_id_guarded(tracker)
     key_path = os.path.join(tracker, ".signing-key")
     if not os.path.isfile(key_path):
@@ -496,10 +468,10 @@ def _gen_local_files(tracker: str) -> None:
 
 
 def _main_worktree_tracker(repo: str) -> str | None:
-    """Path to the MAIN worktree's tracker dir (the configured ``tracker.dir``,
-    default ``.tickets-tracker``) — the real store a linked worktree symlinks to —
-    or None when the main worktree can't be resolved. Does NOT check whether that
-    path exists / is initialized; callers decide."""
+    """Return the main worktree's configured tracker path, or ``None``.
+
+    The caller decides whether the resolved path exists and is initialized.
+    """
     from rebar.config import tracker_dir
 
     wl = _git(repo, "worktree", "list", "--porcelain").stdout
@@ -510,16 +482,14 @@ def _main_worktree_tracker(repo: str) -> str | None:
 
 
 def pending_init_is_symlink(repo_root=None) -> bool:
-    """True when initializing THIS repo would be a pure symlink to an
-    already-initialized store — i.e. the host repo is a linked git worktree
-    (``.git`` is a *file*) and the MAIN worktree already has a ``.tickets-tracker``.
+    """Return whether init would try to link this worktree to a main tracker directory.
 
-    This is the predicate that tells the two init concepts apart. A *first-time*
-    init materializes an orphan ``tickets`` branch + a linked worktree and edits
-    ``.git/info/exclude`` — it mutates the host repo, so it needs consent. Creating
-    this symlink, by contrast, only adds a local link to an EXISTING store and
-    leaves the underlying repo's state untouched, so the auto-init gate may create
-    it automatically, without a prompt."""
+    The predicate requires a linked worktree and checks only that the main tracker path is a
+    directory; it does not validate the tracker's contents. This is one consent-free reuse
+    signal; :func:`pending_init_attaches_to_existing` covers branch attachment. Reusing shared
+    state needs no consent even when mounting it creates a worktree, symlink, or exclude entry.
+    Only creating a new orphan store requires consent.
+    """
     repo = _resolve_repo_root(repo_root)
     if repo is None:
         return False
@@ -530,16 +500,11 @@ def pending_init_is_symlink(repo_root=None) -> bool:
 
 
 def pending_init_attaches_to_existing(repo_root=None) -> bool:
-    """True when a ``tickets`` branch already exists locally or on ``origin``, so
-    initializing THIS repo only MOUNTS that existing shared state (a linked
-    worktree via ``_mount_or_create_branch``'s local/remote arms) rather than
-    fabricating a brand-new orphan store.
+    """Return whether init can mount an existing local or remote tickets branch.
 
-    Like the worktree-symlink case, this is safe to do automatically — including
-    non-interactively — because it does not create new ticket history; it attaches
-    to a store that already exists. Distinguishes "attach to an existing
-    origin/tickets" from a true first-time init, so the auto-init gate need not
-    refuse it for lack of a TTY (bug wet-chair-peg)."""
+    Attaching existing shared state creates no ticket history and may proceed without interactive
+    consent. Creating an orphan store remains a first-time mutation that requires consent.
+    """
     repo = _resolve_repo_root(repo_root)
     if repo is None:
         return False

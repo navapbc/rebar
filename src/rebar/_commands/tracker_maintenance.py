@@ -1,35 +1,16 @@
-"""In-process ``tracker-maintenance`` — the SUPPORTED door for raw git in the tracker.
+"""Provide the supported raw-git maintenance path for a blocked tracker.
 
-Bug 2fa6. The rule this implements is "no AD-HOC raw git in the tracker", not "no raw git
-ever". The distinction matters because a hard prohibition with no sanctioned door is what
-produced the incident: the store was wedged, every rebar write failed, and improvised
-``git add -A`` / ``commit`` / ``merge`` / ``rm`` in the tracker was the only way out. That
-improvisation is also how source files and stray state reach the tickets branch.
+Ordinary tracker mutations must use rebar. This command encloses exceptional repair with three
+safeguards. It creates ``refs/rebar-maintenance/<utc>`` before the first write, refuses to run
+while ``origin/tickets..HEAD`` contains unpushed commits, and attempts to record the actor,
+operation, changes, and force status in a durable audit file outside store content.
 
-Most of what used to need a human is now automatic — ``event_append`` self-heals a
-stranded index on paths the branch does not track, and the push recovery no longer touches
-the repo-global stash stack. This command exists for what auto-heal deliberately REFUSES to
-touch, and its value is the envelope around the operation rather than the operation itself:
+``--force=<reason>`` is a human-only break-glass path. It requires a reason, prints a
+break-glass banner, and records ``forced: true`` in audit JSON when that log is writable.
+Agents must not use it.
 
-1. **A backup ref BEFORE the first write.** ``refs/rebar-maintenance/<utc>`` is created at
-   the current HEAD before anything is mutated. The predecessor of this command tagged
-   ``pre-a3-remediation`` after two of four batches had already run, which made it useless
-   as a rollback point — that is the specific mistake being designed out.
-2. **A refusal when unpushed ticket commits exist.** ``rev-list origin/tickets..HEAD``
-   being non-empty is the one condition that separates a recoverable local mess from real
-   event loss, so it stops the command rather than producing a warning nobody reads.
-3. **A durable audit record.** What ran, when, by whom, what it changed, and whether the
-   break-glass was used — appended to the tracker's git dir, which survives the operation
-   and is not itself store content that could conflict.
-
-``--force=<reason>`` is the break-glass for the case the envelope does not cover. It
-demands a written reason, is reported loudly in the output, and is recorded in the audit
-line with ``forced: true`` so a reviewer can see later that it was used and why. Same
-posture AGENTS.md takes for the claim/close gates: an escape hatch for a human operator's
-judgment call, not a routine agent move.
-
-Exit 0 = nothing to do / repaired; 1 = refused (unpushed commits, no ``--force``);
-2 = fatal (no tracker / bad args).
+Exit zero means no work or successful repair. Exit one means refusal. Exit two means a missing
+tracker, invalid arguments, or failure to create the backup ref.
 """
 
 from __future__ import annotations

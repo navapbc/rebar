@@ -1,21 +1,9 @@
-"""In-process ``rebar metrics`` — render the full metric registry over a range.
+"""Render every registered metric over an optional time range.
 
-This is the capstone read command (ticket 9a5a). It hydrates the declarative
-metric registry by importing the :mod:`rebar.metrics` **package** (whose
-``__init__`` imports the reader modules — ``event_metrics`` / ``git_metrics`` /
-``sidecar_metrics`` — that register their specs into ``REGISTRY`` as an import
-side effect; importing only ``rebar.metrics.registry`` does NOT trigger them).
-It then evaluates every registered spec against a small context object carrying
-the resolved store root and the ``--since``/``--until`` bounds, composing each
-output entry from BOTH the spec (``lens``) and the evaluate result
-(value/source/confidence, or reason/accruing_since).
-
-Each ``evaluate`` call is wrapped in a fault-isolation ``try/except`` so a single
-misbehaving metric renders as ``unavailable`` rather than crashing the whole
-report — every registered id always appears.
-
-Provenance/adapter isolation: this module NEVER imports any
-``rebar.metrics.adapters`` submodule.
+Importing :mod:`rebar.metrics` hydrates ``REGISTRY`` through reader-module side effects that a
+registry-only import would miss. Each spec receives the resolved repository root and time bounds
+in its evaluation context. Per-metric failure renders that metric as ``unavailable`` without
+omitting other IDs or aborting the report. This command does not import metric adapters.
 """
 
 from __future__ import annotations
