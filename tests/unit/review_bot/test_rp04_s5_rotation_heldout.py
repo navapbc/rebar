@@ -1,16 +1,8 @@
-"""HELD-OUT edge oracle for RP-04 S5 (5851) — AC4 rotation, AC5 telemetry, AC1 freshness.
+"""Startup rotation, snapshot freshness, and telemetry contracts.
 
-The implementer does NOT see this file. It asserts the OBSERVABLE contracts that:
-
-* AC4 — the startup binding is an immutable snapshot of its config's non-secret policy:
-  a running process holds ONE binding (no auto-rebind on ambient change), while a fresh
-  compose (the restart analogue) observes rotated material;
-* AC5 — partial/rejected telemetry credentials disable telemetry fail-open (``setup_tracing``
-  returns ``False`` and never raises), so an operation result cannot depend on it;
-* AC1 — each operation composes a FRESH non-secret snapshot: a captured snapshot is stable
-  while the next compose observes an intervening config change.
-
-Run: copy into ``tests/unit/review_bot/`` as ``test_rp04_s5_rotation_heldout.py``.
+A binding is an immutable per-process snapshot. A fresh composition observes rotated policy,
+and every operation receives a fresh snapshot. Partial or rejected telemetry credentials
+disable tracing without raising or changing operation results.
 """
 
 from __future__ import annotations

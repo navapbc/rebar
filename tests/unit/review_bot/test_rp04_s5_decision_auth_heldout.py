@@ -1,16 +1,8 @@
-"""HELD-OUT edge/behavioural oracle for RP-04 S5 (5851) — AC3.
+"""Decision authorization and runtime forwarding contracts for review-bot startup.
 
-The implementer does NOT see this file. It asserts the OBSERVABLE contracts that:
-
-* decision-bearing Gerrit auth is validated BEFORE any provider/job work, and a
-  blank/whitespace token fails closed with NO vote cast and NO fallback principal
-  (``validate_decision_auth`` refuses; the voter casts nothing);
-* the composed startup LLM runtime is forwarded provider-native into the runner the
-  review actually uses (``get_runner`` is called WITH that exact runtime, not a fresh
-  ambient one).
-
-Run: copy into ``tests/unit/review_bot/`` as ``test_rp04_s5_decision_auth_heldout.py``.
-Reuses the offline voter harness from ``tests/unit/test_review_bot.py`` (basename import).
+Gerrit decision credentials are validated before provider or job work. Blank or whitespace
+credentials fail closed without a vote or fallback principal. The composed provider-native
+``LLMRuntime`` reaches the request runner without an ambient replacement.
 """
 
 from __future__ import annotations
@@ -60,9 +52,8 @@ def test_validate_decision_auth_accepts_a_real_token(tmp_path) -> None:
 
 # ── the voter casts NO vote when decision auth is absent (no fallback) ───────
 def test_voter_casts_no_vote_when_decision_auth_is_blank(monkeypatch, tmp_path) -> None:
-    """Even on an otherwise-clean PASS path (which WOULD cast a +1), a blank decision
-    token means the review fails closed BEFORE provider work: no vote reaches Gerrit and
-    the status is not ``voted`` — there is no anonymous/alternate-principal fallback."""
+    """A blank credential blocks an otherwise passing vote before provider work and permits
+    no fallback principal."""
     _patch_review(monkeypatch, [])  # clean → PASS verdict were the review to run
     g = FakeGerrit()
     store = DedupStore(str(tmp_path / "v.db"))

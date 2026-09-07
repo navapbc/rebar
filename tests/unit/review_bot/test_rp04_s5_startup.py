@@ -1,19 +1,9 @@
-"""RP-04 S5 (5851) happy-path oracle — review-bot startup binding + decision-auth
-validation + LLM-runtime forwarding.
+"""Review-bot startup binding, decision authorization, and LLM runtime contracts.
 
-These are the SPECIFICATION tests for the intended, well-formed behavior:
-
-* ``compose_startup_binding(cfg)`` composes an immutable, non-secret startup binding
-  ONCE, carrying an :class:`~rebar.llm.auth.LLMRuntime` for provider-native LLM auth.
-* ``validate_decision_auth(cfg)`` accepts a present decision-bearing Gerrit token and
-  raises the typed :class:`DecisionAuthError` on a blank one — the guard that must run
-  before any provider/job work.
-* ``adapter.code_review_decision(..., runtime=rt)`` forwards the composed runtime into a
-  real runner injected on the ``CodeReviewRequest`` (the LLM-auth cutover seam), instead
-  of leaving the gate to build an ambient runner.
-
-Only observable behaviour/contracts are asserted (return types, immutability, the typed
-raise, the injected runner) — never private structure.
+``compose_startup_binding`` returns an immutable non-secret binding with a provider-native
+``LLMRuntime``. ``validate_decision_auth`` accepts present Gerrit credentials and raises
+``DecisionAuthError`` for blank values before provider or job work. ``code_review_decision``
+forwards the composed runtime to the injected request runner without an ambient replacement.
 """
 
 from __future__ import annotations
