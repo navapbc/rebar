@@ -9,10 +9,11 @@ name: Mirror Guard
 # GitHub `main` has fallen behind/ahead of Gerrit. Expected ~15s post-submit replication lag
 # self-clears within that window instead of redding the run.
 #
-# It runs `python -m rebar.mirror_guard --replication`. Both reads are cheap and need no
-# elevated auth: the Gerrit `main` SHA is read anonymously, and the GitHub `main` SHA is a
-# public-repo read (the Actions-native GITHUB_TOKEN is passed only to lift API rate limits).
-# So this runs on the default token with no fine-grained PAT.
+# It runs `python -m rebar.mirror_guard --replication` through a thin exit-code wrapper. Both
+# reads are cheap and need no elevated auth: the Gerrit `main` SHA is read anonymously, and the
+# GitHub `main` SHA is a public-repo read (the Actions-native GITHUB_TOKEN is passed only to lift
+# API rate limits). So this runs on the default token with no fine-grained PAT. Exit 1 is a real
+# divergence; exit 2 is an IO/unreachable state where the mirror could not be checked.
 #
 # NOTE: the lock-ruleset-drift check (`--ruleset`) is intentionally NOT run here — it needs
 # `administration:read`, which the default GITHUB_TOKEN cannot be granted. Ruleset drift is
@@ -49,4 +50,28 @@ jobs:
           # Default token only — passed to lift GitHub API rate limits on the public
           # main-SHA read; no elevated scope needed for the replication check.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python -m rebar.mirror_guard --replication
+        run: |
+          set +e
+          python -m rebar.mirror_guard --replication
+          code=$?
+          set -e
+
+          case "$code" in
+            0)
+              echo "mirror-guard: replication in sync" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            1)
+              echo "::error title=Mirror Guard divergence::Gerrit and GitHub main stayed divergent across the lag window."
+              echo "mirror-guard: DIVERGED — Gerrit and GitHub main stayed different." >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+              ;;
+            2)
+              echo "::error title=Mirror Guard unreachable::Could not reach Gerrit/GitHub; mirror state was not checked, not a divergence."
+              echo "mirror-guard: UNREACHABLE — could not check mirror state; not a divergence." >> "$GITHUB_STEP_SUMMARY"
+              exit 2
+              ;;
+            *)
+              echo "::error title=Mirror Guard unexpected exit::mirror_guard exited with unexpected code ${code}."
+              exit "$code"
+              ;;
+          esac
