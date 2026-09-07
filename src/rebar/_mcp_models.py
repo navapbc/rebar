@@ -224,6 +224,19 @@ try:
         summary: str | None
         snippet: str | None
 
+    class ReadyTicketSummaryOut(_Out):
+        """Bounded ready-work discovery projection; full state is available via full=True."""
+
+        model_config = ConfigDict(extra="forbid")
+
+        ticket_id: str
+        alias: str | None
+        title: str
+        ticket_type: str
+        status: str
+        priority: int
+        blocking_summary: str | None
+
     class DepsGraphOut(_Out):
         ticket_id: str
         deps: list[dict] = []
@@ -566,6 +579,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     PlanReviewHealthUnavailableOut = None  # type: ignore[assignment,misc]
     TicketStateOut = None  # type: ignore[assignment,misc]
     SearchResultOut = None  # type: ignore[assignment,misc]
+    ReadyTicketSummaryOut = None  # type: ignore[assignment,misc]
     DepsGraphOut = ClarityResultOut = ValidateReportOut = None  # type: ignore[assignment,misc]
     NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]
     CreateResultOut = ClaimResultOut = GateResultOut = None  # type: ignore[assignment,misc]
