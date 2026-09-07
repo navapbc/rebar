@@ -32,6 +32,7 @@ from rebar._mcp_models import (
     GroundingInfoOut,
     NextBatchOut,
     PlanReviewStatusOut,
+    ReadyTicketSummaryOut,
     SearchResultOut,
     TicketStateOut,
     ValidateReportOut,
@@ -250,28 +251,26 @@ def _register_bridge_projects_read(mcp, ann) -> None:
         return rebar.bridge_projects_list()
 
 
+def _ready_discovery_row(row: dict) -> dict:
+    return {
+        "ticket_id": row.get("ticket_id"),
+        "alias": row.get("alias"),
+        "title": row.get("title"),
+        "ticket_type": row.get("ticket_type"),
+        "status": row.get("status"),
+        "priority": row.get("priority"),
+        "blocking_summary": "ready",
+    }
+
+
 def _discovery_rows(rows, *, full: bool) -> list[dict]:
-    """Project a whole-shape discovery list lean, unless ``full``.
+    """Project a ready-work discovery list to its closed default shape, unless ``full``.
 
-    Lives at module level, not inside the registrar, so the branch does not add to
-    ``register_read_tools``' cyclomatic score (the complexity ratchet counts nested
-    defs into their enclosing function).
-
-    ``list_tickets`` gets its lean projection from the read core, which owns an
-    ``include_body`` flag; ``ready_tickets`` has no such flag on the library surface --
-    ``rebar.ready`` -> ``ready_states`` -> ``public_state`` carries none and this change
-    deliberately adds none -- so it projects here, through the SAME
-    :func:`~rebar._engine_support.reads.lean_projection`. That is what keeps the two
-    discovery surfaces from returning different shapes for the same rows
-    (story 98b8-5f08-1569-45cc).
-
-    The payload bound is applied by the CALLER, after ``TicketStateOut.model_validate``,
-    because the budget must be measured on the validated rows the client actually
-    receives -- see :func:`rebar._mcp_budget._wire_bytes`.
+    The default answers only "what can I work on next?" and keeps the MCP budget from
+    depending on ``TicketStateOut`` defaults. ``full=True`` remains the explicit
+    previous full-state shape.
     """
-    from rebar._engine_support.reads import lean_projection
-
-    return list(rows) if full else [lean_projection(row) for row in rows]
+    return list(rows) if full else [_ready_discovery_row(row) for row in rows]
 
 
 def register_read_tools(mcp, ctx) -> None:
@@ -404,15 +403,16 @@ def register_read_tools(mcp, ctx) -> None:
         return _audit_trail(ticket_id)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def ready_tickets(sort: str | None = None, full: bool = False) -> list[TicketStateOut]:
+    def ready_tickets(
+        sort: str | None = None, full: bool = False
+    ) -> list[ReadyTicketSummaryOut | TicketStateOut]:
         """List tickets ready to work (all blockers closed). ``sort`` orders by
         ``priority|created|updated|id|status`` (prefix ``-`` for descending;
         unset values sort last).
 
-        Lean by default, exactly like ``list_tickets`` — the bodies (``description``,
-        ``comments``) AND the signature material (``authorship_ledger``,
-        ``attestations``, ``signature``, ``keyring``) are omitted. Pass ``full=True``
-        for the complete shape.
+        Discovery-shaped by default: each row carries only ticket id, alias, title,
+        type, status, priority, and blocking summary. Pass ``full=True`` for the
+        complete ``TicketStateOut`` shape.
 
         **BREAKING (pre-1.0), story 98b8-5f08-1569-45cc.** This tool previously returned
         the FULL ticket shape and had no ``full`` flag, so the lean default narrows a
@@ -426,11 +426,9 @@ def register_read_tools(mcp, ctx) -> None:
         **Bounded**, like ``list_tickets``. Its refusal names ``next_batch(epic_id)``
         rather than filters, because this tool accepts none (bug 494b-2dd3-e9d3-4fb0).
         """
+        model = TicketStateOut if full else ReadyTicketSummaryOut
         return _bound_list_payload(
-            [
-                TicketStateOut.model_validate(t)
-                for t in _discovery_rows(rebar.ready(sort=sort), full=full)
-            ],
+            [model.model_validate(t) for t in _discovery_rows(rebar.ready(sort=sort), full=full)],
             tool="ready_tickets",
         )
 

@@ -166,16 +166,10 @@ def test_ready_tickets_is_lean_by_default_with_full_as_the_opt_out(
         assert all(row.get(field) for row in full), f"ready_tickets full=True dropped {field}"
 
 
-def test_both_discovery_surfaces_agree_on_their_default_shape(
+def test_ready_default_is_narrower_than_filterable_list_default(
     rebar_repo: Path, bulky_store, monkeypatch
 ) -> None:
-    """The point of ONE shared projection: the two discovery tools cannot drift apart.
-
-    ``list_tickets`` projects in the read core (which owns ``include_body``) and
-    ``ready_tickets`` projects in the MCP tool layer (the library has no such flag), so
-    they reach ``lean_projection`` by different routes. Sharing a function is only a claim
-    until something compares the two outputs on the same rows.
-    """
+    """The unfilterable ready discovery call is deliberately narrower than list."""
     states = [_bulky_state(i) for i in range(3)]
     bulky_store(3)
     monkeypatch.setattr(rebar, "ready", lambda **_: [dict(s) for s in states])
@@ -183,8 +177,9 @@ def test_both_discovery_surfaces_agree_on_their_default_shape(
     listed = _rows(_call("list_tickets").structuredContent)
     ready = _rows(_call("ready_tickets").structuredContent)
 
-    assert sorted(listed[0]) == sorted(ready[0]), (
-        "the two discovery surfaces have drifted apart: "
+    assert len(ready[0]) < len(listed[0]) and "blocking_summary" in ready[0], (
+        "ready_tickets should now be the smaller discovery shape while list_tickets "
+        "keeps its filterable default: "
         f"list-only={sorted(set(listed[0]) - set(ready[0]))} "
         f"ready-only={sorted(set(ready[0]) - set(listed[0]))}"
     )
@@ -268,6 +263,15 @@ def test_ready_tickets_is_bounded_too(rebar_repo: Path, monkeypatch) -> None:
     assert response.isError
     text = "".join(getattr(b, "text", "") for b in (response.content or []))
     assert json.loads(text[text.index("{") :])["error"] == "response_too_large"
+
+
+def test_ready_tickets_default_discovery_rows_stay_small(rebar_repo: Path, monkeypatch) -> None:
+    rows = [_bulky_state(i) for i in range(3)]
+    monkeypatch.setattr(rebar, "ready", lambda **_: [dict(row) for row in rows])
+
+    response = _call("ready_tickets")
+
+    assert _emitted_bytes(response) / len(rows) < 750
 
 
 def test_a_list_that_fits_is_returned_whole(rebar_repo: Path, bulky_store) -> None:
