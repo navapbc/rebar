@@ -202,6 +202,40 @@ resource "aws_cloudwatch_metric_alarm" "ec2_instance_check" {
   }
 }
 
+# --- Alarm 3b: EC2 CPU saturation (non-burstable host) ---------------------
+# The Gerrit host is intentionally non-burstable (r7g.large), so CPUCreditBalance no longer
+# exists as a meaningful signal. Watch sustained CPU saturation directly instead.
+resource "aws_cloudwatch_metric_alarm" "ec2_cpu_utilization_high" {
+  alarm_name        = "rebar-gerrit-cpu-utilization-high"
+  alarm_description = "EC2 CPUUtilization for the non-burstable rebar Gerrit host is >= 85% for 30 minutes. This replaces burst-credit monitoring after the r7g.large resize."
+
+  namespace   = "AWS/EC2"
+  metric_name = "CPUUtilization"
+  statistic   = "Average"
+
+  dimensions = {
+    InstanceId = data.aws_instance.gerrit.id
+  }
+
+  period              = 300
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
+  threshold           = 85
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+
+  # AWS/EC2 publishes this host metric; missing data means the instance is not reporting rather
+  # than CPU pressure, and the status-check alarms above own host-down detection.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "9892-fff8-1f3b-4759"
+  }
+}
+
 # --- ASSERT (not own): the DLM-targeted data volume exists -----------------
 # S1 OWNS the DLM daily-snapshot policy (backup.tf, retain=7) and the data volume
 # with prevent_destroy (main.tf). S7 declares NO aws_dlm_lifecycle_policy. It only

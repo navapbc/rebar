@@ -6,8 +6,8 @@ variable "aws_region" {
 
 variable "instance_type" {
   type        = string
-  description = "EC2 instance type. t4g.large is Graviton/arm64 — must match the arm64 AL2023 AMI."
-  default     = "t4g.large"
+  description = "EC2 instance type. Must be Graviton/arm64 to match the arm64 AL2023 AMI."
+  default     = "r7g.large"
 }
 
 variable "root_volume_size_gb" {
