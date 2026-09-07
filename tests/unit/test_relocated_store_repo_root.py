@@ -1,13 +1,8 @@
-"""A relocated store (``REBAR_TRACKER_DIR`` outside the checkout) must not make rebar
-infer the repo/config root as ``os.path.dirname(tracker)``.
+"""Keep configuration rooted at the code checkout when the store is relocated.
 
-Sibling of ``chuffy-arbored-goldfish`` (claim + gates.py) — this pins the REMAINING
-``os.path.dirname(tracker)``-as-repo-root sites (ticket auspicial-friended-merganser):
-the ``transition open -> in_progress`` start-work gate, the CLI dispatcher's ``repo_root``,
-scratch cleanup on delete, and the library clarity-check threshold. In a co-located
-checkout ``dirname(tracker)`` == the repo root, so these tests only bite when the store is
-relocated — exactly the deployed MCP-server topology (store at ``/var/gerrit/site/mcp-tickets``,
-repo at ``/app``).
+The suite covers the transition start-work gate, CLI dispatch, delete scratch
+cleanup, and the clarity threshold. Fixtures separate the tracker from the code
+root because a colocated store would hide incorrect ``dirname(tracker)`` usage.
 """
 
 from __future__ import annotations
@@ -53,11 +48,10 @@ def _init_relocated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tu
 def test_transition_open_in_progress_gate_still_applies_when_tracker_outside_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``transition open -> in_progress`` is the OTHER start-work gate path (sibling of the
-    already-fixed ``claim``). ``transition_compute`` computed ``repo_root_str =
-    os.path.dirname(tracker)`` and fed it to ``gates.plan_review_precheck`` as the config
-    root — so on a relocated store the gate flag read from an empty config, i.e. OFF, and
-    the enforcement boundary silently STOPPED APPLYING. (AC#1)
+    """Keep the transition start-work gate active for a relocated tracker.
+
+    Its plan review precheck must read configuration from the code root rather
+    than the tracker's parent.
     """
     repo, _external = _init_relocated_store(tmp_path, monkeypatch)
     # A TASK — bugs/session_logs are gate-exempt, so they cannot show the gate.
@@ -76,11 +70,10 @@ def test_transition_open_in_progress_gate_still_applies_when_tracker_outside_rep
 def test_delete_scratch_cleanup_targets_the_repo_root_not_the_store_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """delete.py passed ``os.path.dirname(tracker)`` to ``scratch.cleanup_for_ticket``.
+    """Send the code root to ticket scratch cleanup.
 
-    On a relocated store that is the store's parent, not the code root, so a ticket's
-    scratch under ``<repo>/.rebar/scratch`` was never cleaned. The fix passes the in-scope
-    ``repo_root`` through. Capture the argument the delete path hands the cleanup helper.
+    A relocated tracker's parent does not contain ``<repo>/.rebar/scratch``. The
+    test captures the argument passed by the delete path.
     """
     from rebar._commands import delete as delete_mod
 
@@ -107,11 +100,10 @@ def test_delete_scratch_cleanup_targets_the_repo_root_not_the_store_parent(
 def test_clarity_threshold_reads_repo_config_on_relocated_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A second site in the same class: ``clarity_check`` resolved its threshold from
-    ``os.path.dirname(tracker)`` — on a relocated store an empty config, so a repo that
-    configured a non-default ``ticket_clarity.threshold`` silently got the built-in
-    default (5) instead. With the fix the threshold discovers the repo config (REBAR_ROOT /
-    git toplevel of cwd), independent of where the store lives.
+    """Read the clarity threshold from the code repository configuration.
+
+    A relocated tracker has no local ``ticket_clarity.threshold``. Resolution
+    therefore uses ``REBAR_ROOT`` or the current Git top level, not the store.
     """
     repo, _external = _init_relocated_store(tmp_path, monkeypatch)
     # Override the co-located gate config with a NON-default clarity threshold.
@@ -156,15 +148,10 @@ def test_transition_gate_off_by_config_still_allows(
     assert result["to"] == "in_progress"
 
 
-# ── injurious-pugnacious-azurevase: the str()-wrapped advisory config reads ──────────
-#
-# composer.py / composer_edit.py computed the ADVISORY description-cap warning's config
-# root as ``os.path.dirname(str(tracker))``. That is the str()-wrapped variant of the same
-# class: on a relocated store the tracker's parent has no rebar.toml, so the cap
-# (verify.max_ticket_description_chars) and the plan-review applicability both read an empty
-# config and the save-time warning was silently SUPPRESSED. The fix resolves the config root
-# from the in-scope ``repo_root`` (str(config.repo_root(repo_root))). Config MUST come from a
-# rebar.toml FILE, not an env var, or the read would be root-independent and hide the bug.
+# Description-cap warnings must read ``rebar.toml`` from the code root. Using
+# ``dirname(str(tracker))`` suppresses both the configured cap and plan review
+# applicability when the tracker is relocated. A file-based setting keeps this
+# test sensitive to root selection.
 
 
 def _relocated_store_with_low_cap(
@@ -183,9 +170,7 @@ def _relocated_store_with_low_cap(
 def test_create_description_cap_warning_fires_on_relocated_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """AC#1 (create path): a create whose description exceeds the repo-configured cap must
-    warn even when the store is relocated. ``cfg_root=os.path.dirname(str(tracker))`` read
-    the store's parent (empty config, default 8,000 cap) and returned None."""
+    """Warn when a create exceeds the code repository's description cap."""
     repo, _external = _relocated_store_with_low_cap(tmp_path, monkeypatch)
     created = rebar.create_ticket(
         "task",
@@ -229,18 +214,11 @@ def test_within_cap_still_silent_on_relocated_store(
     assert created["description_warning"] is None
 
 
-# ── scathing-custommade-bobcat: the detached compaction sweep's config root ──────────
-#
-# ``run_sweep`` is the DETACHED-CHILD compaction entry point and the LAST sanctioned site of
-# this class. It composed ``repo_root = os.path.dirname(tracker)`` and handed that to
-# ``compact_all_cli`` as the config root, so on a relocated store the sweep read DEFAULT
-# compaction config (threshold 10, 30-minute horizon) instead of the project's ``[compact]``
-# block: it folded the RIGHT tickets by the WRONG rule. The fix RESOLVES the code root the way
-# every other config reader does — bare ``config.repo_root_or_none()`` (explicit > REBAR_ROOT >
-# git toplevel of the cwd, which for the detached child is the DURABLE canonical-store parent
-# that ``_proc.detached_child_cwd`` anchors it to). Config MUST come from a rebar.toml FILE,
-# not ``REBAR_COMPACT_THRESHOLD`` / ``REBAR_COMPACTION_HORIZON_NS``, or the read would be
-# root-independent and hide the bug.
+# ``run_sweep`` must pass the resolved code root to ``compact_all_cli``. Using
+# the tracker's parent makes a relocated store read default compaction settings
+# instead of the repository's ``[compact]`` block. Resolution follows explicit
+# root, ``REBAR_ROOT``, then the detached child's Git top level. File-based
+# settings keep the test sensitive to that root.
 
 
 def _relocated_store_folding_everything(
@@ -266,9 +244,7 @@ def _relocated_store_folding_everything(
 def test_run_sweep_folds_by_the_repo_compact_config_on_relocated_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """AC#2: the detached sweep must honour the CODE repo's ``[compact]`` config when the
-    store is relocated. With ``repo_root = os.path.dirname(tracker)`` it read the store's
-    parent — no rebar.toml, so the built-in defaults — and folded nothing."""
+    """Apply the code repository's compaction settings to a relocated store."""
     from rebar._commands import compact_trigger
 
     _repo, external, tid = _relocated_store_folding_everything(tmp_path, monkeypatch)
@@ -286,10 +262,10 @@ def test_run_sweep_folds_by_the_repo_compact_config_on_relocated_store(
 def test_run_sweep_hands_the_resolved_code_root_to_the_sweep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The SPECIFIC behaviour, pinned at the seam so no other guard can rescue it: the root
-    ``run_sweep`` passes to ``compact_all_cli`` is the RESOLVED code root, never the store's
-    parent. Asserting only the fold outcome would survive a fix that happened to land on a
-    root that reads the same config by accident."""
+    """Require ``run_sweep`` to pass the resolved code root across the seam.
+
+    An outcome-only assertion could pass through accidental config rediscovery.
+    """
     from rebar._commands import compact as compact_mod
     from rebar._commands import compact_trigger
 
@@ -313,13 +289,11 @@ def test_run_sweep_hands_the_resolved_code_root_to_the_sweep(
 def test_run_sweep_respects_a_repo_config_that_folds_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Config-effect contrast: the SAME relocated store and the SAME seeded ticket fold
-    nothing when the repo's ``[compact]`` block says so — proving the fold above is the repo
-    config being read, not an unconditional sweep. The horizon is the discriminator, not the
-    threshold: ``_scan_snapshot_state`` (``compact.py``) asks ``compact_plan.needs_folding``,
-    whose BACKFILL arm selects any snapshot-less ticket with at least one foldable event
-    whatever the threshold, so only a horizon that puts these just-written events out of
-    reach can hold the sweep back."""
+    """Prove that folding follows repository configuration rather than running unconditionally.
+
+    The horizon supplies the contrast because the backfill arm selects a
+    snapshot-less ticket regardless of threshold.
+    """
     from rebar._commands import compact as compact_mod
     from rebar._commands import compact_trigger
 
@@ -327,10 +301,8 @@ def test_run_sweep_respects_a_repo_config_that_folds_nothing(
     (repo / "rebar.toml").write_text(
         "[compact]\nthreshold = 1\nCOMPACTION_HORIZON_NS = 3600000000000\n", encoding="utf-8"
     )
-    # LIVENESS. run_sweep swallows every exception (`except Exception: logger.warning`), so
-    # "no SNAPSHOT" alone would also be satisfied by a sweep that crashed or stood aside —
-    # the assertion would pass for the wrong reason. Wrap the REAL sweep (never replace it)
-    # to record that it ran to a clean return code.
+    # Record a clean return from the production sweep because ``run_sweep`` swallows
+    # exceptions and an absent snapshot alone would not prove liveness.
     real = compact_mod.compact_all_cli
     outcome: list = []
 
@@ -355,23 +327,13 @@ def test_run_sweep_respects_a_repo_config_that_folds_nothing(
 def test_run_sweep_resolves_the_code_root_without_rebar_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The OTHER precedence arm — the one the local ``make worktree`` topology rides on.
+    """Exercise Git top-level fallback with ``REBAR_ROOT`` unset.
 
-    Every test above resolves through ``REBAR_ROOT``, which is the DEPLOYED arm. Locally
-    nothing exports it: the detached child gets there on ``repo_root_or_none``'s git-toplevel
-    fallback, read from the cwd ``_proc.detached_child_cwd`` anchored at the canonical store's
-    parent (proven separately in ``test_detached_child_cwd.py`` to be the durable main
-    checkout, not the ephemeral worktree). With ``REBAR_ROOT`` unset and the cwd standing in
-    for that anchor, the sweep must STILL read the code repo's ``[compact]`` block — otherwise
-    the fix only works on the deployment and the local half of the argument is unproven.
-
-    RETAINED DELIBERATELY (a027-d86c AC#3), not deleted for being weak: this is the
-    fold-EFFECT (end-to-end) half of the fallback-arm contract and the config-effect contrast
-    for its horizon. It is END-TO-END only, so it survives the ``repo_root=None`` mutant — the
-    resolved root is discarded but ``compact_all_cli`` re-discovers the same root from this
-    test's cwd and folds by accident. The SEAM half that closes that gap is
-    ``test_run_sweep_seam_pins_the_resolved_code_root_on_the_fallback_arm`` below; the two are
-    kept as a pair.
+    The detached child runs from the canonical store parent, which anchors the
+    durable code checkout rather than the ephemeral worktree. This end-to-end
+    test verifies the compaction effect but survives passing ``repo_root=None``
+    because ``compact_all_cli`` can rediscover the same root. The paired seam
+    test below verifies the exact argument.
     """
     from rebar._commands import compact_trigger
 
@@ -391,32 +353,21 @@ def test_run_sweep_resolves_the_code_root_without_rebar_root(
     )
 
 
-# ── a027-d86c: the SEAM assertion for run_sweep's FALLBACK arm ────────────────────────
-#
-# The end-to-end fallback test above pins the fold EFFECT but survives the ``repo_root=None``
-# mutant: with the cwd inside the code repo, discarding the resolved root and passing ``None``
-# lets ``compact_all_cli`` re-discover the same root and fold by accident. Only a SEAM
-# assertion — recording the exact ``repo_root`` value ``run_sweep`` hands ``compact_all_cli`` —
-# kills that mutant on this arm (the ``REBAR_ROOT`` seam test above kills it only on the
-# deployed arm). The topology below is a REAL worktree symlink over a co-located store so that
-# ``dirname(tracker)`` (the ephemeral worktree) is distinguishable from the realpath-resolved
-# code root; a mock or a co-located dir without the symlink cannot tell the two arms apart.
+# The fallback effect test can pass if ``compact_all_cli`` rediscovers a discarded
+# root from its current directory. This seam assertion records the exact argument.
+# A worktree symlink makes ``dirname(tracker)`` differ from the realpath-resolved
+# code root, so the fixture distinguishes the two implementations.
 
 
 def _colocated_symlinked_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Path, Path]:
-    """The LOCAL topology the fallback arm actually rides on: a canonical store CO-LOCATED at
-    ``<main-checkout>/.tickets-tracker`` inside a git repo whose ``rebar.toml`` folds
-    everything, reached through an ephemeral worktree's ``.tickets-tracker`` SYMLINK — exactly
-    what ``make worktree`` provisions and what ``scathing-custommade-bobcat`` verified
-    out-of-band. Returns ``(main_checkout, worktree_tracker_symlink)``.
+    """Model the symlinked store topology created by ``make worktree``.
 
-    The symlink is load-bearing, not decoration: ``os.path.dirname(worktree_tracker)`` is the
-    EPHEMERAL worktree, while ``realpath(worktree_tracker)``'s parent — the anchor
-    ``_proc.detached_child_cwd`` picks — is the main checkout (the code root). A co-located dir
-    with no symlink cannot tell those two apart, so it could not distinguish the resolved-root
-    arm from the ``dirname(tracker)`` arm (a027-d86c AC#4)."""
+    Return the main checkout and worktree tracker symlink. The symlink makes its
+    lexical parent the ephemeral worktree while its resolved parent remains the
+    main checkout selected by ``_proc.detached_child_cwd``.
+    """
     monkeypatch.delenv("REBAR_COMPACT_THRESHOLD", raising=False)
     monkeypatch.delenv("REBAR_COMPACTION_HORIZON_NS", raising=False)
     monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
@@ -448,15 +399,12 @@ def _colocated_symlinked_store(
 def test_run_sweep_seam_pins_the_resolved_code_root_on_the_fallback_arm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """SEAM assertion for the FALLBACK arm (``REBAR_ROOT`` unset). The root ``run_sweep`` hands
-    ``compact_all_cli`` on this arm must be the RESOLVED code root — never ``None`` (which the
-    end-to-end ``test_run_sweep_resolves_the_code_root_without_rebar_root`` lets
-    ``compact_all_cli`` re-discover from the same cwd, folding by accident: the mutant a027-d86c
-    reports as surviving) and never ``os.path.dirname(tracker)`` (the ephemeral worktree on this
-    symlinked topology, which holds no ``rebar.toml``).
+    """Pin the fallback argument to the resolved code root.
 
-    Real symlinked store, real ``_proc.detached_child_cwd`` anchor — the resolution is not
-    mocked; only ``compact_all_cli`` is wrapped to record the value handed across the seam."""
+    It must be neither ``None`` nor the symlink's lexical parent. The test uses
+    the fixture's store symlink and detached-child anchor, wrapping only
+    ``compact_all_cli`` to capture the seam value.
+    """
     from rebar._commands import compact as compact_mod
     from rebar._commands import compact_trigger
     from rebar._proc import detached_child_cwd
@@ -500,26 +448,16 @@ def test_run_sweep_seam_pins_the_resolved_code_root_on_the_fallback_arm(
     )
 
 
-# ── flowered-basaltic-beagle: the reads.py realpath()/abspath() config reads ─────────
-#
-# ``ensure_fresh`` and ``_load_scratch`` (reads.py) each read a ``compose_config()``-derived
-# value from a root that was composed from the tracker path:
-#   * ``ensure_fresh`` — ``sync.pull`` (via ``_sync_disabled(os.path.dirname(realpath(tracker)))``)
-#     and ``tickets.branch`` (via ``tickets_branch(os.path.dirname(tracker_abs))``).
-#   * ``_load_scratch`` — ``scratch.base_dir`` (default under
-#     ``os.path.dirname(abspath(tracker))``).
-# These are the realpath()/abspath() members of the class (feisty's guard blind spot). On a
-# relocated store the tracker's parent holds no rebar.toml, so each read resolved an empty
-# config; the fix routes all three through ``config.repo_root_or_none()`` (the CODE root).
+# ``ensure_fresh`` and ``_load_scratch`` must resolve ``sync.pull``,
+# ``tickets.branch``, and ``scratch.base_dir`` from the code root. Building a
+# root from the relocated tracker's resolved or absolute path reads empty config.
 
 
 def _reads_relocated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
-    """A CODE checkout and a store in SEPARATE trees, code root pinned via ``REBAR_ROOT``.
+    """Return a code root and tracker in separate trees.
 
-    Returns ``(code_root, tracker)``. The tracker's parent (``mcp-tickets/``) is deliberately
-    NOT the code root, so a site that composes a root from the tracker path lands in the wrong
-    tree. Lighter than ``_init_relocated_store`` — these reads.py sites take an explicit
-    ``tracker`` and never open the store, so no ``rebar init`` is needed.
+    ``REBAR_ROOT`` pins the code checkout. These read paths accept the tracker
+    directly, so the fixture does not initialize a store.
     """
     code_root = tmp_path / "mcp-code"
     store = tmp_path / "mcp-tickets"
@@ -533,11 +471,9 @@ def _reads_relocated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> t
 def test_load_scratch_reads_scratch_under_the_code_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``_load_scratch`` (scratch.base_dir site, reads.py) must default the scratch base to
-    ``<code_root>/.rebar/scratch``. The payload is placed ONLY under the code root, so a site
-    that instead composes ``<store_parent>/.rebar/scratch`` (the pre-fix
-    ``os.path.dirname(os.path.abspath(tracker))``) finds nothing — RED pre-fix (empty dict),
-    GREEN post-fix (the payload is read). (AC#1)
+    """Default scratch reads to ``<code_root>/.rebar/scratch``.
+
+    The payload exists only there, so using the store parent returns no data.
     """
     from rebar._engine_support import reads
 
@@ -561,10 +497,9 @@ def test_load_scratch_reads_scratch_under_the_code_root(
 def test_ensure_fresh_resolves_sync_and_branch_from_the_code_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``ensure_fresh`` reads ``sync.pull`` (via ``_sync_disabled``) and ``tickets.branch`` (via
-    ``tickets_branch``). Both must be resolved with the CODE repo root. We capture the ``root``
-    each receives and assert it is the code root — RED pre-fix (the store's parent, the
-    ``os.path.dirname(...realpath(tracker))`` spelling), GREEN post-fix. (AC#1)
+    """Resolve ``sync.pull`` and ``tickets.branch`` from the code root.
+
+    Capture the root received by both configuration readers.
     """
     import os as _os
 
@@ -620,14 +555,9 @@ def test_ensure_fresh_local_read_context_skips_root_resolution(
     assert called == [], "a no_sync read must not resolve sync.pull at all"
 
 
-# ── flowered-basaltic-beagle: fsck/freshness tickets.branch/tickets.remote config reads ──
-#
-# The plan-review gate (G1G2/G6) correctly identified that fsck_tracker_health and freshness
-# READ compose_config() — `config.tickets_branch()` / `config.tickets_remote()` resolve
-# `tickets.branch` / `tickets.remote` from rebar.toml — so by the approved principle #1 they
-# resolve the CODE repo root, exactly like reads.py:249. They were initially mis-bucketed as
-# store-root git ops; these oracles pin the corrected code-root resolution (RED against the
-# `dirname(realpath(tracker))` spelling, GREEN once each resolves via repo_root_or_none()).
+# Fsck and freshness read ``tickets.branch`` and ``tickets.remote`` from
+# ``rebar.toml``. Capture their roots to keep configuration on the code checkout
+# while Git operations continue to target the store.
 
 
 def _capture_branch_remote_roots(monkeypatch: pytest.MonkeyPatch) -> dict:

@@ -1,21 +1,9 @@
-"""RP-06 S7 — the cross-gate boundary guard (AC3).
+"""Guard the shared cross-gate discovery boundary.
 
-A repository-policy / contract test that FAILS the build on the three ways the cross-gate
-cutover could be silently undone:
-
-  (a) a review gate reading packaged/project routing DIRECTLY (``overlay._load_overlay`` or
-      the ``criteria_routing.json`` resource), bypassing the single ``CriteriaSnapshot``
-      policy authority;
-  (b) a SECOND discovery scheduler outside the shared kernel — a module that re-implements
-      the dependency-ordered unit executor (a ``graphlib`` topological schedule over the
-      kernel's ``DiscoveryUnitPlan``/``DiscoveryStagePlan`` types) instead of calling the one
-      ``review_kernel.discovery.execute_stage``;
-  (c) a per-unit trace/debug field added to the review or review-status public OUTPUT
-      schemas (which must stay narrow — internal traces live in the reducer-ignored journal).
-
-Each detector is proven to have TEETH against a synthetic violation, then asserted clean on
-the real tree (the ``repo_policy`` cases). The detectors are semantic/AST — a docstring or
-comment MENTIONING a prohibited symbol is never a violation.
+Review gates must read routing through ``CriteriaSnapshot``, use the shared
+dependency scheduler, and keep per-unit traces out of public output schemas.
+Each semantic AST detector is tested against a synthetic violation and the
+repository. Mentions inside comments or docstrings do not count as violations.
 """
 
 from __future__ import annotations

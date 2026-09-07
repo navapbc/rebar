@@ -1,16 +1,9 @@
-"""RP-06 S7 — the cross-gate discovery SHADOW comparator
-(``rebar.llm.review_kernel.discovery_shadow``).
+"""Test the pure cross-gate discovery shadow comparator.
 
-The shadow comparator certifies the pre-kernel→kernel cutover: from ONE observed
-call/result set of a review run it reconstructs the *legacy* reference derivation and
-compares it, field by field, against the *RP-06* kernel derivation. Every divergence is
-reported EXCEPT the small, enumerated approved-delta allowlist (the deliberate behavior
-changes the cutover introduced). The comparator is a pure, deterministic function — it
-issues NO provider/model call and never controls a gate's final verdict.
-
-All assertions here are on OBSERVABLE contracts: the returned ``ComparisonReport`` (its
-``mismatches`` / ``accepted`` / ``ok``), the ``Mismatch`` field-level shape, and the
-reconstructed projection's outcomes/dispositions — never private structure or source text.
+It reconstructs the legacy projection from one observed run and compares it
+field by field with the kernel projection. Only enumerated migration deltas are
+accepted. The comparator makes no provider call and cannot decide the gate.
+Tests assert public report, mismatch, outcome, and disposition contracts.
 """
 
 from __future__ import annotations
@@ -24,7 +17,7 @@ from rebar.llm.review_kernel import discovery_shadow as ds
 pytestmark = pytest.mark.unit
 
 
-# ── projection builders (observable inputs only) ───────────────────────────────
+# Observable projection inputs.
 def _unit(unit_id: str, **kw: object) -> ds.UnitProjection:
     """One projected discovery unit; every field defaults to a cutover-invariant value so a
     test overrides only the axis it exercises."""
@@ -70,10 +63,7 @@ def _categories(report: ds.ComparisonReport) -> set[str]:
     return {a.category for a in report.accepted}
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HAPPY PATH — the diff machinery + Mismatch shape + no-overlay reconstruction.
-# (These remain visible to the blind implementer.)
-# ══════════════════════════════════════════════════════════════════════════════
+# Happy path and no-overlay reconstruction.
 def test_matching_projections_report_ok_with_no_mismatches() -> None:
     """Two identical projections diff to nothing: ``ok`` is True and both lists are empty."""
     legacy = _stage((_unit("a"), _unit("b")))
@@ -108,13 +98,10 @@ def test_no_overlay_run_reconstructs_to_an_identical_legacy_projection() -> None
     assert report.mismatches == ()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HELD-OUT — allowlist categories (AC1), the nine cross-gate fixtures (AC2),
-# legacy-checkpoint ignore + success-only checkpointing (AC5), purity (AC1).
-# ══════════════════════════════════════════════════════════════════════════════
+# Held-out cross-gate, checkpoint, and purity cases.
 
 
-# ── AC1: the approved-delta allowlist, one category at a time ───────────────────
+# AC1: approved deltas.
 def test_allowlist_names_exactly_the_six_approved_deltas() -> None:
     assert ds.APPROVED_DELTAS == frozenset(
         {
@@ -224,7 +211,7 @@ def test_success_only_checkpointing_is_an_approved_delta() -> None:
     assert "success_only_checkpoint" in _categories(report)
 
 
-# ── AC1: the allowlist is exact — look-alikes that are NOT approved still fire ──
+# AC1: unapproved look-alikes.
 def test_dropping_a_non_disabled_builtin_is_not_an_approved_delta() -> None:
     """RP-06 dropping a built-in that the overlay did NOT disable is a real regression —
     reported despite superficially resembling the disable delta."""
@@ -279,7 +266,7 @@ def test_identity_field_divergence_is_always_reported(field: str) -> None:
     assert field in _fields(report)
 
 
-# ── AC2: the nine cross-gate fixtures → approved dispositions + trace outcomes ──
+# AC2: cross-gate fixtures.
 def _observed_no_overlay() -> ds.ObservedDiscovery:
     return ds.ObservedDiscovery(rp06=_stage((_unit("a"), _unit("b"))))
 
@@ -395,7 +382,7 @@ def test_systemic_and_cancellation_fixtures_match_legacy_with_no_delta() -> None
         assert report.ok is True, name
 
 
-# ── AC5: legacy-checkpoint ignore + success-only checkpoint enforcement ─────────
+# AC5: checkpoint rules.
 def test_a_legacy_checkpoint_envelope_never_changes_the_comparison() -> None:
     """Presence of a legacy-namespace checkpoint is inert: the report is identical to the
     run without it (the envelope is IGNORED, never resumed)."""
@@ -470,7 +457,7 @@ def test_the_budget_shed_fixture_carries_a_real_shed_unit_that_stays_inert() -> 
     assert "model" in _fields(tampered_report)
 
 
-# ── AC1: the comparator is pure — no provider call, deterministic ──────────────
+# AC1: deterministic purity.
 def test_compare_discovery_is_deterministic() -> None:
     observed = _observed_disable_retune()
     first = ds.compare_discovery(observed)

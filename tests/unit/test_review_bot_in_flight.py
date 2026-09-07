@@ -1,16 +1,8 @@
-"""``/health`` must report the in-flight review count (bug 34cd).
+"""Expose every running review through the ``/health`` in-flight count.
 
-``infra/scripts/autodeploy.sh`` reads ``in_flight`` to decide whether recreating this container
-would KILL a running review. That makes the field a load-bearing deploy contract, not a debugging
-nicety: if it silently stopped counting a review path, the deploy loop would resume killing
-reviews mid-flight — invisibly, because a killed review fails nothing and so emits no
-``VOTER_ERROR`` and leaves ``restarts`` at 0.
-
-The coverage that matters most is the RECONCILER path. uvicorn's shutdown drain waits on
-``queue.join()``, which covers only webhook-queued events; the backfill reconciler awaits
-``review_and_vote`` inline, so its review is cancelled outright on shutdown — and the reconciler
-is the path that RETRIES a killed review. A busy signal blind to it would let the deploy loop
-keep killing the very work meant to heal the gate.
+Autodeploy uses this field to avoid replacing a container during a review. The
+count must include the reconciler, which awaits reviews outside the webhook
+queue and therefore is not protected by the queue shutdown drain.
 """
 
 from __future__ import annotations
@@ -132,24 +124,13 @@ def test_health_endpoint_reports_the_in_flight_count(monkeypatch: pytest.MonkeyP
 
 
 def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Bug 9f63 AC: 'not queued' must be distinguishable from 'queued behind N others'.
+    """Distinguish an absent event from one queued behind other reviews.
 
-    ``in_flight`` alone counts only reviews already RUNNING, so a change waiting behind a
-    backlog and a change whose webhook was dropped present identically — that ambiguity is
-    what led an agent to read a queued review as an outage and abandon correct work.
-    ``queue_depth`` is the missing half: with it, an operator can tell 'the bot never got
-    the event' (depth 0, no vote) from 'the bot has it, N ahead of you'.
-
-    Driven by awaiting the handler directly rather than through ``TestClient``. The route
-    returns this dict as-is, so it IS the response body — the contract is unchanged — but
-    no ASGI client is constructed, which matters: ``TestClient`` used as a context manager
-    runs the app lifespan, and that starts the queue worker, the backfill reconciler and
-    the snapshot janitor, then on exit awaits ``queue.join()`` under
-    ``shutdown_drain_seconds()`` (1200s). None of that belongs behind an assertion about
-    one JSON field, and the janitor's startup sweep is a real filesystem walk that has no
-    business running here. The sibling test above already covers the HTTP surface.
-
-    Requires the ``reviewbot`` extra (fastapi); skipped without it.
+    ``in_flight`` counts running work while ``queue_depth`` exposes the backlog.
+    Awaiting the handler directly verifies its returned response body without
+    starting workers, the reconciler, the janitor, or the shutdown drain. The
+    sibling test covers the HTTP surface. This test requires the ``reviewbot``
+    extra.
     """
     pytest.importorskip("fastapi")
 
@@ -182,12 +163,10 @@ def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch
 
 
 def test_health_exposes_in_flight_without_needing_the_reviewbot_extra() -> None:
-    """Same contract as the endpoint test above, asserted WITHOUT fastapi.
+    """Protect the ``in_flight`` response field without requiring FastAPI.
 
-    The endpoint test is ``importorskip``-gated on the ``reviewbot`` extra, so in the default
-    test tier it is skipped — and a skipped test would leave the deploy loop's parse target
-    (``json.load(...)["in_flight"]``) unverified in exactly the tier that gates most changes.
-    This reads the handler's source instead, so removing the field can never be a silent green.
+    The endpoint test may skip without the ``reviewbot`` extra. This structural
+    check keeps autodeploy's parse target covered in the default test tier.
     """
     from pathlib import Path
 
@@ -203,13 +182,10 @@ def test_health_exposes_in_flight_without_needing_the_reviewbot_extra() -> None:
 
 
 def test_the_reconciler_path_is_counted_too(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The reconciler awaits ``review_and_vote`` INLINE, outside the webhook queue that
-    uvicorn's shutdown drains — so it is the path a deploy silently kills, and the one the
-    busy signal most needs to see.
+    """Require the reconciler to call the counted review entry point.
 
-    Asserted structurally (that reconcile calls the counted entry point) rather than by driving
-    a whole backfill pass: what can regress is someone routing the reconciler at the uncounted
-    ``_review_and_vote`` to skip the wrapper.
+    Reconciler work runs outside the drained webhook queue. This structural test
+    rejects routing it directly to the uncounted ``_review_and_vote`` function.
     """
     from pathlib import Path
 

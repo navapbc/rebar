@@ -1,16 +1,9 @@
-"""Config-as-artifact guard for the canary's bug-close commands (ticket ed13).
+"""Guard the canary's classified bug-close commands.
 
-Ticket ed13 made ``--class <value>`` REQUIRED to close a BUG ticket — even with
-``--force``. A close command that omits ``--class`` fails at runtime with
-"closing a bug ticket requires --class", which turns the canary RED on every
-recovery (regression guard for bug 0e15).
-
-Ticket e602 migrated the canary's close-on-recovery commands out of workflow
-YAML into ``scripts/canary_bridge.py``, so this guard re-points there: it
-drives both alert-lifecycle close paths through ``main()`` with a fake runner
-and asserts every ``rebar transition`` argv carries a valid ``--class``. A
-YAML-side assertion keeps the old scan from passing vacuously: no ``rebar
-transition`` may reappear in the canary workflow's run-blocks.
+``--class`` remains required even with ``--force``. These tests drive both
+alert recovery paths through ``scripts/canary_bridge.py`` and require every
+``rebar transition`` argument vector to carry a valid class. They also reject
+transition commands in workflow YAML, which would make the script check vacuous.
 """
 
 from __future__ import annotations

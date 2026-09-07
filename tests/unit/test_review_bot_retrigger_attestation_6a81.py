@@ -1,25 +1,10 @@
-"""`rerun-llm-review` accepts a `bugfix-size-attestation`-only block once attested (6a81).
+"""Allow a re-review when only an earned bugfix-size attestation blocked it.
 
-WHY THIS ARM EXISTS. `retrigger` refuses every current-revision `finding`, on the
-reasoning that the fix for a finding is amend + re-push. That is right for a code veto
-and WRONG for `bugfix-size-attestation`, whose remedy is not a code change at all: you
-write the plan into the ticket and run `rebar review-plan <id>`.
-
-Hit for real on change 1378 — the attestation was earned, the finding was stale,
-`rerun-llm-review` still refused it, and a no-code-change patchset COPIES the -1 forward
-under the label's copy condition. The only escape was inventing a code change, which is
-churn the gate should never require.
-
-THE SECURITY PROPERTY UNDER TEST, unchanged from the original module: eligibility is
-decided privileged-side from the bot's OWN durable vote message plus the ticket store,
-never from anything the requesting comment says. The forged-comment test below is the
-assertion that would catch a future refactor which starts trusting the comment.
-
-THE TRUNCATION PROPERTY, which is why the header count is load-bearing:
-`adapter.py:129-139` renders only the first TEN findings and clips each detail at 240
-chars. So "the rendered lines mention only bugfix-size-attestation" does NOT mean it was
-the only blocking finding. The header states the total, so the accept path requires
-exactly 1 there.
+Eligibility comes from the bot's durable vote message and the ticket store,
+never from the requesting comment. Ordinary code findings still require an
+amended patchset. The summary header must report exactly one finding because
+the rendered list is capped at ten and each detail is truncated. Forged text,
+unreadable attestations, malformed summaries, and additional findings refuse.
 """
 
 from __future__ import annotations
@@ -118,12 +103,10 @@ class RetriggerGerrit:
 
 
 def _trailer_ticket(commit_message: str, repo_root=None):
-    """Stand-in for the gate's store-backed resolver.
+    """Parse the trailer without coupling this suite to the ambient store.
 
-    The real `ticket_for_commit_message` resolves the ref against the tracker; depending on the
-    ambient store would make these tests environment-coupled. The property under test is which id
-    the retrigger PASSES ALONG (trailer, not finding text), so a pure trailer parse is the faithful
-    double — the resolver has its own tests.
+    These tests verify which ticket ID retrigger forwards. The store-backed
+    resolver has separate coverage.
     """
     m = re.search(r"^rebar-ticket:\s*(\S+)\s*$", commit_message or "", re.MULTILINE)
     return m.group(1) if m else None
@@ -195,11 +178,9 @@ def test_the_accept_path_only_resets_to_fixed_neutral_then_posts_reply(
 def test_a_multi_finding_block_is_REFUSED_even_when_only_the_attestation_line_renders(
     tmp_path, accepted_attestation
 ):
-    """THE TRUNCATION CASE. `adapter.py` renders only the first 10 findings.
+    """Refuse when a truncated list hides additional blocking findings.
 
-    A block with 12 findings whose first rendered line happens to be the attestation criterion must
-    NOT unlock. Reading eligibility off the rendered LIST would let a real code veto through; the
-    header's total is the only trustworthy count.
+    The rendered list stops at ten, so only the header provides the total.
     """
     cfg = _cfg(tmp_path)
     gerrit = RetriggerGerrit([_finding_message(total=12, criteria=(_CRIT,))])
@@ -227,20 +208,12 @@ def test_a_two_criteria_block_is_REFUSED(tmp_path, accepted_attestation):
 def test_a_flagged_attestation_is_REFUSED_and_the_reply_NAMES_the_verdict(
     tmp_path, monkeypatch, verdict
 ):
-    """A present-but-invalid attestation must not unlock, and the reply must say WHICH state did it.
+    """Refuse flagged attestations and name the observed verdict.
 
-    `stale-material` is the important one: attest, then edit the plan, and the attestation no longer
-    covers what it claims to. If that unlocked a re-review the gate would be bypassable by editing.
-
-    Naming the observed verdict is the other half of the acceptance criterion and is load-bearing
-    for the contributor: the generic refusal text sends them to `git commit --amend`, which is
-    precisely the wrong instruction here — their remedy is a TICKET action. Asserting only
-    `result is None` would pass against a build that dropped the `detail` plumbing in
-    `_refusal_message`, leaving the contributor with advice that cannot fix their block.
-
-    Every parameter is a REAL member of the gate's `FLAG_VERDICTS`; an invented literal would take
-    the unknown-literal fail-open path into the `infra` bucket and so would not exercise the flagged
-    case it claims to (that path is covered separately below).
+    A plan edit can make an attestation stale, so accepting it would bypass the
+    gate. Naming the verdict directs the contributor to ticket remediation
+    instead of an unrelated commit amendment. Every parameter belongs to
+    ``FLAG_VERDICTS``. Unknown verdicts exercise the separate infrastructure path.
     """
     _patch_gate(monkeypatch, verdict=verdict)
     cfg = _cfg(tmp_path)
@@ -267,15 +240,11 @@ def test_a_flagged_attestation_is_REFUSED_and_the_reply_NAMES_the_verdict(
 def test_an_infra_verdict_does_not_accept_and_the_reply_NAMES_the_verdict(
     tmp_path, monkeypatch, verdict
 ):
-    """An infra verdict is not evidence the attestation exists, so it must not unlock here.
+    """Refuse infrastructure verdicts and identify their distinct remedy.
 
-    The reply must name it too, and name it as `infra` rather than `flag`: this contributor's
-    attestation may be perfectly good and merely unreadable, so the remedy differs from the flagged
-    case and the message must not conflate them.
-
-    `error` is the declared infra literal; `unavailable` is NOT a known literal at all and so
-    exercises `bucket_for_verdict`'s unknown-future-literal fail-open. Both must refuse here — an
-    unreadable attestation is not an attestation.
+    ``error`` is the declared infrastructure value. ``unavailable`` exercises
+    unknown-value classification. Neither proves that an attestation exists,
+    and neither may be reported as a flagged attestation.
     """
     _patch_gate(monkeypatch, verdict=verdict)
     cfg = _cfg(tmp_path)
@@ -299,21 +268,15 @@ def test_the_classifier_raising_REFUSES(tmp_path, monkeypatch):
     assert _run(_comment_event(), cfg, gerrit) is None
 
 
-# ── every PARSE failure refuses — asserted case by case, not assumed ─────────────
-#
-# `sole_blocking_criterion` is the whole soundness argument of this arm: it is what turns "the bot
-# blocked" into "the bot blocked for exactly one reason, and that reason was the attestation". Each
-# way the parse can fail must be shown to refuse, because a parse that cannot ESTABLISH the
-# precondition is not evidence the precondition holds. The remaining two failure modes have their
-# own tests above: an unresolvable ticket id, and the classifier raising.
+# Every parse failure refuses because it cannot prove that the attestation was
+# the sole blocking criterion. Separate tests cover unresolved tickets and a
+# classifier exception.
 
 
 def _raw_finding_message(body: str) -> dict:
-    """A bot verdict message with a `finding` tag and an ARBITRARY summary body.
+    """Build a finding-tagged verdict with an arbitrary malformed summary.
 
-    `_finding_message` can only build well-formed summaries; these cases need malformed ones, so the
-    tag line (which is what makes `latest_bot_tag_state` classify this as `finding`) is kept intact
-    and only the summary below it is corrupted.
+    The intact tag preserves classification while tests corrupt only the body.
     """
     return {
         "_revision_number": 2,
@@ -338,11 +301,7 @@ def _assert_refused_as_a_plain_finding(gerrit, result) -> None:
 
 
 def test_a_MISSING_HEADER_refuses(tmp_path, accepted_attestation):
-    """No total means soleness is unproven, even though the one rendered line is the criterion.
-
-    The header is the ONLY trustworthy count (`adapter.py` renders at most ten findings), so without
-    it a twelve-finding block and a one-finding block are indistinguishable from the list alone.
-    """
+    """Refuse without a header because the capped list cannot prove soleness."""
     assert retrigger.sole_blocking_criterion(_ATTESTATION_LINE) is None
 
     cfg = _cfg(tmp_path)
@@ -361,11 +320,7 @@ def test_a_MISSING_HEADER_refuses(tmp_path, accepted_attestation):
     ],
 )
 def test_an_UNPARSEABLE_COUNT_refuses(tmp_path, accepted_attestation, header):
-    """A header whose count is not a plain integer proves nothing, so it must not unlock.
-
-    Parametrised over the shapes a reworded or partially-rendered summary could produce; each must
-    fail closed rather than fall through to "assume 1".
-    """
+    """Refuse malformed counts instead of assuming that one finding exists."""
     body = f"{header}\n{_ATTESTATION_LINE}"
     assert retrigger.sole_blocking_criterion(body) is None
 
@@ -376,11 +331,7 @@ def test_an_UNPARSEABLE_COUNT_refuses(tmp_path, accepted_attestation, header):
 
 
 def test_a_MISSING_CRITERION_LINE_refuses(tmp_path, accepted_attestation):
-    """A credible header with nothing rendered under it names no criterion, so nothing is unlocked.
-
-    Without this the arm could unlock on the header alone — accepting a block whose single finding
-    was some entirely different criterion that simply failed to render.
-    """
+    """Refuse a header that renders no criterion beneath it."""
     body = "rebar code review found 1 blocking issue(s):\n(no findings rendered)"
     assert retrigger.sole_blocking_criterion(body) is None
 
@@ -407,11 +358,9 @@ def test_a_FORGED_criterion_and_ticket_in_the_COMMENT_are_ignored(tmp_path, acce
 
 
 def test_the_ticket_id_comes_from_the_commit_TRAILER_not_the_finding_text(tmp_path, monkeypatch):
-    """The trailer wins, matching how `apply_bugfix_size_gate` itself resolves the ticket.
+    """Use the commit trailer rather than truncated or forged finding text.
 
-    The finding detail is clipped at 240 chars (`adapter.py:133`), so parsing the id out of it is
-    fragile; the trailer is the durable source. Here the finding text names a DIFFERENT ticket, and
-    the classifier must be asked about the TRAILER's ticket.
+    The classifier must receive the trailer's ticket when the detail names another.
     """
     asked: list[str] = []
     _patch_gate(monkeypatch, record=asked)

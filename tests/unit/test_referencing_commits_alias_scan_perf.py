@@ -1,14 +1,8 @@
-"""The close-precheck referencing-commit scan must resolve historical alias
-trailers against ONE store pass, not one full-store alias scan per distinct
-alias.
+"""Bound historical trailer resolution to one ticket-store scan.
 
-`referencing_commits` walks the whole code history and resolves every commit's
-`rebar-ticket:` trailer. When those trailers are aliases, the old resolver ran a
-fresh full-store alias scan (`os.listdir(tracker)` + a per-ticket CREATE/SNAPSHOT
-read) for EACH distinct alias — O(distinct_aliases x store) — which on a large
-store turns a single close into tens of minutes of pure JSON parsing. The
-contract asserted here is a bounded number of tracker-root scans regardless of
-how many distinct aliases the history references, plus unchanged correctness.
+``referencing_commits`` resolves aliases found while walking code history. The
+number of tracker-root scans must remain bounded as distinct aliases grow while
+resolution results remain unchanged.
 """
 
 from __future__ import annotations
