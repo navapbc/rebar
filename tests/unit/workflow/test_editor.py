@@ -108,12 +108,8 @@ def test_served_assets_are_allow_listed():
 
 
 def test_built_bundle_carries_structured_field_paths():
-    # Story a83a + da27 AC "no raw JSON textarea": the properties panel renders STRUCTURED
-    # per-field entries as the SOLE editor. The faithful oracle is the browser tier
-    # (tests/e2e/test_editor_browser.py), but as an always-on floor assert the built bundle
-    # carries the structured-field + field-validation code paths AND no longer carries the
-    # removed raw-JSON editor — so a build that dropped the structured paths (or reintroduced
-    # the raw textarea) can't pass silently. Skips if not built.
+    # The bundle exposes structured field and validation paths and contains no raw JSON editor.
+    # Browser tests cover interaction behavior.
     if not editor.assets_available():
         pytest.skip("editor bundle not built (run editor_assets npm build)")
     js = editor.read_asset("editor.js") or b""
@@ -394,10 +390,8 @@ def _repo_server(tmp_path, monkeypatch):
 
 @pytest.mark.allow_network  # loopback only
 def test_library_create_criterion_reference_writes_raw_id_no_overlay(_repo_server):
-    # Bug jinx-node-mudra: authoring a batch-criterion rubric (kind=criterion, NO routing) must
-    # write the criterion-category rubric at the RAW id — the id the batch step references — and
-    # return 200. It must NOT force the routing overlay (which 400'd an un-namespaced id and
-    # stranded the reference on the step) nor sanitize the filename to plan-review-<id>.
+    # A criterion reference without routing writes its rubric at the raw identifier and creates
+    # no routing overlay.
     repo, base, token = _repo_server
     status, body = _post_library_create(
         base, token, {"id": "my-new-crit", "kind": "criterion", "body": "Check the new thing."}
@@ -414,9 +408,8 @@ def test_library_create_criterion_reference_writes_raw_id_no_overlay(_repo_serve
 
 @pytest.mark.allow_network  # loopback only
 def test_library_create_criterion_routing_still_requires_project_prefix(_repo_server):
-    # The genuine ACTIVATION flow (routing present) is unchanged: an un-namespaced id is still
-    # rejected (namespace rule intact), while a project.<name> id round-trips to the sanitized
-    # rubric filename + writes the routing overlay.
+    # Routed criteria require a `project.*` identifier and write the sanitized rubric filename
+    # with the routing overlay.
     _repo, base, token = _repo_server
     routing = {
         "exec": "1-TURN",
@@ -454,9 +447,8 @@ def test_sequential_saves_each_back_up_the_prior_ir(tmp_path):
 
 @pytest.mark.allow_network  # loopback only
 def test_library_create_refuses_bad_glob_code_review_project_criterion(_repo_server):
-    # RP-06 S6 AC3 (server seam): saving a project.* code-review LLM criterion whose applies_to
-    # globs are missing/empty is refused fail-loud with the located repository-wide remedy, and
-    # NOTHING is written — neither the rubric prompt nor the routing overlay (fail BEFORE write).
+    # Invalid `applies_to` globs report the repository-wide remedy before either the rubric or
+    # routing overlay is written.
     repo, base, token = _repo_server
     routing = {
         "gate": "code_review",
@@ -481,9 +473,7 @@ def test_library_create_refuses_bad_glob_code_review_project_criterion(_repo_ser
 
 @pytest.mark.allow_network  # loopback only
 def test_library_create_authors_code_review_criterion_under_the_code_review_gate(_repo_server):
-    # RP-06 S6: a VALID project.* code-review LLM criterion authored via the editor lands under
-    # the CODE_REVIEW gate (routing section + activate membership), not silently under plan_review
-    # — the save path honors the routing's declared gate.
+    # A code-review criterion is stored and activated under its declared gate, not `plan_review`.
     repo, base, token = _repo_server
     routing = {
         "gate": "code_review",

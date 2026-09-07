@@ -1,16 +1,7 @@
-"""Held-out oracle: the completion verifier's prefetch must read verdict-bearing
-working-tree file bodies from the ``--ref``-PINNED code snapshot (A), never from the
-live server checkout (B).
+"""Verify completion prefetch reads verdict evidence from the active pinned code root.
 
-Bug shimmery-customary-dorking (831f-326d-be85-437a). ``gate_ops.completion_precheck``
-calls ``assemble_prefetch(spec, repo_root=ctx.repo_root)`` where ``ctx.repo_root`` is the
-live checkout / ticket-store root — NOT the pinned code snapshot, which an attested gate
-activates via ``use_code_root(handle.path)`` / ``current_code_root()``. Before the fix the
-prefetch read the working-tree bodies straight from that live ``repo_root``, so in a
-``--ref A`` run the ``<prefetched_file_contents>`` evidence carried the live checkout's
-(B's) bytes — verdict evidence rooted at the wrong tree.
-
-Offline only — no network, no live LLM, no store (the ticket-state boundary is stubbed).
+An attested snapshot governs declared files and discovered test globs even when `repo_root` names
+another checkout. Local mode continues to use the supplied root.
 """
 
 from __future__ import annotations
@@ -43,10 +34,7 @@ def _write_tree(root: Path, body: str, *, test_body: str | None) -> None:
 
 
 def _fixture(tmp_path: Path) -> tuple[str, str]:
-    """A live checkout dir (B) and a pinned snapshot dir (A) whose declared file diverges.
-    The glob-discovered sibling test file exists ONLY in the pinned snapshot (A), so the
-    `_discover_test_globs` re-rooting is observable: only a glob rooted at A finds it (a glob
-    rooted at the live checkout B finds nothing), and its body must be read from A."""
+    """Create divergent roots with a test file present only in the pinned snapshot."""
     live_b = tmp_path / "live_checkout_B"
     snap_a = tmp_path / "pinned_snapshot_A"
     live_b.mkdir()

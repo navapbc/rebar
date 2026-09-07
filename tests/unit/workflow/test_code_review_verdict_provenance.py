@@ -1,23 +1,9 @@
-"""Task e951: a code-review verdict must record the provenance of the provider that produced it.
+"""Verify code-review verdicts preserve runner-produced provider provenance.
 
-`code_review/sidecar.py` has read `verdict.get("provider_provenance")` since 343b, but the
-code-review verdict never set the key — so every signed code-review sidecar recorded provenance as
-ABSENT while reporting a bare `model` string taken from cfg. 343b fixed the plan-review and
-completion gates and deliberately left code review out.
-
-WHY THIS FILE LOOKS THE WAY IT DOES — 343b's gap 5. All ten of its unit tests passed against a tree
-where the field never reached a production payload, because every one of them handed `build_payload`
-a verdict dict that ALREADY contained `provider_provenance`. That is a constructed-input pass: the
-oracle proved the PERSIST step and never the PATH. So the primary test here hand-builds nothing. It
-runs the REAL `code-review.yaml` through the REAL interpreter with a REAL `PydanticAIRunner` (its
-model swapped for an offline `FunctionModel`, so nothing billable is called), takes whatever
-terminal verdict the gate produces, and feeds THAT to the real sidecar payload builder. Remove the
-YAML wire or the op's assignment and it goes red.
-
-The record is assembled ONCE, inside the runner (`capabilities.provenance_for`), and stamped onto
-each per-call result by `findings.finalize_outcome`. Nothing here recomputes it: a second resolution
-at the verdict site can diverge from the endpoint/caps that actually served the run, which is
-exactly what `provenance_for`'s docstring forbids.
+The gate uses the production interpreter and `PydanticAIRunner` with an offline model. Its verdict
+enters the sidecar builder unchanged, proving the agent-step record travels without being rebuilt
+from configuration. Model-free paths omit provenance, while finalization can recover the runner
+record from a succeeded verify step.
 """
 
 from __future__ import annotations
@@ -87,13 +73,7 @@ def _gate_steps() -> list[dict]:
 
 
 def test_code_review_yaml_wires_provenance_from_an_agent_step() -> None:
-    """The verdict-assembly step must source the record from an AGENT step.
-
-    Only an agent step's outputs are the runner result VERBATIM (`workflow/runs.py`), and the
-    runner is the one place that assembles the record. Sourcing it from a scripted op — whose
-    outputs are whatever that op chose to return — would validate, wire `None` forever, and look
-    exactly like a fix.
-    """
+    """Require verdict assembly to source provenance from an agent step carrying runner output."""
     steps = _gate_steps()
     by_id = {s.get("id"): s for s in steps}
     assembly = [s for s in steps if s.get("uses") == "code_review_coach"]
@@ -115,13 +95,7 @@ def test_code_review_yaml_wires_provenance_from_an_agent_step() -> None:
 
 @pytest.fixture
 def gate_verdict(tmp_path, monkeypatch) -> dict:
-    """Run the REAL code-review gate once, offline, and return its terminal verdict.
-
-    Nothing about the verdict is constructed: the interpreter, the gate document, the scripted ops
-    and the runner are all the production ones. Only the MODEL is a double, and the provenance
-    record is assembled by the runner regardless of that (`runner._pai_model` path), so the record
-    under test is the real one.
-    """
+    """Run the code-review gate with an offline model and return its terminal verdict."""
     monkeypatch.setenv("REBAR_USAGE_LOG", str(tmp_path / "usage.jsonl"))
     doc = _migrate.migrate_to_current(yaml.safe_load(_GATE.read_text()))
     cfg = replace(
@@ -153,13 +127,7 @@ def _batch_runner():
 
 
 def test_a_real_gate_verdict_carries_provenance_into_the_sidecar_payload(gate_verdict) -> None:
-    """THE ORACLE — the composition 343b's tests never made.
-
-    A verdict produced by the real assembly path, fed to the real sidecar payload builder. It is
-    the only assertion in this file that fails if EITHER half regresses (the YAML wire or
-    `code_review_coach`'s assignment), and it cannot be satisfied by a hand-built input because it
-    never sees one.
-    """
+    """Require gate-produced provenance to survive sidecar construction and serialization."""
     record = gate_verdict.get("provider_provenance")
     assert record, (
         "the gate's terminal verdict carries no provider_provenance — the record the runner "
@@ -186,12 +154,7 @@ def test_the_real_verdict_reports_more_than_a_bare_model_string(gate_verdict) ->
 
 
 def test_the_degraded_verdict_omits_provenance_rather_than_deriving_one() -> None:
-    """The outage path ran no model, so it must OMIT the key.
-
-    That site can reach `cfg`, which makes synthesizing a record from `cfg.model` the obvious move
-    and a wrong one: the verdict would claim a provider served it when none did — the exact
-    misattribution the record exists to remove. The sidecar tolerates absence.
-    """
+    """A model-free outage verdict must omit provider provenance."""
     from rebar.llm.workflow.gate_dispatch import _degraded_code_review_verdict
 
     verdict = _degraded_code_review_verdict(error=RuntimeError("outage"), runner_name="pydantic_ai")
@@ -238,12 +201,7 @@ def _finalize(verdict: dict, *, verify_outputs: dict, tmp_path) -> dict:
 
 
 def test_finalize_recovers_the_runners_record_for_an_unwired_verdict(tmp_path) -> None:
-    """`finalize` stamps cfg-derived `model`; the OBSERVED record has to travel with it.
-
-    A verdict that arrives without the wire (a gate document that does not carry it) still has the
-    runner's record sitting on the recorder's `verify` step. Read back from there it is the SAME
-    record the wire delivers — not a fresh resolution, which `provenance_for` forbids.
-    """
+    """Recover the observed provider record from `verify` without resolving it again."""
     record = {"provider": "bedrock", "model": "bedrock:us.anthropic.claude-sonnet-4-6", "tier": "x"}
     verdict = _finalize(
         {"verdict": "PASS", "blocking": [], "advisory": [], "coaching": []},

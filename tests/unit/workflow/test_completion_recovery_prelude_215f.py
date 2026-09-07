@@ -1,12 +1,7 @@
-"""Held-out oracle for bug 215f: a `_recover` PRELUDE failure must not discard the
-primary run's diagnostic.
+"""Verify recovery prelude failures preserve the primary run diagnostic.
 
-The defect: `_reads.show_ticket` runs before the `try:` whose `except` arm is the only
-place `self.failure_diagnostic` is built. A `RebarError` there (missing id, store fails
-to reduce) escapes `_recover` raw: the workflow layer flattens it with
-`failure_diagnostic` still None, so no gate_error_v1 sidecar and the primary run's
-already-computed budget/repetition diagnostic is dropped in full — total evidence loss
-on a narrow trigger, on a gate that SIGNS.
+A ticket-read failure becomes `CompletionRecoveryError`, populates `failure_diagnostic`, and
+retains the budget and repetition counters used by the error sidecar.
 """
 
 from __future__ import annotations

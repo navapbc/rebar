@@ -1,18 +1,8 @@
-"""Story 228b: ANY DET-floor blocking finding short-circuits the plan review BEFORE the
-LLM tier.
+"""Verify DET blocking findings short-circuit plan review before the LLM tier.
 
-`plan_review_precheck` runs the deterministic floor first; a DET block guarantees a BLOCK
-verdict, so the four-pass LLM review would only spend tokens on a foregone conclusion.
-These tests prove the widened short-circuit (formerly P8-only, story B5):
-
- * a DET-blocked plan yields a BLOCK verdict with ZERO finder/agent invocations and
-   ``coverage.llm_ran`` False;
- * the short-circuit verdict carries EVERY DET blocking finding (ids present), matching
-   what ``partition_findings`` produces from the same DET results;
- * a DET-passing plan still runs the full LLM passes unchanged.
-
-Offline like test_plan_review_workflow (whose fixtures this reuses): the finder is a
-counting FakeRunner and the agent steps a canned runner — no live calls.
+A blocked plan invokes neither finder nor agent, and its verdict retains every deterministic
+blocking finding. A DET-passing plan runs the LLM passes. The suite imports canned fixtures from
+`test_plan_review_workflow.py` and makes no network calls.
 """
 
 from __future__ import annotations

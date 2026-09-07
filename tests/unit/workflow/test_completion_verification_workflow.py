@@ -1,17 +1,10 @@
-"""B3: the completion-verification gate as an engine workflow.
+"""Test the completion-verification workflow.
 
-Proves the `src/rebar/llm/workflow/gates/completion-verification.yaml` walking skeleton:
- * it validates + lints clean (v3, prompt-refs resolve);
- * the child-closure precheck SHORT-CIRCUITS — a parent with an unclosed/uncertified child
-   FAILS deterministically and the agentic verify is NEVER called (no billable LLM call), the
-   behaviour completion.py:223-225 guarantees;
- * on a passing precheck the agentic verify runs and its raw verdict is reconciled into a
-   completion_verdict using the SAME normalize → resolve_citations → reconcile → validate
-   pipeline as completion.verify_completion (parity is structural, pinned here);
- * the reconcile invariants hold (FAIL⇔findings; PASS-with-findings flips to FAIL).
-
-Offline only — a canned AgentStepRunner stands in for the LLM (no tokens, no network), and the
-rebar reads the precheck performs are monkeypatched, so the whole gate shape is exercised cheaply.
+The definition validates and lints cleanly. Child closure blocks unclosed children before any LLM
+call. Passing prechecks run agent verification, then normalize findings, resolve citations,
+reconcile verdicts, and validate the result through the completion verifier's pipeline. Child
+certification controls whether a passing verdict is certifiable. Reconciliation enforces the
+verdict and findings invariant. Canned runners keep the suite offline.
 """
 
 from __future__ import annotations
@@ -104,21 +97,16 @@ def _patch_rebar(monkeypatch, *, ticket_type="story", children=None, child_sig="
         lambda tid, repo_root=None: {"ticket_id": "T-1", "ticket_type": ticket_type},
     )
 
-    # Model the precheck's FULL read surface (keyword-only, like the real _reads.list_tickets):
-    # parent queries feed the child-closure gate and the epic-subtree BFS; the epic-close bug
-    # screen's `status=`/`ticket_type="bug"` queries see an EMPTY store (no bugs). A fake pinned
-    # to `(parent, repo_root)` alone would TypeError inside the 4b54 floor and kill the step
-    # before the LLM.
+    # Match the full keyword-only list surface. Parent queries feed child closure and epic
+    # traversal, while bug queries receive an empty store.
     def _fake_list(*, parent=None, status=None, ticket_type=None, repo_root=None, **_kw):
         if ticket_type == "bug":
             return []
         return list(children or []) if parent is not None else []
 
     monkeypatch.setattr("rebar._reads.list_tickets", _fake_list)
-    # Match the REAL call site (completion.child_closure_findings):
-    # verify_signature(cid, kind="completion-verifier", repo_root=…). A fake missing `kind`
-    # raises TypeError, which the child-closure path swallows into `uncertified` — so the
-    # certified-child branch would be untestable (every call would fail via the exception arm).
+    # Accept `kind` because `child_closure_findings` requests the completion-verifier signature.
+    # Without it, certified children enter the uncertified exception path.
     monkeypatch.setattr(
         rebar,
         "verify_signature",
@@ -207,11 +195,8 @@ def test_uncertified_child_does_not_block_but_withholds_certification(monkeypatc
 
 
 def test_certified_child_is_certifiable(monkeypatch):
-    # The REAL certified-child branch: a closed direct child whose completion-verifier signature
-    # verifies as `certified` (and computes valid) does NOT block and does NOT withhold — the
-    # parent's own criteria still run (LLM once) and the verdict stays certifiable=True. This
-    # branch is only reachable because the fake's signature accepts `kind` (a fake missing it
-    # would raise TypeError and land in the uncertified-via-exception arm, masking this path).
+    # A certified child allows the parent's LLM check and keeps its verdict certifiable.
+    # The signature fake accepts `kind` so this branch avoids the uncertified exception path.
     runner = _CannedRunner(verdict="PASS")
     certified_child = [{"ticket_id": "C-3", "title": "child", "status": "closed"}]
     rec, _ = _run(
@@ -227,13 +212,8 @@ def test_certified_child_is_certifiable(monkeypatch):
 
 
 def test_child_enumeration_read_error_withholds_certification(monkeypatch):
-    # Regression (ffb3-730f-bd48-47f1): a TRANSIENT store error enumerating a parent's children
-    # must NOT LAUNDER certification. The old `except: return [], []` made `uncertified` empty →
-    # gate_ops' `certifiable = not uncertified` → True → the parent closed SIGNED as if it were
-    # childless, even though a direct child might be force-closed/uncertified. The correct
-    # behaviour (mirroring attest._attested_delivered's fail-closed-on-certification): the parent
-    # may still close on its OWN criteria (a read glitch shouldn't block a legitimate close), but
-    # the verdict must be certifiable=False (closes UNSIGNED).
+    # A child-enumeration read error must not treat the parent as childless. The parent may close
+    # on its own criteria, but its passing verdict remains uncertifiable.
     from rebar.llm.completion import child_closure_findings
 
     def _boom(parent=None, repo_root=None):
@@ -245,16 +225,13 @@ def test_child_enumeration_read_error_withholds_certification(monkeypatch):
     )
     monkeypatch.setattr("rebar._reads.list_tickets", _boom)
 
-    # Direct contract (the fixed function): blocking EMPTY (don't fabricate a block on a read
-    # error — the close may proceed), uncertified NON-EMPTY (so `certifiable = not uncertified`
-    # is False). This is the exact empty/empty return the bug produced, now withheld.
+    # A read error yields no blocker and a non-empty uncertified set, allowing closure while
+    # withholding certification.
     blocking, uncertified = child_closure_findings("T-1", None)
     assert blocking == [], "a read error must NOT fabricate a blocking child (close may proceed)"
     assert uncertified, "a read error must mark the parent uncertified (withhold, not forge)"
 
-    # End-to-end through the gate: the LLM still runs on the parent's own criteria (not blocked),
-    # the verdict passes, but certification is WITHHELD — not the certification-forging PASS+signed
-    # the empty/empty return would have produced.
+    # The gate runs the parent's LLM check and preserves an uncertifiable passing verdict.
     runner = _CannedRunner(verdict="PASS")
     rec = _Rec()
     res = _ex.run_workflow(
