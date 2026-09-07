@@ -1,21 +1,8 @@
-"""Route-table validation for the CLI registry — the checks, and the vocabularies
-they validate against.
+"""Provide acyclic validation helpers and closed vocabularies for the CLI route registry.
 
-Extracted from ``_registry.py``, which had reached the 800-line hard cap with no
-headroom left for the policy flag ticket ``elfin-decagonal-polarbear`` must add to
-``Route`` (ticket ``bc66-4827-355a-43bd``). The cut follows an existing call-graph
-seam rather than a line count: these functions call only each other, take the route
-table as a PARAMETER, and yield :class:`Finding`. They READ a route table; they never
-build one, so nothing here imports ``ROUTES``.
-
-That direction is what keeps the split acyclic. ``_registry`` imports this module;
-this module imports nothing from ``_registry``. :func:`validate` therefore stays in
-``_registry``, where its ``routes=ROUTES`` default lives, and only the checks move.
-``Route`` is needed for annotations alone, so it is imported under ``TYPE_CHECKING``
-(annotations are strings here via ``from __future__ import annotations``).
-
-The three closed vocabularies move with the checks because the checks are their only
-runtime consumer; ``_registry`` re-exports them, and its ``__all__`` pins that surface.
+The helpers read a supplied route table and yield ``Finding`` values. They never
+construct or import ``ROUTES``. ``_registry`` retains public validation and
+re-exports the vocabularies, while ``Route`` is imported only for type checking.
 """
 
 from __future__ import annotations
@@ -29,30 +16,19 @@ from rebar._capabilities import CAPABILITY_KEYS
 if TYPE_CHECKING:  # pragma: no cover - typing-only, and importing it at runtime would cycle
     from ._registry import Route
 
-# The possible-capability references a route may advertise are the SEMANTIC capability
-# keys of the descriptive capability registry (``rebar._capabilities``, ADR 0100 §7) —
-# single-sourced here so route validation and the capability seam never drift. This is
-# descriptive validation only: a route *advertises* a capability it may exercise; nothing
-# is enforced at route/help construction (the ``rebar._capabilities`` module is stdlib-only
-# and imports no optional package, so this preserves the registry's import-isolation
-# contract). Enforcement happens later, at the selected execution boundary.
+# Route capability names come from the descriptive registry. Validation is descriptive.
+# Enforcement waits until the selected execution boundary, preserving import isolation.
 KNOWN_CAPABILITIES: frozenset[str] = CAPABILITY_KEYS
 
-# The closed set of invocation-adapter kinds — the exact runtime call shape a
-# selected handler is invoked through (RP-05 S3). This is intentionally small and
-# fixed: a route selects ONE kind, never a bespoke call site.
-#   dispatcher         → handler([name, *rest])          (reads.main / commands.main)
-#   argv               → handler([*argv_prefix, *rest])  (module <verb>_cli(rest))
-#   argv_tracker       → handler(rest, tracker_dir())
-#   argv_tracker_root  → handler(rest, tracker_dir(), None)  # root discovered downstream
+# The closed adapter vocabulary defines four call shapes. The dispatcher passes
+# ``[name, *rest]``. The argv adapter prepends its prefix. Tracker variants also pass the
+# tracker directory and, for root, a downstream-discovered root.
 ADAPTER_KINDS: frozenset[str] = frozenset(
     {"dispatcher", "argv", "argv_tracker", "argv_tracker_root"}
 )
 
-# The closed set of init policies applied before a handler runs (RP-05 S3):
-#   none / init_only / full are the static policies; ``doctor`` and
-#   ``fsck_recover`` are the two genuinely conditional selectors preserved from
-#   the pre-cutover per-arm census.
+# The closed initialization vocabulary contains three static modes and the conditional doctor
+# and fsck recovery selectors.
 INIT_POLICIES: frozenset[str] = frozenset({"none", "init_only", "full", "doctor", "fsck_recover"})
 
 
