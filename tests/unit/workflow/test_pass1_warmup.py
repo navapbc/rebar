@@ -1,19 +1,9 @@
-"""Pass-1 warm-then-fan-out for the main chunk/agent pool (story 25fa-0865-8b61-498c).
+"""Tests Pass-1 cache warming before concurrent fan-out.
 
-The container path already warms the cache (one serial pairing, then fan-out); these
-tests pin the same gate ported to the MAIN Pass-1 pool: when the plan-bearing shared
-prefix is large enough to cache (>= ``CACHE_MIN_PREFIX_TOKENS``) and there are >= 2
-Pass-1 calls, the first single-turn chunk runs serially to completion (writing the
-cache prefix) before anything is submitted to the pool; small plans / single-call
-reviews bypass the warm-up; a non-systemic warm failure degrades to direct fan-out
-(the ladder drops that chunk's findings exactly as today, the remainder still fans
-out, and the review completes); and in a stubbed-usage run the shared prefix
-incurs ONE cache write and N-1 cache reads (observed via the per-call usage records
-from the d52a instrumentation seam).
-
-OFFLINE: a test-local ``RecordingRunner`` wraps ``FakeRunner``, records thread-safe
-start/end call ordering, and simulates the provider cache — a call that STARTS after
-some earlier call has COMPLETED reads the warmed prefix; otherwise it writes it.
+When the shared prefix meets ``CACHE_MIN_PREFIX_TOKENS`` and at least two calls are planned,
+one chunk completes before the pool starts. Smaller or single-call reviews bypass warming.
+Non-systemic warm failures drop that chunk and fan out the remainder. Systemic failures
+abort. A thread-safe offline runner verifies ordering and one cache write followed by reads.
 """
 
 from __future__ import annotations
@@ -45,11 +35,11 @@ _READ_USAGE = {
 
 
 class RecordingRunner:
-    """Thread-safe recording runner: logs ``("start", n)`` / ``("end", n)`` events per
-    call, simulates the provider prompt cache (a call that starts after ANY earlier
-    call completed gets cache-READ usage; otherwise cache-WRITE — so a naive
-    concurrent fan-out yields multiple writes, a warmed one exactly one), and can
-    raise a scripted exception on the first call."""
+    """Thread-safe runner recording ``("start", n)``/``("end", n)`` and cache usage.
+
+    Calls starting after an earlier completion record a cache read. Other calls record a
+    write. The first call may raise a scripted exception.
+    """
 
     name = "recording"
 

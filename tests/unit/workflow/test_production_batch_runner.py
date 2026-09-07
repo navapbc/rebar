@@ -1,11 +1,7 @@
-"""Unit tests for the plan-review :class:`ProductionBatchRunner` (epic B, story B1).
+"""Tests ``ProductionBatchRunner`` offline against the shared Pass-1 contract.
 
-These are OFFLINE: a fake ``rebar.llm.Runner`` drives the finder (no model / network),
-and ``rebar.show_ticket`` / ``rebar.list_tickets`` are monkeypatched so
-``assemble_context`` reconstructs a synthetic ticket with no git store. The key AC is
-BEHAVIOURAL EQUIVALENCE — the runner's findings equal those of the bespoke
-``run_pass1`` path on the same context + criteria + fake runner (no duplicated
-algorithm).
+Fake model responses and synthetic store reads isolate the runner. Its findings, sizing,
+budgeting, and resume behavior must match ``run_pass1`` without duplicating that algorithm.
 """
 
 from __future__ import annotations
@@ -237,11 +233,8 @@ def test_resolve_criteria_excludes_isf_and_dedupes():
     assert "NOPE-not-a-criterion" in skipped
 
 
-# ── AC2 sizing behaviours exercised THROUGH the runner, equivalent to run_pass1 ──
-# These three tests close the verifier-flagged gap: prove that size-ladder escalation,
-# shed-to-budget ordering, and checkpoint resume are driven by ProductionBatchRunner
-# (not only by the bespoke orchestrator) AND that the journaled batch_plan coverage is
-# IDENTICAL to what the shared run_pass1 path produces for the same scenario.
+# Exercise ladder escalation, budget shedding, and checkpoint resume through the runner.
+# Its journaled batch plan must match shared ``run_pass1`` behavior.
 
 _IDS_RE = re.compile(r"\(ids: ([^)]*)\)")
 

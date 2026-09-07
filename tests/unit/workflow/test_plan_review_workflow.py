@@ -1,19 +1,9 @@
-"""B2: the plan-review gate as a v3 engine WORKFLOW (running, offline-testable).
+"""Tests the v3 workflow implementation of the plan-review gate offline.
 
-Proves `src/rebar/llm/workflow/gates/plan-review.yaml` + its `uses` ops:
- * it validates + lints clean (v3, prompt-refs resolve);
- * `plan_review_assemble_criteria` routes the criteria (proportionate scrutiny + overlay
-   triggering) and emits the per-criterion `include_<ID>` inclusion the batch's `when` reads
-   — an overlay criterion is included/excluded per its trigger (the E5 advisory);
- * an end-to-end OFFLINE run (inject the B1 ProductionBatchRunner + a FakeRunner for the
-   finder, and a canned AgentStepRunner for verify/coach) produces a plan_review_verdict-shaped
-   result — NO live calls;
- * the DET-block short-circuit skips the LLM entirely (no finder/verify/coach calls) and yields
-   the blocking verdict, mirroring the B3 completion-gate short-circuit;
- * decide/coach produce the expected verdict shape.
-
-This proves the workflow RUNS and produces the right verdict shape (the workflow is now the
-sole plan-review gate; the bespoke path it once mirrored was retired in story B-RETIRE).
+The suite covers schema and lint validity, criterion routing and overlay inclusion,
+end-to-end verdict shape, deterministic-block short-circuiting, and decide/coach behavior.
+It injects a ``ProductionBatchRunner`` plus fake finder, verifier, and coach runners. No
+network model calls occur.
 """
 
 from __future__ import annotations
@@ -369,14 +359,13 @@ def test_clean_pass_makes_no_coach_llm_call(monkeypatch):
     assert canned.prompts_seen.count("plan-review-coach") == 0
 
 
-# ── producer/consumer: a real review run → the real sidecar emit → lossless v2 event (4e19) ─
+# Review output must persist losslessly in a v2 sidecar.
 def test_review_run_emits_lossless_v2_sidecar_via_real_emit_path(monkeypatch, tmp_path):
-    """test-design §3 producer/consumer: a full OFFLINE plan review (stub LLM finder + canned
-    agent) produces a verdict, which the REAL git-backed sidecar emit path persists as a
-    ``REVIEW_RESULT`` event whose ``schema`` is ``plan_review_result_v2`` and whose every
-    persisted finding carries ``evidence``, ``scenarios``, ``block_threshold``, and
-    ``blocking_enabled`` (story 4e19). Unlike the direct ``build_payload`` unit tests, the
-    findings here are the OUTPUT of the real four-pass pipeline, threaded through the real emit."""
+    """A full offline review persists every finding through the git-backed v2 sidecar path.
+
+    Unlike payload-builder tests, it verifies that four-pass output retains evidence,
+    scenarios, and resolved decision boundaries after storage.
+    """
     import subprocess
 
     import rebar
@@ -448,14 +437,10 @@ def test_review_run_emits_lossless_v2_sidecar_via_real_emit_path(monkeypatch, tm
         assert sf.get("blocking_enabled") is not None, "LLM finding lost its blocking_enabled"
 
 
-# ── any DET block short-circuits BEFORE the LLM: no finder calls, BLOCK verdict ─
+# Deterministic blockers short-circuit before any LLM call.
 def test_p1_det_block_short_circuits_before_llm(monkeypatch):
-    # Inverted by story 228b (formerly test_p1_det_block_still_runs_llm_and_blocks, which
-    # asserted the pre-228b behavior of running the LLM anyway): a P1 DET block (here, NO
-    # `## Acceptance Criteria`) now short-circuits the review BEFORE any LLM pass — a DET
-    # block guarantees a BLOCK verdict, so the four-pass review would only spend tokens on
-    # a foregone conclusion. The verdict is a BLOCK carrying the P1 block with
-    # coverage.llm_ran False and ZERO finder invocations.
+    # Missing acceptance criteria is a deterministic blocker, so no LLM pass should run
+    # for a verdict already guaranteed to BLOCK.
     state = _state(description="Just a body, no acceptance criteria at all here.")
     finder = _CountingFinder(structured={"analysis": "", "findings": []})
     canned = _CannedAgent()

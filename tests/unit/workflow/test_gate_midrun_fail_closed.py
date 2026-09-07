@@ -1,19 +1,9 @@
-"""The mid-run fail-closed arms of the gate dispatchers (ticket shaggy-crass-bull).
+"""Fail-closed behavior for LLM errors escaping workflow execution mid-run.
 
-Bug 43d4 (wolflike-chevroned-haddock) added ``LLMInputRejectedError`` to the mid-run
-``except (LLMUnavailableError, LLMInputRejectedError)`` arms in ``gate_dispatch`` — the
-arms that turn an LLM-tier failure escaping ``run_workflow`` into a degraded INDETERMINATE
-verdict plus a ``gate_error_v1`` sidecar, instead of an unhandled crash. Nothing reached
-them: reverting either arm to its pre-43d4 form left the whole suite green.
-
-These tests pin each arm at the ``run_workflow`` seam (the established
-``test_gate_engine_cutover.py`` monkeypatch pattern), and — because a monkeypatched seam is
-only as honest as the seam itself — pin separately that a batch runner's raise really does
-propagate RAW out of a real ``run_workflow`` (``interpreter._run_batch`` wraps
-``runner.run(req, rc.runner)`` in no try), which is what makes the mid-run arms reachable:
-plan-review's ``ProductionBatchRunner`` re-raises a systemic ``LLMUnavailableError`` from
-the Pass-1 chunk pool, and the container stage's warm-call abort raises both types through
-it (see ``tests/unit/test_container_warm_abort.py``).
+Both plan- and code-review dispatchers convert ``LLMUnavailableError`` and
+``LLMInputRejectedError`` into degraded INDETERMINATE verdicts with ``gate_error_v1``
+sidecars instead of crashing. A batch-runner test confirms these errors propagate
+unchanged through ``run_workflow``, keeping the plan-review handler reachable.
 """
 
 from __future__ import annotations
@@ -114,9 +104,8 @@ def test_plan_review_midrun_failure_degrades_with_sidecar(monkeypatch, exc) -> N
     assert verdict["verdict"] == "INDETERMINATE"
     assert verdict["verdict"] != "PASS"  # the fuel-posse-ball guard: never a hollow PASS
     assert verdict["coverage"].get("llm_ran") is False
-    # The write-then-degrade contract (ticket 8bc5): the sidecar is emitted BEFORE the
-    # degraded verdict is returned, on the MID-RUN arm (diagnostic= threaded; None is
-    # legitimate when the failure struck before anything was consumed).
+    # The mid-run arm emits the sidecar before returning. The diagnostic may be None when
+    # the failure occurs before any workflow output is consumed.
     assert len(recorder.calls) == 1
     call = recorder.calls[0]
     assert call["ticket_id"] == "T-1"
@@ -135,14 +124,11 @@ _DIFF = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n+print('hi')\n"
     ids=["unavailable", "input-rejected"],
 )
 def test_code_review_midrun_failure_degrades_with_sidecar(monkeypatch, exc) -> None:
-    """Same contract on the code-review dispatcher: a mid-run systemic error degrades to
-    INDETERMINATE and (with a target ticket) emits the sidecar. NOTE the arm is a DEFENSIVE
-    seam contract today: ``CodeReviewBatchRunner`` translates a runner's
-    ``LLMUnavailableError`` into the kernel's ``SystemicDiscoveryError``, which
-    ``discovery.execute_stage`` absorbs (``systemic_abort``, no re-raise), and agent-step
-    raises are absorbed by ``interpreter._run_leaf`` — so no in-tree production path raises
-    these types out of the code-review workflow. Pinning the arm keeps the contract from
-    silently rotting if a future producer (like plan-review's Pass-1 pool re-raise) appears."""
+    """A code-review mid-run LLM error yields INDETERMINATE and a sidecar for its target.
+
+    The seam is defensive because current batch discovery and agent steps absorb these
+    errors. This test preserves the dispatcher contract for future producers.
+    """
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
     recorder = _SidecarRecorder()
     monkeypatch.setattr(gate_dispatch, "emit_gate_error", recorder)
@@ -199,12 +185,11 @@ def _batch_wf() -> dict:
     ids=["unavailable", "input-rejected"],
 )
 def test_batch_runner_raise_propagates_raw_out_of_run_workflow(exc_type) -> None:
-    """``interpreter._run_batch`` wraps ``runner.run(req, rc.runner)`` in NO try, so an
-    LLM-tier error a batch runner raises escapes ``run_workflow`` RAW — the seam that makes
-    the mid-run arms above reachable (plan-review's production batch runner re-raises a
-    systemic outage from the Pass-1 pool, and the container warm abort raises both types
-    through it). If the interpreter ever started absorbing these, the mid-run arms would go
-    dead and the degraded-verdict contract with them — this test makes that move loud."""
+    """Batch-runner LLM errors escape ``run_workflow`` unchanged.
+
+    Plan review relies on this seam to convert systemic Pass-1 and warm-up failures into
+    degraded verdicts. Interpreter-side absorption would make those handlers unreachable.
+    """
     with pytest.raises(exc_type):
         _ex.run_workflow(
             _batch_wf(),

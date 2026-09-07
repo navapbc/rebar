@@ -1,24 +1,11 @@
-"""Review output-token budgets ride at the resolved model's MAXIMUM (bug 30a2).
+"""Tests model-aware output ceilings across plan, code, completion, and ticket reviews.
 
-Every plan-review LLM call previously ran at the flat ``DEFAULT_MAX_TOKENS`` (16000)
-output ceiling, so a finding-rich structured response (e.g. a container bin over many
-children under the S7 exhaustiveness directive) truncated and raised
-``UnretryableOutputError`` — degrading the whole review to INDETERMINATE. The operator
-rule (mirroring the completion verifier's remediation in ``completion_recovery.py``):
-**allow effectively unlimited output** — the API requires a finite ``max_tokens``, so
-the resolved model's maximum output capacity IS the unlimited setting; output is
-naturally bounded by the model's actual findings, and unspent budget costs nothing.
-
-The FINAL RULE, uniform across EVERY review workflow (plan review, code review,
-completion verification, review_ticket): every review request carries
-``max_tokens = max(configured floor, model_max_output_tokens(resolved model))``, raised
-through the existing per-request seam (``runner.effective_max_tokens`` — a request may
-only RAISE the floor; ``req.output_token_limit`` still clamps down where bounded
-recovery needs it). Bespoke builders (Pass-1 chunk/AGENT, container, ISF, ISF
-summarizer, completion sub-call, coach, prerequisite finder) widen via
-``passes._max_output_cfg``; the workflow verify/coach prompt steps opt in via the
-``with: {output_budget: model_max}`` input (the agentic verify arm keeps its
-``output_tokens_per_item`` scaling as an additional floor-raiser for unmapped models).
+Each request uses ``max(configured floor, model_max_output_tokens(resolved_model))`` so
+large structured responses are not truncated. Bespoke builders use
+``passes._max_output_cfg``. Workflow verify and coach steps request ``model_max``.
+``runner.effective_max_tokens`` only raises the configured floor. Per-item verifier scaling
+remains an additional floor for unmapped models. Bounded recovery may still clamp with
+``req.output_token_limit``.
 """
 
 from __future__ import annotations
@@ -192,14 +179,11 @@ def test_unknown_model_builder_falls_back_to_default_without_error() -> None:
     assert _request_max_tokens(runner) == [DEFAULT_MAX_TOKENS]
 
 
-# ── the AC regression fixture: an oversized container completes under the raise ───
+# Large-container regression under the raised output ceiling.
 
 
 class _CeilingEnforcingRunner:
-    """Simulates the provider output ceiling: a structured response needing more
-    output tokens than the request's ``max_tokens`` truncates → the structured
-    stack raises ``UnretryableOutputError`` (the live failure on epic a492's
-    17-child bin at the flat 16000 ceiling)."""
+    """Raise when simulated response output exceeds the request's ``max_tokens``."""
 
     name = "ceiling"
     required_output_tokens = 20_000  # > DEFAULT_MAX_TOKENS, << model max

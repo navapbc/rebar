@@ -1,13 +1,7 @@
-"""A3 de-risking experiment: the disposable 4-pass review skeleton runs OFFLINE on the v3
-engine, and a PLANNED TRACE is captured — proving epic B's parity-validation mechanism is
-emittable from the engine before B depends on it.
+"""Tests the offline v3 four-pass review skeleton and planned trace emission.
 
-Also pins the two flaws this experiment SURFACED + FIXED in epic A:
- * the linter now existence-checks a `batch` step's nested prompts (finder + criteria), which
-   the agent-step path missed (a gap in the A2 construct);
- * (recorded for epic B, not fixed here) the plan-review criterion prompts are not yet in the
-   workflow prompt catalog, so the skeleton uses catalog ids — the criteria-library<->prompt-
-   library wiring is a B prerequisite.
+It also verifies batch-step nested prompt linting. The example uses catalog prompt IDs while
+plan-review criterion-to-prompt wiring remains outside this skeleton.
 """
 
 from __future__ import annotations

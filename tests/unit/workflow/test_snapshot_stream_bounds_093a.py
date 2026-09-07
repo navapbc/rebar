@@ -1,39 +1,14 @@
-"""Bug 093a: the ``git archive`` stream in the workflow snapshot must be bounded.
+"""Tests bounded, deadlock-free ``git archive`` streaming for workflow snapshots.
 
-``snapshot_at_ref`` streamed ``git archive`` through a pipe with three defects in one
-call, all of which park the caller on an unbounded wait:
+``snapshot_at_ref`` must drain stderr while reading stdout, close stdin with ``DEVNULL``,
+and bound stalled promisor fetches with both a wall-clock timeout and ``stall_abort_args()``.
+Offline fake-git subprocesses reproduce stderr-pipe saturation and a zero-progress stall
+under an outer hang guard, while PID assertions ensure timed-out children are reaped.
 
-1. **No timeout.** Neither the ``Popen`` nor the trailing ``communicate()`` carried one,
-   and the blocking read is inside ``tarfile.__read`` where a ``communicate(timeout=…)``
-   could not reach it anyway. A promisor lazy-fetch stall (a partial clone whose promisor
-   remote accepts the connection and then never replies) held the process at ``STAT=SN,
-   %CPU 0.0`` for 4m26s with zero bytes moved, and was still blocked when killed.
-2. **``stderr=PIPE`` never drained** while stdout is consumed. A child that writes past the
-   ~64 KiB pipe buffer to stderr blocks writing stderr, therefore stops writing stdout, and
-   the parent blocks forever in ``tarfile.__read``. A classic undrained-pipe deadlock that
-   needs no network and no partial clone. Note this is a *proven latent* deadlock, not an
-   observed field failure: a real ``git archive`` emits 0 bytes of stderr because git
-   suppresses progress when stderr is not a TTY, and ``Popen`` gives it a pipe.
-3. **stdin inherited** — unlike ``_store/push.py`` and ``llm/enrich_drain.py``, which both
-   pass ``stdin=DEVNULL``, so a credential or host-key prompt could block here too.
-
-The first two tests drive the REAL ``snapshot_at_ref`` against a fake ``git`` on ``PATH``
-and run it in a CHILD PROCESS under a hard wall-clock bound, so a regression FAILS instead
-of hanging CI forever (the pre-fix code never returns from either scenario).
-
-Two constraints carried in from closed tickets:
-
-* ``subprocess.TimeoutExpired`` is neither an ``OSError`` nor a ``CalledProcessError``, so
-  it escapes ordinary ``except`` tuples, and ``TimeoutExpired.cmd`` carries any
-  ``user:token@host`` URL — found the hard way in ``dominant-northbound-blackrhino``
-  (``77e1-7f82-98e6-4fed``). Turning a hang into a credential disclosure is not a fix, so
-  the redaction is pinned here.
-* Elapsed time is the wrong axis for a stalled transfer (``_snapshot/git_fetch.py``);
-  ``suave-constant-cow`` (``12e4-8c74-a738-4014``) built the reusable ``stall_abort_args()``
-  seam. ``git archive`` reaches the network through the promisor lazy-fetch path, so that
-  seam is spliced here rather than only shortening a wall clock.
-
-Everything here is offline: no network, no LLM.
+All failures must stay in the ``SnapshotError`` vocabulary. In particular,
+``TimeoutExpired`` commands and child stderr may contain credential-bearing URLs and must be
+redacted. The tests also preserve the shipped 300-second ceiling and low-throughput abort
+configuration without contacting a network.
 """
 
 from __future__ import annotations
@@ -215,12 +190,7 @@ def _alive(pid: int) -> bool:
 
 
 def test_stderr_flood_does_not_deadlock_the_archive_stream(tmp_path: Path) -> None:
-    """A child writing past the pipe buffer to stderr must not wedge the extraction.
-
-    Pre-fix this never returns: the child blocks on its stderr write, therefore stops
-    writing stdout, and the parent blocks in ``tarfile.__read``. Post-fix stderr is drained
-    concurrently, so the tar streams to completion and the snapshot is built normally.
-    """
+    """Draining stderr must let a child exceed the pipe buffer without deadlock."""
     repo = _repo(tmp_path)
     bindir = _fake_git_dir(tmp_path)
     done, _ = _drive_snapshot(repo, bindir, mode="stderr_flood")
@@ -318,12 +288,7 @@ class _CredTimeoutProc:
 
 
 def test_timeout_expired_cannot_leak_a_credential_url(tmp_path: Path) -> None:
-    """A ``TimeoutExpired`` must surface as a redacted ``SnapshotError``, not raw.
-
-    ``TimeoutExpired`` is neither ``OSError`` nor ``CalledProcessError``, so without an
-    explicit conversion it escapes this module's error vocabulary entirely — and its
-    ``cmd`` carries the ``user:token@host`` URL verbatim (77e1).
-    """
+    """Convert ``TimeoutExpired`` to ``SnapshotError`` without exposing credentials."""
     repo = _repo(tmp_path)
     sha = snap.resolve_sha("HEAD", str(repo))
     tar = subprocess.run(

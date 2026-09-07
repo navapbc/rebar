@@ -1,13 +1,8 @@
-"""Pass-2 verify-failure robustness for the plan-review gate (bug 59bc).
+"""Tests plan-review recovery when Pass-2 verification exhausts a budget.
 
-When the agentic Pass-2 verifier exhausts its step budget on a finding-rich ticket, the
-old gate misclassified the step failure as ``llm_unavailable`` → a hollow INDETERMINATE
-that DISCARDED the Pass-1 findings and (fail-closed) wrongly blocked the claim. The fix:
-
-* the agentic verify step budget SCALES with the finding count (``step_budget_per_item``);
-* a verify-step failure is RECOVERED — Pass-1 findings are preserved (unverified →
-  INDETERMINATE) and the verdict fails OPEN unless a preserved finding sits on a
-  blocking-enabled criterion (then INDETERMINATE, fail-closed).
+Iteration and output limits scale with finding count. If verification still fails, the verdict
+remains INDETERMINATE while preserving Pass-1 findings. The gate fails open unless a finding
+belongs to a blocking-enabled criterion.
 """
 
 from __future__ import annotations
@@ -88,20 +83,14 @@ def test_verify_budget_unscaled_without_the_input() -> None:
 
 
 def test_runner_honors_per_request_budget_not_just_self_config() -> None:
-    """The runner's effective step budget is the PER-REQUEST max (``req.config``), raised above
-    the operator floor. This is the seam the scaled verifier budget flows through — the old
-    runner read only ``self._config`` and ignored a scaled ``req.config`` (the false-green this
-    closes: RunnerAgentStep set req.config, but the live runner never read it → bug 59bc)."""
+    """Per-request iteration limits may raise, but never lower, the configured floor."""
     assert effective_max_iterations(50, 475) == 475  # a request RAISES the floor
     assert effective_max_iterations(50, None) == 50  # no override → the floor
     assert effective_max_iterations(100, 50) == 100  # a request can NEVER lower the floor
 
 
-# ── output-cap scaling: the verifier's per-CALL max_tokens scales with finding count ──────────
-# Bug spy-luge-wool (=b54e) / sole-teal-churn: the Pass-2 verify structured output grows ~1
-# verification per finding, so a FIXED per-call max_tokens truncates (finish_reason=length) on a
-# finding-rich plan and the whole review collapses to INDETERMINATE. The turn budget already
-# scales (above); the OUTPUT cap must scale the same way.
+# Structured verifier output grows per finding, so its token cap must scale alongside the
+# iteration budget.
 def test_verify_output_cap_scales_with_finding_count() -> None:
     findings = [{"finding": f"f{i}", "criteria": ["G6"]} for i in range(30)]
     runner = _CapturingRunner(structured={"verifications": []})
@@ -266,12 +255,8 @@ def test_recover_returns_none_when_finders_did_not_run() -> None:
     )
 
 
-# ── step-id contract: a YAML rename is caught LOUDLY, not silently degraded ────────────────────
-# The recovery/metrics reconstruction above looks up succeeded-step partitions BY STEP ID
-# (STEP_PRECHECK/STEP_ASSEMBLE/STEP_FINDERS/STEP_VERIFY/STEP_DECIDE). If gates/plan-review.yaml
-# renamed one of those steps, the lookup would silently return None and a recoverable run would
-# degrade to a hollow INDETERMINATE that DISCARDS real findings — with no error. The dispatcher
-# now validates the referenced ids against the loaded doc at dispatch time; these prove it.
+# Recovery and metrics address workflow partitions by step ID. Validate every referenced ID
+# against the loaded document so renames fail loudly instead of discarding findings.
 def _rename_all_steps(node, old: str, new: str) -> None:
     """Recursively rename every step whose ``id`` == ``old`` to ``new`` (steps appear in nested
     ``branch`` arms, so a top-level pass is not enough)."""

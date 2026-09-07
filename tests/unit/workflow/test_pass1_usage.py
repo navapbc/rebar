@@ -1,16 +1,9 @@
-"""Pass-1 per-call usage threading (story d52a-40cd-75d4-46cb).
+"""Tests Pass-1 usage propagation and aggregation.
 
-The runner attaches per-call ``_usage`` to every result; these tests prove Pass-1 no
-longer discards it: the pass functions return ``(findings, usage)`` pairs, the ladder /
-container / ISF / prerequisite paths mint per-call records, ``run_pass1`` aggregates
-them into ``coverage["usage"]``, the ``ProductionBatchRunner`` emits the aggregate as
-``outputs["_usage"]``, ``_attach_plan_review_metrics`` folds the token totals into
-``coverage.metrics``, and the sidecar payload carries
-``coverage.usage.per_call`` / ``coverage.usage.per_criterion``.
-
-OFFLINE: ``FakeRunner.run`` does not emit ``_usage``, so a thin TEST-LOCAL wrapper
-runner delegates to ``FakeRunner`` and attaches deterministic stub ``_usage`` dicts —
-no change to ``FakeRunner`` itself.
+Pass functions return findings/usage pairs, and each call's ``_usage`` flows through chunk,
+ladder, container, ISF, and prerequisite paths into ``coverage["usage"]``,
+``ProductionBatchRunner`` output, review metrics, and sidecar per-call/per-criterion data. A
+test-local ``FakeRunner`` wrapper supplies deterministic offline usage records.
 """
 
 from __future__ import annotations

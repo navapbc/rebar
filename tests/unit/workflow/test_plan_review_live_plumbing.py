@@ -1,13 +1,7 @@
-"""LIVE-path plumbing for the workflow plan-review gate (tepid-bus-pomp).
+"""Exercises plan-review prompt plumbing through ``RunnerAgentStep``.
 
-The B2 workflow plan-review tests injected CANNED agents that never call
-``prompts.resolve_prompt`` — so the fact that the verify/coach prompt steps reference
-``{{plan}}`` (and need the findings/surviving listing in their instructions), while the
-generic ``RunnerAgentStep`` supplies only ``ticket_id``/``ticket_context``/``repo_path``,
-was never exercised. The B5 cutover made the workflow path the default and review-plan
-degraded to INDETERMINATE on the live path (``prompt references undefined variable(s)
-['plan']``). These tests drive the verify/coach steps through the REAL ``RunnerAgentStep``
-(offline, no tokens) so the live prompt resolution is exercised in CI.
+Verify and coach prompts require plan data beyond the generic ticket fields. These offline
+tests ensure the workflow supplies those variables so runtime prompt resolution succeeds.
 """
 
 from __future__ import annotations
@@ -35,10 +29,7 @@ def _ctx(step: dict, inputs: dict) -> StepContext:
 
 
 def test_runner_agent_step_resolves_plan_for_verify() -> None:
-    """The workflow plan-review VERIFY prompt uses ``{{shared_prefix}}`` (story 9374);
-    RunnerAgentStep must supply it from the step's ``with: {shared_prefix: ...}`` so the
-    LIVE path resolves (the pre-9374 analogue raised ``PromptError`` for ``{{plan}}``
-    before tepid-bus-pomp)."""
+    """The verify step must supply its ``shared_prefix`` input to prompt resolution."""
     from rebar.llm.prompting import prompts
 
     step = {
