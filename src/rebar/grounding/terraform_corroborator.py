@@ -184,7 +184,7 @@ def _subject_class_name(diagnostic: str, subject: Any) -> tuple[str, str]:
     if len(parts) == 2:
         return "managed_resource", text
     if len(parts) == 3 and parts[0] == "data":
-        return "data_resource", ".".join(parts[1:])
+        return "data_resource", text
     if len(parts) >= 3:
         return "provider_attribute", text
     return "", ""

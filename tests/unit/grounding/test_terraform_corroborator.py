@@ -63,7 +63,7 @@ def _module_json(**overrides: Any) -> dict[str, Any]:
             }
         },
         "data_resources": {
-            "aws_ami.base": {
+            "data.aws_ami.base": {
                 "mode": "data",
                 "type": "aws_ami",
                 "name": "base",
@@ -263,6 +263,8 @@ def test_module_source_equals_matches_by_hash_not_literal(
         ("declaration_present", "variable.missing", "", "no_unique_address"),
         ("module_source_equals", "module.vpc", "./other", "computed_value"),
         ("required_provider_present", "google", "", "no_unique_address"),
+        ("declaration_present", "data.aws_ami.missing", "", "no_unique_address"),
+        ("declaration_present", "aws_ami.base", "", "no_unique_address"),
         ("declaration_absent", "variable.region", "", "invalid_detector"),
         ("declaration_present", "aws_s3_bucket.logs.id", "", "provider_attribute"),
     ],
