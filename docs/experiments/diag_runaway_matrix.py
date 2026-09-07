@@ -7,7 +7,9 @@ floors and records, per run: total tool calls (transcript proxy), whether the pr
 run tripped the in-flight runaway guard, and the returned verdict. If the runaway is
 budget-anchored, tool-call volume and the trip rate should RISE with the floor.
 
-Local-only, opt-in; raw transcripts kept out of the repo. Results -> /tmp/diag_matrix.csv.
+Local-only, opt-in; raw transcripts kept out of the repo. Results default to a
+per-process file under ``.rebar/scratch/`` to avoid concurrent sessions overwriting one
+another's evidence. Override with ``DIAG_MATRIX_PATH`` when needed.
 
     AWS_REGION=us-east-1 REBAR_LLM_STANDARD_PROVIDER=bedrock \
     REBAR_LLM_STANDARD_MODEL=us.anthropic.claude-sonnet-4-6 REBAR_GATE_ALLOW_UNGATED=1 \
@@ -22,6 +24,7 @@ import logging
 import os
 import sys
 import time
+from pathlib import Path
 
 from rebar.llm import pai_tools
 
@@ -45,8 +48,10 @@ def _patch_factory(name: str) -> None:
     orig = getattr(pai_tools, name)
     if getattr(orig, "_diag_patched", False):
         return
+
     def patched(*a, **k):
         return [_wrap(fn) for fn in orig(*a, **k)]
+
     patched._diag_patched = True  # type: ignore[attr-defined]
     setattr(pai_tools, name, patched)
 
@@ -84,10 +89,12 @@ def main() -> None:
     logging.getLogger("rebar").addHandler(watch)
     logging.getLogger("rebar.llm.structured_run").addHandler(watch)
 
-    from rebar.llm import completion as _completion
     import rebar
+    from rebar.llm import completion as _completion
 
-    out = "/tmp/diag_matrix.csv"
+    default_out = f".rebar/scratch/diag_matrix-{os.getpid()}.csv"
+    out = Path(os.environ.get("DIAG_MATRIX_PATH", default_out))
+    out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
         fh.write("floor,trial,tool_calls,runaway_tripped,outcome,seconds\n")
 
@@ -105,11 +112,11 @@ def main() -> None:
                 outcome = f"raised={type(exc).__name__}"
             secs = round(time.time() - t0, 1)
             row = f"{floor},{trial},{_CALLS},{int(watch.tripped)},{outcome},{secs}"
-            print(f"[matrix] {row}", flush=True)
+            print(f"[matrix] {row}", flush=True)  # noqa: T201
             with open(out, "a", encoding="utf-8") as fh:
                 fh.write(row + "\n")
 
-    print(f"[matrix] done -> {out}")
+    print(f"[matrix] done -> {out}")  # noqa: T201
 
 
 if __name__ == "__main__":

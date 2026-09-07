@@ -170,18 +170,20 @@ jobs:
             exit 0
           fi
           echo "Flushing $ahead unpushed commit(s)."
+          push_err="${RUNNER_TEMP:-.}/push_err-${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-0}-$$"
+          trap 'rm -f "$push_err"' EXIT
           for attempt in 1 2 3 4 5; do
-            if git push origin HEAD:tickets 2>/tmp/push_err; then
+            if git push origin HEAD:tickets 2>"$push_err"; then
               echo "Push succeeded (attempt $attempt)."; exit 0
             fi
-            if grep -qiE 'non-fast-forward|rejected|fetch first' /tmp/push_err; then
+            if grep -qiE 'non-fast-forward|rejected|fetch first' "$push_err"; then
               git fetch origin '+tickets:refs/remotes/origin/tickets' || true
               # MERGE, not rebase: rebase over a remote compaction resurrects the source
               # event files it deleted (SNAPSHOT_INCONSISTENT, bug f193).
               git merge --no-edit origin/tickets || { git merge --abort 2>/dev/null || true; echo "::error::merge conflict"; exit 1; }
               sleep $(( (1 << attempt) + RANDOM % 3 ))
             else
-              echo "::error::non-retryable push failure: $(cat /tmp/push_err)"; exit 1
+              echo "::error::non-retryable push failure: $(cat "$push_err")"; exit 1
             fi
           done
           echo "::error::push failed after retries"; exit 1
