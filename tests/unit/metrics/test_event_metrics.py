@@ -1,13 +1,8 @@
-"""Happy-path contract for the agent-process event-derivation readers (ticket 18e6).
+"""Contract tests for ``attempts_per_ticket`` in ``rebar.metrics.event_metrics``.
 
-Tier: unit (real temp store; raw event files crafted with known timestamps/sessions).
-Pins the core RAW-event derivation that compiled state cannot provide: counting
-distinct claim sessions (attempts). Rework/revert/None-vs-zero contracts are held out.
-
-Public surface (from ``rebar.metrics.event_metrics``):
-- ``attempts_per_ticket(repo_root, since=None, until=None) -> dict[str, int]`` —
-  per-ticket count of distinct claim sessions (distinct ``data.session`` on
-  ``open->in_progress`` STATUS events).
+Raw events supply claim-session identity absent from compiled state. The reader counts distinct
+sessions from ``open->in_progress`` status events within the requested range. Its result maps
+each ticket ID to an attempt count.
 """
 
 from __future__ import annotations

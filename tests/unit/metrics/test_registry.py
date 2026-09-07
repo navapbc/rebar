@@ -1,18 +1,8 @@
-"""Happy-path contract for the metric registry (ticket c085).
+"""Contract tests for metric registry uniqueness and dispatch.
 
-Tier: unit (in-process, real registry). This file is the *happy-path* oracle —
-it specifies the minimal correct shape of the declarative metric registry and
-the value/unavailable dispatch. Edge/segregation contracts live in the held-out
-companion ``test_registry_heldout.py`` and are validated by the orchestrator.
-
-Public contract exercised here (all names are the ticket's documented surface):
-- ``MetricSpec(id, lens, source, confidence, compute, accruing_since)`` — a
-  declarative spec; ``compute`` is ``Callable[[context], value | None]`` where a
-  ``None`` return means "no data has accrued yet".
-- ``REGISTRY`` — an iterable of ``MetricSpec`` with unique ids.
-- ``evaluate(spec, context=None) -> MetricValue | Unavailable`` — runs a spec's
-  compute and dispatches: real data -> ``MetricValue`` carrying the spec's
-  ``source``/``confidence`` labels; no data -> ``Unavailable(reason, accruing_since)``.
+``REGISTRY`` contains unique ``MetricSpec.id`` values. ``evaluate`` wraps computed data in
+``MetricValue`` with the spec's source and confidence labels. A ``None`` result becomes
+``Unavailable`` with its reason and ``accruing_since`` value.
 """
 
 from __future__ import annotations

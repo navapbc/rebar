@@ -1,15 +1,8 @@
-"""Held-out reconciliation between the scc-backed size metric and the CI module-size gate.
+"""Reconcile the scc module-size metric with the CI gate.
 
-Ticket c5b3 (rapid-cuboid-velvetcrab). ``module_size_distribution`` reported a CONFIDENT ZERO
-on a repository whose largest module is at the cap, because the scc invocation omitted
-``--by-file``. Two things must hold once that is fixed:
-
-* the file-set narrowing is PER-PROJECT CONFIGURATION, dogfooded here rather than hardcoded
-  into the polyglot adapter (the operator's ruling on AC3; a config knob with no live read
-  site is the dce2 failure mode), and
-* the number it reports must agree with what the CI ``Module-size gate`` actually enforces
-  (AC4) — the gate counts ``wc -l`` over ``src/rebar/**/*.py`` against
-  ``.github/module-size-limit.txt``.
+Project configuration makes scc and the CI gate inspect the same file set. The metric's
+per-file LOC, the cap from ``.github/module-size-limit.txt``, and the resulting over-cap verdict
+must match gate results based on ``wc -l``.
 """
 
 from __future__ import annotations
@@ -18,11 +11,8 @@ import shutil
 
 import pytest
 
-# Bare name, not ``tests.unit....``: ``tests/`` is inserted into sys.path by
-# ``tests/conftest.py``, whereas a ``tests.``-rooted absolute import only resolves when the
-# repo root happens to be on sys.path -- true under ``python -m pytest`` (which adds cwd),
-# false under the bare ``pytest`` CI runs. Same class of bug as 8a5e F6: anchor to the
-# package layout, never to the working directory.
+# This bare import resolves ``tests/module_size_support.py`` under both ``pytest`` and
+# ``python -m pytest`` without relying on repository-root path injection.
 from module_size_support import (
     REPO_ROOT,
     SRC_ROOT,

@@ -1,29 +1,9 @@
-"""Happy-path contract for the bug_trends metrics lens (ticket b967).
+"""Contract tests for the structural, high-confidence ``bug_trends`` lens.
 
-Tier: unit (real temp store; raw event files crafted with known timestamps).
-
-Public surface (from ``rebar.metrics.bug_trends``) — five dimensions over the
-bug population, each a multi-arg derivation plus a registered spec
-(lens ``bug_trends``, source ``structural``, confidence ``high``):
-
-- ``close_class_by_month(repo_root, since=None, until=None) -> dict | None`` —
-  FLOW: ``{"YYYY-MM": {<close_class or "MISSING">: count}}`` over bugs whose
-  close falls in range. The pre-convention MISSING cohort is a labeled key,
-  never dropped or merged into a real class.
-- ``time_to_close_days(repo_root, since=None, until=None) -> dict | None`` —
-  FLOW: ``{"p50": days, "p90": days, "count": n}`` (nearest-rank percentiles)
-  over bugs closed in range.
-- ``open_bug_age_days(repo_root, now_ns=None) -> dict | None`` — STOCK:
-  ``{"p50": days, "p90": days, "max": days, "count": n}`` over open +
-  in_progress bugs; ``now_ns`` is an explicit clock seam.
-- ``detected_by_distribution(repo_root) -> dict | None`` — STOCK:
-  ``{<channel>: count, "unset": n}``; ``None`` when NO bug carries the field
-  (the sibling-landing degradation path).
-- ``caused_by_fan_in(repo_root) -> dict | None`` — STOCK: ``{target_id: count}``
-  ordered by descending count over bugs' ``caused_by`` links.
-
-``None`` means no data accrued (the registry renders ``unavailable``) — never
-an empty-implies-healthy zero.
+Range-filtered flows report monthly close-class counts and time-to-close percentiles. Stock
+metrics report open-bug age through the explicit ``now_ns`` clock seam, detection-channel
+distribution, and ``caused_by`` fan-in ordered by descending count. Missing close classes use
+``MISSING``. Empty populations return ``None`` so the registry renders unavailable.
 """
 
 from __future__ import annotations
