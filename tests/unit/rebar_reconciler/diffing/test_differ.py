@@ -158,7 +158,7 @@ def test_changed_field_produces_update_mutation(
         mutation_mod.MutationDirection.inbound,
         mutation_mod.MutationDirection.outbound,
     )
-    assert m.payload.get("summary") == "new summary"
+    assert m.payload.get("changed_fields", {}).get("summary") == "new summary"
 
 
 def test_update_contains_only_changed_fields(differ: ModuleType, mutation_mod: ModuleType) -> None:
@@ -167,9 +167,47 @@ def test_update_contains_only_changed_fields(differ: ModuleType, mutation_mod: M
     result = differ.compute_mutations(local_state=local, jira_state=jira)
     assert len(result) == 1
     payload = result[0].payload
-    assert payload.get("status") == "closed"
-    assert "summary" not in payload
-    assert "priority" not in payload
+    assert payload.get("changed_fields") == {"status": "closed"}
+    assert "summary" not in payload["changed_fields"]
+    assert "priority" not in payload["changed_fields"]
+
+
+def test_outbound_update_payload_uses_adr_0107_wrapped_shape(
+    differ: ModuleType, mutation_mod: ModuleType
+) -> None:
+    """Outbound update producer emits ADR 0107's wrapped OutboundUpdatePayload shape."""
+    local = {"DSO-ADR-107": {"summary": "new summary", "status": "open"}}
+    jira = {"DSO-ADR-107": {"summary": "old summary", "status": "open"}}
+
+    result = differ.compute_mutations(local_state=local, jira_state=jira)
+
+    assert len(result) == 1
+    mutation = result[0]
+    assert mutation.direction == mutation_mod.MutationDirection.outbound
+    assert mutation.action == mutation_mod.MutationAction.update
+    assert mutation.payload == {
+        "changed_fields": {"summary": "new summary"},
+        "comments": [],
+        "labels": [],
+        "links": [],
+    }
+
+
+def test_outbound_update_payload_contrasts_with_flat_inbound_create(
+    differ: ModuleType, mutation_mod: ModuleType
+) -> None:
+    """ADR 0107 wraps outbound/update but keeps inbound/create flat."""
+    local: dict = {}
+    jira = {"DSO-INBOUND-FLAT": {"summary": "from jira", "priority": "low"}}
+
+    result = differ.compute_mutations(local_state=local, jira_state=jira)
+
+    assert len(result) == 1
+    mutation = result[0]
+    assert mutation.direction == mutation_mod.MutationDirection.inbound
+    assert mutation.action == mutation_mod.MutationAction.create
+    assert mutation.payload == {"summary": "from jira", "priority": "low"}
+    assert "changed_fields" not in mutation.payload
 
 
 def test_excluded_field_not_in_update_payload(differ: ModuleType, mutation_mod: ModuleType) -> None:
@@ -179,9 +217,14 @@ def test_excluded_field_not_in_update_payload(differ: ModuleType, mutation_mod: 
     assert len(result) == 1
     m = result[0]
     assert m.action == mutation_mod.MutationAction.update
-    assert "local_id" not in m.payload
-    assert "rebar-id" not in m.payload
-    assert m.payload == {"summary": "after"}
+    assert "local_id" not in m.payload["changed_fields"]
+    assert "rebar-id" not in m.payload["changed_fields"]
+    assert m.payload == {
+        "changed_fields": {"summary": "after"},
+        "comments": [],
+        "labels": [],
+        "links": [],
+    }
 
 
 def test_create_excludes_excluded_fields(differ: ModuleType, mutation_mod: ModuleType) -> None:

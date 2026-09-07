@@ -139,11 +139,9 @@ def drop_snapshot_differ_local_state_emissions(mutations: list[Any]) -> list[Any
       ``reconcile.py`` advances the prev snapshot from the PRE-APPLY fetch, so an outbound
       write applied during pass N is invisible to ``prev`` at pass N+1 — a fully converged
       pair is re-planned as outbound work, and a read-only pass (which never advances
-      ``prev``) re-plans the same phantom forever. Applying it changes nothing either: the
-      payload is a bare field dict, not ``{"changed_fields": ...}``, so
-      ``batch_dispatch._mutation_to_batch_dict`` resolves its fields to ``{}``. It is
-      unsatisfiable while still spending the per-mode mutation cap and inflating
-      ``mutation_count``.
+      ``prev``) re-plans the same phantom forever. The snapshot route drops this
+      phantom before apply; the differ's canonical outbound/update payload shape
+      is still ADR 0107's wrapped ``{"changed_fields": ...}`` contract.
     * **``unbound_local``** (key in ``local_state`` only) —
       ``_compute_mutations_emit_local_only`` emits an ``(outbound, create)`` for a key
       that is really just "present in the previous fetch, absent from this one". That is

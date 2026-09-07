@@ -21,9 +21,8 @@ per-key arms divide cleanly:
   re-planned as outbound work — and a read-only pass, which never advances ``prev``,
   re-plans it forever. WRONG (ticket 727f).
 
-WHY NEITHER IS MERELY COSMETIC. The ``field_drift`` phantom's payload is a bare field dict
-rather than ``{"changed_fields": ...}``, so the applier resolves its fields to ``{}``: it can
-never be satisfied, is planned every pass, spends the bootstrap mutation cap, and makes a
+WHY NEITHER IS MERELY COSMETIC. The ``field_drift`` phantom carries the stale prev
+value and is planned every pass, spending the bootstrap mutation cap and making a
 "converged" report untrue. The ``unbound_local`` create is worse — it reaches
 ``client.create_issue`` and resurrects the issue, which ADR 0028 Decision para 1 forbids
 ("No destructive or terminal action ... may be driven by a key's absence from the fetched
@@ -163,7 +162,10 @@ def test_a_converged_pair_plans_no_outbound_update_after_our_own_write(
         "fixture is inert: the snapshot differ emitted no outbound update for a "
         "prev/curr pair that differs on summary, so this test could pass vacuously"
     )
-    assert _of_kind(raw, "outbound", "update")[0].payload.get("summary") == _OLD, (
+    assert (
+        _of_kind(raw, "outbound", "update")[0].payload.get("changed_fields", {}).get("summary")
+        == _OLD
+    ), (
         "fixture drifted: the phantom no longer carries the STALE prev value, so it is "
         "not the mechanism this test exists to pin"
     )
