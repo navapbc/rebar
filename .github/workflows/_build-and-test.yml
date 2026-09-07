@@ -312,6 +312,10 @@ jobs:
     # either. `--privileged` is an OCI runtime capability, not a CI-provider feature:
     # the identical `docker run` works on a developer laptop, which is what
     # `project.portability` requires.
+    #
+    # Keep the package-manager precondition readable: apt output is captured on success
+    # to keep this hot path quiet, but its last lines are printed on failure so the
+    # gating signal is diagnosable instead of collapsing to exit 100 with no evidence.
     name: sandbox enforcement (Linux bwrap, gating)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -336,10 +340,11 @@ jobs:
       # the child ran AND that the outside write did not land.
       - name: Prove bwrap can namespace and enforce (fail the lane if not)
         run: |
-          docker run --rm --privileged ubuntu:24.04 bash -c '
+          docker run --rm --privileged \
+            -v "$PWD:/w:ro" -w /w \
+            ubuntu:24.04 bash -c '
             set -e
-            apt-get update -qq >/dev/null 2>&1
-            apt-get install -y -qq bubblewrap >/dev/null 2>&1
+            bash scripts/install_sandbox_bwrap.sh bubblewrap
             bwrap --version
             d=$(mktemp -d); mkdir -p "$d/allow"
             bwrap --ro-bind / / --bind "$d/allow" "$d/allow" --dev /dev -- \
@@ -375,8 +380,7 @@ jobs:
             -e REBAR_REQUIRE_SANDBOX_ENFORCEMENT=1 \
             python:3.13-slim bash -c '
               set -e
-              apt-get update -qq >/dev/null 2>&1
-              apt-get install -y -qq bubblewrap git >/dev/null 2>&1
+              bash scripts/install_sandbox_bwrap.sh bubblewrap git
               git config --global --add safe.directory /w
               pip install -q ".[dev]"
               python -m pytest tests/scripts/test_mutation_sandbox.py \
