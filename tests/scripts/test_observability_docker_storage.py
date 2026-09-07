@@ -362,6 +362,7 @@ def test_storage_and_buildkit_are_published_against_their_own_caps(tmp_path: Pat
     # BuildKit is AT its cap while the whole budget reads a comfortable 50%: one alarm
     # structurally cannot answer for the other.
     assert _one(aws_log, "docker_buildkit_cache_used_percent") == 100
+    assert _one(aws_log, "docker_du_ok") == 1
 
 
 def test_the_docker_metrics_carry_no_dimensions(tmp_path: Path) -> None:
@@ -389,11 +390,12 @@ def test_the_docker_metrics_carry_no_dimensions(tmp_path: Path) -> None:
 def test_a_failed_du_publishes_nothing_at_all(tmp_path: Path) -> None:
     """A `du` that could not run must not be reported as an empty Docker root.
 
-    ``treat_missing_data = "breaching"`` turns this silence into a page; a fabricated ``0``
-    would instead read as perfect health on a box that is filling.
+    ``docker_du_ok=0`` carries the pageable staleness state; a fabricated ``0`` for the
+    storage readings would instead read as perfect health on a box that is filling.
     """
     env, aws_log = _environment(tmp_path, du_total=None, du_overlay2=None)
     assert _run(env).returncode == 0
+    assert _one(aws_log, "docker_du_ok") == 0
     for metric in (
         "docker_storage_bytes",
         "docker_storage_used_percent",
@@ -430,6 +432,7 @@ def test_an_unreadable_docker_root_publishes_no_residue(tmp_path: Path) -> None:
     """The root `du` IS the minuend now, so without it there is no defensible residue."""
     env, aws_log = _environment(tmp_path, du_total=None)
     assert _run(env).returncode == 0
+    assert _one(aws_log, "docker_du_ok") == 0
     assert _values(aws_log, "docker_storage_bytes") == []
     assert _values(aws_log, "docker_unaccounted_bytes") == []
     # The ledger half is independent and still measurable, so it is still reported.

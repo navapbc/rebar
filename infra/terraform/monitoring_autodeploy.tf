@@ -496,20 +496,18 @@ resource "aws_cloudwatch_metric_alarm" "docker_storage_cap_high" {
   # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
   # or empty, and one healthy datapoint always clears it.
   #
-  # §2f publishes this ONLY on a successful measurement, so silence here is a real condition —
-  # a `du` that could not run, a wedged docker daemon — and "breaching" must stay (the pin in
-  # tests/unit/test_alarm_actions_terraform.py). 6-of-6 keeps that meaning while requiring the
-  # whole window to be silent, which no ordinary scheduling gap achieves.
+  # §2f publishes this ONLY on a successful root-du measurement. Bug 5993 established that a
+  # bounded `du` timing out under load is an accepted degradation, not storage pressure; the
+  # dedicated docker_du_not_ok heartbeat below pages on that state.
   period              = 300
   evaluation_periods  = 6
-  datapoints_to_alarm = 6
+  datapoints_to_alarm = 3
   threshold           = 85
   comparison_operator = "GreaterThanThreshold"
 
-  # observability.sh 2f publishes ONLY on a successful measurement, so absence means the probe
-  # could not read the disk — which is exactly when this must page rather than clear to OK
-  # (bug 3276 defect 2). Pinned by tests/unit/test_alarm_actions_terraform.py.
-  treat_missing_data = "breaching"
+  # rebar:allow-missing-data-notbreaching: docker_du_not_ok owns the bounded root-du failure
+  # state, so this alarm stays about measured capacity rather than paging on "could not check".
+  treat_missing_data = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
@@ -517,6 +515,38 @@ resource "aws_cloudwatch_metric_alarm" "docker_storage_cap_high" {
   tags = {
     Project = "rebar"
     Ticket  = "9183"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "docker_du_not_ok" {
+  alarm_name        = "rebar-docker-du-not-ok"
+  alarm_description = <<-EOT
+    The Docker root `du` census could not complete for a full 30-minute window. This is the
+    accepted degradation from bug 5993: the storage and unaccounted-byte gauges intentionally
+    go stale instead of publishing a plausible zero, and this heartbeat names that condition.
+    Published as rebar/host:docker_du_ok (1 success / 0 failed) by observability.sh 2f.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "docker_du_ok"
+  statistic   = "Minimum"
+
+  period              = 300
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+
+  # Heartbeat semantics: a healthy measurement publishes 1 on every tick, a bounded
+  # non-measurement publishes 0, and absence means the probe/timer/host stopped.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "5993"
   }
 }
 
@@ -600,12 +630,12 @@ resource "aws_cloudwatch_metric_alarm" "docker_unaccounted_bytes" {
   # missing buckets out-voting a real reading: a page needs the whole 30-minute window breaching
   # or empty, and one healthy datapoint always clears it.
   #
-  # §2f publishes only on a successful measurement, so silence is the real "the probe can no
-  # longer size the Docker root" condition and "breaching" stays. 6-of-6 is what distinguishes
-  # that from one ordinary scheduling gap.
+  # §2f publishes this ONLY when both the root `du` and Docker ledger succeeded. Bounded root-du
+  # misses are accepted degradation and page through docker_du_not_ok instead of this residue
+  # alarm pretending the unseen residue crossed the threshold.
   period              = 300
   evaluation_periods  = 6
-  datapoints_to_alarm = 6
+  datapoints_to_alarm = 3
   # 2 GiB. Some divergence between `du` and the ledger is NORMAL — `du` counts allocated
   # blocks including per-layer directory and whiteout overhead plus the daemon's own metadata
   # (image/, network/, buildkit/*.db, tmp/), while the ledger reports layer sizes with sharing
@@ -614,10 +644,9 @@ resource "aws_cloudwatch_metric_alarm" "docker_unaccounted_bytes" {
   threshold           = 2147483648
   comparison_operator = "GreaterThanThreshold"
 
-  # The residue needs BOTH the filesystem read and the ledger read to succeed, so silence here
-  # means one of them failed — and an unmeasured orphan mass is the state this alarm exists
-  # for, not a state it may report as healthy.
-  treat_missing_data = "breaching"
+  # rebar:allow-missing-data-notbreaching: docker_du_not_ok owns bounded root-du staleness; a
+  # missing residue datapoint must not be reported as orphaned bytes above threshold.
+  treat_missing_data = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
