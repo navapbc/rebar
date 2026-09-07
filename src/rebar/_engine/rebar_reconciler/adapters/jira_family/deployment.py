@@ -1,24 +1,9 @@
-"""Derive a `RemoteRef.instance` string from a deployment's base URL (ticket 6a91, epic e369).
+"""Derive a normalized ``RemoteRef.instance`` label from a deployment base URL.
 
-`RemoteRef.instance` names the concrete deployment so two instances of the SAME vendor do not
-collide. (`vendor` already separates Cloud from Data Center — Cloud's backend is ``"jira"``, DC's
-is ``"jira-datacenter"`` — so what `instance` disambiguates is, say, two DC deployments.)
-
-WHAT THIS DOES **NOT** DO, stated here because `RemoteRef`'s own docstring used to imply otherwise:
-it does not prevent LOCAL-ID collision between two same-vendor deployments.
-``inbound_translate._jira_key_to_local_id`` is ``"jira-" + jira_key.lower()`` — it derives the id
-from the Jira key and nothing else — so two DC deployments that each own a project ``DIG`` both
-mint ``jira-dig-123``, whatever `instance` says. Nothing consults `instance` when a local id is
-minted. Making the id instance-aware would change the id scheme for every existing Jira-sourced
-ticket, a breaking store-wide migration that is deliberately out of scope here.
-
-WHY THE BASE URL, AND WHAT HAPPENS WHEN IT CHANGES. It is available wherever a backend is built,
-needs no extra REST round-trip and no operator action. It is also MUTABLE: an operator who moves
-their instance changes it. That is tolerable for exactly one reason — **nothing persists a
-`RemoteRef`**. It is an in-memory value returned by a port member, so a URL change re-labels
-nothing on disk. Any future story that persists one inherits the stability problem and must solve
-it there (an operator-set opaque id, or the instance's own server id, are the candidates; neither
-is needed for in-memory use and adding either now would be unused configuration).
+The label exists only in memory and changes when the URL changes. It distinguishes
+same-vendor deployments within ``RemoteRef`` but does not prevent collisions in
+the current local-ID scheme. Persisting it would require a separate stability
+design.
 """
 
 from __future__ import annotations

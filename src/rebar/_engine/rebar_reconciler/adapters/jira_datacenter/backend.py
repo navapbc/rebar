@@ -1,18 +1,9 @@
-"""``JiraDataCenterBackend`` — the DC backend port implementation (story J6, epic
-e369).
+"""Register the ``jira-datacenter`` backend.
 
-Wires the DC transport (``transport.py``) together with the Jira-family SHARED
-layer (``adapters/jira_family``) — the value maps, sanitizers, and identity
-convention that Cloud and DC both consume from ONE implementation (PR #120's
-mistake was forking these per adapter). The only
-DC-specific pieces are: the rich-text codec (``WikiTextCodec`` — plain
-text/wiki markup, not ADF) and the user-identity model (``NameIdentity`` — DC's
-``name`` username, not Cloud's opaque ``accountId``).
-
-Registered under the key ``"jira-datacenter"``. Importing this module (which
-``adapters/__init__.py`` does, alongside the existing Cloud import) is the SIDE
-EFFECT that makes ``select_backend("jira-datacenter")`` resolve — see
-``_backend_registry.register``.
+The implementation combines shared Jira-family value maps and sanitizers with
+Data Center wiki text and username identity. Importing the module registers the
+backend. Data Center uses ``WikiTextCodec`` rather than ADF and ``NameIdentity``
+rather than Cloud ``accountId``.
 """
 
 from __future__ import annotations
@@ -47,23 +38,14 @@ from rebar_reconciler.adapters.jira_family.rich_text import (
     cutover_clients,
 )
 
-# Story S5 routes the priority value through the shared ``resolve_outbound_priority``
-# (config-driven, map-or-drift) rather than subscripting this map directly, but the
-# INT-keyed built-in is kept imported as a MODULE ATTRIBUTE under its historical name so
-# the jira-family boundary/parity tests can pin Cloud and DC to the SAME object.
-# ``resolve_outbound_priority`` builds its own str-keyed VIEW of this same built-in when
-# no per-project map applies, so no-config behaviour is unchanged.
+# Preserve the shared integer priority map as a module attribute for parity tests.
+# ``resolve_outbound_priority`` applies project maps or the same default.
 from rebar_reconciler.adapters.jira_family.value_maps import (  # noqa: F401
     LOCAL_PRIORITY_TO_JIRA,
 )
 
-# Story bd9e (epic 3e73): the local->Jira TYPE map is imported from the Jira-family
-# shared layer so both create paths resolve to ONE object. Story S3 routes the type
-# value through the shared ``resolve_outbound_type`` (config-driven, map-or-default)
-# rather than subscripting this map directly, but it is kept under the historical
-# private name as a MODULE ATTRIBUTE (read by the jira-family boundary parity test,
-# which pins Cloud and DC to the SAME object). ``resolve_outbound_type`` falls back to
-# this same built-in when no per-project map applies, so no-config behaviour is unchanged.
+# Preserve the shared ticket-type map as a module attribute for parity tests.
+# ``resolve_outbound_type`` applies project maps or this default.
 from rebar_reconciler.adapters.jira_family.value_maps import (  # noqa: F401
     LOCAL_TYPE_TO_JIRA as _LOCAL_TO_JIRA_TYPE,
 )
@@ -76,34 +58,17 @@ def _map_local_to_dc_fields(
     priority_map: dict[str, str] | None = None,
     create_defaults: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Full local-ticket -> DC field mapping (the CREATE path).
+    """Map a local ticket into Data Center create fields.
 
-    Deliberately self-contained rather than delegating to Cloud's
-    ``adapters/jira/outbound_fields._map_local_to_jira_fields``: that function's
-    sibling module lazy-loads ``adapters/jira/adf.py`` by file path, a Cloud-pinned
-    coupling this package must not carry (this package imports nothing from
-    ``adapters/jira/``). Uses the SAME Jira-family value maps Cloud uses, so the
-    local<->Jira vocabulary stays one definition; only the rich-text fit
-    (``WikiTextCodec`` — plain text, not ADF) differs.
-
-    ``status_map`` (S2): the effective per-project local->Jira status map; ``None``
-    falls back to the built-in ``LOCAL_STATUS_TO_JIRA``. A local status with NO target
-    (map-or-drift) OMITS the ``status`` field entirely, never coercing it.
-
-    ``priority_map`` (S5): the effective per-project local->Jira priority map; ``None``
-    falls back to the built-in. A local priority with NO target likewise OMITS the
-    ``priority`` field (map-or-drift), never coercing to ``"Medium"``. ``create_defaults``
-    (S5): str-valued required-beyond-baseline vendor fields merged UNDER this computed body
-    (baseline computed fields win on collision), CREATE-only.
+    Use shared map-or-drift status and priority resolvers and the shared
+    map-or-default type resolver. Omit status or priority when no target exists.
+    Render descriptions with ``WikiTextCodec``. Merge string create defaults
+    beneath computed fields.
     """
     codec = WikiTextCodec(rich="dc" in cutover_clients())
     fields: dict[str, Any] = {
         "summary": ticket.get("title") or "",
-        # Render, then fit — ``to_wire(fit_outbound(...))``, matching ``_issues.py``'s
-        # create path and ``OutboundFieldMapper``'s update path. Fitting WITHOUT
-        # ``to_wire`` is the half-cutover bug: this site builds a rich codec but would
-        # post raw Markdown on CREATE while every later update posted rendered wiki, so
-        # a freshly created issue read as broken formatting until someone edited it.
+        # Render and fit descriptions before create, matching create and update paths.
         "description": codec.to_wire(codec.fit_outbound(ticket.get("description") or "")),
         "issuetype": resolve_outbound_type(ticket.get("ticket_type", "task"), type_map),
         "assignee": ticket.get("assignee") or "",
@@ -128,11 +93,8 @@ class _DCOutbound:
         assignee_resolver: Callable[[str], tuple[Any, bool, bool]] | None = None,
     ) -> None:
         self._mapper = OutboundFieldMapper(WikiTextCodec(rich="dc" in cutover_clients()))
-        #: DC's live account search, bound ONCE to the deployment's client (it takes no
-        #: remote key, unlike Cloud's per-issue closure). A declared constructor parameter
-        #: rather than an attribute the backend sets from outside (ticket 65d7): the
-        #: side-channel form was invisible to mypy and silently degraded every resolution
-        #: to non-authoritative if it ever failed to happen.
+        # Capture the deployment account search through a declared constructor
+        # parameter.
         self._assignee_search = assignee_resolver
 
     @property
@@ -180,14 +142,11 @@ class _DCOutbound:
         *,
         assignee_resolver: Callable[[str], tuple[Any, bool, bool]] | None = None,
     ) -> tuple[Any, bool, bool]:
-        """Delegate to :class:`NameIdentity` (story J4), DC's user-identity model
-        (compares against the remote identity's ``name``, never an accountId).
+        """Resolve assignees through ``NameIdentity``.
 
-        Two resolvers can be in play, so their precedence is explicit (ticket 65d7):
-        the core diff's ``assignee_resolver`` — bound to the issue being diffed — WINS,
-        and the constructor's deployment-wide search is the fallback. That is exactly
-        the old semantics: the core used to *overwrite* the attribute this backend had
-        set at construction, so a core-supplied resolver already took precedence."""
+        The issue-scoped resolver supplied by the core takes precedence over the
+        deployment-wide search captured at construction.
+        """
         return NameIdentity(resolver=assignee_resolver or self._assignee_search).resolve(
             local_value, remote_identity
         )
@@ -214,23 +173,11 @@ class _DCInbound:
 
 
 def _truncate_dc_comment_body(body: str, max_chars: int) -> str:
-    """Truncate a DC COMMENT body to ``max_chars`` — the comment path's OWN rule.
+    """Fit a Data Center comment to an independent character ceiling.
 
-    Bug 049e. This exists so the comment path does not borrow ``WikiTextCodec.
-    fit_outbound``, the DESCRIPTION fitter: the two coincide today only because DC's
-    description fit is a plain character truncation, and a future format-aware change
-    to description fitting must not silently retarget comments.
-
-    ``max_chars <= 0`` means UNLIMITED (``jira.text.field.character.limit``'s own
-    ``0`` convention) — the body is returned untouched.
-
-    The truncation marker is the SHARED ``_WIKI_TRUNCATION_SUFFIX``, imported rather
-    than redeclared: a Jira reader must see ONE marker on DC regardless of which
-    field was shortened, and byte-identity with the description rule at the default
-    ceiling is pinned by the existing DC characterization/held-out tests. Sharing an
-    inert marker STRING is not the coupling this function breaks — sharing the fitter
-    FUNCTION is. Idempotent: re-fitting an already-fitted value is a no-op.
-    Non-``str`` values pass through, matching the codec's "never coerce" behaviour.
+    Nonpositive limits mean unlimited. Truncation uses the shared wiki suffix and
+    is idempotent. Non-string values pass through unchanged. This function remains
+    separate from description fitting so format changes cannot retarget comments.
     """
     if not isinstance(body, str) or max_chars <= 0 or len(body) <= max_chars:
         return body
@@ -266,29 +213,12 @@ class _DCSanitizer:
         return _shared_sanitize_description(description, fit=self._codec.fit_outbound)
 
     def comment_max_chars(self) -> int:
-        """This instance's comment ceiling, resolved ONCE per sanitizer (bug 049e).
+        """Return the configured comment ceiling, resolving it lazily once.
 
-        PROVENANCE OF THE CEILING (story 79d5, made configurable by bug 049e) —
-        32767 is a decision backed by a primary source, not an assumption carried
-        over from the description: Jira's own ``jpm.xml`` defines the advanced
-        setting ``jira.text.field.character.limit`` with ``default-value 32767`` and
-        a description covering "Description, Environment, Comments and Text custom
-        fields", and JRASERVER-28519 records that 7.0.0 made 32767 the default (6.x
-        shipped the same key defaulting to 0 = unlimited, already listing Comments in
-        scope). Comments and descriptions are governed by ONE property on DC, so the
-        two ceilings agreeing NUMERICALLY is faithful to DC rather than a shortcut.
-        Cloud needs its own ``adapters/jira/comment_limits`` module not because its
-        numbers differ but because its UNITS do — Cloud descriptions are limited in
-        ADF-SERIALIZED size, and DC has no ADF inflation to measure.
-
-        What 049e changed: that property is ADMIN-SETTABLE (``0..2147483647``, ``0`` =
-        unlimited), so 32767 is only the DEFAULT. It now comes from
-        ``[tool.rebar.reconciler].comment_max_chars`` (see
-        ``settings.resolve_comment_max_chars`` for the full citation and for why the
-        value is NOT discovered from the instance). Resolution is LAZY — a
-        ``_DCSanitizer`` is built in ``JiraDataCenterBackend.__init__``, which must
-        not require a resolvable config — and cached, so a hot comment loop resolves
-        config once. Tests inject the ceiling via the constructor instead.
+        Data Center defaults ``jira.text.field.character.limit`` to 32767 and
+        treats zero as unlimited. The value is configurable because reading the
+        deployment setting requires Jira administrator permission. Constructor
+        injection supports tests.
         """
         if self._comment_max_chars is None:
             from rebar_reconciler.adapters.jira_datacenter.settings import (
@@ -299,27 +229,16 @@ class _DCSanitizer:
         return self._comment_max_chars
 
     def _fit_raw(self, text: str) -> str:
-        """The comment path's OWN vendor fit — a plain right-truncation at the
-        deployment-resolved ceiling. DELIBERATELY NOT ``self._codec.fit_outbound``
-        (bug 049e): that is the DESCRIPTION fitter. The two agreed today only
-        because DC's description fit happens to be a plain character truncation —
-        Cloud shows why the coupling is a trap, since its description fitter
-        measures ADF-SERIALIZED size and would be catastrophically wrong for a
-        comment. ``_truncate_dc_comment_body`` is the comment path's own rule, so a
-        future format-aware change to description fitting cannot silently retarget
-        comments. Convergence over this ceiling is pinned by ``tests/unit/
-        rebar_reconciler/mutate/test_dc_outbound_comment_length_convergence.py``."""
+        """Fit raw comment text through the comment-specific truncator.
+
+        This path does not use the description codec, so description format
+        changes cannot alter comment limits.
+        """
         return _truncate_dc_comment_body(text, self.comment_max_chars())
 
     def sanitize_comment(self, body: str) -> str:
-        # The SEND-path sanitizer (bug b9b4-f460-2d54-4872: now actually wired, via
-        # ``JiraDataCenterBackend.add_comment``). The fit runs through the shared
-        # ``fit_preserving_marker`` — the same marker-preserving composition Cloud's
-        # send path uses (bug 5931) — so an over-length decorated body is truncated
-        # in its CONTENT and re-decorated, never cutting RECONCILER_MARKER off the
-        # tail. A marker-less body goes straight to ``_fit_raw``, byte-identical to
-        # the pre-wiring behaviour. The operator truncation warning stays in the
-        # shared ``jira_family.sanitize_comment``.
+        # Fit decorated comments with ``fit_preserving_marker`` so truncation
+        # retains ``RECONCILER_MARKER``. Markerless bodies use the raw fitter.
         from rebar_reconciler.outbound_comments import fit_preserving_marker
 
         return _shared_sanitize_comment(
@@ -329,15 +248,10 @@ class _DCSanitizer:
         )
 
     def fit_comment(self, body: str) -> str:
-        """The differ-side comparison transform: exactly the marker-free body the
-        send path LANDS (bug b9b4-f460-2d54-4872, the e339 convergence class).
+        """Reproduce the marker-free comment body used for differ deduplication.
 
-        ``_diff_comments`` builds its dedup key from this and compares it against
-        the marker-stripped body read back from Jira, so it must reproduce the
-        send composition — decorate, :func:`fit_preserving_marker` over
-        :meth:`_fit_raw`, strip the decoration — or an over-length comment never
-        matches and re-posts every pass. ``fit_comment_as_sent`` runs precisely
-        that composition; a body already within the limit returns byte-identical.
+        Apply the send path's decorate, marker-preserving fit, and strip
+        composition. In-limit bodies remain byte-identical.
         """
         from rebar_reconciler.outbound_comments import fit_comment_as_sent
 
@@ -393,11 +307,8 @@ class JiraDataCenterBackend:
 
     vendor = "jira-datacenter"
 
-    #: The store-facing FAMILY this deployment belongs to (bug 5f48). ``vendor`` is
-    #: per-deployment, but the store's identity provider and its CREATION_CHANNELS
-    #: vocabulary are per-family — a human assigned on Cloud and on DC is ONE identity,
-    #: so both mint under ``jira``. The deployment is distinguished by
-    #: ``RemoteRef.instance``, not by forking the store vocabulary.
+    # Cloud and Data Center share the store identity family ``jira``.
+    # ``RemoteRef.instance`` distinguishes deployments without partitioning identities.
     identity_family = "jira"
 
     def remote_ref(self, remote_id: str) -> RemoteRef:
@@ -413,23 +324,15 @@ class JiraDataCenterBackend:
         scope: Any | None = None,
     ) -> None:
         self.transport = transport
-        #: The deployment label for :meth:`remote_ref`, supplied by ``build_backend``
-        #: from the resolved settings, or derived from the captured scope's base URL
-        #: (RP-04 S2) when not given. NOT resolved at call time — see the port docstring.
+        # Capture the normalized deployment label for ``remote_ref`` at construction.
         self.instance = instance or (
             instance_from_base_url(scope.base_url) if scope is not None else ""
         )
-        #: The CAPTURED reconciler settings (RP-04 S2). When present, the read scope and
-        #: ``assert_env_ready`` answer from this frozen scope instead of re-resolving
-        #: ambient env/config on each access; ``None`` keeps the legacy behaviour.
+        # Captured settings supply read scope and readiness checks without ambient
+        # re-resolution.
         self._scope = scope
-        # The underlying jira.JIRA client, threaded through so this deployment's LIVE
-        # assignee search (``_search_users_by_username`` bound to it) reaches the outbound
-        # mapper as a DECLARED constructor parameter (ticket 65d7 — it used to be assigned
-        # onto the mapper as a private attribute of ``self.outbound`` behind a
-        # ``# type: ignore[attr-defined]``). ``None`` for a transport built with a fake
-        # client (unit tests), which is fine: the resolver being absent is exactly the
-        # "non-authoritative" fixture path ``NameIdentity``/``_resolve`` already define.
+        # Retain the injected client for deployment account search. A missing test
+        # client leaves identity resolution non-authoritative.
         self._client = client
         self.outbound = _DCOutbound(
             assignee_resolver=(
@@ -457,17 +360,10 @@ class JiraDataCenterBackend:
 
     @property
     def query_project(self) -> str:
-        """Configured read/query project WITHOUT any create-time default — empty
-        when unset so the inbound fetcher fails closed rather than querying every
-        project (bug 626d; ticket 97f2).
+        """Return the configured read project from captured scope or settings.
 
-        Answered from the captured scope (RP-04 S2) when present, else resolved from
-        settings rather than the transport, mirroring Cloud's
-        ``JiraBackend.query_project``: :attr:`project` answers the transport's
-        write scope, but the read scope must reflect the CONFIGURED value alone.
-        DC has no create-time default to strip — ``resolve_jira_datacenter_settings``
-        returns ``[tool.rebar.jira].project`` (env override ``JIRA_PROJECT``)
-        verbatim, so an unset project stays the empty string.
+        An unset value remains empty so inbound fetches fail closed instead of
+        querying every project. This differs from the transport's write scope.
         """
         if self._scope is not None:
             return self._scope.query_project
@@ -478,19 +374,11 @@ class JiraDataCenterBackend:
         return resolve_jira_datacenter_settings().project
 
     def assert_env_ready(self) -> None:
-        """Fail-fast when a DC connection essential is missing, BEFORE the
-        transport is used for bootstrap-band execution (ticket 97f2).
+        """Raise ``BackendEnvError`` when URL or environment-only PAT is missing.
 
-        DC's essentials are the base ``url`` (``[tool.rebar.reconciler].base_url``)
-        and the ``JIRA_PAT`` bearer token — the env-only Personal Access Token
-        (Jira 8.14+) that is deliberately never a file-config key. This is the DC
-        analogue of Cloud's JIRA_URL/JIRA_USER/JIRA_API_TOKEN check: DC has no
-        separate user credential, because the PAT identifies the account itself.
-        EVERY missing essential is named in one message, so an operator is not
-        walked through a fix-one-rerun loop. Raises the neutral
-        :class:`BackendEnvError` (subclasses ``RuntimeError``) rather than letting
-        a downstream connection attempt fail cryptically. When composed with a
-        captured scope (RP-04 S2), the check runs against that scope."""
+        Report every missing essential before client use. Captured scope supplies
+        the URL when present.
+        """
         if self._scope is not None:
             from rebar_reconciler.runtime import assert_datacenter_scope_ready
 
@@ -537,12 +425,8 @@ class JiraDataCenterBackend:
 
     # --- capability: SupportsComments (delegates to transport) ---
     def add_comment(self, remote_id: str, body: str) -> dict[str, Any]:
-        # Bug b9b4-f460-2d54-4872: fit the body to the deployment-resolved ceiling
-        # BEFORE the transport — the DC transport hands it straight to the jira
-        # client, and an over-length body is rejected without landing, re-emitting
-        # every pass (bug 6afc's loop). ``sanitize_comment`` fits through
-        # ``fit_preserving_marker`` so the RECONCILER_MARKER survives the cut, and
-        # ``fit_comment`` (the differ's dedup key) reproduces this exact result.
+        # Sanitize before transport send. ``fit_comment`` reproduces this
+        # composition for differ deduplication.
         return self.transport.add_comment(remote_id, self.sanitizer.sanitize_comment(body))
 
     def get_comment_map(self, project_key: str) -> dict[str, Any]:

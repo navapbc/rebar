@@ -1,37 +1,14 @@
-"""Declarative per-field symmetry contract for the Jira reconciler (story e931).
+"""Declare symmetry rules for every Jira-reconciled field.
 
-WHY THIS EXISTS.  Reconciler parity bugs (the 3f04 / 4b59 / 32cc class: inverted
-link directions, asymmetric field handling) escaped because each field's symmetry
-POLICY — does it round-trip, does add win over remove, is a removal gated? — lived
-only as scattered code: the ``should_propagate_removal`` gate is imported at four
-separate reconciler sites, add-wins tag merging is an inline dedup in
-``apply_inbound_records`` (mirroring ``rebar.reducer._processors.process_tag_delta``),
-and the direction codec sits in ``link_direction``.  Nothing enumerated the fields,
-so a new field (or a new surface for an old one) could pick a symmetry by accident.
+``FIELD_CONTRACT`` classifies fields as ``bidirectional``, ``add_wins``, or
+``one_way_gated``. Bidirectional fields round-trip across canonical codec
+subsets, with lossy values declared. Add-wins collections retain values added and
+removed in the same pass. One-way-gated fields propagate removals only when
+``should_propagate_removal`` confirms ownership.
 
-THIS MODULE IS THE REGISTRATION CONTRACT.  Every reconciled field handled by the
-differ/apply path MUST have a :class:`FieldSymmetry` entry in :data:`FIELD_CONTRACT`.
-``tests/unit/rebar_reconciler/test_field_contract_properties.py`` enforces that:
-it fails collection when a field handled by ``conflict_resolver.FIELD_CLASSES`` or
-``inbound_differ._OUTBOUND_TO_INBOUND_FIELD`` lacks an entry here, and asserts each
-declared class against the REAL code path (codec maps, gate, reducer contract).
-Adding a field without declaring its symmetry class breaks the build; changing a
-policy breaks a test that names the field.  DECLARATIVE ONLY: call sites are NOT
-rewired through this module (kept additive by design — story e931 scope).
-
-The three symmetry classes:
-
-* ``bidirectional`` — the field crosses in both directions; its value codec (if
-  any) must round-trip on the codec's canonical/injective subset.  Lossy edges are
-  declared, not discovered (``lossy_values``): e.g. local ``blocked`` maps outbound
-  to Jira ``In Progress`` and is reconstructed inbound from ``rebar-status:``
-  annotation labels, never from the workflow status alone.
-* ``add_wins`` — collection field where a value present in both the added and the
-  removed set of one pass stays ADDED (the reducer's intra-event TAG_DELTA
-  contract; set-valued conflict resolution unions).
-* ``one_way_gated`` — the ADD side flows freely, but propagating a REMOVAL to the
-  peer requires the ``should_propagate_removal`` managed-ref gate to return True
-  (we only delete what we provably manage; everything else degrades additive).
+Property tests require every differ and apply field to be registered. They verify
+codec round trips, add-wins behavior, and removal gates against production paths.
+Call sites do not depend on this registry.
 """
 
 from __future__ import annotations

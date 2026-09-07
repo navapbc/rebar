@@ -1,11 +1,7 @@
-"""Parent/hierarchy mixin for the Jira Data Center transport (ticket 465d,
-epic e369) — sub-task ``parent`` writes, the Epic Link custom-field lookup,
-and the bulk parent-map reader. Where 39c1 / 9bb9 / future parent work lands.
+"""Provide Jira Data Center parent reads and writes.
 
-Extracted from ``transport.py`` under the module-size cap (see ADR 0058); no behaviour change.
-``_resolve_epic_link_field_id`` (ticket 9bb9) is SHARED by ``set_parent``
-(outbound write) and ``get_parent_map`` (inbound read) — one discovery,
-never two definitions that could disagree about which field they mean.
+``_resolve_epic_link_field_id`` is shared by inbound maps and outbound updates
+so both directions use the same deployment-specific field.
 """
 
 from __future__ import annotations
@@ -48,29 +44,12 @@ class _HierarchyMixin(_TransportBase):
         return cached
 
     def get_parent_map(self, project_key: str, jql: str | None = None) -> dict[str, str | None]:
-        """``{issue_key → parent_key | None}`` for a project, via DC REST **v2**
-        OFFSET pagination.
+        """Return ``{issue_key: parent_key | None}`` through REST v2 paging.
 
-        Deliberately NOT a port of Cloud's ``get_parent_map``: that one POSTs to
-        ``/rest/api/3/search/jql`` and pages with an opaque ``nextPageToken``
-        cursor, and its own docstring records (live-proven, ticket 8b25) that the
-        legacy endpoint is retired with HTTP 410 and that sending ``startAt`` is
-        rejected with HTTP 400. Both the endpoint and the pagination model are
-        Cloud-v3 only. DC serves ``/rest/api/2/search`` with ``startAt`` /
-        ``maxResults``, which is exactly what ``jira.JIRA.search_issues`` drives —
-        so the library's native offset paging IS the DC-correct mechanism.
-
-        Also reads a non-sub-task's parent back from the "Epic Link" field
-        :meth:`_resolve_epic_link_field_id` discovers, closing 9bb9's round trip
-        with ``set_parent``; ``fields.parent`` wins where both are present.
-
-        Degradation contract (mirrors Cloud, and what ``fetcher`` expects): a
-        failure logs a WARNING and returns ``{}``, so the inbound pass falls back
-        to its parentless path rather than aborting. **One exception (ticket 18a4):**
-        a :class:`~rebar_reconciler._backend.BackendPaginationStallError` from the
-        pager is RE-RAISED past that handler — a stalled pager is a TRUNCATED map,
-        and a ``{}`` there reads as "nothing has a parent", which the differ would
-        act on as authoritative.
+        ``fields.parent`` takes precedence for subtasks. Other issues fall back
+        to the discovered Epic Link field. Ordinary transport failures log and
+        return ``{}``. ``BackendPaginationStallError`` propagates because a
+        partial map cannot safely represent parentless state.
         """
         query = jql or f"project = {project_key}"
         out: dict[str, str | None] = {}
@@ -107,46 +86,14 @@ class _HierarchyMixin(_TransportBase):
         return out
 
     def set_parent(self, remote_id: str, parent_key: str | None) -> None:
-        """Set or clear a SUB-TASK's parent via ``fields.parent``.
+        """Set or clear a subtask parent or an ordinary issue's Epic Link.
 
-        DC splits what Cloud unifies. A sub-task's parent genuinely lives in
-        ``fields.parent`` and this method writes it (``{"parent": {"key": …}}``, or
-        ``{"parent": None}`` to clear — the same call path for a SET and a CLEAR,
-        which is what ``dispatch_one`` relies on). But EPIC membership on DC is not
-        ``parent`` at all: it is the "Epic Link" **custom field**
-        (``customfield_NNNNN``, whose id is instance-specific).
-
-        **Ticket 39c1 lifted the former decline and replaced its route.** The
-        original lift wrote the Epic Link through the Agile API
-        (``add_issues_to_epic``); a live run against DC 8.17.1 answered that call
-        with HTTP 404 "null for uri" — ``POST /rest/greenhopper/1.0/epic/{key}/issue``
-        does not exist on this instance. That route is REFUTED. The Epic Link is
-        instead written as an ORDINARY field update, same mechanism as the
-        sub-task branch below: discover the field's id by matching ``name ==
-        "Epic Link"`` in ``self._client.fields()`` (``GET /rest/api/2/field``,
-        never hardcoded — the id differs per deployment), then
-        ``issue.update(fields={field_id: parent_key})``.
-
-        The decline survives only where the parent is genuinely unrepresentable —
-        no "Epic Link" field discoverable on this instance — because writing
-        ``fields.parent`` for a non-sub-task would be silently no-op'd by DC, which is
-        the failure mode this method exists to refuse.
-
-        **The SUB-TASK write is VERIFIED BY READ-BACK (bug 1a9f-50c0-e7a5-4fda).** Do
-        not "simplify" that extra round trip away as redundant: on DC 8.17.1 the
-        ``fields.parent`` write answers **HTTP 204 and is silently ignored** — the
-        sub-task's parent does not move and the field reads back unchanged. That was
-        proven by raw REST with no rebar code in the path and is recorded in
-        ``docs/jira-dc-capability-map.md``. No status code can detect it, and every
-        caller swallows this method's failure (``dispatch_one`` warns and continues),
-        so the unchanged field is the ONLY observable evidence that the mutation never
-        happened; without the read-back a no-op is reported as applied. The mismatch
-        raises ``NotImplementedError`` for the same classification reason as the
-        decline above — ``dispatch_one`` maps it to ``outbound-parent-unrepresentable``
-        and every other exception type to the RETRYABLE ``outbound-parent-failed``, and
-        a retry cannot help against a platform ignoring the write deterministically.
-        The verification runs strictly AFTER the update call, so a genuine transport
-        error (a 503, say) still propagates untouched rather than being replaced by it.
+        Subtasks use ``fields.parent``. Other issues use the discovered
+        deployment-specific Epic Link field. A missing field raises
+        ``NotImplementedError``. Subtask writes receive a fresh read because Data
+        Center can return HTTP 204 while ignoring the update. A key mismatch also
+        raises ``NotImplementedError``, classifying the parent as unrepresentable
+        rather than retryable.
         """
         issue = _call_logged("set_parent", remote_id, lambda: self._client.issue(remote_id))
         raw = _unwrap(issue)
@@ -154,17 +101,12 @@ class _HierarchyMixin(_TransportBase):
         issue_type = fields.get("issuetype") if isinstance(fields, dict) else None
         is_subtask = bool(issue_type.get("subtask")) if isinstance(issue_type, dict) else False
         if not is_subtask:
-            # Ticket 39c1: a NON-sub-task's parent is the EPIC LINK custom field, written as a
-            # plain field update — never ``fields.parent``, which DC silently no-ops, and never
-            # ``add_issues_to_epic`` (REFUTED: DC 8.17.1 404s on the greenhopper epic-issue path).
-            # Discovery is SHARED with ``get_parent_map`` (9bb9) via ``_resolve_epic_link_field_id``
+            # Non-subtasks use an ordinary update of the deployment-specific Epic Link
+            # field. Neither ``fields.parent`` nor the Agile API represents this operation.
             epic_link_id = self._resolve_epic_link_field_id()
             if epic_link_id is None:
-                # Whether the client can't enumerate fields at all, or it can and this
-                # instance simply has none named "Epic Link", the parent is equally
-                # unrepresentable — both must raise NotImplementedError (not AttributeError)
-                # so `dispatch_one` classifies it as `outbound-parent-unrepresentable`
-                # (change 1305), not the retryable `outbound-parent-failed`.
+                # Failure to discover an Epic Link field makes the parent unrepresentable
+                # and keeps ``dispatch_one`` classification non-retryable.
                 raise NotImplementedError(
                     f"set_parent cannot represent the parent of {remote_id!r} on Jira Data "
                     "Center: the issue is not a sub-task, so its parent is the 'Epic Link' "
@@ -177,21 +119,12 @@ class _HierarchyMixin(_TransportBase):
             return
         body = {"parent": {"key": parent_key}} if parent_key else {"parent": None}
         _call_logged("set_parent", remote_id, lambda: issue.update(fields=body))
-        # Bug 1a9f-50c0-e7a5-4fda: DC answers this write with 204 and ignores it, so the write
-        # is verified by reading the field back. A FRESH `self._client.issue(...)` round trip,
-        # never the `issue` object fetched above — that one carries the pre-write payload, so
-        # re-reading it would "confirm" whatever we already believed. Unwrapped through
-        # `_unwrap` exactly as the issue-type read at the top of this method is.
+        # Verify the write through a fresh issue read because the pre-write object is stale.
         verified = _call_logged("set_parent", remote_id, lambda: self._client.issue(remote_id))
         verified_raw = _unwrap(verified)
         verified_fields = verified_raw.get("fields") if isinstance(verified_raw, dict) else None
-        # An ABSENT `parent` is read as "this issue has no parent", not as "we could not tell".
-        # The read-back above requests the whole issue with no `fields=` projection, so for a
-        # sub-task the key is always present when a parent is set; treating its absence as
-        # inconclusive would reintroduce the silent pass this method exists to remove — a SET
-        # that produced no parent is a FAILED set, whatever the status code said.
-        # `parent` nests a whole issue object (id, key, self, fields), so the comparison is on
-        # the KEY; an explicit null is the no-parent state a CLEAR is asking for.
+        # An absent or null ``parent`` means no parent. Compare a populated parent
+        # by its issue key.
         observed = verified_fields.get("parent") if isinstance(verified_fields, dict) else None
         observed_key = observed.get("key") if isinstance(observed, dict) else None
         wanted_key = parent_key or None

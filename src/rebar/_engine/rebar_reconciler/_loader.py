@@ -1,32 +1,9 @@
-"""Shared by-path sibling loader for the rebar_reconciler package.
+"""Load reconciler siblings by path under caller-supplied canonical module keys.
 
-The reconciler package is routinely loaded **by file path** rather than by
-ordinary import: the top-level ``rebar_reconciler`` name is shadowed by a
-same-named test package, and several modules are exec'd standalone via
-``importlib.util.spec_from_file_location`` (no package context, so
-``from rebar_reconciler.x import ...`` cannot resolve). To load a sibling in
-those contexts, ~two dozen ``_load_*`` helpers across the package hand-rolled
-the identical ``spec_from_file_location`` + ``sys.modules`` cache + ``exec``
-dance. This module collapses that idiom into one function.
-
-**The sys.modules key contract is load-bearing.** Callers pass an *exact* key
-string (e.g. ``"rebar_reconciler.mutation"``, ``"reconcile_applier"``,
-``"rebar_reconciler_errors"``); tests pre-seed those exact keys to inject stubs
-and to preserve class identity (``Mutation`` / enum members) across modules.
-``lazy_load`` therefore:
-
-* returns the already-registered module when ``key`` is present in
-  ``sys.modules`` (so a pre-seeded stub wins), and
-* registers the freshly created module under ``key`` **before** executing it
-  (so ``@dataclass`` bodies and any circular sibling load during exec see the
-  module already in ``sys.modules`` — the ordering fixed in bug 5be7 defect #4).
-
-The file to load is resolved relative to *this* module's directory, which is the
-package directory shared by every sibling — identical to each caller's historic
-``Path(__file__).parent / filename``.
-
-This module imports **only stdlib** and nothing from ``rebar_reconciler`` so it
-stays loadable both as a normal package submodule and standalone by file path.
+A pre-registered ``sys.modules`` entry wins. New modules are registered before
+execution so decorators and circular sibling loads resolve the same object.
+Paths are relative to this package directory. The module uses only the standard
+library and supports normal or standalone loading.
 """
 
 from __future__ import annotations

@@ -1,18 +1,7 @@
-"""Retry policy + error translation for the Jira Data Center transport (story
-S1 [rebar:f2f3-9cb1-335b-4e31], epic e369).
+"""Provide Jira Data Center retry, TLS, and error translation.
 
-Extracted from ``transport.py`` under the module-size cap (see ADR 0058); this
-module changes no behaviour.
-
-``TlsVerificationError`` moves WITH its factory rather than staying behind:
-``_tls_verification_error`` returns it, so splitting the two would make this
-module import ``transport`` while ``transport`` imports ``_with_connection_retry``
-from here — a circular import. The class and its factory are one unit.
-
-``transport.py`` re-exports every name defined here, so existing importers keep
-working unedited — in particular ``test_jira_dc_config_settings.py``, which
-reaches for ``TlsVerificationError`` and ``_with_connection_retry`` through the
-transport module.
+``TlsVerificationError`` remains with its factory to avoid circular imports.
+``transport`` re-exports the public retry names.
 """
 
 from __future__ import annotations
@@ -26,34 +15,9 @@ from typing import Any
 from rebar_reconciler._backend import BackendHTTPError
 from rebar_reconciler._errors import MAX_BACKOFF_S, parse_retry_after
 
-#: PROVENANCE OF THE THREE RATE-LIMIT NUMBERS, labelled rather than stated as fact (story S2's
-#: own plan required each to be either confirmed against the target DC version or explicitly
-#: marked unverified, and the OSS research they came from retracted two of its other claims on a
-#: second pass — so an unlabelled number here would be exactly the over-trust that warning was
-#: about):
-#:
-#:   * "Data Center only" — CONFIRMED for this project's harness. `/rest/api/2/serverInfo`
-#:     reports `deploymentType != "Cloud"`, asserted live by
-#:     `test_instance_is_a_server_deployment_at_the_pinned_version`.
-#:   * "8.6+" — CONFIRMED to be SATISFIED, which is a weaker claim than confirming the threshold.
-#:     The harness runs Jira 8.17.1 and that same live test asserts `version >= (8, 14)`, so the
-#:     instance this code is exercised against is comfortably above 8.6. That 8.6 is the exact
-#:     version the limiter ARRIVED in is **UNVERIFIED** — sourced from Atlassian documentation,
-#:     not tested.
-#:   * "off by default (admin-enabled)" — **UNVERIFIED.** Whether the limiter is enabled is an
-#:     admin setting this suite never reads, and the harness has never had it switched on. This
-#:     is precisely why the retry is driven by the PRESENCE of a `Retry-After` header rather than
-#:     by any assumption about the limiter's configuration: with no header the code behaves
-#:     exactly as it did before, so being wrong about the default costs nothing.
-#:   * "Retry-After plus up to 20% jitter" — **UNVERIFIED against a live limiter.** Sourced from
-#:     Atlassian's guidance; no test has observed a real 429 from a real DC token bucket, because
-#:     the harness cannot produce one. The jitter is nonetheless load-bearing rather than
-#:     decorative: every rebar process sharing a bucket would otherwise wake in lockstep and
-#:     re-collide.
-#:
-#: The jitter is a DELIBERATE divergence from ``dispatch_one``'s 429 branch, which applies
-#: ``min(MAX_BACKOFF_S, retry_after)`` with none — the parser and the ceiling are reused from
-#: ``_errors``; the delay arithmetic is not.
+# Rate-limit retries honor ``Retry-After`` and add up to 20 percent jitter. The
+# harness does not exercise a Data Center limiter. Jitter separates clients that
+# share one rate-limit bucket.
 _RETRY_AFTER_JITTER = 0.20
 
 
@@ -148,19 +112,9 @@ def _tls_verification_error(exc: BaseException) -> Exception | None:
 
 
 def _retry_after_seconds(exc: BaseException) -> float | None:
-    """Seconds the SERVER asked us to wait, read off the 429 response's ``Retry-After``.
+    """Read a usable ``Retry-After`` delay from ``exc.response.headers``.
 
-    READ FROM ``exc.response.headers``, **NOT** ``exc.headers`` — verified against
-    pycontribs/jira 3.10.5 at runtime rather than assumed. ``JIRAError.__init__`` does
-    ``self.headers = kwargs.get("headers", None)`` and its own docstring describes that kwarg as
-    "will be used to get REQUEST headers"; the RESPONSE headers, the ones carrying
-    ``Retry-After``, hang off ``.response``. Reading ``.headers`` would look right, type-check,
-    and silently never find the header — so the rate-limit retry would degrade to "no header
-    present" on every single 429.
-
-    Returns ``None`` when there is no usable header, which the caller treats as "do not retry".
-    ``getattr`` throughout because a fake client in the unit tests raises an error object with
-    neither attribute, and this must not be the thing that breaks it.
+    Return ``None`` when the response or header is absent or invalid.
     """
     response = getattr(exc, "response", None)
     headers = getattr(response, "headers", None)
@@ -189,32 +143,12 @@ def _with_connection_retry(
     attempts: int = 3,
     backoffs: tuple[int, ...] = (2, 5),
 ) -> Any:
-    """Run ``fn()`` with the transport's retry policy.
+    """Run a transport call through the shared retry and translation boundary.
 
-    ``rate_limit_retry`` OPTS THIS CALL IN to retrying HTTP 429, and it **defaults to False**.
-    That default is the load-bearing part. This function is the single choke point for ALL
-    transport call sites INCLUDING ``create_issue``, ``add_comment`` and ``add_label``, and a 429
-    can arrive AFTER the server began a write with nothing in the response distinguishing that
-    from rejection at the gate — so retrying a mutation here would reintroduce the duplicate-issue
-    class bug 21fc just fixed. Opting in per call, rather than opting out, means a mutation added
-    later cannot inherit the retry by omission.
-
-    The 429 retry fires ONLY when the response carries a usable ``Retry-After``. Data Center's
-    limiter is admin-enabled and absent by default (8.6+, DC only), so with no header this
-    behaves exactly as it does today: the error is translated and raised on the first occurrence.
-
-    Retries up to 2 times (3 total attempts), 2s then 5s backoff, on a
-    connection-level fault (see :func:`_connection_retry_exceptions`).
-    ``jira.exceptions.JIRAError`` (any HTTP 4xx/5xx response) is NOT one of
-    those exception types, so it fails on the FIRST attempt, unretried —
-    mirroring ``acli_rest._rest_urlopen_with_retry``'s HTTP-vs-connection
-    distinction exactly (retrying a mutation on an HTTP error risks
-    duplicates).
-
-    This is ALSO the transport's single translation choke point: every method of
-    :class:`JiraDataCenterTransport` routes its library call through here, so
-    converting the unretried HTTP error to :class:`BackendHTTPError` here (rather
-    than per method) is what stops a vendor exception escaping the adapter.
+    Connection faults receive at most two retries with bounded backoff. HTTP
+    failures are not retried, except an opted-in 429 with a usable
+    ``Retry-After`` header. Default opt-out protects mutations from duplicate
+    effects. Unretriable vendor HTTP errors become ``BackendHTTPError``.
     """
     retryable = _connection_retry_exceptions()
     http_errors = _jira_http_error_types()
