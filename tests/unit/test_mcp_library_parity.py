@@ -300,6 +300,20 @@ def test_a_declared_divergence_still_fails_once_the_real_shape_moves():
     assert any("edit_ticket" in m for m in messages), messages
 
 
+def test_a_declared_divergence_fails_once_the_surfaces_converge():
+    declared = _tool(
+        library_symbol="edit_ticket",
+        mcp_params=["ticket_id", "fields"],
+        library_params=["ticket_id", "fields"],
+        divergence={"kind": "enumerated_vs_varkw", "reason": "documented passthrough"},
+    )
+    code, messages = parity.evaluate(
+        _manifest({"edit_ticket": declared}), _manifest({"edit_ticket": declared})
+    )
+    assert code != 0
+    assert any("STALE DIVERGENCE tool `edit_ticket`" in m for m in messages), messages
+
+
 def test_mcp_only_tools_must_be_declared_as_such():
     """A tool with no library counterpart is legitimate (16 exist today) but must say so
     rather than silently reading as a broken mapping."""
@@ -339,6 +353,24 @@ def test_repo_root_is_normalized_away_and_needs_no_per_tool_waiver():
     assert code == 0, f"repo_root should normalize away, got {messages}"
 
 
+def test_schema_version_drift_fails():
+    tools = {"show_ticket": _tool()}
+    manifest = _manifest(tools)
+    live = _manifest(tools) | {"schema_version": manifest["schema_version"] + 1}
+    code, messages = parity.evaluate(live, manifest)
+    assert code != 0
+    assert any("CHANGED schema_version" in m for m in messages), messages
+
+
+def test_normalization_library_only_params_drift_fails():
+    tools = {"show_ticket": _tool()}
+    manifest = _manifest(tools)
+    live = _manifest(tools) | {"normalization": {"library_only_params": ["repo_root", "config"]}}
+    code, messages = parity.evaluate(live, manifest)
+    assert code != 0
+    assert any("CHANGED normalization.library_only_params" in m for m in messages), messages
+
+
 # --------------------------------------------------------------------------
 # the real committed surface
 # --------------------------------------------------------------------------
@@ -364,6 +396,53 @@ def test_update_is_idempotent():
     once = parity.render_manifest(live)
     twice = parity.render_manifest(parity.parse_manifest(once))
     assert once == twice
+
+
+def test_merge_declarations_carries_reasons_and_stubs_new_divergences():
+    previous = _manifest(
+        {
+            "edit_ticket": _tool(
+                library_symbol="edit_ticket",
+                mcp_params=["ticket_id", "title"],
+                library_params=["ticket_id", "fields"],
+                divergence={
+                    "kind": "enumerated_vs_varkw",
+                    "reason": "MCP enumerates fields while the library accepts **fields",
+                },
+            )
+        }
+    )
+    live = _manifest(
+        {
+            "edit_ticket": _tool(
+                library_symbol="edit_ticket",
+                mcp_params=["ticket_id", "title"],
+                library_params=["ticket_id", "fields"],
+            ),
+            "transition_ticket": _tool(
+                library_symbol="transition",
+                mcp_params=["ticket_id", "from_status", "to_status"],
+                library_params=["ticket_id", "from_status", "to_status", "repo_root"],
+            ),
+            "declare_no_file_impact": _tool(
+                library_symbol="declare_no_file_impact",
+                mcp_params=["ticket_id", "reason"],
+                library_params=["ticket_id", "reason", "repo_root", "structured_output"],
+            ),
+        }
+    )
+
+    merged = parity.merge_declarations(live, previous)
+
+    assert (
+        merged["tools"]["edit_ticket"]["divergence"]
+        == previous["tools"]["edit_ticket"]["divergence"]
+    )
+    assert "divergence" not in merged["tools"]["transition_ticket"]
+    assert merged["tools"]["declare_no_file_impact"]["divergence"] == {
+        "kind": "undeclared",
+        "reason": "",
+    }
 
 
 # --------------------------------------------------------------------------
