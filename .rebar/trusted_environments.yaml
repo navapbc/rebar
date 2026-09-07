@@ -27,6 +27,10 @@ environments:
         # Era anchor = the tickets-branch tip log position stamped at deploy time.
         added_at_log_position: "1784078198455948001-35a1ea66-3c97-4d94-9966-380d79489425"
         revoked_at_log_position: null
+      # Rotated 2026-09-07 for ticket auspicial-wily-warbler; private half lives ONLY in SSM /rebar/prod/opcert-ed25519-key.
+      - public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGA6u+J56OuLaR8xsCqyIFZisj/Pke3dkNIfgifykhfi nava-opcert-prod rotated-20260907"
+        added_at_log_position: "1788820816306746425-e8951143-944f-4b77-8668-0449b29cfd40"
+        revoked_at_log_position: null
 
   # The maintainer's local gate environment (bug 846b). WHY THIS EXISTS: the Gerrit
   # bugfix-size gate demands a plan-review op-cert whose principal is pinned HERE, and
