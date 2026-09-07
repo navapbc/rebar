@@ -151,13 +151,59 @@ def test_comment_warns_and_still_mutates(repo: Path, monkeypatch: pytest.MonkeyP
     )
 
 
+def test_gate_reads_warn_for_other_session(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``check_ac`` and ``quality_check`` are single-ticket reads, so they carry the
+    same advisory as ``show_ticket`` while preserving the gate result fields."""
+    tid = _claimed(repo, monkeypatch, holder="sess-A")
+    monkeypatch.setenv("REBAR_SESSION_ID", "sess-B")
+    reads = _read_tools()
+
+    check_ac = reads["check_ac"](tid)
+    quality = reads["quality_check"](tid)
+
+    assert check_ac.cross_session_warning is not None
+    assert _HOLDER_MSG in check_ac.cross_session_warning
+    assert "sess-A" in check_ac.cross_session_warning
+    assert check_ac.verdict in {"pass", "fail"}
+    assert quality.cross_session_warning is not None
+    assert _HOLDER_MSG in quality.cross_session_warning
+    assert "sess-A" in quality.cross_session_warning
+    assert quality.verdict in {"pass", "fail"}
+
+
+def test_declare_no_file_impact_warns_and_still_mutates(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``declare_no_file_impact`` now returns the shared write ack shape:
+    ``result: "ok"`` plus the optional cross-session advisory."""
+    tid = _claimed(repo, monkeypatch, holder="sess-A")
+    monkeypatch.setenv("REBAR_SESSION_ID", "sess-B")
+
+    out = _write_tools()["declare_no_file_impact"](tid, "operator action only")
+
+    assert out.result == "ok"
+    assert out.cross_session_warning is not None
+    assert _HOLDER_MSG in out.cross_session_warning and "sess-A" in out.cross_session_warning
+    state = rebar.show_ticket(tid, repo_root=str(repo))
+    assert state["file_impact_scope"] == "none"
+    assert state["no_file_impact_reason"] == "operator action only"
+
+
 def test_same_session_is_silent(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Negative control: the HOLDER acting on its own ticket gets no advisory."""
     tid = _claimed(repo, monkeypatch, holder="sess-A")
     monkeypatch.setenv("REBAR_SESSION_ID", "sess-A")
+    reads = _read_tools()
+    writes = _write_tools()
 
-    assert _read_tools()["show_ticket"](tid).cross_session_warning is None
-    assert _write_tools()["comment_ticket"](tid, "mine").cross_session_warning is None
+    assert reads["show_ticket"](tid).cross_session_warning is None
+    assert reads["check_ac"](tid).cross_session_warning is None
+    assert reads["quality_check"](tid).cross_session_warning is None
+    assert writes["comment_ticket"](tid, "mine").cross_session_warning is None
+    assert (
+        writes["declare_no_file_impact"](tid, "same-session non-code change").cross_session_warning
+        is None
+    )
 
 
 # ── edge / E2E (held out from the implementer) ────────────────────────────────
@@ -236,9 +282,9 @@ def test_toggle_off_silences_every_surface(repo: Path, monkeypatch: pytest.Monke
 def test_output_schema_exposes_optional_field(repo: Path) -> None:
     """The response models advertise the OPTIONAL ``cross_session_warning`` property, and a
     default (unset) response still validates — the schema change is additive."""
-    from rebar._mcp_models import TicketStateOut, WriteAckOut
+    from rebar._mcp_models import GateResultOut, TicketStateOut, WriteAckOut
 
-    for model in (WriteAckOut, TicketStateOut):
+    for model in (GateResultOut, WriteAckOut, TicketStateOut):
         schema = model.model_json_schema()
         assert "cross_session_warning" in schema["properties"], model.__name__
         assert "cross_session_warning" not in schema.get("required", []), model.__name__

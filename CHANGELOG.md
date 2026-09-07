@@ -38,6 +38,11 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0): MCP `declare_no_file_impact` now returns the shared
+  structured write acknowledgement.** MCP clients should read `result == "ok"`
+  instead of comparing the whole tool result to the bare string `"ok"`. The
+  additive object also carries `push_status` and optional `cross_session_warning`.
+
 - **BREAKING (pre-1.0): simple CLI compatibility aliases have been removed.** Use
   `rebar bridge status` instead of `rebar bridge-status`, `rebar bridge fsck`
   instead of `rebar bridge-fsck`, `rebar bridge check-access` instead of
