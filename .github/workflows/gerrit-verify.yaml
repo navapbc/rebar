@@ -489,7 +489,7 @@ jobs:
           # Require exactly one complete route before trusting the aggregate conclusion;
           # missing jobs, classifier failure, or mixed routes are forced to failure.
           CONCLUSION: >-
-            ${{ (
+            ${{ contains(needs.*.result, 'cancelled') && 'cancelled' || (
               needs.classify.result == 'success' &&
               (
                 (
@@ -538,7 +538,7 @@ jobs:
           GERRIT_SSH_USER: ${{ vars.GERRIT_SSH_USER }}
           CHANGE_NUMBER: ${{ inputs.GERRIT_CHANGE_NUMBER }}
           PATCHSET_NUMBER: ${{ inputs.GERRIT_PATCHSET_NUMBER }}
-          # success -> Verified+1, failure|cancelled -> Verified-1 (fail-closed).
+          # success -> Verified+1, failure -> Verified-1, cancelled -> comment-only no vote.
           # Fed the NORMALIZED conclusion (see the normalize step): `skipped`/empty is coerced
           # into the action's vote-type domain so it can never crash the cast pre-vote.
           VOTE_TYPE: ${{ steps.normalize.outputs.vote-type }}

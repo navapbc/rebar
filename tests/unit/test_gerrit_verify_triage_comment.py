@@ -99,6 +99,15 @@ def test_vote_normalization_requires_the_voting_scanner_on_both_routes(
     assert "needs.docs-only.result == 'success'" in conclusion
 
 
+def test_vote_normalization_preserves_cancelled_as_no_verdict(
+    steps: list[dict[str, Any]],
+) -> None:
+    normalize = _step(steps, "Normalize the conclusion")
+    conclusion = normalize["env"]["CONCLUSION"]
+    assert "contains(needs.*.result, 'cancelled')" in conclusion
+    assert "&& 'cancelled'" in conclusion
+
+
 def test_the_final_vote_uses_the_tolerant_local_helper(steps: list[dict[str, Any]]) -> None:
     """The final vote must be able to classify Gerrit's closed-change race."""
     casts = [s for s in steps if s.get("name") == "Cast Verified from the CI conclusion"]
