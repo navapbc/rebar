@@ -75,7 +75,7 @@ class _FakeClient:
     # reads -----------------------------------------------------------------
     def search_issues(self, jql: str, **kwargs) -> list[dict]:
         s = self._s
-        if jql.strip().startswith('labels = "rebar-id:'):
+        if jql.strip().startswith(('labels = "rebar-id:', 'labels = "rebar-id-')):
             want = jql.split('"')[1]
             return [
                 {"key": k, "fields": json.loads(json.dumps(f))}
@@ -426,6 +426,31 @@ def test_import_materialises_faithfully_and_binds(git_repo, reconciler_modules, 
     # Label / property write-back reached the (faithful) remote.
     assert "rebar-id:jira-dig-1" in state.issues["DIG-1"]["labels"]
     assert state.props["DIG-1"]["local_id"] == "jira-dig-1"
+
+
+def test_keyless_recovery_legacy_hyphen_jql_does_not_fall_through_to_window_search(
+    git_repo,
+):
+    """A legacy hyphen identity-label lookup is still label equality, not a window query."""
+    from rebar_reconciler.binding_store import BindingStore
+
+    state = _FakeJiraState()
+    state.seed(
+        "DIG-1",
+        summary="Unrelated open issue",
+        status={"name": "To Do"},
+        issuetype={"name": "Task"},
+        priority={"name": "Medium"},
+    )
+
+    store = BindingStore(git_repo / ".tickets-tracker")
+    store.bind_pending("jira-missing-identity")
+
+    assert store.recover_pending_bindings(_FakeClient(state)) == 0
+    entry = store.all_bindings()["jira-missing-identity"]
+    assert entry["state"] == "pending"
+    assert entry.get("jira_key") is None
+    assert store.get_local_id("DIG-1") is None
 
 
 def test_out_of_window_alive_pass_reaches_clear_absent_with_no_churn(
