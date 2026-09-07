@@ -508,13 +508,21 @@ def register_read_tools(mcp, ctx) -> None:
     def check_ac(ticket_id: str) -> GateResultOut:
         """Check the ticket has an Acceptance Criteria block
         ({verdict, criteria_count, reason, passed})."""
-        return GateResultOut.model_validate(rebar.check_ac(ticket_id))
+        result = dict(rebar.check_ac(ticket_id))
+        warning = _cross_session(ticket_id)
+        if warning is not None:
+            result["cross_session_warning"] = warning
+        return GateResultOut.model_validate(result)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def quality_check(ticket_id: str) -> GateResultOut:
         """Check ticket dispatch readiness ({verdict, line_count, keyword_count,
         ac_items, file_impact, reason, passed})."""
-        return GateResultOut.model_validate(rebar.quality_check(ticket_id))
+        result = dict(rebar.quality_check(ticket_id))
+        warning = _cross_session(ticket_id)
+        if warning is not None:
+            result["cross_session_warning"] = warning
+        return GateResultOut.model_validate(result)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def validate() -> ValidateReportOut:

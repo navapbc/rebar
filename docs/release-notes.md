@@ -8,6 +8,25 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — `declare_no_file_impact` MCP returns a structured ack
+
+The MCP `declare_no_file_impact` tool now advertises an `outputSchema` and returns
+the shared write acknowledgement object:
+
+```json
+{"result": "ok", "push_status": {...}, "cross_session_warning": null}
+```
+
+Previously it deliberately opted out of structured output and returned the bare
+string `"ok"`. This was the last single-ticket write surface that could not carry
+the cross-session holder advisory, so an agent acting on another session's claimed
+ticket received no ownership signal. The new shape reuses the existing `WriteAckOut`
+contract (`result` has value `"ok"`); it does not introduce an `ok` field.
+
+**Migration.** MCP clients that compared the whole result to `"ok"` should instead
+read `result == "ok"`. Clients that ignore the result need no change. The optional
+`cross_session_warning` field is advisory and may be null or absent on older servers.
+
 ## BREAKING (pre-1.0) — `force_new_store` REFUSES inside a linked git worktree
 
 `rebar.init_repo(repo_root=..., force_new_store=True)` and `rebar init --force-new-store`

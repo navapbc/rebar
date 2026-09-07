@@ -181,7 +181,9 @@ def test_mcp_write_validation_and_schema_contract(
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
 
     assert "declare_no_file_impact" in tools
-    assert not tools["declare_no_file_impact"].outputSchema
+    schema = tools["declare_no_file_impact"].outputSchema
+    assert "result" in schema["properties"]
+    assert "cross_session_warning" in schema["properties"]
 
     result = _unwrap(
         asyncio.run(
@@ -194,7 +196,8 @@ def test_mcp_write_validation_and_schema_contract(
             )
         )
     )
-    assert result == "ok"
+    assert result["result"] == "ok"
+    assert result["cross_session_warning"] is None
 
     state = rebar.show_ticket(ticket_id, repo_root=root)
     assert state["file_impact_scope"] == "none"

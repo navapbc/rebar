@@ -92,6 +92,7 @@ EXEMPT_GENERIC: dict[str, str] = {
     "link_tickets": "write ack {result, push_status}; no canonical shape",
     "unlink_tickets": "write ack {result, push_status}; no canonical shape",
     "set_file_impact": "write ack {result, push_status}; no canonical shape",
+    "declare_no_file_impact": "write ack {result, push_status}; no canonical shape",
     "set_verify_commands": "write ack {result, push_status}; no canonical shape",
     "bridge_projects_set": "write ack {result, push_status}; no canonical shape",
     "bridge_projects_remove": "write ack {result, push_status}; no canonical shape",
@@ -114,8 +115,6 @@ EXEMPT_GENERIC: dict[str, str] = {
 
 # Tools that deliberately advertise NO outputSchema by design.
 NO_SCHEMA_EXEMPT: dict[str, str] = {
-    "declare_no_file_impact": "string ack intentionally uses FastMCP's unstructured-output "
-    "mode, so no outputSchema is advertised.",
     "audit_trail": "audit read-layer aggregator (story 46f0): a best-effort READ that composes "
     "the observability sidecars into a free-form AuditTrail dict "
     "({ticket, plan_reviews, completion, code_reviews}) whose nested payloads are the "

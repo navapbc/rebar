@@ -352,6 +352,9 @@ try:
         keyword_count: int | None = None
         ac_items: int | None = None
         file_impact: int | None = None
+        # Story 734d follow-up: read-only single-ticket gates carry the same
+        # holder-naming advisory as show/write tools.
+        cross_session_warning: str | None = None
         #: The schema types these as `integer`; the metrics the OTHER gate emits must stay
         #: ABSENT rather than become null — see _OmitUnsetOut.
         _omit_when_unset: ClassVar[tuple[str, ...]] = (
@@ -360,6 +363,7 @@ try:
             "keyword_count",
             "ac_items",
             "file_impact",
+            "cross_session_warning",
         )
 
     class BridgeFsckOut(_Out):
