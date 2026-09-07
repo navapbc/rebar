@@ -1,14 +1,9 @@
-"""Self-tests for the repo-isolation guard (tests/conftest.py + tests/_isolation.py).
+"""Test the checkout isolation guards.
 
-The guard exists so a test that commits to — or dirties — the rebar checkout
-fails loudly instead of silently polluting it (the failure mode that once leaked
-dozens of ``ticket: link ...`` commits onto main). These tests prove the guard
-actually fires, so the safety net itself can't rot unnoticed:
-
-* the detection primitives spot a commit (HEAD move) and a stray working-tree
-  file, and report ``None`` outside a repo;
-* end-to-end via ``pytester``: an autouse HEAD guard fails a committing test, the
-  session backstop flags a working-tree write, and a clean test passes.
+The detection primitives report HEAD movement and working-tree pollution while
+returning ``None`` outside a repository. End-to-end tests prove that the autouse
+guard rejects a committing test, the session backstop reports a stray write,
+and a clean test passes.
 """
 
 from __future__ import annotations
@@ -39,20 +34,12 @@ pytest_plugins = ["pytester"]
 def _blocking_git(
     tmp_path: Path, operation: str, *, persistent: bool = True
 ) -> tuple[Path, dict[str, str]]:
-    """A ``git`` shim that stalls the guard's probe.
+    """Create a ``git`` shim that stalls one probe or every later probe.
 
-    ``persistent`` stalls EVERY probe from the second call onward, so the retry budget is
-    exhausted and the guard must still fail loudly. ``persistent=False`` stalls exactly ONE
-    call — the transient contention that bug 860b-28eb-10c0-4249 turned into a false red.
-
-    The call counter is written ATOMICALLY (temp file + ``os.replace``). It has to be: the
-    probe SIGKILLs a stalled shim, and now re-samples afterwards, so a later invocation
-    READS a file an earlier one was killed while writing. ``Path.write_text`` truncates
-    before it writes, so a kill in that window leaves the counter EMPTY, the next shim dies
-    on ``int("")``, and ``check=True`` turns that into a ``CalledProcessError`` — which
-    ``head``/``porcelain`` catch, returning ``None`` instead of raising. That is a probe
-    reporting "not a git repo" for a repo that plainly is one, and it is exactly how this
-    shim failed on ubuntu-latest py3.12 once retries made the second read reachable.
+    A transient stall exercises resampling. A persistent stall exhausts retries
+    and must fail. The counter uses a temporary file and ``os.replace`` because
+    the probe can kill a shim between truncating and writing its state. An empty
+    counter would instead make the next invocation report a false non-repository.
     """
     real_git = shutil.which("git")
     assert real_git is not None
@@ -169,16 +156,10 @@ def test_commit_guard_fails_explicitly_when_head_times_out(tmp_path):
 
 
 def test_a_transient_probe_stall_is_re_sampled_rather_than_reported(tmp_path, monkeypatch):
-    """One starved sample is contention, not a HEAD move (bug 860b-28eb-10c0-4249).
+    """Resample one starved read-only probe instead of reporting a HEAD move.
 
-    The macOS full-suite sweep runs this probe once per test, three xdist workers deep, on
-    a runner where ORDINARY fixture setup was measured at 4.562s against the 5s per-attempt
-    bound. A single stalled sample there errored the innocent test that happened to be
-    running and reddened the branch head. The probe is read-only and idempotent, so a
-    transient stall must be re-sampled rather than reported.
-
-    The paired guarantee — that a PERSISTENT stall still fails loudly — is held by
-    ``test_commit_guard_fails_explicitly_when_head_times_out`` above.
+    Fixture setup can approach the per-attempt bound under xdist. The paired
+    persistent-stall test still requires retry exhaustion to fail explicitly.
     """
     repo = tmp_path / "repo"
     _init_repo(repo)
@@ -392,14 +373,9 @@ def test_leak_guard_fails_a_test_that_writes_into_preexisting_state_dir(pytester
     result.stdout.fnmatch_lines(["*leaked into REPO_ROOT*.rebar/leaked.txt*"])
 
 
-# ── the guard must not delete what it cannot attribute (bug 746c) ─────────────
-#
-# The guard diffs REPO_ROOT around each test, so "appeared during this test" is
-# all it can ever know — a concurrent write from another process in the same
-# checkout produces an identical diff entry (reproduced 1/1 with a bare `touch`
-# 8s into a 12s test body). Reporting such an entry is conservative: it costs a
-# re-run. REMOVING it is not: it destroys another process's file, irreversibly
-# and, for a directory, silently (`rmtree(..., ignore_errors=True)`).
+# The guard observes only changes around a test and cannot attribute concurrent
+# writes in the shared checkout. It may report unknown entries, but it must not
+# delete files that another process could own.
 
 
 def _root_conftest(request: pytest.FixtureRequest):

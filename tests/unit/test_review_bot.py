@@ -1,15 +1,9 @@
-"""Offline unit tests for the review-bot proven pipe (epic d251 / S4b).
+"""Test the review bot without network or model calls.
 
-NO live network and NO live LLM: ``rebar.llm.review_code`` is monkeypatched (the
-adapter imports it lazily as ``from rebar.llm import review_code``) and the Gerrit
-client is a fake that records calls. Async voter coroutines run via ``asyncio.run``
-(the repo does not depend on pytest-asyncio).
-
-Covers:
-- adapter: clean→PASS, blocking-finding→BLOCK, error→BLOCK (fail-closed);
-- dedup: write-on-success + ``already_voted``;
-- voter: skip when already voted (dedup OR Gerrit), MAX on PASS, BLOCK value on BLOCK,
-  no MAX on a vote-POST failure, single-flight lock serializes same-(change, rev).
+The suite replaces lazy ``review_code`` imports and Gerrit with recording fakes,
+then drives coroutines through ``asyncio.run``. It covers fail-closed adapter
+decisions, successful dedup writes, existing-vote skips, PASS and BLOCK labels,
+failed vote posts, and per-revision single-flight serialization.
 """
 
 from __future__ import annotations
@@ -35,7 +29,7 @@ from rebar.review_bot.dedup import DedupStore
 from rebar.review_bot.gerrit_client import GerritError
 
 
-# ── helpers ─────────────────────────────────────────────────────────────────
+# Helpers.
 def _cfg(tmp_path) -> ReceiverConfig:
     return ReceiverConfig(
         llm_review_max_value=1,
@@ -56,12 +50,9 @@ def _event(change_id="rebar~main~Iabc", revision="rev1", project="rebar") -> dic
 
 
 def test_candidate_events_skips_closed_changes():
-    # Bug c943: the backfill reconciler re-voted MERGED/ABANDONED changes, drawing a 409
-    # "change is closed" that the voter records as a (non-actionable) voter_error and — since
-    # no dedup row is written on failure — re-attempts forever. _candidate_events must skip
-    # changes Gerrit considers CLOSED. Open (NEW) and status-ABSENT changes MUST still be
-    # candidates (fail-open: never drop a live change on missing metadata, which would risk
-    # skipping a real open change and stalling the LLM-Review gate).
+    # Closed changes cannot accept votes and would retry forever without a dedup
+    # write. Keep NEW and status-absent changes eligible so missing metadata does
+    # not stall an open change's review gate.
     def ev(cid, status):
         e = _event(change_id=cid, revision="r_" + cid)
         if status is not None:
@@ -79,9 +70,10 @@ def test_candidate_events_skips_closed_changes():
 
 
 class FakeGerrit:
-    """Records vote/clone/diff/has-vote calls; no network. ``parents=1`` (default) is a
-    NON-merge revision (the get_patch path); ``parents>=2`` routes the voter through the
-    merge-change path (get_merge_files / get_file_diff / get_mergelist), epic 88ab / S2."""
+    """Record Gerrit calls without network access.
+
+    One parent selects patch review. Multiple parents select merge review.
+    """
 
     # mirror the real client's magic-pseudo-path set so merge tests can reference it
     MAGIC_PATHS = frozenset({"/COMMIT_MSG", "/MERGE_LIST"})
@@ -122,7 +114,7 @@ class FakeGerrit:
         self.get_patch_calls += 1
         return "diff --git a/x.py b/x.py\n+pass\n"
 
-    # ── merge-change path (S2) ──────────────────────────────────────────────
+    # Merge changes.
     def get_commit(self, change_id, revision="current"):
         if self._raise_on == "get_commit":
             raise GerritError("commit fetch failed", status=500)
@@ -183,7 +175,7 @@ def _patch_review(monkeypatch, findings):
     _patch_verdict(monkeypatch, _verdict_from_findings(findings))
 
 
-# ── adapter (four-pass verdict → decision; WS6) ──────────────────────────────
+# Adapter decisions.
 def test_adapter_clean_is_pass(monkeypatch, tmp_path):
     _patch_verdict(
         monkeypatch,
@@ -195,10 +187,10 @@ def test_adapter_clean_is_pass(monkeypatch, tmp_path):
 
 
 def test_adapter_threads_change_id_into_gate_request(monkeypatch, tmp_path):
-    """Gerrit change-keying (epic super-path-bag): ``code_review_decision`` forwards ``change_id``
-    into the ``CodeReviewRequest``, so the region-gated novelty floor uses the ``change:<id>``
-    keyspace for Gerrit finding-memory — the analogue of the local ``session:<id>`` key. This is the
-    end-to-end wiring that makes 'Gerrit review memory is keyed on the Gerrit change' live."""
+    """Forward the change ID into Gerrit's finding-memory keyspace.
+
+    Local reviews use a session key. Gerrit reviews use ``change:<id>``.
+    """
     import rebar.llm.workflow.gate_dispatch as gd
 
     captured: dict = {}
@@ -314,11 +306,8 @@ def test_adapter_indeterminate_is_coverage_gap_block(monkeypatch, tmp_path):
 def test_adapter_indeterminate_no_gap_no_findings_is_coverage_gap_not_finding(
     monkeypatch, tmp_path
 ):
-    # Bug spy-luge-wool (expanded scope): a non-PASS (INDETERMINATE) verdict with ZERO blocking
-    # findings and NO detected coverage gap was mapped to _block("finding"), rendering the
-    # misleading "[LLM-Review: BLOCK — finding] rebar code review found 0 blocking issue(s):"
-    # (the false -1 observed on change 223). It must be a coverage-gap/INDETERMINATE BLOCK —
-    # never a "finding" BLOCK with no findings.
+    # An INDETERMINATE verdict without findings is a coverage gap. It must not
+    # render a finding block that claims zero blocking issues.
     _patch_verdict(
         monkeypatch,
         {"verdict": "INDETERMINATE", "blocking": [], "advisory": [], "coverage": {"llm_ran": True}},
@@ -376,12 +365,9 @@ def test_adapter_scanner_MATCH_is_a_real_finding(monkeypatch, tmp_path):
 
 
 def test_adapter_renders_named_finding_for_detector_match_block(monkeypatch, tmp_path):
-    # Regression (bug f367): a fail-closed DET detector MATCH forces verdict=BLOCK via
-    # `apply_failclosed`; the adapter must render "found N blocking issue(s)" and NAME the match —
-    # never "found 0 blocking issue(s)" with no finding (which hid a real secret from the author).
-    # Drive the REAL apply_failclosed output (not a hand-built verdict) through the REAL adapter so
-    # the seam is exercised end-to-end: on the pre-fix code apply_failclosed leaves blocking=[]
-    # and this fails at the `verdict["blocking"]` assertion.
+    # A fail-closed detector match must become a named blocking finding. Drive
+    # the detector output through the adapter so an empty synthetic finding
+    # cannot hide the matched secret.
     from rebar.llm.code_review import detectors
 
     monkeypatch.setattr(
@@ -447,7 +433,7 @@ def test_adapter_unparseable_result_is_block(monkeypatch, tmp_path):
     assert out["decision"] == "BLOCK"
 
 
-# ── dedup ───────────────────────────────────────────────────────────────────
+# Deduplication.
 def test_dedup_write_on_success_and_already_voted(tmp_path):
     store = DedupStore(str(tmp_path / "sub" / "voted.db"))  # also exercises mkdir of parent
     assert store.already_voted("c1", "r1") is False
@@ -473,7 +459,7 @@ def test_clear_voted_deletes_only_the_exact_change_revision(tmp_path):
     assert store.already_voted("c2", "r1") is True
 
 
-# ── voter ───────────────────────────────────────────────────────────────────
+# Voting.
 def test_voter_skips_other_project(monkeypatch, tmp_path):
     g = FakeGerrit()
     res = asyncio.run(
@@ -643,7 +629,7 @@ def test_voter_skips_malformed_event(tmp_path):
     assert res["reason"] == "malformed_event"
 
 
-# ── config ──────────────────────────────────────────────────────────────────
+# Configuration.
 def test_config_from_env_defaults_and_token_alias(monkeypatch):
     for k in (
         "LLM_REVIEW_MAX_VALUE",
@@ -666,7 +652,7 @@ def test_config_from_env_defaults_and_token_alias(monkeypatch):
     assert cfg.webhook_token == "secret-tok"
 
 
-# ── reconcile (backfill) ──────────────────────────────────────────────────────
+# Reconciliation.
 def _events_log_event(change_id, revision, number=1, project="rebar", created_on=1_700_000_000):
     """A Gerrit events-log ``patchset-created`` event (epoch ``eventCreatedOn``)."""
     return {
@@ -696,12 +682,8 @@ class ReconcileGerrit(FakeGerrit):
         self.list_since_calls.append(since)
         if self._list_raises:
             raise GerritError("events-log unreachable", status=503)
-        # HONOUR ``since`` the way the live events-log ``?t1=`` does — an INCLUSIVE,
-        # SERVER-SIDE lower bound (bug 9f63; verified against the live plugin:
-        # ``t1=13:00:00`` returned ``oldest=13:00:18``, i.e. earlier events are simply
-        # not in the response). The double previously recorded ``since`` and then
-        # returned the full list regardless, so the production cursor filter was never
-        # exercised and the cursor-skip defect shipped behind a green suite.
+        # Match the event log's inclusive server-side ``since`` filter. Returning
+        # the full list would bypass the production cursor boundary in tests.
         if not since:
             return list(self._events)
         cut = (
@@ -966,12 +948,9 @@ def test_reconcile_once_malformed_events_body_does_not_vote(monkeypatch, tmp_pat
     assert g.votes == []
 
 
-# ── 9ec0: the reconciler's cooperative shutdown (runs in the DEFAULT tier) ────
-#
-# These sit alongside the lifespan tests further down deliberately. Those exercise the whole
-# shutdown end to end but need the ``reviewbot`` extra, and CI's pytest lane installs only
-# ``[dev]`` — so every fastapi test SKIPS there. ``reconcile`` imports without fastapi, so
-# pinning the mechanism here is what gives this fix real coverage in CI rather than a skip.
+# Exercise reconciler shutdown without FastAPI so the default test tier covers
+# the mechanism. Lifespan tests below provide end-to-end coverage when the
+# ``reviewbot`` extra is installed.
 @pytest.fixture(autouse=True)
 def _reset_reconciler_stop_flag():
     """``reconcile``'s stop flag is module state; leaking it would make later reconcile passes
@@ -982,15 +961,11 @@ def _reset_reconciler_stop_flag():
 
 
 async def _await_probe(probe, *, cap=3.0, what="the probe"):
-    """Wait until ``probe`` (a list the code under test appends to) is non-empty.
+    """Wait off-loop until a worker thread appends to ``probe``.
 
-    Polls OFF-LOOP in a single ``to_thread`` hop rather than in a
-    ``while ...: await asyncio.sleep(...)`` loop, which is what ASYNC110 forbids. Its
-    suggested ``asyncio.Event`` is not usable here: the two probes this serves are appended
-    from WORKER THREADS — the review gate and the events-log fetch both run off-loop via
-    ``to_thread`` — and an ``asyncio.Event`` may not be set from another thread. Polling in
-    the thread keeps the event loop free, which is the property the rule protects, without
-    threading a cross-thread signalling contract through every fake.
+    One ``to_thread`` call avoids the ASYNC110 polling pattern. ``asyncio.Event``
+    is unsuitable because the review and event-log probes run in worker threads
+    that cannot safely set it.
     """
 
     def _poll():
@@ -1048,17 +1023,11 @@ def test_reconcile_once_takes_no_new_candidate_once_a_stop_is_requested(monkeypa
 
 
 def test_a_candidate_skipped_by_the_stop_is_held_back_in_the_cursor(monkeypatch, tmp_path):
-    """The stop path must obey the low-water-mark contract (bug 9f63).
+    """Hold a shutdown-skipped candidate inside the next cursor window.
 
-    Declining a candidate at shutdown is only fail-closed if that candidate is still inside
-    the NEXT pass's window. The cursor advances to ``newest`` over the whole fetched window,
-    so a candidate merely ``break``-ed past — without being recorded in ``held_back`` — falls
-    outside every subsequent inclusive ``?t1=`` window and is unreachable forever. That would
-    make shutdown the one path that silently drops a gap patchset, which is the precise defect
-    9f63 closed; this pins that the 9ec0 stop cannot reintroduce it.
-
-    Shaped like the 9f63 oracle: the skipped candidate is NOT the newest event, so unrelated
-    chatter drags ``newest`` past it — the only shape in which the defect can be expressed.
+    Advancing to the newest fetched event without recording the skipped change
+    would lose it permanently. The candidate is intentionally older than other
+    chatter so only the low-water mark can preserve it.
     """
     cfg = _cfg(tmp_path)
     store = DedupStore(cfg.dedup_db_path)
@@ -1098,10 +1067,7 @@ def test_a_candidate_skipped_by_the_stop_is_held_back_in_the_cursor(monkeypatch,
 
 @pytest.mark.real_reconcile_loop
 def test_reconcile_loop_returns_after_finishing_the_review_in_flight(monkeypatch, tmp_path):
-    """AC1's mechanism: on a stop request the loop RETURNS once the in-flight review lands.
-
-    That return is what makes the loop's task awaitable as a drain by the app lifespan — the
-    alternative is cancelling it, which is precisely what abandoned the backfill review."""
+    """Return after an in-flight review finishes so lifespan can drain the loop."""
     cfg = _cfg(tmp_path)
     store = DedupStore(cfg.dedup_db_path)
     started, completed = _slow_review_probe(monkeypatch)
@@ -1149,8 +1115,7 @@ def test_reconcile_loop_stop_is_prompt_while_idle_between_passes(monkeypatch, tm
 
     elapsed = asyncio.run(_run())
 
-    # The failure mode is the loop waiting out its whole 3600s inter-pass interval, and the
-    # enclosing wait_for(10) already caps the run, so the ceiling only has to sit between them.
+    # Five seconds distinguishes normal polling from the 3600-second interval.
     # timing: hang-guard — 5s dwarfs the ~0.25s poll granularity this actually needs
     assert elapsed < 5, (
         f"an idle reconciler took {elapsed:.2f}s to honour the stop against a 3600s interval; "
@@ -1158,7 +1123,7 @@ def test_reconcile_loop_stop_is_prompt_while_idle_between_passes(monkeypatch, tm
     )
 
 
-# ── force / rerun recovery ──────────────────────────────────────────────────────
+# Forced reruns.
 def test_voter_force_re_reviews_despite_existing_vote_and_dedup(monkeypatch, tmp_path):
     """force=True (a manual /rerun) re-reviews + re-casts even when the change ALREADY
     carries a Gerrit vote AND has a dedup row — proving /rerun recovers a stuck vote."""
@@ -1194,7 +1159,7 @@ def test_voter_force_false_still_skips_when_already_voted(monkeypatch, tmp_path)
     assert g.votes == []
 
 
-# ── get_patch decode paths (offline, captured payloads) ──────────────────────
+# Offline patch decoding.
 def _client(tmp_path):
     from rebar.review_bot.gerrit_client import GerritClient
 
@@ -1267,7 +1232,7 @@ def test_get_patch_rejects_non_decodable_body(tmp_path, monkeypatch):
         gc.get_patch("rebar~main~Iabc", "rev1")
 
 
-# ── merge-change review path (epic 88ab / S2) ────────────────────────────────
+# Merge-change review.
 import json as _json  # noqa: E402
 from pathlib import Path as _Path  # noqa: E402
 
@@ -1298,12 +1263,12 @@ def _merge_event(change_id="rebar~main~Imerge", revision="mrev", project="rebar"
 
 
 def test_merge_files_fixture_proves_auto_merge_default(tmp_path, monkeypatch):
-    """AC#1 (riskiest assumption): the LIVE-captured Gerrit 3.14.1 fixture proves that
-    GET .../revisions/{rev}/files with NO base/parent param returns the AUTO-MERGE-BASE file
-    map for a merge commit (it does NOT 409 like /patch). Per Gerrit REST
-    rest-api-changes.html#list-files: for a merge with neither base nor parent set, the file
-    list is computed against the auto-merge. A clean merge yields only the magic pseudo-paths.
-    The client parses the fixture body identically to a live response."""
+    """Pin Gerrit's default merge-file comparison to the auto-merge base.
+
+    Without a base or parent parameter, a clean merge returns only pseudo-paths
+    instead of the 409 produced by the patch endpoint. The client parses the
+    captured Gerrit response through its production path.
+    """
     body = (_FIXTURES / "merge_files_clean.json").read_text(encoding="utf-8")
     gc = _client(tmp_path)
     monkeypatch.setattr(gc, "_request", lambda *a, **k: (200, body))
@@ -1429,9 +1394,10 @@ def test_voter_merge_empty_auto_diff_still_reviews(monkeypatch, tmp_path):
     "raise_on", ["get_commit", "get_merge_files", "get_mergelist", "get_file_diff"]
 )
 def test_voter_merge_path_rest_failure_votes_block_coverage_gap(monkeypatch, tmp_path, raise_on):
-    """EVERY merge-path REST failure (commit/files/mergelist/diff) fails closed as a -1
-    COVERAGE-GAP vote (the merge change is BLOCKED and visibly flagged as an infra veto) —
-    never a MAX. The bare /patch is NEVER used on the merge (409 guard holds)."""
+    """Map every merge REST failure to a visible coverage-gap block.
+
+    The merge path never awards MAX or calls the bare patch endpoint.
+    """
     _patch_review(monkeypatch, [])
     g = FakeGerrit(
         parents=2,
@@ -1502,10 +1468,10 @@ def test_render_diff_info_flattens_segments():
 
 
 def test_voter_emits_merge_debug_logs(monkeypatch, tmp_path, caplog):
-    """The merge path emits debuggable structured logs: merge_detection (parent_count +
-    is_merge for EVERY change), merge_change_review (context stats), and voter_voted carries
-    merge/parent_count. These are the fields that make a future merge-review issue diagnosable
-    from logs alone (the S2 flattening incident had no such signal)."""
+    """Emit merge detection, context statistics, and vote metadata.
+
+    Parent count and merge state must make the review route diagnosable from logs.
+    """
     import logging as _logging
 
     _patch_review(monkeypatch, [])
@@ -1532,11 +1498,11 @@ def test_voter_emits_merge_debug_logs(monkeypatch, tmp_path, caplog):
 
 
 def test_voter_emits_merge_change_409_guard(monkeypatch, tmp_path, caplog):
-    """The is_merge branch routes a merge through the auto-merge-delta path INSTEAD of the
-    bare /patch (which 409s on a >=2-parent commit), and must emit the named
-    ``merge_change_409_guard`` signal (S2 follow-up sly-sloth-bay). It fires ONLY on a merge
-    — distinct from ``merge_detection`` (logged for every change) — so the otherwise-silent
-    guard is visible in the logs and its firing is diagnosable."""
+    """Route merges around the bare patch endpoint and log the guard.
+
+    ``merge_change_409_guard`` fires only for multi-parent revisions, while
+    ``merge_detection`` describes every change.
+    """
     import logging as _logging
 
     _patch_review(monkeypatch, [])
@@ -1578,11 +1544,8 @@ def test_voter_emits_merge_change_409_guard(monkeypatch, tmp_path, caplog):
 
 
 def test_voter_treats_409_change_closed_as_terminal(monkeypatch, tmp_path):
-    # Bug c943: a 409 "change is closed" (a change merged/abandoned in the race window past
-    # reconcile.py's open-status filter) is TERMINAL, not a retryable failure — record it so
-    # it is never retried, and do NOT emit a VOTER_ERROR / increment the voter_errors metric
-    # (a closed change needs no vote, so it is not an actionable fault). A real vote failure
-    # (5xx) still stays a retryable voter_error with no dedup row (unchanged).
+    # Treat a raced 409 for a closed change as terminal and record dedup without
+    # a voter error. Server failures remain retryable and write no dedup row.
     _patch_review(monkeypatch, [])  # clean diff → PASS verdict
     errors: list = []
     monkeypatch.setattr(voter, "_voter_error", lambda **kw: errors.append(kw))
@@ -1594,11 +1557,12 @@ def test_voter_treats_409_change_closed_as_terminal(monkeypatch, tmp_path):
     assert store.already_voted("rebar~main~Iabc", "rev1")  # recorded → never retried
 
 
-# ── app lifespan: snapshot janitor wiring (incident 2731 / bug e7f4) ────────
+# Snapshot janitor lifespan.
 def test_lifespan_starts_and_stops_snapshot_janitor(monkeypatch):
-    """The receiver's lifespan must start the snapshot-cache janitor (the reclamation
-    that incident 2731 showed was dead code in production) and signal its stop event
-    on shutdown. Requires the ``reviewbot`` extra (fastapi); skipped without it."""
+    """Start the snapshot janitor in lifespan and signal it on shutdown.
+
+    The test requires the ``reviewbot`` extra.
+    """
     pytest.importorskip("fastapi")
     import threading
 
@@ -1623,17 +1587,14 @@ def test_lifespan_starts_and_stops_snapshot_janitor(monkeypatch):
     asyncio.run(drive())
 
 
-# ── worker: a hung review must not stall the queue (bug 9d7c / jaguarundi) ──────
+# Hung-review queue recovery.
 def test_worker_abandons_hung_review_and_keeps_draining(monkeypatch, tmp_path):
-    """A single review that HANGS forever (clone/subprocess/LLM blocked — as when the
-    disk filled mid-clone, incident 2731) must NOT wedge the single background worker.
+    """Abandon a timed-out review and continue draining the worker queue.
 
-    The worker wraps each review in a bounded timeout: the hung event is abandoned (a
-    countable ``VOTER_ERROR`` timeout marker is emitted) and the worker moves on to the
-    NEXT queued event. Without the timeout the worker awaits the hung review forever and
-    every subsequent change silently backs up behind it — this test drives the loop under
-    an outer wall-clock guard so the pre-fix (no-timeout) code fails RED rather than
-    hanging the suite. Requires the ``reviewbot`` extra (fastapi); skipped without it."""
+    The timeout emits a countable ``VOTER_ERROR`` marker before the next event
+    runs. An outer wall-clock guard keeps a missing timeout from hanging the
+    suite. The test requires the ``reviewbot`` extra.
+    """
     pytest.importorskip("fastapi")
     import contextlib
 
@@ -1680,7 +1641,7 @@ def test_worker_abandons_hung_review_and_keeps_draining(monkeypatch, tmp_path):
     assert "timed out" in str(markers[0].get("error", ""))
 
 
-# ── logging configuration (ticket c130: structured _emit INFO must reach stdout) ──
+# Review-bot logging.
 def _clear_reviewbot_log_handlers() -> None:
     """Remove any handler this fix installed on the ``rebar`` logger + restore defaults,
     so each logging test starts from a clean, uncontaminated state."""
@@ -1693,11 +1654,9 @@ def _clear_reviewbot_log_handlers() -> None:
 
 
 def test_configure_logging_emits_rebar_info_to_stdout(capsys):
-    """A ``rebar.review_bot.*`` INFO record reaches stdout after ``configure_logging()``.
+    """Send ``rebar.review_bot`` INFO records to stdout after configuration.
 
-    Before the fix, rebar's loggers have no handler, so an INFO record falls through to
-    Python's ``lastResort`` (WARNING+ only) and is silently dropped — the production defect.
-    Imports from ``config`` (fastapi-free) so this runs in the default CI suite.
+    Importing the FastAPI-free config module keeps this in the default test tier.
     """
     from rebar.review_bot.config import configure_logging
 
@@ -1721,21 +1680,17 @@ def test_configure_logging_is_idempotent(capsys):
         h for h in logging.getLogger("rebar").handlers if getattr(h, "_reviewbot_handler", False)
     ]
     assert len(installed) == 1
-    # The guarantee the removed ``propagate = False`` was claimed to provide (bug b718):
-    # a record reaches stdout EXACTLY once, counted on the stream rather than inferred
-    # from the handler list.
+    # Count stream output to prove that one record is emitted exactly once.
     logging.getLogger("rebar.review_bot.voter").info('{"event": "voter_voted", "probe": "b718"}')
     assert capsys.readouterr().out.count('"probe": "b718"') == 1
     _clear_reviewbot_log_handlers()
 
 
 def test_configure_logging_leaves_rebar_log_propagation_intact(caplog):
-    """``configure_logging()`` must not disable propagation on the shared ``rebar`` logger.
+    """Preserve propagation on the process-wide ``rebar`` logger.
 
-    Bug b718: ``logging.getLogger("rebar").propagate = False`` is PROCESS-GLOBAL and was never
-    restored. pytest's ``caplog`` captures through a handler on the ROOT logger, so after one
-    call no ``rebar.*`` record could reach ``caplog`` again for the rest of the process — every
-    later log assertion silently saw zero records. Pre-fix this test fails on both assertions.
+    ``caplog`` captures through the root logger, so disabling propagation would
+    suppress all later ``rebar`` records in the process.
     """
     from rebar.review_bot.config import configure_logging
 
@@ -1766,11 +1721,12 @@ def test_configure_logging_env_level_override(monkeypatch):
     _clear_reviewbot_log_handlers()
 
 
-# ── deploy resilience (ticket 89be: drain on shutdown + reconciler timeout parity) ──
+# Deployment shutdown resilience.
 def test_reconcile_once_times_out_a_hung_review_and_continues(monkeypatch, tmp_path):
-    """A backfill review that never returns must NOT freeze the reconcile loop. reconcile_once
-    bounds each review with review_timeout_seconds() (parity with the live worker); on timeout it
-    abandons the candidate (fail-closed) and the pass returns. Pre-fix (no timeout) this hangs."""
+    """Bound backfill reviews so one timeout cannot freeze reconciliation.
+
+    A timeout abandons the candidate fail-closed and lets the pass return.
+    """
     import rebar.review_bot.reconcile as rec
 
     cfg = _cfg(tmp_path)
@@ -1869,9 +1825,7 @@ def test_lifespan_can_opt_into_the_real_reconcile_loop(monkeypatch, tmp_path):
 
 
 def test_lifespan_drains_queued_events_on_shutdown(monkeypatch, tmp_path):
-    """On shutdown the still-running worker drains queued events instead of the queue being
-    dropped — so a routine autodeploy restart does not abandon acknowledged (202) webhooks.
-    Pre-fix the worker is cancelled immediately and the queued events are lost."""
+    """Drain acknowledged webhook events before cancelling the worker on shutdown."""
     import types
 
     pytest.importorskip("fastapi")
@@ -1937,16 +1891,11 @@ def _compose_stop_grace_seconds() -> float:
 
 
 def test_reviewbot_healthcheck_probes_its_own_listener():
-    """The review-bot service must declare a container healthcheck that probes its OWN
-    listener at ``/health``.
+    """Probe the review bot's own ``/health`` listener from its container.
 
-    This is the AC4 signal for the 2026-08-28 zombie: uvicorn closed its :8000 listener at
-    the start of a graceful shutdown but the process never exited, so ``docker compose ps``
-    kept reporting the container ``Up`` while every request RST'd — a silent 502. A per-container
-    healthcheck that hits the process's own loopback listener flips the container to
-    ``unhealthy`` in exactly that state (the connection is refused), turning a silent zombie
-    into an observable, alarmable signal. Without this stanza the state is indistinguishable
-    from healthy at the container layer, which is what let it run for 22 minutes.
+    A process can remain present after uvicorn closes port 8000 during shutdown.
+    The loopback healthcheck marks that state unhealthy instead of letting the
+    container appear available while requests fail.
     """
     import pathlib
 
@@ -1970,18 +1919,12 @@ def test_reviewbot_healthcheck_probes_its_own_listener():
 
 
 def test_reviewbot_stop_grace_period_covers_an_in_flight_store_write():
-    """The grace period must outlast a shutdown that is still finishing a store write.
+    """Keep the container grace period longer than drain and store-write budgets.
 
-    A SIGTERM starts the lifespan drain, which waits for the in-flight review to finish.
-    That review ends in ``emit_code_review_artifact`` -> ``event_append.stage_and_commit``,
-    which holds the store's **mkdir** write lock. Unlike the fcntl leg, that lock dir is NOT
-    released by the kernel when the process dies, so a SIGKILL landing inside that region
-    orphans it — and a lock stamped by one container cannot be reclaimed by the next.
-
-    So the grace period has to cover the drain window PLUS the write that may only be
-    starting as the window closes, and the dominant term in that write is the store write
-    lock's own acquisition budget. Both are read from source here rather than restated as
-    literals, so raising either budget fails this test until the grace period follows.
+    Artifact emission can acquire the store's mkdir lock as review drain ends.
+    SIGKILL does not release that directory as it releases an fcntl lock, so an
+    early kill can orphan it for the replacement container. The test reads both
+    budgets from source to keep the grace period aligned.
     """
     # Deliberately read from ``config``, not ``app``: this assertion must run in the default
     # test tier, where the fastapi-laden ``app`` module is not importable.
@@ -2004,14 +1947,12 @@ def test_reviewbot_stop_grace_period_covers_an_in_flight_store_write():
 
 
 def test_force_exit_deadline_stays_within_the_stop_grace_band():
-    """The lifespan's hard force-exit deadline must sit in the safe band: strictly BELOW the
-    container ``stop_grace_period`` (so the controlled ``os._exit`` fires before Docker's own
-    SIGKILL, guaranteeing the port is released even when the recreate path's SIGKILL escalation
-    is unreliable — the 2026-08-28 22-minute zombie), yet at least the drain + store-write-lock
-    budget (so it NEVER preempts a legitimate in-flight store write and orphans the mkdir lock,
-    exactly the hazard the stop_grace test above guards). Read from source, so raising any
-    budget fails CI until the deadline follows. Runs in the default tier: ``config`` is imported
-    without the fastapi-laden ``app`` module.
+    """Keep force exit between the work budgets and container grace limit.
+
+    It must follow review drain, cancellation, and store-lock acquisition while
+    preceding Docker's SIGKILL. This releases the listener without preempting a
+    legitimate store write. Source-derived values run through the FastAPI-free
+    config module in the default tier.
     """
     from rebar._store import lock as _lock
     from rebar.review_bot.config import (
@@ -2022,9 +1963,8 @@ def test_force_exit_deadline_stays_within_the_stop_grace_band():
 
     lock_budget = _lock._DEFAULT_TIMEOUT * _lock._DEFAULT_ATTEMPTS
     grace = shutdown_force_exit_grace_seconds()
-    # The deadline is measured from the START of the graceful shutdown: the whole drain, then
-    # the bounded cancel, then this post-cancel grace for an abandoned store write to release
-    # its lock before the force-exit.
+    # Measure from shutdown start across drain, cancellation, and the final
+    # store-write grace before force exit.
     deadline = DEFAULT_SHUTDOWN_DRAIN_SECONDS + DEFAULT_SHUTDOWN_CANCEL_SECONDS + grace
     stop_grace = _compose_stop_grace_seconds()
 
@@ -2042,13 +1982,11 @@ def test_force_exit_deadline_stays_within_the_stop_grace_band():
 
 
 def test_sigkill_during_a_store_write_orphans_the_mkdir_lock(tmp_path):
-    """The control for the test below, and the reason stop_grace_period is the operative
-    safeguard: nothing in-process can clean up after SIGKILL.
+    """Show that SIGKILL can orphan the mkdir leg of the write lock.
 
-    ``write_lock`` releases from a ``finally`` (``_store/lock.py``), so every graceful exit
-    path — including ``CancelledError`` — releases both legs. SIGKILL runs no ``finally``, and
-    while the fcntl leg is released by the kernel, the mkdir dir simply stays. So the ONLY
-    control over this failure is giving the shutdown enough time to finish the write.
+    Graceful exits run ``write_lock`` cleanup, and the kernel releases the fcntl
+    leg. SIGKILL runs no cleanup for the lock directory, so shutdown time is the
+    controlling safeguard.
     """
     import signal
     import subprocess
@@ -2093,13 +2031,10 @@ def test_sigkill_during_a_store_write_orphans_the_mkdir_lock(tmp_path):
 
 
 def test_shutdown_completes_an_in_flight_store_write_and_releases_the_lock(monkeypatch, tmp_path):
-    """AC2: a shutdown that interrupts an in-flight store write must let it finish and
-    release the write lock, leaving no lock dir behind.
+    """Drain an in-flight store write and remove its lock directory.
 
-    This is what makes the grace period worth having: the shutdown path genuinely drains the
-    write rather than abandoning it, so the only thing that can orphan the lock is running
-    out of grace. Exercised through the real ``lifespan`` shutdown (which is exactly what
-    uvicorn runs on SIGTERM) against the real ``write_lock``.
+    The test uses the production lifespan shutdown and ``write_lock`` so
+    only exhausting external grace can orphan the lock.
     """
     import types
 
@@ -2141,10 +2076,11 @@ def test_shutdown_completes_an_in_flight_store_write_and_releases_the_lock(monke
 
 
 def test_reviewbot_compose_trusts_tickets_dir_via_safe_directory():
-    """The review-bot container runs as root over a uid-1000-owned persistent tickets volume;
-    without git safe.directory the dubious-ownership guard refuses every op on it, so every
-    code_review artifact emission fails. Assert the compose service injects
-    safe.directory=<tickets dir> via GIT_CONFIG_* (equivalent to `git -c`, HOME-independent)."""
+    """Trust the persistent tickets volume through Git's ``safe.directory``.
+
+    Compose injects the setting through ``GIT_CONFIG_*`` so root can write
+    artifacts to a uid-1000-owned volume without relying on HOME.
+    """
     import pathlib
 
     yaml = pytest.importorskip("yaml")
@@ -2158,12 +2094,13 @@ def test_reviewbot_compose_trusts_tickets_dir_via_safe_directory():
     assert env.get("GIT_CONFIG_VALUE_0") == "/var/gerrit/site/reviewbot-tickets"
 
 
-# ── c2ba: bounded shutdown / off-loop store write ─────────────────────────────
+# Bounded off-loop shutdown.
 def test_emit_code_review_artifact_runs_off_the_event_loop(monkeypatch, tmp_path):
-    """AC1: the code_review artifact emission — a SYNCHRONOUS, lock-held store write — must run
-    OFF the asyncio event loop (via asyncio.to_thread), so it cannot block the loop and thereby
-    unenforce the drain and per-review wait_for bounds. Pre-fix voter.py called the synchronous
-    emit_code_review_artifact directly on the loop thread; this asserts it is offloaded."""
+    """Offload synchronous artifact writes from the asyncio event loop.
+
+    ``asyncio.to_thread`` keeps lock-held writes from defeating drain and review
+    timeout bounds.
+    """
     import threading
 
     _patch_review(monkeypatch, [])  # clean → PASS, so review_and_vote reaches the emit path
@@ -2192,11 +2129,11 @@ def test_emit_code_review_artifact_runs_off_the_event_loop(monkeypatch, tmp_path
 
 
 def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch, tmp_path):
-    """AC2: the lifespan's cancel + await path must be bounded end to end, so total shutdown has
-    a stateable upper bound even if a background task is slow to honor cancellation (a shielded
-    cleanup, a synchronous finally, or — the c2ba insight — an orphaned to_thread worker whose
-    OS thread cannot be force-cancelled). Pre-fix the unbounded `await task` hangs on exactly
-    such a task; post-fix the bounded cancel/await abandons it."""
+    """Bound lifespan cancellation when a task is slow to stop.
+
+    Shielded cleanup, synchronous finalizers, and abandoned offload threads must
+    not turn ``await task`` into an unbounded shutdown.
+    """
     import types
 
     pytest.importorskip("fastapi")
@@ -2213,9 +2150,8 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
                 try:
                     await asyncio.sleep(3600)
                 except asyncio.CancelledError:
-                    # Models a task slow to honor cancellation: it swallows the FIRST cancel and
-                    # keeps running (pre-fix, the lifespan's unbounded `await task` hangs here).
-                    # It honors a SECOND cancel so asyncio.run's own teardown stays clean.
+                    # Swallow the first cancellation to model a slow task, then honor
+                    # the second so ``asyncio.run`` can finish cleanup.
                     cancels += 1
                     if cancels >= 2:
                         raise
@@ -2230,15 +2166,12 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
 
     async def _run():
         async with appmod.lifespan(fake_app):
-            # Let the worker + reconcile tasks reach their await points, so the reconcile task
-            # is genuinely mid-await (not cancelled-before-start) when shutdown cancels it —
-            # that is the state in which the unbounded `await task` actually hangs.
+            # Reach both await points before shutdown so reconciliation is
+            # cancelled mid-await rather than before it starts.
             await asyncio.sleep(0.05)
 
-    # Pre-fix the lifespan's unbounded `await task` hangs on the slow-to-cancel reconcile task
-    # (only the 10s safety net stops it); post-fix the lifespan's own bounded cancel/await
-    # abandons it in ~SHUTDOWN_CANCEL_SECONDS. Assert on elapsed so a hang FAILS fast rather
-    # than slow-passing at the outer cap.
+    # Assert elapsed time so lifespan's own bound, not the outer safety net,
+    # terminates a slow-to-cancel task.
     start = time.monotonic()
     try:
         asyncio.run(asyncio.wait_for(_run(), timeout=10))
@@ -2255,25 +2188,13 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
 def test_shutdown_forces_process_exit_when_an_orphaned_to_thread_review_outlives_cancel(
     monkeypatch, tmp_path
 ):
-    """AC1/AC2/AC5 (unoutlawed-eloquent-amphibian): the ``drain + cancel`` bound must hold at
-    the PROCESS level, not merely for the asyncio await.
+    """Enforce the shutdown bound at process level after an abandoned offload.
 
-    Every review runs its blocking work through ``asyncio.to_thread`` on the default
-    ``ThreadPoolExecutor``, whose worker threads are **non-daemon**. Cancelling a task parked in
-    such an offload returns the *coroutine* at once (so the lifespan's bounded ``gather``
-    succeeds) but the OS thread keeps running the abandoned review. ``asyncio.run``'s own
-    teardown then JOINS the default executor (uvicorn's runner gives it a 5-minute window) and
-    interpreter finalization joins the surviving non-daemon thread with NO bound — so the
-    process, whose listener uvicorn already closed at the start of graceful shutdown, stays
-    alive (holding its published ``:8000``) for the whole remaining review. That is the live
-    2026-08-28 review-bot zombie, and it violates ADR 0067's ``total shutdown <= drain +
-    cancel`` invariant, which names exactly "the orphaned OS thread of an ``asyncio.to_thread``
-    offload that cannot be force-cancelled" as the hazard the bound must cover.
-
-    The lifespan must therefore FORCE THE PROCESS DOWN once its bounded shutdown work is done,
-    so the container releases the port for the replacement. This asserts the force-down ACTION
-    fired (an injected seam — a real ``os._exit`` cannot be observed in-process), not a
-    stopwatch, so it does not depend on the banned wall-clock timing class.
+    Cancelling ``asyncio.to_thread`` ends its coroutine but not the non-daemon
+    worker thread. Executor and interpreter shutdown can then wait indefinitely
+    after uvicorn has closed its listener. ADR 0067 requires total shutdown to
+    remain within drain and cancellation bounds. The test observes an injected
+    force-exit action because calling ``os._exit`` cannot be inspected in process.
     """
     import threading
     import types
@@ -2298,9 +2219,8 @@ def test_shutdown_forces_process_exit_when_an_orphaned_to_thread_review_outlives
         thread_finished.set()
 
     async def _worker_that_offloads(queue, cfg):
-        # Mirror production: the review's blocking work runs via asyncio.to_thread on the
-        # default (non-daemon) executor. Cancelling THIS coroutine unwinds it at once, but the
-        # OS thread keeps running _orphaned_blocking_review — the un-force-cancellable case.
+        # Match production offload behavior. Cancelling the coroutine leaves the
+        # default executor's non-daemon worker running.
         await asyncio.to_thread(_orphaned_blocking_review)
 
     def _idle_reconcile_loop(*_a, **_k):
@@ -2343,15 +2263,11 @@ def test_shutdown_forces_process_exit_when_an_orphaned_to_thread_review_outlives
 
 
 def test_clean_shutdown_with_no_orphaned_offload_does_not_force_process_exit(monkeypatch, tmp_path):
-    """The other half of the self-distinguishing contract (finding, change 2381): a normal
-    lifespan shutdown whose tasks leave NO orphaned ``asyncio.to_thread`` thread must NOT
-    force the process down — the hard deadline is armed ONLY when an un-force-cancellable
-    offload thread is actually still running, so a clean teardown exits on its own.
+    """Do not force exit after a clean shutdown with no orphaned offload.
 
-    Drives a lifespan whose worker and reconciler both park in ``asyncio.sleep`` (never
-    offloading to a thread) and honor cancellation promptly. With a tiny force-exit grace, an
-    unconditional arm would fire the seam; the gate means it is never armed. Asserts the
-    force-down seam is NOT called (the recorder stays empty), waiting past the grace.
+    Worker and reconciler tasks wait in ``asyncio.sleep`` and honor cancellation.
+    A short grace would expose unconditional arming, so the force-exit recorder
+    must remain empty beyond it.
     """
     import types
 
@@ -2393,27 +2309,15 @@ def test_clean_shutdown_with_no_orphaned_offload_does_not_force_process_exit(mon
     )
 
 
-# ── 9ec0: the shutdown drain must cover the RECONCILER's inline review ────────
-#
-# ``queue.join()`` drains the WEBHOOK queue only. The reconciler awaits ``review_and_vote``
-# INLINE (reconcile.reconcile_once), outside that queue, so with an empty queue ``join()``
-# returns immediately and the reconcile task is cancelled within ``SHUTDOWN_CANCEL_SECONDS``
-# — abandoning a backfill review that may be minutes in. The reconciler is the path that
-# RETRIES a review killed by anything else, so the gap sits on the self-heal path.
-#
-# These tests drive the REAL ``reconcile_loop`` (a test that drives the queue would prove
-# nothing here: the queue path is already protected).
+# Queue drain does not cover the reconciler's inline ``review_and_vote`` call.
+# Drive the production reconciliation loop so shutdown also waits for backfill
+# work on the self-healing path.
 def _reconciler_probe(monkeypatch, tmp_path, *, gap_count=1, review_seconds=0.4):
-    """Wire the real reconcile_loop onto a fake events-log with ``gap_count`` vote-less changes.
+    """Drive the production reconciliation loop against vote-less fake events.
 
-    Slows the review by stubbing the GATE (``produce_code_review_verdict``) rather than by
-    replacing ``review_and_vote``, so the REAL ``review_and_vote`` runs. That matters for the
-    lifespan tests: the drain gate reads ``voter.in_flight_reviews()``, whose count is held by
-    ``_counting_in_flight`` INSIDE ``review_and_vote`` — a stubbed-out review would never hold
-    it, and the test would then be asserting against a count it manufactured itself.
-
-    Returns (cfg, gerrit, started). Completion is read from ``gerrit.votes``: a cast vote is the
-    real end of the pipeline, a stronger signal than a stub's own transcript.
+    Stub only ``produce_code_review_verdict`` so ``review_and_vote`` maintains
+    its in-flight count. Return configuration, fake Gerrit, and a start probe.
+    A recorded vote marks pipeline completion.
     """
     cfg = _cfg(tmp_path)
     started: list[str] = []
@@ -2437,18 +2341,12 @@ def _reconciler_probe(monkeypatch, tmp_path, *, gap_count=1, review_seconds=0.4)
 
 
 def _spy_drain_wait(monkeypatch):
-    """Record the ``timeout`` handed to each ``asyncio.wait`` during the lifespan shutdown.
+    """Record each timeout passed to ``asyncio.wait`` during shutdown.
 
-    The lifespan's reconciler drain is the only ``asyncio.wait`` on that path, so this is a
-    STRUCTURAL proxy for two properties that would otherwise need upper-bound wall-clock
-    asserts — the proven CI flake class the wall-clock lint bans:
-
-    * WHETHER the drain ran at all (the ``in_flight_reviews()`` gate short-circuits it), and
-    * WHETHER it was handed the REMAINING shared budget rather than a fresh full one.
-
-    Reading the timeout instead of the elapsed time also fails in the SAFE direction under
-    runner contention: a loaded runner leaves LESS budget remaining, never more, so a
-    ``<`` assertion on the recorded value cannot flake from slowness the way a stopwatch does.
+    The reconciler drain is the only such wait, so its presence proves the drain
+    ran and its value proves that it received the remaining shared budget.
+    Inspecting the argument avoids a wall-clock assertion and remains stable
+    under runner contention.
     """
     calls: list[float | None] = []
     real_wait = asyncio.wait
@@ -2469,10 +2367,7 @@ async def _await_first_review(started, *, cap=3.0):
 
 @pytest.mark.real_reconcile_loop
 def test_shutdown_drains_an_in_flight_reconciler_review(monkeypatch, tmp_path):
-    """AC1: a reconciler review in flight at shutdown must be DRAINED, not cancelled.
-
-    Pre-fix this fails: the webhook queue is empty, so ``queue.join()`` returns immediately
-    and the reconcile task is cancelled straight away, so the review never completes."""
+    """Drain an in-flight reconciler review even when the webhook queue is empty."""
     import types
 
     pytest.importorskip("fastapi")
@@ -2506,13 +2401,11 @@ def test_shutdown_drains_an_in_flight_reconciler_review(monkeypatch, tmp_path):
 
 @pytest.mark.real_reconcile_loop
 def test_shutdown_does_not_let_the_reconciler_start_a_new_review(monkeypatch, tmp_path):
-    """AC2: the drain must not extend indefinitely — once shutdown has begun the reconciler
-    may finish the review in flight but must start NO new one.
+    """Finish only the reconciler review active when shutdown begins.
 
-    Two vote-less changes are queued in the events-log. Shutdown lands during the first
-    review; the second must never start. This is the guard against 'fix' shapes that merely
-    let the reconcile loop run to completion, which would drain candidate after candidate
-    and could re-extend shutdown up to the full budget."""
+    Two vote-less changes make a complete-loop drain observable. The first may
+    finish, but shutdown must prevent the second from starting.
+    """
     import types
 
     pytest.importorskip("fastapi")
@@ -2539,28 +2432,19 @@ def test_shutdown_does_not_let_the_reconciler_start_a_new_review(monkeypatch, tm
         "Draining must stop accepting new work, or each fresh candidate re-extends shutdown "
         "(9ec0 AC2)."
     )
-    # "One review, not two" is exactly what the two asserts above already pin, structurally and
-    # without a clock. A wall-clock ceiling on top would add no signal and only a flake risk:
-    # a drain that DID re-extend would have to start a second review to do so, which
-    # ``len(started) == 1`` already catches.
+    # The start count proves that drain cannot extend to a second review without
+    # adding a flaky wall-clock ceiling.
 
 
 @pytest.mark.real_reconcile_loop
 def test_shutdown_reconciler_drain_shares_the_queue_drain_budget(monkeypatch, tmp_path):
-    """The reconciler drain must run under the SAME ``shutdown_drain_seconds()`` deadline as
-    the queue drain, not a second independent one.
+    """Share one shutdown deadline between queue and reconciler drains.
 
-    ``test_reviewbot_stop_grace_period_covers_an_in_flight_store_write`` sizes the container's
-    ``stop_grace_period`` as ``DEFAULT_SHUTDOWN_DRAIN_SECONDS + <store lock budget>``. Two
-    sequential windows of one drain budget each would make a real shutdown able to spend
-    ``2 x drain`` before the store write even starts, silently invalidating that sizing —
-    and overrunning the grace period means SIGKILL, which is strictly worse than a clean cancel.
-
-    To tell the two apart the QUEUE drain must consume most of the budget first: a webhook
-    review runs for 0.12s of a 0.2s test budget, and the reconciler review then outlasts
-    whatever is left. The 60/40 ratio is the contract; production's 1200s budget is unchanged.
-    With an empty queue the two are indistinguishable, which is exactly the vacuous shape this
-    avoids."""
+    Independent windows could spend twice the declared drain budget before a
+    store write and exceed container grace. A webhook consumes roughly 60
+    percent of the test budget before the reconciler waits. Recording its
+    remaining timeout distinguishes a shared deadline from a fresh window.
+    """
     import types
 
     pytest.importorskip("fastapi")
@@ -2570,9 +2454,8 @@ def test_shutdown_reconciler_drain_shares_the_queue_drain_budget(monkeypatch, tm
     started: list[str] = []
     completed: list[str] = []
 
-    # The queue half is stubbed at review_and_vote (its drain is queue.join(), which does not
-    # consult the in-flight count), while the reconciler half runs the REAL review so the
-    # drain gate sees a genuine in_flight count.
+    # Stub the queue review, but run the reconciler review so its in-flight count
+    # reaches the drain gate.
     real_review_and_vote = voter.review_and_vote
 
     async def _review(event, *, config=None, gerrit=None, dedup=None, force=False):
@@ -2618,12 +2501,9 @@ def test_shutdown_reconciler_drain_shares_the_queue_drain_budget(monkeypatch, tm
     assert completed == ["rebar~main~Iabc"], (
         f"the webhook review must drain and the reconciler's must outlast the budget: {completed}"
     )
-    # THE CONTRACT, read structurally off the budget the drain was actually handed rather than
-    # off a stopwatch. The 0.2s test budget and ~0.12s webhook review retain production's
-    # important 60/40 geometry, so a SHARED deadline can hand the reconciler wait only the
-    # ~0.08s that remain. Two independent windows would hand it a fresh 0.2s — which breaks the
-    # stop_grace_period sizing that test_reviewbot_stop_grace_period_covers_an_in_flight_store_
-    # write pins, and an overrun means SIGKILL mid-store-write.
+    # Read the shared budget structurally. After the webhook uses about 60
+    # percent, the reconciler must receive only the remainder rather than a new
+    # window that could exceed container grace.
     assert drain_timeouts, (
         "the reconciler drain never ran, so this test is no longer exercising the shared "
         "deadline at all"
@@ -2637,13 +2517,11 @@ def test_shutdown_reconciler_drain_shares_the_queue_drain_budget(monkeypatch, tm
 
 @pytest.mark.real_reconcile_loop
 def test_shutdown_is_prompt_when_the_reconciler_has_no_review_in_flight(monkeypatch, tmp_path):
-    """The new drain must be scoped to an in-flight REVIEW, not to the reconcile task at large.
+    """Drain only when the reconciler has a review in flight.
 
-    A reconciler parked in some other slow step — here a blocking events-log fetch — has no
-    review at risk, so shutdown must stay as prompt as it is today rather than waiting out the
-    drain budget. Without the ``voter.in_flight_reviews()`` gate this waits for the fetch to
-    return, which in production (a 1200s budget against a hung HTTP call) turns a ~10s shutdown
-    into minutes and eats the grace period that the store write needs."""
+    A blocked event-log fetch has no review to protect. The in-flight gate must
+    therefore skip the drain instead of consuming the shutdown budget.
+    """
     import types
 
     pytest.importorskip("fastapi")
@@ -2659,9 +2537,8 @@ def test_shutdown_is_prompt_when_the_reconciler_has_no_review_in_flight(monkeypa
     class SlowFetchGerrit(ReconcileGerrit):
         def list_events(self, since=None):
             self.list_since_calls.append(since)
-            # A barrier, not a sleep: this remains genuinely blocked off-loop until shutdown
-            # has proven it does not drain unrelated reconciler work. The timeout is cleanup
-            # protection only, so a broken test cannot orphan the executor thread forever.
+            # This barrier stays blocked off-loop until shutdown skips unrelated
+            # work. Its timeout prevents an orphaned executor thread on failure.
             assert release_fetch.wait(timeout=10)
             return []
 
@@ -2685,11 +2562,8 @@ def test_shutdown_is_prompt_when_the_reconciler_has_no_review_in_flight(monkeypa
 
     asyncio.run(asyncio.wait_for(_run(), timeout=30))
 
-    # Read structurally rather than with a stopwatch: with no review in flight the
-    # ``voter.in_flight_reviews()`` gate must short-circuit the drain ENTIRELY, so the wait is
-    # never entered. That is a stronger statement than "it finished quickly" — a stopwatch
-    # would also pass if the wait ran and happened to return fast — and it cannot flake under
-    # runner contention the way an upper-bound elapsed assert does.
+    # With no review in flight, the gate must avoid entering the drain. Inspect
+    # the wait directly instead of relying on elapsed time.
     assert drain_timeouts == [], (
         "shutdown entered the reconciler drain with NO review in flight (wait timeouts: "
         f"{drain_timeouts}). It must be gated on voter.in_flight_reviews(), or a reconciler "
@@ -2700,19 +2574,13 @@ def test_shutdown_is_prompt_when_the_reconciler_has_no_review_in_flight(monkeypa
 
 @pytest.mark.real_reconcile_loop
 def test_shutdown_does_not_leave_the_reconciler_permanently_stopped(monkeypatch, tmp_path):
-    """The stop flag must not outlive the shutdown that set it.
+    """Clear the module-level reconciler stop flag after shutdown.
 
-    ``_stop_requested`` is module state on ``reconcile``, not per-app, so a lifespan that exits
-    with it still set silently neuters EVERY later ``reconcile_once`` in the same process — the
-    pass declines every candidate and returns ``reviewed: 0`` while still reporting them as
-    ``scanned``, which looks like "nothing was owed a vote" rather than like a fault.
-
-    Clearing only at the next lifespan STARTUP is not enough: the reconciler is also driven
-    directly, with no lifespan, by the replacement-process recovery path that re-drives a rerun
-    the discarded in-memory queue lost (``test_accepted_rerun_survives_restart_via_gerrit_
-    reconcile`` is the live oracle for that, and it is what caught this). A backfill that
-    silently reviews nothing is the exact failure mode 9ec0 exists to prevent, so this pins the
-    post-shutdown state directly rather than only through that test's side effects."""
+    Leaving it set makes later direct ``reconcile_once`` calls scan candidates
+    while reviewing none. Startup cleanup is insufficient because replacement
+    recovery can drive reconciliation without a new lifespan. The test pins the
+    post-shutdown state directly.
+    """
     import types
 
     pytest.importorskip("fastapi")
@@ -2741,7 +2609,7 @@ def test_shutdown_does_not_leave_the_reconciler_permanently_stopped(monkeypatch,
     )
 
 
-# ── retryable coverage gaps: defer vote-less + bounded escalation (ticket 0347) ──
+# Retryable coverage gaps.
 def _gap_verdict(reason):
     """A four-pass verdict whose coverage block yields the given retryable gap sub-reason."""
     coverage = {
@@ -2924,9 +2792,7 @@ def test_retryable_gap_max_attempts_is_env_overridable(monkeypatch, tmp_path):
 
 
 def test_deferred_change_stays_eligible_for_reconciler(monkeypatch, tmp_path):
-    """AC5: a deferred change has no ``voted`` row and no Gerrit vote, so the backfill
-    reconciler re-drives it on the next pass; the review_attempts row does NOT suppress
-    the re-drive (it accumulates toward escalation instead)."""
+    """Keep deferred changes eligible while attempts accumulate toward escalation."""
     _patch_gap(monkeypatch, "llm-unavailable")
     cfg = _cfg(tmp_path)
     store = DedupStore(cfg.dedup_db_path)
@@ -2944,45 +2810,23 @@ def test_deferred_change_stays_eligible_for_reconciler(monkeypatch, tmp_path):
     assert store.attempt_count("rebar~main~Igap", "rev-gap") == 2
 
 
-# ── cursor low-water mark (bug 9f63) ─────────────────────────────────────────
-#
-# THE DEFECT. ``reconcile_once`` wrote its cursor to ``newest`` — the max event time over
-# the WHOLE fetched window — unconditionally at the end of every pass, with no low-water
-# mark for candidates it had failed to vote. Because the events-log ``?t1=`` window is an
-# inclusive SERVER-SIDE lower bound, any candidate the pass abandoned (check-error,
-# review-timeout, or a voter ``deferred``/``error`` return) fell outside every subsequent
-# window — permanently. Since Gerrit's ``webhooks`` plugin is at-MOST-once and the
-# receiver 202-ACKs into an in-memory queue a container recreation discards, the
-# reconciler is the ONLY recovery path, so the change simply never got a vote until a
-# human minted a fresh event (a ``rerun-llm-review`` comment or a no-op re-push).
-#
-# This contradicted three written contracts: ``reconcile.py``'s module docstring ("This
-# poller closes that loop"), its in-loop comment ("is retried next pass"), and
-# ``docs/adr/0009-review-bot-pipe.md`` ("the reconciler is what recovers a dropped
-# webhook").
-#
-# It shipped because ``ReconcileGerrit.list_events`` recorded ``since`` and ignored it,
-# and because every guarding test used a SINGLE-event window — where ``newest`` IS the
-# failed candidate, so the inclusive re-fetch masked the bug. These tests use a
-# MULTI-event window with the failure on a NON-newest event, which is the only shape that
-# can express the defect.
+# The inclusive event window needs a low-water mark for candidates that receive
+# no vote. Advancing directly to the newest event would permanently lose an
+# older check error, review timeout, or deferred result. Gerrit webhooks are
+# at-most-once and the acknowledged queue is in memory, so reconciliation is
+# the recovery path. Multi-event fixtures place failure before newer chatter to
+# expose the cursor defect that single-event windows hide.
 
 
 def test_reconcile_cursor_holds_back_an_abandoned_non_newest_candidate(monkeypatch, tmp_path):
-    """Bug 9f63 — the regression oracle.
+    """Keep an older timed-out candidate inside the next event window.
 
-    A window holds an OLD candidate whose review times out, a NEWER candidate that votes,
-    and later unrelated chatter that drags ``newest`` forward. The abandoned candidate
-    must still be inside the NEXT pass's window and must be re-driven, per
-    ``reconcile.py``'s "is retried next pass" contract. Pre-fix the cursor jumped to the
-    chatter's timestamp and the candidate was never seen again (``scanned`` fell to 0).
+    A newer vote and later chatter advance ``newest``, so only the low-water mark
+    can make the abandoned candidate eligible again.
     """
     cfg = _cfg(tmp_path)
-    # Bound BOTH sides of the abandon path. The timeout is patched tiny so the pass gives
-    # up fast, and the fake review's own wait is short too — so if this patch ever failed
-    # to bind (a refactor moving how reconcile resolves the timeout), the test fails in
-    # under a second instead of blocking on the 1200s production default and wedging the
-    # whole xdist worker.
+    # Bound both the production timeout seam and fake review so a refactor that
+    # misses the patch still fails quickly instead of wedging an xdist worker.
     monkeypatch.setattr(reconcile, "review_timeout_seconds", lambda: 0.05)
 
     stale = _events_log_event("rebar~main~Istale", "rev-stale", number=91, created_on=1000)
@@ -3030,12 +2874,10 @@ def test_reconcile_cursor_holds_back_an_abandoned_non_newest_candidate(monkeypat
 
 
 def test_reconcile_cursor_advances_past_a_terminal_outcome(monkeypatch, tmp_path):
-    """The hold-back is for RETRYABLE outcomes only.
+    """Advance past terminal ``skipped`` and ``post_vote_closed`` outcomes.
 
-    A change that merged/abandoned mid-review returns ``skipped``/``post_vote_closed``
-    (voter.py) — terminal and unvotable. Re-driving it forever would 409 (bug c943) and
-    would pin the fetch window open, so the cursor must advance past it exactly as it
-    does for a ``voted`` candidate. This is the negative control for the test above.
+    Only retryable outcomes hold the cursor. Re-driving an unvotable change would
+    return 409 and pin the window.
     """
     cfg = _cfg(tmp_path)
 
@@ -3067,11 +2909,9 @@ def test_reconcile_cursor_advances_past_a_terminal_outcome(monkeypatch, tmp_path
 def test_reconcile_holdback_is_bounded_so_a_poison_pill_cannot_pin_the_window(
     monkeypatch, tmp_path
 ):
-    """A candidate that fails on EVERY pass must not hold the cursor back forever.
+    """Expire a persistent cursor hold after ``RECONCILE_MAX_HOLDBACK_SECONDS``.
 
-    Without a ceiling the fetch window grows without bound and the same doomed change is
-    re-driven every 5 minutes in silence. Past ``RECONCILE_MAX_HOLDBACK_SECONDS`` the
-    cursor advances and the change is surfaced as ``holdback_expired``.
+    The change is reported as ``holdback_expired`` so the window cannot grow forever.
     """
     cfg = _cfg(tmp_path)
     cfg = dataclasses.replace(cfg, reconcile_max_holdback_seconds=100)
@@ -3103,12 +2943,7 @@ def test_reconcile_holdback_is_bounded_so_a_poison_pill_cannot_pin_the_window(
 
 
 def test_reconcile_done_reports_the_carried_backlog(monkeypatch, tmp_path, caplog):
-    """AC: backfill's carried backlog is OBSERVABLE.
-
-    ``reconcile_done`` reported only ``scanned``/``reviewed``, so "backfill is carrying N
-    stalled changes" was invisible — the ambiguity that let an agent read a queued review
-    as an outage. The pass must report how many candidates it left un-voted.
-    """
+    """Report the number of unvoted candidates carried into the next pass."""
     cfg = _cfg(tmp_path)
 
     stuck = _events_log_event("rebar~main~Istuck", "rev-stuck", number=98, created_on=1000)
@@ -3139,7 +2974,7 @@ def test_reconcile_done_reports_the_carried_backlog(monkeypatch, tmp_path, caplo
     assert done[-1]["cursor"]
 
 
-# ── tree↔vote binding (ticket da31-f9d1) ─────────────────────────────────────
+# Tree-to-vote binding.
 def _one_commit_repo(path, filename="f.txt") -> str:
     """A real one-commit git repo at ``path``; returns its full HEAD sha."""
     path.mkdir(parents=True, exist_ok=True)
@@ -3174,13 +3009,11 @@ def _one_commit_repo(path, filename="f.txt") -> str:
 
 
 class CloningGerrit(FakeGerrit):
-    """A ``FakeGerrit`` whose ``clone_change_ref`` materializes a REAL checkout at ``dest``.
+    """Materialize the production clone shape in a recording Gerrit fake.
 
-    It reproduces the shape of the production clone: the change tree is checked out FIRST, and
-    a second fetch (the tickets branch, which the real ``clone_change_ref`` pulls from the
-    mirror) then lands on top — so ``dest``'s ``FETCH_HEAD`` points at the TICKETS commit while
-    its ``HEAD`` stays on the change. Any tree↔vote binding that read ``FETCH_HEAD`` would
-    therefore mismatch here even though nothing is wrong."""
+    Checkout sets HEAD to the change before a tickets-branch fetch replaces
+    FETCH_HEAD. Binding must therefore inspect HEAD rather than the later fetch.
+    """
 
     def __init__(self, change_repo, tickets_repo, **kwargs):
         super().__init__(**kwargs)
@@ -3198,12 +3031,10 @@ class CloningGerrit(FakeGerrit):
 
 
 def test_voter_votes_when_the_cloned_tree_is_the_voted_revision(monkeypatch, tmp_path):
-    """Happy path for the tree↔vote binding: the tree the reviewer was handed IS the revision
-    the vote attaches to, so the review proceeds and the vote is cast exactly as before.
+    """Vote when the checked-out HEAD matches the target revision.
 
-    This is the false-mismatch guard the binding must not trip: the clone leaves a divergent
-    ``FETCH_HEAD`` behind (the tickets fetch), the change sha is a full 40-hex name, and the
-    review must still reach Gerrit."""
+    A divergent tickets-branch FETCH_HEAD must not create a false mismatch.
+    """
     change_sha = _one_commit_repo(tmp_path / "change")
     _one_commit_repo(tmp_path / "tickets", filename="tickets.txt")
     _patch_review(monkeypatch, [])  # clean → PASS
@@ -3221,7 +3052,7 @@ def test_voter_votes_when_the_cloned_tree_is_the_voted_revision(monkeypatch, tmp
     assert g.votes and g.votes[0][1] == change_sha and g.votes[0][2] == 1
 
 
-# ── the queue must not spend a review on a superseded patchset (oozy-darkish-merganser) ──
+# Skip superseded queued revisions.
 def _drive_worker(appmod, events, cfg, timeout=10):
     """Run `_worker` over `events` until the queue drains, then cancel it."""
     import contextlib
@@ -3242,18 +3073,11 @@ def _drive_worker(appmod, events, cfg, timeout=10):
 
 
 def test_worker_discards_a_superseded_revision_before_reviewing_it(monkeypatch, tmp_path):
-    """A queued event whose revision is no longer current must be dropped BEFORE the review.
+    """Discard a queued revision that Gerrit no longer considers current.
 
-    The worker is serial (WORKER_COUNT = 1) and a review takes tens of minutes, so a queued
-    event is routinely obsolete by the time it is dequeued: the bot clones, runs the LLM, and
-    votes on a tree the author already replaced. Observed on changes 2226/2231/2232 — the bot
-    voted consistently one patchset behind, e.g. PS7 uploaded 05:59 and the vote landed on PS6
-    at 06:10. The cost is not just the wasted review: on ONE worker that time is stolen from
-    current work, and the `-1` that lands cites findings the author already fixed, prompting a
-    re-push that enqueues yet another review. The failure amplifies itself.
-
-    Discarding is safe: the newer patchset fired its own webhook, so an event for the current
-    revision is already queued behind this one.
+    The serial worker must not spend a long review on an obsolete tree or post
+    findings the author already fixed. Uploading the newer patchset emits its own
+    event, so current work remains queued.
     """
     pytest.importorskip("fastapi")
     from rebar.review_bot import app as appmod
@@ -3299,10 +3123,9 @@ def test_worker_reviews_the_current_revision(monkeypatch, tmp_path):
 
 
 def test_worker_fails_open_when_the_current_revision_cannot_be_read(monkeypatch, tmp_path):
-    """A Gerrit read error must never silently swallow a review.
+    """Review when Gerrit cannot determine the current revision.
 
-    Failing CLOSED here would be worse than the bug: a transient blip would drop reviews with
-    no vote and no retry signal. Unknown-current means review it.
+    A transient read failure must not drop work without a vote or retry signal.
     """
     pytest.importorskip("fastapi")
     from rebar.review_bot import app as appmod
@@ -3347,31 +3170,19 @@ def test_worker_does_not_discard_a_forced_rerun(monkeypatch, tmp_path):
     assert reviewed == [True], "a forced rerun must bypass the staleness check"
 
 
-# ── the review-bot clone path shares the gate-scratch refusal (bug 1ef8) ─────
-#
-# S1 (story aa40, change 2620) put the unreachable-scratch refusal in gate_admission(),
-# which wraps plan-review and completion-verifier. The review-bot's per-review clone does
-# NOT pass through it: it is a plain tempfile.TemporaryDirectory(prefix="reviewbot-")
-# following TMPDIR. So on a declared-but-unmounted scratch volume the gates refused loudly
-# while the review-bot kept cloning onto the root filesystem, silently — and a partial
-# refusal is worse than none, because the loud half creates confidence the protection is in
-# force. These tests pin the clone path onto the SAME predicate, with the SAME ADR 0069
-# deferral treatment the low-disk floor already gets.
+# Review-bot clones do not pass through gate admission, so they must call the
+# same scratch-volume predicate directly. A declared but unmounted volume must
+# refuse before ``TemporaryDirectory`` writes to the root filesystem. ADR 0069
+# gives this condition the same vote-less deferral as low disk.
 
 
 @pytest.fixture
 def scratch_host(tmp_path, monkeypatch):
-    """An isolated 'host', modelled on tests/unit/test_gate_scratch_volume_aa40.py.
+    """Model an isolated host with a declared scratch mount.
 
-    ``tmp_path/var`` stands in for the durable ROOT filesystem (it always exists) and
-    ``tmp_path/var/gate-scratch`` is the mount point. Mounting is simulated by writing the
-    proof marker inside it; unmounting, by never writing it — which is exactly what an
-    unmount does to a file that lived on the volume.
-
-    BOTH env vars are pointed at the mount point because the two consumers read two
-    different names: ``REBAR_GATE_TMPDIR`` moves the snapshot store (and is what the shared
-    predicate derives its markers from), while ``TMPDIR`` is what the ``reviewbot-*`` clone
-    follows. That pairing is the deployed shape (infra/compose/docker-compose.yml).
+    A proof marker represents a mounted volume. Its absence represents an
+    unmount over the durable root directory. ``REBAR_GATE_TMPDIR`` drives the
+    shared predicate while ``TMPDIR`` drives review-bot clones, matching deployment.
     """
     from rebar import _config_sources
     from rebar.llm import gate_admission as ga
@@ -3381,10 +3192,8 @@ def scratch_host(tmp_path, monkeypatch):
     base.mkdir(parents=True)
     monkeypatch.setenv("REBAR_GATE_TMPDIR", str(base))
     monkeypatch.setenv("TMPDIR", str(base))
-    # ``tempfile.gettempdir()`` MEMOISES its answer in ``tempfile.tempdir`` on first use, so
-    # in a process that has already made a temp file the env var alone is inert and the clone
-    # would keep landing on the real system temp — which would make the AC3 absence assertion
-    # pass vacuously. Setting the module attribute is what actually points the clone here.
+    # ``tempfile`` caches its selected directory, so set the module attribute as
+    # well as the environment. Otherwise clone assertions could inspect the wrong root.
     monkeypatch.setattr(tempfile, "tempdir", str(base))
     monkeypatch.setattr(_config_sources, "user_config_path", lambda: tmp_path / "absent.toml")
 
@@ -3398,12 +3207,10 @@ def scratch_host(tmp_path, monkeypatch):
 
 
 class _CloneWitnessGerrit(FakeGerrit):
-    """A FakeGerrit that records whether the clone ran and WHAT it put on the mount point.
+    """Record clone execution and its temporary files before cleanup.
 
-    The during-call capture is not belt-and-braces: ``tempfile.TemporaryDirectory`` removes
-    its tree on ``__exit__``, so a post-call listing alone would be satisfied even by a run
-    that did clone onto the unmounted mount point. Recording the live listing at clone time
-    is what makes the absence assertion non-vacuous.
+    ``TemporaryDirectory`` removes its tree on exit, so only an in-call listing
+    makes the absence assertion non-vacuous.
     """
 
     def __init__(self, base):
@@ -3430,10 +3237,9 @@ def _run_review(gerrit, tmp_path, cfg=None):
 
 
 def test_unmounted_scratch_refuses_the_review_bot_clone(scratch_host, tmp_path, monkeypatch):
-    """AC1: declaration present + proof absent → the clone path REFUSES, vote-lessly.
+    """Refuse without a mount proof when scratch is declared.
 
-    Built from the real two-marker files rather than by monkeypatching the predicate, so it
-    proves the wiring and not just the branch.
+    Production marker files exercise the wiring without replacing the predicate.
     """
     _patch_review(monkeypatch, [])
     scratch_host.declare()
@@ -3450,12 +3256,10 @@ def test_unmounted_scratch_refuses_the_review_bot_clone(scratch_host, tmp_path, 
 def test_the_refusal_creates_no_clone_on_the_underlying_directory(
     scratch_host, tmp_path, monkeypatch
 ):
-    """AC3: the ABSENCE assertion — nothing is created on the root filesystem.
+    """Create no clone bytes beneath an unmounted scratch directory.
 
-    Modelled on S1's ``test_the_refusal_creates_no_store_on_the_underlying_directory``: the
-    point is not that an error was raised but that the bytes never landed. Before the guard
-    existed this test showed a ``reviewbot-*`` directory materialising on the unmounted mount
-    point — on the very disk ADR 0112 provisioned the volume to protect.
+    Refusal alone is insufficient because a temporary tree could be removed
+    before the final assertion.
     """
     _patch_review(monkeypatch, [])
     scratch_host.declare()
@@ -3489,12 +3293,10 @@ def test_unmounted_scratch_defers_rather_than_voting_minus_one(
 def test_unmounted_scratch_exhaustion_is_terminal_no_vote_never_minus_one(
     scratch_host, tmp_path, monkeypatch, capsys
 ):
-    """AC2 (budget spent): still NO vote — the ADR 0069 low-disk carve-out, not the -1.
+    """Keep an unmounted-scratch exhaustion vote-less under ADR 0069.
 
-    This is the criterion the whole fix turns on. Every other retryable gap reason escalates
-    to the fail-closed -1 once its budget is spent; converting an unmounted disk into a
-    negative code-review verdict against an innocent change is the same category error as a
-    vacuous Verified +1. Reusing the ``low-disk`` reason is what makes that structural.
+    Reusing the ``low-disk`` reason preserves its carve-out from fail-closed
+    escalation instead of assigning an unrelated code-review block.
     """
     _patch_review(monkeypatch, [])
     scratch_host.declare()
@@ -3511,11 +3313,7 @@ def test_unmounted_scratch_exhaustion_is_terminal_no_vote_never_minus_one(
 
 
 def test_no_declaration_leaves_the_clone_path_untouched(scratch_host, tmp_path, monkeypatch):
-    """AC4: the no-op case — every developer machine and CI runner.
-
-    No declaration means no dedicated volume was ever provisioned, so the guard is off and
-    the review runs exactly as before. A fix that refused here would break every contributor.
-    """
+    """Leave clone behavior unchanged when no scratch volume is declared."""
     _patch_review(monkeypatch, [])
     g = _CloneWitnessGerrit(scratch_host.base)
 
@@ -3529,11 +3327,7 @@ def test_no_declaration_leaves_the_clone_path_untouched(scratch_host, tmp_path, 
 def test_proof_without_declaration_also_leaves_the_clone_path_untouched(
     scratch_host, tmp_path, monkeypatch
 ):
-    """AC4, fourth quadrant: proof present, declaration absent → today's behaviour.
-
-    Arises when the root-side write failed or an operator removed it during a recovery. The
-    declaration is the only thing that arms the check, so its absence can never REFUSE.
-    """
+    """Ignore a proof marker when no declaration arms the scratch check."""
     _patch_review(monkeypatch, [])
     scratch_host.mount()
     g = _CloneWitnessGerrit(scratch_host.base)
@@ -3558,13 +3352,11 @@ def test_a_mounted_scratch_volume_admits_the_clone(scratch_host, tmp_path, monke
 
 
 def test_the_refusal_says_UNMOUNTED_not_merely_low_disk(scratch_host, tmp_path, monkeypatch):
-    """The sub-condition an operator actually needs, asserted rather than assumed.
+    """Distinguish an unmounted volume from ordinary low disk.
 
-    Routing deliberately reuses the ``low-disk`` gap reason (ADR 0069's one carve-out from
-    the fail-closed -1), so the gap reason ALONE cannot tell an operator whether the disk is
-    full or the volume is gone — two conditions with different remediations. The distinct
-    message and the ``scratch_unavailable``/``scratch_detail`` coverage fields are what carry
-    that, and an untested message is a message that silently reverts to the low-disk wording.
+    Both reuse the vote-less ``low-disk`` reason, so the message and
+    ``scratch_unavailable`` and ``scratch_detail`` fields must identify the
+    remediation-specific condition.
     """
     from rebar.review_bot import low_disk
 
@@ -3587,12 +3379,10 @@ def test_the_refusal_says_UNMOUNTED_not_merely_low_disk(scratch_host, tmp_path, 
 
 
 def test_the_clone_guard_shares_the_gates_predicate_rather_than_reimplementing_it():
-    """AC5: one owner, so enforcement and monitoring cannot disagree.
+    """Share one scratch predicate between gates and review-bot clones.
 
-    Two assertions, because the risk has two shapes. First, the review-bot's helper IS the
-    gate's predicate (patching the owner changes the review-bot's answer) — a copy would keep
-    returning None. Second, no module under ``src/rebar/review_bot`` names either marker
-    literal, so a future edit cannot fork the pair by string.
+    Patching the owner must change the clone result, and review-bot modules must
+    not duplicate either marker literal.
     """
     from rebar.llm import gate_admission as ga
     from rebar.review_bot import low_disk
@@ -3612,12 +3402,7 @@ def test_the_clone_guard_shares_the_gates_predicate_rather_than_reimplementing_i
 
 
 def test_monitoring_reads_the_same_proof_marker_as_the_clone_guard():
-    """AC5: ``observability.sh`` anchors on the constant the clone guard now shares.
-
-    S1 established this property for the gates; a probe that watched a different marker than
-    the code enforces would report a healthy volume while the review-bot refused, or the
-    reverse.
-    """
+    """Require monitoring and clone admission to use the same proof marker."""
     from rebar.llm import gate_admission as ga
 
     repo_root = pathlib.Path(__file__).resolve().parents[2]

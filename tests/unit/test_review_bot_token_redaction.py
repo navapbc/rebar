@@ -1,18 +1,9 @@
-"""Regression tests for the review-bot webhook/rerun token leak (ticket 66af).
+"""Keep review-bot tokens out of uvicorn access logs.
 
-The bug: the receiver is a uvicorn app whose default access log records the full
-request line *including the query string*, and both ``/webhook`` and ``/rerun`` took
-their secret as a ``?token=`` query parameter — so every request wrote the bot's
-Gerrit credential to journald in clear text.
-
-The fix (operator-approved options a + c):
-  (a) accept the token via the ``X-Rebar-Token`` HTTP header — headers are NOT part of
-      the access-logged request line, so the secret never reaches the log; and
-  (c) a belt-and-suspenders uvicorn access-log redaction filter that scrubs any
-      ``token=...`` still present in a request line before it reaches stderr/journald.
-
-The oracle asserts on the EMITTED LOG LINE (not handler behaviour — the handler was
-already correct); each test's RED is stated in its docstring.
+Query parameters appear in logged request lines, so webhook and rerun secrets
+use the ``X-Rebar-Token`` header. A logging filter also redacts any remaining
+``token=...`` query value before emission. The oracle checks emitted log text
+rather than handler behavior.
 """
 
 from __future__ import annotations

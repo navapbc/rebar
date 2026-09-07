@@ -1,24 +1,10 @@
-"""RED oracle for baa8 (curvaceous-powellite-foal): the voter must not cast an
-LLM-Review vote on a revision that is no longer the change's CURRENT revision.
+"""Prevent an LLM-Review vote on a superseded revision.
 
-Mechanism under test (proven root cause): the review takes 15-45 min on a single
-serial worker. ``app._worker`` runs the daa7 staleness guard (``_superseded_by``) ONCE,
-BEFORE the review starts. ``voter._review_and_vote`` then clones, runs the multi-pass
-LLM review, and calls ``post_review`` (→ ``gc.post_vote``) at the END with NO further
-currency check. So a patchset that becomes superseded DURING the review is still voted
-on. That vote's Gerrit comment dispatches the Verified workflow for the STALE refspec
-(g2p ``recheck = verify`` substring mapping), and — because ``gerrit-verify`` concurrency
-is keyed by Change-Id with ``cancel-in-progress`` — the stale run cancels the CURRENT
-patchset's Verified run (ADR-0020: the current patchset must get its own fresh CI).
-
-Authoritative intended behavior (this test encodes the contract, not the reporter's
-assumption):
-- daa7 (``oozy-darkish-merganser``) guard docstring: "DISCARD ... rather than spend
-  15-45 minutes reviewing -- and VOTING ON -- a superseded patchset."
-- ADR-0009: the bot votes on the CURRENT revision.
-- ADR-0020: a stale/copied CI signal must never stand in for the current patchset's CI.
-
-Held out from the fix subagent per /rebar-debug Phase 2 Step 5.
+The worker checks currency before a long review, but a newer patchset can arrive
+before ``post_review``. The voter must check again because a stale vote can
+dispatch CI for the old ref and cancel the current revision's run. ADR-0009
+requires votes on the current revision, and ADR-0020 requires fresh CI for that
+revision. This oracle was held out from the fix author.
 """
 
 from __future__ import annotations

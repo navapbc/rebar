@@ -1,19 +1,9 @@
-"""Advisory findings must always be retrievable ON the Gerrit change (bug
-lacquer-grotesque-urson).
+"""Keep every advisory finding retrievable on its Gerrit change.
 
-Before this module's fix the review bot published advisory findings as a bare COUNT
-("rebar code review passed. 4 advisory finding(s) (non-blocking).") and nothing else: no inline
-comments, no text in the message body, and — on a Gerrit with robot comments disabled — not even
-the patchset-level robot comment. The finding text was retrievable nowhere on the change, so a
-reviewer could not judge which advisory criteria deserved promotion to blocking.
-
-These tests pin the four surfaces the fix guarantees:
-  * advisory text is enumerated in the PASS message body;
-  * advisory text is enumerated on the BLOCK path too;
-  * a finding whose location anchors to a real revision path ALSO becomes an inline comment;
-  * an anchor-less or off-revision finding is still enumerated and produces no inline comment;
-  * a comment-bearing POST that fails falls back to a message-only vote carrying an explicit
-    notice, so a publishing failure is never silent.
+PASS and BLOCK messages enumerate advisory text. Findings anchored to revision
+paths also become inline comments, while unanchored findings remain only in the
+message. If posting comments fails, the bot falls back to a message-only vote
+that names the publishing failure.
 """
 
 from __future__ import annotations
@@ -31,9 +21,7 @@ def _finding(detail: str, *, criteria: str = "quality", location: str | None = N
     return f
 
 
-# --------------------------------------------------------------------------------------
-# AC4(a) — the reproduced 1666/1685 condition: a PASS with advisory findings
-# --------------------------------------------------------------------------------------
+# AC4(a): PASS advisories.
 
 
 def test_pass_message_enumerates_advisory_finding_text() -> None:
@@ -58,9 +46,7 @@ def test_pass_message_is_unchanged_when_there_are_no_advisories() -> None:
     assert message == "rebar code review passed."
 
 
-# --------------------------------------------------------------------------------------
-# AC4(b) — the BLOCK path drops advisory text too
-# --------------------------------------------------------------------------------------
+# AC4(b): BLOCK advisories.
 
 
 def test_block_message_enumerates_both_blocking_and_advisory_findings() -> None:
@@ -100,9 +86,7 @@ def test_a_long_detail_is_truncated_but_still_present() -> None:
     assert "x" * 100 in block
 
 
-# --------------------------------------------------------------------------------------
-# AC4(c)/(d) — anchoring
-# --------------------------------------------------------------------------------------
+# AC4(c,d): anchors.
 
 
 @pytest.mark.parametrize(
@@ -160,9 +144,7 @@ def test_an_off_revision_or_anchorless_finding_is_never_inlined() -> None:
     assert "a path that is not in this revision" in block
 
 
-# --------------------------------------------------------------------------------------
-# AC4(e) — a publishing failure is never silent
-# --------------------------------------------------------------------------------------
+# AC4(e): publishing failures.
 
 
 class _FakeGerrit:

@@ -1,12 +1,9 @@
-"""Tests for the contributor-triggerable re-review (``rerun-llm-review``, ticket bb9b).
+"""Test the contributor-triggered ``rerun-llm-review`` path.
 
-The security property under test: a ``rerun-llm-review`` comment can only cause the
-privileged bot to write the fixed neutral ``LLM-Review: 0`` reset after eligibility,
-and can NEVER choose a label value or get a real findings-BLOCK re-reviewed. Only
-infrastructure states (every coverage-gap sub-reason, a retries-exhausted escalation,
-a PASS, a vote-less or unparseable state) are eligible, decided privileged-side from
-the bot's own durable vote-message tag on the CURRENT revision, never from the
-requesting comment. Reply comments remain label-free.
+Eligible requests can cause only a fixed neutral ``LLM-Review: 0`` reset. The
+privileged bot derives eligibility from its durable vote tag on the current
+revision, never from contributor text. Code findings remain ineligible, and
+reply comments contain no labels.
 """
 
 from __future__ import annotations
@@ -695,14 +692,9 @@ def test_rerun_accepts_when_best_effort_attempt_reset_fails(monkeypatch, tmp_pat
     assert "rebar~main~Iabc" in caplog.text and "rev2" in caplog.text
 
 
-# ── the rename: our trigger word must not collide with CI's substring matcher ───
-#
-# Ticket 0d78-6c15-db26-4cea. CI's ChatOps dispatcher (lfit/releng-gerrit_to_platform) is
-# EXTERNAL and matches comment text by SUBSTRING against the keys of
-# `[mapping "comment-added"]`. A trigger word of ours that embeds one of those keys therefore
-# re-dispatches the Verified workflow too — which cancelled healthy in-flight CI runs on
-# changes 1551 and 1577. These tests read the ini template at test time rather than
-# hardcoding `recheck`, so adding a future CI ChatOps mapping that collides fails here.
+# The review trigger must not contain a CI ChatOps key because the external
+# dispatcher matches comment text by substring. Read the template at test time
+# so a future mapping collision fails here.
 
 _G2P_INI = Path(__file__).resolve().parents[2] / "infra/gerrit/gerrit_to_platform.ini.template"
 

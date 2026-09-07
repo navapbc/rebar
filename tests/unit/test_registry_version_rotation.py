@@ -1,15 +1,10 @@
-"""`registry_version` is sensitive to a criterion's `check` text (ticket 2aa6).
+"""Include criterion ``check`` text in ``registry_version``.
 
-This story renames the pooled "acceptance/success criterion" vocabulary inside
-`criteria_routing.json`'s free-text `check` strings. Those strings are part of the
-hashed basis, so the rename rotates the `regver` stamp.
-
-Pinned here: the rotation is REAL. If editing a `check` string did NOT change the
-stamp, the routing index would not be part of the basis it claims to cover, and
-drift detection would be silently blind to exactly this kind of edit.
-
-(That the rotation is HARMLESS at the claim gate is ADR 0053 / ticket 1f32, already
-covered by the attestation-validity suite; this story only depends on it.)
+Changing free-text checks in ``criteria_routing.json`` must rotate the registry
+stamp. Otherwise drift detection would omit part of its declared basis. The
+attestation suite separately covers the claim-gate effect of that rotation. The
+migration fixture retains one ``success criterion`` phrase so its vocabulary
+allowlist remains coupled to registry-version rotation.
 """
 
 from __future__ import annotations

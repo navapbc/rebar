@@ -1,21 +1,10 @@
-"""Regression: the ``rebar_reconciler`` shadow bridge must survive an engine-first seed.
+"""Keep the test shadow package ahead of an engine-first import seed.
 
-``tests/unit/conftest.py`` bridges the collision between the engine package
-``rebar_reconciler`` (which ships a ``classify.py`` MODULE) and the test tree
-``tests/unit/rebar_reconciler/`` (whose ``classify/`` is a PACKAGE sharing the name).
-Collecting a ``rebar_reconciler.classify.test_*`` module needs ``rebar_reconciler.classify``
-to resolve to the test PACKAGE; if the engine ``classify.py`` module wins that name the
-collection dies with ``'rebar_reconciler.classify' is not a package``.
-
-Bug b900-3cc1: when another test directory seeds the ENGINE package first (its
-``__path__`` is ``[engine_dir]``), the bridge appended the shadow dir AFTER the engine
-dir, so ``rebar_reconciler.classify`` resolved to the engine MODULE — a non-deterministic
-xdist-ordering failure that surfaced on CI. The bridge must order the shadow dir BEFORE
-the engine dir unconditionally, so the test package always wins.
-
-This asserts the OBSERVABLE contract (the resolved kind of ``rebar_reconciler.classify``
-under an adverse seed), not the bridge's internals. It snapshots and restores every
-``rebar_reconciler*`` ``sys.modules`` entry so it cannot perturb sibling tests.
+The engine provides a ``rebar_reconciler.classify`` module while the test tree
+provides a package with that name. Collection requires the test package to win
+even when another directory imports the engine package first. The test asserts
+the resolved object kind and restores every affected ``sys.modules`` entry so
+siblings retain their original import state.
 """
 
 from __future__ import annotations

@@ -276,16 +276,8 @@ def test_fd84_tag_created_after_publish_not_a_trigger() -> None:
     assert "publish" in needs, "github_release must run after (needs) publish"
 
 
-# ── bug 13b4: the PyPI-provenance runbook must name the PyPI verifier ─────────
-#
-# `gh attestation verify --repo <slug>` queries GitHub's *Artifact Attestations*
-# store for a SLSA provenance predicate. `pypa/gh-action-pypi-publish` does not
-# write there: it uploads a PEP 740 bundle carrying the
-# `https://docs.pypi.org/attestations/publish/v1` predicate to *PyPI*. So the
-# GitHub command cannot verify a PyPI release artifact — proved against the
-# rebar 0.11.0 wheel. These tests pin the documented command to the verifier
-# that reads the store the artifact is actually published to, and keep the two
-# stores from being conflated again.
+# PyPI publishes PEP 740 attestations to PyPI, not GitHub's artifact store.
+# Keep the runbook on the PyPI verifier and the two stores distinct.
 
 
 def test_13b4_provenance_runbook_uses_the_pypi_verifier() -> None:
@@ -355,17 +347,9 @@ def test_13b4_release_workflow_comment_names_the_pypi_verifier() -> None:
     )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Ticket 1c70: full-SHA + readable-version-comment pin contract, extended to
-#  the privileged reconciliation workflow (contents/actions-write + OIDC).
-#
-#  The ORIGINAL `test_all_uses_are_full_sha_pinned` above extracts refs with a
-#  whitespace-truncated token: `re.findall(r"uses:\s*(\S+)", text)`. That token
-#  ends at the ref (`owner/repo@<sha>`) and never looks past it, so it cannot
-#  see whether a readable version comment follows — a `uses:` line pinned to a
-#  bare 40-hex SHA with NO trailing `# vX.Y.Z` comment reads as "pinned" to that
-#  extractor. `_full_uses_pin_line` below matches the COMPLETE line instead.
-# ══════════════════════════════════════════════════════════════════════════════
+# Require full SHAs and readable version comments in the privileged workflow.
+# The earlier token extractor stops at the ref, so `_full_uses_pin_line` checks
+# the complete `uses:` line and detects a missing trailing version comment.
 
 RECONCILE_BRIDGE = ROOT / ".github" / "workflows" / "reconcile-bridge.yml"
 
@@ -421,10 +405,7 @@ def test_pin_regex_rejects_a_bare_sha_with_no_comment() -> None:
 
 
 def test_pin_regex_rejects_sha_where_legacy_token_extractor_would_wrongly_pass() -> None:
-    """The historical gap this ticket closes: the legacy whitespace-token extractor
-    (`re.findall(r"uses:\\s*(\\S+)", text)`) truncates at the SHA and never inspects the
-    trailing comment, so `actions/checkout@<40-hex><no-comment>` reads as pinned to it —
-    even though this exact same line fails the full-line pin regex."""
+    """Reject a full SHA without the version comment that token extraction misses."""
     line = "        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\n"
     legacy_token = _re.findall(r"uses:\s*(\S+)", line)[0]
     legacy_ref = legacy_token.split("@", 1)[1]

@@ -1,14 +1,9 @@
-"""RP-06 S2 — the shared discovery-execution kernel (``rebar.llm.review_kernel.discovery``).
+"""Test the shared dependency-aware discovery executor.
 
-Contract tests for the typed discovery plan/result/outcome model and the dependency-aware
-executor. The kernel gives both review gates the SAME trustworthy execution facts: which
-units succeeded, resumed, were skipped, shed, failed, or cancelled — never an empty result
-masquerading as success, never a later failure erasing an earlier success.
-
-The tests inject a stateful fake ONLY at the model-call boundary (``run_unit``); the plan,
-result, outcome, and envelope codecs are the REAL ones. Assertions are on observable
-contracts — returned outcome kinds, exact usage accounting, checkpoint eligibility, and
-collateral state — never on private structure.
+Both review gates receive typed outcomes for success, resume, skip, shedding,
+failure, and cancellation. A stateful fake replaces only ``run_unit``. Tests
+assert returned outcomes, usage accounting, checkpoint eligibility, and
+collateral state through public contracts.
 """
 
 from __future__ import annotations
@@ -32,7 +27,7 @@ from rebar.llm.review_kernel.discovery import (
 pytestmark = pytest.mark.unit
 
 
-# ── fixtures / helpers ────────────────────────────────────────────────────────
+# Helpers.
 def _unit(
     unit_id: str,
     *,
@@ -93,10 +88,7 @@ def _kinds(result: DiscoveryStageResult) -> dict[str, str]:
     return {o.unit_id: o.kind for o in result.outcomes}
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HAPPY PATH — the minimal specification of correct behaviour on well-formed input.
-# (This section is what the implementation subagent sees.)
-# ══════════════════════════════════════════════════════════════════════════════
+# Happy path shown to the implementer.
 def test_all_success_stage_reports_every_unit_success_with_aggregated_usage() -> None:
     # A → B (B depends on A); both succeed; result carries typed success outcomes and the
     # EXACT summed real usage, with no gate-specific verdict fields on the result.
@@ -159,10 +151,7 @@ def test_plan_rejects_zero_budget_but_accepts_omission() -> None:
     assert DiscoveryStagePlan(units=(_unit("a"),), budget=None).budget is None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HELD-OUT ORACLE — edge / boundary / systemic / E2E behaviour.
-# (Withheld from the implementation subagent. Run by the orchestrator only.)
-# ══════════════════════════════════════════════════════════════════════════════
+# Held-out edge and end-to-end oracle.
 def test_local_failure_preserves_earlier_successes_and_skips_dependents() -> None:
     # AC2: A succeeds; B (independent) fails with an EXHAUSTED local op; C depends on B; D is
     # independent. Earlier success A is retained, the independent D still runs, and C — whose

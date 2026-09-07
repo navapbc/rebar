@@ -1,26 +1,12 @@
-"""``edit --review`` and ``claim --review`` (story a114-8f96-ff2d-461d).
+"""Test the valueless ``edit --review`` and ``claim --review`` flags.
 
-Both flags fuse the common "mutate, then re-run the plan review" loop into the
-consuming verb (OSS precedent: cargo publish's default verify; terraform apply's
-staleness-checked plan artifact):
-
-  * ``edit <id> ... --review`` — a VALUELESS flag popped before the ``--key=value``
-    field loop; after ``edit_core`` commits the EDIT, ``rebar.llm.review_plan(id,
-    sign=True)`` runs and the process exits with the disposition mapping
-    (0 PASS / 1 BLOCK / 2 INDETERMINATE / 11 retryable). The edit stays committed
-    whatever the verdict.
-  * ``claim <id> --review`` — two-stage sensing: stage 1 asks the shared
-    ``gates._plan_review_gate_applies`` helper (gate enabled + type not exempt);
-    stage 2 asks ``llm.claim_gate_check`` for currency. Only a stale/missing
-    attestation triggers ``review_plan``; the claim core runs ONLY on a PASS.
-    BLOCK / INDETERMINATE / retryable never invoke the claim core (exit 1/2/11).
-    A non-applicable gate prints a notice and claims. The flag never propagates
-    through the parent-first cascade.
-  * Neither flag holds the store flock across the review, and a RAISING
-    ``review_plan`` propagates through the standard CLI error path (edit stays
-    committed; the claim is never attempted).
-
-All review calls are stubbed (verdict dicts / raising stubs) — no LLM, no network.
+Edit commits before plan review and preserves the edit for every disposition.
+Claim checks whether the gate applies and whether its attestation is current,
+then reviews only stale or missing plans. Only PASS reaches the claim core.
+Other dispositions map to exits 1, 2, or 11. An exempt gate prints a notice,
+and review never propagates through the parent cascade. Neither path holds the
+store lock during review. Exceptions use the standard CLI error path. Stubs
+replace every LLM and network call.
 """
 
 from __future__ import annotations
