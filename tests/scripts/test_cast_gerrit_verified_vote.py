@@ -133,13 +133,13 @@ def test_failure_vote_uses_verified_minus_one(tmp_path: Path) -> None:
     assert "FAILURE: https://github.example/repo/actions/runs/33580445347" in argv
 
 
-def test_cancelled_vote_uses_verified_minus_one(tmp_path: Path) -> None:
+def test_cancelled_vote_posts_no_verdict_label(tmp_path: Path) -> None:
     result = _run(tmp_path, VOTE_TYPE="cancelled")
 
     assert result.returncode == 0
     argv = (tmp_path / "ssh-argv.txt").read_text(encoding="utf-8")
-    assert "--label Verified=-1" in argv
-    assert "--label Code-Review=-1" in argv
+    assert "--label Verified=" not in argv
+    assert "--label Code-Review=" not in argv
     assert "CANCELLED: https://github.example/repo/actions/runs/33580445347" in argv
 
 

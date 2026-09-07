@@ -12,7 +12,7 @@ from pathlib import Path
 _VOTE_TYPES = {
     "success": ("SUCCESS", ("--label", "Verified=1")),
     "failure": ("FAILURE", ("--label", "Verified=-1")),
-    "cancelled": ("CANCELLED", ("--label", "Verified=-1", "--label", "Code-Review=-1")),
+    "cancelled": ("CANCELLED", ()),
 }
 _CLOSED_CHANGE_NEEDLE = "fatal: change is closed"
 
