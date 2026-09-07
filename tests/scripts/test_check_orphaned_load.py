@@ -200,6 +200,16 @@ def _system_daemon(gate: ModuleType) -> object:
     )
 
 
+def _user_gui_app(gate: ModuleType) -> object:
+    """A long-running operator-owned desktop app launchd reparents to PID 1."""
+    return gate.ProcessRecord(
+        pid=1159,
+        ppid=1,
+        cpu_seconds=3636.4,
+        command="/Applications/Caffeine.app/Contents/MacOS/Caffeine",
+    )
+
+
 def _orphaned_agent_job(gate: ModuleType) -> object:
     """A real hit of the target class, buried among the daemons on this host."""
     return gate.ProcessRecord(
@@ -231,7 +241,6 @@ def test_is_system_owned_recognises_measured_offenders(gate: ModuleType, command
         "/bin/bash /Users/joeoakhart/.claude/jobs/09e12a48/tmp/watch-tracker.sh",
         '/opt/homebrew/bin/python -c "while True: pass"',
         "/usr/local/logscale-collector/logscale-collector --cfg config.yaml",
-        "/Applications/Caffeine.app/Contents/MacOS/Caffeine",
         "python -c 'while True: pass'",
     ],
 )
@@ -265,7 +274,7 @@ def test_main_suppresses_system_daemons_and_says_how_many(
     assert code == 1
     assert "26898" in out
     assert "WindowServer" not in out
-    assert "1 system-owned" in out
+    assert "1 launchd/init-owned" in out
     assert "docs/orphaned-processes.md" in out
 
 
@@ -285,3 +294,22 @@ def test_main_exits_zero_when_every_orphan_is_a_system_daemon(
     """The 29-daemon case: nothing actionable, so the check must stay quiet."""
     assert gate.main([], lister=lambda: [_system_daemon(gate)]) == 0
     assert capsys.readouterr().out == ""
+
+
+def test_main_exits_zero_when_every_orphan_is_a_user_gui_app(
+    gate: ModuleType, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A launchd-reparented desktop app is not an agent leak to terminate."""
+    assert gate.main([], lister=lambda: [_user_gui_app(gate)]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_user_gui_apps_do_not_hide_real_leaks(
+    gate: ModuleType, capsys: pytest.CaptureFixture[str]
+) -> None:
+    records = [_user_gui_app(gate), _orphaned_agent_job(gate)]
+    code = gate.main([], lister=lambda: list(records))
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "watch-tracker.sh" in out
+    assert "Caffeine.app" not in out
