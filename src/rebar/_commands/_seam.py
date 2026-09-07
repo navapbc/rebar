@@ -485,8 +485,28 @@ def finalize_event(
     deliberately upstream (see :func:`append_event`) and passes.
     """
     screen_event(data)
+    _refuse_unpublishable_store(tracker)
     event.update(attribution_fields(repo_root))
     _apply_authorship(event, ticket_id, event_type, data, tracker, repo_root)
+
+
+def _refuse_unpublishable_store(tracker) -> None:
+    """Fail before committing an event to a tracker with an unrecoverable split history."""
+    from rebar._store.freshness import write_blocking_divergence
+
+    stale = write_blocking_divergence(tracker)
+    if stale is None:
+        return
+    remote_ref = stale.get("remote_ref", "the shared store")
+    raise CommandError(
+        "Error: ticket write refused: "
+        f"{stale.get('reason', 'the local ticket store cannot publish')}. "
+        f"Run `rebar fsck` to confirm DIVERGED against {remote_ref}; recover with "
+        "`rebar fsck-recover` for stale rebase/merge dangling commits, or use "
+        "`rebar tracker-maintenance` from an isolated operator window before writing "
+        "again.",
+        returncode=1,
+    )
 
 
 _secret_override: contextvars.ContextVar[str] = contextvars.ContextVar(

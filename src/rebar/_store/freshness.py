@@ -189,6 +189,91 @@ def store_freshness(tracker: str | os.PathLike[str] | None = None) -> dict[str, 
     return result
 
 
+def write_blocking_divergence(
+    tracker: str | os.PathLike[str] | None = None,
+) -> dict[str, Any] | None:
+    """Return the proven divergence that must block the next ticket write, if any.
+
+    This is deliberately narrower than :func:`store_freshness`: ordinary local-ahead
+    ``push-pending`` remains best-effort, and a common-ancestor divergence is recoverable
+    by the push/sync merge path. The unrecoverable split-brain case is the one observed in
+    bug ``2d52-5abe-abb8-44ab``: no shared ancestor with the fetched shared store, so every
+    new local event would be stranded on a history the remote can never fast-forward to.
+    """
+    try:
+        if tracker is None:
+            from rebar.config import tracker_dir
+
+            tracker = tracker_dir()
+        from rebar import config
+        from rebar._store.gitutil import run_git
+
+        base = config.repo_root_or_none()
+        branch = config.tickets_branch(base)
+        remote = config.tickets_remote(base)
+        remote_ref = f"{remote}/{branch}"
+        tracker = str(tracker)
+        code_remote = run_git(
+            str(base) if base is not None else os.curdir,
+            "remote",
+            "get-url",
+            remote,
+            check=False,
+            timeout=_GIT_TIMEOUT,
+        )
+        tracker_remote = run_git(
+            tracker, "remote", "get-url", remote, check=False, timeout=_GIT_TIMEOUT
+        )
+        if (
+            code_remote.returncode == 0
+            and tracker_remote.returncode == 0
+            and code_remote.stdout.strip() != tracker_remote.stdout.strip()
+        ):
+            return None
+        refspec = f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"
+        fetched = run_git(tracker, "fetch", remote, refspec, check=False, timeout=_GIT_TIMEOUT)
+        if fetched.returncode != 0:
+            return None
+        if (
+            run_git(
+                tracker, "rev-parse", "--verify", remote_ref, check=False, timeout=_GIT_TIMEOUT
+            ).returncode
+            != 0
+        ):
+            return None
+        if (
+            run_git(
+                tracker,
+                "cat-file",
+                "-e",
+                f"{remote_ref}:.store-compat.json",
+                check=False,
+                timeout=_GIT_TIMEOUT,
+            ).returncode
+            != 0
+        ):
+            return None
+        no_common_ancestor = (
+            run_git(
+                tracker, "merge-base", "HEAD", remote_ref, check=False, timeout=_GIT_TIMEOUT
+            ).returncode
+            != 0
+        )
+    except Exception:
+        logger.debug("write publishability probe failed; allowing write", exc_info=True)
+        return None
+    if not no_common_ancestor:
+        return None
+    return {
+        "verdict": "diverged",
+        "remote_ref": remote_ref,
+        "reason": (
+            "the local ticket store has DIVERGED from the shared store with no shared "
+            "ancestor, so new ticket events would remain local-only and never push"
+        ),
+    }
+
+
 def stale_gate_message(gate_label: str, ticket_id: str, freshness: dict[str, Any]) -> str:
     """The refusal text a gate shows when it declined to certify against a stale store.
 
