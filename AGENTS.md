@@ -435,7 +435,9 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   wrapper for every worktree at once and silently breaks Change-Id stamping host-wide
   (bug 84aa).
 - **Push for review:** `git push gerrit HEAD:refs/for/main` (the magic ref creates a Gerrit
-  change; it does not touch `main`). Iterate on findings with `git commit --amend --no-edit`
+  change; it does not touch `main`). Tag the change with your session hashtag
+  (`rebar-session-<session-id>`) so ownership is visible under the shared Gerrit
+  bot account. Iterate on findings with `git commit --amend --no-edit`
   (keeps the `Change-Id`) + re-push. To REWRITE the message, use
   **`make amend-msg FILE=<path>`**, never `git commit --amend -m/-F`: those REPLACE the whole
   message and so DROP the `Change-Id`, the `commit-msg` hook then stamps a FRESH one, and the
@@ -462,7 +464,12 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   oracle. `recheck` is reserved for provably environmental faults — a TLS/promisor cert flake, a
   missing CI dispatch, a runner outage — and the recheck comment must state that reasoning →
   [CONTRIBUTING.md](CONTRIBUTING.md) §6.
-- **Land it yourself with a plain Gerrit Submit** once both votes are green. `main` is
+- **Land it yourself with revision-scoped Gerrit Submit** once both votes are green.
+  Use `scripts/gerrit_safe_submit.py <change> --revision <current-full-sha>` (or the
+  equivalent `POST /a/changes/<n>/revisions/<full-sha>/submit`), not change-scoped
+  `/submit`: the SHA is the patch set whose live votes you inspected, and Gerrit
+  returns 409 instead of submitting if another session uploaded a newer revision.
+  `main` is
   Rebase-If-Necessary: Gerrit rebases + submits server-side, so you do **not** pre-rebase
   except on a textual conflict it cannot resolve. Do **not** close a ticket until its change
   is `Verified +1` — a passing completion-verifier is **not** a substitute for green CI.

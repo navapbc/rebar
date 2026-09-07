@@ -15,6 +15,8 @@ Endpoints used:
 - ``GET  /a/changes/{id}/revisions/{rev}/review`` — current votes (existing LLM-Review?).
 - ``POST /a/changes/{id}/revisions/{rev}/review`` — cast the LLM-Review label + robot comment.
 - ``POST /a/changes/{id}/revisions/{rev}/review`` — reset LLM-Review to neutral for a rerun.
+- ``POST /a/changes/{id}/hashtags`` — stamp the driving session visibly.
+- ``POST /a/changes/{id}/revisions/{rev}/submit`` — submit-if-current safety.
 - ``GET  /a/plugins/events-log/events/`` — backfill source (reconciler).
 plus a git clone/fetch of the change ref into a working tree for the reviewer.
 """
@@ -363,6 +365,40 @@ class GerritClient:
         )
         if not (200 <= status < 300):
             raise GerritError(f"post_comment({change_id}) -> HTTP {status}", status=status)
+        return status
+
+    def add_session_hashtag(self, change_id: str, hashtag: str) -> int:
+        """Stamp ``change_id`` with a Gerrit-native session hashtag.
+
+        Under the shared bot account, Gerrit ``owner:self`` cannot distinguish concurrent
+        local sessions. Hashtags are UI-visible Gerrit metadata, so they make the driving
+        session answerable without introducing a local serialization point.
+        """
+        status, _ = self._request(
+            "POST",
+            f"/a/changes/{self._q(change_id)}/hashtags",
+            body={"add": [hashtag]},
+        )
+        if not (200 <= status < 300):
+            raise GerritError(f"add_session_hashtag({change_id}) -> HTTP {status}", status=status)
+        return status
+
+    def submit_revision(self, change_id: str, revision: str) -> int:
+        """Submit exactly ``revision`` of ``change_id``.
+
+        Gerrit's revision-scoped submit endpoint is a compare-and-submit guard: if another
+        session uploaded a newer patch set after votes were inspected, Gerrit returns HTTP
+        409 ("revision ... is not current revision") instead of submitting stale state.
+        """
+        status, _ = self._request(
+            "POST",
+            f"/a/changes/{self._q(change_id)}/revisions/{revision}/submit",
+            body={},
+        )
+        if not (200 <= status < 300):
+            raise GerritError(
+                f"submit_revision({change_id}, {revision}) -> HTTP {status}", status=status
+            )
         return status
 
     def list_events(self, since: str | None = None) -> list[dict]:

@@ -286,7 +286,13 @@ statement about the gates, never about whether *you* think the change is done.
 **`LLM-Review +1` AND `Verified +1`** and no unresolved comments, land it yourself with a plain
 Gerrit **Submit** — the Submit button on the change page, or `ssh -p 29418
 <you>@rebar.solutions.navateam.com gerrit review --submit <change>,<patchset>`, or
-`POST /a/changes/<n>/submit`. `main` is **Rebase-If-Necessary** (ADR-0047): Gerrit fast-forwards
+`scripts/gerrit_safe_submit.py <change> --revision <current-full-sha>` or the equivalent
+revision-scoped REST call `POST /a/changes/<n>/revisions/<full-sha>/submit`. The SHA
+must be the current revision whose live `LLM-Review` and `Verified` votes you
+inspected; if another session uploads a newer patch set, Gerrit returns 409 and
+the helper refuses rather than submitting stale state. Also stamp the change with
+your `rebar-session-<session-id>` hashtag so ownership is visible under the shared
+bot account. `main` is **Rebase-If-Necessary** (ADR-0047): Gerrit fast-forwards
 when it can and otherwise **rebases your change onto the current `main` tip and submits it
 server-side, atomically, under its own lock** — so you do **not** pre-rebase for the ordinary
 (non-conflicting) case. Gerrit then merges and **replicates the new `main` to GitHub** (that
