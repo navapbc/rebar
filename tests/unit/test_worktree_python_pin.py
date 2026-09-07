@@ -26,6 +26,7 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PIN_FILE = REPO_ROOT / ".github" / "python-version.txt"
+PYPROJECT = REPO_ROOT / "pyproject.toml"
 MAKEFILE = REPO_ROOT / "Makefile"
 BUILD_AND_TEST = REPO_ROOT / ".github" / "workflows" / "_build-and-test.yml"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
@@ -106,10 +107,13 @@ def test_makefile_does_not_provision_from_ambient_python3() -> None:
     assert "python3 -m venv" not in _makefile_recipe_lines()
 
 
-def _sandbox(tmp_path: Path, *, uv_exit: int) -> tuple[Path, dict[str, str]]:
+def _sandbox(
+    tmp_path: Path, *, uv_exit: int, uv_version: str = "0.12.7"
+) -> tuple[Path, dict[str, str]]:
     """A throwaway tree with the real Makefile and pin file, and a recording `uv` stub."""
 
     shutil.copy2(MAKEFILE, tmp_path / "Makefile")
+    shutil.copy2(PYPROJECT, tmp_path / "pyproject.toml")
     (tmp_path / ".github").mkdir()
     shutil.copy2(PIN_FILE, tmp_path / ".github" / PIN_FILE.name)
 
@@ -117,9 +121,18 @@ def _sandbox(tmp_path: Path, *, uv_exit: int) -> tuple[Path, dict[str, str]]:
     stub_bin.mkdir()
     stub_uv = stub_bin / "uv"
     stub_uv.write_text(
-        f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{tmp_path}/uv-args.txt"\nexit {uv_exit}\n',
+        f"""\
+#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "uv {uv_version}"
+  exit 0
+fi
+printf "%s\n" "$*" >> "{tmp_path}/uv-args.txt"
+exit {uv_exit}
+""",
         encoding="utf-8",
     )
+
     stub_uv.chmod(0o755)
 
     env = subprocess_env()
@@ -159,6 +172,24 @@ def test_make_venv_fails_loudly_rather_than_falling_back(tmp_path: Path) -> None
     combined = result.stdout + result.stderr
     assert _pinned_version() in combined
     assert not (tmp_path / ".venv").exists()
+
+
+def test_make_venv_reports_uv_version_mismatch_before_python_hint(tmp_path: Path) -> None:
+    _, env = _sandbox(tmp_path, uv_exit=1, uv_version="0.12.9")
+
+    result = _run_make_venv(tmp_path, env)
+
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert "ERROR: selected uv is version 0.12.9, but this repository requires 0.12.7" in combined
+    assert str(tmp_path / "bin" / "uv") in combined
+    invocation_log = tmp_path / "uv-args.txt"
+    assert not invocation_log.exists() or "uv venv --python" not in invocation_log.read_text(
+        encoding="utf-8"
+    )
+    assert "uv python install" not in combined
+    assert "could not provision .venv on Python" not in combined
+    assert "✓ worktree ready" not in combined
 
 
 def test_worktree_target_provisions_through_the_pinned_venv_target() -> None:

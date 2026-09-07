@@ -196,6 +196,15 @@ venv:  ## Create .venv on the CI-pinned interpreter ($(PYTHON_VERSION_FILE)). Fa
 		echo "       Install it: https://docs.astral.sh/uv/getting-started/installation/"; \
 		exit 1; }
 	@python_version="$$(tr -d '[:space:]' < $(PYTHON_VERSION_FILE))"; \
+	required_uv="$$(sed -n 's/^[[:space:]]*required-version[[:space:]]*=[[:space:]]*"==\([^"]*\)".*/\1/p' pyproject.toml | head -n 1)"; \
+	actual_uv="$$(uv --version | sed -n 's/^uv \([^ ]*\).*/\1/p')"; \
+	uv_path="$$(command -v uv)"; \
+	if [ -n "$$required_uv" ] && [ "$$actual_uv" != "$$required_uv" ]; then \
+		echo "ERROR: selected uv is version $$actual_uv, but this repository requires $$required_uv."; \
+		echo "       selected uv: $$uv_path"; \
+		echo "       required by: pyproject.toml [tool.uv].required-version"; \
+		exit 1; \
+	fi; \
 	echo "→ uv venv --python $$python_version .venv   (pinned by $(PYTHON_VERSION_FILE))"; \
 	uv venv --python "$$python_version" .venv || { \
 		echo ""; \
