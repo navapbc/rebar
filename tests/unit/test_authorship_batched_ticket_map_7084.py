@@ -1,16 +1,9 @@
-"""The batched ticket-scoped resolver must attribute EXACTLY as the per-event one
-(bug 7084 / remediation R1).
+"""Tests that batched ticket attribution matches the per-event resolver.
 
-Compaction used to resolve each signed event's introducing commit with its own
-``git log --diff-filter=A --full-history`` — 6.78s per event on a 71k-commit tickets
-branch, 47.5s of a measured 48.1s ``compact-on-close``, all of it inside the store write
-lock. R1 replaces that with ONE directory-scoped walk.
-
-This feeds ``rebar verify-identity``, so a wrong or missing commit attribution is an
-attestation-chain correctness failure, not a performance one. These tests therefore assert
-EQUIVALENCE against the old per-event resolver over a real git history — including the
-case ``--full-history`` exists for: an event whose introducing commit is OFF the
-first-parent chain, where default history simplification would answer differently.
+One directory-scoped Git walk replaces a separate ``git log --diff-filter=A --full-history``
+for each signed event under the store lock. ``rebar verify-identity`` depends on exact commit
+attribution, so tests compare both resolvers over Git history. Coverage includes an introducing
+commit outside the first-parent chain where history simplification would differ.
 """
 
 from __future__ import annotations
@@ -31,19 +24,11 @@ TICKET = "aaaa-bbbb-cccc-dddd"
 
 
 class _GitFailed(subprocess.CalledProcessError):
-    """``CalledProcessError`` that RENDERS the captured output.
+    """Render captured Git output from ``CalledProcessError``.
 
-    The base class stores ``stdout``/``stderr`` but its ``__str__`` prints only the argv and
-    the exit status, so a helper running with ``capture_output=True`` captures git's own
-    diagnosis and then discards it at the point it matters. A fixture-setup failure then
-    reaches CI as a bare "returned non-zero exit status 1" — which is why the merge failure in
-    bug warmthless-dermal-oropendola could not be attributed: ``git merge`` exits 1 for a
-    content conflict, a failing hook, AND an unresolvable argument alike. Subclassing keeps the
-    exception TYPE (existing ``except subprocess.CalledProcessError`` clauses still catch it)
-    and changes only what is rendered.
-
-    ``forensics`` (bug innovative-dandruffy-deer) additionally carries an object-store
-    snapshot taken the moment the command failed — see ``_forensics``.
+    The base class omits stored stdout and stderr from ``__str__``. This subtype preserves the
+    catchable exception type while rendering diagnostics that distinguish conflicts, hook
+    failures, and unresolved arguments. ``forensics`` can also carry an object-store snapshot.
     """
 
     forensics: str = ""
@@ -59,17 +44,11 @@ class _GitFailed(subprocess.CalledProcessError):
 
 
 def _forensics(repo: Path) -> str:
-    """Snapshot the object store at the moment a git command fails.
+    """Capture best-effort object-store evidence when Git fails.
 
-    Bug innovative-dandruffy-deer: the fixture merge failed twice on CI with ``invalid
-    object ... git write-tree failed to write a tree`` — a loose blob committed two
-    subprocess calls earlier was GONE (injection proved only file ABSENCE reproduces the
-    signature; corruption does not). git's stderr names the missing object but cannot say
-    why it is missing, so capture what the next occurrence needs: ``fsck`` (every missing
-    object), ``count-objects -v`` (loose/packed census), the ``.git/objects`` listing with
-    sizes and mtimes (what survived, and when it was written), and the ``GIT_*``
-    environment (rules object-store redirection in or out). Best-effort by design — a
-    forensics failure must never mask the original error.
+    Evidence includes ``fsck``, ``count-objects -v``, object sizes and modification times,
+    and the ``GIT_*`` environment. It distinguishes missing loose objects from corruption or
+    redirection without masking the original error.
     """
 
     def run(*args: str) -> str:
@@ -490,14 +469,9 @@ def test_map_is_empty_and_never_raises_when_git_fails(tmp_path: Path) -> None:
 
 
 def test_git_failure_surfaces_git_own_diagnostics(tmp_path: Path) -> None:
-    """A failing ``_git`` names the argv, the exit code, and git's OWN stdout/stderr.
+    """Render argv, exit code, stdout, and stderr for a failing ``_git`` call.
 
-    The fixture helper captures git's output, and ``CalledProcessError.__str__`` does not
-    render it — so a fixture-setup failure reached CI as a bare "returned non-zero exit
-    status 1" with git's message captured and discarded. That is why the merge failure in
-    bug warmthless-dermal-oropendola could not be attributed: ``git merge`` exits 1 for a
-    content conflict, a failing hook, AND an unresolvable argument alike, and the record
-    kept nothing that distinguishes them.
+    The diagnostics distinguish a merge conflict, hook failure, and unresolved argument.
     """
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -516,21 +490,11 @@ def test_git_failure_surfaces_git_own_diagnostics(tmp_path: Path) -> None:
 
 
 def test_a_git_failure_captures_object_store_forensics(tmp_path: Path) -> None:
-    """A failing ``_git`` snapshots the OBJECT STORE, not just git's message.
+    """Attach object-store evidence to a failing ``_git`` call.
 
-    Bug innovative-dandruffy-deer: on CI (twice, months apart, xdist worker gw1) the
-    fixture's merge failed with ``invalid object ... git write-tree failed to write a
-    tree`` — a freshly committed loose blob GONE from ``.git/objects`` two subprocess
-    calls after ``git commit`` wrote it. Injection experiments proved the class (only
-    ENOENT on the loose object file reproduces that exact signature; a corrupt-but-present
-    object does not), but git's own stderr cannot say WHY the file is absent. So the
-    moment a git command fails, the exception must carry the evidence the next occurrence
-    needs: ``git fsck`` (names every missing object), ``git count-objects -v``, a
-    recursive listing of ``.git/objects`` with sizes and mtimes (shows what survived and
-    when it was written), and the ``GIT_*`` environment (rules redirection in or out).
-
-    The reproduction below is that proven mechanism: build the fixture's merge topology,
-    delete the mainline blob's loose object file, merge.
+    The evidence includes ``git fsck``, ``git count-objects -v``, object sizes and modification
+    times, and the ``GIT_*`` environment. The test reproduces a vanished loose blob by deleting
+    the mainline object before merge.
     """
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -1,18 +1,13 @@
-"""Portable drift gate for rebar's public Python API surface (ticket a454-9285-b999-4ac5).
+"""Portable regression tests for the public Python API baseline.
 
-The generator ``scripts/gen_api_surface.py`` snapshots the pinned public surface — the
-``rebar`` facade (``rebar.__all__``) plus the reuse subsystems documented in
-``docs/reuse-surface.md`` — into the committed baseline
-``tests/unit/api_surface_baseline.json``. This test is the portable proving mechanism:
-it runs under ``make test`` with **no CI-provider dependency** and fails whenever the live
-public surface drifts from that baseline (a removed/renamed symbol, a changed signature,
-a changed class shape, or a changed public constant).
+``scripts/gen_api_surface.py`` snapshots the ``rebar`` facade and the reuse subsystems
+documented in ``docs/reuse-surface.md`` into ``api_surface_baseline.json``. These tests run
+under ``make test`` without a CI provider and reject removed or renamed symbols, signature
+changes, class-shape changes, and public-constant changes.
 
-It also **subsumes** the former hand-maintained hardcoded signature assertions in
-``test_reuse_surface_doc.py`` (ticket f5df): those introspected a curated subset of
-signing / prompt-library / runner-contract / workflow-executor signatures by hand; the
-baseline now captures the *whole* surface automatically, and the subsumption tests below
-assert that exact subset is still guarded — no loss of coverage, no manual lockstep.
+The baseline subsumes the curated signature assertions in ``test_reuse_surface_doc.py``.
+Subsumption tests retain coverage of signing, prompt-library, runner-contract, and
+workflow-executor APIs.
 """
 
 from __future__ import annotations

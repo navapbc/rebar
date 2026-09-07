@@ -1,12 +1,8 @@
-"""Held-out oracle for the DSSE module (task 9fd5) — edge, contract, error cases.
+"""Held-out DSSE edge and error tests.
 
-The implementer does NOT see this file. The orchestrator restores and runs it
-after implementation to validate behavior the implementer could not tailor code
-to: byte-exact PAE for tricky inputs, the no-re-serialization contract (AC3),
-and defined error behavior for malformed/invalid input (advisory adv7).
-
-All assertions target observable behavior (return bytes, raised exceptions),
-never internal structure.
+The implementation agent does not see this suite. It verifies byte-exact PAE for tricky
+inputs, the no-reserialization contract, and defined malformed-input behavior through
+observable return bytes and exceptions.
 """
 
 from __future__ import annotations

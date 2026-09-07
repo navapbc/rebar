@@ -1,15 +1,10 @@
-"""Happy-path spec for the op-cert kind (story 368c / garlicky-deviant-kakapo).
+"""Happy-path op-cert trust and subject-binding tests.
 
-The ONLY op-cert tests the implementation subagent sees. Pins the approved-design happy path:
-an asymmetric environment-signed operation certificate (``rebar.opcert.v1``) round-trips —
-signed by an environment's Ed25519 key, verified against that environment's pinned public key,
-with the in-toto subject binding {ticket, material, merged-log commit} matching.
-
-The adversarial matrix — cross-key rejection, replay onto a different ticket / mutated material,
-explicit-SHA era rotation (key_not_valid_at_era vs mismatch), and ssh-keygen-absent
-fail-closed — lives in the held-out companion ``test_attest_opcert_heldout.py`` (NOT given to the
-implementer). Real integration against ``ssh-keygen`` (no new dependency); skip only when
-OpenSSH >= 8.9 is unavailable.
+The implementation agent sees this suite. It verifies that an environment-signed
+``rebar.opcert.v1`` certificate round-trips against the environment's pinned Ed25519 key
+with matching ticket, material, and merged-log commit subjects. The held-out companion
+covers cross-key rejection, replay, era rotation, and absent ``ssh-keygen``. Integration
+uses real ``ssh-keygen`` and skips only when OpenSSH 8.9 or newer is unavailable.
 """
 
 from __future__ import annotations

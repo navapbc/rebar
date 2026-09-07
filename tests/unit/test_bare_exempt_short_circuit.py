@@ -1,22 +1,9 @@
-"""The plan-review workflow's bare-exempt short-circuit is DERIVED, not re-listed (mirror F3-b).
+"""Tests for the derived plan-review bare-exempt short circuit.
 
-Ticket 90cb-fe23-266e-41ac (florid-cookable-fly), discovered from e755-9371-7951-454a.
-
-``rebar.llm.plan_review.workflow_ops.plan_review_precheck`` carried a hardcoded
-``("session_log", "code_review", "identity")`` tuple and imported nothing from
-``rebar.types``, so the vocabulary it depends on was pinned by nothing: renaming a
-``TicketType`` member would silently switch its short-circuit off and the type would start
-taking a full review with no test failing.
-
-The set is deliberately NOT ``PLAN_REVIEW_EXEMPT_TYPES``. That set answers "does this type
-need a signed plan-review attestation to be claimed?" and contains ``bug``. This one answers
-"does this type skip review ENTIRELY?" — and since epic 6982/R4 a bug does not: it takes a
-LIGHT ADVISORY tier (the DET floor plus the ``necessity`` probe). The two are therefore
-related by a derivation, ``exempt − bug-tier``, rather than being the same set.
-
-These tests pin the DERIVATION (AC1, AC3, AC4) and, separately and behaviorally, the
-resulting BEHAVIOR of the precheck op (AC2) — so a refactor that keeps the constants tidy
-while moving a type across the short-circuit still fails.
+``plan_review_precheck`` derives its set from ``PLAN_REVIEW_EXEMPT_TYPES`` instead of listing
+ticket types again. Bugs are excluded from the short circuit because they take the light
+advisory tier with the deterministic floor and ``necessity`` probe. Tests pin both membership
+and precheck behavior so vocabulary changes require an explicit decision.
 """
 
 from __future__ import annotations
@@ -91,12 +78,9 @@ def test_bare_exempt_types_short_circuit_to_an_exempt_pass(monkeypatch, ttype: s
 
 
 def test_a_bug_still_takes_the_light_advisory_tier_not_a_bare_exempt_pass(monkeypatch) -> None:
-    """AC2, the half that a careless derivation deletes.
+    """Keep bugs in the light advisory tier instead of the bare-exempt path.
 
-    Deriving the short-circuit from ``PLAN_REVIEW_EXEMPT_TYPES`` directly (rather than from
-    it MINUS the bug tier) would put ``bug`` back in the short-circuit and silently discard
-    the R4 review tier. This asserts the tier still runs: the LLM arm is taken, no terminal
-    verdict is produced by the precheck, and coverage records the bug tier.
+    Precheck takes the LLM arm, emits no terminal verdict, and records bug-tier coverage.
     """
     out = _precheck(monkeypatch, "bug")
     assert out["run_llm"] is True
@@ -177,13 +161,7 @@ def test_the_two_tiers_partition_the_exempt_set() -> None:
 
 
 def test_membership_is_pinned_so_a_new_exempt_type_forces_a_decision() -> None:
-    """AC2/AC4. The exact membership, pinned.
-
-    Because the bare-exempt set is a subtraction, a type added to
-    ``PLAN_REVIEW_EXEMPT_TYPES`` alone would land in it and skip review entirely with
-    nothing complaining. This pin is what turns that into a failure the author must resolve
-    deliberately — by giving the new type a tier, or by updating this expectation.
-    """
+    """Pin bare-exempt membership so a new exempt type requires an explicit tier decision."""
     assert PLAN_REVIEW_BARE_EXEMPT_TYPES == {"session_log", "code_review", "identity"}
     assert PLAN_REVIEW_BUG_TIER_TYPES == {"bug"}
     assert "bug" not in PLAN_REVIEW_BARE_EXEMPT_TYPES

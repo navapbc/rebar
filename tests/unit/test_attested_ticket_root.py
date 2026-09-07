@@ -1,17 +1,10 @@
-"""Attested-gate ticket-store root resolution (joe-debug fix).
+"""Regression tests for separate code and ticket roots in attested gates.
 
-In an attested LLM gate the ticket STORE is materialized SEPARATELY from the CODE
-snapshot (it lives on the orphan ``tickets`` branch, absent from the code tree) and is
-exposed as ``current_tickets_root()`` — captured onto ``PlanContext.tickets_root`` at
-assemble time (on the thread where the ContextVar is set, so it survives the Pass-1
-worker-thread fan-out). Downstream ticket reads MUST resolve against that tickets root,
-NOT ``ctx.repo_root`` (the CODE snapshot), which has no ``.tickets-tracker`` — feeding
-it a code root makes the read print ``cannot list <code-snapshot>/.tickets-tracker`` and
-silently drop the linked-session-log / prior-concern context (a degraded, unsigned-noise
-review). These tests pin that every plan-review ticket read is directed at the tickets
-root.
-
-Regression guard for the attested ticket-root bug; run offline (no store, no model).
+The orphan tickets branch is materialized apart from the code snapshot and exposed through
+``current_tickets_root()``. Assembly captures it in ``PlanContext.tickets_root`` before
+pass-one worker fan-out. Every plan-review ticket read must use that root rather than
+``ctx.repo_root`` or it drops linked session logs and prior concerns. Tests run without a
+store or model.
 """
 
 from __future__ import annotations

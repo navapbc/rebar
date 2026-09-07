@@ -1,19 +1,11 @@
-"""Overlay-aware registry stamping and its (grandfathered) effect on attestations
-(story 08af, epic 3156; amended by ADR 0053).
+"""Tests for overlay-aware registry stamps and grandfathered attestation drift.
 
-``registry_version`` is still overlay-aware — activating, re-tuning, or disabling a criterion
-rotates the stamp, which still gates drift-refresh REUSE. What changed in ADR 0053 is the claim
-gate's response: a rotated stamp is GRANDFATHERED rather than invalidating. These tests pin:
-
-* ``registry_version(repo_root)`` is overlay-aware, but overlay-ABSENT is BYTE-IDENTICAL to the
-  packaged ``registry_version()`` (existing certs stay valid — zero churn);
-* ``compute_validity`` stays ``valid`` and reports ``registry_drift`` when the overlay changed
-  vs the signed regver (and when the regver line is missing entirely), and reports no drift
-  when unchanged;
-* a ``"disabled": true`` built-in is removed from ``effective_criteria`` + surfaces in
-  ``disabled_builtins`` (and ``disabled`` on a ``project.`` id is a located load error);
-* ``build_manifest`` emits + ``manifest_disabled_builtins`` parses the ``disabled_builtins:``
-  line (absent when empty), and the signed manifest still HMAC-verifies.
+Criterion overlay changes rotate ``registry_version`` for drift-refresh reuse, while claim
+validity remains grandfathered. An absent overlay matches the packaged version byte for byte.
+``compute_validity`` stays valid but reports changed or missing registry versions as
+``registry_drift``. Disabled built-ins leave ``effective_criteria`` and appear in
+``disabled_builtins``. Disabling a ``project.`` criterion is a located load error. Manifest
+round trips preserve ``disabled_builtins`` and HMAC verification.
 """
 
 from __future__ import annotations
@@ -483,11 +475,11 @@ def test_current_head_sha_attested_resolves_gate_ref_not_working_tree(
     store: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bug 1137 (SHARED anchor): ``gate_source.current_head_sha`` for an ATTESTED manifest returns
-    the current gate-ref sha from the LOCAL object DB, NOT the evaluator's (possibly foreign)
-    working-tree HEAD. This single anchor is read by BOTH ``compute_validity``'s unscoped
-    freshness check AND ``drift_floor``'s ``code_drifted`` axis, so neither consumer can read a
-    stranger sha. A LEGACY manifest (no ``verified_at_sha``) keeps the working-tree read."""
+    """Resolve an attested manifest's gate ref from the local object database.
+
+    ``compute_validity`` and ``drift_floor`` share this anchor instead of reading the evaluator's
+    working-tree HEAD. Legacy manifests without ``verified_at_sha`` retain the working-tree read.
+    """
     from rebar._signing_manifest import verified_at_sha_step
     from rebar._snapshot.repo_snapshot import resolve_ref
     from rebar.llm import gate_source
@@ -512,11 +504,10 @@ def test_current_head_sha_source_local_reads_working_tree_not_gate_ref(
     store: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bug 1137 (SHARED anchor, ``source=local`` arm): even with a ``verified_at_sha`` present,
-    when the gate ``source`` is ``local`` the anchor is the in-place checkout's working-tree HEAD
-    (``source=local``'s documented basis), NOT the resolved ``origin/main`` gate ref. So the same
-    signed sha compared against a MOVED working tree reads that moved HEAD (drift is real here),
-    and the attested gate-ref resolution is bypassed entirely."""
+    """Use working-tree HEAD for ``source=local`` even when ``verified_at_sha`` exists.
+
+    This source bypasses the gate ref, so a moved working tree correctly reports drift.
+    """
     from rebar._signing_manifest import verified_at_sha_step
     from rebar.llm import gate_source
 
@@ -537,12 +528,10 @@ def test_attested_unscoped_head_freshness_reads_gate_ref_not_working_tree(
     store: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bug 1137: an attested unscoped ('fail-safe' whole-HEAD) attestation certified at an
-    UNMOVED gate ref must stay valid even when evaluated from a working tree whose HEAD is a
-    FOREIGN commit (a feature worktree, the MCP server's own cwd, or a walked-up enclosing
-    repo). The currency check must resolve the CURRENT gate ref, not ``git rev-parse HEAD`` of
-    the evaluator's tree. RED before the fix: it read the working-tree HEAD and reported a
-    spurious ``stale-head``."""
+    """Keep an unscoped attestation valid when its gate ref has not moved.
+
+    Currency resolves the gate ref instead of a foreign evaluator working-tree HEAD.
+    """
     # Production models a REMOTE gate ref (origin/main); the suite default pins it to HEAD.
     monkeypatch.setenv("REBAR_GATE_REF", "origin/main")
     ticket_id = rebar.create_ticket("epic", "attested unscoped freshness", repo_root=str(store))
@@ -570,10 +559,10 @@ def test_attested_unscoped_head_freshness_still_invalidates_on_moved_gate_ref(
     store: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Negative control for bug 1137: the fix must PRESERVE whole-HEAD invalidation semantics.
-    When the gate ref (``origin/main``) genuinely advances after review, the attested unscoped
-    attestation is still ``stale-head`` — the fix corrects only the foreign VALUE read, not the
-    invalidation granularity (the ticket's declared non-goal)."""
+    """Mark an unscoped attestation ``stale-head`` when its gate ref advances.
+
+    Gate-ref resolution does not change whole-HEAD invalidation granularity.
+    """
     monkeypatch.setenv("REBAR_GATE_REF", "origin/main")
     ticket_id = rebar.create_ticket("epic", "attested unscoped moved ref", repo_root=str(store))
     state = rebar.show_ticket(ticket_id, repo_root=str(store))
@@ -607,10 +596,10 @@ def test_attested_unscoped_head_freshness_fails_closed_when_gate_ref_unresolvabl
     store: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bug 1137 fail-CLOSED arm: when the attested gate ref cannot be resolved to a local
-    snapshot (``fetch=False`` and the ref is absent from the object DB), the currency check
-    must refuse honestly -- it must NOT fall back to reading the working tree, and must NOT
-    emit a foreign value. The reason names the unresolvable gate ref."""
+    """Fail closed when an attested gate ref is absent from the local object database.
+
+    Currency does not fall back to the working tree, and its reason names the unresolved ref.
+    """
     # origin/main is the configured gate ref but no ``origin`` remote is ever published, so
     # resolve_ref(..., fetch=False) cannot resolve it locally -> SnapshotError -> fail closed.
     monkeypatch.setenv("REBAR_GATE_REF", "origin/main")

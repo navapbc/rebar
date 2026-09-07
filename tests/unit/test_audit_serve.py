@@ -1,19 +1,10 @@
-"""Story a3d7 (cultivated-aquatic-crow): ``rebar audit serve`` — HAPPY PATH.
+"""Happy-path tests for ``rebar audit serve``.
 
-The audit UI's server-scaffolding vertical slice: a default-off ``[ui] enabled``
-config flag, a ``nava-rebar[ui]`` extra, a lazily-imported FastAPI server, and a
-``rebar audit serve`` subcommand serving a read-only index of tickets that have
-audit data.
-
-This file holds the HAPPY-PATH oracle shared with the implementer:
-
-* ``[ui] enabled`` config round-trips (rebar.toml / env / -c) and is a recognised
-  section (not an "unknown key").
-* the enabled server's index route (built via ``create_app``) returns HTTP 200 and
-  lists a ticket that has audit data.
-
-Edge/E2E behaviour (disabled-refusal, missing-extra message, non-loopback warning,
-real loopback bind on an ephemeral port) lives in the held-out companion suite.
+The default-off ``[ui] enabled`` setting round-trips through ``rebar.toml``, environment
+configuration, and ``-c`` without an unknown-key warning. With the ``ui`` extra, a lazily
+imported FastAPI app serves a read-only ticket index. ``create_app`` returns HTTP 200 and
+lists seeded audit data. The held-out companion covers refusal, missing extras, host warnings,
+and loopback binding.
 """
 
 from __future__ import annotations

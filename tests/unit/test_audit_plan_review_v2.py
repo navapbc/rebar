@@ -1,10 +1,8 @@
-"""Story 4e19: plan-review sidecar -> lossless v2 (evidence, scenarios, thresholds).
+"""Tests for lossless plan-review v2 sidecars.
 
-The plan-review REVIEW_RESULT sidecar drops the Pass-1 ``evidence``/``scenarios`` prose
-and never records the numeric ``block_threshold``/``blocking_enabled`` a finding was judged
-against. v2 persists all four, per finding, so an auditor can see a finding's grounding
-quotes AND the exact decision boundary that was applied. The surfaced verdict shape and the
-all-buckets pooling stay byte-unchanged; the reader tolerates both v1 and v2.
+Version two preserves each finding's pass-one ``evidence`` and ``scenarios`` with its
+``block_threshold`` and ``blocking_enabled`` decision boundary. Surfaced verdicts and
+all-bucket pooling remain byte-identical, and readers accept versions one and two.
 """
 
 from __future__ import annotations

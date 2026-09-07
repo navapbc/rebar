@@ -1,21 +1,10 @@
-"""Held-out adversarial oracle for the op-cert kind (story 368c / garlicky-deviant-kakapo),
-re-expressed for Option B (story 4214).
+"""Held-out op-cert adversarial and storage-era tests.
 
-NOT shown to the implementation subagent. These are the cases that separate a real op-cert
-implementation from one that fakes the happy path:
-
-* cross-key rejection — a cert verifies ONLY against the signing environment's key;
-* replay defense — the {ticket, material, merged-log commit} subject binding rejects a cert
-  replayed onto a different ticket or onto a mutated material fingerprint;
-* era rotation at the STORAGE ANCHOR — a key valid at the cert's storage anchor verifies; one past
-  its ``revoked_at_log_position`` (relative to the anchor) surfaces the shared
-  ``key_not_valid_at_era`` verdict (two-phase check); a genuinely foreign key surfaces
-  ``mismatch``, not ``key_not_valid_at_era``;
-* fail-closed — ssh-keygen absent never silently passes.
-
-Under Option B the era boundaries are TICKETS-BRANCH log positions and validity is judged at the
-certificate's storage anchor (a tickets-branch commit), so these tests run against a real rebar
-store's position chain. Real ``ssh-keygen`` integration.
+The suite verifies cross-key rejection and subject-binding defenses against ticket or
+material replay. It evaluates key validity at the certificate's tickets-branch storage
+anchor. Revoked keys produce ``key_not_valid_at_era``, foreign keys produce ``mismatch``,
+and an absent ``ssh-keygen`` fails closed. Tests use a rebar store position chain and real
+``ssh-keygen`` integration.
 """
 
 from __future__ import annotations

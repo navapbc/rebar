@@ -1,10 +1,8 @@
-"""Story a3db: pass-4 coaching lossless persistence in the review sidecars.
+"""Tests for lossless pass-four coaching records in review sidecars.
 
-The plan-review sidecar's _slim previously stored each coaching note as only
-{move_id, finding_refs}, dropping move_name, subject, and the rendered coaching prose — so a
-downstream audit UI could not re-render the note. Persist the FULL coaching record
-{move_id, move_name, subject, finding_refs, coaching} in the plan-review sidecar; the
-code-review sidecar already persists the full array (regression-locked here).
+Plan-review records retain ``move_id``, ``move_name``, ``subject``, ``finding_refs``, and
+rendered ``coaching`` so the audit UI can reproduce each note. Code-review sidecars retain
+the same complete array.
 """
 
 from __future__ import annotations

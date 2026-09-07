@@ -1,18 +1,10 @@
-"""autodeploy.sh disk-pressure hardening (incident 2731 follow-up, ticket e2c5).
+"""Tests for capped, fail-soft Docker pruning and disk measurements in autodeploy.
 
-Drives the ``prune_docker_caches`` / ``record_backoff_failure`` helpers from
-``infra/scripts/autodeploy.sh`` in a bash subprocess with a PATH-front ``docker``
-(and ``timeout``) stub that logs argv — no docker daemon involved. What must hold:
-
-* every failure exit reclaims: ``record_backoff_failure`` runs one CAPPED
-  ``builder prune -f --keep-storage <cap>`` and one ``image prune -f``;
-* a prune failure is inert (backoff still recorded, helper returns 0, one
-  non-fatal log line) — it can never mask the deploy-failure exit code;
-* every invocation MEASURES itself: root-disk free space before and after plus
-  the delta (bug 9bc0 — the reclaim logged "complete" for ~11h while freeing
-  nothing, and nothing in the log could tell the two apart);
-* no uncapped ``docker builder prune`` and no bare ``docker image prune``
-  outside the helper exist in the script (the quantified-bound ACs).
+PATH-front ``docker`` and ``timeout`` stubs exercise the shell helpers without a daemon.
+Every backoff failure runs one capped ``builder prune`` and one ``image prune``. Prune
+failures log once without masking the deploy exit. Each invocation records free space before,
+after, and as a delta. The script contains no uncapped builder prune or bare image prune
+outside the helper.
 """
 
 from __future__ import annotations
@@ -72,12 +64,9 @@ def _run_helpers(
     # execs the wrapped command so the docker stub still records real argv.
     _write_stub(bindir, "timeout", 'shift\nexec "$@"')
     _write_stub(bindir, "docker", f'echo "docker $*" >> "{calls}"\nexit {docker_exit}')
-    # `df --output=avail /` stub: a header line + a file-backed number, matching the
-    # `df … | tail -1 | tr -dc '0-9'` shape root_disk_free_kb parses. It is SEQUENCED — the
-    # first read yields free_kb[0] and every later read yields free_kb[1] — so the before/after
-    # pair straddles the prune and models space it actually reclaimed.
-    # free_kb=None models a `df` that yields nothing parseable (absent on stock macOS, a
-    # wedged mount, an unsupported --output): the helper must degrade to 0, not blow up.
+    # The `df --output=avail /` stub emits a header and a file-backed value in the shape
+    # `root_disk_free_kb` parses. It sequences before and after values across pruning.
+    # `free_kb=None` models unparseable output and must degrade to zero.
     if free_kb is None:
         _write_stub(bindir, "df", "exit 1")
     else:
@@ -181,10 +170,10 @@ def test_success_path_uses_the_helper(tmp_path):
 
 
 def test_prune_logs_free_space_before_after_and_the_delta(tmp_path):
-    """Every invocation MEASURES itself. In bug 9bc0-1200-1451-44bb the reclaim ran on schedule,
-    logged "disk pressure reclaim complete" every time, and freed nothing — and the log could
-    not distinguish that from a reclaim that worked. Before, after, and the delta must all
-    appear, so effect is OBSERVED rather than inferred."""
+    """Log free space before and after pruning with the delta.
+
+    These measurements distinguish a no-op reclaim from one that freed space.
+    """
     res = _run_helpers(tmp_path, docker_exit=0, drive="prune_docker_caches", free_kb=(1000, 4200))
     assert res.returncode == 0, res.stderr
     assert "before=1000kB" in res.stdout, f"the BEFORE reading must be logged\n{res.stdout}"
