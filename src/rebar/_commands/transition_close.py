@@ -1,16 +1,12 @@
-"""The ``transition`` close-path tail (module-size seam off :mod:`.transition`).
+"""Finalize the transition close path after its parent cascade.
 
-:func:`close_ticket` is the locked-write-and-finalize half that
-:func:`rebar._commands.transition.transition_compute` calls once the plan-review
-gate and the parent-first cascade have run. It owns the unresolved-open-children
-guard and completion precheck outside the lock, then selects one publication tail:
-receipt-bearing PASSes publish sidecar + STATUS + SIGNATURE in one candidate commit;
-legacy/non-certifiable paths retain the STATUS-then-sign sequence. It also owns the
-force-close audit comment and per-ticket scratch cleanup + best-effort push.
+The close tail checks non-closed children and completion outside the store lock. Receipt-backed
+passes publish the completion sidecar, status, and signature in one candidate commit. Other
+paths commit status before optional signing. The tail also checks plan-review validity, records
+best-effort force-close audit comments, cleans ticket scratch data, pushes non-bundled status
+commits, and triggers compaction.
 
-This module MUST NOT import :mod:`.transition` (no back-edge): the recursion into
-``transition_compute`` lives in ``_cascade_parent_first``, which stays there, so the
-close tail here never calls back up.
+Keep transition recursion above this module to avoid an import cycle with :mod:`.transition`.
 """
 
 from __future__ import annotations
@@ -130,32 +126,12 @@ def _material_drifted(verified_sha: object, fresh_sha: object) -> bool:
 
 
 def _pin_completion_ref(ref: str | None, repo_root) -> str | None:
-    """NORMALISE the completion target at the close boundary: return an immutable sha that
-    replaces ``ref`` for the whole verify+sign unit.
+    """Resolve the completion target once before verification and signing.
 
-    4de6 pinned the DEFAULT target (``ref is None`` -> HEAD): resolving lazily at verify time
-    AND again at the pre-sign drift guard let a benign concurrent commit in that window split
-    them (verify saw A, sign saw B), refusing the signature and closing unsigned. This extends
-    the SAME pin to an EXPLICITLY supplied ref, because a SYMBOLIC one (a branch or a
-    remote-tracking ref such as ``origin/main``) is not the stable no-op a concrete sha is:
-    ``resolve_ref(..., fetch=False)`` reads the LOCAL ref store, and ``refs/remotes/origin/main``
-    lives in the SHARED git common dir, so ANY concurrent fetch in ANY worktree of the repo
-    advances it inside the verify->sign window — and the drift guard then compares two real,
-    differing SHAs and refuses the signature. A CONCRETE sha resolves to itself, so the pin is
-    a no-op for it; the pin changes WHEN the ref is resolved, never WHAT it targets.
-
-    The caller REBINDS ``ref`` to this result, so nothing downstream (verification, snapshot
-    materialisation, the drift guard, signing) ever sees a symbolic ref — a redundant
-    downstream ``rev-parse`` of a full sha is idempotent.
-
-    Two DIFFERENT failure policies, deliberately:
-
-    * EXPLICIT ref: FAIL EARLY — let :class:`SnapshotRefError` propagate. It is the same
-      fail-closed error the verifier path raises for an unresolvable ``--ref`` today, just
-      raised at the boundary instead of minutes into verification. The pin must never turn a
-      correctly-reported bad ref into a silent fallback.
-    * DEFAULT (``ref is None``): best-effort. If HEAD cannot resolve, fall back to the prior
-      lazy ``HEAD`` behavior (return ``None``) — never worse than before.
+    An explicit ref resolves locally without fetching and propagates resolution errors. A
+    missing ref resolves ``HEAD`` on a best-effort basis and returns ``None`` on failure,
+    preserving the lazy fallback. Returning a full SHA prevents ref movement from splitting
+    verification and drift checks.
     """
     from rebar._snapshot.repo_snapshot import resolve_ref
 
@@ -169,19 +145,12 @@ def _pin_completion_ref(ref: str | None, repo_root) -> str | None:
 
 
 def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None, *, signer=None) -> dict:
-    """The completion-verifier PRODUCER STEP: build the deterministic PASS manifest for
-    ``result`` (via :func:`_verdict_manifest`) and mint the ``completion-verifier`` op-cert
-    through the signing seam (:func:`rebar.signing.sign_manifest`), appending the SIGNATURE
-    event to the store under ``repo_root``. Returns the signed record.
+    """Build and sign the deterministic ``completion-verifier`` PASS manifest.
 
-    Extracted from the close gate so BOTH producers mint the completion op-cert the SAME way
-    (story ee0b): the close path here and the trusted op-cert gate service's worker on a PASS
-    verdict. ``signer`` (story 6f14): an OPTIONAL startup-composed op-cert binding; when the
-    service passes one, the SEAM signs from that binding's key + principal instead of the process
-    env — the caller never signs bespokely. Omitting it (the developer-local CLI close) keeps the
-    exact env/genesis behavior. Raises :class:`rebar.signing.SigningError` on the degrade path
-    (OpenSSH < 8.9 / unwritable tracker), which the caller records as a closed-/completed-without
-    -signature outcome."""
+    The optional ``signer`` supplies a composed key and principal binding. Omitting it uses the
+    local signing environment. The signature event is appended under ``repo_root`` and the
+    signed record is returned. Signing failures propagate.
+    """
     from rebar import signing as _signing
 
     manifest = _verdict_manifest(result, ticket_id, repo_root)
@@ -193,35 +162,18 @@ def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None, *, sig
 def record_completion_verdict(
     result: dict, ticket_id: str, repo_root=None, *, sign: bool = True
 ) -> dict[str, object]:
-    """Record a completion-verifier run made OUTSIDE a close transition ON THE TICKET, so a
-    later same-``--ref`` close REUSES it instead of firing a duplicate (billable) verifier run
-    — the recording half of the close gate's reuse path
-    (:func:`rebar._commands.close_autoresume._reusable_attested_pass`).
+    """Record a standalone completion verdict for reuse by a close at the same ref.
 
-    Mirrors the close gate's post-close recording tail, minus the ``verify -> close -> sign``
-    ordering: a standalone verify has no close to sequence against, so the verdict is signed
-    directly against the sha it was verified at (the reuse consumer re-checks that sha against
-    the close's ``--ref``, so an intervening code change simply means the close verifies afresh).
-    Two durable artifacts:
+    The resolved ticket receives a best-effort ``COMPLETION_VERDICT`` sidecar before any
+    signature attempt. Signing occurs only when enabled for an attested, certifiable PASS with
+    ``verified_at_sha``. Local, non-PASS, uncertifiable, signing-disabled, and unpinned results
+    remain sidecar-only.
 
-    * the ``COMPLETION_VERDICT`` sidecar (PASS or FAIL) — the same offline-queryable record the
-      close gate emits (:mod:`rebar.llm.completion_sidecar`); and
-    * on an ATTESTED, CERTIFIABLE ``PASS`` pinned to a ``verified_at_sha``, the signed
-      ``completion-verifier`` op-cert, minted through the SHARED producer
-      (:func:`sign_completion_verdict`) so a standalone verify and a close mint the cert the
-      SAME way and the reuse check accepts either.
-
-    NEVER signs a ``local`` (unattested, opt-in) or ``certifiable=False`` verdict — matching the
-    close gate's own suppression of both in ``close_precheck._completion_precheck``
-    (an unattested/uncertified verdict is by contract not a reusable certification: ADR 0005 /
-    epic raze-vet-ditch S4). ``sign=False`` records only the sidecar — the CLI ``--no-sign`` and
-    the MCP read-only opt-outs, symmetric with ``review_plan``.
-
-    Best-effort and NEVER raises: recording is observability plus a close-time optimization, so a
-    sidecar or signing failure leaves the caller's verdict/exit untouched. Returns a
-    machine-readable ``{"signed": bool, "cause": str, "sidecar_written": bool, "error": str}``
-    with ``cause`` one of ``signed`` / ``not_pass`` / ``sign_disabled`` / ``local_source`` /
-    ``not_certifiable`` / ``no_verified_sha`` / ``sign_failed``."""
+    Return ``signed``, ``cause``, ``sidecar_written``, and ``error``. ``cause`` is ``signed``,
+    ``not_pass``, ``sign_disabled``, ``local_source``, ``not_certifiable``,
+    ``no_verified_sha``, or ``sign_failed``. Sidecar and signing failures are logged without
+    changing the caller's verdict.
+    """
     from rebar import config as _config
     from rebar import signing as _signing
     from rebar._engine_support.resolver import resolve_ticket_id
@@ -306,25 +258,12 @@ def _resolve_caused_by_culprit(
 def _apply_caused_by(
     ticket_id: str, caused_by: str, tracker: str, repo_root_str: str, repo_root
 ) -> None:
-    """Best-effort ``caused_by`` link on a BUG close (ticket 555e).
+    """Update a bug's ``caused_by`` attribution after close without failing the close.
 
-    Only bugs carry the blame-hunt semantics. An explicit ``caused_by`` id wins; otherwise
-    :func:`rebar.metrics.blame.derive_caused_by` auto-derives a single dominant culprit from
-    git blame. If a culprit is resolved, the edge is written via the lower-level
-    :func:`rebar.graph._links._write_link_event` (which bypasses the closed-source + cycle
-    guards ``add_dependency`` enforces — the source bug is already ``closed`` here). EVERYTHING
-    is wrapped so a resolve/write failure NEVER blocks or fails the close.
-
-    Bypassing ``add_dependency`` also bypassed its ``_is_active_link`` idempotency check, so a
-    close that named an ALREADY-linked origin wrote a SECOND edge to the same target and
-    double-counted one escaped defect in ``rebar metrics`` (bug 10d0). The write is now
-    reconciled against the edges already recorded:
-
-    * culprit already linked -> no-op;
-    * a DIFFERENT explicit culprit -> REPLACES the recorded edge (unlink, then link). An
-      explicit flag is a deliberate, corrected attribution; dropping it silently would lock in
-      a known-wrong origin, and this path is best-effort by construction (every failure is
-      swallowed so the close stands), so there is no "fail loudly" that a caller could act on.
+    A new explicit target replaces other active targets; an already-active target leaves all
+    attribution unchanged. Without an explicit target, blame derives one only when no
+    attribution exists. The low-level link writer permits the closed source. Resolution,
+    removal, and write failures are logged and suppressed.
     """
     try:
         from rebar.reducer import reduce_ticket as _reduce
@@ -343,9 +282,8 @@ def _apply_caused_by(
         tracker_dir = str(config.tracker_dir(repo_root))
         for superseded in existing:
             remove_dependency(ticket_id, superseded, tracker_dir, "caused_by")
-        # Provenance marker (ticket 6536-367c): an explicit --caused-by is the operator's
-        # stated attribution; an empty flag means the culprit came from blame auto-derivation.
-        # Escape-rate consumers weight proven attributions above guessed ones on read.
+        # Mark operator-supplied attribution as explicit and blame-derived attribution as derived.
+        # Provenance lets consumers weight explicit evidence above derived guesses.
         provenance = "explicit" if caused_by.strip() else "derived"
         _write_link_event(ticket_id, culprit, "caused_by", tracker_dir, provenance=provenance)
     except Exception:
@@ -359,37 +297,23 @@ def _apply_caused_by(
 def _sign_completion_and_report(
     verified_result: dict, ticket_id: str, repo_root, ref: str | None
 ) -> dict:
-    """Sign the completion verdict for a just-closed ticket and report what became of it.
+    """Sign a non-bundled completion verdict after status has committed.
 
-    Extracted from :func:`close_ticket` (bug silvern-dewy-damselfly): this tail is a decision
-    of its own — drift refusal vs sign vs sign failure — and inlining it pushed the caller past
-    the complexity ratchet.
-
-    Returns the ``completion_signature`` block the close payload carries:
-    ``{"signed": bool, "cause": str, "error": str}`` with ``cause`` one of ``signed`` /
-    ``material_drifted`` / ``sign_failed``. NEVER raises: the close has ALREADY committed by the
-    time this runs, so a failure here can only be reported, never undone. Warnings go to stderr
-    and the caller's exit code is unaffected.
+    Return ``completion_signature`` with ``signed``, ``cause``, and ``error``. The cause is
+    ``signed``, ``material_drifted``, or ``sign_failed``. Material drift and signing failures
+    leave the ticket closed, emit a warning, and do not raise.
     """
     import sys
 
     from rebar import signing as _signing
 
-    # Pre-sign fingerprint recheck (story blackbear): the verifier ran OUTSIDE the write lock,
-    # and transport retries + timeouts widen the verify -> close -> sign window. The close gate
-    # verifies an attested snapshot of HEAD, so the manifest's `verified-at-sha:` IS the HEAD
-    # SHA at verify time; re-read HEAD now and, if it MOVED, the code drifted under us — do NOT
-    # attest stale state. The ticket already closed (the transition committed above), so this is
-    # the same closed-without-signature outcome as --force: warn on stderr and skip
-    # signing (the close still succeeds, exit 0). Re-close to certify against the current tree.
+    # Status is already committed. Compare the manifest's verified SHA with a fresh target
+    # resolution. Drift suppresses stale attestation without undoing the close.
     _manifest = _verdict_manifest(verified_result, ticket_id, repo_root)
     _verified_sha = _signing.verified_at_sha_from_manifest(_manifest)
-    # bug 80af: a --ref-targeted close verifies (and must sign against) THAT ref, not HEAD.
-    # So the drift guard must resolve the SAME ref for the fresh sha — otherwise a stacked-story
-    # close (--ref=<story-sha> while the worktree sits at the epic tip) would compare the story
-    # sha against the tip HEAD and be spuriously treated as drifted, landing UNSIGNED. For a
-    # concrete commit the tree is immutable, so resolving the same ref makes the check a stable
-    # no-op and a legitimately-targeted close lands SIGNED.
+    # Re-resolve the pinned target used for verification. Normally ``close_ticket`` passes an
+    # immutable SHA for either default HEAD or an explicit ref. Only a failed default pin leaves
+    # ``ref`` unset and falls back to live HEAD here.
     if ref and ref != "HEAD":
         from rebar._snapshot.repo_snapshot import resolve_ref
 
@@ -440,21 +364,12 @@ def _sign_completion_and_report(
 def _trigger_compaction(
     target_status: str, tracker: str, ticket_id: str, repo_root_str: str
 ) -> None:
-    """Fire the operation-linked compaction trigger on a close (story gaudy-gangrenous-basilisk).
+    """Trigger operation-linked compaction after a close.
 
-    Compaction is no longer PERFORMED on the close path — holding the store write lock across
-    the fold is what starved every concurrent writer for up to 13m53s. But it still has to
-    happen somewhere for an adopter with no CI and no cron, who has no scheduled sweep to fall
-    back on: compaction must work without either, which is why the original design was linked
-    to an operation. So the close TRIGGERS it instead of doing it. By the time this runs the
-    locked write has released the store lock AND the best-effort push has completed, the
-    decision costs two O(1) checks, and any real folding goes to a detached worker — the
-    session holds nothing and waits for nothing.
-
-    A GUARD FUNCTION, not an inline branch, on purpose: :func:`close_ticket` sits at its
-    recorded ceiling in ``.github/complexity-baseline.json``, which is shrink-only, so the
-    decision point lives here and the call site stays unconditional (the same reason
-    :func:`rebar._commands.close_precheck._ensure_duplicate_close_is_linked` is a function).
+    The caller has released the store lock and completed its push. ``maybe_compact`` uses
+    store-size-independent eligibility checks and normally delegates folding to a detached
+    worker, so closing does not wait for the fold. This trigger keeps compaction available
+    without a scheduled sweep.
     """
     if target_status != "closed":
         return
@@ -464,17 +379,11 @@ def _trigger_compaction(
 
 
 def _hint_disposition_alternative(close_class: str) -> None:
-    """On a force close shaped like an administrative disposition, point at the truthful exit.
+    """Suggest the attested disposition path for an administrative-shaped force close.
 
-    Store mining behind ticket fc20 found the single largest FORCE_CLOSE class to be
-    administrative closes (duplicate/obsolete/superseded/wontfix) forced only because the
-    completion verifier can never PASS them — a sanctioned, attested path now exists, so the
-    force path SAYS SO. "Administrative-shaped" = the close carries an administrative
-    ``--class`` already (the force was likely unnecessary) or no class at all (the operator may
-    not know the vocabulary). A bug-only class (e.g. ``regression``) earns no hint — that force
-    is about the verifier's verdict, not a missing disposition path. Best-effort stderr,
-    never affecting the close; a side-effecting guard function so ``close_ticket`` stays at its
-    shrink-only complexity ceiling."""
+    Emit the hint for an administrative class or no class. Suppress it for bug-only classes
+    because their bypass concerns completion. The stderr hint does not alter the committed close.
+    """
     from rebar._commands import close_disposition
 
     if close_class and close_class not in close_disposition.ADMINISTRATIVE_CLASSES:
@@ -498,21 +407,12 @@ def _plan_review_close_recheck(
     close_reason: str,
     tracker: str,
 ) -> Callable[[Mapping[str, Any]], None] | None:
-    """Run the plan-review close gate NOW (outside the write lock) and, when it actually
-    ran, return the under-lock recheck closure for ``txn.transition_core``; ``None`` when
-    the gate was skipped. Raises via :func:`_raise_plan_review_close_gate_error` on a block.
+    """Check plan-review validity before close and return its locked recheck.
 
-    Install the under-lock recheck ONLY when the gate actually ran. The closure is invoked
-    by ``txn.transition_core`` INSIDE the write lock, so it re-reads the config there;
-    installing it after a SKIP (gate disabled) would add a config read to the critical
-    section for a gate that never applied. (An unreadable config never reaches here: the
-    pre-lock check raises :class:`~rebar.config.ConfigError`, per operator ruling
-    39f8-ae7c — so the error is raised BEFORE the lock. In the rare window where the
-    config turns unreadable between this check and the locked recheck, the recheck's
-    ``ConfigError`` aborts the close via ``transition_core``'s fail-closed
-    ``CommandError`` re-wrap.) Ask the producer's stamp, never a verdict string:
-    the skip vocabulary grows, and a string comparison that misses a new skip verdict starts
-    doing exactly that work."""
+    Configuration errors propagate and blocking results raise. Return ``None`` when
+    ``gates.gate_ran`` reports a skip. Otherwise return a closure that repeats the check against
+    locked state and fails closed if validity changes.
+    """
     from rebar._commands import gates
 
     check = gates.close_plan_review_gate_check(
@@ -587,24 +487,21 @@ def close_ticket(
                 returncode=1,
             )
 
-    # Completion-verification close gate (opt-in; runs OUTSIDE the write lock since an LLM
-    # call must not serialize all writes). The precheck blocks fail-closed on FAIL or an
-    # unavailable verifier. A receipt-bearing PASS is prepared for atomic publication; a
-    # legacy PASS keeps the post-close signing path. force_close skips both.
+    # Run completion verification outside the write lock. An applicable FAIL or unavailable
+    # verifier blocks the close. A receipt-backed PASS publishes its sidecar, status, and
+    # signature atomically. A non-bundled PASS signs after status. Qualified dispositions use a
+    # deterministic sign signal. Force closes bypass completion and plan-review checks and do
+    # not sign.
     #
-    # `idea → closed` is a REJECT/DROP, not a completion, so skip completion gates; the
-    # open-children structural guard above still applies.
-    # Stays None when no completion signature is in play; otherwise records whether signing
-    # succeeded so consumers need not parse stderr.
+    # Closing an ``idea`` rejects unimplemented work, so neither close check applies. The
+    # open-child guard still applies. ``completion_signature`` stays absent for non-close
+    # transitions and idea rejection.
     completion_signature: dict[str, object] | None = None
     verified_result: dict[str, Any] | None = None
     completion_expectation = ""
     plan_review_recheck = None
     if target_status == "closed" and current_status != "idea":
-        # Pin the completion target ONCE, here at close entry, and thread that sha through
-        # _completion_precheck (verify) AND the pre-sign drift guard (which resolves `ref`
-        # again), so both bind the SAME commit. Covers the default HEAD target (4de6) and an
-        # explicitly supplied — possibly SYMBOLIC — ref. See _pin_completion_ref.
+        # Pin the default or explicit ref once, then pass its SHA through verification and signing.
         ref = _pin_completion_ref(ref, repo_root)
         from rebar.reducer import reduce_ticket as _reduce
 
@@ -677,13 +574,8 @@ def close_ticket(
         legacy_signer=_sign_completion_and_report,
     )
 
-    # Blame-Hunt Advisory (ticket 555e): on a BUG close, draw a best-effort caused_by link
-    # from the (now-closed) bug to the culprit change/ticket. An explicit --caused-by <id>
-    # override wins; otherwise git-blame auto-derives a single dominant culprit. Runs AFTER the
-    # close committed, so the link SOURCE (the bug) is `closed` — add_dependency REJECTS a closed
-    # source, so we write the edge via the lower-level _write_link_event, which bypasses the
-    # closed-source + cycle guards (a non-blocking, non-cycle relation on a closed source needs
-    # neither). Best-effort: any resolve/write failure is swallowed and NEVER blocks the close.
+    # For a committed bug close, add ``caused_by`` only when atomic delivery is safe. The
+    # explicit target wins over blame derivation. Link failures never undo the close.
     atomic_delivery = str((atomic_close or {}).get("delivery", ""))
     caused_by_safe = atomic_close is None or atomic_delivery in {
         "pushed",
@@ -694,16 +586,12 @@ def close_ticket(
     if target_status == "closed" and caused_by_safe:
         _apply_caused_by(ticket_id, caused_by, tracker, repo_root_str, repo_root)
 
-    # Reopen invalidation is NO LONGER a write-time mutation (epic dark-acme-lumen): attestation
-    # records are immutable, and a reopen is detected on READ via state["last_reopened_at"] +
-    # compute_validity (a completion/plan-review attestation signed before the reopen reads as
-    # not-valid). This replaces the former retire_attested_pin clear, and — unlike it — does not
-    # destroy the kind-keyed attestations a reopened ticket still carries.
+    # Reopen validity is computed from ``last_reopened_at`` during reads. Attestation records
+    # remain immutable and retain every kind.
 
     # Force-close audit comment (best-effort, silenced — matches bash || true).
     if target_status == "closed" and force_close:
-        # A deliberate bypass, not a failure — but still closed-without-signature, so it gets
-        # its own cause rather than being reported as if a signature had been attempted.
+        # A force bypass closes without a completion signature and reports a distinct cause.
         completion_signature = {"signed": False, "cause": "force_bypassed", "error": ""}
         _hint_disposition_alternative(close_class)
         session = _resolve_session(tracker)
@@ -722,22 +610,10 @@ def close_ticket(
                 exc_info=True,
             )
 
-    # Compaction is NOT run here (bug choosy-arthrodic-barbet). It used to be, and it was the
-    # store's longest lock holder BY FAR: `compact_txn._compact_locked` takes the ONE store
-    # write lock and holds it for the whole fold — read, reduce, authorship ledger, snapshot
-    # write, retire renames, and the git add/commit, whose nested `_store_git_op_lock` wait and
-    # index-lock retry budget stack INSIDE that hold with no aggregate ceiling. Measured on the
-    # rebar store: a single close held the lock for 13m53s, and three others the same hour held
-    # ~2.5min each, starving every concurrent writer. The 7084 stand-aside probe could not help,
-    # because the closing process had released the lock seconds earlier so the store always read
-    # free to its own probe.
-    #
-    # Moving it is safe because compaction is OPTIONAL housekeeping, never a correctness step:
-    # an unfolded event log is completely valid and the reducer replays it. `rebar compact
-    # <id>` still folds on demand; a scheduled sweep folds the store where CI exists; and this
-    # close still TRIGGERS a fold — see `_trigger_compaction` below — it just hands the work to
-    # a detached worker after the lock is released instead of doing it inline. What changed is
-    # WHO holds the lock and WHEN, not whether a close leads to compaction.
+    # Clean ticket scratch data after close. Unfolded logs remain valid, so compaction is
+    # optional. Manual and scheduled sweeps remain available. The operation-linked trigger
+    # delegates eligible folding after the store lock is released and the push completes,
+    # keeping compaction outside the close transaction.
     if target_status == "closed":
         scratch.cleanup_for_ticket(repo_root_str, ticket_id)
 

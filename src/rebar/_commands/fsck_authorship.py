@@ -1,30 +1,12 @@
-"""Per-``env_id`` authorship health for ``fsck`` (bug ed5c-42fc-bb7f-4cf4).
+"""Compute counted authorship health for each ``env_id``.
 
-``fsck`` already emits a store-wide advisory ``authorship: N signed, M unsigned`` line. That
-tally is blind to the failure it most needs to catch: ONE writer (one clone, one bot, one
-container) whose identity stops resolving, so every event it appends is unsigned while every
-OTHER writer keeps signing. Summed store-wide, the healthy writers' volume swallows the broken
-one — which is exactly how a review bot wrote ~8900 unsigned, ``Unknown``-authored events for a
-month before an unrelated audit noticed (bug beb1). The per-env signed-rate breakdown that
-finally found it was a one-off script; this module makes it a standing, COUNTED check.
+An environment is unhealthy when it has events and either none are signed or all authors are
+missing or ``Unknown``. The check runs only after the store has adopted signing, and reports
+only environments whose newest event is at least as recent as the earliest signed event. This
+excludes dormant pre-signing writers while detecting active writers without usable identities.
 
-The rule, and why it is gated
------------------------------
-An env is reported when it has at least one event AND either **no** event of its is signed, or
-**every** event of its is authored ``Unknown``/absent — the two signatures of a writer with no
-usable identity.
-
-Applied naively that would fire on every store with history, because all events written before
-authorship signing existed are unsigned, permanently and unfixably. So the check is gated on
-signing ADOPTION: it stays silent unless the store contains at least one signed event, and it
-only reports an env whose most recent event is at or after the store's EARLIEST signed one.
-An env that went dormant before signing arrived is history, not a defect; an env still writing
-while its peers sign is the live problem. Measured against the tracker this was written from
-(18 envs), the gate suppresses all four dormant 0%-signed envs and would still have reported
-beb1's env, which kept writing unsigned alongside a signing peer.
-
-Presence only — like the store-wide line, this counts the PRESENCE of ``author_sig`` and never
-verifies a signature. Cryptographic verification is ``rebar verify-identity``.
+The tally checks only whether ``author_sig`` is present. ``rebar verify-identity`` performs
+cryptographic verification.
 """
 
 from __future__ import annotations
@@ -98,13 +80,7 @@ class EnvAuthorshipTally:
             row.authors.add(author.strip())
 
     def identity_pairs(self) -> set[tuple[str, str]]:
-        """The store's ``(env_id, author)`` pairs, for the environment-identity divergence
-        check (bug gold-distinct-lacewing).
-
-        Served from this tally rather than collected separately in ``fsck._scan`` because
-        this class ALREADY extracts both fields from every event on the way past — a second
-        observer would re-do that work and, more to the point, spend lines in ``fsck.py``,
-        which sits at the module-size cap."""
+        """Return collected ``(env_id, author)`` pairs for identity-divergence checks."""
         return {(env_id, author) for env_id, row in self._envs.items() for author in row.authors}
 
     def findings(self) -> list[str]:

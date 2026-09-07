@@ -1,21 +1,13 @@
-"""``fsck --repair`` — the live-store remediation cluster (Tier E E4, A3 34b1).
+"""Repair ``fsck`` findings through guarded store write paths.
 
-Extracted from ``fsck.py`` (the diagnostic scanner) as a one-way leaf: it imports
-nothing from ``fsck``. The shared filesystem helpers ``_ticket_dirs``,
-``_dir_is_archived`` and ``_resolve_tracker_git_dir`` now live in
-:mod:`rebar._store.gitutil` (ticket b432-c9dc-c1b4-4a45) — they were never about repair,
-and keeping them here forced the store layer to defer-import a command module. They are
-re-imported here at module level, NOT for convenience: several tests bind them as
-``fsck_repair`` module ATTRIBUTES (``monkeypatch.setattr(fsck_repair, "_ticket_dirs", …)``),
-and this module's own call sites resolve them through the module global, so the re-import is
-what keeps those patches effective. Do not convert it to a qualified ``gitutil._ticket_dirs``
-call.
+The module retires folded sources and rebuilds recoverable snapshot faults, while leaving
+order-sensitive or incomplete-log cases for human triage. Retirement and rebuild helpers
+acquire their own store locks; deleted-source restoration may write before the rebuild lock.
+Live A3 remediation receives a rollback tag and commits in batches, pushing each batch only
+when a remote exists. A possible reconciler pass aborts repair.
 
-The ``--repair`` path drives the store to fsck-zero, safely and resumably: retire
-still-present folded sources (SNAPSHOT_INCONSISTENT), rebuild snapshots that dropped
-an AUTO-RECOVER orphan, and surface order-sensitive orphans for human triage — all
-under the store write lock, pre-tagged for rollback, batched + committed + pushed,
-and aborted if a reconciler pass is (or may be) in flight.
+Shared git helpers remain module attributes because tests and call sites patch those names.
+This leaf does not import the diagnostic driver.
 """
 
 from __future__ import annotations
@@ -41,12 +33,8 @@ from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
 logger = logging.getLogger(__name__)
 
-# ── A3 (34b1) live-store remediation: orphan disposition ─────────────────────
-# Routed BY EVENT TYPE. Additive/commutative orphans are safe to AUTO-RECOVER via a
-# full-log rebuild (the fold order does not change their effect). Order-sensitive
-# orphans are surfaced for HUMAN-TRIAGE — an auto-rebuild could pick a wrong order.
-# CREATE (genesis) and SNAPSHOT (the fold marker) are never orphan-classified; the
-# two sets below cover every other KNOWN_EVENT_TYPE (asserted in tests).
+# Additive or commutative orphan types allow a full-log rebuild. Order-sensitive
+# types require human triage. The sets cover every known non-CREATE, non-SNAPSHOT type.
 _AUTO_RECOVER_ORPHAN_TYPES = frozenset(
     {"COMMENT", "LINK", "UNLINK", "TAG_DELTA", "COMMITS", "BRIDGE_ALERT", "REVERT"}
 )
@@ -60,9 +48,8 @@ _HUMAN_TRIAGE_ORPHAN_TYPES = frozenset(
         "WORKFLOW_RUN",
         "WORKFLOW_STEP",
         "ARCHIVED",
-        # Identity key lifecycle (epic gnu-whale-ichor / e165): a KEY_ADD/KEY_REVOKE lands
-        # on an identity, not the ticket graph, so it is never a graph orphan — but it is
-        # epoch-order-sensitive (a blind rebuild could reorder add/revoke), so human-triage.
+        # Identity key events are order-sensitive and require human triage even though they
+        # belong to an identity rather than the ticket graph.
         "KEY_ADD",
         "KEY_REVOKE",
     }
@@ -76,17 +63,11 @@ def is_snapshot_orphan(
     snapshot_filename: str,
     source_uuids: set[str],
 ) -> bool:
-    """fsck's ORPHAN_EVENT predicate, anchored to one snapshot — THE shared definition.
+    """Return whether an active event is an orphan relative to one snapshot.
 
-    True when an ACTIVE event file is pre-snapshot loss: a KNOWN-type, non-SNAPSHOT
-    event whose filename sorts before ``snapshot_filename`` and whose uuid is absent
-    from that snapshot's ``source_event_uuids``. Non-KNOWN types are *correctly*
-    uncited (compaction never folds them), and snapshots are never orphan-classified.
-
-    Shared by fsck's scan (``_check_snapshot``) AND the compaction fold's exclusion
-    guard (``compact_txn``), so the two can never disagree about what an orphan is —
-    a fold that retired + cited an event fsck called ORPHAN_EVENT would launder the
-    loss into an undetectable, unrepairable state (bug f96b-3498-8f04-40b0).
+    An orphan has a known non-snapshot type, sorts before the snapshot, and is absent
+    from ``source_event_uuids``. The scanner and compaction exclusion guard share this
+    predicate so compaction cannot retire an event that ``fsck`` reports as orphaned.
     """
     return (
         etype in KNOWN_EVENT_TYPES
@@ -101,12 +82,9 @@ def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
     return run_git(tracker, *args, check=False)
 
 
-# The a3-remediation push is an INCREMENTAL push of a batch of ticket events against an
-# already-warm clone, so bound it with the _store incremental precedent
-# (_store/push.py._GIT_TIMEOUT = 30), NOT the 300s cold-materialize one. A timeout
-# surfaces as a synthetic failed CompletedProcess(124) naming the op + bound, which the
-# caller's existing ABORT path reports (never a bare TimeoutExpired, never a hang) —
-# mirroring _store/push.py._git (bug 983f).
+# Repair pushes incremental batches against a warm clone, so they use the store's
+# 30-second incremental bound. Timeout becomes ``CompletedProcess(124)`` for the
+# caller's abort path instead of escaping as ``TimeoutExpired``.
 _PUSH_TIMEOUT = 30
 
 
@@ -310,11 +288,8 @@ def _repair_ticket(
             handle.release()
 
     if plan["auto_orphans"] or (repair_stale_channel and plan["stale_channel"]):
-        # Task 08c8: go through the COMPOSED helper, not the bare rebuild — otherwise a
-        # ticket whose source a legacy (delete-style) compaction dropped is never
-        # recovered on this path and the b636 guard just refuses the rebuild. Imported
-        # locally because ``fsck_restore`` is imported at the BOTTOM of this module (it
-        # lazily imports ``snapshot_missing_sources`` back from here).
+        # The composed helper restores deleted sources before rebuilding. Import locally
+        # because ``fsck_restore`` lazily imports ``snapshot_missing_sources`` from here.
         from rebar._commands.fsck_restore import rebuild_with_restore as _rebuild_with_restore
 
         rebuilt, restored = _rebuild_with_restore(
@@ -601,15 +576,10 @@ def _abbrev(uuids: list[str], limit: int = 3) -> str:
 
 
 def snapshot_missing_sources(ticket_dir: str) -> list[str]:
-    """UUIDs cited by the newest active SNAPSHOT that have NO event file on disk (bug b636).
+    """Return source UUIDs cited by the newest snapshot but absent from disk.
 
-    Compaction before the I1 non-destructive rename (story tricolour-head-ratfish) DELETED
-    its folded sources, so for those tickets the cited state survives only inside the
-    SNAPSHOT's ``compiled_state``. A non-empty return is therefore PROOF that the raw log is
-    incomplete: a from-zero replay (even ``include_retired=True``) would reconstruct a partial
-    history and whatever status happened to survive would win.
-
-    Best-effort — an unreadable or absent snapshot yields ``[]`` (nothing proven missing).
+    A non-empty result proves the raw log is incomplete and unsafe for a from-zero rebuild.
+    An absent or unreadable snapshot yields ``[]`` because no missing source is proven.
     """
     try:
         names = sorted(os.listdir(ticket_dir))
@@ -631,9 +601,7 @@ def snapshot_missing_sources(ticket_dir: str) -> list[str]:
 def missing_sources_finding(
     ticket_dir: str, ticket_id: str, snapshot_filename: str, source_uuids: list
 ) -> list[str]:
-    """The ``SNAPSHOT_MISSING_SOURCES`` finding, so the latent population is visible BEFORE a
-    repair runs. Such a ticket is NOT safely rebuildable: a from-zero replay would drop the
-    state those deleted events carried."""
+    """Build a finding for missing snapshot sources that make replay unsafe."""
     try:
         names = sorted(os.listdir(ticket_dir))
     except OSError:
@@ -649,17 +617,11 @@ def missing_sources_finding(
 
 
 def rebuild_source_state(ticket_id: str, ticket_dir: str):
-    """The state a rebuild would persist, or ``None`` when it must NOT proceed (bug b636).
+    """Return the full-log rebuild state, or ``None`` when replay is unsafe.
 
-    FAIL CLOSED first: a from-zero replay is sound only when the raw log is COMPLETE, so a
-    prior SNAPSHOT citing sources absent from disk aborts the rebuild rather than
-    reconstructing a partial history. Ticket 34b1 already classifies STATUS and the other
-    order-sensitive kinds as HUMAN-TRIAGE, never auto-rebuilt — but that classification gates
-    only WHICH ORPHAN TYPE TRIGGERS a rebuild, and a rebuild is whole-ticket. This moves the
-    guard from the trigger to the blast radius.
-
-    Then the usual reduce: full raw-history state (active + retired, snapshots stripped),
-    INCLUDING the merged-in orphan the stale snapshot's positional skip had dropped.
+    Missing cited sources fail closed because a whole-ticket replay would lose their state.
+    Otherwise reduction includes active and retired events, excludes snapshots, and restores
+    any merged orphan omitted by the stale snapshot.
     """
     from rebar.reducer import reduce_ticket
 
@@ -690,12 +652,11 @@ def repair_or_plan(
     no_mutate: bool,
     dry_run: bool,
 ) -> tuple[list[str], list[str]]:
-    """RC2b Option 1: rebuild a stale snapshot that dropped a merged-in orphan, then re-check
-    (folds the orphan back in). Returns ``(lines_to_emit, findings_after)``.
+    """Plan or attempt a safe snapshot repair and return lines plus remaining findings.
 
-    Under ``dry_run`` it only PLANS (bug b636): ``--repair-snapshots`` previously ignored
-    ``--dry-run`` entirely and MUTATED the store, so the broad legacy rebuild could not be
-    previewed at all.
+    Eligible findings cover inconsistency, orphans, stale channels, and missing sources;
+    safety checks may leave them unresolved. ``dry_run`` reports the plan without changing
+    the store.
     """
     rebuildable = any(
         "SNAPSHOT_INCONSISTENT" in f
@@ -711,10 +672,8 @@ def repair_or_plan(
     if no_mutate:
         return [], findings
 
-    # Routing parity with `fsck --repair` (bug f96b): an order-sensitive orphan is
-    # HUMAN-TRIAGE, never auto-rebuilt — the rebuild is whole-ticket, so it would
-    # silently absorb the orphan in log order. Its presence blocks this ticket's
-    # rebuild; findings stay (the damage is real and still unrepaired).
+    # An order-sensitive orphan requires human triage and blocks the whole-ticket
+    # rebuild. Keep its findings because no repair occurred.
     triage = _repair_plan(ticket_dir, ticket_id)["triage_orphans"]
     if triage:
         return [
