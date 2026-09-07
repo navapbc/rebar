@@ -1,35 +1,12 @@
-# Terraform drift detection (ticket c7d4). Runs read-only `terraform plan` on any change
-# under infra/terraform/** and on a daily schedule, and FAILS when the plan is non-empty
-# (committed HCL that has not been applied, or live infra that has drifted from HCL). This
-# closes the gap behind dc3f: applies are manual (infra/runbooks/provision-restore.md), so
-# without this check committed infra could sit un-applied and unnoticed.
+# Read-only drift detection for Terraform-path PRs and daily/manual branch health. A non-empty
+# plan catches unapplied HCL or live drift while applies remain manual. The plan job assumes the
+# scoped OIDC read role and uses `-lock=false`; no static AWS key or state-lock write is needed.
 #
-# Auth: GitHub OIDC -> the rebar-terraform-plan IAM role (infra/terraform/iam.tf), which is
-# ReadOnlyAccess + kms:Decrypt-via-SSM. `-lock=false` keeps the plan strictly read-only (no
-# S3 state-lock write needed). No AWS static keys are stored in the repo.
-#
-# TWO JOBS, ON PURPOSE (bugs fd2b-7af3 and eebc-6aa1). Both bugs are the same shape: the
-# workflow could FAIL TO LOOK for drift while its outcome stayed indistinguishable from a
-# healthy one. The structure below makes finishing without an answer impossible:
-#
-#   `fmt`   formatting only. It CANNOT abort the drift plan, because it is not upstream of
-#           it and the plan does not `needs:` it. It previously was the plan job's FIRST
-#           step; `terraform fmt -check` exits 3 on a cosmetic whitespace difference, which
-#           killed the job before `plan` ran and blinded drift detection for two days
-#           (22s and 29s runs against a healthy 6m07s) while a declared-but-unapplied EBS
-#           volume and two CloudWatch alarms went unreported (bug fd2b-7af3).
-#   `plan`  drift only, and it FIRST proves it is planning the tree it claims to plan. A
-#           plan from a checkout behind the tracked branch reports "No changes" for
-#           resources declared on that branch, byte-identical to converged infrastructure
-#           (bug eebc-6aa1). The currency assertion is a hard gate, not advisory.
-#
-# So a red run names WHICH thing is wrong from the job list alone: `fmt` red means whitespace,
-# `plan` red means drift (or an un-provable tree). Neither can masquerade as the other, and
-# neither can silence the other.
-#
-# Both jobs are outside the required `Verified` vote aggregate in gerrit-verify.yaml, so
-# ADR 0114's advisory-before-hot-path staging does not apply: this workflow cannot lock its
-# own repair out of the landing path.
+# Formatting and planning are independent jobs so a cosmetic fmt failure cannot suppress the
+# drift answer. Before planning, the latter proves its full-history checkout is current with the
+# tracked tree; a stale tree can otherwise report the same "No changes" as convergence. Job names
+# distinguish formatting from drift or an unprovable plan. This advisory workflow is outside the
+# Gerrit Verified aggregate, so it cannot lock its own repair out of review.
 name: Terraform Drift
 
 # `main` CI on this mirror is SCHEDULED, not push-triggered (ticket 03ef-6fb5-158b-4abd).
@@ -137,22 +114,9 @@ jobs:
         run: terraform validate
 
       - name: terraform plan (fail on drift)
-        # -detailed-exitcode: 0 = no changes, 2 = a diff (un-applied drift), 1 = the plan
-        # could not be produced at all. -lock=false keeps it read-only.
-        #
-        # THE THREE OUTCOMES ARE NAMED, not merged into one red (bug a68c-9633-248c-4b06).
-        # Exit 1 and exit 2 are opposite conditions wearing the same colour: exit 2 means
-        # "we looked, and the infrastructure differs from the HCL"; exit 1 means "we could
-        # not look, and NOTHING here is known". When user_data.sh outgrew EC2's 16 KiB
-        # UserData cap, terraform could not evaluate the configuration at all, and this
-        # sweep went red for a day reading as ordinary drift while every apply was blocked.
-        # A conflation like that is the same class as erratic-sunny-genet (Mirror Guard
-        # reporting healthy:false when it could not reach the host) and
-        # deistic-conventual-blackmamba (a cancelled run voting Verified-1 FAILURE): the
-        # check must never let "no answer" pass for an answer.
-        #
-        # Both non-zero cases still FAIL — this changes what the failure SAYS, not whether
-        # it fails, so the sweep's gating behaviour is unchanged.
+        # `-detailed-exitcode` names all outcomes: 0 converged, 2 drift, and 1 no plan answer.
+        # Both non-zero cases still fail, but an evaluation error must not masquerade as observed
+        # drift. `-lock=false` keeps the live read from writing a state lock.
         shell: bash
         run: |
           set -o pipefail

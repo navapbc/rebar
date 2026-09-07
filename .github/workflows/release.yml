@@ -1,41 +1,19 @@
 name: Release
 
-# Build and publish nava-rebar to PyPI via Trusted Publishing (OIDC) — no stored token.
+# Publish nava-rebar through PyPI Trusted Publishing (OIDC), without a stored token.
+# Releases are manual dispatches from `refs/heads/main`, never pushed tags. Before building,
+# `authorize` checks the ref, version lockstep across the input/pyproject/server manifest,
+# HEAD ancestry, and required-reviewer plus main-only policy on the `pypi` environment.
+# Guard logic is unit-tested in scripts/release_guards.py.
 #
-# Release-source authorization (story fd84, Finding 1): the release is initiated ONLY by
-# `workflow_dispatch` run from `refs/heads/main` — never by a pushed `v*` tag. Because the
-# GitHub mirror's `main` is exactly the Gerrit-reviewed-and-landed history, releasing from
-# `main` guarantees the source was reviewed **by construction** (the mainstream OSS pattern:
-# release only from the protected branch). The `authorize` job asserts, BEFORE any build:
-#   (1) the run is on refs/heads/main,
-#   (2) version-lockstep — the `version` input == pyproject `[project].version` ==
-#       server.json top-level + every packages[].version,
-#   (3) ancestry — HEAD is reachable from origin/main (belt-and-suspenders vs the ref guard),
-#   (4) env-preflight — the `pypi` environment has required reviewers AND a main-only
-#       deployment-branch policy (fail-closed drift detection at release time).
-# The guard LOGIC lives in scripts/release_guards.py (unit-tested); the wiring is enforced by
-# tests/unit/test_release_workflow_pins.py. Publish happens DIRECTLY via OIDC Trusted
-# Publishing (no intermediate tag relay); the `v*` tag + GitHub Release are created only AFTER
-# a successful publish (record only — a tag is an output, never a trigger). A hand-pushed `v*`
-# tag can no longer reach the re-keyed `pypi` environment and therefore cannot publish.
+# Actions use immutable SHAs; the no-isolation build uses a hash-locked toolchain; and an
+# unprivileged job verifies the exact mcp-publisher archive before its OIDC job executes it.
+# Artifacts are built once, tested, then promoted byte-for-byte. PyPI publishes directly by
+# OIDC; the `v*` tag and GitHub Release are post-publish records, never triggers.
 #
-# Supply-chain hardening (story 08a8): every executable this workflow depends on is
-# pinned to an immutable reference — actions to full commit SHAs, the build toolchain
-# to a hash-locked requirements file consumed by a `--no-isolation` build, and the
-# mcp-publisher binary to an exact version whose SHA-256 is verified before it is ever
-# executed (in an unprivileged job, separate from the OIDC-privileged publish). See
-# docs/releasing.md ("Pinning").
-#
-# One-time PyPI setup (Account → Publishing → add a pending publisher):
-#   PyPI project name: nava-rebar
-#   Owner:             navapbc
-#   Repository:        rebar
-#   Workflow filename: release.yml
-#   Environment:       pypi   (the OIDC `sub` is environment-scoped, so it is
-#                              ref-independent — dispatch-from-main matches the same entry)
-# The GitHub environment named `pypi` (Settings → Environments) MUST have required-reviewers
-# protection AND a `main`-only deployment-branch policy — the `authorize` env-preflight fails
-# the release closed if either is missing.
+# PyPI's pending publisher must name project `nava-rebar`, owner `navapbc`, repository `rebar`,
+# workflow `release.yml`, and environment `pypi`. That GitHub environment must retain required
+# reviewers and a main-only deployment policy; preflight fails closed on drift.
 
 on:
   workflow_dispatch:
@@ -80,24 +58,19 @@ jobs:
         run: |
           python scripts/release_guards.py version-lockstep \
             --version "$VERSION" --pyproject pyproject.toml --server-json server.json
-      # (2b) MCP Registry description length — the registry rejects publish with a 422
-      # when server.json's top-level description exceeds its schema limit. Catch this
-      # BEFORE PyPI publish (that step is irreversible; the 0.13.0 release shipped to
-      # PyPI before this was ever caught, only failing later at the registry's own
-      # remote validation).
+      # Check the MCP Registry's description limit before the irreversible PyPI publish,
+      # rather than discovering a schema 422 during later registry promotion.
       - name: Guard — server.json description fits the MCP Registry schema
         run: |
           python scripts/release_guards.py mcp-registry-description --server-json server.json
-      # (3) Ancestry — HEAD must be reachable from origin/main (redundant with the ref guard
-      # under dispatch-from-main, kept as defense-in-depth).
+      # Defense in depth: HEAD must be reachable from origin/main as well as dispatched there.
       - name: Guard — HEAD is an ancestor of origin/main
         env:
           SHA: ${{ github.sha }}
         run: |
           git fetch --no-tags origin main
           python scripts/release_guards.py ancestry --sha "$SHA" --ref origin/main
-      # (4) Env-preflight — fail the release CLOSED if the pypi environment lost its required
-      # reviewers or its main-only branch policy (drift detected exactly when it matters).
+      # Fail closed if the `pypi` environment lost required reviewers or its main-only policy.
       - name: Guard — pypi environment preflight (required reviewers + main-only branch policy)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,11 +80,8 @@ jobs:
           gh api "/repos/${GH_REPO}/environments/pypi/deployment-branch-policies" > branch-policies.json
           python scripts/release_guards.py env-preflight \
             --response env.json --branch-policies branch-policies.json
-      # (5) Dependency advisories — a release NEVER ships on a known-vulnerable pin
-      # (bug 63e8). This is the one place a red dependency-advisory scan on `main` is
-      # load-bearing: it blocks releases, not merges and not Gerrit submit. Runs in
-      # `authorize`, which every publishing job descends from via `needs:`, so a blocking
-      # advisory stops the release before anything is built or published.
+      # Dependency advisories block releases, not Gerrit submit. Running this in `authorize`
+      # stops every publishing descendant before build when a shipped pin is vulnerable.
       - uses: ./.github/actions/setup-uv
         with:
           enable-cache: true
@@ -160,18 +130,10 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
-      # BUILD ONCE (story 6168): the wheel + sdist are built exactly once here, their
-      # SHA-256 digests recorded, and the SAME bytes flow to test + publish — the tested
-      # artifact IS the published artifact (no rebuild between test and publish). The
-      # release commit's short SHA is baked into the wheel/sdist via REBAR_BUILD_COMMIT so
-      # the sdist→wheel rebuild path can't lose provenance to `COMMIT = None` (see
-      # hatch_build.py / docs/releasing.md "Build-once").
-      #
-      # Hash-locked, --no-isolation build. Instead of pulling `build`/`twine` from PyPI
-      # unpinned, install the EXACT toolchain from the hash-locked lock into a fresh venv
-      # (--require-hashes fails on any unpinned/mismatched hash; --no-deps installs only the
-      # lock's entries), capture it as evidence, assert nothing ambient leaked into the env
-      # (the guard closes the --no-isolation hole), then build without a second isolated env.
+      # Build the wheel and sdist once, record their digests, and send those same bytes through
+      # tests and publication. REBAR_BUILD_COMMIT bakes the release SHA into both paths.
+      # Install only the hash-locked toolchain in a fresh venv, prove no ambient package leaked
+      # into the no-isolation build, and capture the toolchain as evidence.
       - name: Build sdist + wheel (hash-locked, --no-isolation)
         env:
           GITHUB_SHA: ${{ github.sha }}
@@ -297,12 +259,8 @@ jobs:
     name: Publish to PyPI
     needs: [build, wheel_test, sdist_test]
     runs-on: ubuntu-latest
-    # Publish on an authorized dispatch-from-main run (the `authorize` job upstream of `build`
-    # already enforced ref==main + version-lockstep + ancestry + env-preflight). The `pypi`
-    # environment's required reviewers below hold this job until an identity on that list
-    # approves the pending deployment. That is identity control over who can release the
-    # publish job -- not a second-party review of the release contents; see
-    # docs/releasing.md ("What the `pypi` environment gate does -- and does not -- guarantee").
+    # `authorize` already proved main, versions, ancestry, and environment policy. Required
+    # reviewers control who may release; they are not another review of artifact contents.
     if: github.event_name == 'workflow_dispatch'
     environment:
       name: pypi
@@ -314,9 +272,8 @@ jobs:
         with:
           name: dist
           path: dist/
-      # HASH GATE: the bytes we publish must be byte-identical to what build-once produced
-      # and the test jobs exercised. Verify against SHA256SUMS and FAIL on any mismatch;
-      # there is deliberately NO `python -m build` here — publish promotes, never rebuilds.
+      # Require the tested bundle to match SHA256SUMS exactly. Publishing promotes those bytes;
+      # it never rebuilds them.
       - name: Verify the bundle against SHA256SUMS (no rebuild)
         run: |
           ( cd dist && sha256sum -c SHA256SUMS )
@@ -325,24 +282,17 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
         with:
-          # PEP 740 digital attestations: the action generates + uploads
-          # provenance attestations for each artifact, signed via the same OIDC
-          # identity as Trusted Publishing. On by default when id-token: write is
-          # present; set explicitly so a future default flip can't silently drop
-          # them. The bundle lands in PyPI's PEP 740 store (predicate
-          # https://docs.pypi.org/attestations/publish/v1), NOT in GitHub's
-          # Artifact Attestations store, so consumers verify with
-          # `pypi-attestations verify pypi --repository <this repo>` — see
-          # docs/releasing.md ("Supply-chain attestations").
+          # Explicitly upload PEP 740 provenance signed by the Trusted Publishing OIDC identity.
+          # PyPI, not GitHub's artifact store, holds it; consumers use
+          # `pypi-attestations verify pypi --repository <this repo>`.
           attestations: true
 
   github_release:
     name: Create GitHub Release
     needs: publish
     runs-on: ubuntu-latest
-    # Runs after a successful publish so a GitHub Release never appears for a version that
-    # failed to publish. The `v*` tag is an OUTPUT here (created at the release SHA), never a
-    # trigger — the workflow is dispatch-only, so this tag cannot start another release run.
+    # Create the GitHub record only after publish. Its `v*` tag points at the release SHA and,
+    # because this workflow is dispatch-only, cannot trigger another release.
     if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: write   # create the tag + release + upload its asset
@@ -351,12 +301,9 @@ jobs:
         with:
           name: dist
           path: dist/
-      # Create the GitHub Release for this version with auto-generated notes (commit/PR list
-      # since the previous release) and mark it Latest, attaching the built sdist + wheel. The
-      # version comes from the dispatch input (NOT a pre-pushed tag). `gh release create`
-      # without `--verify-tag` CREATES the lightweight `v<version>` tag at --target (the run
-      # SHA, already asserted an ancestor of main) when it does not pre-exist — no tag relay /
-      # PAT needed. The step is idempotent: an existing release for the tag is updated in place.
+      # Attach the built artifacts, generate notes, and mark Latest. Without `--verify-tag`, gh
+      # creates the lightweight dispatch-version tag at the authorized run SHA; an existing
+      # release is updated, so no pre-pushed tag, relay PAT, or duplicate is required.
       - name: Create the v* tag + GitHub Release (record only, post-publish)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -378,19 +325,13 @@ jobs:
   mcp_verify:
     name: Verify pinned mcp-publisher
     runs-on: ubuntu-latest
-    # UNPRIVILEGED by design: this job downloads + digest-verifies the mcp-publisher
-    # binary but holds NO id-token: write. The OIDC token lives only in mcp_registry,
-    # which consumes the verified artifact — so an unverified/substituted archive can
-    # never be executed with the registry-publishing OIDC identity.
+    # Deliberately unprivileged: verify mcp-publisher here without `id-token: write`; only the
+    # later job may execute this verified artifact with the registry OIDC identity.
     permissions:
       contents: read
     steps:
-      # Download → verify → extract as three discrete steps (never a piped
-      # download-into-extract, which would unpack an unverified stream). The URL +
-      # SHA-256 are the immutable mcp-publisher pin;
-      # `sha256sum -c --strict` fails the job on any byte mismatch BEFORE extraction.
-      # Regenerate the pair with docs/releasing.md ("Pinning"); verify locally with
-      # `make verify-mcp-pin`.
+      # Download, strict-SHA-256 verify, then extract as separate steps so no unverified stream
+      # is unpacked. The URL/digest pair is the immutable pin documented in releasing.md.
       - name: Download + digest-verify mcp-publisher
         env:
           MCP_PUBLISHER_URL: "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.0/mcp-publisher_linux_amd64.tar.gz"
@@ -453,10 +394,8 @@ jobs:
       # same trust model as the PyPI Trusted Publishing above.
       - name: Authenticate to the MCP Registry via GitHub Actions OIDC
         run: ./mcp-publisher login github-oidc
-      # The registry validates that the PyPI package exists before accepting the
-      # server. Right after the publish job, pypi.org may not yet serve the new
-      # version — that raced on v0.7.1 (registry returned "PyPI package not found
-      # (404)"). Wait until PyPI serves this exact version before publishing.
+      # The registry requires the PyPI version to be visible; wait through propagation until
+      # pypi.org serves this exact version.
       - name: Wait for PyPI to serve this version
         env:
           VERSION: ${{ inputs.version }}
@@ -473,9 +412,8 @@ jobs:
           done
           echo "::error::PyPI did not serve nava-rebar ${version} within 5 minutes"
           exit 1
-      # Publish with a bounded, idempotent retry: check the registry for this
-      # version BEFORE each attempt, so a retry after a partial/duplicate publish
-      # (versions are immutable) is treated as success rather than looping to failure.
+      # Retry within a bound, checking first for the immutable version so a prior partial or
+      # duplicate publish counts as success.
       - name: Publish server.json to the MCP Registry
         env:
           VERSION: ${{ inputs.version }}
@@ -501,10 +439,8 @@ jobs:
 
   consolidate_evidence:
     name: Consolidate release evidence
-    # The fragment producers: action-pin evidence, build-toolchain evidence, the built-
-    # artifact digests (evidence-artifacts — wheel/sdist SHA-256s from the build-once job,
-    # story 6168), and the mcp-publisher digest evidence. This job's evidence-* glob picks
-    # up every fragment; `needs: build` covers both evidence-build and evidence-artifacts.
+    # Consolidate action pins, the build toolchain, build-once wheel/sdist digests, and the
+    # mcp-publisher digest. `needs: build` supplies both build evidence fragments.
     needs: [evidence_shapin, build, mcp_verify]
     runs-on: ubuntu-latest
     steps:
