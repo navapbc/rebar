@@ -19,18 +19,12 @@ dnf install -y nvme-cli || true
 # ---------------------------------------------------------------------------
 # 1) Resolve an EBS volume's NVMe device dynamically, by volume id.
 # ---------------------------------------------------------------------------
-# Nitro/Graviton presents EBS volumes as /dev/nvme*n1, NOT the /dev/sdf/sdg we ask
-# for in the attachment. We match by the EBS volume id, which AWS encodes (minus
-# dashes) in the NVMe controller serial number.
+# Nitro exposes EBS volumes as NVMe devices, not their requested attachment names. Resolve both
+# Gerrit and gate-scratch volumes by the dashless EBS ID in the controller serial.
 #
-# ONE function, two callers (the Gerrit data volume and the review-gate scratch
-# volume added by story aa40-cbda-ee38-481c). A second inline copy of this loop is
-# how the two would drift: the by-id fallback below exists because the nvme-cli path
-# has been observed to miss, and a copy that lacks it fails on exactly the boot the
-# fallback was added for.
+# Keep one shared resolver so both callers retain the by-id fallback when nvme-cli misses.
 #
-# Terraform's templatefile() substitutes the volume ids before this script is ever
-# executed. ShellCheck lints the UNRENDERED template and cannot know that.
+# Terraform substitutes volume IDs before execution. ShellCheck sees the unrendered template.
 
 # Two refusals, each written as its OWN function called from a single line, so the guard is
 # individually removable — which is what lets a test SEED the defect back in and prove the
@@ -197,19 +191,11 @@ fi
 # ---------------------------------------------------------------------------
 # 2b) Mount the review-gate SCRATCH volume (ADR 0112 decision 3, story aa40).
 # ---------------------------------------------------------------------------
-# Snapshot store + review-bot clones live here instead of on the root filesystem,
-# so a review burst can no longer wedge the OS disk (bug 3276).
+# Snapshot data and review clones use this volume instead of the OS disk.
 #
-# FAILS LOUD, and that is the point. A bare mount point is an ordinary directory:
-# if the mount silently does not take, every consumer keeps working — on root —
-# and the volume's failure mode becomes exactly the outage it was built to
-# prevent. `mount -a` alone does not prove the mount happened (a `nofail` entry is
-# skipped quietly), so the mount is ASSERTED with `mountpoint` — inside
-# `mount_ebs_volume`, so EVERY volume gets it and a second call site cannot be added
-# without one, which is how /var/gerrit came to have no assertion at all.
-# Both names are terraform template variables substituted before this ever runs, and
-# ShellCheck lints the UNRENDERED template — so each reference needs its own directive
-# (a disable comment covers only the line that follows it).
+# A `nofail` skip leaves an ordinary directory on root while `mount -a` reports success.
+# mount_ebs_volume therefore asserts both mounts and fails boot loudly. Terraform supplies
+# these variables after ShellCheck runs, so each reference needs its adjacent directive.
 # shellcheck disable=SC2154
 GATE_SCRATCH_MOUNT="${gate_scratch_mount}"
 # shellcheck disable=SC2154
@@ -219,29 +205,17 @@ if ! mount_ebs_volume "${gate_scratch_volume_id}" "$GATE_SCRATCH_MOUNT"; then
 fi
 
 # The two marker files rebar's gate admission reads (rebar.llm.gate_admission).
-# They are on DIFFERENT filesystems on purpose, which is what makes "mounted" and
-# "unmounted" tellable apart at all:
-#   .gate-scratch-required — beside the mount point, on ROOT: the DECLARATION that
-#     this host has a dedicated scratch volume. Survives an unmount.
-#   .gate-scratch-mounted  — inside the mount point, on the VOLUME: the PROOF.
-#     Disappears with the volume.
-# Declaration present + proof absent => gate admission refuses instead of quietly
-# repopulating the store on root.
-# `chmod` FIRST: the mount point was created under the ambient umask, and tightening it only
-# after writing the markers left a brief 0755 window on a directory that goes on to hold
-# review clones of every repository the bot sees. The window is small and the host is
-# single-tenant root, so the impact is hygiene rather than exposure -- but "tighten, then
-# populate" is the order the intent was recorded in, and an ordering that is right only by
-# accident is the kind that quietly becomes load-bearing (bug ad8d-4274-ef43-4f44 F4).
+# Root-side `.gate-scratch-required` declares the volume. Volume-side
+# `.gate-scratch-mounted` proves it is mounted. Declaration without proof makes admission
+# refuse instead of repopulating root. Tighten the mount before writing either marker.
 chmod 0700 "$GATE_SCRATCH_MOUNT"
 touch "$GATE_SCRATCH_MOUNT/../.gate-scratch-required"
 touch "$GATE_SCRATCH_MOUNT/.gate-scratch-mounted"
 echo "Gate scratch mounted at $GATE_SCRATCH_MOUNT and marked"
 
 # ---------------------------------------------------------------------------
-# 3) Fetch the SecureString secrets from SSM (instance role grants read on
-#    /rebar/prod/*) and write /etc/rebar/.env (0600). FAIL FAST on the CHANGEME
-#    sentinel — never write a half-configured env that silently misbehaves.
+# 3) Fetch required /rebar/prod SecureStrings into /etc/rebar/.env (0600).
+#    A CHANGEME sentinel is boot-fatal.
 # ---------------------------------------------------------------------------
 TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
 REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region \
@@ -253,17 +227,10 @@ umask 077
 : > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
-# param name -> env var key. (Brace expansions below are escaped as $${...}
-# because they survive templatefile to run in bash.)
-# PARAMS is consumed below as $${!PARAMS[@]} / $${PARAMS[$name]}; templatefile turns
-# each $$ into a literal $, so bash receives a real brace expansion.
-# Do NOT spell the post-render form out in prose here. templatefile() interpolates the
-# WHOLE file -- comments included, since # means nothing to it -- so an unescaped brace
-# expansion in a COMMENT is parsed as HCL and breaks every terraform operation in the
-# repo, not just this file (bug dd30-f10d-69f3-4c36; -target does not help, because
-# terraform evaluates the whole configuration first). Only $${...} is safe in this file;
-# the sole exception is ${data_volume_id}, which main.tf actually declares.
-# ShellCheck reads the escaped pre-render form and so cannot see the use.
+# Map parameter names to environment keys. `$${...}` is required for literal Bash brace
+# expansions even in comments because templatefile parses the whole file and renders `$$`
+# as `$`. Iteration uses `$${!PARAMS[@]}` / `$${PARAMS[$name]}`. Only declared
+# `${data_volume_id}` is a Terraform interpolation. ShellCheck sees the pre-render form.
 # shellcheck disable=SC2034
 declare -A PARAMS=(
   ["/rebar/prod/gerrit-admin-password"]="GERRIT_ADMIN_PASSWORD"
@@ -273,18 +240,11 @@ declare -A PARAMS=(
   ["/rebar/prod/anthropic-api-key"]="ANTHROPIC_API_KEY"
   ["/rebar/prod/alert-endpoint"]="ALERT_ENDPOINT"
   ["/rebar/prod/gerrit-bot-token"]="GERRIT_BOT_TOKEN"
-  # NOTE: the GitHub OAuth App creds (b744/WS8) are deliberately NOT fetched here.
-  # This cloud-init .env (/etc/rebar/.env) has no consumer of them; the containers
-  # read the OAuth creds from infra/compose/.env (written by fetch-secrets.sh at
-  # compose-up), and they are only required under auth.type = OAUTH. Adding them to
-  # this unconditional CHANGEME-fail-fast map would make a fresh boot die on the
-  # OAuth params before OAuth is even in use.
+  # OAuth credentials are intentionally excluded. Their consumers read compose .env only when
+  # OAUTH is enabled. Fetching them here would make unused placeholders boot-fatal.
 )
 
-# "$${!PARAMS[@]}" renders to a real bash key expansion: one word PER KEY, not one word
-# in total. (Writing the rendered form out here would itself be an unescaped
-# interpolation -- see the note above the declaration.)
-# ShellCheck sees the pre-render literal and wrongly reports a single-iteration loop.
+# `$${!PARAMS[@]}` renders one word per key. ShellCheck sees the literal and misdiagnoses it.
 # shellcheck disable=SC2066
 for name in "$${!PARAMS[@]}"; do
   key="$${PARAMS[$name]}"

@@ -1,19 +1,11 @@
 # ---------------------------------------------------------------------------
 # opcert.tf — trusted op-cert gate service edge (story 76d2, epic op-cert).
 #
-# ZERO FIXED-COST posture (the epic's compute-runtime resolution): the gate service
-# rides the EXISTING t4g.large `rebar-gerrit` box (a compose service behind the HOST
-# nginx TLS origin — see infra/compose/docker-compose.yml + infra/nginx/rebar.conf.template).
-# The only NEW cloud resources here are:
-#   - an API Gateway HTTP API (v2) — PAY-PER-REQUEST, no fixed monthly fee — that
-#     SigV4-authenticates callers (`authorization_type = "AWS_IAM"` on the route) and
-#     proxies to the box's HTTPS nginx origin, injecting a static origin-guard header;
-#   - an IAM role `rebar-opcert-admin` the API restricts Invoke to (trust from a deploy
-#     variable), the SOLE grantee of `execute-api:Invoke`;
-#   - two FREE SSM Parameter Store SecureString slots under /rebar/prod/* (already covered
-#     by the instance profile's `rebar-gerrit-ssm-params-read` grant — NO new IAM here).
-# NO Fargate/ECS, NO load balancer/VPC link, NO Secrets Manager, NO customer KMS CMK,
-# NO kms:Sign (SSHSIG signing is done by the service itself).
+# The service uses the existing `rebar-gerrit` host and nginx TLS origin. New resources are
+# pay-per-request API Gateway v2 with SigV4 and an injected origin guard, the sole
+# `execute-api:Invoke` role, and two SSM SecureStrings covered by the existing instance grant.
+# It needs no ECS/Fargate, load balancer/VPC link, Secrets Manager, customer CMK, or
+# `kms:Sign`. The service performs SSHSIG signing.
 #
 # `data.aws_caller_identity.current` is declared in iam.tf; reused here.
 # ---------------------------------------------------------------------------
@@ -30,13 +22,9 @@ variable "opcert_admin_principal_arns" {
 }
 
 # --- Origin-guard shared secret -------------------------------------------
-# Terraform-generated (the hashicorp/random provider is already pinned in versions.tf).
-# Its value is (a) stored as the /rebar/prod/opcert-origin-guard SSM SecureString below and
-# (b) injected as the static `X-Opcert-Guard` request header on the API Gateway integration.
-# Rotation = `terraform apply -replace=random_password.opcert_guard`, which updates BOTH the
-# SSM value and the integration header together; the operator then re-runs
-# infra/scripts/materialize-opcert-guard.sh to refresh the host-nginx map (brief fail-closed
-# window between the two steps — /opcert/ serves 403 until the map is rewritten).
+# Terraform stores this generated value in SSM and injects it as `X-Opcert-Guard`.
+# Rotate with `terraform apply -replace=random_password.opcert_guard`, then run
+# infra/scripts/materialize-opcert-guard.sh. `/opcert/` fails closed with 403 between steps.
 resource "random_password" "opcert_guard" {
   length  = 48
   special = false # keep it header-safe (alnum) — it travels as an HTTP header value
@@ -44,13 +32,9 @@ resource "random_password" "opcert_guard" {
 
 # --- SSM SecureString parameters (under the EXISTING rebar-gerrit-ssm-params-read grant) ---
 
-# The environment's passphrase-free Ed25519 op-cert PRIVATE key. Declared as a placeholder;
-# the operator SEEDS the real key out-of-band (`aws ssm put-parameter --overwrite`) after apply.
-# Write-only `value_wo` (ADR 0105) is NEVER persisted to terraform state, and the provider
-# re-sends it only when value_wo_version changes, so a later `terraform apply` NEVER
-# reverts/clobbers the operator-seeded key — Terraform owns the parameter's existence + type,
-# not its value. This applies ONLY to the key parameter (the guard parameter below is a
-# terraform-GENERATED value and stays fully Terraform-managed).
+# The operator seeds the passphrase-free Ed25519 private key after apply. Write-only
+# `value_wo` (ADR 0105) stays out of state and is resent only on a version change, so
+# Terraform owns this slot's existence and type, not its value. The guard stays fully managed.
 resource "aws_ssm_parameter" "opcert_ed25519_key" {
   name = "/rebar/prod/opcert-ed25519-key"
   type = "SecureString"
@@ -88,11 +72,8 @@ resource "aws_apigatewayv2_api" "opcert" {
   }
 }
 
-# HTTP_PROXY integration to the box's HTTPS nginx origin (NOT http://:80, which the nginx
-# config 301-redirects and would break the integration). The greedy `{proxy}` path variable
-# from the route is forwarded, and the static origin-guard header is APPENDED on every request
-# (`append:header.X-Opcert-Guard`) — nginx rejects any /opcert/ request whose header does not
-# match, so a direct-to-origin request that bypasses this API is refused.
+# HTTP_PROXY uses the HTTPS nginx origin because its HTTP redirect breaks integration. It
+# forwards `{proxy}` and appends the guard. nginx refuses direct requests without a match.
 resource "aws_apigatewayv2_integration" "opcert" {
   api_id                 = aws_apigatewayv2_api.opcert.id
   integration_type       = "HTTP_PROXY"
@@ -125,10 +106,8 @@ resource "aws_apigatewayv2_stage" "opcert" {
 }
 
 # --- IAM: the SOLE Invoke grantee -----------------------------------------
-# The admin role the API restricts Invoke to. Trust is limited to the deploy-supplied
-# principal ARNs — no principal outside `opcert_admin_principal_arns` can assume it, and
-# `AWS_IAM` route auth means only a SigV4-signed request from an Invoke-granted principal
-# reaches the origin.
+# Trust is limited to deploy-supplied principals. Route-level `AWS_IAM` admits only
+# SigV4-signed requests from an Invoke-granted principal.
 data "aws_iam_policy_document" "opcert_admin_assume" {
   statement {
     sid     = "AssumeOpcertAdmin"
@@ -144,13 +123,9 @@ resource "aws_iam_role" "opcert_admin" {
   name               = "rebar-opcert-admin"
   assume_role_policy = data.aws_iam_policy_document.opcert_admin_assume.json
 
-  # The trust principals are OPERATOR-SUPPLIED AT DEPLOY (`var.opcert_admin_principal_arns`,
-  # empty by default) — the SAME operator-owned pattern as the key SSM param above, so it gets
-  # the SAME guard. Without this, the terraform-drift check (`terraform plan` with no -var,
-  # .github/workflows/terraform-drift.yml) renders an empty principal and reports a permanent
-  # phantom "1 to change" against the live operator-applied principal, reddening the daily
-  # drift sweep forever and masking real drift. Terraform owns the role's existence, not who
-  # may assume it — the operator manages the trust list out-of-band (see the deploy runbook).
+  # The operator manages this trust list, whose default is empty. `ignore_changes` keeps the
+  # scheduled drift plan from replacing it when the deploy variable is absent. Terraform owns
+  # the role rather than its membership. See the deploy runbook.
   lifecycle {
     ignore_changes = [assume_role_policy]
   }
