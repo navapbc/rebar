@@ -151,9 +151,7 @@ def test_every_write_tool_advertising_a_schema_declares_push_status(rebar_repo: 
     silently ship without the field.
 
     A hand-written list would rot; this enumerates the registered write tools from
-    ``list_tools()`` and checks their advertised ``outputSchema``. The one documented
-    exception is ``declare_no_file_impact``, which deliberately uses FastMCP's
-    unstructured-output mode and therefore advertises no schema to add a field to.
+    ``list_tools()`` and checks their advertised ``outputSchema``.
     """
     from rebar.mcp_server import build_server
 
@@ -169,6 +167,7 @@ def test_every_write_tool_advertising_a_schema_declares_push_status(rebar_repo: 
         "archive_ticket",
         "compact_ticket",
         "set_file_impact",
+        "declare_no_file_impact",
         "set_verify_commands",
         "create_ticket",
         "create_idea",
