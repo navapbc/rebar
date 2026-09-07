@@ -18,6 +18,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GERRIT_BASE_URL` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_BOT_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_PROJECT` | `src/rebar/review_bot/config.py` |  |
+| `GITHUB_STEP_SUMMARY` | `src/rebar/_cli/_bridge_commands.py` |  |
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
 | `JIRA_API_TOKEN` | `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/_engine/rebar_reconciler/runtime.py`, `src/rebar/config.py` |  |
 | `JIRA_PAT` | `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
@@ -176,7 +177,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_164 variables._
+_165 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
