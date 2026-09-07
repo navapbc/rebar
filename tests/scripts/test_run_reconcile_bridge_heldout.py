@@ -53,6 +53,8 @@ def test_exact_pause_marker_is_benign_and_skips_delivery(tmp_path: Path) -> None
     checkout, _tracker, origin = bridge_workspace(tmp_path)
     before = git(origin, "rev-parse", "tickets").stdout.strip()
     env = runner_env(tmp_path, checkout)
+    summary = tmp_path / "step-summary.md"
+    env["GITHUB_STEP_SUMMARY"] = str(summary)
     env["STUB_MUTATE"] = "0"
     env["STUB_STDERR"] = (
         'BRIDGE_PAUSED: {"paused":true,"reason":"cutover","who":"operator@example.com",'
@@ -64,6 +66,12 @@ def test_exact_pause_marker_is_benign_and_skips_delivery(tmp_path: Path) -> None
     assert completed.returncode == 0
     assert "Reconcile bridge is paused; skipping ticket commit and push." in completed.stdout
     assert git(origin, "rev-parse", "tickets").stdout.strip() == before
+    summary_text = summary.read_text(encoding="utf-8")
+    assert "## :pause_button: Reconcile Bridge PAUSED" in summary_text
+    assert "- **Reason:** `cutover`" in summary_text
+    assert "- **Paused at:** `2026-08-10T12:00:00Z`" in summary_text
+    assert "reconciled nothing" in summary_text
+    assert "FAILED" not in summary_text
 
 
 @pytest.mark.parametrize(

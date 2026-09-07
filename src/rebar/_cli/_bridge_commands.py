@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.util
+import json
+import os
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -206,6 +208,40 @@ def _status(parsed: argparse.Namespace) -> int:
     return 0 if result["verdict"] in last_pass.HEALTHY_VERDICTS else 1
 
 
+def _pause_payload(stderr: str) -> dict[str, str] | None:
+    """Return the single valid bridge pause payload from captured stderr, if present."""
+    prefix = "BRIDGE_PAUSED: "
+    markers = [line.removeprefix(prefix) for line in stderr.splitlines() if line.startswith(prefix)]
+    if len(markers) != 1:
+        return None
+    try:
+        payload = json.loads(markers[0])
+    except json.JSONDecodeError:
+        return None
+    keys = ("paused", "reason", "who", "paused_at")
+    if not (
+        isinstance(payload, dict)
+        and tuple(payload) == keys
+        and payload["paused"] is True
+        and all(isinstance(payload[key], str) and payload[key] for key in keys[1:])
+    ):
+        return None
+    return {key: payload[key] for key in keys[1:]}
+
+
+def _write_pause_summary(payload: dict[str, str]) -> None:
+    """Make a paused no-op bridge run visible in GitHub Actions without paging."""
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")  # read-via: github-actions-summary
+    if not summary_path:
+        return
+    with open(summary_path, "a", encoding="utf-8") as fh:
+        fh.write("## :pause_button: Reconcile Bridge PAUSED\n\n")
+        fh.write("This run reconciled nothing because the bridge is paused.\n\n")
+        fh.write(f"- **Reason:** `{payload['reason']}`\n")
+        fh.write(f"- **Paused by:** `{payload['who']}`\n")
+        fh.write(f"- **Paused at:** `{payload['paused_at']}`\n")
+
+
 def _run_profile(parsed: argparse.Namespace) -> int:
     """Render the packaged bridge runner's captured streams exactly once."""
     import rebar
@@ -218,6 +254,14 @@ def _run_profile(parsed: argparse.Namespace) -> int:
         sys.stdout.write(stdout)
     if isinstance(stderr, str):
         sys.stderr.write(stderr)
+    if result["state"] == "paused" and isinstance(stderr, str):
+        payload = _pause_payload(stderr)
+        if payload is not None:
+            _write_pause_summary(payload)
+            sys.stderr.write(
+                "::notice title=Reconcile Bridge paused::No reconciliation ran; "
+                "see the job summary for the pause reason.\n"
+            )
     return result["returncode"]
 
 
