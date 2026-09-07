@@ -51,7 +51,7 @@ _TF_DIR = Path(__file__).resolve().parents[2] / "infra" / "terraform"
 # loudly instead of passing vacuously. A vacuous guard is the failure mode this guard exists
 # to prevent, so it must not be able to fall to it itself. Raise this floor when alarms are
 # added; never lower it without deleting alarms.
-_MIN_EXPECTED_ALARMS = 26
+_MIN_EXPECTED_ALARMS = 30
 
 _ALARM_RE = re.compile(
     r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{',
@@ -67,7 +67,7 @@ _MISSING_DATA_OPT_OUT_RE = re.compile(r"#\s*rebar:allow-missing-data-notbreachin
 # Host-published alarms had 13 rebar/host blocks when this guard was written. Same
 # anti-vacuity role as _MIN_EXPECTED_ALARMS: a scope filter that silently matches nothing
 # makes the guard below pass for free.
-_MIN_EXPECTED_HOST_ALARMS = 21
+_MIN_EXPECTED_HOST_ALARMS = 25
 
 
 def _quoted_attr(raw: str, masked: str, attr: str) -> str | None:
@@ -626,3 +626,52 @@ def test_no_alarm_watches_the_quota_reading() -> None:
             f"{file_name}:{label} alarms on container_quota_enforceable, which reads 0 until a "
             "host reboot enables rootflags=pquota — a permanently-firing alarm gets muted"
         )
+
+
+_LIVENESS_HEARTBEATS_REQUIRING_ALARMS = {
+    "gerrit_healthy": "rebar-gerrit-healthy-down",
+    "reviewbot_healthy": "rebar-reviewbot-healthy-down",
+    "mem_probe_ok": "rebar-memory-probe-not-ok",
+    "container_stats_ok": "rebar-container-stats-probe-not-ok",
+}
+_OBSERVABILITY_SH = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
+_PUBLISHED_METRIC_RE = re.compile(r"--metric-name[ \\\n]+(?P<metric>[A-Za-z0-9_]+)")
+
+
+def _published_observability_metrics() -> set[str]:
+    return set(_PUBLISHED_METRIC_RE.findall(_OBSERVABILITY_SH.read_text(encoding="utf-8")))
+
+
+def test_liveness_heartbeats_have_matching_alarms() -> None:
+    """Probe-success heartbeats must not be visible on dashboards but unwatched."""
+    published = _published_observability_metrics()
+    alarms_by_metric: dict[str, tuple[str, str, str]] = {}
+    for _file_name, _label, raw, masked in _host_alarm_blocks():
+        metric = _quoted_attr(raw, masked, "metric_name")
+        if metric:
+            alarms_by_metric[metric] = (
+                _quoted_attr(raw, masked, "alarm_name") or "",
+                _quoted_attr(raw, masked, "treat_missing_data") or "unset",
+                masked,
+            )
+
+    missing_publishers = sorted(set(_LIVENESS_HEARTBEATS_REQUIRING_ALARMS) - published)
+    assert not missing_publishers, "liveness metric(s) are no longer published: " + ", ".join(
+        missing_publishers
+    )
+
+    offenders: list[str] = []
+    for metric, alarm_name in _LIVENESS_HEARTBEATS_REQUIRING_ALARMS.items():
+        alarm = alarms_by_metric.get(metric)
+        if alarm is None:
+            offenders.append(f"{metric} has no alarm")
+            continue
+        found_name, missing_data, masked = alarm
+        if found_name != alarm_name:
+            offenders.append(f"{metric} alarm_name={found_name!r}, expected {alarm_name!r}")
+        if missing_data != "breaching":
+            offenders.append(f"{metric} treats missing data as {missing_data}")
+        if "aws_sns_topic.alerts.arn" not in masked:
+            offenders.append(f"{metric} alarm is not wired to the shared SNS topic")
+
+    assert not offenders, "liveness heartbeat alarm gap(s): " + "; ".join(offenders)
