@@ -96,6 +96,22 @@ def delivered_now(child: dict[str, Any], siblings: list[dict[str, Any]], *, repo
     return False
 
 
+def _uncertified_plan_review_reason(ticket_id: str, result: dict[str, Any]) -> str:
+    verdict = result.get("verdict", "unsigned")
+    detail = result.get("reason", "")
+    prefix = f"no certified plan-review attestation (signature: {verdict}; {detail})."
+    if verdict == "mismatch":
+        return (
+            f"{prefix} A signature was persisted but failed verification; run "
+            f"`rebar sign-review {ticket_id}` to re-sign the already-recorded PASS review"
+        )
+    return (
+        f"{prefix} Run `rebar review-plan {ticket_id}` to earn one, or "
+        f"`rebar sign-review {ticket_id}` if a review already PASSED but its "
+        "attestation failed to persist"
+    )
+
+
 def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     """The fast, local claim-path check for the PLAN-REVIEW gate. Returns
     ``{ok: bool, reason: str, verdict: str}``.
@@ -134,18 +150,12 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
         return {"ok": False, "reason": f"signing-unavailable: {exc}", "verdict": "error"}
 
     if not result.get("verified"):
-        # rebar cannot tell "never reviewed" from "review PASSed but signing aborted" —
-        # both leave no record — so name BOTH remedies rather than the one that happens to
-        # fit the common case (bug 94a3). ``sign-review`` is the cheap no-LLM recovery for
-        # the second; ``review-plan`` is the only one for the first.
+        # ``unsigned`` cannot distinguish "never reviewed" from "review PASSed but signing
+        # aborted" (bug 94a3), so it names both remedies. A ``mismatch`` proves a
+        # signature exists, so the cheap no-LLM ``sign-review`` remedy is unambiguous.
         return {
             "ok": False,
-            "reason": (
-                f"no certified plan-review attestation (signature: {result.get('verdict')}"
-                f"; {result.get('reason', '')}). Run `rebar review-plan {ticket_id}` to earn "
-                f"one, or `rebar sign-review {ticket_id}` if a review already PASSED but its "
-                "attestation failed to persist"
-            ),
+            "reason": _uncertified_plan_review_reason(ticket_id, result),
             "verdict": result.get("verdict", "unsigned"),
         }
     # We requested kind="plan-review" strictly, so a certified result IS a plan-review

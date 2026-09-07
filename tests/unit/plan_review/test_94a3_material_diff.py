@@ -411,6 +411,27 @@ def test_unsigned_claim_gate_message_names_both_remedies(monkeypatch) -> None:
     assert "review-plan" in res["reason"] and "sign-review" in res["reason"]
 
 
+def test_mismatch_claim_gate_message_names_sign_review_only(monkeypatch) -> None:
+    from rebar import signing
+    from rebar.llm.plan_review import attest_gate
+
+    monkeypatch.setattr(
+        signing,
+        "verify_signature",
+        lambda tid, kind=None, repo_root=None: {
+            "verified": False,
+            "verdict": "mismatch",
+            "reason": "ssh-keygen -Y verify rejected signature",
+        },
+    )
+
+    res = attest_gate.claim_gate_check("t-94a3")
+
+    assert res["ok"] is False
+    assert "sign-review t-94a3" in res["reason"]
+    assert "review-plan t-94a3" not in res["reason"]
+
+
 # ── gate-outcome invariance ─────────────────────────────────────────────────────
 @pytest.mark.parametrize(
     ("state_extra", "verdict"),
