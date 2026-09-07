@@ -443,11 +443,15 @@ fi
 # this box) and far below the 6.5 GB that went unnoticed.
 #
 # EVERY reading is GATED ON ITS OWN MEASUREMENT SUCCEEDING, the §2e rule: a probe that could
-# not measure publishes NOTHING rather than a plausible 0. All three alarms are
-# treat_missing_data = "breaching" (bug 3276 defect 2), so silence PAGES — while a fabricated
-# 0 would read as a healthy, empty Docker root on a box that is filling. The overlay2 `du` is
-# a DIAGNOSTIC BREADCRUMB only — it names the subtree in the log line and nothing is derived
-# from it — so its failing mutes nothing.
+# not measure publishes NOTHING rather than a plausible 0. The accepted degradation from bug
+# 5993 is explicit, however: the root `du` can time out under load while the probe remains
+# otherwise healthy, so the pageable state must be carried by a separate heartbeat instead of
+# spending the storage alarms' missing-data path on "bounded non-measurement". docker_du_ok
+# publishes 1 when the root `du` succeeded and 0 when it did not; the storage and residue gauges
+# stay silent on failure, and their alarms treat missing data as not-breaching so they do not
+# claim "full" when the actual observation is "could not check". The overlay2 `du` is a
+# DIAGNOSTIC BREADCRUMB only — it names the subtree in the log line and nothing is derived from
+# it — so its failing mutes nothing.
 #
 # DIMENSIONLESS on both sides, following root_disk_used_percent (§2b): CloudWatch keys a
 # metric by namespace+name+dimensions, so a dimension on only one side silently never matches.
@@ -880,16 +884,20 @@ docker_ledger_bytes() {
 
 docker_total_bytes=""
 docker_overlay2_bytes=""
+docker_du_ok=0
 # ONE walk for both readings, and its cost is itself published (docker_du_seconds below) so the
 # call that caused bug 9313-1fac-9f32-4b07 can be watched instead of re-measured by hand.
 docker_du_started_at="$(date +%s)"
 if docker_du_census "$DOCKER_ROOT"; then
   docker_total_bytes="$DOCKER_DU_TOTAL"
   docker_overlay2_bytes="$DOCKER_DU_OVERLAY2"
+  docker_du_ok=1
 fi
 docker_du_seconds=$(( $(date +%s) - docker_du_started_at ))
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name docker_du_seconds --unit Seconds --value "$docker_du_seconds" 2>/dev/null || true
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name docker_du_ok --unit Count --value "$docker_du_ok" 2>/dev/null || true
 
 if [ -n "$docker_total_bytes" ]; then
   aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \

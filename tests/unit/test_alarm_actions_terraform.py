@@ -51,7 +51,7 @@ _TF_DIR = Path(__file__).resolve().parents[2] / "infra" / "terraform"
 # loudly instead of passing vacuously. A vacuous guard is the failure mode this guard exists
 # to prevent, so it must not be able to fall to it itself. Raise this floor when alarms are
 # added; never lower it without deleting alarms.
-_MIN_EXPECTED_ALARMS = 30
+_MIN_EXPECTED_ALARMS = 31
 
 _ALARM_RE = re.compile(
     r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{',
@@ -67,7 +67,7 @@ _MISSING_DATA_OPT_OUT_RE = re.compile(r"#\s*rebar:allow-missing-data-notbreachin
 # Host-published alarms had 13 rebar/host blocks when this guard was written. Same
 # anti-vacuity role as _MIN_EXPECTED_ALARMS: a scope filter that silently matches nothing
 # makes the guard below pass for free.
-_MIN_EXPECTED_HOST_ALARMS = 25
+_MIN_EXPECTED_HOST_ALARMS = 26
 
 
 def _quoted_attr(raw: str, masked: str, attr: str) -> str | None:
@@ -256,16 +256,15 @@ def test_host_published_disk_alarms_treat_missing_data_as_breaching() -> None:
         # named set is that pin, so a later edit to either alarm fails here by name.
         ("monitoring_autodeploy.tf", "gate_scratch_disk_high"),
         ("monitoring_autodeploy.tf", "gate_scratch_unmounted"),
-        # The Docker generator trio (story 9183-aaae-667d-45e6). Same ADR 0112 obligation,
+        # The Docker generator pair (story 9183-aaae-667d-45e6). Same ADR 0112 obligation,
         # and the same reason to PIN rather than trust the copy-paste — but with one extra
-        # edge these three have and the others do not: observability.sh 2f publishes them
-        # ONLY on a successful measurement, so their missing-data state is a real, reachable
-        # runtime condition (a `du` that could not run, a wedged docker daemon) rather than
-        # only the dead-host case. `notBreaching` here would render exactly "the probe can no
-        # longer see the disk" as health.
-        ("monitoring_autodeploy.tf", "docker_storage_cap_high"),
+        # edge these have and the others do not: observability.sh 2f publishes them ONLY on a
+        # successful measurement, so their missing-data state is a real, reachable runtime
+        # condition rather than only the dead-host case. docker_du_not_ok below is the
+        # accepted-degradation carve-out for the root `du`; the BuildKit ledger heartbeat and
+        # Docker `du` heartbeat still own their dead/missing cases.
         ("monitoring_autodeploy.tf", "docker_buildkit_cache_high"),
-        ("monitoring_autodeploy.tf", "docker_unaccounted_bytes"),
+        ("monitoring_autodeploy.tf", "docker_du_not_ok"),
         # The journald pair (story e956-b1c3-45b9-4016). Same ADR 0112 obligation, pinned for
         # the same reason — and with the same reachable runtime edge as the Docker trio:
         # observability.sh 2g publishes ``journal_used_percent`` only on a successful
@@ -315,6 +314,21 @@ def test_host_published_disk_alarms_treat_missing_data_as_breaching() -> None:
         "publisher dies, missing data must enter ALARM and invoke alarm_actions, not "
         "clear as OK: " + ", ".join(offenders)
     )
+
+
+def test_bounded_docker_du_silence_is_alarmed_by_health_marker() -> None:
+    """Accepted du staleness pages as staleness, not as fabricated storage pressure."""
+    expected = {
+        "docker_storage_cap_high": "notBreaching",
+        "docker_unaccounted_bytes": "notBreaching",
+        "docker_du_not_ok": "breaching",
+    }
+    found: dict[str, str | None] = {}
+    for file_name, label, raw, masked in _alarm_blocks():
+        if file_name == "monitoring_autodeploy.tf" and label in expected:
+            found[label] = _quoted_attr(raw, masked, "treat_missing_data")
+
+    assert found == expected
 
 
 def test_masking_ignores_prose_mentions_of_alarm_actions() -> None:
@@ -633,6 +647,7 @@ _LIVENESS_HEARTBEATS_REQUIRING_ALARMS = {
     "reviewbot_healthy": "rebar-reviewbot-healthy-down",
     "mem_probe_ok": "rebar-memory-probe-not-ok",
     "container_stats_ok": "rebar-container-stats-probe-not-ok",
+    "docker_du_ok": "rebar-docker-du-not-ok",
 }
 _OBSERVABILITY_SH = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _PUBLISHED_METRIC_RE = re.compile(r"--metric-name[ \\\n]+(?P<metric>[A-Za-z0-9_]+)")
