@@ -1,19 +1,11 @@
-"""Cross-run PASS-verdict cache for the completion verifier (ticket 8d74-2c9f-c98f-4f0b).
+"""Test the completion verifier's cross-run PASS cache.
 
-Re-verification after exhaustion used to re-prove EVERY criterion (~10 min/cycle). The cache
-persists each validated PASS verdict at finalize under
-``.rebar/cache/completion_verdicts/<ticket>/<criterion-hash>.json``, keyed by (criterion-text
-hash, scoped content fingerprint), and SEEDS still-valid entries into the next run's
-run-scoped CriterionBank (stamped ``seeded: true``). PASS-only by design: insufficiency/FAIL
-records are never cached — the cache can only credit what an earlier validated run proved.
-
-Fingerprint scope pins (all RED-first):
-* own ``file_impact`` → git blob SHAs of those paths (an in-scope edit rotates the blob and
-  invalidates; an unrelated commit does NOT — the whole-repo tree sha would).
-* absent path → sentinel; git failure → None (reuse disabled for the run, fail-open to
-  re-verification).
-* empty own impact + children → union of DIRECT-child file_impact blobs.
-* childless + empty impact → whole-tree sha fallback.
+Validated PASS verdicts persist by criterion-text hash and scoped content fingerprint, then seed
+matching entries into the next run-scoped `CriterionBank`. Non-PASS verdicts are excluded. Owned
+path blobs keep unrelated commits from invalidating entries. Parents without owned impacts use
+direct-child impact blobs, while childless tickets use the whole-tree SHA. Missing paths use a
+sentinel, and Git failures disable reuse. Per-write temporary files preserve concurrent
+last-write-wins behavior.
 """
 
 from __future__ import annotations
@@ -490,15 +482,12 @@ def test_run_scoped_banks_stay_isolated_across_concurrent_closes(store: Path) ->
 def test_concurrent_persist_for_same_criterion_loses_no_writer(
     store: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two concurrent closes persisting the SAME ticket+criterion must BOTH land their
-    write, per the module's ``last-write-wins safe across concurrent closes`` invariant.
+    """Both concurrent writes for one ticket and criterion must persist.
 
-    A shared ``<hash>.tmp`` pathname makes that false: forced to interleave, both writers
-    write the one shared temp file, then the second ``os.replace`` finds a temp the first
-    already consumed → ``FileNotFoundError`` → the outer best-effort handler swallows it and
-    the writer silently returns 0 (its cache population lost). The barrier fires at the real
-    ``os.replace`` seam, so both writers have already run ``tmp.write_text`` (which precedes
-    the replace in the code) before either replace runs — a deterministic collision."""
+    The barrier pauses each writer at `os.replace` after its temporary file is written. Per-write
+    paths prevent either replace from consuming the other's file and preserve last-write-wins
+    behavior.
+    """
     import threading
 
     repo = store

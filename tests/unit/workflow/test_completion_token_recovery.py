@@ -368,14 +368,7 @@ def test_non_length_error_containing_context_does_not_enter_recovery() -> None:
     assert len(runner.requests) == 1
 
 
-# ── fd84: a step-budget exhaustion routes into the SAME bounded recovery ──────────────────
-#
-# `interpret_failure`'s budget branch raises LLMBudgetExhaustedError (a strict LLMRunnerError
-# subclass). Before fd84 the except spine here caught ONLY UnretryableOutputError, so a budget
-# stop PROPAGATED past the recovery machinery that exists exactly for it — the operator was
-# told "narrow the task" while the code that narrows the task sat unreachable one except
-# clause away. The catch is purely TYPED: a plain LLMRunnerError carrying the identical
-# message must still propagate (no message or diagnostic-shape sniffing).
+# Only typed `LLMBudgetExhaustedError` enters recovery. A plain runner error propagates.
 
 
 class _BudgetExhaustedRunner(_RecoverableRunner):
@@ -663,11 +656,7 @@ def test_bare_failure_still_raises_plain_llm_error(monkeypatch) -> None:
 
 
 def test_short_run_exhaustion_still_renders_repetition(monkeypatch) -> None:
-    """Seam-review Issue 1: below REPETITION_WINDOW tool calls usage_log GUARANTEES
-    distinct_ratio_window is None (usage_log.py: `if len(signatures) >= REPETITION_WINDOW`).
-    A token exhaustion at 10 calls must still render the five concrete counters in the
-    operator-facing message -- dropping the whole line re-creates the computed-then-
-    discarded defect 8b97 removes. No literal None placeholders either way."""
+    """Render short-run repetition counters without an unavailable ratio or `None` placeholder."""
     from rebar.llm.workflow.completion_recovery import raise_completion_workflow_failure
     from rebar.llm.workflow.executor import RunResult
 

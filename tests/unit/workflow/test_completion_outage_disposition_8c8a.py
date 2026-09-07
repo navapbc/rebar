@@ -1,18 +1,7 @@
-"""Held-out oracle for bug 8c8a: a RETRYABLE provider outage in the completion gate must
-surface its disposition so ``close_precheck`` maps it to exit 11 ("transient — retry"),
-not the misleading exit-1 verdict-less hard fault that offers ``--force``.
+"""Verify retryable completion outages retain their disposition through the raised-error path.
 
-The parity defect (caused_by authorial-hated-blackbear / epic jira-reb-687): that story built
-the exit-11 CONSUMER — ``close_precheck`` reads ``failure.outcome_of(exc).retryable`` — and wired
-the PRODUCER for the plan-review / code-review "Shape A" degrade verdicts
-(``_degraded_plan_review_verdict`` copies ``resolution_fields(outcome_of(error))`` onto coverage),
-but never wired the completion gate's "Shape B" raised-error path. A mid-run
-``LLMUnavailableError`` propagates raw out of ``CompletionAgentStep.run``, the workflow interpreter
-stringifies it into ``RunResult.error`` (dropping the ``.outcome`` the classifier attached at
-``run_failure`` :func:`interpret_failure`), and ``raise_completion_workflow_failure`` raises a fresh
-outcome-less ``LLMError`` → ``outcome_of`` returns ``None`` → exit 1.
-
-Offline — no billable call. Mirrors ``tests/unit/test_llm_disposition_plumbing.py``.
+`close_precheck` can then select its retry path. The tests also classify botocore read and connect
+timeouts without importing botocore.
 """
 
 from __future__ import annotations
@@ -144,12 +133,7 @@ def test_completion_agent_step_preserves_outage_disposition(monkeypatch) -> None
     assert step.failure_diagnostic.get("resolution_class") == ResolutionClass.WAIT_AND_RETRY.value
 
 
-# ── half 3: first-classification of a raw provider (botocore) transport timeout ────────────
-# ``failure._map`` gains a provider-agnostic arm so a raw Bedrock/botocore read/connect timeout
-# classifies retryable (WAIT_AND_RETRY) at FIRST classification, parallel to the httpx arm — the
-# same disposition the forwarding chain above then carries to exit 11. Matched by class-name +
-# ``botocore``-module prefix WITHOUT importing botocore, so these tests synthesize the exception
-# type with a controlled ``__module__`` (and a non-botocore control that must NOT match).
+# Botocore read and connect timeout names are retryable only under the botocore module.
 def _timeout_exc(name: str, module: str) -> BaseException:
     cls = type(name, (Exception,), {})
     cls.__module__ = module

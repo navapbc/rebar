@@ -1,19 +1,10 @@
-"""RP-06 S6 — the workflow editor's read-only Effective Policy view.
+"""Test the editor's read-only `/effective-policy` projection.
 
-These are real producer→consumer contract tests. They feed a real project
-``.rebar/criteria_routing.json`` overlay through the S1 ``CriteriaSnapshot`` compiler and
-assert the NARROW, read-only projection the editor server exposes at ``/effective-policy``:
-snapshot ``digest``/``source`` plus, per criterion, its gate, execution ``tier``, effective
-``posture``, ``applicability`` summary, and ``enabled``/provenance — and NOTHING else (no
-discovery trace, no prompt/context body, no provider response, no secret). The projection is
-configuration provenance, not a review-result viewer.
-
-The companion fail-loud criterion-authoring rule (a ``project.*`` code-review LLM criterion
-MUST declare non-empty ``applies_to`` globs, with plan-review/DET/built-in negative controls)
-is pinned in ``test_editor_batch.py`` alongside the other criterion-authoring tests.
-
-The implementer sees only the HAPPY-PATH section; the HELD-OUT section (edge/error/exclusion)
-is validated by the orchestrator against code it could not tailor to.
+The compiled snapshot supplies its digest and source. Each criterion supplies its gate, tier,
+posture, applicability, enabled state, and provenance. The view contains configuration provenance
+rather than review results and excludes discovery traces, prompt and context bodies, provider
+responses, detector bodies, and secrets. `test_editor_batch.py` covers authoring validation for
+project code-review globs.
 """
 
 from __future__ import annotations
@@ -129,9 +120,7 @@ def _clear_caches():
     criteria.clear_caches()
 
 
-# ══════════════════════════════════════════════════════════════════════════════════
-# HAPPY PATH (the implementer sees these) — pins the read-only projection contract.
-# ══════════════════════════════════════════════════════════════════════════════════
+# The snapshot digest binds the narrow policy projection.
 def test_effective_view_is_available_and_digest_bound(tmp_path):
     """A real overlay yields an AVAILABLE effective view carrying the snapshot's digest and a
     per-criterion projection of the compiled policy — the same digest the snapshot compiles."""
@@ -160,9 +149,7 @@ def test_effective_view_is_available_and_digest_bound(tmp_path):
     assert builtins, "expected at least one packaged plan-review built-in in the effective view"
 
 
-# ══════════════════════════════════════════════════════════════════════════════════
-# HELD-OUT: edge / error / exclusion oracle (orchestrator-validated).
-# ══════════════════════════════════════════════════════════════════════════════════
+# Scoped globs retain scoped applicability.
 def test_effective_view_reports_scoped_glob_applicability(tmp_path):
     """AC2: applicability provenance distinguishes a repository-wide criterion from a scoped
     one — a scoped glob is summarized as its glob, not as ``repository-wide``."""

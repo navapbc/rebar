@@ -124,16 +124,9 @@ def test_prompt_step_if_overlay_round_trips():
     assert review["if"] == "${{ steps.t.outputs.security }}"
 
 
-# ══════════════════════════════════════════════════════════════════════════════════
-# RP-06 S6 — project-LLM glob authoring validation + built-in/DET/plan-review controls.
-#
-# The editor's criterion-authoring seam enforces RP-06's project-applicability contract: a
-# ``project.*`` code-review LLM criterion MUST declare a non-empty list of non-empty
-# repository-relative ``applies_to`` globs, and an empty/missing/blank/non-list selector is
-# refused with the located ``use ["**"] for a repository-wide criterion`` remedy. Plan-review
-# project criteria, code-review DET criteria, and built-ins are negative controls — they keep
-# their own authoring semantics and are NOT forced through the glob rule.
-# ══════════════════════════════════════════════════════════════════════════════════
+# `project.*` code-review LLM criteria require a non-empty list of non-empty repository-relative
+# `applies_to` globs. The refusal recommends `["**"]` for repository-wide coverage. Plan-review
+# criteria, DET criteria, and built-ins retain their separate authoring rules.
 def test_authoring_a_valid_repository_wide_code_review_criterion_succeeds():
     """A ``project.*`` code-review LLM criterion whose ``applies_to`` is a non-empty list of
     non-empty globs authors cleanly (no fail-loud refusal)."""

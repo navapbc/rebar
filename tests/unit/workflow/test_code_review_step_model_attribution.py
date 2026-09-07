@@ -1,23 +1,7 @@
-"""Per-step model attribution for the code-review gate (story b690).
+"""Verify each code-review step resolves its declared model before reaching the runner.
 
-THE DEFECT UNDER TEST: the gate declares a model CLASS on four of its LLM steps — `base`
-(`model: frontier`), `round_a`/`round_b` (`model_ladder: [frontier]`), `verify` and `coach`
-(`model: standard`) — and a live run showed every one of nine calls made on `cfg.model` instead,
-including `verify`'s, whose `model: standard` was landed by ticket 172e. So the three-class
-configuration is declared and NOT honoured.
-
-WHY THE TEST IS BUILT THIS WAY — the trap that would make a green test worthless. The existing
-offline harness (`test_code_review_workflow.py`) passes `agent_runner=_FakeRunner(...)`, which
-REPLACES `RunnerAgentStep` wholesale and therefore never runs
-`resolve_model(cfg, step=ctx.step.get("model"), ...)` — the exact line whose behaviour is in
-question. A recording runner built that way observes only the DECLARED token the engine
-delivered, which is already covered elsewhere. So here the fake sits BENEATH the production agent
-step: `RunnerAgentStep` is real, and the underlying `Runner` is injected through its own
-`runner=` seam (consumed at `runs.py`'s `get_runner(cfg, override=self._runner)`). What it
-captures is `req.config.model` — the POST-resolution value, which is the fact at issue.
-
-The class table is pointed at models that DIFFER from `cfg.model`, so "declared class honoured"
-and "fell through to cfg.model" are distinguishable outcomes rather than the same string.
+`RunnerAgentStep` remains in the execution path while an injected underlying runner records
+`req.config.model`. Distinct class-table sentinels separate declared classes from `cfg.model`.
 """
 
 from __future__ import annotations
@@ -58,11 +42,7 @@ _DIFF = "diff --git a/src/auth/login.py b/src/auth/login.py\n+++ b/src/auth/logi
 
 @pytest.fixture
 def class_table(monkeypatch):
-    """Point the class table at three distinct sentinel models and clear the nine env overrides.
-
-    Hermetic on purpose: `_parse_slot` applies `REBAR_LLM_<CLASS>_<FIELD>` over the config table,
-    so an ambient override on a developer machine would silently retarget a class.
-    """
+    """Install distinct class sentinels after clearing ambient model overrides."""
     from rebar.llm import config as llm_config
 
     for name in _ENV_VARS:
@@ -81,12 +61,7 @@ def class_table(monkeypatch):
 
 
 class _RecordingRunner:
-    """The layer BENEATH the production agent step: captures the model it is actually handed.
-
-    `req.config.model` is post-resolution, and the step id comes from the executor-bound
-    ContextVar — the same carrier the usage log reads — so one recording covers both the
-    attribution wiring and the model actually used.
-    """
+    """Record each post-resolution model with its executor-bound step ID."""
 
     name = "recording"
 

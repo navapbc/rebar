@@ -1,15 +1,6 @@
-"""df94: gate-run CONSUMPTION (requests/tool_calls/duration) must survive to the completion
-sidecar — for a FAILING gate run, not only a passing one.
+"""Verify failing completion runs retain request, tool-call, and duration metrics in the sidecar.
 
-Sibling of aec1 (which fixed the same observability defect on the `.rebar/usage.jsonl` usage-log
-channel). This pins the SIDECAR channel that rides the ticket store: the COMPLETION_VERDICT
-sidecar payload must carry a `metrics` block with the consumed `requests`/`tool_calls` and a
-run duration, reaching parity with the plan-review REVIEW_RESULT sidecar's `metrics` block.
-
-Offline only: a fake runner stands in for the LLM (no tokens, no network) and reports a real
-run's consumption via its `_usage`; the reads the precheck performs are monkeypatched. The
-assertions are on the OBSERVABLE sidecar payload (`completion_sidecar.build_payload`), never a
-private name.
+An offline runner reports `_usage`, and assertions inspect the sidecar payload.
 """
 
 from __future__ import annotations
@@ -102,10 +93,7 @@ def test_failing_run_consumption_survives_to_the_sidecar(monkeypatch, tmp_path):
 
 
 def test_sanitize_diagnostic_admits_consumed_counters():
-    # Part 1: the sanitization allowlist admitted the LIMITs but DROPPED the consumed counters,
-    # so a durable diagnostic recorded the ceiling and silently lost the measurement. Assert the
-    # observable output of the boundary: `requests`/`tool_calls` survive (plain integers, no
-    # content), an unknown key is dropped, and string redaction still applies.
+    # Preserve consumed counters at the diagnostic boundary while dropping unknown keys.
     from rebar.llm.failure import sanitize_diagnostic
 
     out = sanitize_diagnostic(

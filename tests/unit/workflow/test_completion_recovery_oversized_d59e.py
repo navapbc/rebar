@@ -1,33 +1,7 @@
-"""A large, legitimate ticket reaches a verdict on its FULL context (bug d59e).
+"""Verify large tickets reach recovery with complete, unmodified context.
 
-Bounded completion recovery exists to survive an exhausted aggregate verifier (ticket 9a08,
-whose Impact calls the failure mode "a fail-closed close-gate availability defect: correct,
-merged work cannot transition to `closed`"). Before this change it did the opposite for a
-ticket that was merely large: ``_validate_recovery_inputs`` refused any context over 24,000
-chars, and the remedy it printed ("shorten the ticket's description/comments") could not be
-carried out — measured on the real ticket 9fd4-a94c-156e-4a56 (34,282 chars, reproducing its
-live failure byte-for-byte): description 10,281 + 9 comments 23,617, so deleting the ENTIRE
-description still leaves 24,001 chars, and comments cannot be deleted at all because the store
-is append-only (``_lib_writes`` exposes ``comment()`` with no delete/redact counterpart).
-
-**Why the budget is raised rather than made elastic.** An earlier attempt compacted an
-over-budget context by dropping comment history oldest-first. That was WITHDRAWN as a
-signed-false-PASS vector: on an epic the gate assembles one block PER TICKET
-(``operations.assemble_context(graph=True)``), each with its own ``#### Comments`` heading, so
-dropping "comment history" silently deleted whole CHILD tickets — including their unmet
-acceptance criteria — while reporting only that comments were removed. Elision is dangerous in
-both directions (dropping evidence a criterion IS met causes a false FAIL; dropping evidence it
-is NOT causes a false PASS), and this gate SIGNS its verdict. So: nothing is ever elided, the
-budget is large enough for real tickets, and anything above it is REFUSED visibly.
-
-What this file pins:
-
-* a realistic large ticket is verified on its full context, byte-identical — not "within
-  budget", not summarized, not truncated;
-* the criteria budget can never exceed the context budget (criteria ⊂ description ⊂ context),
-  the incoherence that made the top of the criteria budget unreachable;
-* an over-budget payload still fails fast with ZERO billable recovery calls, so raising the
-  budget did not delete the cost guard.
+The criteria ceiling cannot exceed the model-derived context ceiling. Payloads above that ceiling
+fail before recovery calls, preserving the cost guard.
 """
 
 from __future__ import annotations
@@ -51,10 +25,7 @@ pytestmark = pytest.mark.unit
 _NINE_FD4_CHARS = 34_282
 _TWO_NINE_THREE_TWO_CHARS = 41_595
 
-# The flat `_MAX_CONTEXT_CHARS` constant is retired (bug 8eb3): the physical context ceiling
-# is now derived from the resolved verifier model's own window. These tests consume the same
-# accessor the code does, evaluated for the default verifier model, so they track the
-# window-derived bound instead of a hard-coded number.
+# Derive the physical ceiling from the resolved default verifier model.
 _DEFAULT_CONTEXT_CEILING = _cr.physical_context_ceiling(VERIFIER_DEFAULT_MODEL)
 
 
@@ -122,12 +93,7 @@ def _ctx(context: str) -> StepContext:
 
 
 def _realistic_context(total: int) -> str:
-    """A context shaped like a real ticket: a description plus many evidence comments.
-
-    Deliberately NOT ``"x" * N`` — a degenerate blob is the hostile-input case covered
-    separately, and conflating the two is what let a guard written for hostile input refuse
-    legitimate work.
-    """
+    """Build a ticket-like context with acceptance criteria and evidence comments."""
     head = "Ticket: T-1\nDescription:\n## Acceptance Criteria\n" + "\n".join(
         f"- [ ] criterion {i}" for i in range(1, 7)
     )
@@ -162,12 +128,7 @@ def test_a_real_blocked_ticket_now_reaches_a_verdict(monkeypatch, label: str, si
 
 
 def test_the_full_context_reaches_the_model_with_nothing_elided(monkeypatch) -> None:
-    """The anti-elision guarantee, asserted byte-for-byte.
-
-    "Within budget" is not good enough: a summarized or truncated context is exactly the
-    signed-false-PASS vector this design withdrew. Every per-criterion call must carry the
-    assembled context verbatim.
-    """
+    """Require every evidence request to contain the complete context byte for byte."""
     monkeypatch.setattr("rebar._reads.show_ticket", lambda *a, **k: _ticket())
     context = _realistic_context(_NINE_FD4_CHARS)
     runner = _RecoverableRunner()
@@ -205,12 +166,7 @@ def test_the_budget_covers_the_tickets_this_defect_blocked() -> None:
 
 
 def test_an_over_budget_payload_still_fails_before_any_billable_call(monkeypatch) -> None:
-    """NEGATIVE CONTROL — raising the budget must not delete the cost guard.
-
-    Recovery re-sends the context once per criterion, so an unbounded context is a real
-    multiplier. A payload above the budget must still fail fast, buying only the single
-    already-spent primary request.
-    """
+    """Reject context above the model-derived ceiling before any recovery call."""
     monkeypatch.setattr("rebar._reads.show_ticket", lambda *a, **k: _ticket())
     runner = _RecoverableRunner()
     cfg = LLMConfig(runner="fake")

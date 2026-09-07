@@ -1,17 +1,7 @@
-"""Held-out oracle for bug b39a: when the completion verifier has already banked an
-operator-actionable BLOCK and THEN hits a provider outage, the gate must finalize a
-deterministic BLOCK verdict FROM THE BANK — with no further LLM calls — instead of dying
-verdict-less. Honors the module invariant "a run with any banked progress can never die
-verdict-less" (completion_recovery.py:11-12) under the OPERATOR DECISION re-scope: the trigger
-is "the bank already holds an operator-actionable BLOCK," NOT "the outage is sustained."
+"""Verify a retryable provider outage finalizes an actionable bank as a deterministic BLOCK.
 
-An EMPTY bank — or a bank holding only PASSes / insufficiency placeholders — has nothing
-actionable to surface, so it keeps the retryable exit-11 posture (ADR 0040): the outage
-re-raises with its disposition intact.
-
-Offline — no billable call. The fake primary run banks a genuine refutation through the
-record tool it is handed (exactly as a real primary banks incrementally), then raises a
-retryable ``LLMUnavailableError``. Mirrors ``test_completion_outage_disposition_8c8a.py``.
+Empty, PASS-only, or insufficient banks retain the retryable error path. The offline runner
+records a bank entry before raising `LLMUnavailableError`.
 """
 
 from __future__ import annotations
@@ -122,10 +112,7 @@ def _run(tmp_path, bank_action):
 
 # ── the fix: an actionable banked BLOCK + outage degrades to a deterministic BLOCK ─────────
 def test_actionable_bank_outage_degrades_to_deterministic_block(tmp_path) -> None:
-    """A banked refutation (met=false, NOT insufficiency) + a provider outage must finalize a
-    deterministic BLOCK from the bank with NO further LLM calls: verdict FAIL, certifiable
-    False, finalizer deterministic_fallback. RED before the fix (the arm re-raised the outage
-    unconditionally → LLMUnavailableError, verdict-less exit 11)."""
+    """An actionable refutation plus outage yields a non-certifiable FAIL without another call."""
     cid = _expected_ids()[_CRITERION]
 
     def bank_block(record_tool):

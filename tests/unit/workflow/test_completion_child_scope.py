@@ -1,13 +1,7 @@
-"""The completion gate must HONOR the caller's ``graph`` when assembling the verifier's context.
+"""Verify completion precheck preserves caller-owned graph scope.
 
-The close gate (``_commands.transition``) passes ``graph=False`` so an epic close verifies the
-epic's OWN completion criteria, NOT its whole descendant subtree — children are separate tickets
-gated on their own close (the deterministic child-closure precheck trusts their certified
-signatures). Bug: ``completion_precheck`` re-derived ``graph = (ticket_type == "epic")``,
-overriding the documented ``graph=False`` — so epic closes re-verified every descendant and blew
-the step budget (see the step-floor history in ``completion.py``). This pins that the precheck
-threads the caller's ``graph`` through to ``assemble_context`` (with the epic default preserved
-only when ``graph`` is not threaded — the standalone ``verify-completion`` path).
+A close passes `graph=False` to verify only the ticket. Direct workflow calls also default to
+`False`, while `verify_completion` resolves any epic-wide default upstream.
 """
 
 from __future__ import annotations
@@ -79,9 +73,7 @@ def test_precheck_honors_caller_graph_false_for_epic(tmp_path, monkeypatch):
 
 
 def test_precheck_defaults_to_false_when_graph_not_threaded(tmp_path, monkeypatch):
-    """When no graph is threaded (a direct workflow invocation), the precheck defaults to False —
-    verify the ticket's OWN criteria. The epic-includes-descendants deep-review default is resolved
-    UPSTREAM in verify_completion, not re-derived in the precheck (re-deriving was the bug)."""
+    """Without a supplied graph scope, precheck verifies only the ticket."""
     repo, epic = _repo_with_epic(tmp_path, monkeypatch)
     seen: dict = {}
 

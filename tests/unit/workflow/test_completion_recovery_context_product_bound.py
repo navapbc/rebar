@@ -1,26 +1,7 @@
-"""The two-ceiling recovery bound: physical (window-derived) + economic (bug 8eb3).
+"""Verify completion recovery's physical and economic context bounds.
 
-`d59e` raised a FLAT per-context char bound (24,000 → 100,000) and c9f7 outgrew it
-within weeks (121,147 chars > 100,000), refused forever because the store is append-only
-so context can only grow. A flat bound chases a monotonically growing tail; the fix is to
-derive the bound from the capacity it actually protects.
-
-`_validate_recovery_inputs` now expresses TWO distinct ceilings, evaluated against the
-resolved verifier model:
-
-* **Physical** — each evidence run must fit ONE model window. Derived from the resolved
-  model's OWN context window (`own_window_tokens`), NOT the plan-review escalation max
-  (`largest_window_tokens`, which over-admits because plan-review escalates up the ladder
-  and completion does not). ceiling = own_window_tokens × 2 chars/token, deliberately
-  conservative (English prose ≈ 4 chars/token) so half the window is left for the system
-  prompt, criteria, tool traffic, and output.
-* **Economic** — recovery re-sends the context once PER criterion, so spend scales with
-  `len(context) × len(criteria)`. A single flat product ceiling (3,200,000 = the
-  previously-ratified worst case, _MAX_CRITERIA 32 × 100k) replaces the arbitrary
-  per-axis split, allocating the ratified worst case where real tickets need it.
-
-This file is the held-out oracle for both ceilings and for the own-window accessor's
-own-vs-escalation semantics.
+The physical ceiling uses twice the resolved verifier model's own token window. Unknown models use
+the smallest ladder window. The economic ceiling bounds context length times criterion count.
 """
 
 from __future__ import annotations
@@ -54,13 +35,7 @@ _C9F7_CRITERIA = 22
 
 
 def test_own_window_accessor_returns_the_matched_models_own_window() -> None:
-    """AC: accessor(haiku rung) == 200,000 while largest_window_tokens(haiku) == 1,000,000.
-
-    Completion does not escalate models, so reusing plan-review's escalation accessor
-    would admit haiku contexts up to the LADDER MAX (1M tokens) instead of haiku's own
-    200k — over-admitting context that cannot fit one window. The two accessors must
-    disagree exactly here, side by side.
-    """
+    """Use the matched model's own window instead of the plan-review ladder maximum."""
     from rebar.llm.model_classes import own_window_tokens
     from rebar.llm.plan_review.sizing import largest_window_tokens
 
@@ -70,12 +45,7 @@ def test_own_window_accessor_returns_the_matched_models_own_window() -> None:
 
 
 def test_own_window_accessor_falls_back_to_the_ladder_minimum_for_unknown_models() -> None:
-    """An unrecognised model → the ladder MINIMUM (bug 48b3's conservative default).
-
-    Under-admitting is loud and recoverable (a large ticket refuses visibly); over-admitting
-    fails mid-run. The rung lookup is a substring match, so any family the ladder cannot
-    locate must inherit the smallest window, never the largest.
-    """
+    """Unknown models inherit the smallest ladder window."""
     from rebar.llm.model_classes import MODEL_WINDOW_LADDER, own_window_tokens
 
     ladder_min = min(window for _name, window in MODEL_WINDOW_LADDER)
