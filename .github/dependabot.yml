@@ -1,32 +1,15 @@
-# Dependabot — GitHub Actions version updates only.
+# Dependabot opens advisory PRs for monthly GitHub Actions and weekly uv updates.
+# `main` advances through Gerrit, so maintainers reproduce accepted bumps there and close
+# the GitHub PRs. The lockdown workflow exempts `dependabot[bot]` from auto-closure.
 #
-# ADVISORY-PR posture: this repo's `main` advances only through Gerrit review, so
-# a Dependabot pull request CANNOT be merged here. Dependabot PRs are advisory
-# notifications — the maintainer reads the diff, lands the equivalent bump via a
-# Gerrit change, and closes the PR (Dependabot is another shepherded patch author
-# under the PR-as-intake posture). The lockdown workflow
-# (.github/workflows/lockdown.yml, owned by story nonsecular-arthritic-sidewinder)
-# exempts dependabot[bot] with a job-level actor guard so these PRs are not
-# auto-closed.
+# The uv entry updates the committed `uv.lock` used by `make install`, CI, and the
+# reviewbot and opcert images. Published metadata retains unpinned minimums, so a pip entry
+# would change nothing. The `cooldown` key remains omitted because the disputed schema
+# feature offers little value at this cadence. Security alerts remain enabled independently
+# of version-update PRs.
 #
-# Scope + design decisions (recorded here so they survive independent of tickets):
-#   - GitHub-Actions ecosystem + the `uv` ecosystem. The uv block keeps the COMMITTED
-#     uv.lock fresh (ticket ce5d went uv-canonical: repo envs — make install, CI, the
-#     reviewbot/opcert images — install through the lock; published metadata keeps
-#     unpinned `>=` floors, so there is still no `pip` ecosystem entry: it would act on
-#     nothing).
-#   - The `cooldown` key is intentionally OMITTED. It is in production use in pip's
-#     own dependabot config, but its schema status was disputed in review and its
-#     value here is marginal (it only delays update PRs a few days). Omitting it
-#     removes any dependence on a contested feature. Revisit trigger: update-PR noise.
-#   - Rejected alternatives: a bespoke Gerrit-pushing bump bot (the Gerrit-peer
-#     pattern — Wikimedia LibraryUpgrader, OpenStack requirements automation —
-#     overkill for a monthly actions-only stream; parked as idea
-#     misogynic-cerulean-goldfish); and alerts-only with no version-update PRs
-#     (loses the ready-made diff; security alerts fire regardless and stay on).
-#   - mcp major pinned out (semver-major ignore in the uv block) per epic
-#     732b-51df-acf2-477b (fastmcp import removal); remove the ignore when the
-#     migration epic lands. 1.x patch/security bumps still flow; alerts stay on.
+# Ignore mcp major versions until `bared-nickel-insect` lands. Patch and security updates
+# remain enabled. User-facing follow-up is `rhyolite-saddening-aidi`.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
