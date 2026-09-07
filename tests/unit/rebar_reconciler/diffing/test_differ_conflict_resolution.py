@@ -88,7 +88,7 @@ def test_state_field_local_wins(
     assert m.action == mutation_mod.MutationAction.update
     assert m.target == "DSO-1"
     # resolve_state: local wins → "In Progress".
-    assert m.payload.get("status") == "In Progress"
+    assert m.payload.get("changed_fields", {}).get("status") == "In Progress"
 
 
 def test_set_field_union_resolution(
@@ -106,7 +106,7 @@ def test_set_field_union_resolution(
     m = result[0]
     assert m.action == mutation_mod.MutationAction.update
     assert m.target == "DSO-2"
-    resolved_labels = m.payload.get("labels")
+    resolved_labels = m.payload.get("changed_fields", {}).get("labels")
     assert set(resolved_labels) == {"X", "Y", "Z"}
 
 
@@ -128,7 +128,7 @@ def test_non_field_class_field_uses_raw_local(
     m = result[0]
     assert m.action == mutation_mod.MutationAction.update
     assert m.target == "DSO-3"
-    assert m.payload.get(field_name) == "new summary"
+    assert m.payload.get("changed_fields", {}).get(field_name) == "new summary"
 
 
 def test_unresolvable_conflict_emits_conflict_mutation(

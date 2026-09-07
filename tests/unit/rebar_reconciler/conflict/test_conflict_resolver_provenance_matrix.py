@@ -82,7 +82,8 @@ def _apply_mutation_to_snapshot(snapshot: dict, mutation) -> dict:
     if action in ("create", "update"):
         if target not in result:
             result[target] = {"local_id": payload.get("local_id", target)}
-        result[target].update(payload)
+        fields = payload.get("changed_fields") if action == "update" else None
+        result[target].update(fields if isinstance(fields, dict) else payload)
         return result
     # probe / conflict / clean_label / repair_property: no snapshot change.
     return result
@@ -275,7 +276,10 @@ def test_counter_edit_not_suppressed(differ, field, old, new):
     # not an echo. Expect a non-empty mutation list for this field.
     pass2 = differ.compute_mutations(prev_after, next_after)
     field_changes = [
-        m for m in pass2 if m.action.value == "update" and field in dict(m.payload or {})
+        m
+        for m in pass2
+        if m.action.value == "update"
+        and field in dict(dict(m.payload or {}).get("changed_fields") or {})
     ]
     assert field_changes, (
         f"counter-edit on {field}: pass 2 should emit a mutation reflecting "

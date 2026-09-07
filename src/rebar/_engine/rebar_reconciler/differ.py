@@ -601,7 +601,12 @@ def _compute_mutations_emit_both(
                 direction=MutationDirection.outbound,
                 action=MutationAction.update,
                 target=key,
-                payload=changed,
+                payload={
+                    "changed_fields": changed,
+                    "comments": [],
+                    "labels": [],
+                    "links": [],
+                },
                 provenance=_derive_provenance(
                     target=key,
                     primary_fields=jira_fields,
