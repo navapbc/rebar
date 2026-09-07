@@ -258,7 +258,7 @@ existing seam (a single already-locked operation) is exempt — the seam's own s
 ### 4c. Hold out the oracle
 
 Physically move the **edge and E2E tests out of the implementation subagent's working tree**
-(stash/relocate them; omitting them from the prompt is not enough — a subagent can read files).
+(move them under `$(git rev-parse --git-path heldout)/`; omitting them from the prompt is not enough — a subagent can read files, and `git stash create` does not preserve untracked tests).
 Leave only the **happy-path test(s)** in place. Declare the held-out paths off-limits.
 
 ### 4d. Subagent implements against the happy path only

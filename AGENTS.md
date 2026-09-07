@@ -257,7 +257,9 @@ restated here:
   repo-global and shared by every worktree). When rebar itself cannot write the store, use the
   supported door `rebar tracker-maintenance` (backup ref before the first write, refusal on
   unpushed ticket commits, durable audit) and its human-only `--force=<reason>` break-glass →
-  `docs/concurrency.md` §"Mutating the tracker: no AD-HOC raw git".
+  `docs/concurrency.md` §"Mutating the tracker: no AD-HOC raw git". Also do not use
+  `git stash` anywhere in this repository while linked worktrees share one repo-global
+  stash stack; see `docs/concurrency.md` for the hazard and safe substitutes.
 - **Session logs** — the `session_log` type semantics and the `session-log` helper +
   auto-rotation (incl. the ops error-sweep ledger convention) → `docs/event-schema.md`
   and `docs/user-guide.md`.

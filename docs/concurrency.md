@@ -928,10 +928,15 @@ theoretical — it dropped `src/…` and `.rebar/…` into the store, left the i
 unmerged entries and no `MERGE_HEAD`, and blocked every ticket write until a human
 intervened.
 
-rebar's own push recovery no longer does this: it records the dirty tree with
+rebar's own push recovery no longer does this: it records tracked dirty files with
 `git stash create`, which writes a stash **commit object** and returns its sha without
 touching `refs/stash`, and restores it with `git stash apply <sha>`. A commit named by sha
-is unreachable from another worktree's pop. Hold the same line in anything you write.
+is unreachable from another worktree's pop. This is safe for the tracked-file ticket-store
+recovery path it serves, but it is **not** a general substitute: `git stash create` does
+not capture untracked files, even with `-u`, so it will silently drop a newly authored
+held-out test. For a held-out oracle, move the file outside the worktree instead, e.g.
+`mkdir -p "$(git rev-parse --git-path heldout)" && mv <test> "$(git rev-parse --git-path heldout)/"`,
+then move it back for validation. Hold the same line in anything you write.
 
 ### The supported door — `rebar tracker-maintenance`
 

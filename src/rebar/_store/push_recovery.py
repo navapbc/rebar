@@ -67,8 +67,10 @@ def _stash_create(core: ModuleType, base_path: str) -> str | None:
     shared by every worktree, so a ``stash push``/``pop`` pair here could — and did — pop an
     entry created on a source branch, dropping ``src/…`` into the store and stranding the
     index. A commit addressed by sha is unreachable from another worktree's pop. Unlike
-    ``stash push``, ``create`` does NOT clean the working tree; the caller resets. Returns
-    the sha, ``""`` when the tree was already clean, or ``None`` on git failure."""
+    ``stash push``, ``create`` does NOT clean the working tree; the caller resets. This
+    tracker recovery only sets aside tracked modifications; untracked files remain in the
+    working tree and are handled by the merge-overwrite quarantine path if they collide.
+    Returns the sha, ``""`` when the tree was already clean, or ``None`` on git failure."""
     cp = core._git(base_path, "stash", "create", "push_tickets_branch:auto-stash")
     if cp.returncode != 0:
         return None
@@ -128,7 +130,9 @@ def _recover_dirty_merge(
     """Set the dirty tree aside, merge, and restore the working-tree edits.
 
     Uses a stash COMMIT OBJECT (never ``refs/stash``) so nothing here can interact with
-    the repo-global stash stack another worktree shares — see :func:`_stash_create`."""
+    the repo-global stash stack another worktree shares. This is safe here because the
+    ticket-store recovery only preserves tracked dirty files; it is not a held-out-oracle
+    substitute for untracked tests — see :func:`_stash_create`."""
     stash_sha = _stash_create(core, base_path)
     if stash_sha is None:
         _raise_if_strict(
