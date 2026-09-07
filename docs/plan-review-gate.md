@@ -67,7 +67,8 @@ The gate has **two layers**:
 * **Layer 1 — the deterministic floor (P1–P11)** — `det_floor.py`. The *only* tier
   that blocks **by default**. Frozen, deterministic, polyglot, fail-open. The
   sound, unambiguous blockers are **P1** (missing `## Acceptance Criteria`
-  checklist), **P4** (description above `verify.max_ticket_description_chars`, default 8,000),
+  checklist), **P4** (review-bounded prose outside `## Acceptance Criteria` above
+  `verify.max_ticket_description_chars`, default 8,000),
   **P5** (a dependency *cycle* among children), **P8** (the ticket
   is too big to review in full even one criterion at a time → "reduce/decompose"),
   **P10** (verification-presence), and **P11** (AC vagueness).

@@ -22,9 +22,9 @@ The checks
 * **P3 package existence** — probes explicit dependency references against the
   oracle's T0 deps lane. Coverage only, **never blocks**. (:mod:`det_advisory`.)
 * **P4 oversize signals** — a plan-size heuristic (AC count / file-impact count /
-  description length). Description overflow **BLOCKS**; AC count and file-impact
-  remain advisory. (``scc``/``lizard`` code metrics apply to code-review, epic
-  ``9da1`` — a plan has no diff to size.)
+  review-bounded prose length). Prose overflow **BLOCKS**; AC count and
+  file-impact remain advisory. (``scc``/``lizard`` code metrics apply to
+  code-review, epic ``9da1`` — a plan has no diff to size.)
 * **P5 task-DAG validity + interference** — for a container, detects dependency
   **cycles** among children (**BLOCKS** — sound + unambiguous) and file-impact
   interference between unordered children (advisory).
@@ -49,10 +49,10 @@ The checks
   both word boundaries, code-span aware) over AC item lines only. **BLOCKS.**
   (ticket 49b8; :mod:`det_clarity`; P6's advisory lexicon shares the matcher.)
 
-The only sound, unambiguous blockers are therefore **P1, P4 (description), P5 (cycle),
-P8, P10, and P11**. Everything else is advisory or coverage-only, consistent with "the
-DET floor blocks only on sound, unambiguous checks and fails open on everything
-else".
+The only sound, unambiguous blockers are therefore **P1, P4 (review-bounded prose),
+P5 (cycle), P8, P10, and P11**. Everything else is advisory or coverage-only,
+consistent with "the DET floor blocks only on sound, unambiguous checks and fails
+open on everything else".
 
 That blocking / never-blocking split is also this module's SIZE seam. The four checks
 that can never block (P2, P3, P6, P7) live in :mod:`det_advisory`; they call nothing
@@ -300,14 +300,14 @@ P4_FILE_IMPACT_SOFT_CAP = 30  # file-impact entries
 # signal branch below flags, and that is where decomposition advice belongs. Both messages
 # POINT AT the packaged authoring guide rather than restating it, so they cannot drift from it.
 P4_OVER_LIMIT_FIX = (
-    "Shorten the description to at most {desc_limit} characters by writing more concisely and "
-    "moving narration out — not by splitting coherent work. KEEP the context a reader who has "
-    "never seen this ticket needs in order to evaluate the plan: the problem, the constraints "
-    "the work must respect, and each acceptance criterion with how it will be evidenced. MOVE "
-    "the narration into ticket comments or a session log, where it stays discoverable without "
-    "consuming the reviewer's and completion-verifier's context: investigation history, method "
-    "discussion, rationale for choices already settled, and the conversational progression that "
-    "led to the plan. Run `rebar explain plan` for the authoring guidance. Split into child "
+    "Shorten the review-bounded prose outside `## Acceptance Criteria` to at most {desc_limit} "
+    "characters by writing more concisely and moving narration out — not by splitting coherent "
+    "work. KEEP the context a reader who has never seen this ticket needs in order to evaluate "
+    "the plan: the problem, the constraints the work must respect, and each acceptance criterion "
+    "with how it will be evidenced. MOVE the narration into ticket comments or a session log, "
+    "where it stays discoverable without consuming the reviewer's context: investigation history, "
+    "method discussion, rationale for choices already settled, and the conversational progression "
+    "that led to the plan. Run `rebar explain plan` for the authoring guidance. Split into child "
     "tickets only when the WORK is genuinely more than one unit — the advisory oversize signals "
     "flag that case separately."
 )
@@ -326,25 +326,50 @@ def _description_limit(repo_root: str | None) -> int:
     return _config.compose_config(repo_root).verify.max_ticket_description_chars
 
 
+def review_bounded_description_chars(description: str) -> int:
+    """Characters charged to the P4 review-admission cap.
+
+    The cap bounds free-form plan narration. The Acceptance Criteria block is already
+    structured and independently bounded by AC count plus P8's whole-context budget, so AC
+    corrections must not turn an already-reviewed ticket into an over-cap deadlock.
+    """
+    lines = description.splitlines(keepends=True)
+    charged = 0
+    in_ac = False
+    for line in lines:
+        if re.fullmatch(r"##[ \t]+Acceptance Criteria[ \t]*\n?", line, re.IGNORECASE):
+            in_ac = True
+            continue
+        if in_ac and re.fullmatch(r"##[ \t]+.+?[ \t]*\n?", line):
+            in_ac = False
+        if not in_ac:
+            charged += len(line)
+    return charged
+
+
 def p4_oversize(ctx: PlanContext) -> DetResult:
     """Report one size finding; only a description above the configured limit blocks."""
     ac = _count_ac_items(ctx.plan_text)
     fi = len(ctx.state.get("file_impact") or [])
     chars = len(ctx.description)
+    review_bounded_chars = review_bounded_description_chars(ctx.description)
     desc_limit = _description_limit(ctx.repo_root)
-    description_over_limit = chars > desc_limit
+    description_over_limit = review_bounded_chars > desc_limit
     signals = []
     if ac > P4_AC_SOFT_CAP:
         signals.append(f"{ac} acceptance-criteria items (> {P4_AC_SOFT_CAP})")
     if fi > P4_FILE_IMPACT_SOFT_CAP:
         signals.append(f"{fi} file-impact entries (> {P4_FILE_IMPACT_SOFT_CAP})")
     if description_over_limit:
-        signals.append(f"description is {chars} chars (> {desc_limit})")
+        signals.append(
+            f"review-bounded description prose is {review_bounded_chars} chars (> {desc_limit})"
+        )
     cov = {
         "ran": True,
         "ac_items": ac,
         "file_impact": fi,
         "desc_chars": chars,
+        "review_bounded_chars": review_bounded_chars,
         "desc_limit_chars": desc_limit,
     }
     if not signals:

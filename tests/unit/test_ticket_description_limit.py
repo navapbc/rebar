@@ -8,25 +8,32 @@ import pytest
 
 from rebar.config import Config, ConfigError
 from rebar.llm.plan_review.det_floor import PlanContext, p4_oversize, run_det_floor
+from rebar.llm.plan_review.pass1 import material_fingerprint
 from rebar.llm.workflow import steps as _steps  # noqa: F401 — register gate operations
 from rebar.llm.workflow.executor import STEP_REGISTRY, StepContext
 
 pytestmark = pytest.mark.unit
 
 _TARGET = "T-oversize"
-_PLAN_START = (
-    "## Why\nBound expensive review inputs.\n\n"
-    "## What\nReject descriptions above the configured maximum.\n\n"
+_PLAN_CHARGED_SUFFIX = (
+    "\n\n## What\nReject descriptions above the configured maximum.\n\n"
     "## Scope\nPlan and completion admission only.\n\n"
-    "## Acceptance Criteria\n"
-    "- [ ] The exact boundary is enforced and covered by tests.\n\n"
     "## Testing\nRun the focused unit test.\n\n"
+)
+_PLAN_AC_SUFFIX = (
+    "## Acceptance Criteria\n- [ ] The exact boundary is enforced and covered by tests.\n\n"
 )
 
 
 def _description(length: int) -> str:
-    assert length >= len(_PLAN_START)
-    return _PLAN_START + ("x" * (length - len(_PLAN_START)))
+    prefix = "## Why\n"
+    assert length >= len(prefix) + len(_PLAN_CHARGED_SUFFIX)
+    return (
+        prefix
+        + ("x" * (length - len(prefix) - len(_PLAN_CHARGED_SUFFIX)))
+        + _PLAN_CHARGED_SUFFIX
+        + _PLAN_AC_SUFFIX
+    )
 
 
 def _state(ticket_type: str, length: int, *, file_impact=None) -> dict:
@@ -90,15 +97,36 @@ def test_typed_config_rejects_non_positive_integer_limit(value) -> None:
         Config.from_mapping({"verify": {"max_ticket_description_chars": value}})
 
 
-def test_p4_allows_8000_and_blocks_8001() -> None:
+def test_p4_allows_8000_and_blocks_8001_of_review_bounded_prose() -> None:
     admitted = p4_oversize(_plan_context(8_000))
     rejected = p4_oversize(_plan_context(8_001))
 
     assert admitted.status == "pass"
     assert admitted.blocked is False
     assert rejected.blocked is True
-    assert rejected.coverage["desc_chars"] == 8_001
+    assert rejected.coverage["review_bounded_chars"] == 8_001
     assert rejected.coverage["desc_limit_chars"] == 8_000
+
+
+def test_p4_does_not_deadlock_near_cap_acceptance_criteria_correction() -> None:
+    base = (
+        "## Why\n" + ("n" * 7_937) + "\n\n## Acceptance Criteria\n- [ ] Old incorrect criterion.\n"
+    )
+    correction = base + "- [ ] Corrected criterion with the factual explanation that pushed over.\n"
+    assert len(base) <= 8_000 < len(correction)
+
+    result = p4_oversize(_plan_context(len(correction), description=correction))
+
+    assert result.blocked is False
+    assert result.coverage["desc_chars"] == len(correction)
+    assert result.coverage["review_bounded_chars"] <= 8_000
+
+
+def test_acceptance_criteria_correction_still_changes_material_fingerprint() -> None:
+    before = _plan_context(8_000)
+    after = _plan_context(8_000, description=before.description.replace("boundary", "corrected"))
+
+    assert material_fingerprint(after) != material_fingerprint(before)
 
 
 def test_p4_honors_configured_positive_override(monkeypatch) -> None:
@@ -150,8 +178,9 @@ def test_p4_other_size_signals_remain_one_advisory_finding() -> None:
 
 
 def test_p4_combines_all_signals_into_one_blocking_finding() -> None:
-    start = "## Acceptance Criteria\n" + "".join(f"- [ ] item {index}\n" for index in range(26))
-    description = start + ("x" * (8_001 - len(start)))
+    acs = "## Acceptance Criteria\n" + "".join(f"- [ ] item {index}\n" for index in range(26))
+    prose = "## Why\n" + ("x" * 8_001) + "\n\n"
+    description = prose + acs
     ctx = _plan_context(
         8_001,
         description=description,
@@ -222,30 +251,21 @@ def test_completion_precheck_accepts_description_at_exact_limit(monkeypatch) -> 
     assert result["verdict"] is None
 
 
-def test_completion_precheck_rejects_before_child_or_context_work(monkeypatch) -> None:
+def test_completion_precheck_does_not_reject_oversize_description(monkeypatch) -> None:
     state = _state("task", 5_001)
     monkeypatch.setattr("rebar._reads.show_ticket", lambda *a, **k: dict(state))
     monkeypatch.setattr(
         "rebar.config.load_config",
         lambda *a, **k: Config.from_mapping({"verify": {"max_ticket_description_chars": 5_000}}),
     )
-
-    def _unexpected(*_args, **_kwargs):
-        raise AssertionError("oversize completion must short-circuit before downstream work")
-
-    monkeypatch.setattr("rebar.llm.completion.child_closure_findings", _unexpected)
-    monkeypatch.setattr("rebar.llm.operations.assemble_context", _unexpected)
-    monkeypatch.setattr(
-        "rebar.llm.config.resolve_gate_config",
-        lambda *a, **k: SimpleNamespace(runner="fake", model="fake", repo_path="."),
-    )
+    monkeypatch.setattr("rebar.llm.completion.child_closure_findings", lambda *a, **k: ([], []))
+    monkeypatch.setattr("rebar.llm.operations.assemble_context", lambda *a, **k: ("context", []))
+    monkeypatch.setattr("rebar.llm.completion.build_child_closure_evidence", lambda *a, **k: "")
+    monkeypatch.setenv("REBAR_VERIFY_PREFETCH", "0")
 
     result = STEP_REGISTRY["completion_precheck"](_step_context())
 
-    assert result["run_verify"] is False
-    assert result["precheck_failed"] is True
-    assert result["context"] == ""
-    assert result["verdict"]["verdict"] == "FAIL"
-    assert result["verdict"]["runner"] == "deterministic"
-    assert "5,001" in result["verdict"]["summary"]
-    assert "5,000" in result["verdict"]["summary"]
+    assert result["run_verify"] is True
+    assert result["precheck_failed"] is False
+    assert "context" in result["context"]
+    assert result["verdict"] is None

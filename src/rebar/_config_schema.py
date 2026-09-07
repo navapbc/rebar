@@ -52,7 +52,7 @@ def _documented(default: _FieldValue, description: str) -> _FieldValue:
 class VerifyConfig:
     max_ticket_description_chars: int = _documented(
         8_000,
-        "Sets the ticket description limit used by plan review and completion verification.",
+        "Sets the review-bounded ticket-description prose limit used by plan review.",
     )
     enforce_plan_material_pins: bool = _documented(
         False,

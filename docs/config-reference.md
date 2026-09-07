@@ -60,7 +60,7 @@ The 104 typed `section.field` keys with type, default, description, and lifecycl
 
 | Key | Type | Default | Description | Lifecycle |
 |-----|------|---------|-------------|-----------|
-| `verify.max_ticket_description_chars` | `int` | `8000` | Sets the ticket description limit used by plan review and completion verification. | active |
+| `verify.max_ticket_description_chars` | `int` | `8000` | Sets the review-bounded ticket-description prose limit used by plan review. | active |
 | `verify.enforce_plan_material_pins` | `bool` | `False` | Requires plan-review signatures to pin reviewed ticket material. | active |
 | `verify.require_completion_verification_for_close` | `bool` | `False` | Requires a passing completion verification before a work ticket can close. | active — replaces removed key `verify.require_verdict_for_close` |
 | `verify.completion_pinned_ticket_view` | `bool` | `False` | Uses the experimental non-epic lazy ticket view and atomic completion-close bundle when sync.push is always. | active |
