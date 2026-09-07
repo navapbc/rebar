@@ -1,10 +1,7 @@
-"""Map an export NDJSON record → write-path kwargs, carrying provenance (P1.2).
+"""Translate exported records into fresh local-create kwargs.
 
-An imported ticket gets a FRESH local id and FRESH HLC timestamps (the locked
-write path assigns them); the source store's identity is preserved as ``source_*``
-metadata on the CREATE/COMMENT events (T1 plumbing), never injected as foreign
-timestamps. This module is the single place that decides which export fields become
-provenance, so the importer stays declarative.
+The locked writer assigns local IDs and HLCs; source identity becomes ``source_*``
+metadata. This module alone owns that provenance mapping.
 """
 
 from __future__ import annotations
@@ -13,15 +10,9 @@ from typing import Any
 
 
 def _coerce_ns(value: Any) -> Any:
-    """Coerce a nanosecond-timestamp field to a canonical ``int`` (``None`` passes through).
+    """Return exact nanoseconds as ``int`` from JSON numbers or decimal strings.
 
-    The export wire form (bug ``guilty-pusslike-wyvern``) carries a ``time.time_ns()``
-    timestamp outside the JS-safe range as its EXACT decimal STRING, while older exports
-    (and in-range values) carry a bare JSON number. Coercing with ``int()`` accepts BOTH,
-    so an imported ticket's ``source_created_at`` provenance is always a canonical int with
-    the exact digits — the ``export | import`` round-trip cannot drift the type. A
-    non-numeric or absent value is left untouched (``None`` / malformed provenance is
-    tolerated by the write path rather than aborting the import row).
+    Preserve ``None`` and malformed provenance so one field cannot abort the import row.
     """
     if value is None or isinstance(value, int):
         return value
@@ -32,16 +23,10 @@ def _coerce_ns(value: Any) -> Any:
 
 
 def create_kwargs(record: dict[str, Any]) -> dict[str, Any]:
-    """Keyword args for ``create_ticket`` from one export record (parent set later).
+    """Build ``create_ticket`` kwargs, leaving parent wiring for later.
 
-    Provenance: the record's own ``ticket_id``/``created_at``/``author``/``env_id``
-    become ``source_*`` — i.e. provenance points at the store we are importing FROM,
-    not at any earlier ancestor a re-exported record might also carry.
-
-    ``_creation_channel`` (story e622) is pinned to ``"import"``: the NDJSON importer
-    creates a FRESH LOCAL ticket, so its own genesis channel is the import ingress —
-    NOT a copy of whatever channel the exported source record carried (the source's
-    origin lives on in the ``source_*`` provenance instead).
+    Derive ``source_*`` from this record, not inherited provenance. The fresh local ticket's
+    genesis channel is ``import``; its prior origin remains in ``source_*``.
     """
     return {
         "ticket_type": record.get("ticket_type"),

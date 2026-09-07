@@ -1,9 +1,7 @@
-"""CLI handlers for ``rebar export`` (and, later, ``rebar import``).
+"""CLI adapters for export/import flag grammars and output channels.
 
-Mirrors the manual flag-parsing idiom used across rebar's command impls
-(``--flag value`` and ``--flag=value`` both accepted). Export always emits NDJSON
-to a sink (stdout or ``-o FILE``); run metadata goes to stderr so every stdout
-line stays a clean ticket object.
+Manual normalization preserves spellings argparse cannot express. Export sends only
+NDJSON to its sink; run metadata and errors go to stderr.
 """
 
 from __future__ import annotations
@@ -26,15 +24,9 @@ def export_cli(argv: list[str], *, repo_root: str | Path | None = None) -> int:
     from rebar._cli._parser import ParseError, render_parse_error
     from rebar._cli._parsers.core.io import build_export
 
-    # The factory is the parser of record: it produces the namespace that drives
-    # execution below. The one thin loop here only handles the two slivers argparse
-    # cannot express byte-exactly and then hands a canonical ``--flag=value`` argv to
-    # the factory: (1) export consumes the token after a value flag VERBATIM — even an
-    # option-looking one (``--status --type`` sets status to ``--type``), which argparse
-    # would reject; and (2) the bespoke ``unknown option`` reject (a bare word, an
-    # unknown flag, or a value flag missing its value) with exit 2, plus the ``-o=``
-    # short-equals spelling. The accepted values themselves come from ``ns``, not from a
-    # second imperative pass.
+    # Keep the factory as parser of record. This loop canonicalizes ``--flag value`` while
+    # consuming its next token verbatim, supports ``-o=``, and gives bare, unknown, or
+    # valueless options the required exit-2 rejection. Execution reads only ``ns``.
     _value_flags = {
         "-o": "--out",
         "--out": "--out",
@@ -99,11 +91,8 @@ def import_cli(argv: list[str], *, repo_root: str | Path | None = None) -> int:
     from rebar._cli._parser import ParseError, render_parse_error
     from rebar._cli._parsers.core.io import build_import
 
-    # Factory is the parser of record: its namespace drives the import below. The one
-    # loop here owns only import's argparse-inexpressible rejects — an option-looking
-    # token (INCLUDING a bare ``--``) is a hard ``unknown option`` rather than an
-    # argparse end-of-options separator, and a second positional is ``unexpected
-    # argument`` — then hands a canonical argv to the factory.
+    # Keep the factory as parser of record. This loop rejects option-looking tokens (including
+    # bare ``--``) as unknown and a second positional as unexpected, then passes canonical argv.
     dry_run = False
     in_file: str | None = None
     i, n = 0, len(argv)
