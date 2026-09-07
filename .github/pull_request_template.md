@@ -1,7 +1,6 @@
 <!--
-  ⚠️  IMPORTANT: GitHub pull requests are NOT merged for this project.
-  GitHub is a read-only mirror; `main` only advances through our Gerrit review
-  flow and then replicates out to GitHub.
+  GitHub is a read-only mirror. Submit changes through Gerrit because GitHub
+  pull requests cannot merge into `main`.
 -->
 
 ## 🚦 GitHub PRs are not merged here — please use Gerrit
