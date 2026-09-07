@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# apply-mirror-lock.sh — S6 GitHub mirror-lock (gh-api path).
+# apply-mirror-lock.sh: GitHub API mirror lock.
 #
-# Locks navapbc/rebar so ONLY the Gerrit replication deploy key
-# (title "rebar-gerrit-replication", registered in S5) can update `main` and
-# tags. Every human/admin push, PR-merge, force-push, deletion, and tag write
-# is rejected.
+# DEFAULT EFFECT
+# Creates rulesets that lock `main` and every tag.
+# Only the Gerrit replication deploy key titled
+# `rebar-gerrit-replication` may bypass them.
+# The main rules block updates, deletion, and non-fast-forward changes.
+# This rejects direct pushes, PR merges, force-pushes, and deletion.
+# The tag rules block creation, updates, and deletion.
 #
-# HOW THE LOCK WORKS
-#   A repository ruleset with the `update` rule means "restrict updates": only
-#   the ruleset's bypass_actors may update the matched refs. Because a PR merge
-#   into main is itself an *update to main* performed by a non-bypass actor, the
-#   `update` rule rejects BOTH direct pushes AND PR merges. We add `deletion`
-#   and `non_fast_forward` so the branch can't be deleted or force-pushed
-#   either. A second ruleset locks tags (creation/update/deletion).
+# BYPASS CONTRACT
+# The REST entry is {"actor_type": "DeployKey", "bypass_mode": "always"}.
+# GitHub uses the repository DeployKey slot, so no numeric actor_id is valid.
 #
-#   The sole bypass actor is the deploy key, expressed in the REST API as:
-#       {"actor_type": "DeployKey", "bypass_mode": "always"}
-#   (no actor_id — GitHub identifies the single repo deploy-key bypass slot by
-#   actor_type alone; a DeployKey bypass entry carries no numeric actor_id.)
+# PROVIDER FALLBACK
+# Use this script when integrations/github is older than 6.8.0 and cannot
+# express the native DeployKey bypass.
 #
-# THIS IS THE OPERATOR'S RELIABLE LIVE PATH and the fallback when the Terraform
-# provider is older than 6.8.0 (which lacks the native DeployKey bypass).
+# AUTH
+# Authenticate gh for navapbc/rebar with Administration:write through
+# gh auth login or GH_TOKEN. This file contains no token.
 #
-# AUTH: gh must be authenticated with a token holding `Administration:write`
-# on navapbc/rebar (via `gh auth login` or GH_TOKEN env). NO token in this file.
-#
-# USAGE:
-#   ./apply-mirror-lock.sh                 # create the two lock rulesets
+# USAGE
+#   ./apply-mirror-lock.sh
+#       Create both lock rulesets.
 #   ./apply-mirror-lock.sh --delete-main-protection
-#                                          # also delete the pre-existing
-#                                          # main-protection ruleset (id 18048287)
+#       Also delete the legacy main-protection ruleset with id 18048287.
+#
+# Roll back with ./rollback-mirror-lock.sh.
+# See infra/runbooks/github-mirror-lock.md for verification and recovery.
+#
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -60,10 +60,8 @@ api() { gh api -H "Accept: application/vnd.github+json" "$@"; }
 
 echo "==> S6 mirror-lock: ${OWNER}/${REPO}"
 
-# 1. (optional) delete the pre-existing main-protection ruleset. The new
-#    update-rule lock supersedes it; leaving it in place is harmless but the
-#    operator may want a clean board. Snapshot lives at
-#    infra/github/main-protection.snapshot.json for rollback.
+# Optional legacy cleanup. The new update-rule lock already supersedes this
+# ruleset. Rollback restores it from main-protection.snapshot.json.
 if [[ "$DELETE_MAIN_PROTECTION" -eq 1 ]]; then
   echo "==> deleting pre-existing main-protection ruleset (id ${MAIN_PROTECTION_ID})"
   api -X DELETE "/repos/${OWNER}/${REPO}/rulesets/${MAIN_PROTECTION_ID}" ||
