@@ -306,12 +306,32 @@ class slot:
 
 **Delete all three lines and recreate the container.** That is the whole switch.
 
+### Before any manual compose recreate: pause auto-deploy and drain the in-flight tick
+
+`rebar-autodeploy.timer` also runs `docker compose` for the review-bot/opcert/MCP stack. A manual
+`docker compose up -d --force-recreate ...` can race the timer's oneshot and leave services
+created-but-not-started. Pause the timer for the whole recreate window, and also prove the current
+`rebar-autodeploy.service` tick has drained before you run compose:
+
+```bash
+sudo systemctl disable --now rebar-autodeploy.timer
+while systemctl is-active --quiet rebar-autodeploy.service; do sleep 2; done
+
+# run the intended docker compose operation here, then verify the affected services
+
+sudo systemctl enable --now rebar-autodeploy.timer
+```
+
+If the manual operation fails, keep the timer disabled while you recover the compose state; re-enable
+it only after the affected services are healthy.
+
 *Fast path (seconds, on the box — but TRANSIENT, see the caveat below):*
 
 ```bash
 # SSM Session Manager onto the box, then:
 cd /opt/rebar/infra/compose             # the deployed COPY of main (autodeploy's DEPLOY_REPO)
 sudo -e docker-compose.yml              # delete the three REBAR_LLM_*_MODEL lines
+# Pause auto-deploy first; see "Before any manual compose recreate" above.
 docker compose up -d --force-recreate review-bot
 # Confirm the overrides are gone from the running container:
 docker compose exec review-bot env | grep REBAR_LLM_ || echo "no class-slot overrides set"
@@ -388,7 +408,8 @@ Know this before you tune anything during a Bedrock incident:
   let the direct-Anthropic path carry the gate.
 
 Reverting back to Bedrock is the same edit in reverse: restore the three
-`REBAR_LLM_*_MODEL` lines and `docker compose up -d --force-recreate review-bot`.
+`REBAR_LLM_*_MODEL` lines, pause auto-deploy as above, and
+`docker compose up -d --force-recreate review-bot`.
 
 ## Where the logs live
 
