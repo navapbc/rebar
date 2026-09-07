@@ -8,6 +8,33 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — MCP `ready_tickets` defaults to discovery rows
+
+The MCP `ready_tickets` tool now returns a compact discovery row by default:
+
+```json
+{
+  "ticket_id": "0c99-8f2b-0de7-48f2",
+  "alias": "lucky-egoistic-akitainu",
+  "title": "Give ready_tickets a discovery-shaped result so its budget stops being a cliff",
+  "ticket_type": "story",
+  "status": "open",
+  "priority": 2,
+  "blocking_summary": "ready"
+}
+```
+
+This is a deliberate narrowing of the unfiltered discovery surface. `ready_tickets`
+has no narrowing filters, so the previous default `TicketStateOut` rows left the
+90,000-byte MCP payload budget with only about one row of headroom on the live
+store. The default now matches the question callers ask — "what can I work on
+next?" — and avoids re-adding bulky `TicketStateOut` defaults after projection.
+
+**Migration.** MCP clients that need full ticket state should pass `full: true`,
+which continues to return the previous `ticket_state` shape. `list_tickets` is
+unchanged: its filters make an over-budget refusal actionable, so its budget is
+a guardrail rather than the cliff `ready_tickets` had.
+
 ## BREAKING (pre-1.0) — `declare_no_file_impact` MCP returns a structured ack
 
 The MCP `declare_no_file_impact` tool now advertises an `outputSchema` and returns

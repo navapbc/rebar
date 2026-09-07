@@ -68,6 +68,7 @@ __all__ = [
     "OVERLAP_VERDICT",
     "PLAN_REVIEW_STATUS",
     "PLAN_REVIEW_VERDICT",
+    "READY_TICKET_SUMMARY",
     "REVIEW_RESULT",
     "SCRATCH_ENVELOPE",
     "SEARCH_RESULT",
@@ -102,6 +103,7 @@ TICKET_STATE = "ticket_state"
 TICKET_STATE_LLM = "ticket_state_llm"
 SEARCH_RESULT = "search_result"
 SEARCH_RESULT_LLM = "search_result_llm"
+READY_TICKET_SUMMARY = "ready_ticket_summary"
 DEPS_GRAPH = "deps_graph"
 NEXT_BATCH = "next_batch"
 LIST_DESCENDANTS = "list_descendants"
@@ -330,6 +332,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "list": TICKET_STATE,
     "search": SEARCH_RESULT,
     "ready": TICKET_STATE,
+    "ready.mcp": READY_TICKET_SUMMARY,
     "session_logs": TICKET_STATE,
     "show.llm": TICKET_STATE_LLM,
     "list.llm": TICKET_STATE_LLM,

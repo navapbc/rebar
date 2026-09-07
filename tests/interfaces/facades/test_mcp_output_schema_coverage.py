@@ -44,7 +44,7 @@ CANONICAL: dict[str, str] = {
     "show_ticket": schemas.TICKET_STATE,
     "list_tickets": schemas.TICKET_STATE,
     "search": schemas.SEARCH_RESULT,
-    "ready_tickets": schemas.TICKET_STATE,
+    "ready_tickets": schemas.READY_TICKET_SUMMARY,
     "recent_session_logs": schemas.TICKET_STATE,
     "ticket_deps": schemas.DEPS_GRAPH,
     "next_batch": schemas.NEXT_BATCH,
