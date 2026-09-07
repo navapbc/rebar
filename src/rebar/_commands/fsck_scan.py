@@ -1,23 +1,12 @@
-"""The fsck store WALK — enumeration plus the per-ticket validators.
+"""Walk the store and run per-ticket ``fsck`` validators.
 
-Extracted from ``fsck.py`` (which fused four concerns and sat at the 800-LOC hard cap). This is
-the concern that grows with every check added, so it gets its own module: ``_scan`` walks the
-tracker and runs the per-ticket checks, and ``_check_snapshot`` is the per-snapshot validator it
-is the only caller of.
+The scan checks event JSON, CREATE presence, snapshot source consistency, orphan events, and
+unsupported event types. Stale index-lock cleanup is its only mutation and is disabled by
+``no_mutate=True``. Tracker-wide health and per-environment authorship remain delegated to
+their leaf modules. Advisory ensure and authorship totals come from this same walk.
 
-  1. JSON validity of event files
-  2. CREATE event presence (via the reducer)
-  3. Stale ``.git/index.lock`` cleanup (>5min; the ONLY mutation, suppressed by the
-     ``no_mutate=True`` argument for read-only surfaces)
-  4. SNAPSHOT ``source_event_uuids`` consistency (4a still-on-disk, 4b orphans)
-  5. Forward-compat — event types newer than this binary (informational)
-
-Checks 4.5–4.9 inspect the tracker as a whole and live in ``fsck_tracker_health``; the per-env
-authorship tally (4.8) lives in ``fsck_authorship``. The trailing advisory lines (ensure-registry
-status, store-wide authorship) are reported here because they are summed from the same walk.
-
-Imports run one way only: the command driver (``fsck``) calls in here, this module calls into
-the tracker-health / repair / authorship leaves, and none of them call back.
+Dependencies point from the command driver through this module into health, repair, and
+authorship leaves without back imports.
 """
 
 from __future__ import annotations
@@ -53,13 +42,10 @@ from rebar.reducer._cache import is_active_event
 def _check_json_validity(
     tracker: str, env_authorship: EnvAuthorshipTally, *, include_archived: bool = False
 ) -> tuple[list[str], int]:
-    """Check 1 — every event file parses as JSON.
+    """Check event JSON while feeding the per-environment authorship tally.
 
-    Doubles as the single read pass that feeds the per-env authorship tally (bug ed5c), so the
-    per-env signed-rate check costs no extra walk over the store. That tally is a STORE-WIDE
-    metric, so this check always walks every ticket dir; ``include_archived`` scopes only
-    which dirs' findings are REPORTED (archived dirs stay cheap: terminally folded, their
-    remaining live files are few).
+    Every ticket contributes to the store-wide tally. ``include_archived`` controls only which
+    parse findings are reported.
     """
     lines: list[str] = []
     issues = 0
@@ -82,14 +68,10 @@ def _check_json_validity(
 def _check_create_events(
     tracker: str, *, include_archived: bool = False
 ) -> tuple[list[str], int, int, int]:
-    """Check 2 — every ticket reduces to a state with a usable CREATE.
+    """Check for a usable CREATE and return report lines, issues, and authorship totals.
 
-    Returns ``(lines, issues, signed_total, unsigned_total)``: the store-wide authorship
-    PRESENCE tally (3183) is summed from each ticket's reduced ``authorship`` summary, which is
-    already computed by the reduction this check performs — presence only, never a crypto check
-    (see verify-identity). Because that tally is STORE-WIDE, this check always reduces every
-    ticket; ``include_archived`` scopes only which dirs' findings are REPORTED (an archived
-    ticket is terminally folded, so its reduction reads a SNAPSHOT plus a few events).
+    Totals count signature presence without cryptographic verification. Every ticket
+    contributes, while ``include_archived`` controls only reported findings.
     """
     # The reducer warns to stderr on corrupt events; those warnings are noise here
     # (not part of the fsck output contract), so silence its stderr.
@@ -133,15 +115,8 @@ def _check_create_events(
                 f"STATUS_FORK_RESOLVED: {ticket_id} — concurrent claim/status race resolved "
                 f"(dropped uuid={last.get('dropped_uuid')})"
             )
-            # Reported but NEVER counted — so it cannot drive fsck's exit code.
-            # The reducer ALREADY resolved the race deterministically; nothing is
-            # broken and there is nothing to repair. ``status_fork_resolutions`` is
-            # permanent derived state that survives compaction, so counting it would
-            # pin a busy store's fsck exit at 1 forever. Same report-only class as
-            # PUSH_PENDING (fsck_tracker_health.py) and TRACKER_DIRTY_TMP_EVENT,
-            # both ``is_issue=False``; documented in docs/user-guide.md. This kind is in
-            # fsck._NEVER_COUNTED_KINDS so the JSON ``issue_count`` excludes it too — keep
-            # the two in sync (see that constant's drift guard).
+            # Resolved status forks are report-only derived state. The reducer has already
+            # settled them, and ``fsck._NEVER_COUNTED_KINDS`` excludes them from JSON totals.
     return lines, issues, signed_total, unsigned_total
 
 
@@ -168,12 +143,8 @@ def _check_index_lock(tracker: str, no_mutate: bool) -> list[str]:
             "WARN: stale .git/index.lock present (older than 5 minutes) — not removed (read-only)"
         )
     else:
-        # Reclaim through the hardened write-path helper (bug 4c6c): it re-stats the lock
-        # immediately before unlinking and aborts unless device+inode AND age still prove it the
-        # same stale file. A raw os.remove here had NO such re-validation — a peer that replaced
-        # the stale lock with a fresh LIVE one in the check->use window got its live lock
-        # clobbered (the exact TOCTOU df83 fixed on the write path). Messaging + no_mutate gating
-        # are unchanged.
+        # The write-path helper rechecks device, inode, and age before unlinking. This prevents
+        # removal of a replacement lock created during the race window.
         _reclaim_if_stale_index_lock(tracker)
         lines.append("FIXED: removed stale .git/index.lock (older than 5 minutes)")
     return lines
@@ -258,12 +229,10 @@ def _check_forward_compat(tracker: str, *, include_archived: bool = False) -> li
 
 
 def _advisory_lines(tracker: str, signed_total: int, unsigned_total: int) -> list[str]:
-    """The two trailing informational lines — never counted, never in ``--output json``.
+    """Return uncounted text advisories for ensure status and unsigned event presence.
 
-    * ensure-registry status (epic odd-vortex-elbow / WS3), derived WITHOUT running the sweep:
-      N applied (in the git-ignored .ensure-applied marker, intersected with the registry) / M
-      registered. Lowercase tag ⇒ text-only.
-    * store-wide authorship (3183): count of events WITHOUT an author_sig, presence only.
+    Ensure status reads the local applied marker without running the sweep. These lines do not
+    appear in JSON output.
     """
     from rebar._store import ensures as _ensures
 
@@ -328,10 +297,8 @@ def _scan(
     lines += _advisory_lines(tracker, signed_total, unsigned_total)
     issue_count += json_issues + create_issues + snapshot_issues + tracker_issues
 
-    # Per-env authorship health (bug ed5c): unlike the store-wide line above, a writer that
-    # signs NOTHING is a COUNTED issue — that asymmetry is the point. The store-wide tally
-    # hid beb1 for a month because one broken writer's unsigned events looked like ordinary
-    # legacy volume; per-env, a 0%-signed writer that is still active stands out.
+    # Per-environment authorship is counted because it isolates an active writer that signs no
+    # events, which the advisory store-wide total cannot identify.
     env_findings = env_authorship.findings()
     lines += env_findings
     issue_count += len(env_findings)
@@ -340,17 +307,10 @@ def _scan(
 
 
 def _active_event_map(ticket_dir: str, snapshot_filename: str) -> dict[str, tuple[str, str]]:
-    """Map ``uuid -> (filename, event_type)`` over a ticket's LIVE event files.
+    """Map each active event UUID to its filename and type without reading event bodies.
 
-    The type is parsed from the canonical filename suffix (``{ts}-{uuid}-{TYPE}.json``), so it
-    agrees with the event body without a second read. Lifted out of ``_check_snapshot`` as its
-    own step: it is the filename-parsing concern, distinct from the consistency comparison the
-    caller performs with it.
-
-    I1: a folded source renamed to ``*.retired`` is NOT a live event — it must never read as
-    "source UUID still exists" (SNAPSHOT_INCONSISTENT). Hence the explicit ``is_active_event``
-    guard on top of the ``.json`` filter (which already excludes ``*.json.retired``). The
-    snapshot being checked is excluded so it never compares against itself.
+    Types come from canonical filename suffixes. ``is_active_event`` excludes folded retired
+    sources, and the inspected snapshot is excluded from comparison with itself.
     """
     event_files: dict[str, tuple[str, str]] = {}
     for name in sorted(os.listdir(ticket_dir)):
@@ -377,15 +337,8 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
     except (json.JSONDecodeError, OSError):
         return out
     _data = snapshot.get("data", {})
-    # Creation-channel provenance drift (story 568c): a PRE-feature SNAPSHOT — one whose
-    # compiled_state was compacted before `creation_channel` existed — carries no channel, and
-    # on SNAPSHOT-only replay there is no CREATE to re-infer from. Read-time re-inference
-    # (process_snapshot) already keeps reads correct, but the DURABLE snapshot stays stale.
-    # When the ticket still retains its CREATE as a folded `.retired` source, the snapshot is
-    # rebuildable: `--repair-snapshots` re-projects the channel via
-    # rebuild_snapshot_from_full_log (which replays the retained CREATE). Gate strictly on a
-    # real compiled_state dict that lacks the key AND a retained CREATE, so a post-feature
-    # snapshot (channel present) never trips this.
+    # A snapshot without ``creation_channel`` is stale only when compiled state exists and a
+    # retired CREATE can supply the missing value. ``--repair-snapshots`` can then rebuild it.
     if _is_stale_channel_snapshot(ticket_dir, snapshot_filename):
         out.append(
             f"SNAPSHOT_STALE_CHANNEL: {ticket_id}/{snapshot_filename} — compiled_state "
@@ -406,10 +359,8 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
                 f"{u} still exists as {event_files[u][0]}"
             )
     for file_uuid, (name, etype) in event_files.items():
-        # The orphan definition lives in fsck_repair.is_snapshot_orphan — shared with the
-        # compaction fold's exclusion guard so scan and fold can never disagree (bug f96b).
-        # Non-KNOWN types are correctly uncited (compaction folds only KNOWN_EVENT_TYPES),
-        # so they are not orphans; snapshots are never orphan-classified.
+        # Scanner and compaction share ``is_snapshot_orphan``. Unknown types and snapshots are
+        # excluded because compaction does not fold them as ordinary sources.
         if _is_snapshot_orphan(name, etype, file_uuid, snapshot_filename, source_uuid_set):
             out.append(
                 f"ORPHAN_EVENT: {ticket_id}/{name} — pre-snapshot event not "

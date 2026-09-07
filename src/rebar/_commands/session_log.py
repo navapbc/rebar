@@ -1,20 +1,9 @@
-"""Session-log capture helper (epic 7738, story e7e4).
+"""Create and append to the checkout's current session log.
 
-A thin convenience layer over the shared write path: create a ``session_log`` on
-first use and append entries to the SAME log on subsequent calls, so verbose
-logging is low-friction without agents hand-assembling ``create`` + ``comment``.
-
-The "current" log is tracked by a LOCAL, git-ignored pointer file
-(``<repo>/.rebar/current_session_log``) — the same ``.rebar`` local-state root
-``scratch`` uses — so stateless CLI invocations within a checkout converge on one
-log. ``start`` rotates to a fresh log (and re-points). The pointer never enters
-the shared tickets branch, so it does not propagate across machines.
-
-All writes go through the existing locked seam (``composer.create_core`` /
-``_seam.append_event`` / ``composer.link_core``), so the helper flows identically
-to library, CLI, and MCP, and inherits the session_log write-path rules from add5
-(gate/lifecycle exempt; blocking links refused; relates_to / discovered_from
-allowed).
+The git-ignored ``.rebar/current_session_log`` pointer lets separate CLI calls share one log.
+``start`` creates a new log and rotates the pointer, which never propagates through the tickets
+branch. Writes use the shared locked create, append, and link seams. Session logs remain gate and
+lifecycle exempt, reject blocking links, and allow ``relates_to`` or ``discovered_from``.
 """
 
 from __future__ import annotations
@@ -46,14 +35,10 @@ def _pointer_path(repo_root=None) -> Path:
 
 
 def _resolve_session_fp() -> str | None:
-    """The current session fingerprint used to auto-rotate the current-log pointer.
+    """Return the shared session fingerprint used for automatic pointer rotation.
 
-    Delegates to the shared :func:`rebar._commands.session_id.resolve_session_id`
-    (epic crust-fetch-stump, story 6014) so session-id precedence is defined in ONE
-    place. NOTE the unified contract puts ``REBAR_SESSION_ID`` BEFORE
-    ``CLAUDE_CODE_SESSION_ID`` — an intentional inversion of this function's former
-    order that only differs when BOTH are set. As before, we stop at ``None`` (never
-    git HEAD) so a commit within one session does not spuriously rotate the log.
+    Session precedence comes from :func:`session_id.resolve_session_id`. ``None`` remains
+    ``None`` instead of falling back to git ``HEAD``, so commits do not rotate a session log.
     """
     return resolve_session_id()
 

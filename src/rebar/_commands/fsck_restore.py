@@ -22,15 +22,10 @@ logger = logging.getLogger(__name__)
 
 
 def _deleted_history(tracker: str, ticket_id: str) -> dict[str, str]:
-    """Map ``path -> commit that deleted it`` for every event file ever removed from this
-    ticket dir, in ONE ticket-scoped pass.
+    """Map each deleted event path to its newest deleting commit in one directory pass.
 
-    Modelled on :func:`rebar.attest.authorship.build_ticket_position_commit_map`, which does
-    the same directory-prefix single-pass walk for ``--diff-filter=A``. CRITICAL DIFFERENCE:
-    that helper lets the OLDEST commit win (correct for ADD — the oldest add introduced the
-    event). For DELETE the correct fold is the NEWEST deletion, because a path can be added
-    and deleted more than once across successive compactions and only the last removal has
-    the current pre-image. ``git log`` streams newest-first, so FIRST-SEEN wins here.
+    A path may be added and removed across several compactions. ``git log`` is newest first,
+    so retaining the first deletion preserves the current pre-image.
     """
     try:
         res = run_git(
@@ -58,12 +53,10 @@ def _deleted_history(tracker: str, ticket_id: str) -> dict[str, str]:
 
 
 def _deleted_path_for_uuid(tracker: str, ticket_id: str, uuid: str) -> tuple[str, str] | None:
-    """``(path, deleting commit)`` for ONE uuid, or ``None`` (bug 85fa).
+    """Return one UUID's deleted path and commit, or ``None``.
 
-    :func:`_deleted_history` scopes to the ticket DIRECTORY; git path simplification can drop a
-    deletion there that a PATH-scoped walk reports. Live-store measurement on f130's lost EDIT:
-    ``-- <tid>/`` found 0, ``-- <tid>/*<uuid>*`` found 1; neither ``--all`` nor
-    ``--full-history`` helped, so it is a pathspec-scope effect.
+    The path-scoped lookup is a fallback for deletions omitted by git history
+    simplification during the directory-scoped pass.
     """
     try:
         res = run_git(
@@ -127,20 +120,12 @@ def _uuid_fallback(
 def restore_deleted_sources(
     tracker: str, ticket_id: str, ticket_dir: str, *, dry_run: bool = False
 ) -> list[str]:
-    """Restore the event files a legacy compaction DELETED, from tickets-branch history.
+    """Restore deleted event sources from tickets-branch history as ``*.retired`` files.
 
-    Compaction before the I1 non-destructive rename (story tricolour-head-ratfish) removed
-    its folded sources from the worktree, but the blobs stay reachable at the deleting
-    commit's parent. Each is written back as a folded ``*.retired`` source — NEVER as a live
-    event — so the subsequent rebuild replays it under ``include_retired=True`` without
-    resurrecting it into the active log.
-
-    Sweeps the ticket's FULL deletion history rather than the newest SNAPSHOT's
-    ``source_event_uuids``: an earlier deleted STATUS that no surviving snapshot cites still
-    breaks the chain's ``current_status`` precondition, so the reducer would reject both it
-    and the close that follows.
-
-    Returns the filenames restored (or, under ``dry_run``, those that WOULD be restored).
+    Restoration scans the full deletion history because uncited earlier events can still be
+    required by reducer preconditions. Retired files participate in a full-log rebuild without
+    returning to the active log. Return restored filenames, or planned filenames in
+    ``dry_run`` mode.
     """
     try:
         have = set(os.listdir(ticket_dir))
@@ -182,17 +167,10 @@ def restore_deleted_sources(
 def rebuild_with_restore(
     tracker: str, ticket_id: str, ticket_dir: str, *, no_commit: bool = False
 ) -> tuple[bool, list[str]]:
-    """Restore any deleted sources, then rebuild. Returns ``(rebuilt, restored_filenames)``.
+    """Restore deleted sources, then return the rebuild result and restored filenames.
 
-    This is the repair path's single entrypoint. The b636 fail-closed guard inside
-    :func:`rebar._commands.compact.rebuild_snapshot_from_full_log` still applies: if the
-    restore could not complete the log, the rebuild refuses and the ticket is surfaced for
-    human triage rather than rewritten from a partial history.
-
-    ``no_commit`` is forwarded verbatim to the rebuild. It defaults to ``False`` — the
-    behaviour ``repair_or_plan`` has always had — so only the caller that needs deferred
-    commits (``_repair_ticket`` under the ``--repair`` batch loop, which commits once per
-    batch rather than once per ticket) has to pass it.
+    The rebuild fails closed when restoration cannot complete the log, leaving the ticket for
+    human triage. ``no_commit`` passes through so batch repair can defer per-ticket commits.
     """
     from rebar._commands.fsck_repair import snapshot_missing_sources
 

@@ -1,35 +1,15 @@
-"""MCP client-config diagnostics for ``rebar doctor``.
+"""Diagnose whether configured MCP clients can reach rebar.
 
-Answers one operator question the rest of ``doctor`` cannot: *will the client I am
-about to launch actually reach the rebar MCP server?* Two failure modes make the
-``rebar`` server silently vanish from a client's tool list, and both are invisible
-from inside the server:
+The scan reports two independent wiring failures. ``KIND_PAT_UNRESOLVABLE`` means the
+configured PAT reference resolves to no value. ``KIND_STALE_PAT_ENV_NAME`` means the
+reference differs from the canonical variable for that client, even when the configured
+variable has a value. Both findings may apply.
 
-* **The credential is not there.** The documented setup (``docs/mcp-client-setup.md``,
-  ``examples/mcp-clients/``) tells the operator to ``export`` a per-client PAT. A bare
-  ``export`` is TRANSIENT — it dies with the shell it was typed in, and is persisted
-  nowhere. A client launched from any other shell (or a later one) then resolves the
-  bearer to nothing, fails auth, and drops the server. That is
-  :data:`KIND_PAT_UNRESOLVABLE`.
-* **The config names the wrong variable.** A config may reference a bearer env var that
-  is not this project's canonical name for that client (a hand-edited or
-  copied-from-elsewhere entry). It can even be *resolvable* and still be wrong: the
-  operator exports the canonical name, the config reads a different one, and the two
-  never meet. That is :data:`KIND_STALE_PAT_ENV_NAME`, and it is reported independently
-  of whether the named variable happens to be set.
-
-Fixing either alone can leave the server omitted, so both are always reported.
-
-**No credential VALUE ever enters a finding.** Configs are read for env-var *names*
-only, and a name is resolved against the environment purely as a truthiness test — the
-value is never bound to a name, formatted, or returned. A header that embeds a literal
-instead of referencing a variable is reported by *kind* (:data:`KIND_PAT_LITERAL`)
-without echoing the header.
-
-The scan is pure and OS-agnostic: stdlib only (``tomllib``/``json``), no subprocess, no
-network, no platform-specific mechanism. ``home`` and ``env`` are injectable so the whole
-surface is testable without monkeypatching. Every degradation — a missing config, an
-unparseable one, a config with no ``rebar`` entry — becomes a finding, never an exception.
+Findings never contain credential values. The scan tests referenced variable names only,
+and reports an embedded bearer as ``KIND_PAT_LITERAL`` without echoing the header. It uses
+only the standard library, performs no subprocess or network work, and accepts injectable
+``home`` and ``env`` values. Missing, unreadable, or incomplete client configs produce
+findings instead of exceptions.
 """
 
 from __future__ import annotations

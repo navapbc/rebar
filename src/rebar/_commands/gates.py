@@ -1,23 +1,12 @@
-"""Shared posture for the opt-in close/claim verification gates.
+"""Share configuration and attestation policy for claim and close gates.
 
-The completion-verification *close* gate (``transition.py``) and the plan-review
-*start-work* gate (``claim.py`` + ``transition.py``) each resolve a single ``verify.*``
-config flag. On an **unreadable** config that resolution RAISES a
-:class:`rebar.config.ConfigError` naming the gate, the ticket, and the parse fault —
-the operator ruling on ticket 39f8-ae7c ("Unreadable config should result in an
-error"): a config FAULT must fail the gated operation loudly, never silently resolve
-the gate to its default (the retired fail-OPEN posture) and never mint a blocked
-``unavailable`` verdict a fail-closed gate could not act on. That resolution + error
-posture is identical between the gates and is exactly the kind of copy-pasted,
-security-relevant logic that drifts between sessions — so it lives here, once.
+Each opt-in gate resolves one ``verify.*`` flag. A readable flag yields enabled or disabled.
+Unreadable configuration raises :class:`rebar.config.ConfigError` and blocks the operation
+instead of becoming a policy result.
 
-The **plan-review start-work gate** itself (:func:`plan_review_precheck`) also lives
-here, once: starting work on a ticket goes through it whether via ``claim`` (open ->
-in_progress + assignee, atomically) or a plain ``transition open -> in_progress``, so
-the two entry points cannot diverge in what they require before code is touched.
-
-What the *completion* gate does when enabled (run the LLM completion verifier) is
-gate-specific and stays in ``transition.py``.
+:func:`plan_review_precheck` is the common start-work check for atomic claim and plain
+``open`` to ``in_progress`` transition. Completion-verifier execution remains in the
+transition command.
 """
 
 from __future__ import annotations
@@ -41,27 +30,18 @@ __all__ = [
     "plan_review_precheck",
 ]
 
-#: Ticket types exempt from the plan-review start-work gate. Re-exported from
-#: :mod:`rebar.types`, which owns the one declaration and derives its complement from
-#: ``TicketType`` (mirror F3). This comment previously claimed the tuple was
-#: "single-sourced here so ... cannot drift"; five other sites carried their own copy.
+#: Plan-review exemptions re-exported from :mod:`rebar.types`, which owns the declaration
+#: and derives its complement from ``TicketType``.
 _PLAN_REVIEW_EXEMPT_TYPES = PLAN_REVIEW_EXEMPT_TYPES
 
 logger = logging.getLogger(__name__)
 
 
 class GateState(Enum):
-    """The resolution of an opt-in ``verify.*`` gate flag from a READABLE config.
+    """Represent an opt-in gate flag read from valid configuration.
 
-    ``ENABLED`` and ``DISABLED`` are both **POLICY CHOICES**: someone's config was read
-    and answered. An unreadable config is a **FAULT** and is not a state at all any more:
-    per the 39f8-ae7c operator ruling, :func:`gate_enabled` raises a
-    :class:`~rebar.config.ConfigError` instead of resolving it (the pre-ruling
-    ``UNREADABLE`` member — a falsey fail-OPEN skip — was removed with that ruling).
-
-    :meth:`__bool__` is truthy for ``ENABLED`` **only**, so every existing
-    ``if not gate_enabled(...)`` call site keeps its exact semantics and the test modules
-    that monkeypatch :func:`gate_enabled` with a plain bool keep working.
+    ``ENABLED`` and ``DISABLED`` are policy outcomes. Unreadable configuration raises before a
+    state is produced. Only ``ENABLED`` is truthy, preserving boolean call sites and test fakes.
     """
 
     ENABLED = "enabled"
@@ -93,22 +73,11 @@ def _claim_gate_reason(check: Mapping[str, object]) -> str:
 
 
 def gate_enabled(cfg_root: str | None, attr: str, *, ticket_id: str, gate_label: str) -> GateState:
-    """Resolve an opt-in ``verify.<attr>`` gate flag, ERRORING on an unreadable config.
+    """Resolve ``verify.<attr>`` to an enabled or disabled gate state.
 
-    ``attr`` is a ``VerifyConfig`` attribute name (e.g.
-    ``"require_completion_verification_for_close"``). Returns
-    :attr:`GateState.ENABLED` when the flag is on and :attr:`GateState.DISABLED` when a
-    readable config has it off. When the config cannot be read or parsed it raises a
-    :class:`~rebar.config.ConfigError` — chained from the parse fault and naming
-    ``gate_label`` and ``ticket_id`` — so the gated operation FAILS loudly and the
-    operator sees exactly what to fix.
-
-    That error posture is the 39f8-ae7c operator ruling ("Unreadable config should
-    result in an error"), which retired both alternatives it was asked to choose
-    between: the historical fail-OPEN skip silently resolved every gate to its default
-    (laundering a fault into a policy outcome), and a fail-CLOSED gate on an unreadable
-    config could only answer ``unavailable`` — a hard block that buys zero enforcement,
-    because the same unreadable config makes the attestation unreadable too.
+    ``attr`` names a :class:`VerifyConfig` field. Read or parse failure raises a chained
+    :class:`~rebar.config.ConfigError` that identifies ``gate_label`` and ``ticket_id``. The
+    gated operation therefore fails without treating a configuration fault as a default.
     """
     from rebar.config import ConfigError, compose_config
 
@@ -140,26 +109,19 @@ def gate_ran(check: Mapping[str, object]) -> bool:
     return check.get("gate_ran") is True
 
 
-#: The administrative dispositions whose justification is a LIVE REPLACEMENT LINK — a
-#: verifiable, in-tracker fact the sibling completion gate already reads
-#: (:func:`close_precheck._has_live_replacement_link`). Deliberately a STRICT subset of
-#: ``close_disposition.ADMINISTRATIVE_CLASSES``: ``obsolete``/``wontfix`` are
-#: REASON-required rather than link-backed, so their justification is operator prose that
-#: no gate can verify — they keep the full attestation requirement. Widening this set is
-#: the security boundary of bug 69b9, not a tuning knob.
+#: Administrative dispositions supported by a verifiable replacement link. This strict
+#: subset excludes reason-backed ``obsolete`` and ``wontfix`` closes, which still require
+#: full attestation.
 _LINK_BACKED_DISPOSITION_CLASSES = frozenset({"duplicate", "superseded"})
 
 
 def _disposition_close_exempt(
     ticket_id: str, ticket_type: str, close_class: str, tracker: str | None, repo_root
 ) -> bool:
-    """Whether this close is an evidence-backed administrative disposition (bug 69b9).
+    """Return whether a link-backed administrative close has a valid replacement link.
 
-    True only when BOTH hold: ``close_class`` is link-backed administrative vocabulary, AND
-    the replacement link it claims is actually live. The evidence check REUSES the
-    completion gate's own predicate rather than reimplementing it, so the two close gates
-    cannot drift on what counts as a replacement. Any unreadable tracker yields ``False`` —
-    absent evidence never grants the exemption.
+    The completion gate's predicate supplies the evidence check. An unreadable tracker or
+    absent evidence returns ``False``.
     """
     if close_class not in _LINK_BACKED_DISPOSITION_CLASSES:
         return False
@@ -185,17 +147,12 @@ def close_plan_review_gate_check(
     close_class: str = "",
     tracker: str | None = None,
 ) -> dict[str, object]:
-    """Locally validate the opt-in plan-review close requirement.
+    """Validate the opt-in plan-review close requirement using local state only.
 
-    This deliberately verifies an already-created attestation only: it never starts a
-    review, invokes an LLM, or contacts the network.  ``CLOSE`` keeps the plan and
-    policy freshness checks while allowing implementation code to change during work.
-
-    ``close_class``/``tracker`` are keyword-only with defaults so every caller that does not
-    know the disposition is unaffected. When they name a LINK-BACKED administrative
-    disposition backed by a live replacement link, the gate returns the distinct
-    ``disposition`` verdict instead of demanding an attestation the ticket cannot earn (bug
-    69b9) — see :func:`_disposition_close_exempt`.
+    The check reads an existing attestation and performs no review, LLM call, or network work.
+    ``CLOSE`` permits implementation changes while enforcing plan and policy freshness. A
+    link-backed administrative disposition with replacement evidence returns the distinct
+    ``disposition`` verdict.
     """
     state = gate_enabled(
         str(repo_root),
@@ -204,11 +161,8 @@ def close_plan_review_gate_check(
         gate_label="the plan-review close gate",
     )
     if not state:
-        # A DISABLED gate is a POLICY CHOICE — someone read the flag and turned the gate
-        # off — so the skip payload says exactly that. (An unreadable config never reaches
-        # here: gate_enabled raises, per the 39f8 operator ruling.) Consumers must not
-        # read the verdict string to learn whether the gate ran — that is what the
-        # `gate_ran` stamp below (and :func:`gate_ran`) is for.
+        # Disabled is a readable policy result. Unreadable configuration raises earlier.
+        # Consumers use the ``gate_ran`` stamp instead of inferring execution from verdict text.
         return {
             "ok": True,
             "gate_ran": False,
@@ -224,9 +178,8 @@ def close_plan_review_gate_check(
         }
     ticket_type = str(ticket_state.get("ticket_type") or "")
     if _disposition_close_exempt(ticket_id, ticket_type, close_class, tracker, repo_root):
-        # A DISTINCT verdict, never "exempt": the audit trail must separate an
-        # evidence-backed administrative close from a ticket-TYPE exemption and from a
-        # --force bypass (which records no signature and never consults this gate).
+        # A distinct verdict separates a replacement-backed disposition from type exemptions
+        # and force bypasses in the audit trail.
         return {
             "ok": True,
             "gate_ran": True,
@@ -239,8 +192,8 @@ def close_plan_review_gate_check(
 
     from rebar._store import freshness
 
-    # Same harm as at claim (bug b928), same placement: an attestation read from a store
-    # that is not current can report ``unsigned`` for a ticket that is properly certified.
+    # Require a current store before reading attestation state to avoid a false ``unsigned``
+    # result.
     store = freshness.store_freshness(tracker or freshness.resolve_tracker(repo_root))
     if not store["fresh"]:
         return {
@@ -291,14 +244,11 @@ def close_plan_review_gate_check(
 
 
 def _plan_review_gate_applies(cfg_root: str | None, ticket_type: str, *, ticket_id: str) -> bool:
-    """Whether the plan-review START-WORK gate applies to this ticket at all: the
-    ``verify.require_plan_review_for_claim`` flag is on (ERRORING on an unreadable
-    config, via :func:`gate_enabled`) AND the ticket type is not exempt.
+    """Return whether the claim gate is enabled and the ticket type is not exempt.
 
-    Shared by :func:`plan_review_precheck` and ``claim --review``'s stage-1
-    applicability sensing (story a114) so the two cannot drift. This is pure config +
-    type logic — no attestation/currency check (that is stage 2:
-    ``llm.claim_gate_check``)."""
+    This shared applicability check reads configuration and type only. Attestation currency is
+    checked later by ``llm.claim_gate_check``.
+    """
     if not gate_enabled(
         cfg_root,
         "require_plan_review_for_claim",
@@ -312,23 +262,11 @@ def _plan_review_gate_applies(cfg_root: str | None, ticket_type: str, *, ticket_
 def description_cap_warning(
     description: str | None, ticket_type: str, *, ticket_id: str, cfg_root: str
 ) -> str | None:
-    """The save-time heads-up for a description the plan-review gate will not admit.
+    """Return a save-time warning when a gated description exceeds its configured cap.
 
-    The review guard (``llm.plan_review.det_floor`` P4) and the completion precheck
-    reject a description above ``verify.max_ticket_description_chars``, but they only
-    run at ``review-plan``/close time — so an oversized description was historically
-    discovered long after it was written. When a create/edit writes a description over
-    that same configured cap AND the plan-review START-WORK gate applies to this ticket
-    (:func:`_plan_review_gate_applies` — the very probe the claim path uses, so the
-    warning cannot promise a block the gate would not make), this returns the operator
-    warning; otherwise ``None``.
-
-    Advisory ONLY: callers emit it on their own surface's channel AFTER the event is
-    appended, and it never blocks or alters the write. Any unexpected failure resolving
-    the cap therefore degrades to ``None`` rather than disturbing a completed write.
-
-    ``cfg_root`` is the REPO root (parent of the tracker), where ``.rebar/config.conf``
-    lives — the same root the claim path passes to the gate probe.
+    The warning applies only when the start-work gate applies and uses the same cap as plan
+    review and completion checks. It is advisory, runs after the write, and degrades to ``None``
+    on lookup failure. ``cfg_root`` is the repository root used by claim configuration.
     """
     if not description:
         return None
@@ -355,15 +293,10 @@ def description_cap_warning(
 
 
 def log_advisory_warning(warning: object) -> str | None:
-    """Emit a save-time advisory notice on the LIBRARY channel and hand it back.
+    """Log a post-write advisory on the library channel and return it.
 
-    The CLI prints these notices to stderr and MCP returns them as result fields; an
-    embedding library caller has neither, so they go through the ``rebar`` logger — the
-    documented library convention (:mod:`rebar._logging`). That root carries a
-    ``NullHandler``, so a caller configuring no logging is undisturbed, while the CLI and
-    MCP entrypoints (which install a stderr handler) surface it. Returns the warning so a
-    caller can pass it on in one expression. Advisory only: the write has already
-    committed by the time this runs.
+    The ``rebar`` logger has a ``NullHandler`` for unconfigured library callers. CLI and MCP
+    entrypoints install handlers or return the warning through their own surfaces.
     """
     text = warning if isinstance(warning, str) and warning else None
     if text:
@@ -372,48 +305,29 @@ def log_advisory_warning(warning: object) -> str | None:
 
 
 def log_description_cap_warning(warning: object) -> str | None:
-    """Emit :func:`description_cap_warning`'s notice on the LIBRARY channel and hand it back.
-
-    The named entry point for the description-cap notice (ticket 594b); the channel logic
-    is the shared :func:`log_advisory_warning`, which the duplicate-title advisory
-    (ticket eac3) rides too.
-    """
+    """Log and return :func:`description_cap_warning` through the shared advisory channel."""
     return log_advisory_warning(warning)
 
 
 def plan_review_precheck(
     ticket_id: str, cfg_root: str | None, repo_root, *, force_reason: str
 ) -> None:
-    """The plan-review gate guarding the START of work on a ticket — the single
-    method both ``claim`` and ``transition open -> in_progress`` call.
+    """Enforce the shared plan-review gate before claim or start-work transition.
 
-    When ``verify.require_plan_review_for_claim`` is on, starting a work ticket
-    requires a fresh, certified plan-review attestation (earn one with
-    ``rebar review-plan <id>``). This is a FAST, LOCAL HMAC verify + freshness/
-    material binding — NO LLM and NO network call (the heavy review is out-of-band).
-    Bugs and session_logs are EXEMPT. A non-empty ``force_reason`` bypasses with an
-    audit comment (it is a reason STRING, not a bool — the bool ``--force`` flag is
-    converted to a reason by the callers). Raises :class:`CommandError` (block) when
-    the attestation is absent/stale/wrong. Returns ``None`` (allow) when the gate is
-    off, the ticket is exempt, the bypass reason is set, or the attestation is valid.
+    When enabled, non-exempt work requires a fresh certified attestation. Validation is local
+    and performs no LLM or network call. Bugs and session logs are exempt. A non-empty
+    ``force_reason`` records a bypass. Missing, stale, or invalid attestations raise
+    :class:`CommandError`. Disabled, exempt, bypassed, and valid cases return ``None``.
 
-    ``cfg_root`` is the repo root whose ``rebar.toml`` / ``.rebar/`` the gate flag is read
-    from; ``None`` means "discover", the same contract every other config reader uses. It is
-    NOT the tracker's parent: ``REBAR_TRACKER_DIR`` relocating the store is supported, and
-    inferring the root from the tracker silently resolved an empty config there — which for a
-    gate flag means the gate reads as DISABLED and stops applying.
-
-    Consolidated here (out of ``claim.py``) so the claim and transition entry points enforce
-    IDENTICAL requirements before code is touched.
+    ``cfg_root`` identifies the repository configuration root and supports discovery when
+    omitted. It must not be inferred from a relocated tracker directory.
     """
     from rebar import config
     from rebar._commands._seam import CommandError
     from rebar.reducer import reduce_ticket as _reduce
 
-    # Shared resolution + error-on-unreadable-config posture (see gate_enabled),
-    # mirroring the completion close gate so the two can't drift. Applicability
-    # (flag on + non-exempt type) is single-sourced in _plan_review_gate_applies,
-    # which `claim --review` also senses (story a114).
+    # ``_plan_review_gate_applies`` shares configuration failure and exemption behavior with
+    # the close gate and ``claim --review``.
     ticket_type = (_reduce(os.path.join(str(config.tracker_dir(repo_root)), ticket_id)) or {}).get(
         "ticket_type", ""
     )
@@ -442,8 +356,8 @@ def plan_review_precheck(
     check = llm.claim_gate_check(ticket_id, repo_root=repo_root)
     if check.get("ok"):
         return None
-    # DEGRADE remediation (story 8d8e): op-cert signing needs ssh-keygen (OpenSSH >= 8.9). When it
-    # is unavailable the review could not MINT the attestation, so name the concrete fix in-band.
+    # Op-cert signing requires ``ssh-keygen`` from OpenSSH 8.9 or newer. Include that remedy
+    # when a review could not mint its attestation.
     ssh_hint = ""
     try:
         from rebar.attest import sshsig

@@ -1,26 +1,26 @@
-"""Shared session-id resolution (epic crust-fetch-stump, story 6014).
+"""Resolve the session identifier shared by event-producing commands.
 
-ONE resolver for "which coding-agent session emitted this event", replacing the two
-divergent chains that used to live in :mod:`rebar._commands.session_log` and
-:mod:`rebar._commands.transition_close`. The ordered var list is data-driven so a new
-harness var is a one-line add (story c557 appended the OSS harness var
-``OPENCODE_SESSION_ID`` here; Codex has no readable session var, so it is NOT listed —
-see story 7656).
+Precedence:
 
-Precedence (first NON-EMPTY wins): the explicit, rebar-owned ``REBAR_SESSION_ID`` (an
-operator/hook override is authoritative), then the native harness var
-``CLAUDE_CODE_SESSION_ID``, then the ambient ``SESSION_ID``; else ``None``.
+1. ``REBAR_SESSION_ID``
+2. ``CLAUDE_CODE_SESSION_ID``
+3. ``OPENCODE_SESSION_ID``
+4. ``SESSION_ID``
 
-Deliberate non-goals:
+The first non-empty value wins. Whitespace-only values are absent.
 
-- This resolver NEVER falls back to git HEAD. A HEAD changes on every commit within one
-  session, so it is not a session id — call sites that need a cosmetic non-empty string
-  (e.g. the FORCE_CLOSE audit comment) keep that fallback LOCALLY.
-- An empty / whitespace-only value is treated as ABSENT (skipped), matching the falsy
-  ``or``-chain semantics the old resolvers had.
+The selected value is:
 
-The value is read as an opaque string and returned verbatim — never interpolated or
-executed (consent/provenance sensitivity, epic gotcha).
+- opaque;
+- returned verbatim;
+- ``None`` when every variable is absent.
+
+It is never:
+
+- interpolated or executed;
+- derived from git ``HEAD``.
+
+Callers that need a display fallback provide it locally.
 """
 
 from __future__ import annotations

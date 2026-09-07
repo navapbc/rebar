@@ -1,26 +1,11 @@
-"""The ``fsck`` COMMAND — argv parsing, scan/repair dispatch, report rendering.
+"""Parse, dispatch, and render the ``fsck`` command.
 
-Non-destructive store integrity validator. This module is the command surface; the checks
-themselves live in leaves it calls, one way only:
+``fsck_scan`` owns the store walk, ``fsck_tracker_health`` owns tracker checks,
+``fsck_authorship`` owns environment tallies, and ``fsck_repair`` owns mutation. Text output
+contains tagged findings and a summary. JSON output derives its findings and counted total from
+the same text. Exit status is zero for no counted issues and one otherwise.
 
-* ``fsck_scan`` — the store walk and the per-ticket validators (checks 1–4, 5);
-* ``fsck_tracker_health`` — the tracker-level checks (4.5–4.7, 4.9);
-* ``fsck_authorship`` — the per-env authorship tally (4.8);
-* ``fsck_repair`` — the mutating ``--repair`` surface.
-
-The filesystem primitives the diagnostics share (``_ticket_dirs``, ``_resolve_tracker_git_dir``)
-live in :mod:`rebar._store.gitutil`, not under ``repair`` (ticket b432-c9dc-c1b4-4a45).
-
-Text mode emits tagged lines + a summary; ``--output json`` derives
-``{issues:[{kind,ticket_id?,filename?,detail}], fixed[], issue_count}`` from the SAME text via a
-regex transform (kept identical so text and JSON never drift). Exit 0 = no issues, 1 = issues
-found.
-
-The leaf symbols below are re-imported and re-exported so ``fsck.<symbol>`` attribute access
-keeps resolving for the callers that bind to it — ``tracker_maintenance``
-(``foreign_store_path_list``) and the fsck tests (``_scan``, ``_check_snapshot``,
-``_tracker_sync_status``, ``_foreign_store_paths``, and ``_resolve_tracker_git_dir`` /
-``_ticket_dirs``, which several store tests import from here).
+Shared filesystem and leaf symbols remain re-exported for established command and test callers.
 """
 
 from __future__ import annotations
@@ -81,24 +66,9 @@ _TRACKER_DIRTY_KINDS = {
 
 _DIRTY_HEAD_RE = re.compile(r"^(\d+) path\(s\): (.*)$")
 
-# Findings the scan leaves emit with ``is_issue=False``: they appear in the text report
-# (and in ``issues[]``) but must NOT drive the exit code, so they must NOT be tallied into
-# ``issue_count`` either. This is the single place the text→JSON transform can see the
-# kind, so the JSON count becomes the COUNTED subset and AGREES with ``_scan``'s
-# ``is_issue``-respecting tally (bug 29c3-b025-04d7-454e).
-#
-# is_issue=False is decided at two kinds of production site, and this set tracks BOTH
-# without a hand-maintained duplicate that can silently drift (plan-review G6):
-#   * the tracker-dirty wedge classes are SINGLE-SOURCED from ``_DIRTY_LINE_SPECS`` below,
-#     so a future ``counted=False`` dirty class flows in automatically.
-#   * three scan/health kinds are decided by an inline ``is_issue=False`` at their
-#     production site (each site carries a pointer comment back here):
-#       push_pending         — fsck_tracker_health ``_tracker_sync_status`` (sync-ahead info)
-#       status_fork_resolved — fsck_scan (the reducer already resolved the cross-clone race)
-#       warn                 — every ``WARN:`` line (index-lock, forward-compat, branch mismatch)
-# The drift guard in tests/interfaces/facades/test_fsck_issue_count_29c3.py keeps this set
-# in lock-step with the per-site ``is_issue`` flags (round-trip over ``_DIRTY_LINE_SPECS``
-# plus a per-kind ``sum(counted) == exit-code tally`` cross-check).
+# Report-only kinds remain in text and JSON findings but do not affect ``issue_count`` or exit
+# status. Dirty kinds derive from ``_DIRTY_LINE_SPECS``. The explicit scan kinds correspond to
+# their ``is_issue=False`` producers. The facade drift test keeps both sources aligned.
 _NEVER_COUNTED_TRACKER_DIRTY_KINDS = frozenset(
     kind.lower() for _key, kind, _blurb, counted in _DIRTY_LINE_SPECS if not counted
 )
@@ -299,11 +269,9 @@ def _missing_tracker_result(tracker: str, fmt: str) -> int | None:
             f"store exists at {legacy} — tracker.dir was changed without migrating."
         )
     if fmt == "json":
-        # Emit an explicit, COUNTED ``not_initialized`` finding so the JSON payload is
-        # distinguishable from a clean store (which is ``issues:[], issue_count:0``) and
-        # ``issue_count`` (1) agrees with the exit code (1). The real diagnostic rides in
-        # the finding's ``detail``; the tracker.dir mismatch WARN (never counted) is
-        # carried alongside when present (bug 29c3-b025-04d7-454e).
+        # A counted ``not_initialized`` finding distinguishes a missing store from a clean one
+        # and keeps JSON ``issue_count`` aligned with exit status. A path mismatch remains a
+        # separate uncounted warning.
         diagnostic = (
             f"NOT_INITIALIZED: ticket system not initialized ({tracker} not found) — "
             "run 'rebar init' first"
@@ -320,11 +288,9 @@ def _missing_tracker_result(tracker: str, fmt: str) -> int | None:
 def _fsck_govern(
     *, repair_snapshots, include_archived, do_repair, dry_run, only, limit, fmt
 ) -> int | None:
-    """Parser-of-record governance for :func:`fsck_cli`.
+    """Ask the parser factory to govern canonical argv derived from the bespoke scan.
 
-    Reconstruct a canonical, always-argparse-valid argv from the values the bespoke
-    scan extracted and let the factory govern it. Returns a render exit code when a
-    (rejecting) factory refuses the argv, else ``None`` to continue.
+    Return the rejection render code, or ``None`` when dispatch may continue.
     """
     from rebar._cli._parser import ParseError, render_parse_error
     from rebar._cli._parsers.core.repair import build_fsck
@@ -352,9 +318,8 @@ def _fsck_govern(
 
 
 def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int:
-    # RC2b Option 1: --repair-snapshots opts into rebuilding a stale SNAPSHOT that has
-    # a merged-in pre-snapshot orphan (drives the live store to fsck-zero — A3). Strip
-    # it before output parsing; it is honored only when mutation is allowed.
+    # ``--repair-snapshots`` permits rebuilding a stale snapshot with a pre-snapshot orphan.
+    # Strip it before output parsing and honor it only on mutating paths.
     repair_snapshots = "--repair-snapshots" in argv
     include_archived = "--include-archived" in argv
     do_repair = "--repair" in argv
@@ -397,11 +362,8 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
         sys.stderr.write(f"Error: {exc}\n")
         return 2
 
-    # Parser of record. fsck's accepted grammar is order-independent membership tests
-    # (a flag may appear anywhere or repeat), equals-only ``--only=``/``--limit=`` with
-    # bespoke multi/require diagnostics, and ``--output`` handled by ``parse_output`` —
-    # none of which argparse matches byte-for-byte, so the handling above owns it. The
-    # factory still governs via ``_fsck_govern`` (a rejecting factory raises → fail).
+    # The bespoke scan owns repeated flags, equals-only filters, and output parsing. The parser
+    # factory still governs canonical argv through ``_fsck_govern`` and may reject it.
     _rc = _fsck_govern(
         repair_snapshots=repair_snapshots,
         include_archived=include_archived,
@@ -432,10 +394,8 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
             include_archived=include_archived,
         )
 
-    # ``no_mutate`` is passed by the caller (the library's read-only fsck surface),
-    # not read from the environment: read paths (list/show via rebar.fsck(report_only=
-    # True)) pass no_mutate=True so they never delete the stale lock; the CLI `fsck`
-    # always mutates (default False).
+    # ``no_mutate`` comes from the caller, not the environment. Library read paths set it to
+    # preserve stale locks, while the CLI uses the mutating default.
     lines, issue_count = _scan(
         tracker,
         no_mutate or dry_run,
@@ -451,9 +411,8 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     )
     rc = 0 if issue_count == 0 else 1
 
-    # Story 21dd: the read-only diagnostic surfaces an incompatible/corrupt store as a
-    # structured `compat_error` (JSON) + WARNING, WITHOUT blocking (repair is gated via
-    # lock.acquire() instead); the exit code is unchanged.
+    # Read-only diagnostics expose store incompatibility as a JSON ``compat_error`` and warning
+    # without changing exit status. Repair enforces compatibility while acquiring the lock.
     compat_error = compat.describe_store_compat(tracker)
     if compat_error is not None:
         sys.stderr.write(f"WARNING: {compat_error['detail']}\n")

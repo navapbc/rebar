@@ -1,30 +1,12 @@
-"""Create-time advisory same-title duplicate probe (ticket eac3-ed70-764a-4f9e).
+"""Provide the create-time advisory for recent duplicate titles.
 
-Duplicate tickets were only detected after an agent was mid-implementation: the heavy
-overlap detector (ADR 0086) deliberately runs at review time, off the hot write path, so a
-same-title twin filed seconds after its original passed creation unflagged — and the store
-measurement on that ticket showed every same-title true duplicate was created within 171
-seconds of its twin ("same normalized title + short window" scored 100% precision).
+A store-side journal records normalized titles within a fixed window. Each create prunes and
+probes the journal before appending its row, avoiding a store scan. One exclusive ``fcntl.flock``
+protects the read, prune, probe, append, and rewrite sequence without nesting under the store
+write lock. Journal order therefore makes a concurrent second create observe the first.
 
-This module is the cheap create-time complement: a small rolling "recent creates" journal —
-a store-wide sidecar beside the canonical tracker (the keying the overlap enrich gate marker
-uses, bug ``da68-fc7c``) — records each create and is pruned to a fixed recency window. On
-every create the journal is probed for a normalized-title match BEFORE the new ticket's own
-entry is appended. Cost is one flock + one small-file read + one write — O(window), never
-O(store): no title index and no store scan, honouring the write-path budget lesson of
-``moist-short-lionfish`` (486 ms/write against a 20 ms budget).
-
-Concurrency: the whole read-prune-probe-append-rewrite is ONE critical section under a
-dedicated exclusive ``fcntl.flock`` (:func:`_journal_lock` — the ``_hlc_lock`` pattern from
-:mod:`rebar._store.hlc`), held only for the small-file RMW and never nested with the store
-write lock, so two near-simultaneous creates serialize: the second's probe observes the
-first's entry (the burst case the feature targets) and no rewrite clobbers a just-appended
-row. The kernel drops the lock if its holder dies — no staleness logic.
-
-Advisory ONLY, gated on the existing ``verify.suggest_duplicate_tickets`` key: the flag off
-means no journal, no probe, zero write-path footprint; and every failure inside the probe
-(unreadable journal, config error, reduce failure) degrades to no-warning, because an
-advisory must never fail a completed write.
+The feature runs only when ``verify.suggest_duplicate_tickets`` is enabled. Configuration,
+journal, and reduction failures suppress the advisory without affecting the completed create.
 """
 
 from __future__ import annotations
@@ -134,13 +116,10 @@ def _probe_and_record(
 def duplicate_create_warning(
     tracker: Any, *, ticket_id: str, alias: str | None, title: str, cfg_root: str
 ) -> str | None:
-    """The create-time advisory: a recent same-normalized-title create, or ``None``.
+    """Return a recent normalized-title match, or ``None``, after CREATE has landed.
 
-    Called by ``create_core`` AFTER the CREATE event lands (the ticket exists either way).
-    Runs only when ``verify.suggest_duplicate_tickets`` is enabled — the same key that turns
-    on the review-time overlap detector, so one switch governs "suggest duplicates" on both
-    seams. Each surface emits the returned text on its own channel (CLI stderr, library
-    logger, MCP result field), exactly as ``description_cap_warning`` does.
+    The duplicate-suggestion setting governs this probe and review-time overlap detection.
+    CLI, library, and MCP callers emit the advisory through their own channels.
     """
     try:
         from rebar.config import compose_config

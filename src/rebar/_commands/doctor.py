@@ -1,46 +1,17 @@
-"""``doctor`` — find (and optionally repair) blocking edges that predate the
-structural link rule.
+"""Diagnose and optionally repair blocking links and tracker health.
 
-Blocking-link comparability used to be decided by ticket TYPE TIER; ticket
-7ab3-9df0-7a90-4ffd replaced that with a structural rule (endpoints must be
-siblings; otherwise each escalates to a child of their nearest common ancestor).
-A ``LINK`` event is durable and nothing re-resolves it on read, so edges written
-under the old rule stay wrong on disk and keep distorting ``ready`` /
-``next-batch`` / the parent-first claim cascade.
+Each active blocking link is checked with the current structural resolver. An
+``ancestor-blocking`` link is redundant and can be removed. A ``mis-escalated`` link is
+replaced with the resolved pair. An ``unreadable`` link is reported but never repaired.
 
-This module enumerates net-active blocking edges and asks the CURRENT resolver
-what each one should be, so the audit can never drift from the rule it audits:
+Lock health reporting is read-only and never reclaims a stale lock. Dirty-tracker repair
+restores tracked store artifacts and quarantines regenerable compaction leftovers under a
+short write-lock window, then releases that lock before reconvergence. It creates
+``refs/rebar-doctor/<utc-ts>`` before the first mutation. Temporary ``.tmp-event-*`` files
+remain report-only because an in-flight append may own them.
 
-  * ``ancestor-blocking`` — the resolver reports the pair redundant, i.e. one
-    endpoint is an ancestor of the other. Repair unlinks it; there is no correct
-    replacement, because the hierarchy edge already expresses the relationship.
-  * ``mis-escalated``     — the resolver returns a different pair than the one on
-    disk. Repair replaces the edge with the resolved pair.
-  * ``unreadable``        — the resolver could not read an endpoint. Reported,
-    never repaired.
-
-Alongside the link audit it reports LOCK HEALTH — held/free, the ownership stamp,
-holder liveness, hold age and staleness for each of the store's lock legs. That half
-lives in :mod:`rebar._commands.doctor_locks` and is strictly read-only: a stale lock is
-reported and advised on, never reclaimed. Only link findings are repairable, so lock
-results never enter the repair loop below.
-
-It also scans for the DIRTY-TRACKER wedge class fsck check 4.10 detects (ticket
-c925-7669-ded8-43a3): tracked deletions of store artifacts restorable from HEAD,
-untracked regenerable compaction leftovers, and orphaned ``.tmp-event-*`` staging
-files. ``--repair`` heals the first two in TWO lock windows — the store write lock is
-NON-reentrant, so the file mutations (restore via ``git checkout``; quarantine MOVE,
-never delete) run under one short scoped ``write_lock`` window that is RELEASED before
-``sync.reconverge`` (which takes the lock itself) converges the previously wedged
-store. Before the first mutation a backup ref ``refs/rebar-doctor/<utc-ts>`` records
-the tickets HEAD, mirroring tracker-maintenance's backup-ref envelope. Class 3 is
-printed and never touched — a live ``.tmp-event-*`` belongs to an in-flight append.
-
-Repair writes the replacement BEFORE removing the stale edge: unlink-first would,
-on any failure in between, destroy a dependency with nothing left to reconstruct
-it from, whereas link-first fails toward a transient superset that the next scan
-finishes. Repair is therefore resumable and idempotent, and no failure path loses
-an edge.
+Link repair writes the resolved replacement before removing the stale edge. This ordering
+preserves the dependency on failure and makes repair resumable and idempotent.
 """
 
 from __future__ import annotations

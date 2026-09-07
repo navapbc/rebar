@@ -1,17 +1,8 @@
-"""The ``identity`` entity: create path, the self-identity pointer, and resolver.
+"""Create identity entities and resolve the checkout's optional current identity.
 
-An ``identity`` ticket is a first-class, gate-/graph-exempt entity (modeled on
-``session_log`` / ``code_review``) that records a person/agent: a ``name`` (its
-title), an ``email``, external-provider ``mappings`` (``{provider, external_id}``),
-and OpenSSH authorized-``keys`` lines. All three payload fields ride the CREATE
-event so the reducer surfaces them in compiled state.
-
-The "current" identity is tracked by a LOCAL, git-ignored pointer file
-(``<repo>/.rebar/current_identity`` — the same ``.rebar`` local-state root
-``session_log`` / ``scratch`` use), so it never enters the shared tickets branch and
-never propagates across machines. Identity is entirely OPT-IN: an unauthenticated
-checkout (no pointer, no matching git email) is valid, so :func:`resolve_current_identity`
-returns ``None`` on every miss and NEVER raises.
+An identity is gate and graph exempt. Its CREATE stores title, email, provider mappings, and
+OpenSSH public keys. The git-ignored ``.rebar/current_identity`` pointer stays local and never
+enters the tickets branch. Missing or ambiguous identity state resolves to ``None``.
 """
 
 from __future__ import annotations
@@ -282,18 +273,12 @@ def create_identity_core(
     repo_root=None,
     creation_channel: str = "python",
 ) -> dict:
-    """Mint an ``identity`` ticket in ONE CREATE event; return ``{id, alias, title}``.
+    """Create an identity in one event and return its id, alias, and title.
 
-    ``name`` becomes the title; ``email`` / ``mappings`` / ``keys`` ride the CREATE
-    payload (see :func:`rebar._commands.composer.create_core`). ``tags`` (e.g. a
-    ``placeholder`` marker for a ghost identity) rides the SAME CREATE event so it is
-    atomic — no separate ``tag`` call, no tagless window. Raises :class:`CommandError`
-    on validation failure.
-
-    ``creation_channel`` (story 6fe2) is threaded to the genesis CREATE. This is the
-    SHARED signature local/library callers reach through the ``"python"`` default and
-    ``identity_cli`` overrides to ``"cli"``; a later Jira story supplies ``"jira"`` at
-    the inbound boundary."""
+    ``name`` becomes the title. The event atomically carries email, mappings, keys, tags, and
+    ``creation_channel``. Validation failures raise :class:`CommandError`. Library callers
+    default to ``python`` and the CLI supplies ``cli``.
+    """
     reject_private_key_material(keys or [])
     return create_core(
         "identity",
@@ -314,9 +299,10 @@ _PLACEHOLDER_TAG = "placeholder"
 
 
 def is_placeholder(identity_id: str, *, repo_root=None) -> bool:
-    """True iff ``identity_id`` is an identity whose compiled-state ``tags`` carries the
-    ``placeholder`` marker (a ghost minted for an unmapped inbound user). An unknown id,
-    a non-identity ticket, or any reduce failure is ``False`` — never raises."""
+    """Return whether compiled identity tags contain ``placeholder``.
+
+    Unknown IDs, other entity types, and reduction failures return ``False``.
+    """
     import os
 
     if not isinstance(identity_id, str) or not identity_id.strip():
@@ -340,24 +326,14 @@ def ensure_identity_for(
     repo_root=None,
     creation_channel: str = "python",
 ) -> str:
-    """Resolve-or-mint the identity for an inbound ``(provider, external_id)`` user; return
-    its id (2f13, epic gnu-whale-ichor). Idempotent and provider-neutral:
+    """Resolve or create the identity for an inbound provider mapping.
 
-    * RESOLVE FIRST via :func:`resolve_mapping` (keyed on the opaque external id, NEVER
-      email). If an identity already carries this mapping, RETURN it — never mint a
-      second. When that existing identity is still a *placeholder* and ``display_name`` is
-      non-empty and differs from its current title, UPGRADE the title IN PLACE (a real,
-      already-named identity is left untouched — a ghost's mapping is reused, never
-      renamed over a human's).
-    * Else MINT a placeholder: an ``identity`` whose title is ``display_name`` (falling
-      back to ``external_id`` when blank), an empty email, the single ``{provider,
-      external_id}`` mapping, and the ``placeholder`` tag riding the SAME CREATE event.
-
-    Never raises on a lookup problem — a resolve failure falls through to a mint.
-
-    ``creation_channel`` (story 6fe2) is threaded to a minted placeholder's genesis
-    CREATE; it defaults to ``"python"`` (a later Jira story supplies ``"jira"`` at the
-    inbound boundary)."""
+    Resolution uses ``(provider, external_id)`` rather than email and returns an existing
+    mapping idempotently. A mapped placeholder adopts a non-empty display name without
+    renaming a non-placeholder identity. Otherwise one CREATE mints a placeholder with an
+    empty email, one mapping, the placeholder tag, and ``creation_channel``. Lookup failure
+    falls through to creation.
+    """
     import os
 
     existing = None
@@ -459,15 +435,12 @@ def add_identity_key(
     signature=None,
     repo_root=None,
 ) -> None:
-    """Add ``public_key`` to an identity's keyring (epic gnu-whale-ichor / e165).
+    """Add a public key under trust-on-first-use and signed-rotation rules.
 
-    GENESIS / TOFU: when the identity currently has NO valid keys, the first key is added
-    trust-on-first-use — no signature is required (there is no prior key that could sign
-    it). NON-GENESIS: once the identity holds at least one valid key, ``signature`` (a
-    :class:`~rebar.attest.dsse.Envelope` over ``keyop_payload("KEY_ADD", identity_id,
-    public_key)``) is REQUIRED and must verify against a currently-valid key; otherwise the
-    rotation is REFUSED and NO event is appended. On success a ``KEY_ADD`` event is
-    appended (the signature envelope, if any, is stored encoded for auditability)."""
+    The first valid key needs no signature. Later additions require a DSSE signature over the
+    ``KEY_ADD`` payload from a currently valid key. Failed verification appends nothing.
+    Successful events retain the encoded envelope for audit.
+    """
     if not isinstance(public_key, str) or not public_key.strip():
         raise CommandError("Error: add_identity_key requires a non-empty public key")
     public_key = public_key.strip()
@@ -494,13 +467,11 @@ def revoke_identity_key(
     signature,
     repo_root=None,
 ) -> None:
-    """Revoke ``public_key`` from an identity's keyring (epic gnu-whale-ichor / e165).
+    """Revoke a public key with a signature from a currently valid identity key.
 
-    A revoke is ALWAYS signed: ``signature`` (a :class:`~rebar.attest.dsse.Envelope` over
-    ``keyop_payload("KEY_REVOKE", identity_id, public_key)``) is REQUIRED and must verify
-    against a currently-valid key of the identity; otherwise the revoke is REFUSED and NO
-    event is appended. On success a ``KEY_REVOKE`` event is appended, closing the key's
-    validity window at the revoke event's position (its introducing commit)."""
+    The DSSE envelope covers the ``KEY_REVOKE`` payload. Failed verification appends nothing.
+    A successful event closes the key's validity window at that event position.
+    """
     if not isinstance(public_key, str) or not public_key.strip():
         raise CommandError("Error: revoke_identity_key requires a non-empty public key")
     public_key = public_key.strip()
@@ -516,12 +487,10 @@ def revoke_identity_key(
 
 
 def use_identity(identity_id: str, *, repo_root=None) -> None:
-    """Write the ``.rebar/current_identity`` pointer to ``identity_id``.
+    """Point ``.rebar/current_identity`` at an identity and invalidate attribution cache.
 
-    Invalidates the per-repo attribution cache (epic gnu-whale-ichor): the current
-    identity determines the ``author_id`` stamped on subsequent event envelopes, so a
-    pointer change must be picked up by the next ``attribution_fields`` call rather
-    than served a stale cached dict computed under the previous identity."""
+    The next attribution lookup therefore stamps events with the selected ``author_id``.
+    """
     _write_pointer(identity_id, repo_root=repo_root)
     from rebar._commands._seam import _reset_attribution_cache
 
@@ -529,12 +498,11 @@ def use_identity(identity_id: str, *, repo_root=None) -> None:
 
 
 def resolve_current_identity(*, repo_root=None) -> str | None:
-    """Resolve the current self-identity, or ``None`` (opt-in; never raises).
+    """Resolve the optional current identity without raising.
 
-    Order: (1) if the pointer names an existing ``identity`` ticket, return it;
-    (2) else a case-insensitive ``git config user.email`` match against identity
-    tickets. Every miss — no pointer / deleted target, git email unset or the ``git``
-    call itself failing, zero matches, or two-or-more ambiguous matches — is ``None``."""
+    A valid pointer wins. Otherwise a unique case-insensitive identity match for git user email
+    wins. Missing, invalid, failed, or ambiguous inputs return ``None``.
+    """
     tracker = str(tracker_dir(repo_root))
     pointer_id = _read_pointer_id(repo_root)
     if pointer_id and _is_identity(pointer_id, tracker):
@@ -623,13 +591,10 @@ def _do_create(ns, *, repo_root) -> int:
 
 
 def identity_cli(argv: list[str], *, repo_root=None) -> int:
-    """``rebar identity create ...`` / ``rebar identity use <id>`` / ``rebar identity key ...``.
+    """Handle identity create, use, and key commands through the shared parser factory.
 
-    The accepted-argv grammar is owned by the shared parser factory
-    :func:`rebar._cli._parsers.advanced.identity.build`; this handler keeps the
-    dispatcher-style top-level ``--help`` (usage to stdout) and the value-semantics
-    validations, and maps the factory's :class:`ParseError` to identity's historical
-    exit-1 reject contract (argparse's own default would be exit 2).
+    Top-level help writes usage to stdout. Value validation and parser failures retain the
+    command's exit-one rejection contract.
     """
     if not argv or argv[0] in ("--help", "-h", "help"):
         print(_USAGE)
