@@ -264,19 +264,10 @@ def run_access_check(
     return {"verdict": verdict, "steps": steps}, lines, 1 if failed else 0
 
 
-# ---------------------------------------------------------------------------
-# Mapped-project visibility preflight (ticket a011).
-#
-# Before a reconcile pass mutates a live Jira, EVERY project the pass could
-# touch must be visible to the bridge bot. This is the single source of truth
-# for "is this mapped key + legacy_default (+ empty-mapping fallback) visible?"
-# — reused by both the reconcile-pass preflight (__main__.run_pass_result) and
-# the bridge fsck live diagnostic (ticket 9702). The check NEVER raises for a
-# "not visible" / "unreachable" verdict (those are encoded in the returned
-# ProjectVisibilityResult.status), so a diagnostic caller can inspect the full
-# result; enforce_mapped_project_visibility() is the raising wrapper the
-# fail-fast pass wiring uses.
-# ---------------------------------------------------------------------------
+# Resolve mapped keys, ``legacy_default``, and the empty-mapping fallback before
+# checking every project. Invisible or unreachable projects remain non-raising
+# result statuses for diagnostic callers. ``enforce_mapped_project_visibility``
+# raises for the fail-fast pass boundary.
 
 _PROJECT_SEARCH_PATH = "/rest/api/3/project/search"
 _PROJECT_SEARCH_PAGE_SIZE = 50

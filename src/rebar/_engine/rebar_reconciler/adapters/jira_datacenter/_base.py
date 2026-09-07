@@ -1,14 +1,7 @@
-"""Shared plumbing for the Jira Data Center transport's capability mixins
-(ticket 465d, epic e369) — construction, the unwrap boundary, the logged-retry
-choke point, and the one shared pager.
+"""Provide shared construction, unwrapping, logging, retry, and paging.
 
-Extracted from ``transport.py`` under the module-size cap (see ADR 0058); no behaviour change.
-Every capability mixin (``_issues.py``, ``_hierarchy.py``, ``_links.py``,
-``_comments.py``, ``_people.py``, ``_properties.py``) inherits from
-:class:`_TransportBase` so mypy sees ``self._client`` / ``self.project`` /
-``self._epic_link_field_id`` without each mixin re-declaring them, and so
-``__init__`` exists exactly once regardless of how many mixins
-``JiraDataCenterTransport`` composes.
+Every Jira Data Center capability mixin inherits ``_TransportBase``, which owns
+the injected client, project state, Epic Link field ID, and sole initializer.
 """
 
 from __future__ import annotations
@@ -38,25 +31,11 @@ def _unwrap(obj: Any) -> Any:
 
 
 def _call_logged(member: str, remote_id: Any, fn: Any, *, rate_limit_retry: bool = False) -> Any:
-    """Run ``fn()`` through :func:`_with_connection_retry`, logging a WARNING that
-    names the transport MEMBER and the REMOTE ID before any failure propagates.
+    """Run ``fn`` through connection retry and log failures before re-raising.
 
-    Seven of the twelve members added by story J9 are invoked from core call sites
-    that swallow ``Exception`` at EVERY site (comments, links, parents, issue
-    properties, assignee validation), and three more swallow it at some sites. A
-    failure there produces no crash and no record — which is precisely how a DC
-    deployment can "converge" while syncing nothing. This log is the only signal
-    those paths emit, so it is written HERE, at the single choke point every
-    member routes through, rather than per method (where it would be forgotten by
-    the thirteenth member). The exception is re-raised untouched: this observes,
-    it never handles. Follows ``adapters/jira/acli_subprocess.py``'s module-level
-    ``logger = logging.getLogger(__name__)`` convention.
-
-    ``rate_limit_retry`` is FORWARDED, defaulting to False. This forward is load-bearing
-    rather than cosmetic: before story S2 this function called ``_with_connection_retry(fn)``
-    with no keyword at all, so a flag threaded only as far as here would have been a no-op
-    that still type-checked — every ``_paged_search`` read would have looked opted-in and
-    retried nothing.
+    Warnings name the public transport member and remote ID, including at call
+    sites that swallow exceptions. ``rate_limit_retry`` is forwarded explicitly
+    so paged reads can opt in.
     """
     try:
         return _with_connection_retry(fn, rate_limit_retry=rate_limit_retry)
@@ -78,15 +57,7 @@ def _user_attr(user: Any, key: str) -> Any:
 
 
 class _TransportBase:
-    """Construction + the shared pager every capability mixin is built on.
-
-    This carried a ``resolved_statuses`` parameter and ``_resolved_statuses`` attribute for
-    the inbound absence probe's classifier. That port was deleted with task f020, leaving the
-    attribute write-only — stored on every transport and read by nothing — so task 549c
-    removed it. The config keys that fed it were deprecated by 549c and then removed
-    outright by task f408; they survive only as warn-class tombstones in
-    ``_deprecations._TOMBSTONE_REGISTRY``.
-    """
+    """Hold the shared client, project state, Epic Link field ID, and pager."""
 
     # Declared at class level (type-only) so every capability mixin that inherits
     # ``_TransportBase`` sees a resolvable type for these attributes regardless of
@@ -113,41 +84,12 @@ class _TransportBase:
         page_size: int = 100,
         rate_limit_retry: bool = False,
     ) -> list[dict[str, Any]]:
-        """Every issue matching ``jql``, paged to exhaustion — the ONE pager the
-        whole-project readers share.
+        """Return every issue matching ``jql`` through offset pagination.
 
-        Advances by what the server ACTUALLY returned and stops only on an EMPTY page.
-        Jira DC silently truncates ``maxResults`` above ``jira.search.views.default.max``,
-        so a SHORT page is not proof of exhaustion: advancing by the REQUESTED size reads
-        a truncated FIRST page as the final one (measured: 20 of 250 recovered).
-
-        SHARED rather than repeated per method because that defect was fixed once, in
-        ``get_parent_map`` alone, leaving the two siblings here plus a third in
-        ``fetcher._iter_pages``. A structural test now fails the build if any caller takes
-        the ``search_issues`` default again (bug 9263).
-
-        **Termination (ticket 18a4).** Two conditions stop the walk, and only two:
-
-        * an EMPTY page — the ordinary exhaustion exit; or
-        * an OFFSET STALL — a page repeating the previous page's first issue key,
-          which proves the server is not honouring ``startAt``. That raises
-          :class:`~rebar_reconciler._backend.BackendPaginationStallError` naming
-          ``startAt`` and the stalled offset. Without it the empty-page exit is
-          unreachable against a ``startAt``-blind instance and this loop runs
-          forever, ``out`` growing without bound.
-
-          The stall aborts on ANY repeated page, SHORT **or** FULL — deliberately
-          UNLIKE ``fetcher._iter_pages``, which returns cleanly on a repeated SHORT
-          page. That reasoning ("fewer than asked for, so nothing further to give")
-          does not transfer to DC: this pager exists *because* a hardened DC caps
-          EVERY page below the requested size, so on DC a short page is the normal
-          case WITH more to give. Treating it as exhaustion would silently return
-          20 of 250 — the exact bug-9263 loss this pager was built to refuse. It
-          cannot false-positive either: a ``startAt``-honouring server serves
-          DIFFERENT issues at each offset.
-
-        Raises:
-            BackendPaginationStallError: the server stopped honouring ``startAt``.
+        Advance ``startAt`` by the count returned because Data Center can cap
+        pages below ``maxResults``. An empty page ends iteration. Repeating the
+        previous page's first issue key raises ``BackendPaginationStallError`` for
+        both short and full pages, preventing truncated maps and unbounded loops.
         """
         out: list[dict[str, Any]] = []
         start_at = 0

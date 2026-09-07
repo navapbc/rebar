@@ -37,27 +37,14 @@ _BRIDGE_ONLY_CREATE_FIELDS: frozenset[str] = frozenset(
 _UNSETTABLE_AT_CREATE_FIELDS: frozenset[str] = frozenset({"status"})
 
 
-#: DC's REST v2 descriptions are plain text/wiki markup with the instance's
-#: ``jira.text.field.character.limit`` cap; the codec is the one place that fit
-#: is spelled, shared with the backend's description sanitizer.
-#:
-#: Built per CALL, not once at import: the rich-text cutover flag
-#: (``reconciler.rich_text_cutover``, story 3388) is read at call time, and a
-#: module-level codec would freeze whatever the flag said when this module was first
-#: imported — which for a long-lived reconciler process is "whatever it was at boot".
+# Build the REST v2 wiki codec per call so the rich-text cutover and character
+# limit remain current. The backend description sanitizer uses the same contract.
 def _description_codec() -> WikiTextCodec:
     return WikiTextCodec(rich="dc" in cutover_clients())
 
 
 def _create_summary(ticket_data: dict[str, Any]) -> str:
-    """Resolve the Jira ``summary`` from the create payload's two spellings.
-
-    ``title`` is the bridge-side name (added by ``dispatch_one`` for Cloud) and
-    ``summary`` is the differ's Jira-side name; both arrive in the same payload, so
-    prefer the bridge value and fall back to the Jira one. An empty result RAISES
-    rather than creating an untitled issue, because the create's whole purpose is to
-    bind a local ticket to a recognisable remote one (Cloud raises here too).
-    """
+    """Prefer ``title``, fall back to ``summary``, and reject an empty value."""
     stripped = ""
     for key in ("title", "summary"):
         # A whitespace-only value counts as absent, so a blank ``title`` falls
@@ -77,13 +64,10 @@ def _create_summary(ticket_data: dict[str, Any]) -> str:
 
 
 def _create_issuetype(ticket_data: dict[str, Any]) -> dict[str, str]:
-    """Resolve Jira's ``{"name": …}`` issue-type object from the create payload.
+    """Normalize ``ticket_type`` or ``issuetype`` into Jira's name object.
 
-    Three shapes reach this function, and at least two of them in the SAME payload:
-    ``ticket_type`` (a bridge-side string such as ``"task"``, capitalized the way
-    Cloud's ``AcliClient.create_issue`` capitalizes it), and ``issuetype``, which the
-    differ emits either as Jira's nested ``{"name": "Story"}`` or as a bare string.
-    A payload that yields nothing usable defaults to ``Task``, matching Cloud.
+    Strings and existing objects are accepted. Missing or unusable values default
+    to ``Task``.
     """
     bridge_type = ticket_data.get("ticket_type")
     if isinstance(bridge_type, str) and bridge_type.strip():
@@ -100,13 +84,11 @@ def _create_issuetype(ticket_data: dict[str, Any]) -> dict[str, str]:
 
 
 def _translate_create_fields(ticket_data: dict[str, Any]) -> dict[str, Any]:
-    """Translate a dual-schema create payload into Jira's own field schema.
+    """Translate a dual-schema create payload into Jira fields.
 
-    Everything the payload carries that Jira DOES accept — ``priority``,
-    ``assignee``, ``parent``, ``labels``, custom fields — passes through untouched;
-    only the bridge-only names and the create-unsettable ones are dropped, and only
-    ``summary``/``issuetype``/``description`` are rewritten. Narrowing this to an
-    allowlist instead would silently drop real content the differ emitted.
+    Rewrite summary, issue type, and description. Remove bridge-only and
+    create-unsettable fields. Preserve other valid Jira fields, including custom
+    fields.
     """
     fields = {
         name: value
@@ -117,25 +99,11 @@ def _translate_create_fields(ticket_data: dict[str, Any]) -> dict[str, Any]:
     fields["issuetype"] = _create_issuetype(ticket_data)
     description = fields.get("description")
     if isinstance(description, str):
-        # CREATE is a SECOND DC send path, distinct from the update path's mapper. It
-        # must render too: fitting without ``to_wire`` would post raw Markdown on create
-        # and rendered wiki on every later update. In plain mode both ops are the
-        # identity, so this is byte-for-byte today's behaviour.
+        # Render and fit create descriptions through the wiki codec used by updates.
         codec = _description_codec()
         fields["description"] = codec.to_wire(codec.fit_outbound(description))
-    # Jira's REST API wants OBJECTS for these two, and a live run is what said so — with the
-    # bridge-only names fixed the create got further and failed differently:
-    #   "priority":"Could not find valid 'id' or 'name' in priority object."
-    #   "assignee":"data was not an object"
-    # A bare string arrives because the SHARED outbound mapper has already resolved rebar's
-    # integer priority to a Jira NAME, and because Data Center identifies users by ``name``
-    # (never Cloud's accountId — see ``validate_assignee_exists``). ACLI accepts the bare forms,
-    # which is why the Cloud path never needed this: the same per-transport seam again.
-    # Wrapping only a STRING keeps this idempotent in shape — a caller that already passed the
-    # object form must not end up with ``{"name": {"name": ...}}``, a third distinct 400 — and an
-    # ABSENT field is never invented, which would assign the issue to nobody in particular.
-    # ``parent`` wraps DIFFERENTLY: Jira identifies a parent by ``key``, not by ``name``. Reusing
-    # one wrapper for all three would still 400, so the shape is per-field.
+    # Wrap string priority and assignee values by ``name``, and parent by ``key``.
+    # Existing objects remain unchanged.
     for name, wrapper in (("priority", "name"), ("assignee", "name"), ("parent", "key")):
         if name not in fields:
             continue
@@ -143,12 +111,8 @@ def _translate_create_fields(ticket_data: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, str) and value:
             fields[name] = {wrapper: value}
         elif not value:
-            # PRESENT BUT EMPTY is not the same as absent, and it is what the differ actually
-            # emits for a ticket with no assignee: the key arrives carrying ``None``. Passing
-            # that through sends a null where Jira expects an object and the whole create is
-            # rejected — ``"assignee":"data was not an object"``. Dropping is the only correct
-            # handling: there is no object that means "unassigned"/"no priority" at create time,
-            # and inventing one would assign the issue to somebody.
+            # Drop empty object-valued fields because Jira rejects null where it
+            # expects an object.
             del fields[name]
     return fields
 
@@ -163,27 +127,11 @@ class _IssuesMixin(_TransportBase):
         def _assign(self, remote_id: str, assignee: Any) -> None: ...
 
     def create_issue(self, ticket_data: dict[str, Any]) -> dict[str, Any]:
-        """Create an issue, TRANSLATING the payload into Jira's field schema first.
+        """Create an issue from the translated dual-schema payload.
 
-        The create payload carries TWO schemas at once: ``dispatch_one`` starts from
-        the differ's Jira-shaped fields (``summary``, ``issuetype``, ``status``, …)
-        and then ADDS the bridge-shaped names Cloud's client needs (``title``,
-        ``ticket_type``), passing everything else through. Cloud's
-        ``AcliClient.create_issue`` EXTRACTS the fields it wants and ignores the
-        rest, so the duplication is harmless there. This method used to splat the
-        whole dict into ``client.create_issue(**fields)``, which sent rebar's own
-        field names to Jira as field ids and got the entire request rejected —
-        ``HTTP 400 … Field 'ticket_type'/'title'/'status' cannot be set. It is not on
-        the appropriate screen, or unknown.`` No issue meant no binding, so the
-        failure surfaced three steps downstream as ``get_jira_key`` returning
-        ``None`` (bug 18a5-2bd8-3e56-4bd8).
-
-        The translation lives PER TRANSPORT — the same seam :meth:`update_issue`
-        documents for ``status``→transition, and Data Center simply never got its
-        half. :func:`_translate_create_fields` therefore drops the bridge-only names
-        and ``status`` (not settable at create at all — a status is reached by a
-        workflow transition), rewrites ``summary``/``issuetype``/``description`` into
-        Jira's shapes, and leaves every other genuinely Jira-valid field alone.
+        Bridge and Jira field names can coexist. Translation removes bridge-only
+        names and routes status through a workflow transition rather than a create
+        field. Other Jira fields pass through.
         """
         fields = _translate_create_fields(ticket_data)
         fields.setdefault(
@@ -198,22 +146,10 @@ class _IssuesMixin(_TransportBase):
         return _unwrap(issue)
 
     def update_issue(self, remote_id: str, **kwargs: Any) -> dict[str, Any]:
-        """Apply an outbound field update, ROUTING ``status`` to a transition.
+        """Apply editable fields, then route status through a workflow transition.
 
-        ``status`` is not an editable Jira field. It arrives here anyway —
-        ``dispatch_apply_phases._OUTBOUND_BATCH_ALLOWLIST`` contains it and
-        ``dispatch_one._update_one_scalar_update`` forwards the whole allowlisted
-        dict as ``update_issue(key, **fields)`` — and this method used to hand it
-        straight to ``issue.update(fields=…)``, a REST field EDIT. Jira rejected it,
-        the rejection was soft-failed, and the outbound status silently never
-        changed (bug d067). Cloud does the same translation inside its own transport
-        (``adapters/jira/acli.py:170,182-183``); the status→transition seam lives
-        PER TRANSPORT, and Data Center simply never got its half.
-
-        ``status`` and ``assignee`` are therefore both popped BEFORE the field edit,
-        which then carries only genuinely editable fields — the field edit and the
-        transition happen in this one call, in that order, so a mutation that
-        changes a summary and a status still does both.
+        Assignee uses its dedicated route. Status and assignee are removed before
+        the general field update so a mixed mutation applies each operation once.
         """
         assignee = kwargs.pop("assignee", _MISSING)
         status = kwargs.pop("status", _MISSING)
@@ -239,19 +175,7 @@ class _IssuesMixin(_TransportBase):
         transition_to_status(self._client, remote_id, target_status)
 
     def add_label(self, remote_id: str, label: str) -> None:
-        """Append ``label`` without resetting the issue's existing labels.
-
-        ``add_field_value`` lives on the ISSUE resource, not on the client:
-        ``jira.JIRA`` has no such attribute (verified against jira 3.10.5), so the
-        earlier client-level call raised ``AttributeError`` on every invocation —
-        this method could never have worked. It shipped because it had no test at
-        any tier; the live test that now covers it caught the bug on its first
-        real execution. ``Issue.add_field_value(field, value)`` is documented as
-        "add a value to a field that supports multiple values, without resetting
-        the existing values ... should work with: labels", which is exactly the
-        append semantics this method's callers expect (a read-modify-write of the
-        whole ``labels`` list would clobber concurrent edits).
-        """
+        """Append ``label`` through the issue resource without replacing labels."""
         issue = _with_connection_retry(lambda: self._client.issue(remote_id))
         _with_connection_retry(lambda: issue.add_field_value("labels", label))
 
@@ -280,23 +204,14 @@ class _IssuesMixin(_TransportBase):
         )
         return [_unwrap(issue) for issue in results]
 
-    # ------------------------------------------------------------------
-    # The twelve members the core reaches for (story J9). Each is written
-    # against DC REST **v2** via ``pycontribs/jira`` — never by copying Cloud's
-    # v3 endpoint, and never by hand-rolled REST. Every one routes through
-    # ``_call_logged`` so a failure at a call site that swallows
-    # ``Exception`` still leaves a WARNING naming the member and the remote id.
-    # ------------------------------------------------------------------
+    # REST v2 transport members route through ``_call_logged`` so swallowed
+    # failures retain member and remote-ID evidence.
 
     def get_issue_by_rest(self, remote_id: str) -> dict[str, Any]:
-        """Read an issue straight from the primary store (no search-index lag).
+        """Read from REST v2 through ``client.issue``.
 
-        On DC this is the SAME call ``get_issue`` makes — ``client.issue(key)`` is
-        already ``GET /rest/api/2/issue/{key}``. Cloud needs the distinction only
-        because its ``get_issue`` goes through ACLI's JQL search; DC has no such
-        indirection, so the two coincide. The method still exists separately
-        because ``outbound_differ`` calls it by name, and it is the ONE member of
-        the twelve whose call site lets the error propagate.
+        The named primary-store entry point remains distinct for
+        ``outbound_differ`` even though it shares ``get_issue`` mechanics.
         """
         issue = _call_logged("get_issue_by_rest", remote_id, lambda: self._client.issue(remote_id))
         return _unwrap(issue)

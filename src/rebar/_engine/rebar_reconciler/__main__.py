@@ -139,22 +139,10 @@ def _load_sibling_keyed(dotted_key: str, filename: str):
 
 
 def _try_load_step(name: str):
-    """Attempt to import a sibling module by name; return None if absent.
+    """Load a sibling under its dotted module key, or return ``None`` when absent.
 
-    Registers the loaded module in ``sys.modules`` under its dotted spec name
-    (``rebar_reconciler.<name>``) BEFORE exec_module runs. This is load-bearing
-    on Python 3.14 because the new dataclass type-resolution helper
-    (``dataclasses._is_type`` -> ``sys.modules.get(cls.__module__).__dict__``)
-    requires that any module containing a ``@dataclass`` be discoverable via
-    the same key the class's ``__module__`` attribute points at. If
-    ``sys.modules.get(cls.__module__)`` returns None (because we loaded the
-    module via importlib.util but never put it in sys.modules), dataclass
-    instantiation fails with ``AttributeError: 'NoneType' object has no
-    attribute '__dict__'`` (bug 5be7 chain — defect #4 / chain item 4).
-
-    Registration must happen BEFORE ``exec_module`` so that any decorator
-    that runs during module body execution (e.g. ``@dataclass``) sees the
-    module already in sys.modules.
+    Register it in ``sys.modules`` before execution so decorators such as
+    ``@dataclass`` can resolve the executing module.
     """
     here = Path(__file__).parent
     module_path = here / f"{name}.py"
@@ -239,12 +227,8 @@ def _reconcile_exception_result(
     details: dict[str, object] = {"error": str(exc)}
     if type(exc).__name__ == "SelectionStaleError":
         return PassResult(_Disposition.INVALID_INVOCATION, details, legacy_message=f"ERROR: {exc}")
-    # Bug sole-curbable-stinkpot: a rejected Jira credential is a CONFIG fault, not a
-    # data/operational one, so it classifies as INVALID_INVOCATION — the operator gets a
-    # distinct exit code (2, not 1) AND a message naming the token, instead of the generic
-    # "reconcile_once raised: ... exit status 1" that six failed bridge runs reported.
-    # Matched by NAME (not isinstance) to match this function's existing adapter-neutral
-    # posture: it must not import the Jira/ACLI adapter to classify a pass.
+    # Classify credential rejection as INVALID_INVOCATION by exception name, which
+    # avoids importing the Jira adapter.
     if type(exc).__name__ == "AcliAuthError":
         details["error_class"] = "auth_failed"
         message = (
@@ -324,12 +308,9 @@ def run_pass(
 
 
 def _project_visibility_preflight(repo_root: Path, target_mode, route: str | None):
-    """Thin adapter over the sibling preflight (ticket a011).
+    """Translate the sibling preflight's ``PreflightAbort`` into ``PassResult``.
 
-    The backend-gated project-visibility logic lives in ``_preflight.py`` (kept out
-    of this module for the size cap). Here we only translate its lightweight
-    ``PreflightAbort`` verdict into this module's classified ``PassResult``. Loaded
-    via the sibling-keyed loader so tests can pre-seed it.
+    The sibling-keyed loader permits pre-seeded test modules.
     """
     preflight = _load_sibling_keyed("rebar_reconciler._preflight", "_preflight.py")
     abort = preflight.project_visibility_preflight(repo_root, target_mode, route)
@@ -477,25 +458,13 @@ def _run_with_last_pass(
 
 
 def _bind_operation_snapshot(repo_root):
-    """Compose ONE :class:`OperationSnapshot` for the reconcile pass and bind it active
-    for the duration of :func:`main`'s remaining work (ticket ec44 — authoritative
-    counterpart to the retired diagnostic-only shadow).
+    """Compose and bind one ``OperationSnapshot`` for the remainder of ``main``.
 
-    Returns the ENTERED context manager; the caller MUST hold a reference to it and
-    call ``.__exit__(...)`` when the pass concludes (``main`` does this via a
-    ``try/finally``). A generator-based CM's ``__enter__`` does not keep the CM (or its
-    underlying generator) alive on its own — an unreferenced CM is collectible
-    immediately after ``__enter__`` returns, and collecting it invokes the generator's
-    ``close()``, which raises ``GeneratorExit`` at the ``yield`` and unwinds the
-    ``finally`` that resets the bound contextvar right away, silently defeating the
-    binding. Explicit ``__exit__`` (rather than "leave it bound, the process exits
-    soon") also matters because this module is loaded and ``main()`` invoked
-    IN-PROCESS by tests (``test_main_entry.py``/``test_reconcile_main.py``) — a binding
-    left active past ``main()``'s return would leak the bound contextvar into every
-    later test sharing that process/xdist worker. Fails OPEN exactly like the composer
-    it wraps: a malformed/insecure config leaves nothing bound and the pass falls back
-    to ambient resolution exactly as it did before this seam existed (AC3 of ticket
-    3a08 — unchanged fail-open contract for this general, non-LLM snapshot)."""
+    Return the entered context manager so the caller retains it through the pass and
+    exits it explicitly. Retention prevents premature generator cleanup. Explicit exit
+    prevents context leakage between in-process calls. Configuration errors preserve
+    fail-open ambient resolution.
+    """
     from rebar._operation_config import compose_and_bind_operation_snapshot
 
     cm = compose_and_bind_operation_snapshot(repo_root=repo_root)
@@ -531,12 +500,8 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = request.repo_root
     route = getattr(request, "route", None)
 
-    # Authoritative operation snapshot (ticket ec44, succeeding the RP-04 S1 shadow):
-    # one composed-and-bound snapshot from the resolved request root at this
-    # compatibility boundary, active for the remainder of this pass and explicitly
-    # unbound in the ``finally`` below (see ``_bind_operation_snapshot`` — this must
-    # not linger past the pass, since tests load this module and invoke ``main()``
-    # in-process).
+    # Bind one composed operation snapshot through the pass and release it in the
+    # finalizer.
     operation_snapshot_cm = _bind_operation_snapshot(repo_root)
     try:
         # This compatibility path remains before mode and advisory-lock checks.
@@ -567,24 +532,16 @@ def main(argv: list[str] | None = None) -> int:
         if pause_exit is not None:
             return pause_exit
 
-        # One-time migration (epic dust-troth-naval / C4): the lock moved to
-        # refs/reconciler/*; scrub any pre-existing .reconciler-* lock files still
-        # committed on the tickets branch from the old file backend. Idempotent; a git
-        # failure logs and continues (never aborts the pass).
+        # Remove legacy ``.reconciler-*`` ticket-branch locks once. Log Git failures
+        # and continue the pass.
         if selection_ids is None:
             _purge_committed_reconciler_locks(repo_root)
 
-        # Generate pass_id ONCE, up-front — it is both the lock/steal HOLDER and is
-        # threaded into run_pass(). (Previously generated at Step 3, below the lock
-        # check; hoisted here for story 9622 so the steal attempt has a holder.) Under
-        # any sub-second clock advance a second timestamp could diverge from the lock
-        # owner — a silent hazard for post-mortems correlating locks to pass records.
+        # Use one pass ID as both the lease holder and the run record identifier.
         pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
 
-        # Step 2a: pass-lock check (dd-3). If held, attempt to STEAL an expired lease
-        # (story 9622) instead of unconditionally exiting 3 — a SIGKILLed pass would
-        # otherwise wedge refs/reconciler/lock until an operator hand-deleted it. Gated
-        # by REBAR_RECONCILER_LOCK_STEAL (default ON; OFF = old unconditional exit-3).
+        # Steal an expired pass lock when ``REBAR_RECONCILER_LOCK_STEAL`` permits it.
+        # A held lock otherwise exits with status 3.
         held, preflight_exit = _post_pause_preflight(advisory, target_mode, repo_root)
         if preflight_exit is not None:
             legacy_message = (

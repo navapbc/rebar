@@ -1,32 +1,12 @@
-"""The reconciler backend port — pinned by ADR 0035 §(d) (epic ``bbf1``).
+"""Define vendor-neutral reconciler backend contracts.
 
-This module defines the vendor-neutral interface the reconciler core drives a
-backend through. It is *pure interface*: ``typing.Protocol`` declarations plus
-the ``RemoteRef`` identity value — no behavior, no vendor imports, stdlib +
-``typing`` only, so it loads in every context the reconciler is exec'd in
-(normal import and ``spec_from_file_location`` by-path).
-
-The design (ADR 0035 §(d)):
-
-* rebar's **local** ticket is the canonical model — the seam speaks the
-  local-field vocabulary and each adapter maps vendor⇄local.
-* **Core owns diff/apply; adapters only read + enact.** A backend never diffs.
-* A backend is one :class:`Backend` object exposing **five required role
-  Protocols** (:class:`TicketTransport`, :class:`OutboundMapper`,
-  :class:`InboundMapper`, :class:`FieldSanitizer`, :class:`IdentityConvention`)
-  plus zero or more **opt-in capability Protocols**
-  (:class:`SupportsLinks`, :class:`SupportsComments`).
-* Callers detect a capability by an ``isinstance``-guarded check against the
-  backend (behavioural, not structural introspection); the capability Protocols
-  are therefore ``@runtime_checkable``.
-* :class:`RemoteRef` is the identity tuple ``{vendor, instance, remote_id}`` that
-  replaces the hardcoded ``"jira"`` provider literal and the bare remote key.
-
-This module *defines* the port and lands a thin ``JiraBackend`` +
-``JiraIdentityConvention`` implementation of it. Config-driven selection (S3,
-:func:`~rebar_reconciler._backend_registry.select_backend`) and routing core call
-sites through the port (S4, e.g. ``run_differs`` injecting ``backend.outbound`` /
-``backend.inbound`` / ``backend.transport``) have both landed.
+Local tickets are canonical. The core owns diff and apply while adapters map
+fields, read remote state, and enact changes. A ``Backend`` combines
+``TicketTransport``, ``OutboundMapper``, ``InboundMapper``, ``FieldSanitizer``,
+and ``IdentityConvention``. ``SupportsLinks`` and ``SupportsComments`` remain
+optional runtime-checkable capabilities. ``RemoteRef`` identifies a vendor
+deployment and remote item. The module has no vendor imports so by-path loading
+remains supported.
 """
 
 from __future__ import annotations
@@ -100,24 +80,11 @@ class BackendHTTPError(urllib.error.HTTPError):
 
 @dataclass(frozen=True)
 class RemoteRef:
-    """A backend-neutral identity for one remote work item.
+    """Identify one remote item by vendor, deployment instance, and opaque ID.
 
-    ``vendor`` names the backend family (e.g. ``"jira"``); ``instance`` names the
-    concrete deployment (e.g. a Jira site / project host); ``remote_id`` is the
-    backend's own opaque key for the item (e.g. a Jira issue key ``"DIG-1234"``).
-    Frozen + value-equal so it can be a dict key and compared by identity content.
-
-    **WHAT ``instance`` DOES NOT DO** (corrected by ticket 6a91; this docstring
-    previously claimed "so two instances of the same vendor never collide", which
-    overstated it). It distinguishes two deployments of the SAME vendor *within this
-    value* — Cloud vs Data Center is already separated by ``vendor`` itself
-    (``"jira"`` vs ``"jira-datacenter"``). It does **NOT** prevent LOCAL-ID collision
-    between two same-vendor deployments: ``inbound_translate._jira_key_to_local_id``
-    is ``"jira-" + jira_key.lower()`` and consults nothing else, so two DC
-    deployments that each own a project ``DIG`` both mint ``jira-dig-123``. Making
-    the local id instance-aware would change the id scheme for every existing
-    Jira-sourced ticket — a breaking, store-wide migration, deliberately not done
-    here. A `RemoteRef` is also NOT persisted anywhere.
+    The frozen value supports equality and dictionary keys. ``instance``
+    distinguishes deployments only within this value. It neither prevents
+    collisions in the current local-ID scheme nor persists with the ticket.
     """
 
     vendor: str
@@ -158,40 +125,12 @@ _REQUIRED_TRANSPORT_MEMBERS = (
 
 
 class _TransportPortMeta(type(Protocol)):  # type: ignore[misc]
-    """Makes :class:`TicketTransport` conformance mean what the story needs it to
-    mean, in two respects.
+    """Check required transport members directly on every ``isinstance`` call.
 
-    **1. The check is uncached, so it is always current.** ``typing``'s own
-    ``isinstance`` against a runtime-checkable Protocol goes through
-    ``ABCMeta``'s subclass CACHE, which memoises the first positive answer per
-    class: a class that conformed once keeps reporting ``True`` even after a
-    member is removed. That is harmless for a static class definition and fatal
-    for a guard whose entire job is detecting a missing member — including in the
-    test that proves the guard has teeth. :meth:`__instancecheck__` therefore
-    evaluates the required set directly, every time.
-
-    **2. It carries the CAPABILITY members** the core also reaches for on a
-    transport receiver — ``set_relationship`` / ``get_issuelinks_map``
-    (``SupportsLinks``) and ``add_comment`` / ``get_comment_map``
-    (``SupportsComments``).
-
-    Two facts about :class:`TicketTransport` are BOTH true and pull in opposite
-    directions. (1) The core calls those four directly on a transport object, so
-    an audit asking "is every transport member a core module reaches for declared
-    on the port?" must be able to find them here. (2) They are nonetheless the
-    OPT-IN capability surface: a tracker with no link model, or no comment model,
-    is still a perfectly valid transport, and the whole point of the capability
-    Protocols is that a backend advertises them rather than being forced to
-    provide them. Declaring them in the class body would collapse (2) into (1) and
-    make every future non-Jira transport fail conformance for lacking a feature it
-    was never obliged to have.
-
-    Attaching them to the METACLASS resolves that: ``hasattr(TicketTransport,
-    "add_comment")`` is ``True`` (the audit finds them, attributed to the right
-    capability), while ``typing``'s protocol-attribute collection — which walks the
-    CLASS's ``__mro__``, in every Python from 3.11 through 3.14 — never sees them,
-    so structural conformance stays exactly the always-required set below. They are
-    reference markers, not implementations; nothing calls them.
+    Bypassing the protocol subclass cache makes member removal observable.
+    Metaclass markers expose optional link and comment member names to audits
+    without adding them to the required protocol body. The markers are
+    references, not implementations.
     """
 
     #: ``SupportsLinks``: create one link between two remote items.
@@ -215,30 +154,10 @@ class _TransportPortMeta(type(Protocol)):  # type: ignore[misc]
 
 @runtime_checkable
 class TicketTransport(Protocol, metaclass=_TransportPortMeta):
-    """CRUD transport against the remote tracker (today: ``acli.AcliClient``).
+    """Declare required remote ticket operations used by the core.
 
-    The always-present read/write surface the core drives regardless of which
-    optional capabilities a backend advertises.
-
-    **This Protocol must state what the CORE actually requires, not a comfortable
-    subset of it.** It originally declared six members while the core reached for
-    many more. The methods below are the always-required subset, and the remaining
-    four (``set_relationship`` / ``get_issuelinks_map`` /
-    ``add_comment`` / ``get_comment_map``) are the opt-in capability surface, so a
-    links-less transport still conforms. The omitted methods were unchecked by
-    every conformance test, and a transport missing all of them passed
-    ``isinstance``, the backend contract
-    suite, and 1600+ unit tests while being unable to complete a single writing
-    pass (story J9, epic ``e369``). Conformance to an incomplete port proves less
-    than it appears to — so a member the core calls belongs HERE, even when only
-    one backend implements it today.
-
-    It is ``@runtime_checkable`` for the same reason the capability Protocols are:
-    without the decorator ``isinstance(x, TicketTransport)`` raises ``TypeError``
-    rather than returning ``False``, so a construction-time conformance guard
-    cannot be written against it at all. (``isinstance`` against a runtime-checkable
-    Protocol checks member PRESENCE, not signatures — which is exactly the check
-    that would have caught this defect.)
+    Runtime checking verifies member presence, not signatures. Link and comment
+    operations remain optional capabilities outside this protocol body.
     """
 
     def create_issue(self, ticket_data: dict[str, Any]) -> dict[str, Any]: ...
@@ -333,24 +252,10 @@ class TicketTransport(Protocol, metaclass=_TransportPortMeta):
 
 
 def assert_transport_conforms(transport: Any, *, vendor: str) -> None:
-    """Fail LOUDLY, at backend CONSTRUCTION, if ``transport`` is missing a
-    required :class:`TicketTransport` member.
+    """Reject a transport missing required members during backend construction.
 
-    Story J9 exists because a transport missing TWELVE members passed
-    ``isinstance``, the backend contract suite, and 1600+ unit tests, and then
-    crashed mid-writing-pass on ``set_entity_property``. Declaring the members on
-    the port (above) closes the *declaration* half of that gap; this closes the
-    *enforcement* half. Without it the port is a description that nothing checks
-    at the moment a backend is assembled, and the first evidence of a missing
-    member is again a partial pass that has already written to the remote.
-
-    Construction is the right choke point precisely because the call sites are
-    not: seven of those twelve members are invoked from core paths that swallow
-    ``Exception`` at EVERY site, so a missing member there produces no crash and
-    no record. A failure raised here happens before any mutation is applied.
-
-    Raises ``BackendEnvError`` — the same type the factories already raise for a
-    mis-configured environment, which is what a non-conforming transport is.
+    Raising ``BackendEnvError`` before any mutation prevents a partial writing
+    pass.
     """
     missing = [m for m in _REQUIRED_TRANSPORT_MEMBERS if not hasattr(transport, m)]
     if missing:
@@ -606,21 +511,10 @@ class Backend(Protocol):
     def vendor(self) -> str: ...
 
     def remote_ref(self, remote_id: str) -> RemoteRef:
-        """This backend's identity for ``remote_id``, naming vendor AND deployment.
+        """Return the vendor and captured deployment identity for ``remote_id``.
 
-        DECLARED HERE because the test double has implemented it since J7
-        (``tests/unit/rebar_reconciler/backend_support.py``) while the port never declared it and
-        no real backend provided it — so the contract tests ran against a fake strictly more
-        capable than production. Ticket 6a91 closed that gap.
-
-        Implementations MUST NOT resolve configuration when called: the ``instance`` value is
-        supplied at CONSTRUCTION by the ``build_backend`` factory, which already holds the
-        resolved settings. A call-time resolve reaches into ambient config, which makes the
-        backend unusable in any context that has none — and a settings-resolving PROPERTY has
-        already earned a ``Verified -1`` on this project once (change cd78: Python 3.12 changed
-        runtime-checkable ``Protocol`` ``isinstance`` from ``hasattr`` to
-        ``inspect.getattr_static``, so a property that raises breaks ``isinstance`` on CI's 3.11
-        while passing locally).
+        Implementations must use construction-time state rather than resolving
+        ambient configuration when called.
         """
         ...
 
@@ -667,24 +561,6 @@ class Backend(Protocol):
         ...
 
 
-# ---------------------------------------------------------------------------
-# Capability narrowing (ticket cc77)
-# ---------------------------------------------------------------------------
-#
-# The four opt-in capability members (``set_relationship`` / ``get_issuelinks_map``
-# / ``add_comment`` / ``get_comment_map``) live on :class:`_TransportPortMeta`, NOT
-# in :class:`TicketTransport`'s body — deliberately, so ``hasattr`` attributes them
-# while ``typing``'s protocol-attribute collection does not, letting a links-less or
-# comment-less transport still conform. mypy does not consult metaclass attributes
-# for a Protocol-typed value, so a core call site reaching for one through a
-# ``TicketTransport``-annotated parameter is reported ``[attr-defined]`` — correctly:
-# the annotated VIEW does not offer the member.
-#
-# Such a site is resolved by narrowing to the capability Protocol that declares it,
-# spelled ``cast("SupportsComments", client).add_comment(...)`` (a string forward
-# reference, so the import stays under ``TYPE_CHECKING`` and nothing changes at
-# runtime). The narrowed value is still attribute-checked — a typo in the member
-# name remains an error — so this is a NARROWING, not a widening to ``Any``. Widening
-# is the one resolution cc77 forbids: it reinstates exactly the blindness the story
-# removes. Adding the member to :class:`TicketTransport`'s body is also wrong — it
-# would oblige every future transport to provide an opt-in feature.
+# Optional transport calls require a cast to the matching capability protocol.
+# This preserves member checking without widening the receiver to ``Any`` or making
+# the capability mandatory.

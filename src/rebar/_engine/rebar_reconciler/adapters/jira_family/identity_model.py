@@ -1,32 +1,9 @@
-"""The ``UserIdentityModel`` contract (story J4, epic e369).
+"""Define Jira-family user identity resolution.
 
-User identity is one of the three real Cloud/Data-Center differences: Jira Cloud
-identifies users by opaque ``accountId`` (username and userkey were removed for
-GDPR), while Data Center identifies them by ``name``.
-
-This module pins that difference as a contract with two operations:
-
-* ``resolve(local_value, remote_identity)`` -> ``(value, authoritative, is_account_id)``
-  — the 3-state account-resolution fast-path the core diff consults before emitting
-  an assignee change (ADR 0035 §(d) canonical-comparison corollary);
-* ``to_payload(value)`` -> the deployment's assignee field shape.
-
-Both implementations take their lookup resolver as an EXPLICIT constructor
-parameter. Nothing is discovered with ``getattr``: a resolver that silently goes
-missing would make every resolution non-authoritative, and a permanently
-non-authoritative assignee makes the outbound diff re-emit a change it can never
-converge — the churn class epic ``ace2`` exists to fix (PR #120's defect, which
-this contract makes unwritable: there is no optional attribute to be missing,
-only a required constructor parameter).
-
-The 3-state resolution state machine is Jira Cloud's pre-existing
-``JiraBackend.resolve_assignee`` behaviour (ticket 625b; 264f semantics),
-reproduced here verbatim and shared between both deployments — parameterized only
-by the remote-identity key it compares against (``account_id`` for Cloud,
-``name`` for DC) and by whether a resolved value is ever an accountId (Cloud only;
-DC has no accountId at all, so it is always ``False``). That single shared
-implementation is the point of this story: the state machine exists ONCE, not
-copy-pasted per deployment (the mistake PR #120 made).
+Cloud identifies users by ``accountId``, while Data Center uses ``name``. Each
+model receives its resolver explicitly and produces the deployment-specific
+assignment payload. ``resolve`` returns ``(value, authoritative, is_account_id)``.
+Both deployments share this three-state algorithm.
 """
 
 from __future__ import annotations
