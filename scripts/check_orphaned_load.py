@@ -22,7 +22,8 @@ Two signals together identify that shape, and neither alone is sufficient:
   ``--min-cpu-seconds`` moves the line for hosts that run legitimate long-lived
   compute under PID 1.
 
-**System-owned executables are excluded by default, and that is load-bearing.**
+**System-owned executables and GUI app bundles are excluded by default, and that is
+load-bearing.**
 PPID 1 means something weaker on a desktop OS than the plain reading suggests:
 every ``launchd``-managed daemon is parented to PID 1 by design, and they
 legitimately accumulate days of CPU. Measured on the affected host, the
@@ -33,8 +34,10 @@ means the unfiltered check would not have surfaced the incident it exists for.
 Excluding ``_SYSTEM_PATH_PREFIXES`` leaves **4**, one of which is a genuine hit
 of the target class: an orphaned agent-job script
 (``/bin/bash ~/.claude/jobs/*/tmp/watch-tracker.sh``, 3.0h of CPU at PPID 1) that
-the noise was burying. ``--include-system`` opts the daemons back in, and the
-suppressed count is always printed rather than silently dropped.
+the noise was burying. User desktop applications installed as ``.app`` bundles
+under ``/Applications`` are launchd-parented by the same OS mechanism and are not
+agent-spawned helpers. ``--include-system`` opts these default suppressions back
+in, and the suppressed count is always printed rather than silently dropped.
 
 The report remains a triage list, not a verdict: what identifies a leak is its
 command line — an ad-hoc ``python -c``, a helper from a finished investigation —
@@ -52,7 +55,7 @@ running. It is a plain command with no CI-provider dependency
 Exit status is 0 when nothing is flagged and 1 when at least one process is. It
 is strictly READ-ONLY: it inspects the process table and never signals, kills, or
 spawns anything. Reclaiming a flagged batch is an operator decision — see
-``docs/orphaned-processes.md`` for the teardown guidance and the ``pkill`` recipe.
+``docs/orphaned-processes.md`` for the teardown guidance.
 
 The process-inspection seam (``list_processes``) is injectable via ``main``'s
 ``lister`` argument precisely so tests can feed synthetic records: a test that
@@ -99,6 +102,10 @@ _SYSTEM_PATH_PREFIXES = (
     "/Library/Apple/",
     "/Library/Application Support/JAMF/",
 )
+
+#: Operator-owned desktop apps launchd reparents to PID 1 by design. They may burn
+#: more than an hour of CPU without being a leaked agent helper.
+_GUI_APP_PREFIXES = ("/Applications/",)
 
 #: ``ps`` output spec. Field order matches ``_parse_ps_line``; ``command=`` is last
 #: because it is the only field that can contain spaces.
@@ -196,6 +203,16 @@ def is_system_owned(command: str) -> bool:
     return command.startswith(_SYSTEM_PATH_PREFIXES)
 
 
+def is_user_gui_app(command: str) -> bool:
+    """Is this command line a macOS GUI app bundle executable?"""
+    return command.startswith(_GUI_APP_PREFIXES) and ".app/Contents/MacOS/" in command
+
+
+def is_default_suppressed(command: str) -> bool:
+    """Is this process launchd/init-owned noise rather than an agent leak?"""
+    return is_system_owned(command) or is_user_gui_app(command)
+
+
 def find_orphaned_load(
     records: Sequence[ProcessRecord],
     min_cpu_seconds: float,
@@ -206,22 +223,22 @@ def find_orphaned_load(
 
     Both PPID and CPU conditions are required: a reparented process that has
     burned no CPU is an ordinary daemon, and a CPU-hot process with a live parent
-    belongs to whoever started it. System-owned executables are dropped as well
-    unless ``include_system`` — see the module docstring for the measurement that
-    makes that the default.
+    belongs to whoever started it. Known launchd/init-owned noise is dropped as
+    well unless ``include_system`` — see the module docstring for the measurement
+    that makes that the default.
     """
     flagged = [
         record
         for record in records
         if record.ppid == ORPHAN_PPID
         and record.cpu_seconds > min_cpu_seconds
-        and (include_system or not is_system_owned(record.command))
+        and (include_system or not is_default_suppressed(record.command))
     ]
     return sorted(flagged, key=lambda record: record.cpu_seconds, reverse=True)
 
 
 def _report(flagged: Sequence[ProcessRecord], min_cpu_seconds: float, suppressed: int) -> None:
-    note = f" ({suppressed} system-owned suppressed)" if suppressed else ""
+    note = f" ({suppressed} launchd/init-owned suppressed)" if suppressed else ""
     print(
         f"check_orphaned_load: {len(flagged)} orphaned process(es) with PPID "
         f"{ORPHAN_PPID} above {min_cpu_seconds:g} CPU-seconds{note}:"
@@ -232,16 +249,15 @@ def _report(flagged: Sequence[ProcessRecord], min_cpu_seconds: float, suppressed
         print(f"    {record.command}")
     print(
         "\nEach of these was spawned by something that has since exited. Confirm "
-        "the owning investigation is over, then terminate them by matching their "
-        "command line, e.g. `pkill -f 'while True: pass'`. Bounding helpers at "
-        "spawn time (`timeout 120 ... &`) and tearing down the process group "
-        "(`trap 'kill 0' EXIT INT TERM`) prevents the leak — see "
+        "the owning investigation is over, then terminate only the specific pids "
+        "you have verified with `ps -o pid=,ppid=,command= -p <pid>`. Bounding "
+        "helpers at spawn time and reaping the recorded pid prevents the leak — see "
         "docs/orphaned-processes.md."
     )
     if suppressed:
         print(
-            f"\n{suppressed} further orphan(s) were suppressed as system-owned "
-            "(launchd/init parents them to PID 1 by design). Re-run with "
+            f"\n{suppressed} further orphan(s) were suppressed as launchd/init-owned "
+            "processes parented to PID 1 by design. Re-run with "
             "--include-system to see them."
         )
 
@@ -265,8 +281,8 @@ def main(argv: list[str] | None = None, *, lister: ProcessLister | None = None) 
         action="store_true",
         help=(
             "also report OS-vendor and endpoint-management executables, which "
-            "launchd/init parents to PID 1 by design (29 of 33 on the host that "
-            "motivated this check)"
+            "launchd/init parents to PID 1 by design, plus macOS GUI app bundles "
+            "(29 of 33 on the host that motivated this check)"
         ),
     )
     args = parser.parse_args(argv)
