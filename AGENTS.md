@@ -230,7 +230,8 @@ restated here:
   **`review_plan_start`/`verify_completion_start`** (they return a `{job_id,…,status:'running'}`
   handle in ms on a background daemon, mirroring `run_workflow`), then POLL —
   `plan_review_status`/`verify_completion_status` for the durable signed verdict, or
-  `gate_status(job_id)` for the run handle (`running` → `passed`/`failed`/`stale-running`);
+  `gate_status(job_id)` for the run handle (`running` → `passed`/`failed`, with a
+  stale daemon materialized as a failed diagnostic);
   for plan-review jobs, wait for `gate_status(job_id).findings.readable` before reading the
   latest `REVIEW_RESULT` findings sidecar. The
   synchronous `review_plan`/`verify_completion` tools remain the fallback and are now
