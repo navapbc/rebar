@@ -1,38 +1,10 @@
-"""Live END-TO-END reconcile pass against the J5 Data Center harness (story J7, epic e369).
+"""Run the complete reconciler against the live J5 Data Center harness (J7, epic e369).
 
-This is the point at which the whole DC assembly — config selection, the registry, the
-backend, the shared Jira-family layer and the DC transport — first drives a REAL Jira
-instance as one system. Everything below it is proven in isolation; only a live pass
-proves they compose.
-
-What it pins:
-
-1. a reconcile pass against a DC-configured repo completes with ZERO unhandled exceptions;
-2. it is IDEMPOTENT — an immediately repeated pass writes nothing (convergence, not merely
-   "it wrote something");
-3. provenance: a ticket created locally FROM a DC issue carries the shared ``jira``
-   creation channel and a ``jira-`` local-id prefix, with the deployment distinguished by
-   ``RemoteRef.instance`` — the epic's shared-identity decision.
-
-WHY THE EXCEPTION CHECK IS A SUBPROCESS ASSERTION, not ``caplog``: the bridge runs the
-reconciler in a SUBPROCESS. ``caplog`` hooks only the *test* process's ``logging`` and can
-never observe those records. These tests therefore invoke the primary reconciler subprocess
-vocabulary DIRECTLY and assert on both captured streams.
-
-Tier notes (inherited from ``tests/external/``; see ``test_transport.py`` for the full
-rationale, reproduced here only where it matters):
-
-* the module-level ``_live_jira_ready`` sentinel is what makes ``tests/external/conftest.py``
-  attach the ``jira_live`` marker and enrol this module in the all-skip canary;
-* absent harness ⇒ SKIP with an actionable message. But when the harness IS reachable and
-  the ``[jira-datacenter]`` extra is absent, that is a LOUD FAILURE, not a skip: the canary
-  counts collected-vs-executed GLOBALLY per session, so a sibling module's executing tests
-  mask an all-skip of this one and the job reports green having validated nothing. J6
-  shipped two defects behind exactly that mask;
-* the harness serves plain ``http://localhost:2990/jira``, so the config written here sets
-  ``allow_insecure = true`` explicitly — J6's TLS validator REJECTS a non-``https``
-  ``base_url`` at config-load time otherwise, so this exercises the override branch rather
-  than bypassing the validator.
+The DC config, registry, Jira-family backend, and transport must compose without unhandled
+subprocess errors; an immediate repeat must write nothing. Inbound tickets retain shared
+``jira`` provenance while ``RemoteRef.instance`` distinguishes deployment. The live sentinel
+enrolls the all-skip canary: absent harness skips, but a reachable harness without the DC
+extra fails loudly. Plain HTTP deliberately exercises ``allow_insecure``.
 """
 
 from __future__ import annotations
@@ -113,17 +85,10 @@ def _fail_if_extra_missing_while_harness_is_up() -> None:
 def dc_rebar_repo(
     rebar_repo: Path, jira_dc_project: str, jira_dc_pat: str, monkeypatch: pytest.MonkeyPatch
 ) -> Path:
-    """A rebar repo wired to drive the DC backend.
+    """Configure the temporary repo for the DC backend and its exact scratch project.
 
-    ``rebar_repo`` (inherited from the PARENT conftest, ``tests/external/conftest.py``)
-    gives us an initialized store in a temp git dir — but it calls ``rebar.init_repo()``
-    and writes NO ``[tool.rebar.reconciler]`` section, so on its own the reconcile
-    subprocess would have no backend, no base URL and no credential: it would fail at
-    config-load or silently drive the CLOUD backend. This fixture supplies exactly that
-    missing half.
-
-    ``allow_insecure`` is REQUIRED, not incidental — the harness is plain http and the
-    config-load TLS validator rejects a non-https ``base_url`` without it.
+    The inherited repo has no reconciler settings. This adds the backend and harness URL;
+    ``allow_insecure`` is required because config validation rejects its plain HTTP URL.
     """
     (rebar_repo / "rebar.toml").write_text(
         textwrap.dedent(f"""
@@ -159,30 +124,20 @@ def _envelope(cp: subprocess.CompletedProcess[str]) -> dict[str, Any]:
 
 
 def _assert_converged_writing_pass(cp: subprocess.CompletedProcess[str], *, what: str) -> None:
-    """Assert a WRITING pass settled, reading the shape the CANONICAL route actually emits.
+    """Require the canonical sync completion signal, ``BRIDGE_STATE: converged``.
 
-    Writing passes emit no JSON envelope — only the ``no_write`` branch calls ``json.dumps``.
-    They used to be read off the ``OK: …`` stdout summary, but the canonical ``preview`` /
-    ``sync`` routes suppress that line by design (``__main__.py`` guards it with
-    ``route not in {"preview", "sync"}``) and report ``BRIDGE_STATE: converged`` on stderr
-    instead — see ``docs/exit-codes.md`` §"Bridge routes" and ADR 0092. These cells were
-    re-pointed at ``sync`` by ``c87afedba8``, so the ``OK:`` form asserted on output the
-    invoked route never prints. Parsing lives in ``_bridge_output.py``, which
-    ``tests/unit/test_bridge_output_parsing.py`` covers without the live harness.
+    Writing sync emits neither a JSON envelope nor the legacy ``OK:`` summary; the shared
+    stderr parser has offline coverage.
     """
     problem = converged_pass_problem(cp.stdout, cp.stderr)
     assert problem is None, f"{what}: {problem}\n{cp.stdout}\n--stderr--\n{cp.stderr}"
 
 
 def _assert_wrote_nothing(cp: subprocess.CompletedProcess[str], *, what: str) -> None:
-    """Idempotence, read off the reconciler's own counters.
+    """Prove idempotence from zero differ totals and no mutation batch outcome.
 
-    NOT just ``BRIDGE_STATE: converged``: ``__main__.py`` classifies a pass that applied N
-    mutations as CONVERGED too, so that line means "settled", not "wrote nothing". Asserting
-    on it alone would leave this cell green while a pass thrashed the remote every run — the
-    exact failure it exists to catch. Zero-write evidence therefore comes from the
-    unconditional ``RECON:`` stderr telemetry: both differ totals zero
-    (``run_differs.py``) and no per-mutation ``batch_outcome`` line (``applier.py``).
+    ``BRIDGE_STATE: converged`` only means settled and may still include writes; the
+    unconditional ``RECON:`` counters carry the zero-write claim.
     """
     problem = wrote_nothing_problem(cp.stdout, cp.stderr)
     assert problem is None, (
@@ -254,10 +209,10 @@ def test_a_repeated_dc_reconcile_pass_writes_nothing(dc_rebar_repo: Path) -> Non
 def test_a_dc_created_ticket_carries_the_shared_jira_provenance(
     dc_rebar_repo: Path, jira_dc_project: str, jira_dc_pat: str, track_issue: Any
 ) -> None:
-    """A DC deployment is still the ``jira`` FAMILY: tickets it creates carry the shared
-    ``jira`` creation channel and ``jira-`` local-id prefix, with the DEPLOYMENT
-    distinguished by ``RemoteRef.instance`` — not by a second creation channel. Nothing in
-    the store vocabulary forks per deployment, which is why this epic needs no migration.
+    """Keep shared ``jira`` provenance while ``RemoteRef.instance`` identifies DC.
+
+    Inbound tickets retain the ``jira-`` ID prefix, so deployment adds no store vocabulary
+    or migration.
     """
     from rebar_reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
     from rebar_reconciler.adapters.jira_datacenter.transport import (
@@ -292,17 +247,8 @@ def test_a_dc_created_ticket_carries_the_shared_jira_provenance(
     _assert_no_unhandled_exception(cp, what="inbound provenance pass")
     _assert_converged_writing_pass(cp, what="inbound provenance pass")
 
-    # Match on the DERIVED local id, exactly — NOT `remote_key in json.dumps(ticket)`.
-    #
-    # That substring form could never pass, and it hid this test's real verdict for the
-    # entire life of the epic (bug 23ed). Two independent reasons: `_jira_key_to_local_id`
-    # LOWERCASES (`inbound_translate.py:120-124` — "RBJ…-1" -> "jira-rbj…-1") and the `in`
-    # test is case-sensitive; and the inbound CREATE payload
-    # (`apply_inbound_records.py:183-212`) carries no raw Jira key at all — the key appears
-    # only as a TITLE FALLBACK, unused whenever the issue has a summary, as it does here.
-    # So a perfectly-created ticket produced a red, and a broken one would have too. A blob
-    # scan is also the wrong shape regardless: it can match an incidental occurrence in any
-    # field and assert nothing about correspondence.
+    # Match the exact derived ID: derivation lowercases the key and the create payload may omit
+    # its raw form, while a serialized substring could match an unrelated field (bug 23ed).
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
 
     expected_local_id = _jira_key_to_local_id(remote_key)

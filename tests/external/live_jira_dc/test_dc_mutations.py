@@ -1,36 +1,10 @@
-"""J11 — the COMPREHENSIVE mutation table: 14 mutations x 2 directions, live against a real
-Jira Data Center instance, over a scrubbed copy of the project's real ticket store
-(epic e369, ticket 5200-e04e-246e-4aae).
+"""Exercise the J11 14-by-2 mutation table against live Data Center and a scrubbed store copy.
 
-WHAT THIS ADDS OVER THE THIN SLICE. `test_store_copy_isolation.py` proves the two ENDS — an
-issue created in DC reaches the local store, and a local edit reaches the DC issue. That is the
-epic's headline criterion and it is green. It is not the same claim as "the bridge round-trips
-the things a ticket actually consists of": a bridge can carry a title and silently drop labels,
-comments, assignees, links and parents. Each row below asserts ONE observable, so a regression
-names the field it broke instead of reporting an aggregate "converged".
-
-EVERY CELL IS ITS OWN TEST. The rows are parametrized rather than looped inside one function,
-so pytest reports 28 independent verdicts. That is deliberate and it is the plan's requirement:
-a single test asserting fourteen things fails on the first one and hides the other thirteen,
-which is precisely how this epic lost time before ("counts are not causes" — three live runs
-reported the same 2-failed/12-passed with three different causes).
-
-READ DIRECTION MATTERS. An inbound cell mutates through the DC REST API and reads the LOCAL
-ticket; an outbound cell mutates locally and reads the DC ISSUE. In both cases the value
-asserted is the value the cell itself wrote and is unique per run, so no cell can pass by
-re-reading an unchanged field.
-
-TWO HAZARDS THAT SHAPE EVERY INBOUND CELL:
-  1. INDEX LAG. The fetch finds issues through a JQL search and Jira's Lucene index is
-     eventually consistent, so a field written a moment ago may not be visible to the pass yet.
-     Every inbound cell therefore waits until a SEARCH REFLECTS THE NEW VALUE — not merely
-     until the key is searchable, which is a weaker condition that let an earlier cell run
-     against a stale document. When the wait times out it says so, so a timing artefact is
-     never reported as a bridge defect.
-  2. SCOPING IS MANDATORY. The scrub removes every binding, so an UNSCOPED writing pass would
-     route all ~2,700 copied tickets down the CREATE path and file them into the harness. Every
-     writing pass here is scoped with `--filter-local-ids <local_id>,<key>`; the only unscoped
-     passes are DRY-RUNS, which write nothing.
+Each field and direction has an independent verdict: inbound writes a unique value through DC
+and reads local state; outbound writes locally and reads the DC issue. Inbound cells wait for
+JQL to reflect the changed value, not merely the key, so index lag is not misdiagnosed. Every
+writing pass is scoped to its local-ID/key pair because the scrubbed store has no bindings;
+only dry-runs may be unscoped.
 """
 
 from __future__ import annotations
@@ -59,12 +33,7 @@ from _dc_support import seed_searchable_issue as _seed
 from _dc_support import skip_no_extra as _skip_no_extra
 from _dc_support import skip_no_harness as _skip
 
-# THE ALL-SKIP CANARY KEYS ON THIS NAME. `tests/external/conftest.py`'s
-# `pytest_collection_modifyitems` applies the `jira_live` marker only to modules that define a
-# module-level `_live_jira_ready`, and the canary then fails a run in which live tests were
-# COLLECTED but none EXECUTED. Refactoring this helper into `_dc_support` silently removed this
-# module from that bookkeeping — so the cells carrying the epic's headline evidence could all-skip
-# and the run would be green and silent. Re-exported under the name the canary looks for.
+# Re-export the exact sentinel name used to mark this module for the all-skipped live-test canary.
 _live_jira_ready = live_jira_ready
 
 _WRITING_MODE = "bootstrap-strict"
@@ -83,14 +52,10 @@ def _wait_until_search_reflects(
     what: str,
     timeout: float = 90.0,
 ) -> None:
-    """Block until a JQL SEARCH returns `key` in a state satisfying `predicate`.
+    """Wait until JQL returns ``key`` with the changed state accepted by ``predicate``.
 
-    STRONGER THAN `wait_until_searchable`, and the difference is the whole point. That helper
-    waits for the key to EXIST in the index; this one waits for the index to reflect the
-    specific CHANGE the cell just made. The inbound pass reads fields off the search result
-    (`transport.search_issues` returns the unwrapped issues), so a cell that only waits for
-    existence can hand the differ a stale document and then report "the change did not reach
-    the local store" — a bridge defect that never happened.
+    Existence alone can expose a stale indexed document; the inbound differ reads this search
+    result, so waiting for the exact change prevents index lag from masquerading as bridge loss.
     """
     deadline = time.monotonic() + timeout
     attempts = 0
@@ -133,15 +98,11 @@ def _wait_until_links_reflect(
     what: str,
     timeout: float = 90.0,
 ) -> None:
-    """Block until THE PRODUCTION LINK READ for ``key`` satisfies ``predicate``.
+    """Wait until the production, search-backed link map for ``key`` satisfies ``predicate``.
 
-    Waits on ``get_issuelinks_map`` rather than on ``get_issue_links``, and the difference
-    matters for the same reason `_wait_until_search_reflects` exists. ``get_issue_links`` is a
-    direct GET (`transport.py:477-486`) and is immediately consistent; the INBOUND PASS reads
-    links from a JQL paged search — ``fetcher.py:592-593`` calls ``get_issuelinks_map``, which
-    is ``_paged_search(f"project = {project}")`` (`transport.py:391-395`) — and Jira's Lucene
-    index is not. A cell that waits on the direct GET can therefore hand the differ a stale
-    document and then report a bridge defect that never happened.
+    A direct issue-link GET is immediately consistent, but inbound uses paged JQL. Waiting on
+    that same indexed path prevents a successful write plus stale search from looking like a
+    bridge defect.
     """
     deadline = time.monotonic() + timeout
     attempts = 0
@@ -160,29 +121,17 @@ def _wait_until_links_reflect(
 
 
 def _plan_entries_for(repo: Path, local_id: str, key: str) -> list[dict[str, Any]]:
-    """Scoped dry-run plan entries naming this pair.
+    """Return scoped dry-run entries naming this local-ID/Jira-key pair.
 
-    MATCHES ON `target`, NOT on `local_id`. The envelope's `local_id` field is populated from
-    `provenance["local_id"]` (`reconcile_helpers._build_plan_entries`) and for these entries it
-    carries the JIRA KEY, not the rebar local id — observed directly in J11's first harness
-    run (ticket 5200-e04e-246e-4aae), whose
-    outbound entries read `{'target': 'RBJISZB-1', 'local_id': 'RBJISZB-1'}`. A filter keying on
-    the derived local id alone therefore matches NOTHING, which is how the pagination cell
-    reported a suspiciously round "0 of 201 recovered" and nearly became a false data-loss alarm.
-    The thin slice's `test_the_inbound_create_is_PLANNED_for_a_new_dc_issue` already gets this
-    right by ORing on `target`; this mirrors it.
+    Match ``target`` as well as ``local_id`` because plan provenance may place the Jira key in
+    both fields. Local-ID-only filtering can yield an empty plan and make absence checks vacuous.
     """
     cp = _run(repo, "dry-run", only=f"{local_id},{key}")
     plan = _envelope(cp).get("plan", [])
     return [e for e in plan if key in str(e.get("target")) or e.get("local_id") in (local_id, key)]
 
 
-# ===========================================================================
-# INBOUND — mutate in Data Center, assert on the LOCAL ticket
-# ===========================================================================
-#
-# Each row is (id, mutate, oracle). `mutate` performs the DC-side change and returns the
-# value the oracle expects; it is also responsible for waiting until the index reflects it.
+# Inbound rows mutate Data Center, wait for indexed visibility, and assert the local ticket.
 
 
 def _in_summary(tr: Any, project: str, key: str) -> str:
@@ -395,14 +344,9 @@ def test_inbound_mutation_round_trips(
     jira_dc_project: str,
     bound_dc_issue: Any,
 ) -> None:
-    """Rows 2-7 and 9 inbound: mutate in DC, run a pass, assert the LOCAL ticket carries it.
+    """Exercise inbound update rows 2–7 and 9 against an imported, bound issue.
 
-    `bound_dc_issue` supplies an issue that is already imported and BOUND, so this cell
-    exercises the UPDATE path on an existing ticket rather than re-testing the create path
-    (row 1, which the thin slice already covers end to end).
-
-    ROW 8 IS NOT IN THIS TABLE — it is `test_inbound_assign_round_trips` below, because it
-    needs two passes and this driver runs one.
+    Row 8 is separate because assignment needs two passes while this driver performs one.
     """
     local_id, key = bound_dc_issue
     dc_transport.project = jira_dc_project
@@ -420,48 +364,18 @@ def test_inbound_mutation_round_trips(
 def test_inbound_assign_round_trips(
     dc_store_copy_repo: Path, dc_transport: Any, jira_dc_project: str, bound_dc_issue: Any
 ) -> None:
-    """Row 8 inbound: assigning a DC user puts THAT user on the local ticket.
+    """Row 8 inbound: assigning the guaranteed DC admin writes that exact local username.
 
-    THIS CELL USED TO BE A `_INBOUND_CELLS` ROW AND COULD NOT FAIL IN EITHER HALF. It is the
-    epic's signature failure mode, twice over in eight lines:
-
-      * THE MUTATION WAS A NO-OP. `bound_dc_issue`'s seeded issue arrives ALREADY ASSIGNED to
-        the project lead — `conftest._create_scratch_project` passes `lead=admin` with no
-        `assigneeType`, so DC default-assigns to it, and this suite asserts that fact in two
-        other places. Assigning `ADMIN_USER` therefore changed nothing:
-        `inbound_fields._assignee_matches` (`inbound_fields.py:102-128`) short-circuits an
-        unchanged assignee, so the differ had nothing to report. The J11 harness
-        confirmed it independently by finding `jira/'admin'` already mapped before any cell ran.
-      * THE ORACLE CHECKED A FIELD THE BINDING PASS HAD ALREADY POPULATED, and checked it only
-        for TRUTHINESS. So the cell was green whether or not inbound assignee sync worked at
-        all. The AC's row-8 inbound oracle is "`.assignee` is the mapped identity"; a
-        truthiness check is not that.
-
-    THE REPAIR IS THE ONE THE MINT CELL ALREADY ESTABLISHED: make the expected value one that
-    is genuinely NOT there beforehand. That cell removes an identity MAPPING to establish
-    absence; this one drives the ASSIGNEE to empty and asserts the emptiness reached the local
-    ticket, so the value read at the end is one only the pass under test can have written.
-
-    STANDALONE, NOT A ROW, for the reason rows 6 and 9 outbound are standalone: the table
-    driver runs exactly ONE pass and this needs TWO (clear, converge, assign, converge). The
-    admin is the ONE user the harness guarantees exists and is assignable
-    (`_dc_support.py:28-31`), so "assign a DIFFERENT user than the pre-seeded one" is not
-    available on this instance — going through empty is.
-
-    THE ORACLE IS EXACT EQUALITY against the DC username, via
-    `_dc_support.assert_local_assignee_is`, which is where the reasoning for that expected value
-    lives (`.assignee` holds `_extract_name(fields["assignee"])`, and `_extract_name` prefers
-    `name` over `displayName`, which on DC is the username). It is shared rather than inline so
-    the harness-free mutation check can drive THE ORACLE ITSELF — the harness is amd64-only, so
-    a green live run is the one thing that cannot demonstrate this cell discriminates.
+    The seeded issue may already be assigned to the project lead, making reassignment and a
+    truthy oracle vacuous. This standalone cell therefore clears and converges first, proves
+    local emptiness, then assigns and converges again. The shared exact-equality oracle is also
+    exercised by harness-free mutation tests.
     """
     local_id, key = bound_dc_issue
     dc_transport.project = jira_dc_project
 
-    # SETUP — take the assignee away, and drive that all the way into the local ticket. Both
-    # halves are asserted as SETUP: an unassign that does not propagate leaves the pre-seeded
-    # value in place, which is exactly the state that made this cell vacuous. Cell `09-unassign`
-    # covers this propagation on its own; if that cell is also red, fix it there.
+    # Establish and prove an empty remote and local assignee before testing assignment; otherwise
+    # the fixture's pre-seeded value could satisfy the oracle.
     dc_transport.update_issue(key, assignee=None)
     _wait_until_dc_assignee_is(dc_transport, jira_dc_project, key, None, "the unassignment (setup)")
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
@@ -515,12 +429,8 @@ def _out_status(repo: Path, local_id: str) -> str:
     import rebar
 
     current = _local(repo, local_id).get("status") or "open"
-    # ESTABLISH the pre-state instead of mutating conditionally (bug 59b2, Finding C). The
-    # conditional version skipped the transition when the ticket was ALREADY in_progress, and the
-    # oracle then asserted a status this helper had not created — the same "the oracle may be
-    # checking pre-existing state" shape as the 08-assign vacuity. An imported DC issue lands
-    # `open`, so this is a precondition that holds today; making it LOUD rather than silently
-    # tolerated is the fix, because the tolerated branch is the one that proves nothing.
+    # Require the imported pre-state rather than conditionally skipping an already-satisfied
+    # transition; the oracle must assert a status this helper actually created.
     assert current != "in_progress", (
         f"{local_id} is already 'in_progress' before this helper transitions it, so the status "
         f"this row asserts would be pre-existing state rather than a mutation this cell made. "
@@ -631,33 +541,12 @@ def test_outbound_mutation_round_trips(
 def test_outbound_create_stamps_both_provenance_markers(
     dc_store_copy_repo: Path, jira_dc_project: str, track_issue: Any, dc_request: Any
 ) -> None:
-    """Row 1 OUTBOUND: a local ticket the pass CREATES in DC carries BOTH provenance markers.
+    """Row 1 outbound: a pass-created DC issue carries both provenance markers.
 
-    THIS ROW HAD NO TEST AT ALL, in either this module or the thin slice, and it was not on the
-    story's own list of known gaps — `grep -rn "rebar-id:\\|properties/local_id" tests/external/`
-    returned nothing. Every other outbound cell rides `bound_dc_issue`, which exists precisely
-    so those cells exercise the UPDATE path; nothing exercised the CREATE path's write-back.
-
-    THE TWO MARKERS ARE ASSERTED TOGETHER because neither is redundant and the create writes
-    them as a pair (`dispatch_one.py:306-307`). The LABEL is what the dedup JQL re-finds the
-    issue by (`dispatch_one.py:214` searches `labels = "rebar-id:<local_id>"`); lose it and the
-    next pass creates a DUPLICATE. The ENTITY PROPERTY is what inbound consumers correlate on.
-    A cell asserting one would pass a build that lost the other.
-
-    THE COLON FORM IS THE ONE ASSERTED, and that is established from the writers, not chosen.
-    This codebase carries both `rebar-id:<local_id>` and `rebar-id-<local_id>` (see
-    `inbound_differ`'s exclusion list re bug `eadb`), and all three writers emit the COLON form:
-    `dispatch_one.py:306`, `apply_inbound_records.py:290`, `binding_store.py:706`. The hyphen
-    form is READ-ONLY legacy — `binding_walk.py:352` and `inbound_translate.py:77-78` accept it
-    and `binding_store.py:715` searches it as a fallback, but nothing writes it. So a
-    hyphen-only issue is a finding, and the oracle says so rather than accepting it.
-
-    THE PROPERTY IS READ BY RAW REST, not through `transport.get_entity_property`. Reading a
-    value back through the same abstraction that wrote it cannot distinguish "stored correctly"
-    from "stored and re-read consistently wrong" — which is bug 0b27 exactly: a Cloud
-    implementation wrapped the value as `{"value": …}`, storing the wrong shape and breaking
-    correlation WITHOUT raising. The labels are read from that same raw document for the same
-    reason, so nothing in this oracle passes through the writing path.
+    Update rows cannot cover create write-back. Dedup consumes the writer's colon-form label;
+    inbound correlation consumes the entity property, so both are required and the read-only
+    legacy hyphen form is insufficient. Read both via raw REST, outside the writing abstraction,
+    to detect an incorrectly wrapped property that the same transport might re-read consistently.
     """
     from rebar_reconciler.binding_store import load_binding_store
 
@@ -673,10 +562,8 @@ def test_outbound_create_stamps_both_provenance_markers(
 
     key = load_binding_store(dc_store_copy_repo).get_jira_key(local_id)
     if not key:
-        # [rebar:18a5-2bd8-3e56-4bd8] — the create-and-bind failed, and this is exactly the
-        # cell that ticket's own root-cause comment says can settle WHY: a real pass ran here
-        # (not a direct transport call, unlike 1a9f's sub-task cells), so a swallowed exception
-        # would have gone through `record_backstop_failure` and left a `bridge_alerts` record.
+        # A real reconcile pass distinguishes this from a direct-transport failure. A swallowed
+        # create-and-bind error should leave a ``bridge_alerts`` record for the local ID.
         alerts = _assert_bridge_alert_for_mutation(cp, dc_store_copy_repo, local_id)
         if alerts:
             raise AssertionError(
@@ -745,35 +632,13 @@ def test_outbound_remove_label_round_trips(
 def test_outbound_unassign_round_trips(
     dc_store_copy_repo: Path, dc_transport: Any, bound_dc_issue: Any
 ) -> None:
-    """Row 9 outbound: clearing the local assignee must leave `fields.assignee` NULL in DC.
+    """Row 9 outbound: clearing locally must leave DC ``fields.assignee`` null.
 
-    STANDALONE, NOT A `_OUTBOUND_CELLS` ROW, for the reason row 6 (remove-label) is standalone:
-    the table driver runs exactly ONE pass, and a clear needs a CONVERGED ASSIGN before it or
-    the absence afterwards proves nothing — the issue starts out assigned to the project lead in
-    some runs and unassigned in others, so an unconditional "is it null?" could pass without any
-    mutation happening at all. Two passes, so it cannot be a row.
-
-    THE ORACLE IS THE REMOTE FIELD BEING EMPTY, not that the payload carried a clear
-    instruction and not that the pass exited 0. That distinction is the entire point here: every
-    layer on this path degrades quietly — the resolver treats an unmappable assignee as "desired
-    = unassigned" (`outbound_differ.py:479-505`) and the transport's assign call is wrapped in
-    error translation — so the only thing that discriminates "unassigned" from "silently left
-    alone" is reading `fields.assignee` back off the instance.
-
-    EXPECTED RED, AND THE MECHANISM IS PROVEN BY CODE PATH, not guessed. An empty local assignee
-    is resolved to the EMPTY STRING, not to None: `_assignee_resolver` returns `("", True,
-    False)` when `not assignee` (`outbound_differ.py:504-505`), and `assignee` is in
-    `_OUTBOUND_BATCH_ALLOWLIST` (`dispatch_apply_phases.py:46`), so `update_issue(key,
-    assignee="")` is what the transport receives. DC's `update_issue` pops `assignee` and calls
-    `_assign(remote_id, "")` with no empty-value branch (`transport.py:281-303`), and
-    pycontribs/jira treats ONLY None / -1 / "-1" as Unassigned — `JIRA._get_user_id` (jira
-    3.10.5) otherwise runs a user search and raises `JIRAError("No matching user found for:
-    '')`. Cloud has the fix and DC never got its half: `adapters/jira/acli.py:342-345,357-359`
-    routes an empty/None assignee through `unassign_issue` precisely because passing it on
-    "silently no-ops" (bug 85a1). That is the same Cloud-has-it/DC-doesn't shape as bug d067,
-    which this transport's own docstring records at `transport.py:265-275`. Filed as
-    [rebar:751e-06f1-bb0b-464c]; this cell asserts the AC's oracle (row 9 outbound:
-    "`fields.assignee` is null") rather than pinning the current behaviour.
+    This standalone two-pass cell first assigns and proves the remote field, preventing an
+    initially unassigned issue from satisfying the clear oracle. It then clears locally and
+    reads the DC post-state—not merely exit status or payload—because resolver and transport
+    failures can degrade quietly. The known gap is empty-string routing through pycontribs rather
+    than DC's explicit unassign path.
     """
     import rebar
 
@@ -817,19 +682,8 @@ def test_outbound_unassign_round_trips(
 
 
 # ---------------------------------------------------------------------------
-# Rows 10-11 — links, in both directions. ADD and REMOVE are SEPARATE cells.
-# ---------------------------------------------------------------------------
-#
-# WHY THE SPLIT, since both directions previously carried one cell apiece. The two link
-# cells below each claimed "Rows 10-11" in their docstring while asserting ONLY the add — a
-# docstring overclaiming its own coverage, which is the exact defect class sibling ticket 2944
-# existed to delete, and it is worse than a missing test: it makes the gap invisible to anyone
-# auditing the table. The removals now live in their own cells (`test_inbound_delete_link_...`
-# and `test_outbound_delete_link_...`), each asserting the link's ABSENCE after a removal that
-# a PROVEN add preceded, and these two are re-scoped to row 10 alone. Splitting rather than
-# appending is also the discipline this module already learned the expensive way (see
-# `test_a_repeat_pass_over_a_converged_pair_plans_nothing`): a removal can fail for reasons the
-# add cannot, so bundling them makes one red report two indistinguishable things.
+# Link additions and removals have separate inbound and outbound cells. Each removal first proves
+# the add, so absence cannot pass vacuously and failures remain attributable to one operation.
 
 
 @_skip
@@ -841,23 +695,11 @@ def test_inbound_link_round_trips(
     track_issue: Any,
     bound_dc_issue: Any,
 ) -> None:
-    """Row 10 inbound: a Jira issue link surfaces as a local dep.
+    """Row 10 inbound: a Jira issue-link addition surfaces as a local dependency.
 
-    SCOPED TO THE ADD, and the docstring says so. It previously read "Rows 10-11 ... and its
-    removal removes it" while the body asserted only the add; the removal is now
-    `test_inbound_delete_link_round_trips` below. No assertion was weakened — one was ADDED,
-    elsewhere, and this claim narrowed to what this body actually proves.
-
-    THE FAR END MUST BE BOUND *AND* LOCALLY PRESENT BEFORE THE LINK PASS. The inbound link
-    translator resolves the counterpart through the binding store and skips an unresolvable
-    one — `inbound_differ.py:402-404`, "unbound — retry next pass" — and then skips again when
-    the counterpart is missing from the pass's active local set (`inbound_differ.py:409-412`,
-    built once at pass start from `rebar list`). Neither can be satisfied within the SAME pass
-    that first imports the target: the inbound differ runs before the binding walk that adopts
-    it (`run_differs.py:586` then `:688`). A single-pass version of this cell therefore
-    asserted an outcome that is structurally unreachable and reported an empty `deps` as a
-    bridge defect. `test_outbound_link_round_trips` below already carries the same priming
-    pass, with the same reasoning, which is why it passes.
+    A priming pass must first bind and import the counterpart into the active local set; inbound
+    link translation precedes binding adoption and skips unresolved or dormant targets. Link
+    removal is asserted independently below.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
@@ -929,28 +771,11 @@ def test_inbound_delete_link_round_trips(
     track_issue: Any,
     bound_dc_issue: Any,
 ) -> None:
-    """Row 11 inbound: a Jira issue link DELETED in DC must disappear from the local ticket.
+    """Row 11 inbound: deleting a Jira issue link removes the local dependency.
 
-    THE ORACLE IS ABSENCE, ASSERTED AFTER A PROVEN ADD. The add half is SETUP, not the
-    assertion, and it is asserted as setup: a removal cell whose link never arrived passes
-    vacuously against a bridge that never wrote it. Same shape as
-    `test_outbound_remove_label_round_trips` (row 6), for the same reason.
-
-    "The pass did not raise" is deliberately NOT the oracle. The whole d067 defect was a
-    soft-failed error with exit 0, so the only thing worth reading here is whether the dep is
-    GONE from `rebar show`.
-
-    EXPECTED RED — AND THE PRODUCT, NOT THIS CELL, IS WHY. `inbound_differ._diff_links_inbound`
-    is ADD-ONLY by construction: its docstring opens "Reflect Jira issuelinks into rebar
-    relations. ADD-only." and closes "ADD-only (no REMOVE mutations)"
-    (`inbound_differ.py:380`, `:396`). Nothing walks the local deps looking for one whose Jira
-    counterpart has gone, so a link a human deletes in Jira stays on the rebar ticket forever
-    and no pass reports it. The OUTBOUND direction does have a removal path
-    (`outbound_links._diff_link_removals`, `outbound_links.py:120-175`), which is what makes
-    this an asymmetry rather than a deliberate whole-feature omission. Filed as
-    [rebar:2b16-9be0-a8f5-41d9] with the citations; this cell is the evidence, so it asserts the
-    AC's oracle (row 11 inbound: "that link is ABSENT") rather than pinning the current
-    behaviour. Do not "fix" it by asserting the dep survives — that would freeze the gap.
+    First prove the link was added, then assert its absence from local state; exit zero is not
+    evidence because the bridge soft-fails. This remains expected-red while inbound link diffing
+    is add-only, unlike the outbound removal path; do not invert the oracle to preserve that gap.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
@@ -1019,14 +844,10 @@ def test_outbound_link_round_trips(
     track_issue: Any,
     bound_dc_issue: Any,
 ) -> None:
-    """Row 10 outbound: a local `blocks` link surfaces in `fields.issuelinks`.
+    """Row 10 outbound: a local ``blocks`` addition reaches DC ``fields.issuelinks``.
 
-    SCOPED TO THE ADD, and the docstring now says so. It previously claimed "Rows 10-11 ... and
-    unlink removes it. Both halves in one cell", and the body asserted ONLY the add (there was
-    no unlink here at all) — a docstring overclaiming its coverage, which hides a gap more
-    effectively than having no test. The removal is `test_outbound_delete_link_round_trips`
-    below, which does exactly what the old text described: proves the add landed, then asserts
-    absence. No assertion was weakened; one was added, elsewhere."""
+    This cell covers only addition; the independent removal cell proves add then absence.
+    """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
 
@@ -1068,18 +889,10 @@ def test_outbound_delete_link_round_trips(
     track_issue: Any,
     bound_dc_issue: Any,
 ) -> None:
-    """Row 11 outbound: a local `unlink` must remove the link from `fields.issuelinks`.
+    """Row 11 outbound: local ``unlink`` removes the DC issue link.
 
-    THE ORACLE IS ABSENCE ON THE INSTANCE, read with `get_issue_links` (a direct GET,
-    `transport.py:477-486`) so it cannot be satisfied by what rebar believes it sent. Not "the
-    pass exited 0" and not "the payload carried a remove instruction": the removal path
-    (`outbound_links._diff_link_removals` → `dispatch_one`'s `delete_issue_link`) is exactly the
-    kind of best-effort chain that logs and continues, so only the post-state is evidence.
-
-    ITS OWN CELL, separate from row 10's add. The add is asserted here too, but as SETUP — an
-    unlink asserted without first proving the link ARRIVED passes vacuously against a bridge
-    that never wrote it, which is the same trap `test_outbound_remove_label_round_trips`
-    documents for row 6.
+    Prove the add as setup, then assert absence through a direct instance read. Exit status and
+    the best-effort removal payload cannot establish the remote post-state.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
@@ -1132,10 +945,8 @@ def test_outbound_delete_link_round_trips(
     )
 
 
-# ---------------------------------------------------------------------------
-# Rows 12-13 — parent. DC splits what Cloud unifies: a SUB-TASK's parent is `fields.parent`,
-# an EPIC parent is the instance-discovered 'Epic Link' custom field (ticket 39c1).
-# ---------------------------------------------------------------------------
+# Rows 12-13: DC stores subtask parents in `fields.parent` and epic parents in
+# the instance-discovered Epic Link field (ticket 39c1).
 
 
 @_skip
@@ -1143,27 +954,11 @@ def test_outbound_delete_link_round_trips(
 def test_outbound_epic_parent_round_trips_via_the_epic_link(
     dc_transport: Any, jira_dc_project: str, track_issue: Any, dc_request: Any
 ) -> None:
-    """Row 12, the EPIC case: `set_parent` WRITES the Epic Link, and it round-trips.
+    """Row 12 epic case: ``set_parent`` writes and clears the Epic Link.
 
-    REWRITTEN, and the reason is recorded rather than quietly applied. This cell used to assert
-    `pytest.raises(NotImplementedError)` — the loud decline that was correct while ticket 39c1's
-    fix did not exist. Two harness runs changed what is correct here:
-
-      * a harness run confirmed the decline meant NO parent could ever reach DC, because the
-        outbound emit gate only emits an EPIC parent (bug 8b25) and that was precisely the shape
-        this side refused;
-      * a later run refuted the FIRST attempt at the fix (change 1302, `add_issues_to_epic`
-        under `agile_rest_path="greenhopper"`) — DC 8.17.1 answers
-        POST /rest/greenhopper/1.0/epic/{key}/issue with HTTP 404 "null for uri".
-
-    The cell's INTENT is unchanged: prove what `set_parent` does with an epic parent, and refuse to
-    let `fields.parent` be written where DC would silently no-op it. What changed is the expected
-    outcome, from "declines loudly" to "writes the Epic Link" — so this is not an inverted
-    assertion hiding a failure, it is the oracle for the behaviour the ticket now ships.
-
-    ASSERTED AGAINST A RAW REST READ-BACK, not the transport's return value, for the reason every
-    row here follows: the write path and the proving read must not share code, or a broken writer
-    that returns cleanly still passes.
+    This replaces the former expected refusal now that the supported DC path exists; a standard
+    issue must not use silently ignored ``fields.parent``. Assert both attach and detach through
+    raw REST rather than the writer’s return value.
     """
     epic_field = _epic_link_field_id(dc_request)
     if epic_field is None:
@@ -1203,27 +998,11 @@ def test_outbound_epic_parent_round_trips_via_the_epic_link(
 def test_a_subtask_reparent_is_REFUSED_rather_than_silently_ignored(
     dc_transport: Any, jira_dc_project: str, track_issue: Any, dc_request: Any
 ) -> None:
-    """Ticket 1a9f AC4: the read-back refusal, with the REFUSAL as this cell's subject.
+    """Assert the explicit refusal when DC accepts but ignores a subtask reparent.
 
-    Data Center answers a sub-task ``fields.parent`` write with **HTTP 204 and ignores it** — the
-    parent does not move. Every core caller swallows ``set_parent``'s failure, so before the fix
-    the only trace was an unchanged field noticed by some later assertion, and the pass reported
-    a mutation that never happened.
-
-    WHY THIS CELL EXISTS SEPARATELY. The two round-trip cells for sub-task parents do surface the
-    new refusal — in their failure text — but their SUBJECT is that a reparent round-trips, and
-    they are red because Data Center genuinely cannot do that. Reading the fix's success out of
-    another cell's error message is exactly the adjacent-green substitution this epic has been
-    burned by. This cell asserts the refusal itself, and is GREEN when the fix works.
-
-    THE SECOND ASSERTION IS THE LOAD-BEARING ONE. Raising is easy; raising because the write was
-    VERIFIED is the property. So the parent is read back over raw REST and must still be the
-    original — proving the transport refused after observing reality, not by declining the
-    sub-task branch outright. Without it, a blanket ``raise NotImplementedError`` would pass.
-
-    ``NotImplementedError`` specifically, because ``dispatch_one`` maps that to
-    ``outbound-parent-unrepresentable`` while every other type is the RETRYABLE
-    ``outbound-parent-failed``, and retrying a write DC ignores by design never terminates.
+    The transport must raise ``NotImplementedError`` only after raw read-back still shows the
+    original parent, and the message names requested and observed parents. That type maps the
+    mutation to terminal ``outbound-parent-unrepresentable`` rather than futile retry.
     """
     subtask_type = _subtask_type_name(dc_request, jira_dc_project)
     first = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 refuse par-1"))
@@ -1237,13 +1016,8 @@ def test_a_subtask_reparent_is_REFUSED_rather_than_silently_ignored(
         extra={"parent": {"key": first}},
     )
 
-    # RAW PLATFORM PROBES — moved here by [rebar:9f26-66c2-14af-4223] from the two sub-task
-    # round-trip cells that were re-homed away from `fields.parent`. They belong on THIS cell:
-    # its subject IS the accept-and-ignore, so it is the right place to keep re-measuring the
-    # platform behaviour every run rather than trusting the capability map. `set_parent` cannot
-    # answer this itself — pycontribs' `issue.update(...)` does not surface the raw HTTP
-    # response — so these bypass it entirely. None of them assert; their results are folded
-    # into the oracle's failure text so a CI reader sees what DC actually said without a rerun.
+    # Raw probes remeasure this accept-and-ignore behavior because pycontribs hides the HTTP
+    # response. They bypass `set_parent` and feed diagnostics rather than assertions.
     editmeta_status, editmeta_ops = _probe_subtask_parent_editmeta_ops(dc_request, child)
     probe_status, probe_body = _probe_subtask_parent_put(dc_request, child, second)
     update_verb_status, update_verb_body = _probe_subtask_parent_put(
@@ -1284,28 +1058,11 @@ def test_outbound_epic_parent_reaches_dc_THROUGH_A_RECONCILE_PASS(
     track_issue: Any,
     dc_request: Any,
 ) -> None:
-    """Ticket 39c1 AC1: the emit gate and the apply gate must OVERLAP on a real pass.
+    """Prove the parent emit and apply gates overlap on a real reconcile pass.
 
-    THE CELL ABOVE IS NOT THIS CELL, and the difference is the whole acceptance criterion.
-    ``test_outbound_epic_parent_round_trips_via_the_epic_link`` calls ``dc_transport.set_parent``
-    directly, so it proves the APPLY side in isolation: that Data Center accepts an Epic Link
-    write. AC1 asks something strictly stronger — that a reconcile PASS emits that write at all.
-    Those are different claims, and 39c1 exists precisely because the two gates were DISJOINT:
-    the emit side (bug 8b25's hierarchy guard) omits the parent unless the local parent's
-    ``ticket_type`` is ``epic``, while the apply side used to accept only sub-task children. No
-    pass could ever emit a parent DC would take.
-
-    Substituting the transport-level cell for this one is the error this epic keeps making —
-    changes 1276, 1288 and 1302 each shipped merged and mutation-proven against a green that was
-    ADJACENT to the claim rather than the claim.
-
-    THE PARENT'S LOCAL TICKET_TYPE IS ASSERTED, not assumed. If the seeded epic did not import as
-    local ``epic``, the emit gate would omit the parent and this cell would go red for a reason
-    that has nothing to do with the apply side — an unattributable failure of exactly the kind
-    the SETUP-vs-defect split in this module exists to prevent.
-
-    READ BACK OVER RAW REST, never through the transport that performed the write, so a writer
-    that returns cleanly without persisting cannot pass itself.
+    A direct transport test covers only application; this cell requires the local parent to be
+    an ``epic`` so the emit guard includes it, then verifies the Epic Link independently through
+    raw REST. An unexpected local type is a setup failure, not evidence about application.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
@@ -1377,26 +1134,11 @@ def test_a_repeat_pass_over_a_converged_epic_parent_plans_nothing(
     track_issue: Any,
     dc_request: Any,
 ) -> None:
-    """Ticket 9bb9 AC6: a converged EPIC-PARENT pair must not be re-planned.
+    """Assert that a converged Epic Link parent is not planned again.
 
-    A SEPARATE CELL from the epic-parent emit above, for the reason this module already learned
-    the hard way: an idempotence assertion bundled into a round-trip cell turns every churn bug
-    into a false red on a mutation that actually worked, and J11's first run buried the real
-    signal under thirteen of them.
-
-    NOT COVERED BY ``test_a_repeat_pass_over_a_converged_pair_plans_nothing``, which converges a
-    TITLE edit on a plain task. The epic parent is a different field on a different code path —
-    written outbound as the Epic Link custom field and read back inbound by ``get_parent_map``'s
-    Epic Link branch (ticket 9bb9). Idempotence is a property of the WRITE/READ PAIR agreeing
-    about a field's value, so proving it for a summary says nothing about a parent: if the reader
-    and the writer disagree about the epic parent's shape, every pass re-plans the same attach
-    forever and the store churns.
-
-    WAITS ON ``get_parent_map`` BEFORE RE-PLANNING. The differ's remote snapshot is index-backed
-    and eventually consistent, so a re-plan issued immediately after the write sees the old
-    document and re-plans what it just applied. Waiting on the PRODUCTION read — the same one the
-    inbound pass uses — is what makes a subsequent non-empty plan attributable to churn rather
-    than to lag.
+    Keep this separate from the round-trip and from title idempotence: Epic Link write/read
+    agreement is its own path. Wait until the production, index-backed parent map sees the attach
+    before requiring an empty repeat plan, so lag cannot be mistaken for churn.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
@@ -1423,11 +1165,8 @@ def test_a_repeat_pass_over_a_converged_epic_parent_plans_nothing(
 
     rebar.edit_ticket(child_local, repo_root=dc_store_copy_repo, parent=epic_local)
 
-    # POSITIVE CONTROL — the filter CAN surface an entry for THIS pair (bug 59b2, Finding B).
-    # This is the SECOND cell drawing a verdict from an empty filtered plan; the ticket named only
-    # the summary one, and the shared defect was found by the repo-only guard that pins the control
-    # ordering. With the local parent edit pending and DC not yet updated, an entry must exist — so
-    # an empty result here indicts `--filter-local-ids`, not convergence.
+    # Positive control: the pending local parent edit must surface for this pair; otherwise the
+    # later empty filtered plan cannot prove convergence (bug 59b2, Finding B).
     pending = _plan_entries_for(dc_store_copy_repo, child_local, child)
     assert pending, (
         f"the filtered dry-run surfaced NO entry for {child_local}/{child} even though a local "
@@ -1488,13 +1227,9 @@ def _epic_link_field_id(dc_request: Any) -> str | None:
 
 
 def _seed_epic(dc_request: Any, dc_transport: Any, project: str, track_issue: Any) -> str:
-    """Create an EPIC in `project` and return its key.
+    """Create an Epic after discovering the project type and required ``Epic Name`` field.
 
-    Two things are discovered rather than assumed, and both fail as SETUP rather than as a
-    bridge defect: the project must actually offer an "Epic" issue type (the scratch project is
-    built from whichever template the image ships), and DC requires the "Epic Name" field on
-    creation — omitting it is rejected with a validation error that would otherwise read as a
-    transport bug.
+    Missing capabilities fail as harness setup rather than being misreported as transport defects.
     """
     status, body = dc_request(f"/rest/api/2/project/{project}")
     assert status == 200 and isinstance(body, dict), (
@@ -1524,15 +1259,10 @@ def _seed_epic(dc_request: Any, dc_transport: Any, project: str, track_issue: An
 
 
 def _subtask_type_name(dc_request: Any, project: str) -> str:
-    """The name of THIS project's sub-task issue type, ASKED of the instance.
+    """Read this project’s subtask type name from DC.
 
-    Read from the project rather than hardcoded. Since bug 3fe5 the project is created from a
-    PINNED template and `conftest._assert_project_capabilities` guarantees a `Sub-task` type is
-    present before any cell runs, so this is no longer the only thing standing between us and a
-    confusing failure — but it stays a read because the contract pins the type's PRESENCE, not
-    the exact display name a future image might localise or rename. A hardcoded name the project
-    does not have would make `create_issue` fail, and every parent cell below would report a
-    PROJECT-CONFIGURATION problem as a bridge defect.
+    Provisioning guarantees presence but not a forever-fixed display name. Discovery prevents a
+    project-configuration mismatch from masquerading as a parent-bridge failure.
     """
     status, body = dc_request(f"/rest/api/2/project/{project}")
     assert status == 200 and isinstance(body, dict), (
@@ -1561,22 +1291,11 @@ def _wait_until_parent_map_reflects(
     what: str,
     timeout: float = 90.0,
 ) -> None:
-    """Block until ``get_parent_map`` reflects ``what`` for ``key``.
+    """Wait until the production parent map reflects ``what`` for ``key``.
 
-    Waits on THE PRODUCTION READ. The inbound pass does not read `fields.parent` off the issue:
-    the fetcher makes one extra paged REST search via ``client.get_parent_map`` and merges the
-    result into each snapshot entry (`fetcher.py:485-511`), and that search is index-backed and
-    eventually consistent. So this is the `_wait_until_search_reflects` hazard again, one layer
-    over: waiting on a direct GET would let a stale parent map be reported as a bridge defect.
-
-    THE PREDICATE TAKES THE WHOLE MAP, NOT ``mapping[key]``, and that is a correctness
-    requirement rather than a convenience. ``get_parent_map`` has a DEGRADATION CONTRACT: any
-    REST failure logs a warning and returns ``{}`` (`transport.py:520-527`). A predicate handed
-    only the looked-up value cannot distinguish "the instance says this issue has no parent"
-    (key PRESENT, value None) from "the parent map failed and returned nothing" (key ABSENT) —
-    so a clear-parent wait written that way is satisfied by a broken read, which is precisely
-    the vacuous-oracle failure this suite keeps finding. Callers asserting an ABSENT parent must
-    therefore require the key to be present, e.g. ``lambda m: key in m and not m[key]``.
+    Inbound consumes this index-backed paged read, not a direct issue GET. Give predicates the
+    whole mapping so a present key with no parent differs from the degradation result ``{}``; a
+    clear must require membership as well as a false value.
     """
     deadline = time.monotonic() + timeout
     attempts = 0
@@ -1605,49 +1324,12 @@ def test_inbound_set_parent_round_trips(
     track_issue: Any,
     dc_request: Any,
 ) -> None:
-    """Row 12 inbound: a parent set on the INSTANCE must reach `.parent_id` locally.
+    """Row 12 inbound: an instance Epic Link reaches local ``parent_id``.
 
-    RE-HOMED FROM THE SUB-TASK SHAPE ([rebar:9f26-66c2-14af-4223]), and the distinction that
-    justifies it is that the sub-task was never this cell's SUBJECT. The subject is rebar's
-    INBOUND pass — does a parent change made on the instance reach the local ticket? The
-    sub-task reparent was only
-    the SETUP that produced the change, and that setup is the part Data Center cannot do:
-    `PUT fields.parent` on a sub-task returns HTTP 204 and is silently ignored (capability map
-    req-0056/req-0058). Live run 30951453979 shows this cell failing at the setup line itself
-    with `NotImplementedError` — "asked for RBJREXN-2 … a fresh read still reports RBJREXN-1" —
-    so the inbound pass was never once exercised in twelve runs.
-
-    THE SETUP MOVES TO THE MECHANISM DC SUPPORTS; THE ORACLE DOES NOT MOVE. The parent is now
-    the "Epic Link" custom field on a NON-sub-task child, proven on this instance in both
-    directions (`test_outbound_epic_parent_round_trips_via_the_epic_link` and
-    `test_inbound_clear_parent_round_trips`, both green in that same run; map req-0040/0041).
-    What is asserted is unchanged and still end to end: after a real inbound pass, the child's
-    local `.parent_id` is the local id of the parent it was given on the instance.
-
-    THE CHILD STARTS PARENTLESS, and that is a correctness requirement rather than a
-    simplification. The sub-task version had to RE-PARENT (A -> B) because a sub-task cannot be
-    created without a parent, so asserting its creation-time parent would have re-read a field
-    the cell did not write. A standard issue has no such constraint — so the cell can create it
-    parentless and assert the parent IT set, which is a genuine round trip AND avoids a
-    collision the re-parent shape would walk into:
-
-      * `parent` is NOT in `_INBOUND_MIRRORED_FIELDS`, so a local parent that disagrees with
-        the remote one is resolved LOCAL-WINS, not adopted;
-      * `_OUTBOUND_TO_INBOUND_FIELD` maps `parent` -> `parent_id`, so an outbound parent
-        emission SUPPRESSES the inbound mirror for the same ticket in that pass.
-
-      A cell that primed the child under epic A locally and then moved it to epic B on the
-      instance would therefore have outbound re-assert A, suppress the inbound adopt, and
-      REVERT the instance-side move — a red that says nothing about the inbound pass. With no
-      local parent at all there is nothing to re-assert: a detached local ticket produces a
-      CLEAR candidate, `_parent_clear_is_managed` finds the remote parent unmanaged (rebar
-      never set it), and the pass takes the documented "adopt inbound, don't clobber" path.
-      The precondition below asserts the local parent is EMPTY, which is what keeps that true.
-
-    THE PARENT MUST BE BOUND. `inbound_differ._extract_parent_local_id` resolves the parent key
-    through `binding_store.get_local_id` and returns None when it is not yet bound; the caller
-    then SKIPS the field rather than emitting it, so an unbound parent produces no mutation at
-    all — indistinguishable from a bridge defect.
+    Use a parentless standard issue because DC silently ignores subtask reparenting and a prior
+    local parent would trigger local-wins suppression. Prime and prove bindings, set the supported
+    Epic Link, wait on the production parent map, then assert the real pass adopts the bound
+    parent locally.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
@@ -1697,10 +1379,8 @@ def test_inbound_set_parent_round_trips(
         f"SETUP FAILED (not the bridge): set_parent returned without error but {child}'s Epic "
         f"Link ({epic_field}) reads {landed!r}, expected {epic_key!r} (HTTP {status})."
     )
-    # Wait on the PRODUCTION read — `get_parent_map` is an index-backed paged search (9bb9
-    # taught it the Epic Link fallback), so a direct GET agreeing proves nothing about what the
-    # pass will see. The predicate takes the WHOLE map: a degraded map is `{}`, and a predicate
-    # written over `mapping[child]` alone cannot tell that from "no parent".
+    # Wait on the index-backed production `get_parent_map`, not direct GET. Inspect the whole
+    # map so a degraded `{}` is not mistaken for "no parent".
     _wait_until_parent_map_reflects(
         dc_transport,
         jira_dc_project,
@@ -1730,32 +1410,11 @@ def test_inbound_clear_parent_round_trips(
     track_issue: Any,
     dc_request: Any,
 ) -> None:
-    """Row 13 inbound, REWRITTEN (ticket 37e7): clear a NON-sub-task's Epic Link parent.
+    """Row 13 inbound: clearing a standard issue’s Epic Link clears local ``parent_id``.
 
-    WHY THE REWRITE. The previous version of this cell cleared a SUB-TASK's `fields.parent` and
-    could never reach its own oracle: 37e7's root-cause investigation confirmed Data Center
-    refuses to null `fields.parent` on a sub-task INTRINSICALLY — the field is object-typed and
-    mandatory on that issue shape, and DC rejects `null` at the deserializer level for every
-    payload shape rebar could send, before any business rule even runs. That is a PLATFORM
-    constraint, not a rebar defect, so the cell always reported SETUP FAILED and the inbound
-    parent-clear path had no live coverage at all. The operator's ruling (37e7) was to prove the
-    SAME clear semantic on a field that Jira actually allows to be nulled — a non-sub-task's
-    "Epic Link" custom field — and to keep a small, separate pin asserting DC still refuses the
-    sub-task case, so a future DC version that starts allowing it is caught rather than silently
-    reopening a gap nobody is watching for.
-
-    THIS ONLY WORKS BECAUSE OF 9bb9. An earlier attempt at this exact rewrite was blocked:
-    `get_parent_map` used to read ONLY `fields.parent`, so an Epic Link clear was structurally
-    invisible to inbound — the map read `None` for the issue before the clear and `None` after,
-    a non-transition the differ could not observe. Change 1324 (ticket 9bb9), confirmed merged
-    on this base, taught `get_parent_map` to also read the Epic Link field back
-    (`transport.py:533-579`, falling to it whenever `fields.parent` is absent), which is what
-    makes this rewrite representable at all.
-
-    THE PRECONDITION IS AN "Epic" ISSUE TYPE, which this harness project currently does NOT have
-    (ticket 3fe5 — `has ['Sub-task', 'Task']`). `_seed_epic` therefore fails as SETUP until 3fe5
-    lands; that SETUP FAILED, naming the missing issue type, is the honest and correct outcome
-    here, not a weakened cell.
+    DC cannot null a subtask’s mandatory object-valued parent, so that platform constraint has
+    a separate pin. The supported case is observable because ``get_parent_map`` also reads the
+    Epic Link fallback; prove the attach before clearing it.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
@@ -1865,49 +1524,11 @@ def test_outbound_clear_parent_round_trips(
     track_issue: Any,
     dc_request: Any,
 ) -> None:
-    """Row 13 outbound: detaching the parent LOCALLY must clear it on the instance.
+    """Row 13 outbound: a local detach clears the DC Epic Link.
 
-    RE-HOMED FROM THE SUB-TASK SHAPE ([rebar:4b9e-bcad-456a-4233]), the outbound twin of the
-    move [rebar:37e7-d751-0042-4b94] already made for the inbound clear. The old cell detached
-    a SUB-TASK's `fields.parent`, which
-    Data Center will not do: `{"fields":{"parent":null}}` is rejected 400 `data was not an
-    object` and `{"update":{"parent":[{"set":null}]}}` is rejected 400 `not on the appropriate
-    screen`, and a sub-task's `/editmeta` exposes no `parent` field at all (capability map
-    req-0054/0055/0057). `dispatch_one` swallows that 400 (it warns and continues), so the pass
-    exited 0 and the remote parent survived — which is exactly what live run 30951453979 reports:
-    "the local parent was DETACHED but RBJUFQU-2 still carries fields.parent = RBJUFQU-1".
-
-    The inbound twin was re-homed to the Epic Link and has been green ever since; this cell was
-    left behind, and it has been red in all twelve runs. It was also self-contradicted inside this
-    very file: `test_inbound_clear_parent_round_trips` ends with a pin asserting that
-    `set_parent(subtask, None)` RAISES. One of the two had to be wrong, and 37e7's ruling says it
-    is this one.
-
-    THE BLOCKING UNKNOWN 4b9e HELD THIS WORK BEHIND IS ALREADY ANSWERED — BY THE HARNESS. That
-    ticket would not write this cell until a dedicated probe established whether
-    `{epic_link: null}` actually clears on DC 8.17.1. Two cells in run 30951453979 answer YES and
-    both PASSED: `test_outbound_epic_parent_round_trips_via_the_epic_link`, whose final assertion
-    is literally `set_parent(child, None)` followed by `assert not cleared`, and
-    `test_inbound_clear_parent_round_trips`, which observes an Epic Link clear arriving inbound.
-    The probe was answering a question the suite had already answered.
-
-    THE PARENT IS SET BY REBAR, NOT BY JIRA, AND THAT IS A CORRECTNESS REQUIREMENT rather than
-    convenience. `_parent_clear_is_managed` gates the outbound clear on
-    `should_propagate_removal`, which fires only for a ref in the ticket's `managed_refs` — the
-    fail-open rule that stops rebar clobbering a parent a human set on the Jira side. A local
-    `edit_ticket(..., parent=...)` folds `("parent", <id>)` into `managed_refs`
-    (`reducer/_processors.py:528`), so priming through a local edit is what makes the later
-    detach propagate at all. Priming by CREATING the issue under a parent Jira-side — what the
-    old cell did — is the shape that does not.
-
-    THE PRIMING SET IS PROVEN LANDED BEFORE THE CLEAR IS ASKED FOR, so "the Epic Link is empty at
-    the end" cannot be satisfied by a parent that was never there. And the parent's local
-    `ticket_type` is asserted to be `epic`, because bug 8b25's emit guard omits the parent field
-    for any non-epic parent — without that, the priming pass would plan nothing and the cell would
-    go red for an import reason rather than a clear reason.
-
-    READ BACK OVER RAW REST, never through the transport that performed the write: a writer that
-    returns cleanly without persisting must not be able to pass itself.
+    Subtask parent clearing is unsupported, so prime a standard child with a locally managed Epic
+    relation—the provenance required for removal propagation. Prove the attach landed, detach
+    locally, and verify absence by raw REST outside the writer.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
@@ -1969,12 +1590,8 @@ def test_outbound_clear_parent_round_trips(
     assert_child_ran_clean(cp, what="outbound clear-parent pass")
 
     status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
-    # The STATUS is asserted before the value is read, and that is load-bearing rather than
-    # defensive. A 401/403/500 answers with a dict like `{"errorMessages": [...]}`, whose
-    # `.get("fields")` is None — so a falsy `after` would be indistinguishable from a genuine
-    # clear and this cell would go GREEN on a failed read. The positive assertions above are
-    # safe without this (they compare against an expected key); a "must be absent" oracle is
-    # not.
+    # Prove the read succeeded before checking absence; an error response can otherwise look
+    # like a cleared field.
     assert status == 200 and isinstance(body, dict) and "fields" in body, (
         f"could not read {child} back to verify the clear (HTTP {status}, body "
         f"{str(body)[:200]}) — an unreadable issue must not be reported as a cleared one."
@@ -1999,53 +1616,12 @@ def test_outbound_unrepresentable_parent_is_REPORTED_rather_than_silently_droppe
     track_issue: Any,
     dc_request: Any,
 ) -> None:
-    """Row 12 outbound, RE-HOMED (ticket 9f26): the user must be TOLD when a parent cannot land.
+    """Report an unrepresentable outbound parent durably without writing it.
 
-    WHY THE OLD SUBJECT HAD TO GO. This cell used to assert that rebar can SET a sub-task's
-    `fields.parent` on Data Center. It cannot, and neither can anything else: DC answers that
-    write with HTTP 204 and ignores it (capability map req-0056/req-0058), which live run
-    30951453979 reproduces in the cell's own failure text — "asked for RBJVZQW-2 … a fresh read
-    still reports RBJVZQW-1". Twelve consecutive runs, never green. An oracle for an operation
-    the platform cannot perform is a wrong oracle.
-
-    WHY IT IS NOT RE-HOMED TO THE EPIC PARENT. That would make it a duplicate:
-    `test_outbound_epic_parent_round_trips_via_the_epic_link` already pins the transport-level
-    write and `test_outbound_epic_parent_reaches_dc_THROUGH_A_RECONCILE_PASS` already pins it
-    through a real pass, both green. A third copy would assert nothing new, which is the
-    adjacent-green substitution this epic has been burned by three times (changes 1276, 1288,
-    1302).
-
-    THE CLAIM IT TAKES INSTEAD IS THE ONE NOTHING ASSERTS ANYWHERE, and it is the actual
-    user-visible defect. Two gates, each correct alone, silently swallow a hierarchy edit:
-
-      * `outbound_field_diff._resolve_local_parent` OMITS the parent field entirely when the
-        local parent's `ticket_type` is not `epic` (bug 8b25's guard, correctly refusing to
-        write a parent the tracker rejects or ignores) — and, before this ticket, returned
-        BYTE-IDENTICALLY to its "unbound this pass, retry next pass" return, with no log and no
-        record;
-      * so `parent` never enters `fields`, `dispatch_one._update_one_apply_parent` never runs,
-        and the entire `record_parent_divergence` / `bridge_alerts` apparatus that ticket 39c1
-        built for exactly this failure is STRUCTURALLY UNREACHABLE.
-
-    The pass then exits 0 and reports convergence while the user's parent edit is gone. That is
-    the same invisibility `pass_io.py` names as the reason this class "stayed invisible through
-    five instances" — 39c1 wired it into apply-time failure and left emit-time suppression mute.
-
-    THE ORACLE IS THE USER-VISIBLE OUTCOME, ASSERTED BOTH WAYS. rebar must (1) TELL the operator
-    — a durable `outbound-field-dropped` bridge alert naming this issue and the `parent` field,
-    not a log line — and (2) still NOT have written anything, because a write DC accepts and
-    ignores is the failure mode the whole ticket is about. Asserting only the first would pass
-    for an implementation that alerts AND writes; asserting only the second is what twelve runs
-    already did.
-
-    DISTINCT FROM `test_a_subtask_reparent_is_REFUSED_rather_than_silently_ignored`, which
-    asserts the TRANSPORT raising when called directly. This asserts what a real reconcile PASS
-    surfaces — and `dispatch_one` swallows set_parent's exception, so the transport's raise is
-    invisible at pass level. They are different layers and both are needed.
-
-    THE PARENT'S LOCAL TICKET_TYPE IS ASSERTED, NOT ASSUMED. If the seeded parent imported as
-    local `epic`, the guard would not fire, the parent would be emitted, and this cell would go
-    green for a reason that has nothing to do with the alert.
+    A non-epic local parent is suppressed by the emit guard before transport application, so a
+    real pass must create an ``outbound-field-dropped`` alert naming the issue and ``parent``.
+    Raw REST must also show neither ``fields.parent`` nor Epic Link was written. This complements
+    the direct transport-refusal cell by asserting the user-visible pass outcome.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
@@ -2108,16 +1684,9 @@ def test_outbound_unrepresentable_parent_is_REPORTED_rather_than_silently_droppe
         f"failure 39c1 made durable for the apply side and this ticket closes for the emit side."
     )
 
-    # (2) AND NOTHING WAS WRITTEN. The whole reason the field is suppressed is that DC would
-    # accept-and-ignore it; an implementation that alerts AND writes is not fixed. Read over
-    # RAW REST, never the transport that would have performed the write.
-    #
-    # BOTH FIELDS ARE READ, and that is what makes this assertion able to fail at all. `child`
-    # is a standard issue, and `set_parent` NEVER writes `fields.parent` for a non-sub-task —
-    # it writes the Epic Link instead (it declines `fields.parent` precisely because DC would
-    # no-op it). So a `?fields=parent` read alone is empty by construction whatever rebar did,
-    # and would pass vacuously. The Epic Link is the field a write WOULD land in here, so it
-    # is the one that carries the claim.
+    # An alert is insufficient if a write occurred. Check raw REST rather than the writing
+    # transport, and read both fields: `fields.parent` is always empty for a standard issue,
+    # while an attempted parent write would target the Epic Link.
     assert epic_field is not None  # narrowed by the SETUP guard above
     status, body = dc_request(f"/rest/api/2/issue/{child}?fields=parent,{epic_field}")
     assert status == 200 and isinstance(body, dict) and "fields" in body, (
@@ -2145,42 +1714,16 @@ def test_outbound_unrepresentable_parent_is_REPORTED_rather_than_silently_droppe
 def test_a_deleted_dc_issue_never_plans_a_local_teardown(
     dc_store_copy_repo: Path, dc_transport: Any, bound_dc_issue: Any
 ) -> None:
-    """Row 14 inbound: deleting the DC issue must NOT plan any teardown of the local side.
+    """Row 14 inbound: remote absence must not plan local teardown.
 
-    ORACLE CORRECTED. This cell previously asserted an `(inbound, probe)` plan entry and cited
-    `differ.py:630-650` as its emitter. That citation was wrong and the assertion was
-    unsatisfiable: `_compute_mutations_emit_absent_partner_probes` reads
-    `local_state[key]["jira_key"]`, but its only production caller passes the PREVIOUS JIRA
-    SNAPSHOT as `local_state` (`run_differs.py:222` — `compute_mutations(ctx.prev_snapshot,
-    ctx.curr_snapshot, ...)`), and a snapshot entry is the raw Jira `fields` dict
-    (`fetcher.py:479`, contract shape `schemas/jira_snapshot_entry.schema.json`) which carries
-    no `jira_key`. So that loop never fires in production and NOTHING emits an
-    `(inbound, probe)` for a bound pair whose local ticket is active. The pair's real owner
-    is the outbound differ's bounded direct GET, which on a confirmed 404 records the
-    absence toward grace and
-    deliberately emits no mutation (`outbound_differ.py:692-702`); `binding_walk.py:167-170`
-    skips active-local pairs precisely to leave them to it. (Bug 3b5f has since DELETED that
-    dead producer along with the whole `(inbound, probe)` dispatch chain, which is why the
-    corrected oracle below is the only one that could ever have held.)
-
-    THE AUTHORITATIVE OBSERVABLE IS THE ONE THIS DOCSTRING ALWAYS DESCRIBED — "rebar does not
-    tear down a local ticket because a remote read failed once". ADR 0028 §1: snapshot-absence
-    is NOT a signal of deletion, and no destructive or terminal action may be driven by it;
-    deletion is proven only by a bounded GET 404 counted to grace (§2). So the assertion is
-    that the plan carries NO local teardown for this pair and the local ticket survives.
-
-    Asserted from a DRY-RUN. That is not merely tidiness here: a writing pass over a key that
-    has left the snapshot also plans an `(outbound, create)` for it, which is a separate
-    finding filed on its own — running this cell in a writing mode would file a duplicate
-    issue into the harness.
+    Snapshot absence is not deletion under ADR 0028; only bounded direct-GET grace can prove it.
+    Use a dry-run because a writing pass would separately plan a duplicate create, then assert no
+    destructive local action and that the ticket survives.
     """
     local_id, key = bound_dc_issue
 
-    # POSITIVE CONTROL — the filter CAN surface an entry for THIS pair (bug 59b2, Finding B).
-    # The verdict below is `not teardown` over a FILTERED plan, so a filter matching nothing
-    # passes it vacuously. Establish reach BEFORE the delete, while the pair still exists: a
-    # pending local edit must produce at least one entry. The edit is then reverted so the
-    # subject state is the converged pair this cell means to test, not a dirty one.
+    # Positive control: a pending local edit must reach this filtered plan before deletion.
+    # Revert it afterward so the no-teardown verdict examines the converged pair (bug 59b2).
     import rebar as _rebar
 
     _probe_title = _uniq("rebar J11 row14 filter probe")
@@ -2228,33 +1771,11 @@ def test_a_deleted_dc_issue_never_plans_a_local_teardown(
 def test_outbound_delete_leaves_the_issue_absent_by_key_AND_by_id(
     dc_transport: Any, jira_dc_project: str, track_issue: Any, dc_request: Any
 ) -> None:
-    """Row 14 outbound: a deleted DC issue must be unreachable by KEY *and* by NUMERIC ID.
+    """Row 14 outbound primitive: deletion leaves the issue absent by key and numeric ID.
 
-    ASSERTED DIRECTLY AGAINST THE TRANSPORT, like row 12's epic case, and for a structural
-    reason rather than convenience: NO differ emits an `(outbound, delete)` mutation. The only
-    production callers of `delete_issue` are the create-ROLLBACK
-    (`apply_outbound.py:100-113`, which deletes an issue it had just created before re-raising)
-    and the typed leaf `_apply_outbound_delete` (`apply_outbound.py:168-183`), which no diff
-    path reaches. Nor could one: rebar has no local ticket deletion to diff against (see
-    `_dc_support.forget_identity_mapping` — "There is no library delete for a ticket"), and
-    ADR 0028 §1 forbids driving a destructive action from absence, which is what the INBOUND
-    row-14 cell above asserts. So the reachable claim is about the PRIMITIVE, and routing it
-    through a pass would mean asserting a mutation nothing emits.
-
-    WHY BOTH LOOKUPS, which is the whole reason this row exists rather than a bare 404 check. A
-    Jira issue MOVED to another project is re-KEYED, and its old key then 404s exactly like a
-    deleted one — bug 7c26, whose fix has the binding store re-ask by immutable numeric id and
-    re-key on a hit (`binding_store.py:142`, `:488-506`, `:558`; the outbound differ's
-    `note_absent_or_rekey` at `outbound_differ.py:703-707`). A cell that checked only the key
-    would therefore report "deleted" for an issue that is alive under a new key. The numeric id
-    is captured BEFORE the delete, because afterwards there is nothing left to read it from.
-
-    ABSENCE IS ASSERTED POSITIVELY, via raw REST status codes, so "no exception was raised" is
-    nowhere in the oracle: `delete_issue` absorbs a 404 as idempotent success
-    (`transport.py:529-554`), which means a delete that never happened and a delete of an
-    already-absent issue return the SAME value. Only the post-state discriminates them, and
-    this cell first asserts the issue is READABLE (HTTP 200 by both handles) so the later 404s
-    are a change it caused rather than a state it inherited.
+    No differ emits outbound deletion, so exercise the reachable transport operation directly.
+    Prove both handles return 200 before deletion and 404 afterward; key-only absence could be a
+    project move and re-key, while return-without-error cannot prove the post-state.
     """
     key = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 outbound delete"))
 
@@ -2294,48 +1815,12 @@ def test_outbound_delete_leaves_the_issue_absent_by_key_AND_by_id(
 def test_the_inbound_assignee_mints_a_jira_family_identity(
     dc_store_copy_repo: Path, dc_transport: Any, jira_dc_project: str, bound_dc_issue: Any
 ) -> None:
-    """An inbound assignee MINTS an identity, and it is minted under the SHARED `jira` family.
+    """Assert that inbound assignment mints one shared-family placeholder identity.
 
-    ASSERTED POSITIVELY, AND AGAINST THE REGISTRY RATHER THAN THE TICKET. Bug 5f48 was exactly
-    this failing SILENTLY — `jira-datacenter` was not a valid creation channel and the mint was
-    swallowed — so "the pass did not raise" is worth nothing here.
-
-    WHAT THIS CELL USED TO DO, AND WHY IT COULD NEVER FAIL. It read `.assignee` off the local
-    ticket and compared it to `rebar.ensure_identity_for("jira", "admin", ...)`. Two separate
-    errors compounded:
-
-      1. `.assignee` IS NOT THE IDENTITY. Local tickets store the assignee as a BARE STRING on
-         BOTH deployments by design — `inbound_fields._assignee_matches` exists precisely
-         because Jira returns an object and local holds a string — and the mint is ADDITIVE:
-         `apply_inbound_records._ensure_inbound_assignee_identity` says outright that it
-         "NEVER changes the human-readable name extraction". This story's own plan said the
-         same: the identity is NOT a field on the ticket JSON. So the field was never going to
-         carry the id.
-      2. `ensure_identity_for` IS CREATE-OR-REUSE. Calling it inside the oracle MINTS the
-         identity if the pass did not, so comparing its return value against itself can never
-         distinguish "the pass minted it" from "the assertion just minted it". Even with (1)
-         corrected, that comparison would be a tautology.
-
-    SO THE OBSERVABLE IS A BEFORE/AFTER ON THE REGISTRY, read through the READ-ONLY resolver
-    `rebar.resolve_mapping` — which returns None rather than creating. The mapping is absent
-    before the pass and present after it; that difference is the pass's own work and nothing
-    else's.
-
-    The FAMILY is asserted in both directions. The epic's shared-identity decision is that DC
-    and Cloud share the `jira` provider, with the DEPLOYMENT distinguished by
-    `RemoteRef.instance` rather than by forking the store vocabulary. So the mapping must
-    resolve under `jira` AND must NOT exist under `jira-datacenter` — a positive-only check
-    would pass a build that minted under both.
-
-    THE CELL ESTABLISHES ITS OWN PRECONDITION RATHER THAN HOPING FOR IT. The J11 harness
-    showed the "absent before" assertion failing: jira/'admin' was already mapped. That is not
-    the scrub's doing — every identity on the real `tickets` branch carries `mappings: []`. It
-    is `bound_dc_issue`'s binding pass importing the seeded issue's DEFAULT assignee (the
-    project lead, i.e. the admin) and minting for it. Since the fixture will re-mint whichever
-    user its issue is assigned to, and the admin is the only user the harness guarantees, the
-    cell unassigns, syncs, removes that one mapping, and asserts the absence it just
-    established — the assertion stays, and now discriminates a failed setup instead of an
-    unwinnable one.
+    First unassign and remove the binding pass’s mapping, proving read-only resolution is absent.
+    After assigning the guaranteed admin and running the pass, require ``jira`` resolution, no
+    ``jira-datacenter`` fork, and placeholder status. Ticket-field username equality is a separate
+    oracle because local ``assignee`` never stores the registry ID.
     """
     import rebar
 
@@ -2420,13 +1905,9 @@ def test_the_inbound_assignee_mints_a_jira_family_identity(
 
 
 def _observed_page_size(dc_request: Any, project: str) -> int:
-    """The page size the SERVER actually applies, read from its own echoed `maxResults`.
+    """Read the server-applied page size from its echoed ``maxResults``.
 
-    Observed rather than assumed, which is the AC's requirement and also the only honest way:
-    Jira DC silently clamps `maxResults` to `jira.search.views.default.max`, so asking for a
-    huge page and reading back what the server says it gave is the measurement. Requesting a
-    deliberately absurd size makes the clamp visible even on a nearly empty project — a count
-    of returned issues could not, because it is bounded by how many exist.
+    An oversized request exposes DC’s silent clamp even when the project contains few issues.
     """
     status, body = dc_request(
         f"/rest/api/2/search?jql=project%3D{project}&maxResults=100000&fields=key"
@@ -2444,21 +1925,11 @@ def test_the_inbound_snapshot_survives_multi_page_pagination(
     track_issue: Any,
     dc_request: Any,
 ) -> None:
-    """Seed past the reconciler's page size and assert EVERY seeded issue is recovered.
+    """Seed beyond two effective pages and require every issue in the inbound plan.
 
-    THIS GUARDS A DEFECT THAT SHIPPED TWICE. `get_parent_map` (fixed in 1105), then
-    `get_issuelinks_map`/`get_comment_map` (9263), then `fetcher._iter_pages` (deac) all
-    advanced by the REQUESTED page size and stopped on a SHORT page — so a server-truncated
-    FIRST page read as "that is all there is". Measured at the time: 20 of 250 recovered, 92%
-    of the inbound snapshot silently lost, raising nothing. A unit test with a fake client
-    caught it only after it was known to look for; this cell makes the real instance say so.
-
-    The reconciler pages `_iter_pages` at 100 (`fetcher.py:256,458`), so seeding 2*100+1 forces
-    THREE pages. The count is derived from the observed server page size and REPORTED in the
-    run output (`-rA` keeps a passing test's stdout) rather than left implicit.
-
-    Runs UNFILTERED but DRY-RUN: unfiltered is required because the point is what the FETCH
-    recovers, and dry-run is what makes unfiltered safe over an unbound store copy.
+    Derive the target from the server-echoed and reconciler page sizes to force three pages. Run
+    unfiltered to exercise fetching but dry-run for safety over the unbound store copy. This guards
+    against advancing by requested size or treating a server-clamped short page as EOF.
     """
     server_page = _observed_page_size(dc_request, jira_dc_project)
     reconciler_page = 100  # fetcher._iter_pages' default, and what every caller passes
@@ -2480,17 +1951,9 @@ def test_the_inbound_snapshot_survives_multi_page_pagination(
         track_issue(key)
         seeded.append(key)
 
-    # Wait for the INDEX to hold them all — a count check, because waiting on the last key
-    # alone would not prove the earlier ones are visible to a paged search.
-    #
-    # MEASURED BY RAW REST, NOT BY `_paged_search`. This used to read
-    # `len(dc_transport._paged_search(...))` — and `_paged_search` IS the pagination fix this
-    # cell exists to guard (ticket 9263). So a re-truncation failed the cell HERE, at its
-    # precondition, under a message reading "NOT a pagination defect": the one place a reader
-    # would be told to stop looking is the place the defect was. `raw_indexed_issue_count` pages
-    # with explicit `startAt`/`maxResults` and advances on what the server RETURNED, so a
-    # truncating `_paged_search` now reaches the real assertion below and is named there. The
-    # disclaimer in this message is only honest because the measurement is independent.
+    # Wait until raw REST counts every indexed issue; seeing only the last key would not prove
+    # earlier visibility. This independent pager keeps `_paged_search` (ticket 9263) from
+    # validating its own precondition.
     deadline = time.monotonic() + 300.0
     indexed = 0
     while time.monotonic() < deadline:
@@ -2535,24 +1998,15 @@ def test_the_inbound_snapshot_survives_multi_page_pagination(
 def test_no_config_in_the_working_repo_points_anywhere_but_the_harness(
     dc_store_copy_repo: Path,
 ) -> None:
-    """Collect EVERY `base_url` assignment in the working repo and assert the set is the harness.
+    """Require every repository ``base_url`` assignment to name only the harness.
 
-    A FILE-CONTENT check, not an environment check, and the distinction is the point: the
-    environment assertions in `test_the_working_repo_is_isolated_from_this_project` prove no
-    credential is present, but they cannot prove that some config file in this copy names the
-    project's real Jira. A single stray `base_url` is all it would take for a writing pass to
-    aim at production, and asserting the SET (rather than "the harness URL appears") is what
-    catches a second value sitting alongside the right one.
+    This complements credential-environment checks: a stray configured production URL can redirect
+    a writing pass. Compare the complete set, not merely the presence of the expected URL.
     """
     import shutil
 
-    # POSITIVE CONTROL, on a DECOY tree (bug 59b2, Finding A). The only file in the real copy
-    # carrying a base_url is the rebar.toml the fixture itself wrote from BASE, so the assertion
-    # below compares the fixture against itself and could not detect the stray production URL it
-    # exists to catch. Running the SAME collector over a tree that deliberately contains a foreign
-    # value is what proves the collector can see one — without it, an empty or broken candidate
-    # list looks identical to a clean repo. The collector lives in `_dc_support` so a repo-only
-    # test can mutation-check it too (tests/unit/test_live_dc_isolation_controls_59b2.py).
+    # Positive control: `collect_base_urls` must find both URLs in a decoy tree; otherwise an
+    # empty or broken collector could make the real-copy equality check pass (bug 59b2).
     decoy_root = dc_store_copy_repo / ".j11-decoy"
     (decoy_root / ".rebar").mkdir(parents=True, exist_ok=True)
     (decoy_root / "rebar.toml").write_text(f'[reconciler]\nbase_url = "{BASE}"\n')
@@ -2584,21 +2038,11 @@ def test_no_config_in_the_working_repo_points_anywhere_but_the_harness(
 def test_a_repeat_pass_over_a_converged_pair_plans_nothing(
     dc_store_copy_repo: Path, dc_transport: Any, jira_dc_project: str, bound_dc_issue: Any
 ) -> None:
-    """After a mutation converges, a second pass must plan nothing for that pair.
+    """Require an indexed, converged pair to produce an empty repeat plan.
 
-    A SEPARATE CELL, and the separation is the lesson rather than a style choice. This assertion
-    was originally bundled into every round-trip cell above, and J11's first harness run
-    (ticket 5200-e04e-246e-4aae) then reported 19
-    failures of which THIRTEEN were mutations that had round-tripped perfectly and tripped only on
-    this check — the real signal buried under false reds. An assertion that can fail for a reason
-    unrelated to the cell's subject belongs in its own cell. (This is the same "split it into two
-    cells" move that localised an earlier four-attempt bug on the first run.)
-
-    WAITS FOR THE INDEX BEFORE RE-PLANNING, which the bundled version did not. The differ reads
-    the remote snapshot through a JQL search and Jira's index is eventually consistent, so a
-    dry-run issued immediately after a write sees the OLD document and re-plans the update it just
-    applied. Without this wait the check cannot distinguish index lag from genuine churn, and a
-    failure would be unattributable — the exact trap `_wait_until_search_reflects` exists for.
+    Keep idempotence separate from round-trip fields so churn cannot obscure a successful mutation.
+    Wait until JQL sees the applied title before replanning; otherwise stale search looks like
+    genuine work.
     """
     import rebar
 
@@ -2607,12 +2051,8 @@ def test_a_repeat_pass_over_a_converged_pair_plans_nothing(
 
     rebar.edit_ticket(local_id, repo_root=dc_store_copy_repo, title=new_title)
 
-    # POSITIVE CONTROL — the filter CAN surface an entry for THIS pair (bug 59b2, Finding B).
-    # The verdict below is drawn from an EMPTY filtered plan, and story 5200 already burned a
-    # cycle on `--filter-local-ids` being a post-filter that matched nothing ("1640 mutations
-    # computed, 0 match filter"). Under that failure mode "a repeat plans nothing" passes while
-    # proving nothing. Taken here, with the local edit pending and DC not yet updated, an entry
-    # for this pair MUST exist — so an empty result now indicts the filter, not convergence.
+    # Positive control: the pending title edit must surface for this pair; otherwise the later
+    # empty filtered plan cannot prove idempotence (bug 59b2, Finding B).
     pending = _plan_entries_for(dc_store_copy_repo, local_id, key)
     assert pending, (
         f"the filtered dry-run surfaced NO entry for {local_id}/{key} even though a local title "

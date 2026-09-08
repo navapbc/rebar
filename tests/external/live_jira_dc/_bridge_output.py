@@ -1,39 +1,11 @@
-"""Read the canonical bridge ``preview`` / ``sync`` route's stream contract.
+"""Parse the canonical bridge route's captured stream contract.
 
-WHY THIS MODULE EXISTS. The reconciler's ``OK: …`` summary lines on stdout are printed
-**only** for the compatibility ``--mode`` routes: ``__main__.py`` guards that block with
-``route not in {"preview", "sync"}``. The canonical routes suppress it deliberately and
-report through a single stderr disposition line instead — ``docs/exit-codes.md``
-§"Bridge routes: canonical 0/1/2 and retained compatibility sentinels" pins
-``BRIDGE_STATE: converged`` as the contract, and ADR 0092 records the adapters.
-
-When commit ``c87afedba8`` re-pointed the cells in ``test_reconcile_pass.py`` at
-``sync``, their ``"OK:" in stdout`` assertions became assertions on an output the invoked
-route does not emit, and the next live DC run went red against a reconciler that was
-behaving correctly.
-
-THE TRAP TO AVOID WHEN FIXING THAT. ``BRIDGE_STATE: converged`` is **not** by itself a
-zero-write signal. ``__main__.py`` classifies a pass that applied N mutations as
-``CONVERGED`` as well — the disposition means "the pass reached a settled end state", not
-"the pass wrote nothing". Swapping the idempotence cell's assertion one-for-one onto that
-line would keep it green while a pass thrashed the remote on every run, which is the exact
-failure it was written to catch.
-
-The zero-write evidence a canonical ``sync`` run does emit is the reconciler's ``RECON:``
-telemetry. Those are bare ``print(..., file=sys.stderr)`` calls, not ``logging`` calls, so
-they appear at any log level with no ``REBAR_LOG_LEVEL`` cooperation:
-
-* ``RECON: outbound_differ total=N create=… update=… delete=…`` — ``run_differs.py``,
-  emitted unconditionally once the outbound differ completes.
-* ``RECON: inbound_differ total=N with_fields=… …`` — ``run_differs.py``, likewise, and
-  already net of bidirectional suppression (suppressed pairs are returned separately and
-  are not counted in the total).
-* ``RECON: batch_outcome action=… key=… error=…`` — ``applier.py``, emitted once **per
-  applied mutation**, so zero occurrences is direct evidence that nothing was written.
-
-Every function here takes captured text and returns a verdict. No subprocess, no network,
-no Jira, no ``rebar`` import — so ``tests/unit/test_bridge_output_parsing.py`` can prove
-this parsing without the live DC harness, which only CI's external lane can run.
+``preview`` and ``sync`` suppress the compatibility route's stdout ``OK:`` line and report
+``BRIDGE_STATE: converged`` on stderr. That disposition means settled, not write-free: a pass
+that applied mutations also converges. A no-op therefore also requires reported inbound and
+outbound ``RECON:`` totals of zero and no per-mutation ``batch_outcome`` lines. The telemetry
+uses direct stderr prints, independent of log level. Keeping this as pure text parsing lets
+the unit suite verify the live-harness oracle without Jira or subprocesses.
 """
 
 from __future__ import annotations
