@@ -170,14 +170,14 @@ def _criteria_eval(args: argparse.Namespace) -> int:
     from rebar.llm.errors import LLMError
     from rebar.llm.evals import eval as _eval
 
-    if args.criterion_id and args.changed_since:
+    if args.criterion_id and args.changed_since is not None:
         sys.stderr.write("Error: criterion id and --changed-since are mutually exclusive\n")
         return 2
     if args.runs < 1:
         sys.stderr.write("Error: --runs must be >= 1\n")
         return 2
     if not (args.criterion_id or "").strip():
-        if args.changed_since:
+        if args.changed_since is not None:
             return _criteria_eval_changed_since(args)
         return _missing_criterion_error()
 
@@ -275,9 +275,12 @@ def _criteria_eval_changed_since(args: argparse.Namespace) -> int:
     if _live_criteria_eval_available():
         # Human calibration reports go to STDERR so stdout stays the pure, machine-parseable
         # sorted id list a consumer selects on.
-        _run_selected_criteria_live(
+        completed = _run_selected_criteria_live(
             selection.selected, repo_root=repo_root, args=args, stream=sys.stderr
         )
+        if args.require_live and completed == 0:
+            sys.stderr.write("Error: no selected live criteria completed successfully\n")
+            return 1
         return 0
     # Selected criteria exist but no live backend is configured. Never a silent success:
     # under --require-live (the CI job) this is a misconfiguration → fail visibly; otherwise
@@ -294,9 +297,9 @@ def _criteria_eval_changed_since(args: argparse.Namespace) -> int:
 
 
 def _is_null_ref(ref: str | None) -> bool:
-    """True for git's all-zero SHA (the push `before` on a new branch's first push)."""
+    """True for an empty/no-baseline ref or git's all-zero SHA."""
     stripped = (ref or "").strip()
-    return len(stripped) >= 7 and set(stripped) == {"0"}
+    return not stripped or (len(stripped) >= 7 and set(stripped) == {"0"})
 
 
 def _changed_since_repo_root(config_module: object) -> str | None:
@@ -325,13 +328,18 @@ def _changed_paths_since(ref: str, *, cwd: str | None) -> list[str]:
 
 
 def _live_criteria_eval_available() -> bool:
-    from rebar.llm.config import available_backends
+    from rebar.llm.config import LLMConfig, available_backends, infer_provider, resolve_model
 
     backends = available_backends()
-    return bool(
-        backends.get("pydantic_ai")
-        and (backends.get("anthropic_api_key") or backends.get("openai_api_key"))
-    )
+    if not backends.get("pydantic_ai"):
+        return False
+    if backends.get("anthropic_api_key") or backends.get("openai_api_key"):
+        return True
+    try:
+        cfg = LLMConfig.from_env()
+        return infer_provider(resolve_model(cfg), cfg.model_provider) == "bedrock"
+    except Exception:  # noqa: BLE001 - availability probing must degrade to "not live"
+        return False
 
 
 def _run_selected_criteria_live(
@@ -340,11 +348,12 @@ def _run_selected_criteria_live(
     repo_root: str | None,
     args: argparse.Namespace,
     stream: TextIO | None = None,
-) -> None:
+) -> int:
     from rebar.llm.errors import LLMError
     from rebar.llm.evals import eval as _eval
 
     out_stream = stream if stream is not None else sys.stdout
+    completed = 0
     for criterion_id in criterion_ids:
         try:
             report = _eval.calibrate_criterion(criterion_id, repo_root=repo_root, runs=args.runs)
@@ -352,6 +361,8 @@ def _run_selected_criteria_live(
             sys.stderr.write(f"Error: {criterion_id}: {exc}\n")
             continue
         _write_criteria_report(report, output=args.output, stream=out_stream)
+        completed += 1
+    return completed
 
 
 def _write_criteria_report(report: dict, *, output: str, stream: TextIO | None = None) -> None:

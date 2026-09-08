@@ -346,3 +346,123 @@ def test_live_calibration_reports_do_not_pollute_the_selection_stdout(monkeypatc
     assert rc == 0
     assert [ln.strip() for ln in captured.out.splitlines() if ln.strip()] == ["T8"]
     assert "Calibration for criterion" in captured.err
+
+
+def test_empty_changed_since_ref_is_a_clean_no_baseline_noop(tmp_path: Path) -> None:
+    """A present-but-empty --changed-since flag is a null baseline, not a missing criterion."""
+    repo = _seed_repo(tmp_path)
+
+    proc = _run_changed_since(repo, "")
+
+    assert proc.returncode == 0, proc.stderr
+    assert _selection(proc) == []
+    assert "no prior" in proc.stderr.lower()
+
+
+def test_positional_id_and_empty_changed_since_are_mutually_exclusive(tmp_path: Path) -> None:
+    """Even an empty --changed-since value means the flag was present."""
+    repo = _seed_repo(tmp_path)
+    proc = subprocess.run(
+        ["rebar", "criteria", "eval", "T8", "--changed-since", ""],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 2, proc.stderr
+    assert "mutually exclusive" in proc.stderr.lower()
+
+
+def test_bedrock_configured_model_counts_as_live_backend(monkeypatch) -> None:
+    """Bedrock uses the ambient AWS chain, so availability is provider identity."""
+    import rebar.llm.config as llm_config
+
+    monkeypatch.setattr(
+        llm_config,
+        "available_backends",
+        lambda: {"pydantic_ai": True, "anthropic_api_key": False, "openai_api_key": False},
+    )
+    monkeypatch.setattr(
+        llm_config.LLMConfig,
+        "from_env",
+        classmethod(lambda cls: llm_config.LLMConfig(model="bedrock:us.anthropic.claude")),
+    )
+
+    assert eval_cmds._live_criteria_eval_available() is True
+
+
+def test_require_live_fails_when_every_selected_live_eval_errors(monkeypatch, capsys) -> None:
+    """--require-live must be red if live was attempted but produced zero successful evals."""
+    from rebar.llm.errors import LLMError
+
+    monkeypatch.setattr(eval_cmds, "_live_criteria_eval_available", lambda: True)
+    monkeypatch.setattr(eval_cmds, "_changed_since_repo_root", lambda cfg: None)
+    monkeypatch.setattr(
+        eval_cmds,
+        "_changed_paths_since",
+        lambda ref, *, cwd: ["src/rebar/llm/reviewers/plan_review_T8.md"],
+    )
+    monkeypatch.setattr(
+        changed_criteria_mod,
+        "select_changed_criteria",
+        lambda paths, root, **k: changed_criteria_mod.ChangedCriteriaSelection(("T8",), ()),
+    )
+    import rebar.llm.evals.eval as eval_engine
+
+    monkeypatch.setattr(
+        eval_engine,
+        "calibrate_criterion",
+        lambda cid, *, repo_root, runs: (_ for _ in ()).throw(LLMError("provider down")),
+    )
+    args = SimpleNamespace(
+        criterion_id=None, changed_since="deadbeef", require_live=True, runs=1, output="text"
+    )
+
+    rc = eval_cmds._criteria_eval_changed_since(args)
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "T8" in captured.out
+    assert "provider down" in captured.err
+    assert "no selected live criteria completed successfully" in captured.err
+
+
+def test_live_eval_continues_after_one_criterion_error(monkeypatch, capsys) -> None:
+    """One criterion's LLMError is fatal to that criterion, not to the whole live batch."""
+    from rebar.llm.errors import LLMError
+
+    monkeypatch.setattr(eval_cmds, "_live_criteria_eval_available", lambda: True)
+    monkeypatch.setattr(eval_cmds, "_changed_since_repo_root", lambda cfg: None)
+    monkeypatch.setattr(
+        eval_cmds,
+        "_changed_paths_since",
+        lambda ref, *, cwd: [
+            "src/rebar/llm/reviewers/plan_review_G6.md",
+            "src/rebar/llm/reviewers/plan_review_T8.md",
+        ],
+    )
+    monkeypatch.setattr(
+        changed_criteria_mod,
+        "select_changed_criteria",
+        lambda paths, root, **k: changed_criteria_mod.ChangedCriteriaSelection(("G6", "T8"), ()),
+    )
+    import rebar.llm.evals.eval as eval_engine
+
+    def calibrate(cid: str, *, repo_root, runs):
+        if cid == "T8":
+            raise LLMError("criterion failed")
+        return _fake_report(cid)
+
+    monkeypatch.setattr(eval_engine, "calibrate_criterion", calibrate)
+    args = SimpleNamespace(
+        criterion_id=None, changed_since="deadbeef", require_live=True, runs=1, output="text"
+    )
+
+    rc = eval_cmds._criteria_eval_changed_since(args)
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert [ln.strip() for ln in captured.out.splitlines() if ln.strip()] == ["G6", "T8"]
+    assert "Error: T8: criterion failed" in captured.err
+    assert "Calibration for criterion 'G6'" in captured.err
