@@ -357,7 +357,7 @@ def process_revert(state: dict, event: dict, data: dict, event_uuid: str) -> Non
 # creation channel and its (later-story) inference marker are stamped once at CREATE
 # and are immutable, so `process_edit` skips them even if a (buggy/malicious) EDIT
 # names them. Other specialized processors never assign these fields.
-_IMMUTABLE_EDIT_FIELDS = frozenset({"creation_channel", "creation_channel_inferred"})
+_IMMUTABLE_EDIT_FIELDS = frozenset({"creation_channel", "creation_channel_inferred", "detected_by"})
 
 
 def process_edit(state: dict, data: dict) -> None:

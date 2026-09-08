@@ -16,6 +16,13 @@ from rebar._store import freshness
 logger = logging.getLogger(__name__)
 _NON_COMPLETION_BUG_CLASSES = close_disposition.DISPOSITION_CLASSES
 _NO_DISPOSITION = object()
+_BOT_ALERT_DETECTORS = frozenset(
+    {
+        "dependency-advisory-canary",
+        "heartbeat-canary",
+        "binding-drift-canary",
+    }
+)
 _STALE_REF_MESSAGE = (
     "this checkout could not refresh or see its remote refs before deciding whether a "
     "referencing commit exists. Fetch the code clone or retry from a current worktree; "
@@ -496,21 +503,11 @@ def _administrative_disposition(
 ):
     """Route a qualifying disposition close to its deterministic sign signal (ticket fc20).
 
-    Returns the verdict dict to sign, ``None`` (a disposition path that yields no signal — the
-    close proceeds unsigned, the conservative direction), or the :data:`_NO_DISPOSITION`
-    sentinel meaning "not a disposition — keep normal completion verification". A separate
-    guard function on purpose: ``_completion_precheck`` sits at its recorded shrink-only
-    complexity ceiling, so the decision points live here and its call site stays a single
-    branch.
-
-    Two doors, mirroring :func:`close_disposition.verdict`'s mints: a REASON-REQUIRED class
-    (obsolete/wontfix always; not_a_bug/escalated unless a live replacement link stands in —
-    bug d54b, checked replacement-first inside ``verdict``) is attested from its ``--reason``
-    or replacement (validated by the shared class guard before this runs); every other
-    disposition class still requires a net-active replacement link to a live counterpart
-    (:func:`_has_live_replacement_link`). ATTESTING rather than withholding the signature is
-    the 738a fix: an unsigned exempt close made the certification path count it as
-    uncertified and withhold its parent's signature, with no honest exit."""
+    Returns the verdict dict to sign, ``None`` for an unsigned disposition path, or
+    :data:`_NO_DISPOSITION` for "keep normal completion verification". The two evidence
+    doors mirror :func:`close_disposition.verdict`: reason-required classes attest their
+    reason, while replacement-bearing classes attest the live counterpart.
+    """
     from rebar._commands import close_disposition
 
     if close_class in close_disposition.REASON_REQUIRED_CLASSES:
@@ -518,6 +515,44 @@ def _administrative_disposition(
     if _has_live_replacement_link(ticket_id, ticket_type, close_class, tracker):
         return close_disposition.verdict(ticket_id, close_class, tracker)
     return _NO_DISPOSITION
+
+
+def _bot_alert_disposition(ticket_id: str, close_class: str, close_reason: str, tracker: str):
+    if close_class != "env_integration":
+        return _NO_DISPOSITION
+    from rebar.reducer import reduce_ticket
+
+    try:
+        state = reduce_ticket(os.path.join(tracker, ticket_id)) or {}
+    except Exception as exc:
+        raise CommandError(
+            "Error: --class env_integration requires bot-alert detected_by provenance, "
+            "but the ticket could not be read.",
+            returncode=1,
+        ) from exc
+    detected_by = str(state.get("detected_by") or "")
+    if detected_by not in _BOT_ALERT_DETECTORS:
+        allowed = ", ".join(sorted(_BOT_ALERT_DETECTORS))
+        raise CommandError(
+            "Error: --class env_integration requires bot-alert detected_by provenance "
+            f"({allowed}); ordinary tickets must pass completion verification.",
+            returncode=1,
+        )
+    if not close_reason:
+        raise CommandError(
+            "Error: --class env_integration bot-alert closes require --reason=<text> "
+            "describing the observed recovery.",
+            returncode=1,
+        )
+    return {
+        "verdict": "PASS",
+        "disposition": close_class,
+        "detected_by": detected_by,
+        "close_reason": close_reason,
+        "model": "none (deterministic disposition)",
+        "runner": "close_precheck.bot_alert_disposition",
+        "findings": [],
+    }
 
 
 def _gate_skip_expectation(ticket_id: str, code_root: str, force_close: str) -> str | None:
@@ -627,13 +662,8 @@ def _completion_precheck(
     # reads below continue to use the independently resolved tracker directory.
     code_root = str(config.repo_root(repo_root))
 
-    # Cheap precondition BEFORE the billable LLM call: an invalid close-class combination
-    # (missing bug class, non-administrative class on a non-bug, missing reason for a
-    # reason-required class — tickets ed13 + fc20 + bug d54b). Shared rule
-    # (:func:`txn.close_class_refusal`), so it cannot drift from transition_core's
-    # authoritative write-side guard, which would reject the close anyway; failing here spares
-    # the LLM call. ticket_id + tracker let the rule honor a not_a_bug/escalated close whose
-    # live replacement link stands in for its --reason.
+    # Validate close-class shape before any billable verifier call. This is the same guard
+    # transition_core will enforce under the write lock.
     tracker = str(config.tracker_dir(repo_root))
     if force_close:
         skip = _gate_skip_expectation(ticket_id, code_root, force_close)
@@ -649,23 +679,14 @@ def _completion_precheck(
             returncode=1,
         )
 
-    # An administrative/disposition close is a statement about where the work lives (or why it
-    # will not happen), not a claim that this ticket's acceptance criteria were implemented.
-    # Skip the completion-only checks (including file-impact and the billable verifier) when
-    # the disposition qualifies: a reason-required class carries its --reason (or, for
-    # not_a_bug/escalated, a replacement link instead), and a replacement-bearing class
-    # carries a net-active link to a live counterpart. The close-class guard above and all
-    # structural/write-time close guards still apply.
+    # Disposition closes attest why completion is not being claimed; skip the verifier.
     disposition = _administrative_disposition(ticket_id, ticket_type, close_class, reason, tracker)
     if disposition is not _NO_DISPOSITION:
         return disposition, "disposition"
+    disposition = _bot_alert_disposition(ticket_id, close_class, reason, tracker)
+    if disposition is not _NO_DISPOSITION:
+        return disposition, "disposition"
 
-    # Shared resolution + error-on-unreadable-config posture (see _commands/gates.py:
-    # an unreadable config raises ConfigError out of this close, per operator ruling
-    # 39f8-ae7c). The confirmed fail-CLOSED behavior still applies when the gate is
-    # readable-ON but the LLM is unavailable (below). Administrative dispositions are checked
-    # first because their deterministic attestation is not a completion-verification verdict
-    # and should be minted even when the completion gate is disabled.
     skip = _gate_skip_expectation(ticket_id, code_root, force_close)
     if skip:
         return None, skip
