@@ -1,14 +1,7 @@
-"""The plan-review Pass-1 FINDER runs on the frontier class, and Pass-2 does not (ticket 77ed).
+"""Pass-1 FINDER uses ``frontier``. Pass-2 verify and Pass-4 coach use ``standard``.
 
-Pass-1 generates the findings that become blocking, so it must run on `frontier`; Pass-2 verify and
-Pass-4 coach run on `standard` via `_verifier_cfg`, and that downgrade is deliberate. The failure
-mode these guard against is the two collapsing onto one model.
-
-WHAT IS ASSERTED is the model that REACHES THE RUNNER, captured at
-`ProductionBatchRunner` -> `run_pass1`. Asserting the YAML text would prove nothing: the declaration
-and the model actually used can disagree, and have. `test_model_class_ladder.py` covers the
-resolution machinery but feeds it a SYNTHETIC ladder, so it cannot see a wrong rung in the shipped
-document — these read the ladder from the real gate file. See ticket 77ed for the history.
+Tests observe the model reaching ``ProductionBatchRunner`` rather than merely the YAML
+declaration, keeping the shipped nested ladder and runtime wiring aligned (ticket 77ed).
 """
 
 from __future__ import annotations
@@ -28,12 +21,7 @@ _GATE = pathlib.Path("src/rebar/llm/workflow/gates/plan-review.yaml")
 
 
 def _yaml_pass1_ladder() -> list[str]:
-    """The Pass-1 `model_ladder` as the SHIPPED gate document declares it.
-
-    Walked recursively rather than scanning top-level steps: the finders batch lives INSIDE a
-    branch (`steps[1].branch.then[1].batch`), so a flat scan silently finds nothing — which is
-    exactly how the first draft of this test passed vacuously.
-    """
+    """Return Pass-1's ladder from the shipped, recursively nested gate document."""
     found: list[list[str]] = []
 
     def walk(node: Any) -> None:
@@ -150,21 +138,10 @@ def test_the_finder_does_not_run_on_the_cheapest_class(monkeypatch):
 
 
 def test_the_prerequisite_finder_packs_against_the_frontier_model(monkeypatch):
-    """The prerequisite arm of Pass-1 BIN-PACKS, and `pack_prerequisite_bins` sizes the bins from
-    whatever model it is handed. If that model is not the frontier one the finder over-chunks —
-    paying for extra calls and splitting prerequisites that would have fit in one window — while
-    every other assertion in this file still passes, because the packing model is a second,
-    independent path off the resolved config.
+    """Prerequisite bin packing receives the resolved frontier model.
 
-    The observable is the model that REACHES `pack_prerequisite_bins`, captured with a spy. It is
-    NOT the resulting window number: `MODEL_LADDER` declares 1_000_000 for both the sonnet and
-    the opus rung, so the window alone cannot tell the frontier class from the one below it
-    (ticket 1157). `largest_window_tokens` is deliberately left unpatched for the same reason —
-    a synthetic window would make the wiring unobservable, which is what left this gap open.
-
-    The class table retargets `frontier` ONLY, so "resolved the frontier class" and "fell through
-    to the default `cfg.model`" are different strings. With no table configured they are the same
-    string and the assertion would hold no matter which path ran.
+    The spy captures the model because frontier and standard share a window size. Retargeting
+    only frontier keeps an accidental fallback to ``cfg.model`` observable.
     """
     from rebar.llm.plan_review import sizing
 

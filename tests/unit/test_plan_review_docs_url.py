@@ -1,10 +1,7 @@
-"""Regression: plan-review coaching deep-links must resolve for CONSUMERS by default.
+"""Default plan-review guide links resolve in consumer installations.
 
-Bug (client report §5): with REBAR_DOCS_URL unset, plan_review_docs_url() defaulted to a
-``file://<repo-root>/docs/plan-review-criteria-guide.md`` URI. In a consumer repo (rebar
-installed, no rebar docs/ tree) every coaching guide_url therefore pointed at a nonexistent
-local file, so the deep-link affordance was dead out of the box. The default must be a
-canonical hosted URL (still overridable by REBAR_DOCS_URL).
+``REBAR_DOCS_URL`` may override the hosted URL. No default ``file://`` path may depend on a
+source checkout.
 """
 
 from __future__ import annotations

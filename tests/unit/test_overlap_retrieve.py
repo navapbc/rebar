@@ -60,13 +60,8 @@ def test_perf() -> None:
         )
         for i in range(300)
     }
-    # Perf guardrail (bug 5e94): assert the MINIMUM wall-clock across several runs, not
-    # a single sample. ``retrieve`` over 300 digests is ~1-2 ms, so 50 ms is a wide
-    # margin on the true compute cost — but a single sample on a contended CI runner can
-    # spike >100x (observed 289 ms on a loaded shared runner) and flake the gate. The min
-    # reflects the uncontended cost (at least one of N runs hits a quiet slice), so
-    # transient contention no longer flakes it; a real algorithmic regression slows every
-    # run — including the min — and still trips the budget.
+    # Time the minimum of several runs so CI contention cannot flake this guardrail.
+    # An algorithmic regression slows every sample, including the minimum.
     config = LLMConfig()
 
     def _elapsed_ms() -> float:

@@ -1,29 +1,8 @@
-"""``read_file`` must not answer a malformed range by silently reading to EOF (bug 4c2b).
+"""Malformed ``read_file`` ranges must not silently widen to EOF (bug 4c2b).
 
-``read_file`` picks its upper bound with
-``hi = line_end if line_end and line_end >= lo else len(lines)``. That ``else`` is the
-tool's documented "read to EOF" fallback for the ``line_end == 0`` sentinel — but the
-guard selecting it is also false for an **inverted** range (``0 < line_end < line_start``,
-or a negative ``line_end``). Both land on ``len(lines)``, so an agent that asks for a
-bounded window whose end precedes its start is handed the whole rest of the file, capped
-at ``_READ_MAX_LINES``, with nothing in the return value saying so.
-
-Observed live: the looping completion-verifier in bug bf31 issued
-``read_file(<path>, line_start=115, line_end=30)`` **31 times**, each returning the same
-~11,000-character blob for a request it had framed as a 30-line window.
-
-This is the class bug ``bf31-fd55-d28d-4b7a`` fixed in the sibling tool -- ``search_files``
-must not fake "(no matches)" -- and the contract is stated in ``read_file``'s own neighbour at
-``pai_tools.py``: an error is never reported as an ordinary answer. These are the
-read-only tools every rebar LLM gate hands its agent, and those gates SIGN their verdicts,
-so a tool that answers a request it did not perform is a false-verdict vector.
-
-The contract these tests pin, in three parts:
-
-* an inverted range is REPORTED, not substituted;
-* ``line_end == 0`` still means "read to EOF, capped" — the documented sentinel is
-  untouched (pinned as an explicit regression, since it shares the branch being changed);
-* an ordinary ``line_start <= line_end`` window is unchanged.
+An inverted or negative upper bound is reported, never treated as the ``line_end == 0``
+read-to-EOF sentinel. That sentinel remains capped, and ordinary bounded windows are
+unchanged. Gate agents depend on errors remaining distinct from successful file content.
 """
 
 from __future__ import annotations

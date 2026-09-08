@@ -1,15 +1,9 @@
-"""RP-06 S4 — plan-review Pass-1 discovery over the shared typed kernel.
+"""Plan-review Pass-1 discovery contracts over the shared typed kernel.
 
-These tests pin the observable behaviour of cutting plan-review's Pass-1 checkpointing
-and outcome-classification over to :mod:`rebar.llm.review_kernel` while preserving the
-existing finder mechanics (facet packing, size ladder, shed-to-budget, cache warming,
-bounded concurrency). They assert ONLY observable behaviour: the checkpoint identity's
-sensitivity to every material/code/policy/prompt/contract/model/mode/topology/context/
-dependency/namespace input, success-only reuse, the false-success fix (a failed local
-unit is never serialized as a clean checkpoint), the reducer-ignored discovery journal,
-and the narrow ``review-plan --status`` contract.
-
-OFFLINE: a fake ``rebar.llm.Runner`` drives the finder; no model, no network.
+Offline fakes verify checkpoint identity covers material, code, policy, prompt, contract,
+model, mode, topology, context, dependency, and namespace inputs. Reuse is success-only,
+failed units never serialize clean checkpoints, journals are reducer-ignored, and
+``review-plan --status`` remains narrow.
 """
 
 from __future__ import annotations

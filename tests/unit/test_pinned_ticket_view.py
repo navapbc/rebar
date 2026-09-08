@@ -634,13 +634,9 @@ def test_corrupt_event_json_fails_closed(repo: Path) -> None:
 
 
 def _freeze_gc(tracker: str) -> None:
-    """Stop auto-gc packing objects mid-test, so a storage shape can be CONSTRUCTED.
+    """Disable auto-GC so the test can construct a deliberate object-storage shape.
 
-    rebar deliberately unsets `gc.auto` on the tracker and sets `gc.autoDetach=false`
-    (`_commands/_init_ensures.py`), so a triggered `git gc --auto` runs FOREGROUND
-    during a rebar write and can pack a blob that was just committed. Asserting a blob
-    is loose without this is asserting that gc happened not to have run — which is what
-    made this test fail on its own scaffolding (`7bcc-55a9`).
+    Foreground GC may otherwise pack a newly committed blob before the assertion.
     """
     _git(tracker, "config", "gc.auto", "0")
     _git(tracker, "config", "maintenance.auto", "false")
@@ -659,13 +655,10 @@ def _drop_loose(tracker: str, object_root: Path, blob_oid: str) -> None:
 
 
 def _drop_packed(tracker: str, object_root: Path, blob_oid: str) -> None:
-    """Make a PACKED object unreadable, without disturbing anything else.
+    """Make only the selected packed blob unreadable.
 
-    Packing is induced deterministically rather than via `git gc`, whose thresholds
-    make it unreliable: a pack is written containing ONLY this blob, the loose copy is
-    removed so the pack is the sole source, and then that pack is deleted. A whole
-    repack would take the commit and trees with it, and the view would raise for a
-    missing TREE rather than for this blob — passing for the wrong reason.
+    A single-object pack keeps commits and trees available when the loose copy and pack
+    are removed.
     """
     pack_dir = object_root / "pack"
     pack_dir.mkdir(parents=True, exist_ok=True)
@@ -685,12 +678,9 @@ def _drop_packed(tracker: str, object_root: Path, blob_oid: str) -> None:
 def test_tree_listed_ticket_blob_missing_from_object_database_fails_closed(
     repo: Path, shape: str, drop: Any
 ) -> None:
-    """The view fails closed whichever way git chose to store the blob.
+    """Fail closed whether Git stored the missing blob loose or packed.
 
-    The old version asserted the blob was LOOSE as a setup precondition and deleted the
-    loose file. That is an implementation detail of git's storage, not a guarantee —
-    rebar deliberately no longer pins `gc.auto=0`, so an auto gc can pack the object and
-    the test then failed on its own scaffolding, before exercising anything.
+    The setup removes the object without assuming Git's storage representation.
     """
     # Materialize the tracker, then freeze gc BEFORE writing the ticket under test, so
     # its blob's storage shape is the one this case builds rather than whatever gc left.
@@ -848,13 +838,10 @@ def test_completion_precheck_preserves_materialized_mode_selected_at_operation_s
 
 
 def test_snapshot_backend_lean_projection_matches_the_event_log_backend(repo: Path) -> None:
-    """The two read backends must return the SAME lean row shape (story 98b8-5f08-1569-45cc).
+    """Event-log and pinned-view backends return identical lean projections.
 
-    ``TicketView.list_by_query`` and the event-log ``list_states`` each own a lean path.
-    They were made to share one :func:`lean_projection` precisely so they cannot drift --
-    but sharing a function is only a claim until something COMPARES the two outputs. This
-    is that comparison, run against a real pinned view over a real tracker: same query,
-    both backends, identical key sets.
+    Compare the same query against repository-backed tracker data, independently of their
+    shared helper.
     """
     from rebar._engine_support import reads as ticket_reads
     from rebar._engine_support.reads import LEAN_OMITTED_FIELDS

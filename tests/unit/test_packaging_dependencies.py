@@ -1,14 +1,8 @@
-"""Packaging-contract tests for the dependency tree declared in ``pyproject.toml``.
+"""Packaging dependency contracts.
 
-These pin removals that are easy to silently reintroduce and expensive when they come
-back (ticket 9fb3): the unused ``inspect-ai`` dependency, the ``[eval]`` extra it was the
-sole content of, the two ``[tool.uv] conflicts`` entries that forked the resolution around
-its boto3 diamond, and the ``override-dependencies`` entry that existed only to widen the
-stale ``click`` cap it carried.
-
-They also check the inverse drift: every extra named in :data:`rebar._optional.EXTRAS` must
-resolve to a real key in ``[project.optional-dependencies]``, so the guard can never again
-advertise ``pip install 'nava-rebar[<extra>]'`` for an extra that does not exist.
+Keep ``inspect-ai``, its empty ``eval`` extra, related resolver conflicts, and its
+Click override removed. Every name in :data:`rebar._optional.EXTRAS` must map to a
+declared project optional-dependency key.
 """
 
 from __future__ import annotations
@@ -57,16 +51,7 @@ def _direct_requirement(pyproject: dict, name: str) -> Requirement | None:
 
 
 def test_anthropic_sdk_direct_floor_allows_the_httpx2_line(pyproject) -> None:
-    """The direct `anthropic` SDK must keep a floor while allowing the httpx2 line.
-
-    `pydantic-ai-slim[anthropic]` pulls the anthropic SDK but caps only pydantic-ai
-    (`>=1.107,<2`), leaving the SDK itself unbounded (bug 1f35). anthropic 1.0.0 switched
-    its client to a vendored `httpx2`, which 1f35 temporarily excluded with `<1`.
-
-    Once 2bd6 teaches the provider seam both contracts, the direct requirement remains useful
-    only as a floor for the `--resolution lowest-direct` sweep leg; it must no longer exclude
-    the httpx2 releases the seam now supports.
-    """
+    """Keep an SDK floor for lowest-direct while allowing the supported httpx2 line."""
     anthropic = _direct_requirement(pyproject, "anthropic")
     assert anthropic is not None, (
         "the anthropic SDK must remain a DIRECT dependency of the [agents] extra so the "
@@ -104,13 +89,7 @@ def test_eval_extra_is_gone(pyproject) -> None:
 
 
 def test_no_dependency_overrides(pyproject) -> None:
-    """`override-dependencies` forces an untested combination and must stay a last resort.
-
-    The only one rebar ever carried (`click>=8.3.3`) existed to widen inspect-ai's stale cap;
-    with inspect-ai gone the resolver reaches a non-vulnerable click on its own. A new
-    override needs the written justification the dependency-advisory runbook demands, and
-    updating this test is the deliberate step that forces it.
-    """
+    """Keep overrides exceptional. Normal resolution now selects a safe Click version."""
     assert "override-dependencies" not in pyproject.get("tool", {}).get("uv", {})
 
 

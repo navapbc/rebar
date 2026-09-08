@@ -1,18 +1,9 @@
-"""Read-set-scoped SHA-drift invalidation for NO-``file_impact`` attestations (ticket 81ca).
+"""Read-set-scoped drift invalidation for attestations without ``file_impact``.
 
-ADR 0002 scopes attestation currency to a per-path ``{path: sha256}`` dependency set. With no
-declared ``file_impact`` that set was empty and the claim gate degraded to whole-HEAD freshness.
-These tests pin the scoping that replaces the degradation, and — more importantly — every path
-back to it:
-
-* the six-step ``distinct_fetches`` → read-set normalization protocol;
-* the read-set living INSIDE the signed manifest (tamper ⇒ verification failure);
-* the no-``file_impact`` dependency set = read-set ∪ cited ∪ expanded blast radius, decided by
-  the UNCHANGED ADR-0002 per-path comparison;
-* glob handling: expansion catches content drift, the membership digest catches ADDITIONS;
-* every fail-safe — no recorded read-set, a declared ``file_impact``, an expansion failure —
-  falling back to the pre-change whole-HEAD behavior;
-* the reported ``currency-basis``, in the manifest, in ``plan_review_status``, and on the CLI.
+The signed dependency set combines normalized reads, citations, and expanded blast radius.
+Glob membership changes count. Missing reads retain the pre-existing dependency composition.
+Declared impacts retain file-impact scoping, while expansion failures fall back to whole-HEAD
+invalidation. Manifests and CLI/status output expose the currency basis.
 """
 
 from __future__ import annotations

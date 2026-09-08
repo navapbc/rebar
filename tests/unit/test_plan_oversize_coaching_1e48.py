@@ -1,16 +1,8 @@
-"""Ticket 1e48-ff69-13f7-4a83 — the P4 over-limit message must coach CONCISION.
+"""Keep P4 coaching distinct for oversized prose and oversized work (ticket 1e48).
 
-The over-limit branch used to offer exactly one remedy ("split independent work
-into coherent child tickets"). Splitting is right when the **work** is oversized;
-it is wrong when the **prose** is, which is the more common cause — and an author
-who follows it literally fragments a coherent unit of work for a formatting
-reason. These tests pin the *observable message content* of both P4 branches:
-
-* the **over-limit** branch coaches concision + relocating narration to comments
-  or a session log, distinguishes context-that-stays from narration-that-moves,
-  and points at the packaged authoring guide instead of restating it;
-* the **oversize-signal** branch keeps decomposition advice, where it fits;
-* the two are distinguishable, and the 8,000-character limit is unchanged.
+The over-limit branch recommends concise context, relocates narration to comments or a
+session log, and links the authoring guide. The oversize-signal branch retains decomposition
+advice, and the 8,000-character limit remains fixed.
 """
 
 from __future__ import annotations

@@ -1,17 +1,8 @@
-"""Real-CLI end-to-end oracle for ``review-plan --retry`` (story RP-06 S5 — AC8 + AC5).
+"""CLI subprocess contract for ``review-plan --retry``.
 
-Unlike ``test_plan_review_retry.py`` (which drives the library entry point in-process), these
-tests exercise the flag through the **actual CLI** in a child process against a temporary
-ticket store, using the production journal codec and a stateful fake pinned at the model
-boundary — exactly the contract the ticket's Testing section mandates. They assert the
-observable process contract only: exit code, the stderr remedy, the exact re-run chunk id via
-the fake, and the persisted retry lineage on the tickets branch.
-
-Two of these need no fake at all — an ineligible/conflicting invocation is decided BEFORE any
-model call, so a plain ``python -m rebar`` subprocess is the faithful oracle and the assertion
-that it made zero calls is structural (there is no runner to call). The eligible-resume E2E
-runs a small driver that patches the runner-selection seam to inject the counting fake, then
-invokes ``rebar._cli.main`` — a real end-to-end CLI dispatch — and reports what the fake saw.
+Child processes use the production journal codec and a stateful model-boundary fake to assert
+exit status, remedy text, resumed chunk identity, and persisted lineage. Ineligible calls never
+reach a model. Eligible resume invokes ``rebar._cli.main`` with lazy runner injection.
 """
 
 from __future__ import annotations
@@ -45,11 +36,8 @@ _DESC = (
     "- [ ] `pytest tests/unit` proves the change\n"
 )
 
-# A driver run as its own process: it patches the runner-selection seam (a lazy import, so
-# patching the module attribute is enough — every call site resolves it at call time) to a
-# counting fake that fails F1's chunk exactly once, then invokes the REAL CLI entry point.
-# It reports the fake's finder-call id-sets and the CLI's exit code as JSON so the parent can
-# assert the observable resume contract.
+# Child-process driver: inject a one-shot counting finder failure through the lazy runner
+# seam, invoke ``rebar._cli.main``, and report call IDs plus exit status as JSON.
 _DRIVER = """
 import json, re, sys
 from pathlib import Path

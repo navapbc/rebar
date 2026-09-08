@@ -1,10 +1,7 @@
-"""The Pass-3 DRIFT floor (bug 5e40) — convergent re-review on the plan-UNCHANGED + code-DRIFTED
-axis. The tests pin: the pure drop predicate (drift-intersection, all quadrants), the in-place
-verdict mutation over blocking+advisory (dropped→`dropped` bucket, drift-namespaced coverage,
-corrected counts, BLOCK→PASS re-derivation), the eligibility candidate (plan-unchanged +
-code-drifted; a MATERIAL edit must NOT be eligible), the entry gate, and — the guard — that the
-whole-HEAD invalidation TRIGGER (compute_validity 'stale-head') is untouched. No live LLM: the
-novelty map is injected.
+"""Pass-3 drift-floor contracts for plan-unchanged, code-drifted re-review.
+
+Tests cover eligibility, finding drops and counts, BLOCK-to-PASS rederivation, and preserve
+whole-HEAD stale-head invalidation. Novelty is injected. No model runs.
 """
 
 from __future__ import annotations
@@ -254,12 +251,11 @@ def test_candidate_not_eligible_without_signature(monkeypatch) -> None:
 
 
 def test_candidate_reads_shared_gate_ref_anchor_not_working_tree(monkeypatch) -> None:
-    """Bug 1137 (drift_floor consumer): ``code_drifted`` must be sourced from the SHARED
-    ``gate_source.current_head_sha`` gate-ref anchor, NOT ``git rev-parse HEAD`` of the evaluator
-    working tree. With the gate ref UNMOVED (shared anchor == signed) but a FOREIGN working-tree
-    HEAD, the code has NOT drifted → not eligible → full review. RED before the fix: drift_floor
-    read the foreign working-tree head and spuriously armed the finding-drop (suppressing a
-    finding it must not), violating its own 'never suppress incorrectly' contract."""
+    """Use the shared gate-ref anchor for drift, not evaluator worktree HEAD.
+
+    A foreign worktree revision with an unmoved gate ref requires full review, preventing
+    incorrect finding suppression.
+    """
     from rebar import signing
 
     _patch_candidate(monkeypatch, signed_sha="shaGATE", current_sha="shaGATE")
