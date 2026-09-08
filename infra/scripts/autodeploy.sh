@@ -215,20 +215,21 @@ MCP_PATHS='src/rebar infra/compose/Dockerfile.mcp infra/scripts/mcp-entrypoint.s
 # secrets-only change must redeploy it too (bug f910). SECRETS_PATHS is intentionally kept a
 # separate variable rather than folded into MCP_PATHS so the two gates share one secrets list.
 # config paths are DETECT-ONLY in v1 (signalled, never auto-applied).
-# infra/compose/gerrit.config is in this list, NOT in a re-materializing trigger, on
+# infra/compose/gerrit.config and infra/compose/jgit.config are in this list, NOT in a
+# re-materializing trigger, on
 # purpose: compose-up.sh DOES re-seed it into the site etc dir, but only when compose-up
 # runs, and this loop deliberately never touches the Gerrit container (BOT_SERVICE is
 # "NEVER 'gerrit'"). Gerrit also reads gerrit.config once at injector-creation time, so
-# applying it means RESTARTING Gerrit — an operator judgement call on a live review gate,
+# applying either means RESTARTING Gerrit — an operator judgement call on a live review gate,
 # not something the unattended loop may do. Before it was listed here a gerrit.config
 # change reached /opt/rebar and then silently did nothing, with no signal at all
-# (bug 1630-0279-85ba-4e15); detect-only at least makes that visible.
+# (bug 1630-0279-85ba-4e15 / bug 7744-3e35-b2c4-40c2); detect-only at least makes that visible.
 # infra/gerrit/materialize-deploy-key.sh is the SSM→file deploy-key materializer, a direct
 # sibling of materialize-g2p-config.sh already in this list; applying it also touches gerrit
 # (it writes into the gerrit user's dir), so it is the SAME detect-only boundary. Before it was
 # listed here a deploy-key-materializer change reached /opt/rebar and silently did nothing, with
 # no signal at all (bug 408c-9c78-c523-4d1c); detect-only at least makes that visible.
-CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh infra/gerrit/materialize-deploy-key.sh infra/compose/gerrit.config'
+CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh infra/gerrit/materialize-deploy-key.sh infra/compose/gerrit.config infra/compose/jgit.config'
 # nginx edge source of truth: rebar.conf.template is rendered into
 # /etc/nginx/conf.d/rebar.conf. Its rendered copy lives OUTSIDE the compose build context,
 # so an edge change reaches no other trigger above and would otherwise never be detected.
@@ -904,7 +905,7 @@ log "main advanced $DEPLOYED -> $TARGET; computing component deltas"
 
 # ── config refs (replication/g2p/meta): DETECT-ONLY (v1 boundary) ─────────────
 if changed "$CONFIG_PATHS"; then
-  err config_manual "infra config changed in $TARGET — replication/g2p/refs-meta/gerrit.config need a MANUAL operator apply (auto-apply is a v2 follow-up)"
+  err config_manual "infra config changed in $TARGET — replication/g2p/refs-meta/gerrit.config/jgit.config need a MANUAL operator apply (auto-apply is a v2 follow-up)"
   log "infra config change detected + signalled (not auto-applied in v1)"
 fi
 

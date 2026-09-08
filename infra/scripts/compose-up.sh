@@ -220,6 +220,10 @@ ENV_FILE="${REPO_ROOT}/infra/compose/.env"
 # runbook Step 3), so a whole-stack boot is not coupled to GerritForge CI reachability.
 # We only VERIFY oauth.jar is present here (fail-loud) before booting into OAUTH.
 cp "${REPO_ROOT}/infra/compose/gerrit.config" "${SITE_HOST_DIR}/etc/gerrit.config"
+cp "${REPO_ROOT}/infra/compose/jgit.config" "${SITE_HOST_DIR}/etc/jgit.config"
+grep -qE '^[[:space:]]*autogc[[:space:]]*=[[:space:]]*false[[:space:]]*$' "${SITE_HOST_DIR}/etc/jgit.config" || {
+  echo "compose-up: FATAL — infra/compose/jgit.config must keep receive.autogc=false" >&2
+  exit 1; }
 
 oauth_client_id="$(grep -E '^GITHUB_OAUTH_CLIENT_ID=' "${ENV_FILE}" | cut -d= -f2-)"
 oauth_client_secret="$(grep -E '^GITHUB_OAUTH_CLIENT_SECRET=' "${ENV_FILE}" | cut -d= -f2-)"
