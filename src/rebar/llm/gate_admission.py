@@ -141,6 +141,7 @@ _SLOT_PREFIX = "gate-slot-"
 #: thing that knows whether this host has a dedicated volume.
 _SCRATCH_REQUIRED_MARKER = ".gate-scratch-required"
 _SCRATCH_MOUNTED_MARKER = ".gate-scratch-mounted"
+_CANONICAL_GATE_SCRATCH_MOUNT = Path("/var/lib/rebar/gate-scratch")
 
 
 def _test_slot_namespace() -> str | None:
@@ -188,16 +189,27 @@ def scratch_unavailable_detail() -> str | None:
     ``REBAR_GATE_TMPDIR`` / ``TMPDIR`` routed them. That is deliberately conservative, and it
     is what keeps one predicate honest for both callers.
 
-    ``None`` on a host with no declaration, so the guard is opt-in by PROVISIONING rather than
-    by rebar version — no laptop, CI runner or existing box changes behaviour.
+    ``None`` on a host with no declaration AND no canonical dedicated scratch path, so the
+    guard is opt-in by PROVISIONING rather than by rebar version — no laptop, CI runner or
+    existing box changes behaviour. The canonical path is also a declaration source: compose
+    exports it through ``REBAR_GATE_TMPDIR``, and that host config survives the post-launch
+    EBS attach case where ``user_data.sh`` never ran the marker writes.
     """
     from rebar._snapshot.repo_snapshot import peek_store_root
 
     base = peek_store_root().parent
-    if not (base.parent / _SCRATCH_REQUIRED_MARKER).is_file():
+    declared = (base.parent / _SCRATCH_REQUIRED_MARKER).is_file()
+    configured_dedicated_path = base == _CANONICAL_GATE_SCRATCH_MOUNT
+    if not (declared or configured_dedicated_path):
         return None
     if (base / _SCRATCH_MOUNTED_MARKER).is_file():
         return None
+    if configured_dedicated_path and not declared:
+        return (
+            f"{base} is configured as the dedicated scratch volume but "
+            f"{_SCRATCH_REQUIRED_MARKER} and {_SCRATCH_MOUNTED_MARKER} are absent, so the "
+            "volume was not mounted or marked"
+        )
     return (
         f"{base} declares a dedicated scratch volume ({base.parent / _SCRATCH_REQUIRED_MARKER}) "
         f"but {_SCRATCH_MOUNTED_MARKER} is absent, so the volume is not mounted"
