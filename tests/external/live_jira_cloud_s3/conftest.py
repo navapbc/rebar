@@ -1,44 +1,13 @@
-"""Fixtures for the READ-ONLY, S3-backed live Jira Cloud multi-project rehearsal.
+"""Fixtures for the read-only, multi-project Jira Cloud rehearsal over S3.
 
-Opt-in, LIVE-ONLY canary for the many-to-many Jira bridge over the **S3 store
-backend** and **real Cloud ticket volume/diversity**. It complements the Jira Data
-Center harness in ``tests/external/live_jira_dc`` (sibling story 368f): DC is
-git/file-backed and uses low-volume throwaway projects, so it can exercise neither
-the S3 backend nor real Cloud volume. This suite drives the reconciler against the
-two REAL Cloud projects **REB** and **DIG** over an ISOLATED, S3-backed store, using
-ONLY read paths that are proven non-mutating on Jira:
+The autouse ``readonly_jira_guard`` replaces every mutating transport method with a raiser.
+Scenarios use ``compute_snapshot`` and dry-run ``bridge_preview``, so Jira access remains
+read-only.
 
-  * inbound fetch via ``rebar_reconciler.fetcher.compute_snapshot`` — the read-only
-    counterpart of ``fetch_snapshot`` (it writes nothing; it only issues JQL
-    searches), whose per-project JQL fan-out is driven by the store's projects.json
-    mapping, and
-  * ``rebar.bridge_preview`` — a dry run (``Mode.DRY_RUN`` -> ``MODE_CAPS = 0`` ->
-    ``persist = False``), so no leaf applier runs and nothing is written to Jira or
-    the store.
-
-CARDINAL RULE — READ-ONLY ON JIRA CLOUD. No outbound writes to Jira. The invariant
-is enforced STRUCTURALLY by :func:`readonly_jira_guard` (autouse): it monkeypatches
-every mutating method on the Cloud transport class to raise, so a scenario is
-literally unable to invoke an outbound Jira mutation. Read methods are untouched.
-
-Shared constants and helpers live in the sibling ``_cloud_s3_support`` module (pytest
-``prepend`` import mode puts this dir on ``sys.path``); this file holds only the
-fixtures pytest must discover here.
-
-Gating (three independent layers, all off the default lane):
-  1. the parent ``tests/external/conftest.py`` autouse skip on ``REBAR_RUN_EXTERNAL``;
-  2. ``live_jira_ready()`` (Jira creds + ``acli``) via ``@_skip`` on each test;
-  3. the ``rehearsal_store`` fixture's skip when the S3 backend cannot be provisioned
-     (``git-remote-s3`` absent, or AWS/bucket unreachable).
-Defining a module-level ``_live_jira_ready`` in the test module earns the
-``jira_live`` marker from the parent conftest's ``pytest_collection_modifyitems``.
-
-Isolation is STRUCTURAL, not asserted against a production URL: the store is a FRESH,
-minimal store whose ONLY git remote is a throwaway ``s3://<bucket>/<unique-prefix>``,
-with ``REBAR_SYNC_PUSH=off``. Store CONTENT is irrelevant to a read-only fetch (the
-volume comes from live Jira, not the local store), so a minimal store is the correct,
-lighter isolation boundary — it cannot reach the production tickets remote. The
-prefix is deleted on teardown.
+Execution has three gates. ``REBAR_RUN_EXTERNAL`` enables the external tier,
+``live_jira_ready`` requires Jira credentials and ``acli``, and ``rehearsal_store`` requires
+the S3 backend. That fixture creates a minimal store whose only remote is a generated or
+operator-supplied S3 prefix with sync pushes disabled. Teardown deletes the prefix.
 """
 
 from __future__ import annotations
