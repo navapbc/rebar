@@ -1,11 +1,9 @@
-"""Fixtures + canary enrolment for the bounded live-Cloud coordinator MUTATION probe.
+"""Fixtures and canary enrollment for Jira Cloud mutation probes.
 
-Defining the module-level ``_live_jira_ready`` sentinel here earns every test in this suite
-the ``jira_live`` marker from the parent ``tests/external/conftest.py``
-(``pytest_collection_modifyitems``), which in turn enrols the suite in the all-skip canary:
-if these tests are COLLECTED under ``REBAR_RUN_EXTERNAL=1`` but every one SKIPS (missing
-creds / broken acli auth), the session FAILS rather than reporting a hollow green — a
-missing secret can never masquerade as a passing Live-External AC.
+The ``_live_jira_ready`` sentinel gives collected tests the ``jira_live`` marker and enrolls
+them in the external tier's all-skip canary. The canary fails a fully skipped enrolled run.
+``cloud_client`` owns client construction, and the autouse label sweep removes run-labelled
+issues left after primary teardown.
 """
 
 from __future__ import annotations

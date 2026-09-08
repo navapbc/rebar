@@ -1,22 +1,12 @@
-"""Bounded, self-cleaning live-Jira-Cloud probe of the RP-03 coordinator write paths.
+"""Bounded Jira Cloud probes for coordinator write paths.
 
-The epic's Live-External AC requires the create-coordinator's create / binding-lifecycle /
-commit-unknown / fuse to be proven against REAL Jira Cloud (the read-only S3 rehearsal
-cannot). Each test here drives ONE of those seams against live Cloud through the SAME public
-facade production uses — ``run_coordinated_outbound_create`` for the create+containment
-composition, ``coordinate_and_fuse`` for the non-create fuse pass — never a bespoke
-re-implementation, so a green run proves the shipped wiring, not a test double.
+Tests call production public facades with one mutation plan, limiting each run to one issue.
+Each issue receives a unique binding label and run label, then primary teardown deletes it by
+key. Fixture and workflow sweeps handle interrupted teardown. External gating requires explicit
+enrollment, Jira credentials, and ``acli``.
 
-SELF-CLEANING CONTRACT. Every issue is created with a UNIQUE ``rebar-id:<local_id>`` binding
-label, immediately stamped with the run-scoped ``REBAR_PROBE_RUN_LABEL``, and DELETED by key
-in a ``finally``. The conftest label-sweep and the workflow's always-run acli teardown are
-crash backstops. Nothing is enumerated and no ``--filter-local-ids`` legacy path is used: the
-coordinator is handed exactly ONE plan, structurally bounding the blast radius to one issue.
-
-Gating: the parent ``tests/external/conftest.py`` skips the whole tier unless
-``REBAR_RUN_EXTERNAL`` is set; ``live_jira_ready()`` skips when creds/acli are absent; and the
-module-level ``_live_jira_ready`` sentinel (in the conftest) enrols the suite in the all-skip
-canary so a fully-skipped run FAILS instead of reporting green.
+The scenarios cover create and binding lifecycle plus fuse behavior through
+``run_coordinated_outbound_create`` and ``coordinate_and_fuse``.
 """
 
 from __future__ import annotations
