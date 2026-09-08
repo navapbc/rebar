@@ -11,6 +11,7 @@ size cap; ``fetcher`` re-exports these names for its existing callers.
 from __future__ import annotations
 
 import re
+import urllib.error
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -53,6 +54,40 @@ def _extract_issues(result) -> list[dict]:
     if isinstance(result, list):
         return result
     return []
+
+
+def enrich_local_id_properties(
+    client: TicketTransport, project_key: str, snapshot: dict, log
+) -> None:
+    """Attach Jira ``local_id`` entity properties to snapshot entries when readable.
+
+    The base search payload does not include issue properties. A bound issue whose
+    binding-store row and identity label are both lost still carries the entity
+    property written during create containment, so reading it here gives the
+    differs a third identity signal without relying on search-index label state.
+    """
+    get_local_id_map = getattr(client, "get_local_id_map", None)
+    if not callable(get_local_id_map):
+        return
+    try:
+        local_id_map = get_local_id_map(project_key)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        if log is not None:
+            log.warning(
+                "fetch_snapshot: local_id property bulk read unavailable for %s "
+                "(HTTP 404: %r); continuing without property enrichment",
+                project_key,
+                exc,
+            )
+        return
+    for issue_key, local_id in local_id_map.items():
+        fields = snapshot.get(issue_key)
+        if not isinstance(fields, dict) or fields.get("local_id"):
+            continue
+        if local_id:
+            fields["local_id"] = str(local_id)
 
 
 def _iter_pages(client: TicketTransport, jql: str, page_size: int = 100, cap: int | None = None):
