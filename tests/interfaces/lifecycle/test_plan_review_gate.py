@@ -111,6 +111,10 @@ def _enable(repo: Path) -> None:
     (repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
 
 
+def _enable_close(repo: Path) -> None:
+    (repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_close = true\n")
+
+
 def _commit(repo: Path) -> None:
     subprocess.run(
         ["git", "commit", "--allow-empty", "-q", "-m", "c"],
@@ -276,6 +280,44 @@ def test_import_preserves_in_progress_under_gate(rebar_repo: Path) -> None:
         t for t in rebar.list_tickets(repo_root=str(rebar_repo)) if t["status"] == "in_progress"
     ]
     assert imported, "imported in_progress ticket was downgraded to open by the gate"
+
+
+def test_open_task_obsolete_close_bypasses_plan_review_close_gate(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
+    _enable_close(rebar_repo)
+    tid = _make(rebar_repo)
+
+    rebar.transition(
+        tid,
+        "open",
+        "closed",
+        close_class="obsolete",
+        reason="the premise no longer applies",
+        repo_root=str(rebar_repo),
+    )
+
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    assert state["status"] == "closed"
+    assert state["close_class"] == "obsolete"
+    assert state["close_reason"] == "the premise no longer applies"
+    assert rebar.verify_signature(tid, kind="completion-verifier", repo_root=str(rebar_repo))[
+        "verified"
+    ]
+
+
+def test_completed_work_close_still_requires_plan_review_close_attestation(
+    rebar_repo: Path,
+) -> None:
+    _commit(rebar_repo)
+    _enable_close(rebar_repo)
+    tid = _make(rebar_repo)
+    rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
+
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+
+    assert "plan-review close gate" in ei.value.stderr
+    assert _status(tid, rebar_repo) == "in_progress"
 
 
 def test_transition_gate_off_by_default(rebar_repo: Path) -> None:

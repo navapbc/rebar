@@ -140,30 +140,26 @@ def gate_ran(check: Mapping[str, object]) -> bool:
     return check.get("gate_ran") is True
 
 
-#: The administrative dispositions whose justification is a LIVE REPLACEMENT LINK — a
-#: verifiable, in-tracker fact the sibling completion gate already reads
-#: (:func:`close_precheck._has_live_replacement_link`). Deliberately a STRICT subset of
-#: ``close_disposition.ADMINISTRATIVE_CLASSES``: ``obsolete``/``wontfix`` are
-#: REASON-required rather than link-backed, so their justification is operator prose that
-#: no gate can verify — they keep the full attestation requirement. Widening this set is
-#: the security boundary of bug 69b9, not a tuning knob.
-_LINK_BACKED_DISPOSITION_CLASSES = frozenset({"duplicate", "superseded"})
-
-
 def _disposition_close_exempt(
-    ticket_id: str, ticket_type: str, close_class: str, tracker: str | None, repo_root
+    ticket_id: str,
+    close_class: str,
+    tracker: str | None,
+    repo_root,
+    *,
+    close_reason: str = "",
 ) -> bool:
-    """Whether this close is an evidence-backed administrative disposition (bug 69b9).
+    """Whether this close is an attestable administrative disposition.
 
-    True only when BOTH hold: ``close_class`` is link-backed administrative vocabulary, AND
-    the replacement link it claims is actually live. The evidence check REUSES the
-    completion gate's own predicate rather than reimplementing it, so the two close gates
-    cannot drift on what counts as a replacement. Any unreadable tracker yields ``False`` —
-    absent evidence never grants the exemption.
+    Reuse the completion-disposition producer as the single evidence predicate, so the
+    plan-review close gate and completion gate cannot drift: replacement-backed classes must
+    name a live replacement, and reason-backed obsolete/wontfix closes must carry the
+    close_reason that will be signed into the deterministic disposition attestation. Any
+    unreadable tracker yields ``False`` — absent evidence never grants the exemption.
     """
-    if close_class not in _LINK_BACKED_DISPOSITION_CLASSES:
+    from rebar._commands import close_disposition
+
+    if close_class not in close_disposition.ADMINISTRATIVE_CLASSES:
         return False
-    from rebar._commands import close_precheck
 
     try:
         if tracker is None:
@@ -171,7 +167,12 @@ def _disposition_close_exempt(
 
             tracker = str(config.tracker_dir(repo_root))
         return bool(
-            close_precheck._has_live_replacement_link(ticket_id, ticket_type, close_class, tracker)
+            close_disposition.verdict(
+                ticket_id,
+                close_class,
+                tracker,
+                close_reason=close_reason,
+            )
         )
     except Exception:  # noqa: BLE001 -- an unreadable source must stay fail-CLOSED
         return False
@@ -183,6 +184,7 @@ def close_plan_review_gate_check(
     *,
     repo_root=None,
     close_class: str = "",
+    close_reason: str = "",
     tracker: str | None = None,
 ) -> dict[str, object]:
     """Locally validate the opt-in plan-review close requirement.
@@ -191,11 +193,11 @@ def close_plan_review_gate_check(
     review, invokes an LLM, or contacts the network.  ``CLOSE`` keeps the plan and
     policy freshness checks while allowing implementation code to change during work.
 
-    ``close_class``/``tracker`` are keyword-only with defaults so every caller that does not
-    know the disposition is unaffected. When they name a LINK-BACKED administrative
-    disposition backed by a live replacement link, the gate returns the distinct
-    ``disposition`` verdict instead of demanding an attestation the ticket cannot earn (bug
-    69b9) — see :func:`_disposition_close_exempt`.
+    ``close_class``/``close_reason``/``tracker`` are keyword-only with defaults so every
+    caller that does not know the disposition is unaffected. When they name an
+    evidence-backed administrative disposition, the gate returns the distinct
+    ``disposition`` verdict instead of demanding an attestation the ticket cannot earn — see
+    :func:`_disposition_close_exempt`.
     """
     state = gate_enabled(
         str(repo_root),
@@ -222,8 +224,9 @@ def close_plan_review_gate_check(
             "verdict": "exempt",
             "reason": "ticket type is exempt",
         }
-    ticket_type = str(ticket_state.get("ticket_type") or "")
-    if _disposition_close_exempt(ticket_id, ticket_type, close_class, tracker, repo_root):
+    if _disposition_close_exempt(
+        ticket_id, close_class, tracker, repo_root, close_reason=close_reason
+    ):
         # A DISTINCT verdict, never "exempt": the audit trail must separate an
         # evidence-backed administrative close from a ticket-TYPE exemption and from a
         # --force bypass (which records no signature and never consults this gate).
@@ -232,8 +235,9 @@ def close_plan_review_gate_check(
             "gate_ran": True,
             "verdict": "disposition",
             "reason": (
-                f"closed as {close_class} against a live replacement link; the plan-review "
-                "attestation certifies work to be done here, and this work landed elsewhere"
+                f"closed as {close_class} with an administrative disposition attestation; "
+                "the plan-review attestation certifies work to be done here, and this close "
+                "does not claim completed work on this ticket"
             ),
         }
 

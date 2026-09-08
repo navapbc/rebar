@@ -1,4 +1,4 @@
-"""Link-backed administrative dispositions and the plan-review CLOSE gate (bug 69b9).
+"""Administrative dispositions and the plan-review CLOSE gate (bug 69b9).
 
 THE DEFECT. ``gates.close_plan_review_gate_check`` could not see the close disposition at
 all — it took no ``close_class`` parameter, so a story closed as ``superseded`` against a
@@ -12,13 +12,12 @@ Its sibling close gate already honours exactly this evidence
 (``close_precheck._has_live_replacement_link``), so the asymmetry was an omission, not a
 policy: one gate reads the live replacement link, the other was never handed it.
 
-THE FIX asserted here. The gate takes keyword-only ``close_class`` / ``tracker`` (defaults
-keep every existing caller unchanged) and exempts a close ONLY when BOTH hold: the class is
-a LINK-BACKED administrative disposition (``superseded`` / ``duplicate`` — never the
-reason-required ``obsolete`` / ``wontfix``, which carry no verifiable evidence) AND the
-existing predicate confirms a live replacement link. The exemption reports a DISTINCT
-``disposition`` verdict so the audit trail separates it from a type ``exempt`` and from an
-unaudited ``--force`` bypass.
+THE FIX asserted here. The gate takes keyword-only disposition evidence (defaults keep every
+existing caller unchanged) and exempts a close only when the same deterministic disposition
+producer can mint a completion-disposition attestation: link-backed classes need a live
+replacement, and reason-backed ``obsolete`` / ``wontfix`` need the persisted close reason.
+The exemption reports a DISTINCT ``disposition`` verdict so the audit trail separates it
+from a type ``exempt`` and from an unaudited ``--force`` bypass.
 """
 
 from __future__ import annotations
@@ -160,29 +159,39 @@ def test_plain_close_with_no_disposition_is_unaffected(store, monkeypatch):
     assert check["verdict"] != "disposition"
 
 
-# --- AC-scope: reason-required classes are DELIBERATELY excluded --------------------------
+# --- AC-scope: reason-required classes require the close reason they attest ----------------
 
 
 @pytest.mark.parametrize("reason_class", ["obsolete", "wontfix"])
-def test_reason_required_classes_never_exempt_even_with_a_live_link(
+def test_reason_required_classes_exempt_only_with_the_signed_reason(
     store, monkeypatch, reason_class
 ):
-    """obsolete/wontfix are reason-required, not link-backed: no verifiable evidence."""
+    """obsolete/wontfix are reason-backed: the gate must see the reason to bypass."""
     _arm_plan_review_close_gate(monkeypatch)
     replacement = _make(store, "story", "a live sibling", claim=False)
     tid = _make(store, "story", "claims obsolescence")
     rebar.link(replacement, tid, "supersedes", repo_root=str(store))
 
-    check = gates.close_plan_review_gate_check(
+    without_reason = gates.close_plan_review_gate_check(
         tid,
         _state(store, tid),
         repo_root=str(store),
         close_class=reason_class,
         tracker=_tracker(store),
     )
+    with_reason = gates.close_plan_review_gate_check(
+        tid,
+        _state(store, tid),
+        repo_root=str(store),
+        close_class=reason_class,
+        close_reason="the original premise no longer holds",
+        tracker=_tracker(store),
+    )
 
-    assert check["ok"] is False
-    assert check["verdict"] != "disposition"
+    assert without_reason["ok"] is False
+    assert without_reason["verdict"] != "disposition"
+    assert with_reason["ok"] is True
+    assert with_reason["verdict"] == "disposition"
 
 
 # --- AC3: the verdict is distinguishable in the audit trail -------------------------------
