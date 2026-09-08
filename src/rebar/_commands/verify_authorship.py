@@ -1,41 +1,12 @@
-"""Authenticated-authorship merge-gate (``rebar verify-identity``).
+"""Authenticated-authorship merge gate (``rebar verify-identity``).
 
-The security boundary of the opt-in authenticated-authorship feature (epic
-gnu-whale-ichor / 3183). Where the write-time UX gate in ``_seam.append_event`` only
-nudges the local writer, THIS gate — run in CI (the Gerrit ``Verified`` leg) — is what
-actually enforces authorship: it re-verifies every in-scope mutating event's signature
-against the author identity's COMMIT-ANCESTRY-SCOPED keyring, so a forged / unsigned /
-wrong-key event cannot land on ``main`` when the project has opted in.
+For each in-scope mutating event, verify canonical content and the author's commit-era
+keyring, classifying it as ``verified``, ``unsigned``, ``unknown-author``,
+``bad-signature``, or ``key_not_valid_at_era``. Only ``verified`` passes when
+``identity.require_authenticated`` is enabled. Otherwise reporting is advisory.
 
-For each mutating event it emits one classification:
-
-* ``verified``            — an ``author_sig`` is present, binds this event's canonical bytes
-                            (via its in-toto Statement subject), and verifies against a key
-                            the author identity held VALID at the event's commit.
-* ``unsigned``            — the event carries no ``author_sig``.
-* ``unknown-author``      — the event has no ``author_id`` (or it is not an identity ticket),
-                            so there is no trust root to verify against.
-* ``bad-signature``       — an ``author_sig`` is present but fails (malformed, wrong content,
-                            or not signed by ANY key this identity has ever held).
-* ``key_not_valid_at_era`` — an ``author_sig`` verifies against a REAL key of the author
-                            identity, but that key was not valid at the event's commit
-                            (not yet added, or already revoked) — a real key, wrong era.
-
-Display grouping: ``verified`` (the only pass) / ``unverified``
-(= ``bad-signature`` | ``key_not_valid_at_era`` | ``unknown-author``) / ``unsigned``.
-Under ``identity.require_authenticated`` every non-``verified`` classification fails
-the gate.
-
-Scope is the whole store with ``--all`` (or when no ``--base`` is given); with
-``--base <ref>`` it is the event files CHANGED in ``<base>..HEAD`` on the tracker branch
-(the commit range CI checks). Exit is NON-ZERO when ``identity.require_authenticated`` is
-ON and ANY in-scope event is not ``verified``; when the gate is OFF it is purely advisory
-(always exit 0). Mirrors ``verify_commit`` (the commit-ticket gate) in shape.
-
-After a ticket is compacted its raw event files are retired and folded into a SNAPSHOT;
-the signed events are preserved in the SNAPSHOT's ``compiled_state['authorship_ledger']``
-(built by ``compact.py``), so this gate re-verifies them from the ledger when the raw
-files are gone.
+``--base`` scopes to event files changed in ``base..HEAD``. ``--all`` or no base scans the
+store. Compacted events are reverified from the snapshot authorship ledger.
 """
 
 from __future__ import annotations
@@ -63,15 +34,11 @@ _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 class _ScopedEvent:
-    """One in-scope event to classify.
+    """An event plus the provenance needed for authorship classification.
 
-    Two provenances. A LIVE event (raw ``.json`` on disk) carries its full ``event`` dict
-    (so the content binding is recomputed) and its ``ticket_dir`` (so its commit is resolved
-    on demand); ``commit_sha`` / ``content_hash`` / ``signer_pubkey`` are ``None``. A LEDGER
-    entry (folded into a SNAPSHOT, raw file retired) carries the recorded ``content_hash``,
-    ``signer_pubkey``, ``event_uuid`` and a pre-resolved ``commit_sha`` (from its recorded
-    ``position``), with ``event`` / ``ticket_dir`` ``None``. ``position`` is the event's
-    ``{timestamp}-{uuid}`` string (for the intra-commit ordering refinement)."""
+    Raw event records carry the event and ticket directory so content and introducing commit
+    are resolved from the file and repository history. Snapshot-ledger records instead carry
+    the saved hash, signer key, UUID, position, and commit."""
 
     def __init__(
         self,
@@ -140,13 +107,10 @@ def _is_gate_exempt_ticket(ticket_dir: str) -> bool:
 
 
 def _is_archived_ticket(ticket_dir: str) -> bool:
-    """True iff the ticket at ``ticket_dir`` is net-ARCHIVED (retired work, out of gate scope).
+    """Return whether a ticket is net archived and therefore outside gate scope.
 
-    An ARCHIVED ticket's events are retired, so — like the gate-exempt types — they are OUT of
-    the authorship gate's scope. Delegates to the canonical
-    :func:`rebar.reducer._api._is_net_archived` (which already nets ARCHIVED against REVERT).
-    Fail-safe like :func:`_is_gate_exempt_ticket`: any lookup error yields False so the scan
-    continues (the ticket is scanned normally)."""
+    Use the reducer's ARCHIVED/REVERT calculation. Lookup failures return false so the ticket
+    is scanned."""
     try:
         from rebar.reducer._api import _is_net_archived
 
@@ -156,13 +120,13 @@ def _is_archived_ticket(ticket_dir: str) -> bool:
 
 
 def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root, position_resolver=None) -> str:
-    """Classify an event that carries an ``author_sig``: VERIFIED / KEY_NOT_VALID_AT_ERA /
-    BAD_SIGNATURE (with an UNKNOWN_AUTHOR short-circuit when the author is not an identity).
+    """Classify a signed event as ``verified``, ``key_not_valid_at_era``,
+    ``bad-signature``, or ``unknown-author``.
 
-    The in-toto content binding is checked first (the envelope's Statement subject must name
-    THIS event's uuid + content hash), then the commit-ancestry era verify; a failed era
-    verify that STILL passes an any-key verify is a real-but-wrong-era key
-    (``key_not_valid_at_era``) rather than a forgery (``bad-signature``)."""
+    Validate the first in-toto subject's event UUID and content hash before commit-era key
+    checks. After failed era verification, test every key recorded for the identity. A match
+    yields ``key_not_valid_at_era`` when a commit was resolved. An unresolved ledger record
+    instead yields ``verified``, while an unresolved raw event remains nonverified."""
     from rebar.attest import authorship, dsse
 
     is_live = ev.event is not None
@@ -190,10 +154,8 @@ def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root, position_resolver=
         if not _is_identity_author(author_id, tracker):
             return UNKNOWN_AUTHOR
 
-    # Content binding: the DSSE payload must be an in-toto Statement whose single subject
-    # binds THIS event's uuid + content hash, so a valid envelope over other content cannot
-    # be replayed onto this event. LIVE events recompute the hash from the raw dict; LEDGER
-    # entries compare against the recorded content_hash / event_uuid.
+    # Bind the first entry in the nonempty in-toto subject list to this event's UUID and hash.
+    # Recompute hashes for raw events. Ledger entries use their stored hash and UUID.
     try:
         statement = json.loads(envelope.payload.decode("utf-8"))
         subject = statement["subject"]
@@ -247,13 +209,9 @@ def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root, position_resolver=
     any_v = authorship.verify_authorship_any_key(envelope, str(author_id), repo_root=repo_root)
     if not any_v.verified:
         return BAD_SIGNATURE
-    # Authentic identity signature. If we HAD a commit, the key was simply wrong-era → the real
-    # KEY_NOT_VALID_AT_ERA classification. But if the commit is UNRESOLVABLE for a LEDGER entry (a
-    # compacted event whose raw file is retired and whose introducing commit is genuinely
-    # unrecoverable) we cannot era-scope at all — and an authentic signature by the identity is NOT
-    # a forgery, so it must not fail a gate whose purpose is to reject forged/unsigned/wrong-key
-    # events: classify it VERIFIED. A LIVE event keeps the historical era-fail-closed behavior (its
-    # raw file is present at HEAD, so an unresolvable commit there is anomalous, not compaction).
+    # A signature from an identity key is wrong-era when a commit was resolved. An unresolved
+    # ledger entry cannot be era-scoped, so accept a signature verified against the identity's
+    # recorded keys. Raw events remain fail-closed because their files are present at HEAD.
     if commit_sha is None and not is_live:
         return VERIFIED
     return KEY_NOT_VALID_AT_ERA
@@ -280,11 +238,10 @@ def _display_group(verdict: str) -> str:
 def _resolve_commit(
     ev: _ScopedEvent, repo_root, commit_map: dict[str, str] | None = None
 ) -> str | None:
-    """The event's introducing tracker-branch commit SHA, or ``None`` if unresolvable. LEDGER
-    entries carry a pre-resolved commit; a LIVE event is resolved via ``commit_map`` (the batched
-    single-pass lookup keyed by tracker-relative path, ``ev.ref`` for a file event) and only
-    falls back to the per-event :func:`resolve_event_commit` when the map lacks the path (empty
-    map / a merge-introduced file). Never raises (:func:`resolve_event_commit` is fail-closed)."""
+    """Resolve an event's introducing commit, or ``None`` on failure.
+
+    Ledger entries use their recorded commit. Raw entries use the batched path map and fall
+    back to per-event history lookup when the map misses, such as after a merge."""
     if ev.commit_sha is not None:
         return ev.commit_sha
     if commit_map is not None:
@@ -299,10 +256,11 @@ def _resolve_commit(
 
 
 def _is_enforced(commit_sha: str | None, since_ref: str | None, tracker: str) -> bool:
-    """Whether an event is ENFORCED by the gate. With no ``since_ref`` every event is enforced.
-    Otherwise an event is enforced iff its introducing ``commit_sha`` is ``since_ref`` or a
-    descendant of it (``git merge-base --is-ancestor <since_ref> <commit>`` exits 0). An
-    unresolvable commit is enforced (fail-closed); any git error also fails closed."""
+    """Return whether the event is enforced relative to ``since_ref``.
+
+    Without a boundary, every event is enforced. Missing commits and exceptions while invoking
+    Git also enforce the event. Otherwise enforcement follows Git's ancestry exit status.
+    Nonzero exits place the event outside the boundary."""
     if not since_ref:
         return True
     if commit_sha is None:
@@ -378,13 +336,9 @@ def _event_from_file(ticket_id: str, filename: str, path: str) -> list[_ScopedEv
     if event.get("event_type") == "SNAPSHOT":
         return _ledger_events(event, ticket_id)
 
-    # Reducer-IGNORED observability sidecars (COMPLETION_VERDICT, REVIEW_RESULT,
-    # TICKET_DIGEST, ENQUEUE_ENRICH, the plan-review/digest sidecars, …) are NOT in
-    # ``rebar.reducer.KNOWN_EVENT_TYPES``: they carry no ticket state, are not "authored
-    # work", and are emitted by best-effort seams that may have no signing key. Classifying
-    # them would false-fail the authorship gate under enforcement (an unsigned sidecar reads
-    # as ``unsigned``), so they are OUT of scope — skipped exactly as the reducer's
-    # forward-compat path preserves-and-ignores them.
+    # Ignore reducer-unknown observability sidecars because they do not mutate ticket state.
+    # Best-effort producers may omit signatures, so scanning sidecars would produce false
+    # enforcement failures.
     if event.get("event_type") not in KNOWN_EVENT_TYPES:
         return []
 
@@ -498,12 +452,8 @@ def cli(argv: list[str]) -> int:
         events = _collect_all(tracker)
 
     if not required:
-        # Advisory mode is REPORT-ONLY: the exit code is unconditionally 0 and no event can fail
-        # the gate, so the per-event git era-verify — whose SOLE consumer is the enforced verdict
-        # (and the informational counts / --format json, used only by tests) — is skipped
-        # ENTIRELY (ticket a2c7). Report only the signed/unsigned split, the one classification
-        # that needs no git, keeping advisory O(collect) rather than O(events × git). This also
-        # skips building the commit maps below, which are pointless without a verdict to reach.
+        # Advisory mode never fails, so avoid era verification and commit maps. Report only
+        # the signature-presence split, keeping the scan O(events) with exit 0.
         signed = sum(1 for ev in events if ev.author_sig)
         out = sys.stderr if as_json else sys.stdout
         if as_json:
@@ -524,18 +474,16 @@ def cli(argv: list[str]) -> int:
     from rebar.attest import authorship
 
     commit_map = authorship.build_introducing_commit_map(repo_root=args.root)
-    # Position→commit map for re-resolving a compacted LEDGER entry's null commit_sha in ONE
-    # git-log pass (same --full-history robustness as build_introducing_commit_map). This both
-    # fixes the topology fragility of a per-entry `git log` AND removes its ~O(entries × 2 s)
-    # cost on the whole-store gate; a map miss falls back to the per-entry resolver below.
+    # Resolve ledger positions in one full-history pass. Map hits avoid per-entry history
+    # walks and survive topology changes. Misses use the fallback below.
     position_map = authorship.build_position_commit_map(repo_root=args.root)
 
     def _resolve_position(position: str) -> str | None:
-        """position → introducing commit via the batched map (O(1)); a per-position ``git log``
-        fallback runs only for a position the map misses (fail-closed). Threaded into the
-        era-verify so each event's key-validity check is a map hit, not a full-history git log
-        per keyring record — the O(events × keyring × history) cost that dominated the gate
-        (ticket a2c7)."""
+        """Resolve a position through the batched map, then one history lookup.
+
+        Empty or unresolved positions return ``None``. An unresolved raw event remains
+        nonverified. A snapshot-ledger event can still pass when its signature matches a key
+        recorded for the identity."""
         if not position:
             return None
         hit = position_map.get(position)
@@ -554,12 +502,9 @@ def cli(argv: list[str]) -> int:
     report: list[dict] = []  # one entry per NON-verified in-scope event
     enforced_not_verified = 0
     for ev in events:
-        # A compacted LEDGER entry's recorded commit_sha is a cache. Re-resolve its position
-        # against the current history so an epoch rewrite cannot make a valid signature appear
-        # wrong-era; retain the recorded SHA only when current resolution fails. This also
-        # repairs null SHAs recorded when compaction could not resolve the introducing commit.
-        # Use the batched --full-history position map first (O(1)); only fall back to the
-        # per-entry resolver for a position the map misses (fail-closed).
+        # Treat a ledger commit as a cache. Re-resolve its position against current history to
+        # repair rewritten or formerly unresolved ancestry. Retain the stored SHA only when
+        # both batched and per-position resolution fail.
         if ev.event is None and ev.position:
             resolved_sha = _resolve_position(ev.position)
             if resolved_sha is not None:

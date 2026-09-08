@@ -1,25 +1,11 @@
-"""``rebar verify-opcert`` — required-environment operation-certificate merge-gate (story 4214).
+"""Required-environment completion-certificate merge gate (``rebar verify-opcert``).
 
-The op-cert lane of the shipped ``verify-identity`` merge-gate: it walks the MERGED LOG, groups by
-ticket, and for each in-scope CLOSED ticket verifies that the required trusted environment produced
-a valid ``completion-verifier`` operation certificate (a DSSE envelope stored on the ticket by the
-e4df keystone). Posture + grandfather boundary come from ``rebar.toml`` —
-``verify.require_environment`` (which environment must sign) and ``verify.opcert_enforce_since``
-(the grandfather ref) — exactly as
-``verify-identity`` reads ``identity.*`` (no CI variable).
-
-* A ticket is IN SCOPE when it has a terminal ``STATUS`` event whose target is ``closed`` (rebar has
-  no separate CLOSE event type). Its enforcement anchor is that event's introducing commit.
-* ENFORCED (anchor is a descendant of ``verify.opcert_enforce_since``) + missing/foreign/wrong-era
-  op-cert → the gate FAILs (exit 1). Grandfathered (anchor predates the boundary) → advisory.
-* ``verify.require_environment`` unset → advisory everywhere (exit 0).
-
-Verification of a present cert delegates to ``trusted_env.verify_required_environment`` (verify
-against the PINNED key, not the cert's self-claimed keyid); the stored envelope is read with
-``opcert.opcert_from_record``.
-
-The exit-code contract + walk are pinned by the RED oracle: 2 = infra error (no config/store),
-1 = an ENFORCED closed ticket lacks a valid op-cert (enforcement on), 0 = pass/advisory.
+For each closed ticket in merged history, verify its ``completion-verifier`` certificate
+against the configured trusted environment. The terminal close STATUS commit anchors
+grandfathering. The certificate's SIGNATURE commit anchors key-era validity. Missing or invalid
+certificates fail enforced tickets, pre-boundary tickets are advisory, and an unset required
+environment disables enforcement. Exit 2 reports config or store errors, 1 an enforced failure,
+and 0 a pass or advisory result.
 """
 
 from __future__ import annotations
@@ -36,11 +22,9 @@ KIND = "completion-verifier"
 
 
 def _close_anchor_event(events, ticket_id):
-    """The terminal close-STATUS scoped event for ``ticket_id`` (a STATUS event whose
-    ``data.status`` is ``closed``), or ``None`` if the ticket has no close event in scope.
+    """Return the last close-STATUS event for the ticket, or ``None``.
 
-    Later events sort after earlier ones (``_collect_all`` walks event files in filename =
-    timestamp order), so the LAST close-STATUS seen is the terminal one — the enforcement anchor."""
+    Collection order is timestamp order, so the last match is the terminal enforcement anchor."""
     anchor = None
     for ev in events:
         if ev.ticket_id != ticket_id or ev.event is None:
@@ -53,15 +37,11 @@ def _close_anchor_event(events, ticket_id):
 
 
 def _opcert_anchor_event(events, ticket_id):
-    """The terminal envelope-bearing ``SIGNATURE`` event for ``ticket_id`` whose derived
-    attestation kind is ``completion-verifier`` — the certificate's STORAGE ANCHOR event (story
-    4214 / Option B). Its introducing tickets-branch commit is the anchor ``S`` at which key
-    era-validity is judged, decoupling validity from the cert's self-chosen ``merged_log_commit``.
+    """Return the last uncompacted completion-verifier SIGNATURE event, or ``None``.
 
-    ``_collect_all`` yields a ticket's events in filename (= timestamp) order, so the LAST matching
-    SIGNATURE seen is the terminal one — the same record the reducer keeps in
-    ``attestations['completion-verifier']``. Returns ``None`` when the ticket has no such live
-    event (e.g. it was compacted into a SNAPSHOT), so the caller can FAIL CLOSED."""
+    Its introducing commit is the storage anchor for key-era validation, independent of the
+    certificate's claimed merged commit. Snapshot-only or missing records remain unresolved so
+    the caller fails closed."""
     from rebar.reducer._processors import attestation_kind
 
     anchor = None
@@ -161,11 +141,8 @@ def cli(argv: list[str]) -> int:
         if not isinstance(state, dict) or state.get("status") != "closed":
             continue
         in_scope += 1
-        # Enforcement anchor = the terminal close-STATUS event's introducing commit. If that event
-        # has been compacted into a SNAPSHOT the anchor is unresolvable (None). We must NOT drop the
-        # ticket from scope — that would be FAIL-OPEN (a compacted closed ticket could carry no
-        # op-cert yet never be enforced). Leave close_commit=None and let `_is_enforced(None, ...)`
-        # FAIL CLOSED (treat as enforced): a ticket we cannot prove is grandfathered is enforced.
+        # Resolve the terminal close STATUS as the enforcement anchor. A compacted or missing
+        # event leaves no proven grandfathering commit, so ``_is_enforced`` fails closed.
         anchor = _close_anchor_event(events, ticket_id)
         close_commit = (
             _resolve_commit(anchor, args.root, commit_map) if anchor is not None else None
@@ -184,17 +161,12 @@ def cli(argv: list[str]) -> int:
             else:
                 envelope, bound = got
                 merged_commit = bound.get("merged_log_commit")
-                # AUTHORITATIVE material fingerprint: recompute from the LIVE ticket state — never
-                # trust the record's self-reported `material_fingerprint`. The record (and its
-                # envelope) live on the auto-pushed, non-Gerrit-gated tickets branch, so an attacker
-                # can craft a self-consistent record (envelope binds X, record claims X); binding
-                # the RECOMPUTED value forces the cert to attest the ticket's REAL current material.
+                # Recompute material from the current ticket state. Do not trust the
+                # self-reported record because ticket-branch data bypasses Gerrit review.
                 auth_material = _authoritative_material(ticket_id, args.root)
-                # STORAGE ANCHOR S: the introducing tickets-branch commit of the terminal
-                # completion-verifier SIGNATURE event, resolved with the SAME machinery as the close
-                # anchor (build_introducing_commit_map / resolve_event_commit). Era-validity is
-                # judged at S — NOT at the cert's self-chosen merged_log_commit (story 4214 /
-                # Option B). An unresolvable S (compacted / off-history) FAILS CLOSED.
+                # Resolve storage anchor S from the terminal certificate SIGNATURE event and
+                # judge trusted-key era at S, not at the claimed merged commit. Unresolvable S
+                # fails closed.
                 s_anchor = _opcert_anchor_event(events, ticket_id)
                 s_commit = (
                     _resolve_commit(s_anchor, args.root, commit_map)

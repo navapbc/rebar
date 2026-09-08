@@ -1,29 +1,9 @@
-"""The status-transition + claim locked critical section, in-process.
+"""Locked in-process cores for status transitions and atomic claims.
 
-This module IS the lock-holding, committing core for a status transition and for
-an atomic claim (history: the bash-era ``_engine/ticket_txn.py`` heredoc extraction,
-relocated here; see ``docs/bash-migration.md`` §7).
-
-Each core runs as ONE critical section in ONE process: acquire the unified write
-lock (``rebar._store.lock`` — fcntl + mkdir dual leg, the ``stiff-mop-lane`` fix),
-re-read + verify the current status (exit 10 / :class:`ConcurrencyMismatch` on
-optimistic-concurrency mismatch), apply the close-time guards, write the
-append-only event file(s), and ``git add``+``commit`` — releasing the lock only
-after the commit. Do NOT split the commit out: it would reopen a lost-update
-window (REMEDIATION_PROPOSAL §0 I4/I5, docs/concurrency.md).
-
-**Byte-parity contract.** Event files are serialised through the single canonical
-helper ``rebar._store.canonical.canonical_str`` (sorted keys, compact separators,
-``ensure_ascii=False``) — byte-identical to every other live writer (epic P1.0).
-This still does NOT use ``rebar._store.event_append.stage_and_commit``/
-``write_and_push`` (which re-acquire the lock per event); it shares only the
-serializer and ``event_filename``, keeping the inline rename+commit window here.
-
-Failure signalling: these cores **raise** rather than ``sys.exit``. exit-10
-optimistic-concurrency mismatch → :class:`ConcurrencyMismatch`; everything else →
-:class:`CommandError` carrying the exact stderr text + exit code (1 generic /
-2 git). The caller (CLI/library/shim) emits ``message`` to stderr and maps the
-exit code.
+Each operation holds the shared write lock through fresh-state validation, canonical
+append-only event writes, staging, and commit. Splitting the commit would reopen a
+lost-update race. The cores raise :class:`ConcurrencyMismatch` for status races and
+:class:`CommandError` for other failures, leaving channel rendering to callers.
 """
 
 from __future__ import annotations
@@ -54,13 +34,10 @@ class ConcurrencyMismatch(CommandError):
 
 
 def _stamp_session(status_data: dict) -> None:
-    """Add the claiming session provenance to an ``open -> in_progress`` STATUS event's
-    ``data`` when the shared resolvers find any (epic crust-fetch-stump, stories 68ef +
-    c557): the primary session id (``session``), the harness tag (``harness``), and the
-    secondary remote session (``remote_session``). Each absent value OMITS its key, so a
-    no-provenance claim's event bytes are identical to the pre-feature path (older clones
-    preserve-and-ignore the extra keys). Values are opaque strings, read verbatim — never
-    interpolated or executed."""
+    """Stamp available claim-session identifiers into a STATUS event.
+
+    Each opaque session, harness, or remote-session value is added only when present,
+    preserving legacy bytes when no provenance resolves."""
     from rebar._commands.session_id import (
         resolve_harness,
         resolve_remote_session,
@@ -77,16 +54,12 @@ def _stamp_session(status_data: dict) -> None:
 
 
 def _acquire_write_lock(tracker_dir: str) -> lock.LockHandle:
-    """Acquire the unified write lock (fcntl + mkdir dual leg) for a txn critical
-    section — mutually exclusive with every other writer on every platform class (the
-    ``stiff-mop-lane`` fix). Held across the whole re-read → write → commit section.
+    """Acquire the cross-platform write lock for the complete transaction.
 
-    One pass is the historical 30s (``attempts=1``); ``retries`` extra passes follow so
-    the most CONTENDED verb stops being the first to lose its write — measured, a `claim`
-    behind a 45s holder died at exactly 30.30s while comments beside it survived
-    (royal-weariless-zebrafish). The :class:`~rebar._store.lock.LockTimeout` message is
-    PROPAGATED rather than replaced: the old generic string discarded both the cumulative
-    wait and the holder, leaving a starved caller unable to say what blocked it."""
+    Each acquisition pass has a 30-second budget. Configured retries add further passes so
+    claims tolerate ordinary contention. Propagate
+    :class:`~rebar._store.lock.LockTimeout` details, including wait and holder, through
+    :class:`CommandError`."""
     try:
         return lock.acquire(
             tracker_dir,
@@ -128,14 +101,10 @@ def _parent_status_uuid(ticket_dir_path: str) -> str | None:
 
 # raw-git-ok: locked store seam internal
 def _git(tracker_dir: str, *args: str) -> None:
-    """Run a git command in the tracker, raising :class:`CommandError` (exit 2) on
-    failure with the exact bash stderr prefix.
+    """Run a tracker git command and raise exit-2 :class:`CommandError` on failure.
 
-    Routed through :func:`run_git_write` so any index-mutating op (the claim/transition
-    ``add``+``commit``) self-heals git's ``.git/index.lock`` contention — a stale lock is
-    reclaimed and a contended one ridden out with a bounded backoff before this reports a
-    genuine (post-retry) failure. index.lock only appears on index-mutating commands, so a
-    read op run through here simply never trips the retry (bug fix-indexlock-retry)."""
+    :func:`run_git_write` recovers stale index locks and retries contention with another
+    index writer. Read-only commands do not trigger that retry."""
     cp = run_git_write(tracker_dir, *args, check=False)
     if cp.returncode != 0:
         raise CommandError(f"Error: git operation failed: {cp.stderr}", returncode=2)
@@ -143,29 +112,20 @@ def _git(tracker_dir: str, *args: str) -> None:
 
 # raw-git-ok: locked store seam internal
 def _git_commit(tracker_dir: str, message: str) -> None:
-    """Commit the staged claim/transition event with git's auto-maintenance SUPPRESSED, then
-    run maintenance as an explicit deferred step (bd66) — parity with the event-append write
-    path (``event_append._deferred_maintenance``).
+    """Commit staged events with automatic maintenance disabled, then run it separately.
 
-    ADR 0051 keeps git maintenance FOREGROUND on the tickets worktree so a repack serialises
-    under the write lock; but letting ``git commit`` trigger it INLINE charges an O(store)
-    repack to the commit's own watchdog bound, so once the store crosses git's loose-object
-    threshold the commit that trips it can be SIGKILLed mid-repack. ``_AUTOMAINT_OFF`` keeps
-    the commit O(1); :func:`run_auto_maintenance` replays the identical maintenance as a
-    separate, roomier-bounded step — still under the lock the caller holds, so the repack
-    stays serialised. Best-effort maintenance: the commit already succeeded, so it never
-    fails the write."""
+    This keeps the commit bounded while maintenance remains serialized under the caller's
+    write lock. Since the commit has succeeded, deferred maintenance is best effort."""
     _git(tracker_dir, *_AUTOMAINT_OFF, "commit", "-q", "--no-verify", "-m", message)
     run_auto_maintenance(tracker_dir)
 
 
 # raw-git-ok: locked store seam internal
 def _unstage(tracker_dir: str, *abs_paths: str | None) -> None:
-    """Best-effort: drop ``abs_paths`` from the git index (and working tree). On a
-    commit failure the event file was already ``git add``-ed; removing it from disk
-    alone leaves it STAGED, so the next write's commit would sweep the orphaned
-    event in. Reset the index entry too. Held under the write lock, so this is the
-    sole writer. Never raises (cleanup path)."""
+    """Best-effort removal of failed event paths from the index before file cleanup.
+
+    This prevents a later commit from sweeping in an orphaned staged event. The caller holds
+    the write lock. Cleanup never raises."""
     rels = [os.path.relpath(p, tracker_dir) for p in abs_paths if p]
     if not rels:
         return
@@ -180,12 +140,9 @@ def _unstage(tracker_dir: str, *abs_paths: str | None) -> None:
         pass
 
 
-# The closed-ticket close classification vocabulary (ticket ed13; widened by ticket fc20): a
-# bug close records a REQUIRED, bounded ``--class <value>`` (replacing the old free-text
-# ``--reason``), and a non-bug close MAY record one from the ADMINISTRATIVE subset — both
-# folded into reduced state as ``close_class``. Single-sourced here so the CLI parser, the
-# close guard, and the completion-gate pre-check all validate against the SAME list — kept in
-# the same order as common.schema.json#/$defs/close_class.
+# Closed bugs require a bounded classification. Non-bugs may use the administrative subset.
+# Keep this schema-ordered vocabulary as the shared source for the CLI, write guard, and
+# completion precheck.
 CLOSE_CLASSES: tuple[str, ...] = (
     "regression",
     "plan_defect",
@@ -220,19 +177,13 @@ def close_class_refusal(
     ticket_id: str = "",
     tracker: str = "",
 ) -> str | None:
-    """The refusal message for an invalid close-class combination, or ``None`` when valid.
+    """Return the refusal for an invalid close disposition, otherwise ``None``.
 
-    Shared by :func:`transition_core` (the authoritative, gate-independent write-side guard —
-    neither ``--force`` nor a disabled completion gate skips it) and the completion gate's
-    cheap pre-LLM check in ``close_precheck`` so the two cannot drift. Three rules (tickets
-    ed13 + fc20 + bug d54b): a bug close REQUIRES a class from the full vocabulary; a non-bug
-    close MAY carry one only from ``close_disposition.ADMINISTRATIVE_CLASSES`` (``not_a_bug`` /
-    ``escalated`` stay bug-only); and a reason-required class REQUIRES a reason — the CLI
-    ``--reason`` text (persisted as ``close_reason``), the ``--force=<reason>`` bypass note when
-    the close is forced, or (``not_a_bug``/``escalated`` only) a live replacement link, checked
-    when the caller passes ``ticket_id``+``tracker`` (:func:`close_disposition.reason_refusal`;
-    omitting them fails toward requiring the reason). ``idea -> closed`` is a reject/drop, not a
-    completion, and bypasses all three."""
+    The write guard and completion precheck share rules independent of gates. Bugs require a
+    known class. Non-bugs accept only administrative classes. Reason-required classes need a
+    close reason or force note. ``not_a_bug`` and ``escalated`` may instead use a usable
+    replacement link. Missing lookup context requires the reason. ``idea -> closed`` is a
+    reject or drop operation and bypasses these disposition rules."""
     if target_status != "closed" or from_idea:
         return None
     from rebar._commands import close_disposition
@@ -265,38 +216,15 @@ def _stamp_close_metadata(
     force_reason: str,
     completion_expectation: str,
 ) -> None:
-    """Stamp the close-metadata keys on a ``*->closed`` STATUS event's ``data``.
+    """Add present-only close metadata to ``* -> closed`` STATUS data.
 
-    All present-only (mirrors ``_stamp_session``): absent -> key omitted -> byte-identical
-    to the pre-feature close event, which is what keeps every addition here
-    backward-compatible (a legacy event without a key reduces with the key ABSENT — unknown,
-    never guessed).
-
-    * ``close_class`` — bug-close classification (ticket ed13): the validated ``--class``,
-      folded by the reducer into ``state["close_class"]``.
-    * ``close_reason`` — the operator's justification for a reason-bearing disposition close
-      (ticket fc20): the CLI ``--reason`` on a NON-force disposition close. DISTINCT from
-      ``force_close_reason`` — this key records why a truthful disposition closed, that one
-      records why a gate was bypassed. Persisted ONLY for reason-required classes and the
-      provenance-guarded bot-alert ``env_integration`` disposition: any other close discards
-      the value rather than smuggling a free-text rationale past the bounded vocabulary
-      (ticket 3803's honesty rule, enforced write-side).
-    * ``force_close_reason`` — the operator's ``--force=<reason>`` for bypassing the close
-      gates (the unified ``force_reason`` in memory — ticket blusterous-earthly-kitten). The
-      PERSISTED key stays ``force_close_reason``: it is durable reduced state (the reducer +
-      schema fold it), so renaming it would be an out-of-scope event-schema migration. This
-      parameter was previously accepted and DISCARDED (bug defiant-orthoclase-buck): the only
-      durable trace of a bypass reason was a best-effort FORCE_CLOSE audit comment written
-      afterwards via a SECOND lock acquisition and swallowed on failure — least reliable under
-      exactly the contention that makes force-closing attractive. Recording it here costs no
-      extra lock: this write already holds one.
-    * ``completion_expectation`` — WHY a completion signature was or was not expected for
-      this close (story mechanical-coherent-wolverine): the write-time provenance that lets a
-      later reader distinguish gate-genuinely-off from force-bypassed, unreadable-config
-      fail-open, local-source, certification-withheld, and signature-append failure. Records
-      the EXPECTATION, never the outcome — the STATUS commits before signing is attempted, so
-      ``required`` + no attestation reads as "a signature was expected and is missing".
-    """
+    Omitting absent keys preserves legacy event bytes. ``close_class`` stores the validated
+    classification. ``close_reason`` stores a non-force rationale only for reason-required
+    dispositions and provenance-guarded bot-alert ``env_integration`` closes.
+    ``force_close_reason`` separately records a bypass under its durable schema name in this
+    already-locked write. ``completion_expectation`` records why signing was or was not
+    expected, not its outcome. Because STATUS commits first, ``required`` without an attestation
+    means an expected signature is missing."""
     if target_status != "closed":
         return
     if close_class:
@@ -416,14 +344,12 @@ def transition_core(
     repo_root=None,
     pre_status_check: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> None:
-    """Write the append-only STATUS(``target_status``) event under the write lock.
+    """Atomically append and commit a STATUS event under the write lock.
 
-    Re-reads the ticket under the lock and rejects with :class:`ConcurrencyMismatch`
-    (exit 10) if its status is not ``current_status``. Applies the bug-close-reason
-    guard. ``pre_status_check`` is an optional local caller policy invoked with the
-    freshly reduced locked state immediately before the STATUS is appended. Raises
-    :class:`CommandError` for validation / git failures. Returns ``None`` on success
-    (the wrapper computes newly_unblocked + output separately)."""
+    Fresh state must match ``current_status``. A mismatch raises
+    :class:`ConcurrencyMismatch`. The function enforces close-disposition rules, runs an
+    optional ``pre_status_check`` on locked state, and raises :class:`CommandError` for
+    validation or git failures."""
     handle = _acquire_write_lock(tracker_dir)
     final_path = None
     try:
@@ -472,14 +398,12 @@ def claim_core(
     assignee: str = "",
     repo_root=None,
 ) -> None:
-    """Atomic claim: move an ``open`` ticket to ``in_progress`` AND set its assignee
-    in ONE locked critical section (single commit). Rejects with
-    :class:`ConcurrencyMismatch` (exit 10) if the ticket is not ``open``.
+    """Atomically move an open ticket to ``in_progress`` and optionally assign it.
 
-    Both the STATUS(in_progress) and EDIT(assignee) events are fresh UUID-named
-    files written and committed in ONE commit before the lock releases, so no
-    reader on any clone ever observes in_progress without the assignee (I2/I8;
-    docs/concurrency.md)."""
+    The STATUS event is always written. A supplied assignee adds a later EDIT event. Every
+    event produced by the claim commits together before the lock releases. A current state
+    other than ``open`` raises :class:`ConcurrencyMismatch`. When assignment is requested, no
+    reader observes it without the status change."""
     handle = _acquire_write_lock(tracker_dir)
     status_path = None
     edit_path = None
@@ -620,23 +544,13 @@ def ensure_ac_boxes_checked(
 def ensure_attested_items_valid(
     ticket_id: str, tracker: str, *, ticket_state: Mapping[str, object] | None = None
 ) -> None:
-    """Fail the close (CommandError, exit 1) on an invalid ``[non-codebase]`` AC item.
+    """Reject invalid ``[non-codebase]`` acceptance criteria before completion review.
 
-    Deterministic, pre-LLM (bug 2f56-313f-6175-41b1). The completion verifier classifies
-    criteria SOLELY from the author tag (ADR-0043) — by design it never second-guesses
-    ``[non-codebase]`` — so a LAUNDERED tag (a code-verifiable criterion tagged to dodge
-    repository verification) must be rejected HERE, before the tag buys anything. Two checks,
-    in remedy order:
-
-    1. **Laundering** — a tagged item whose own text (or continuation lines) cites exact repo
-       path/symbol evidence. Its remedy is UNTAG (the verifier can check the repository), so
-       it is reported first — never coached into decorating the mistag with provenance.
-    2. **Provenance shape** — a tagged item missing its complete ``provenance:`` continuation
-       line (ADR-0043 x ADR-0016; the same detector the advisory review-side P6 lint uses,
-       promoted to blocking on the close path).
-
-    Silently returns on any read / reduce failure so an unreadable ticket is never blocked
-    here (other guards own that). ``--force`` bypasses it upstream, like every close precheck."""
+    Repository citations make a tagged criterion an attestation-laundering finding, so the
+    criterion must be untagged. Otherwise the tag requires a complete ``provenance:``
+    continuation. The check reports laundering first. Read or reduction failures return
+    without error because other close guards own ticket readability. Force bypass occurs
+    upstream."""
     try:
         state = (
             ticket_state

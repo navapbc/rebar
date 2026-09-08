@@ -1,15 +1,9 @@
-"""In-process ``transition`` / ``reopen`` / ``claim`` wrappers.
+"""Provide in-process wrappers for ``transition``, ``reopen``, and ``claim``.
 
-These wrappers drive the locked write cores in :mod:`rebar._commands.txn`
-(``transition_core`` / ``claim_core``) and own everything around the locked write:
-``--output`` parsing, the 2-arg current-status autodetect, the ``archived → open``
-un-archive seam, status validation, the idempotent no-op, the ghost / init checks,
-the open-children close guard, ``newly_unblocked`` detection (via
-:func:`rebar.graph._unblock.batch_close_operations`), the force-close audit
-comment, compact-on-close, per-ticket scratch cleanup, the
-``{ticket_id,from,to,newly_unblocked}`` json / ``UNBLOCKED:`` text output, and
-claim's error-envelope (ticket_not_found / concurrency_conflict / claim_failed) +
-``CLAIMED:`` output.
+The wrappers own CLI parsing, status detection, lifecycle validation, parent cascades,
+close verification, cleanup, and stable output. Locked writes remain in
+:func:`rebar._commands.txn.transition_core` and
+:func:`rebar._commands.txn.claim_core`.
 """
 
 from __future__ import annotations
@@ -30,9 +24,8 @@ from rebar.reducer import reduce_ticket
 
 _VALID_STATUSES = ("idea", "open", "in_progress", "closed", "blocked")
 
-# The close-gate escape hatch retired by ticket 24f7 in favour of a single `--force`
-# (see :func:`_parse_flags`). Built from parts so a tree-wide grep for the dead flag
-# spelling stays clean while the parser can still recognise — and loudly reject — it.
+# Build the retired close-only flag from parts to keep dead-flag scans clean.
+# The parser still recognizes the complete spelling and rejects it with an error.
 _RETIRED_FORCE_CLOSE = "--force" + "-close"
 
 _USAGE = (
@@ -95,14 +88,10 @@ def _read_status(tracker: str, ticket_id: str) -> str | None:
 
 
 def _resolve_parent_in_status(tracker: str, ticket_id: str, status: str) -> str | None:
-    """Return the resolved id of ``ticket_id``'s parent IFF the parent exists and its
-    current status is ``status`` — else ``None``.
+    """Return the resolved parent id only when it exists at ``status``.
 
-    This is the lookup behind the parent-first cascade: the caller names the parent
-    status that is ELIGIBLE to be cascaded on the edge being taken (``"open"`` for
-    ``open -> in_progress``, ``"closed"`` for both the ``closed -> open`` reopen and
-    the ``closed -> in_progress`` reactivation). A parent in any other status (or absent
-    / unreadable) yields ``None`` — no cascade, the child op proceeds alone."""
+    This supplies cascade eligibility: ``open`` for claims and ``closed`` for reopen or
+    reactivation. Missing, unreadable, or differently staged parents return ``None``."""
     state = reduce_ticket(os.path.join(tracker, ticket_id))
     if state is None:
         return None
@@ -124,41 +113,13 @@ def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
 
 
 def _parse_flags(args: list[str]) -> tuple[str, str | None, str, str, str]:
-    """Parse [--reason[=]] [--class[=]] [--force[=]] [--caused-by[=]] [--ref[=]] from the args
-    AFTER <current> <target>. Returns (reason, force_reason, close_class, caused_by, ref).
-    Unknown tokens are silently skipped.
+    """Parse transition flags into ``(reason, force_reason, close_class, caused_by, ref)``.
 
-    ``--force`` / ``--force=<reason>`` (ticket 24f7) is THE single escape hatch, spelled
-    exactly as ``claim --force[=<reason>]``. ``force_reason`` is ``None`` when the flag is
-    ABSENT and a (possibly empty) string when present, so the caller can tell "not passed"
-    from "passed with no value". Which gate it bypasses is decided by the target status:
-    ``open -> in_progress`` bypasses the start-work (plan-review) gate; ``-> closed``
-    bypasses the completion-verification / signature gate.
-
-    It REPLACES the former close-only spelling outright — no alias (operator decision
-    2026-08-07, clean break). Because this loop silently skips unknown tokens, a bare removal
-    would have made a stale close-only invocation a SILENT no-op that closes the ticket
-    through the very gate it meant to bypass. So the retired spelling is matched explicitly
-    and rejected with an error naming ``--force``. The loop compares tokens exactly (there is
-    no prefix/abbreviation matching here), so truncations stay unknown tokens rather than
-    abbreviation-matching onto a live flag.
-
-    ``--ref <ref>`` / ``--ref=<ref>`` (bug 80af) is the OPTIONAL completion-close-gate target:
-    the git ref whose committed tree the gate verifies (and signs against) instead of HEAD.
-    Default ``""`` (→ HEAD, today's behavior).
-
-    ``--class <value>`` / ``--class=<value>`` (ticket ed13) is the REQUIRED bounded
-    classification for a bug close (the vocabulary lives in ``txn.CLOSE_CLASSES``); it is
-    parsed here and threaded to ``transition_core``, which validates it.
-
-    ``--caused-by <id>`` / ``--caused-by=<id>`` (ticket 555e) is the OPTIONAL explicit culprit
-    override for a bug close: it threads through to :func:`close_ticket`, which draws a
-    best-effort ``caused_by`` link from the (now-closed) bug to that change/ticket. Absent an
-    explicit value, the close auto-derives the culprit via git-blame.
-
-    (The ``--verdict-hash`` flag was removed pre-1.0 — DE7; the story/epic close gate
-    requires a certified signature via ``rebar sign``. It is now just an unknown
-    token, silently skipped.)"""
+    Unknown tokens are skipped. ``force_reason`` is ``None`` when absent and a possibly
+    empty string when present. Only ``--force=<reason>`` carries text, so a bare flag never
+    consumes the next token. The retired close-only spelling is rejected first to prevent
+    silent loss of a requested bypass. ``--ref`` selects the completion tree, ``--class``
+    carries the close classification, and ``--caused-by`` overrides culprit inference."""
     _reject_retired_force_close(args)
     force_reason, rest = _extract_force(args)
     from rebar._cli._parsers.core.lifecycle import build_transition
@@ -169,13 +130,10 @@ def _parse_flags(args: list[str]) -> tuple[str, str | None, str, str, str]:
 
 
 def _reject_retired_force_close(args: list[str]) -> None:
-    """Reject the retired close-only spelling (``_RETIRED_FORCE_CLOSE``) EXPLICITLY (24f7).
+    """Reject the retired close-only force spelling, bare or valued.
 
-    ``_parse_flags`` silently skips unknown tokens, so a bare removal would have turned a
-    stale ``_RETIRED_FORCE_CLOSE`` invocation into a SILENT no-op that closes the ticket
-    through the very gate it meant to bypass. Matching it here (bare or ``=<reason>``) and
-    erroring — with a message naming ``--force`` as the replacement — keeps the failure
-    loud."""
+    Unknown flags are otherwise skipped, so explicit rejection prevents stale callers from
+    silently losing their requested bypass and names ``--force`` as the replacement."""
     for a in args:
         if a == _RETIRED_FORCE_CLOSE or a.startswith(_RETIRED_FORCE_CLOSE + "="):
             raise CommandError(
@@ -188,17 +146,11 @@ def _reject_retired_force_close(args: list[str]) -> None:
 
 
 def _extract_force(args: list[str]) -> tuple[str | None, list[str]]:
-    """Pull transition's inline-only ``--force`` out of ``args``, returning
-    ``(force_reason, remaining)``.
+    """Remove inline-only ``--force`` and return ``(force_reason, remaining)``.
 
-    ``--force`` is handled here rather than by argparse because argparse cannot express an
-    inline-only optional value that is distinct from "flag absent" WITHOUT consuming a
-    following token — and transition's ``--force`` must NEVER swallow the next argv token
-    (ticket 24f7): the reason rides only via ``--force=<reason>``. ``force_reason`` is ``None``
-    when the flag is ABSENT and a (possibly empty) string when present, so the caller can tell
-    "not passed" from "passed with no value" (the None-vs-"" distinction drives the close-gate
-    bypass). ``_RETIRED_FORCE_CLOSE`` is NOT matched here — it is rejected earlier by
-    :func:`_reject_retired_force_close`."""
+    ``None`` means absent, ``""`` means a bare flag, and text is accepted only after ``=``.
+    This preserves the gate-bypass distinction without consuming the next argument. The
+    retired spelling is rejected by :func:`_reject_retired_force_close`."""
     force_reason: str | None = None
     rest: list[str] = []
     for a in args:
@@ -244,41 +196,17 @@ def transition_compute(
     cascade: bool = True,
     _cascade_seen: frozenset[str] | None = None,
 ) -> dict:
-    """Validate, guard, write, and post-process a transition for an ALREADY-RESOLVED
-    ticket id. Returns ``{ticket_id, from, to, newly_unblocked, noop}``. Raises
-    :class:`ConcurrencyMismatch` (exit 10) / :class:`CommandError`. Does NOT parse
-    ``--output`` or autodetect current — that is the CLI wrapper's job.
+    """Apply a transition to an already-resolved ticket and return its stable result mapping.
 
-    Parent-first cascade: on a CASCADING EDGE — ``open -> in_progress``, the
-    ``closed -> open`` reopen, or the ``closed -> in_progress`` reactivation (see
-    :data:`_CASCADING_EDGES`) — if the ticket's parent sits in the status eligible for
-    that edge (``open`` for the first, ``closed`` for the other two),
-    the parent is transitioned along the SAME edge first (recursively up the chain)
-    before the child; a parent failure aborts the child with an error naming the
-    parent. Pass ``cascade=False`` to suppress this for callers that replay an exact
-    recorded state per-ticket (e.g. NDJSON import) where pre-moving a parent would
-    conflict with that parent's own explicit transition. ``_cascade_seen`` is the
-    internal recursion guard (the ids already on the cascade stack) — callers leave it
-    ``None``.
-
-    ``force_reason`` is the single face of the one CLI ``--force[=<reason>]`` flag and the
-    library ``force`` parameter (ticket blusterous-earthly-kitten): ``None`` means "not
-    forcing"; any string (the audit reason, ``"(no reason given)"`` for a bare bypass)
-    forces, bypassing BOTH the start-work plan-review gate AND the completion-verify close
-    gate — whichever this transition hits — recording the reason in the audit trail. It
-    replaces the former three-way ``force`` (bool) / ``force_reason`` / ``force_close``
-    split. ``close_reason`` (ticket fc20) is the NON-force justification for a reason-only
-    administrative close (``--class obsolete``/``wontfix``): it persists as the
-    ``close_reason`` key on the close STATUS event and is signed into the disposition
-    attestation — distinct from the force-bypass reason, which records why a gate was
-    bypassed."""
+    Raises :class:`ConcurrencyMismatch` or :class:`CommandError`. Configured cascading edges
+    advance eligible parents recursively before the child. ``cascade=False`` suppresses this
+    for exact-state replay, and ``_cascade_seen`` is internal. ``force_reason=None`` means no
+    bypass. Any string bypasses the applicable start or close gate and is audited.
+    ``close_reason`` instead records a reason-required administrative disposition."""
     tracker = str(config.tracker_dir(repo_root))
-    # The code/config root — resolved the SAME way every config reader does (explicit
-    # repo_root > REBAR_ROOT > git toplevel of cwd), NOT os.path.dirname(tracker), which
-    # is the repo root ONLY when the store is co-located. REBAR_TRACKER_DIR relocating the
-    # store is supported, so inferring the root from the tracker resolved an empty config
-    # there — silently disabling the plan-review start-work gate below and misrooting the
-    # close-path blame/scratch/compaction that inherit this value (auspicial-friended-merganser).
+    # Resolve the code and configuration root through shared precedence instead of the
+    # tracker path. A relocated store can lie outside the repository. Tracker-based
+    # inference would miss gate configuration and misroot close-path work.
     repo_root_str = str(config.repo_root(repo_root))
 
     _validate_status("current_status", current_status)
@@ -330,34 +258,21 @@ def transition_compute(
             "Error: ticket system not initialized. Run 'ticket init' first.", returncode=1
         )
 
-    # Plan-review START-WORK gate. ANY entry into `in_progress` starts work on the
-    # ticket's plan, so it goes through the SAME consolidated gate as `claim` (see
-    # _commands/gates.py): blocks (fail-closed) on a missing/stale attestation when
-    # enabled, exempts bug/session_log, and a non-None `force_reason` bypasses with an
-    # audit note. Keying on the TARGET (not `current=="open"`)
-    # closes every side-door into in_progress — `open`, a `blocked` resume, or a
-    # `closed`-then-reactivate — so un-reviewed work can't slip past via an alternate
-    # edge. A same-status no-op was already short-circuited above, so reaching here with
-    # target in_progress means current is open/blocked/closed. A legitimately-reviewed
-    # ticket keeps a valid attestation and passes (including a normal block/resume).
-    # cascade=False (replay/import re-materializing a recorded status verbatim) skips it.
+    # Every transition into ``in_progress`` passes the claim start-work gate. This
+    # target-based check covers open, blocked, and closed sources after same-status no-ops
+    # have returned. ``cascade=False`` remains reserved for exact-state replay. The shared
+    # precheck exempts eligible ticket types and fails closed on missing or stale attestations
+    # unless ``force_reason`` supplies the audited bypass.
     if cascade and target_status == "in_progress":
         from rebar._commands import gates
 
-        # Gate THIS ticket first (mirrors claim_compute's order); the recursive parent
-        # transition below gates the parent in turn, so every ticket in the chain that
-        # starts work is gated. The force bypass propagates up the cascade so a forced
-        # start does not stall on an un-reviewed ancestor (claim/transition parity).
-        # The audit note is the `--force=<reason>` value, or `"(no reason given)"` for a
-        # bare bypass — identical to `claim` (the `--reason` fallback was dropped in
-        # blusterous-earthly-kitten so `--reason` feeds only close_reason).
+        # Gate the child before cascading. Each recursive parent gates itself. Pass the force
+        # note through the cascade so one explicit bypass covers the requested chain.
         note = _force_note(force_reason)
         gates.plan_review_precheck(ticket_id, repo_root_str, repo_root, force_reason=note)
 
-    # Parent-first cascade: on a cascading edge (open -> in_progress, the closed -> open
-    # reopen, and the closed -> in_progress reactivation), if this ticket has a parent in
-    # the eligible status, transition it first (recursively up the chain) so a child is
-    # never left ahead of its parent in the lifecycle. See _cascade_parent_first.
+    # Move an eligible parent along the same edge before the child to preserve lifecycle
+    # order. ``_cascade_parent_first`` performs the recursive walk.
     _cascade_parent_first(
         ticket_id,
         current_status,
@@ -370,13 +285,9 @@ def transition_compute(
         cascade_seen=_cascade_seen,
     )
 
-    # Locked write + close-path tail: the open-children guard, the completion-
-    # verification precheck (ordered verify -> close -> sign), the locked write,
-    # post-close signing / force-close audit, and compact-on-close + scratch
-    # cleanup + best-effort push. Lives in the sibling module (module-size seam);
-    # see :func:`rebar._commands.transition_close.close_ticket`. The single
-    # ``force_reason`` (None = not forcing) drives the close-gate bypass too: normalize it
-    # to the audit-note string the close path records (empty = no bypass).
+    # Delegate the close tail, which guards children, verifies, closes, and then signs. The
+    # delegate also performs the locked write, compaction, cleanup, and push. Normalize
+    # ``force_reason`` to its audit string.
     return close_ticket(
         ticket_id,
         current_status,
@@ -394,38 +305,20 @@ def transition_compute(
 
 
 def _force_note(force_reason: str | None) -> str:
-    """The audit-note string for a force bypass: ``""`` when not forcing (``force_reason``
-    is ``None``), the reason when given, or ``"(no reason given)"`` for a bare bypass — the
-    same placeholder ``claim`` uses (ticket blusterous-earthly-kitten). This is the single
-    normalization point that turns the unified ``force_reason: str | None`` into the truthy
-    audit string the start-work gate and the close path both consume."""
+    """Normalize ``force_reason`` for gate and close auditing.
+
+    ``None`` means no bypass, an empty string becomes ``"(no reason given)"``, and other
+    values pass through."""
     if force_reason is None:
         return ""
     return force_reason or "(no reason given)"
 
 
-# The cascading edges of the parent-first cascade, mapping the ``(current, target)``
-# status edge the CHILD is taking to the parent status that is ELIGIBLE to cascade on
-# it. Every entry moves the parent along the SAME edge, ahead of the child:
-#
-#   open -> in_progress   : an ``open`` parent is pulled into progress, so a descendant
-#                           is never in progress while an ancestor is merely open;
-#   closed -> open        : a ``closed`` parent is reopened, so a reopened descendant is
-#                           never left under a still-closed ancestor (bug
-#                           cranial-sulfur-peafowl);
-#   closed -> in_progress : the direct reactivation edge — a ``closed`` parent is
-#                           reactivated too, so reactivating a descendant straight into
-#                           progress never leaves it under a still-closed ancestor.
-#
-# Every other edge — notably ``* -> closed`` (which has its own open-children guard),
-# ``* -> blocked``, and the ``blocked -> in_progress`` resume — is absent and therefore
-# never cascades. The blocked resume is DELIBERATELY absent even though the start-work
-# gate fires on it (the gate keys on the TARGET status; task 65e3): a blocked child
-# never sits under a closed parent (the unconditional close guard refuses to close a
-# parent over ANY non-closed child), and on this table's same-edge shape the only
-# expressible row would auto-resume a ``blocked`` parent that is routinely blocked for
-# its own independent reason. Task 0446-4278-b7df-438d records the decision;
-# docs/concurrency.md §I4a documents the accepted residuals.
+# Cascading edges map the child's edge to the parent status eligible for that same edge.
+# Open parents enter progress before descendants. Closed parents reopen or reactivate first.
+# Transitions to closed or blocked never cascade. A blocked-child resume deliberately does
+# not resume its independently blocked parent. The close guard already prevents blocked
+# children beneath closed parents. See docs/concurrency.md §I4a.
 _CASCADING_EDGES: dict[tuple[str, str], str] = {
     ("open", "in_progress"): "open",
     ("closed", "open"): "closed",
@@ -445,31 +338,12 @@ def _cascade_parent_first(
     cascade: bool,
     cascade_seen: frozenset[str] | None,
 ) -> None:
-    """Parent-first cascade for a cascading edge (see :data:`_CASCADING_EDGES`): if
-    ``ticket_id``'s parent sits in the status eligible for this edge, transition the
-    parent along the SAME edge first (recursively up the chain, via
-    :func:`transition_compute`) so an eligible parent is never left behind on this
-    edge — an ``open`` parent is pulled into progress ahead of the child, and a
-    still-``closed`` parent is reopened/reactivated ahead of it. The guarantee is
-    per-edge and same-edge only — see docs/concurrency.md §I4a for what the cascade
-    does and does not guarantee (task 0446-4278-b7df-438d).
+    """Advance each eligible parent before the child on a configured cascading edge.
 
-    If the parent transition fails, the child is NOT transitioned and the raised error
-    names the parent as the cause (preserving the parent's exit code / concurrency
-    identity — a raced parent surfaces as exit-10 / ConcurrencyError at the leaf too).
-    ``cascade_seen`` breaks any malformed parent cycle.
-
-    The WALK itself (ancestor lookup, cycle guard, benign-race TOCTOU re-check, error
-    attribution) lives once in :func:`rebar._commands.lifecycle_cascade.cascade_parent_first`
-    — story 4329 — which ``claim`` shares; this function only supplies the two things that
-    are genuinely transition-specific: which parent status is eligible on this edge, and
-    the write primitive (:func:`transition_compute`).
-
-    A no-op unless ``cascade`` is set AND the edge is in :data:`_CASCADING_EDGES`;
-    ``cascade=False`` (replay/import re-materializing a recorded status verbatim)
-    suppresses it. Mirrors :func:`claim_compute`'s cascade, and like it is sequential
-    and fail-fast rather than transactional: a parent already moved is not rolled back
-    if the child then fails."""
+    The shared walker owns recursion, cycle protection, race rechecks, and parent-attributed
+    errors. This adapter supplies edge eligibility and :func:`transition_compute`. It is a
+    no-op when disabled or non-cascading. The fail-fast sequence is not transactional. An
+    advanced parent is not rolled back if the child fails."""
     if not cascade:
         return
     parent_status = _CASCADING_EDGES.get((current_status, target_status))
@@ -583,13 +457,11 @@ def _resolve_id_or_report(raw_id: str, tracker: str, fmt: str) -> str | None:
 
 
 def _plain_reason_refused(reason: str, force: bool, target_status: str, close_class: str) -> bool:
-    """Whether a ``--reason`` given WITHOUT ``--force`` must be refused.
+    """Return whether a non-force ``--reason`` would otherwise be discarded.
 
-    Post-unification (ticket blusterous-earthly-kitten) ``--reason`` records ONLY a
-    reason-bearing disposition's ``close_reason``. With ``--force`` present ``--reason`` is
-    permissively ignored (not refused). Any OTHER plain transition silently discarding the text
-    would be worse than refusing it. A guard function so ``transition_cli`` stays under its
-    shrink-only complexity ceiling."""
+    A reason is valid only for a reason-required close class or an ``env_integration`` close.
+    With ``--force`` it is ignored because the force value carries the bypass audit note.
+    Refuse other transitions instead of silently dropping their text."""
     if not reason or force:
         return False
     from rebar._commands import close_disposition
@@ -611,15 +483,10 @@ def _emit_transition_result(
     result: dict,
     verb: str,
 ) -> None:
-    """Print ``transition``'s result on the active channel (ticket 6bda-9d58-8546-4638).
+    """Emit the stable transition result on the selected channel.
 
-    The JSON success payload is the PRE-EXISTING shape, byte-identical; the no-op
-    path (which never had a JSON shape) and the text confirmations follow the
-    shared mutation contract. ``verb`` is ``"reopened"`` for the ``reopen`` alias —
-    its line drops the unblocked segment (reopening cannot unblock anything) —
-    and ``"transitioned"`` otherwise, where the line preserves the UNBLOCKED ids
-    datum the old close-path output carried.
-    """
+    JSON keeps the existing success shape. No-op and text output use the shared mutation
+    contract. Reopen omits unblocked data, while ordinary transitions preserve it."""
     from rebar._commands import _confirm
 
     if result["noop"]:
@@ -637,10 +504,8 @@ def _emit_transition_result(
             "to": target_status,
             "newly_unblocked": result["newly_unblocked"],
         }
-        # Same field-by-field rebuild hazard as the library return: without this the
-        # completion-signature marker never reaches a CLI consumer parsing --output json,
-        # leaving a close that landed WITHOUT its signature undetectable except by reading
-        # English off stderr (bug silvern-dewy-damselfly).
+        # Preserve the optional completion-signature marker when rebuilding the JSON payload.
+        # Callers need it to detect a close committed without its signature.
         if "completion_signature" in result:
             payload["completion_signature"] = result["completion_signature"]
         sys.stdout.write(js_safe_dumps(payload) + "\n")
@@ -657,21 +522,11 @@ def _emit_transition_result(
 
 
 def _emit_completion_signature_text(ticket_id: str, result: dict) -> None:
-    """Warn on an adjacent text line when a completion close landed UNSIGNED.
+    """Warn in text mode when a completion close committed without its signature.
 
-    The default text branch used to inspect only the ``transitioned`` datum, so a
-    completion-verified close that COMMITTED but failed to obtain its attestation
-    printed an unqualified success line — the missing-signature signal reached the
-    JSON payload, the library return, and stderr, but never the default text
-    surface (bug faulty-floppy-kob). The key is absent for a plain transition and
-    for ``idea -> closed`` (absence => not a completion close, print nothing).
-
-    Gate on the ``signed`` BOOLEAN, not on ``cause == "signed"``: an idempotent
-    atomic close is fully attested but carries ``cause == "already_equivalent"``
-    (``signed`` is True), so a cause-token check would misreport it as unsigned.
-    Warn only when the close genuinely landed WITHOUT its attestation
-    (``signed`` is False: ``sign_failed`` / ``material_drifted`` / ``force_bypassed``).
-    """
+    An absent marker is not a completion close. Check ``signed`` rather than ``cause`` because
+    an already-equivalent atomic close is signed under a different cause. Warn only when the
+    marker says it is not signed."""
     from rebar._commands import _confirm
 
     sig = result.get("completion_signature")
@@ -725,12 +580,9 @@ def transition_cli(argv: list[str], *, repo_root=None, _confirm_verb: str = "tra
 
     try:
         reason, force_reason, close_class, caused_by, ref = _parse_flags(flag_args)
-        # One `--force[=<reason>]` flag, one unified bypass (ticket
-        # blusterous-earthly-kitten). `force_reason` is None when `--force` is absent, "" for a
-        # bare `--force` (normalized to "(no reason given)" downstream), or the `--force=<reason>`
-        # text — and it bypasses BOTH the start-work and completion-verify close gates, exactly
-        # as `claim --force[=<reason>]`. `--reason` no longer stands in as the force note; it
-        # feeds only close_reason.
+        # ``None`` means absent. An empty string means a bare bypass. Other text is its audit
+        # reason. The one force value applies to either the start or completion gate.
+        # ``--reason`` remains solely a disposition close reason.
         force = force_reason is not None
         if _plain_reason_refused(reason, force, target_status, close_class):
             raise CommandError(
