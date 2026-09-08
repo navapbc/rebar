@@ -40,10 +40,15 @@ def _write_event(ticket_dir: Path, ts_ns: int, event_type: str, data: dict) -> N
     )
 
 
-def _ticket(tracker: Path, tid: str, ttype: str = "task") -> Path:
+def _ticket(tracker: Path, tid: str, ttype: str = "task", title: str | None = None) -> Path:
     d = tracker / tid
     d.mkdir(parents=True)
-    _write_event(d, _ns("2026-01-01T00:00:00"), "CREATE", {"ticket_type": ttype, "title": tid})
+    _write_event(
+        d,
+        _ns("2026-01-01T00:00:00"),
+        "CREATE",
+        {"ticket_type": ttype, "title": title or tid},
+    )
     return d
 
 
@@ -76,3 +81,47 @@ def test_single_session_is_one_attempt(tmp_path):
 
     result = attempts_per_ticket(str(tmp_path))
     assert result["bbbb-0000-0000-0002"] == 1
+
+
+def test_duplicate_title_peak_hour_uses_create_warning_normalization(tmp_path):
+    from rebar._commands.recent_creates import normalize_title
+    from rebar.metrics.event_metrics import duplicate_title_peak_hour
+
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    for index, title in enumerate(("Fix THE thing!", " fix   the thing ", "Other work")):
+        d = _ticket(tracker, f"dddd-0000-0000-000{index}", title=title)
+        create = next(d.glob("*-CREATE.json"))
+        event = json.loads(create.read_text(encoding="utf-8"))
+        event["timestamp"] = _ns(f"2026-02-01T00:0{index}:00")
+        event["data"]["title"] = title
+        create.write_text(json.dumps(event), encoding="utf-8")
+
+    assert normalize_title("Fix THE thing!") == normalize_title(" fix   the thing ")
+    result = duplicate_title_peak_hour(str(tmp_path), "2026-02-01T00:00:00", "2026-02-01T01:00:00")
+
+    assert result == {"peak_hour": 1, "alarm_threshold": 10, "alarm": False}
+
+
+def test_mass_creation_volume_peak_hour_alarms_and_clears(tmp_path):
+    from rebar.metrics.event_metrics import create_volume_peak_hour
+
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    for index in range(51):
+        d = _ticket(tracker, f"eeee-0000-0000-{index:04d}", title=f"Work {index}")
+        create = next(d.glob("*-CREATE.json"))
+        event = json.loads(create.read_text(encoding="utf-8"))
+        event["timestamp"] = _ns(f"2026-02-01T00:{index % 60:02d}:00")
+        create.write_text(json.dumps(event), encoding="utf-8")
+    quiet = _ticket(tracker, "eeee-0000-0000-9999", title="Later quiet work")
+    quiet_create = next(quiet.glob("*-CREATE.json"))
+    event = json.loads(quiet_create.read_text(encoding="utf-8"))
+    event["timestamp"] = _ns("2026-02-01T03:00:00")
+    quiet_create.write_text(json.dumps(event), encoding="utf-8")
+
+    burst = create_volume_peak_hour(str(tmp_path), "2026-02-01T00:00:00", "2026-02-01T01:00:00")
+    cleared = create_volume_peak_hour(str(tmp_path), "2026-02-01T03:00:00", "2026-02-01T04:00:00")
+
+    assert burst == {"peak_hour": 51, "alarm_threshold": 50, "alarm": True}
+    assert cleared == {"peak_hour": 1, "alarm_threshold": 50, "alarm": False}

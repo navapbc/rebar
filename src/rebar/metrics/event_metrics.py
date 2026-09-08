@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import rebar
+from rebar._commands.recent_creates import normalize_title
 from rebar.config import tracker_dir
 from rebar.metrics.registry import REGISTRY, MetricSpec
 from rebar.reducer._cache import is_active_event
@@ -43,6 +44,9 @@ from rebar.reducer._sort import event_sort_key
 # ---------------------------------------------------------------------------
 
 _NS_PER_DAY = 86_400 * 1_000_000_000
+_NS_PER_HOUR = 3_600 * 1_000_000_000
+_DUPLICATE_TITLE_ALARM_THRESHOLD = 10
+_CREATE_VOLUME_ALARM_THRESHOLD = 50
 
 
 def _ticket_dirs(repo_root: Any) -> list[str]:
@@ -306,6 +310,128 @@ def first_pass_rate(
     return single / len(attempts)
 
 
+def _create_events(repo_root: Any, since: str | None, until: str | None) -> list[dict[str, Any]]:
+    """CREATE events in range, sorted by event timestamp."""
+
+    lo, hi = _bounds(since, until)
+    events: list[dict[str, Any]] = []
+    for ticket_dir in _ticket_dirs(repo_root):
+        for path in _event_files(ticket_dir, "CREATE", include_retired=True):
+            event = _load(path)
+            if _in_range(event.get("timestamp"), lo, hi):
+                event["_ticket_id"] = os.path.basename(ticket_dir)
+                events.append(event)
+    events.sort(key=lambda event: event["timestamp"])
+    return events
+
+
+def _distinct_file_impact_ticket(repo_root: Any, ticket_id: Any) -> str | None:
+    """Single-file impact discriminator for legitimate same-title path work."""
+
+    if not isinstance(ticket_id, str):
+        return None
+    ticket_dir = os.path.join(str(tracker_dir(repo_root)), ticket_id)
+    if not os.path.isdir(ticket_dir):
+        return None
+    impact_events = _event_files(ticket_dir, "FILE_IMPACT", include_retired=True)
+    if not impact_events:
+        return None
+    impacts = (_load(impact_events[-1]).get("data") or {}).get("file_impact") or []
+    if len(impacts) != 1:
+        return None
+    impact = impacts[0]
+    if isinstance(impact, str):
+        return impact
+    if isinstance(impact, dict):
+        path = impact.get("path") or impact.get("file")
+        return path if isinstance(path, str) else None
+    return None
+
+
+def _recurring_alert_create(event: dict[str, Any]) -> bool:
+    """True for known recurring bridge alert filings that intentionally reuse titles."""
+
+    data = event.get("data") or {}
+    title = str(data.get("title") or "")
+    return event.get("author") == "rebar-bridge[bot]" and title.startswith("[binding-drift]")
+
+
+def _duplicate_excess(repo_root: Any, events: list[dict[str, Any]]) -> int:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        if _recurring_alert_create(event):
+            continue
+        title_norm = normalize_title(str((event.get("data") or {}).get("title") or ""))
+        if title_norm:
+            grouped.setdefault(title_norm, []).append(event)
+
+    excess = 0
+    for matches in grouped.values():
+        if len(matches) < 2:
+            continue
+        impacts = {
+            _distinct_file_impact_ticket(repo_root, event.get("_ticket_id")) for event in matches
+        }
+        if None not in impacts and len(impacts) == len(matches):
+            continue
+        excess += len(matches) - 1
+    return excess
+
+
+def _peak_rolling_hour(events: list[dict[str, Any]], count: Any) -> int:
+    peak = 0
+    start = 0
+    for end, event in enumerate(events):
+        cutoff = event["timestamp"] - _NS_PER_HOUR
+        while start <= end and events[start]["timestamp"] < cutoff:
+            start += 1
+        peak = max(peak, count(events[start : end + 1]))
+    return peak
+
+
+def _alarm_value(peak_hour: int, threshold: int) -> dict[str, Any]:
+    return {
+        "peak_hour": peak_hour,
+        "alarm_threshold": threshold,
+        "alarm": peak_hour > threshold,
+    }
+
+
+def duplicate_title_peak_hour(
+    repo_root: Any,
+    since: str | None = None,
+    until: str | None = None,
+) -> dict[str, Any] | None:
+    """Peak excess same-normalized-title CREATEs in any rolling hour.
+
+    The title signature is exactly the create-time ``duplicate_warning`` normalizer. Distinct
+    one-file impacts suppress known legitimate path-collision work, and recurring bridge fsck
+    alerts are exempt because they intentionally reuse titles. Missing data is not breaching:
+    this observer publishes measured zeroes; absent output means the observer itself is down.
+    """
+
+    events = _create_events(repo_root, since, until)
+    if not events:
+        return None
+    return _alarm_value(
+        _peak_rolling_hour(events, lambda window: _duplicate_excess(repo_root, window)),
+        _DUPLICATE_TITLE_ALARM_THRESHOLD,
+    )
+
+
+def create_volume_peak_hour(
+    repo_root: Any,
+    since: str | None = None,
+    until: str | None = None,
+) -> dict[str, Any] | None:
+    """Peak title-independent CREATE volume in any rolling hour."""
+
+    events = _create_events(repo_root, since, until)
+    if not events:
+        return None
+    return _alarm_value(_peak_rolling_hour(events, len), _CREATE_VOLUME_ALARM_THRESHOLD)
+
+
 # ---------------------------------------------------------------------------
 # c085 registry integration — single-arg context adapters.
 # ---------------------------------------------------------------------------
@@ -362,6 +488,8 @@ def register() -> None:
         _spec("revert_recovery", revert_recovery),
         _spec("reopen_recovery", reopen_recovery),
         _spec("first_pass_rate", first_pass_rate),
+        _spec("duplicate_title_peak_hour", duplicate_title_peak_hour),
+        _spec("create_volume_peak_hour", create_volume_peak_hour),
     ]
     for spec in specs:
         if spec.id not in existing:
