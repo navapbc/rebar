@@ -1,4 +1,4 @@
-"""Browser E2E coverage for the workflow editor.
+"""Exercise the workflow editor in browser E2E tests.
 
 Headless Chromium exercises the built bundle through an editor server. The tests verify
 rendered edges and layout, selection-driven properties, and saved IR changes. Missing browser

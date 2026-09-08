@@ -1,4 +1,4 @@
-"""Browser E2E coverage for prompt library authoring and typed insertion.
+"""Exercise prompt library authoring and typed insertion in browser E2E tests.
 
 A Chromium session verifies prompt listing, ``ScriptTask`` and ``ServiceTask`` insertion,
 and prompt creation through ``/prompt/save`` under the temporary project root. Unavailable
