@@ -145,6 +145,26 @@ def test_no_declaration_means_no_assertion(scratch_host) -> None:
     assert ran == [True]
 
 
+def test_configured_dedicated_scratch_path_refuses_without_markers(
+    scratch_host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The post-launch attach miss: host config says scratch is dedicated, markers absent.
+
+    This is the third state that was silent: Terraform/compose had routed gates to the
+    dedicated mount path, but user_data had never mounted or marked the volume because it runs
+    only at first boot. The configured path is durable host state, so it must arm the same
+    refusal as the root-side declaration marker.
+    """
+    host = scratch_host
+    monkeypatch.setattr(ga, "_CANONICAL_GATE_SCRATCH_MOUNT", host.base)
+
+    with pytest.raises(GateScratchUnavailableError) as excinfo:
+        with ga.gate_admission("plan_review", "t-absent", host.base):
+            pytest.fail("the gate ran on the root-backed scratch directory")
+
+    assert "configured as the dedicated scratch volume" in str(excinfo.value)
+
+
 def test_proof_without_declaration_also_admits(scratch_host) -> None:
     """The fourth quadrant, stated rather than left to fall out of the implementation.
 
@@ -257,6 +277,13 @@ def test_the_scratch_bind_carries_the_declaration_marker_into_the_container() ->
     volumes = _review_bot_service()["volumes"]
     parent = str(Path(SCRATCH_MOUNT).parent)
     assert any(str(v).startswith(f"{parent}:{parent}") for v in volumes), volumes
+
+
+def test_gate_admission_knows_the_compose_configured_dedicated_path() -> None:
+    """Compose's REBAR_GATE_TMPDIR is now itself an arming source for the refusal."""
+    env = _review_bot_service()["environment"]
+    assert env["REBAR_GATE_TMPDIR"] == SCRATCH_MOUNT
+    assert str(ga._CANONICAL_GATE_SCRATCH_MOUNT) == SCRATCH_MOUNT
 
 
 # ── observability: the metric behind the alarms ──────────────────────────────────────
