@@ -1,6 +1,6 @@
-"""Tests for bounded, selection-driven E2E toolchain provisioning.
+"""Test bounded, selection-driven E2E toolchain provisioning.
 
-Each case uses stub npm and Node executables, so the suite performs no network access. The
+Cases that invoke npm or Node use stub executables, so the suite performs no network access. The
 tests cover collection-time provisioning, named failures, locking, optional browser packages,
 fixture fallbacks, and satisfied-tree no-ops.
 """
