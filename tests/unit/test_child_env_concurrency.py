@@ -1,19 +1,7 @@
-"""Concurrency oracle for RP-04 S3 child-env projection (ticket 6e3b, AC4).
+"""Concurrency tests for child environment projection.
 
-AC4: *Concurrent-operation tests prove no global environment mutation and no
-cross-operation credential/config observation.* The ticket's Testing section requires
-"Concurrency tests run distinct operations with different overlays and timeouts,
-asserting ``os.environ`` is byte-equal before/during/after and no cross-operation value
-is observed."
-
-``_child_env.project_child_env`` is a pure function that returns a fresh mapping and never
-touches the global environment, so distinct operations may project concurrently with
-per-operation overlays without any interference. These tests exercise that invariant under
-real thread contention: each worker owns a distinct secret value, and the tests assert (a)
-each worker observes ONLY its own overlaid credential, never a sibling's, and (b) the
-global ``os.environ`` is byte-for-byte identical before, during, and after the storm.
-
-Observable behavior only — returned mappings and the (non-)mutation of ``os.environ``.
+Parallel projections receive their own credential overlays without observing sibling values.
+The caller's mapping and ``os.environ`` remain unchanged throughout the run.
 """
 
 from __future__ import annotations

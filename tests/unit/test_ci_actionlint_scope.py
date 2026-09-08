@@ -1,14 +1,6 @@
-"""CI guard: `make lint` must actionlint ALL workflows, not just release.yml.
+"""Tests that ``make lint`` invokes actionlint across every workflow.
 
-Bug 8002: ``reconcile-bridge.yml`` shipped a job-level ``${{ runner.temp }}`` — a GitHub
-Actions *startup failure* (zero jobs, no rebar->Jira sync for ~2 days) — and merged with a
-green Gerrit ``Verified`` vote because ``make lint`` only ran actionlint against
-``release.yml``. Widening actionlint to every workflow closes that gap.
-
-The existing ``test_ci_workflow_parity.py`` only asserts both CI legs invoke the *string*
-``make lint``; it does NOT check actionlint's scope. This test is the guard for that scope:
-it fails if the Makefile ``lint`` target is ever re-narrowed to a release.yml-only actionlint,
-so the bug-8002 regression cannot recur silently.
+The lint recipe must keep actionlint enabled and must not restrict it to the release workflow.
 """
 
 from __future__ import annotations

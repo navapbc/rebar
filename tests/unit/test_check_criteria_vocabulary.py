@@ -192,12 +192,8 @@ def test_symlink_into_excluded_tree_is_not_rescanned(tmp_path: Path) -> None:
     assert _run(tmp_path).returncode == 0
 
 
-# Held-out git-scope contract (bug d5ae): when the root IS a git repository the guard must
-# consider exactly the files git would — so a gitignored tree (`.claude/worktrees/...`,
-# `bridge_state/`) is invisible to it, while tracked and untracked-but-not-ignored files are
-# scanned exactly as before. Before this contract the guard walked the whole filesystem and a
-# single agent worktree produced tens of thousands of violations, permanently reddening the
-# `make lint` commit gate in any checkout that had ever created one.
+# Git repositories scan tracked and untracked files while excluding ignored paths. This keeps
+# agent worktrees and bridge state outside the vocabulary check.
 def _init_git_repo(root: Path) -> None:
     subprocess.run(["git", "init", "--quiet"], cwd=root, check=True, capture_output=True)
 
@@ -291,11 +287,8 @@ def test_make_lint_rejects_live_vocabulary_through_guard(tmp_path: Path) -> None
     shutil.copy2(SCRIPT, scripts / SCRIPT.name)
     (scripts / "criteria-vocabulary-allowlist.txt").write_text("", encoding="utf-8")
     (scripts / "check_dco_identity.py").write_text("", encoding="utf-8")
-    # `make lint` also runs the complexity-baseline gate (story c9f7), the
-    # config-ownership + config-read gates (RP-04 S7.2) and the env-var registry drift
-    # check before the vocabulary guard under test; stub them as no-ops so this sandbox
-    # reaches the guard. A new `make lint` gate needs a stub here or it aborts the run
-    # early and this test fails on a missing script rather than on the guard.
+    # Stub the lint gates that precede this guard so the sandbox reaches the vocabulary
+    # check.
     (scripts / "check_complexity_baseline.py").write_text("", encoding="utf-8")
     (scripts / "check_config_ownership.py").write_text("", encoding="utf-8")
     (scripts / "check_config_reads.py").write_text("", encoding="utf-8")

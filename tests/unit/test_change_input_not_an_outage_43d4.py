@@ -1,18 +1,9 @@
-"""Bug 43d4 — a ``CHANGE_INPUT`` provider failure must not wear provider-OUTAGE clothes.
+"""Provider failure classification tests for rejected request input.
 
-``interpret_failure``'s broad arm classifies every unrecognised provider exception and then
-raises ``LLMUnavailableError`` regardless of what the classification said. For a
-``CHANGE_INPUT`` failure — a context-length 400, a 413, a content-filter refusal — that is the
-wrong type: the provider is healthy, the *input* is not, and no amount of waiting will help.
-
-The consequence is not cosmetic. ``plan_review.sizing.pass1_with_ladder`` orders its handlers
-``except LLMUnavailableError: raise`` BEFORE ``except Exception: if is_context_limit_error(...)``,
-and Python matches top-to-bottom — so the size ladder that exists precisely for this provider
-signal can never see it. §C below is the mechanism test: it drives the REAL ladder and observes
-the fallback that the wrong type suppresses.
-
-Every assertion here is on observable behaviour — a raised type, a message, a call count, the
-ladder's own event strings — never a private name or a grep of source text.
+Context limits, oversized requests, and content refusals raise ``LLMInputRejectedError``
+without masquerading as outages. Provider text remains available to the size ladder,
+classified dispositions stay attached, retry and fallback boundaries remain unchanged, and
+the epic bug screen propagates rejection.
 """
 
 from __future__ import annotations
@@ -161,14 +152,7 @@ def test_the_new_type_stays_inside_the_shared_error_vocabulary():
     ],
 )
 def test_a_genuine_outage_still_raises_the_outage_type(exc):
-    """AC#3 — THE test that matters. A change that relabels EVERYTHING as an input problem
-    satisfies AC#1 and AC#2 while being strictly worse than today: it would tell an operator to
-    shrink their prompt during a provider incident, and it would send a 5xx down the plan-review
-    size ladder to burn the whole model ladder on an error no smaller input can fix.
-
-    Both halves are load-bearing. ``type(...) is`` catches a relabel-everything change; the
-    401 and the malformed-400 rows catch the subtler over-reach of keying on 'status is 4xx'
-    or 'retryable is False' instead of on the CHANGE_INPUT classification the seam computes."""
+    """Keep non-``CHANGE_INPUT`` failures typed as ``LLMUnavailableError``."""
     err = _raised(exc)
     assert type(err) is LLMUnavailableError, (
         f"a genuine outage surfaced as {type(err).__name__}; the change relabels rather than "
@@ -208,14 +192,7 @@ def _drive_the_real_ladder(monkeypatch, boom: BaseException) -> tuple[list, list
 
 
 def test_a_rejected_input_reaches_the_size_ladder_instead_of_aborting_the_review(monkeypatch):
-    """The mechanism. ``pass1_with_ladder`` documents 'on a context-limit signal, fall back to
-    ONE CRITERION PER CALL … ESCALATE up the model ladder … emit a FAILURE FINDING', but its
-    ``except LLMUnavailableError: raise`` arm is evaluated BEFORE the arm that consults
-    ``is_context_limit_error``. While the seam raises an outage type the documented fallback is
-    unreachable: the batch call fails once and the whole review aborts unsigned.
-
-    Asserting the batch fallback ACTUALLY RAN — three calls and the ladder's own event strings —
-    is what separates this from a test that would pass on any renamed exception."""
+    """Route a context-limit rejection through the per-criterion size fallback."""
     boom = _raised(_http(400, _CONTEXT_400_TEXT))
     calls, events, findings = _drive_the_real_ladder(monkeypatch, boom)
 
@@ -243,14 +220,7 @@ def test_an_outage_still_aborts_the_review_rather_than_climbing_the_ladder(monke
 
 
 def test_the_new_prefix_does_not_itself_look_like_a_context_limit():
-    """A prefix-wording trap with real consequences. ``is_context_limit_error`` matches the
-    WHOLE string, so a prefix containing any of its phrases ('context', 'input length',
-    'token limit', 'exceeds the maximum', …) would make EVERY rejected input — a content-filter
-    refusal included — read as a context limit and burn the full model ladder before emitting a
-    bogus 'too big to review' finding.
-
-    The context-400 must match on the PROVIDER's text; the content-filter refusal must not
-    match at all."""
+    """Let only the provider message identify a context-limit rejection."""
     from rebar.llm.plan_review.sizing import is_context_limit_error
 
     context_err = _raised(_http(400, _CONTEXT_400_TEXT))
@@ -305,15 +275,7 @@ def test_fallback_eligibility_is_unchanged(exc, expected):
 
 
 def test_a_rejected_input_still_fails_the_epic_bug_screen_closed():
-    """Bug 1019's operator-ratified ruling is that a systemic provider error must propagate
-    out of the epic-close bug screen rather than degrade each candidate to ``C``, because a
-    screen that never ran must not report success.
-
-    A prompt-too-long or content-refused screen is blind for exactly the same reason, but it
-    arrives on a different type — so the narrow ``except LLMUnavailableError`` that enforced
-    the ruling silently stops enforcing it. Without this assertion, an epic whose material
-    outgrew the window would screen every candidate as ``C`` ("not a blocker") and close on
-    evidence no model ever produced."""
+    """Propagate rejected input when the epic bug screen has no model evidence."""
     from rebar.llm import epic_bug_screen
 
     def _rejects(bug: dict, system_prompt: str) -> dict:

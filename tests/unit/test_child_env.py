@@ -1,21 +1,8 @@
-"""Happy-path oracle for the RP-04 S3 child-environment projection (ticket 6e3b).
+"""Behavioral tests for child environment projection.
 
-RP-04 S3 adds ``src/rebar/_child_env.py``: a PURE environment-projection API plus a
-checked-in registry of the exact secret env-var NAMES each Rebar adapter owns (names,
-never values). A reconciler that spawns a child process projects the parent environment
-through this API so that:
-
-- a trusted *same-capability* child inherits the ambient environment,
-- an *owning* child receives ONLY its adapter's overlay for adapter-owned secrets,
-- an *unrelated sibling* has every Rebar adapter's declared secret NAME removed,
-- unknown native Git/SSH/AWS/proxy/CA variables always survive, and
-- projecting NEVER mutates the caller's mapping or the global ``os.environ``.
-
-This file is the happy-path specification the implementer works against. The
-edge/purity/leak cases live in a held-out oracle the implementer does not see.
-
-Observable behavior only — the returned mapping and (non-)mutation of inputs. No
-assertions on private names or source text.
+A same-capability child inherits ambient values. An owning child receives its adapter
+credentials, while unrelated children lose every registered adapter secret. Unknown process
+settings survive, and projection does not mutate its input or ``os.environ``.
 """
 
 from __future__ import annotations

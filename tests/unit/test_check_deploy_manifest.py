@@ -1,20 +1,8 @@
-"""Self-tests for the deploy-manifest completeness gate (ticket ``0a6a-04d3-8fd9-4cd5``).
+"""Tests for deploy-manifest completeness.
 
-The gate exists because ``infra/scripts/autodeploy.sh``'s hand-curated ``*_PATHS`` manifests
-have silently fallen out of sync with reality four times — a deploy-relevant infra file added
-but never listed, so a later change to it drifts to the running box with no signal. The gate
-DERIVES the expected path set from Dockerfile/compose directives and filename conventions and
-fails on drift, so the enforced list can never silently diverge.
-
-These tests pin, against the REAL repo:
-  * the guard PASSES on the complete manifests (current ``origin/main``);
-  * a RED case — a derived path omitted from every manifest fails for the RIGHT reason,
-    naming that path and the derivation source that matched it;
-  * the mutation check — re-omitting any covered derived path returns the gate to RED, so the
-    coverage check has teeth for each manifest entry, then restore;
-  * the exclusion mechanism (each entry has a reason, and an excluded path is suppressed);
-  * the gate's wiring into ``make lint`` (a CI-only gate lets a local verdict be green over a
-    tree CI rejects).
+The checker derives deployment paths from container inputs and filename conventions,
+compares them with each manifest and justified exclusion, and is invoked by ``make lint``.
+Mutation cases prove that removing a derived path produces a named failure.
 """
 
 from __future__ import annotations
