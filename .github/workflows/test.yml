@@ -1,18 +1,18 @@
 name: Test Suite (mirror)
 
-# Branch-head CI entrypoint. `_build-and-test.yml` owns the shared lint, audit, default
-# Python, and CI-safe integration lanes used here and by Gerrit's exact-patchset Verified
-# workflow. This file adds clean-install, artifact-provenance, optional live-external, and
-# scheduled breadth lanes; triggers select among them rather than all running every time.
-# Live Jira validation uses manual bridge probes. Credentialed external tests remain outside
-# the default `not integration and not external` selection.
+# This workflow is the branch-head CI entrypoint. `_build-and-test.yml` defines the shared lint,
+# audit, default Python, and CI-safe integration lanes used here and by Gerrit's exact-patchset
+# Verified workflow. This file adds clean-install, artifact-provenance, opt-in external, and
+# scheduled breadth lanes. Triggers select the applicable lanes. Manual bridge probes validate
+# Jira. External tests remain outside the default
+# `not integration and not external` selection.
 
 on:
   push:
-    # Run ordinary branch pushes, excluding replicated `feature/**`, `main`, and the event-log
-    # `tickets` branch. Gerrit's dispatch is the sole pre-merge Verified source. Main health is
-    # scheduled because same-ref cancellation made per-push runs misleading; ticket writes must
-    # never consume code-CI capacity. `**` covers every nested feature depth.
+    # Ordinary branch pushes run this workflow except replicated `feature/**`, `main`, and
+    # `tickets`. Gerrit's dispatch provides the pre-merge Verified result. The schedule reports
+    # periodic main health. Ticket events do not consume code-CI capacity. `**` matches every
+    # nested feature depth.
     branches-ignore: ["feature/**", "main", "tickets"]
   pull_request: {}
   workflow_dispatch:
@@ -38,7 +38,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Shared gate definition: no input checks this branch head; Gerrit supplies its patchset ref.
+  # The shared gate definition checks this branch head when no input is supplied. Gerrit supplies
+  # its patchset ref.
   build-and-test:
     uses: ./.github/workflows/_build-and-test.yml
 
@@ -52,10 +53,11 @@ jobs:
     if: github.event_name != 'schedule'
     uses: ./.github/workflows/_scanner-integration.yml
 
-  # The only credentialed, REBAR_RUN_EXTERNAL=1 lane: live Jira mutations and billable LLM
-  # calls cannot leak into the secretless reusable tests. It requires an explicit dispatch
-  # input in the canonical owner-run repo, excluding forks, PRs, schedules, and ordinary health
-  # dispatches. Daily concurrency caps it; the separate weekly external workflow is unchanged.
+  # This lane sets `REBAR_RUN_EXTERNAL=1` so Jira mutations and billable model requests stay
+  # outside secretless reusable tests. Its condition requires a workflow dispatch, an explicit
+  # input, and an actor whose name equals the repository owner. Pull requests, schedules, and
+  # ordinary health dispatches cannot select it. The workflow-wide per-ref concurrency policy
+  # also applies. The weekly external workflow remains separate.
   external:
     name: external-integration (live Jira + LLM)
     runs-on: ubuntu-latest
@@ -81,22 +83,21 @@ jobs:
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
       - name: Run the external tier (live; opt-in + credential scoped)
-        # The opt-in lifts the tier skip; individual tests still self-skip without their own
-        # credentials/extras. Wire repository or organization secrets to these keys:
+        # The opt-in lifts the tier skip. Each test still skips when its required credentials or
+        # extras are unavailable. A project copy can enable the commented credential mappings:
         #   JIRA_URL: ${{ secrets.JIRA_URL }}
         #   JIRA_USER: ${{ secrets.JIRA_USER }}
         #   JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
         #   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        # Without them, tests self-skip while proving the tier is reachable only here.
+        # Without these values, tests skip while confirming that only this lane reaches the tier.
         env:
           REBAR_RUN_EXTERNAL: "1"
           # JIRA_URL: ${{ secrets.JIRA_URL }}
           # JIRA_USER: ${{ secrets.JIRA_USER }}
           # JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        # Thread-mode timeout can interrupt C-level socket/subprocess waits. This lane has no
-        # runtime history, so its 600-second bound follows the identical external selection's
-        # measured 85-120-second steps with ample headroom.
+        # Thread-mode timeout can interrupt C-level socket or subprocess waits. The 600-second
+        # bound covers the selected external tests.
         run: >-
           pytest -m external -q -p no:cacheprovider
           --timeout=600 --timeout-method=thread
@@ -146,14 +147,15 @@ jobs:
           fi
           python scripts/probe_rebar.py </dev/null
 
-  # Shared artifact-provenance probe: no input checks this branch head; Gerrit supplies its
-  # exact patchset ref so the two lanes cannot drift.
+  # The shared artifact-provenance probe checks this branch head when no input is supplied.
+  # Gerrit supplies its exact patchset ref so the two lanes cannot drift.
   artifact-probe:
     uses: ./.github/workflows/_artifact-probe.yml
 
-  # Scheduled health loses per-commit attribution, so publish its verdict, the last green main
-  # SHA, and a copyable bisect recipe. Resolve the lower bound read-only from this workflow's
-  # successful Actions history; if unavailable, report that softly rather than reddening main.
+  # Scheduled health does not identify a failing commit directly. Publish the verdict, the most
+  # recent successful main SHA, and a copyable bisect recipe. Resolve the lower bound from this
+  # workflow's successful Actions history without writes. An unavailable bound produces a report
+  # and does not fail main.
   main-health-report:
     name: main health report (last known green + bisect recipe)
     # Branch-health lanes only. A PR has its own per-commit attribution and needs no bisect
@@ -170,9 +172,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The tested script owns API lookup and rendering so quoting, 403s, and fallbacks are
-      # exercised offline. GH_TOKEN and job-level `actions: read` are both required; otherwise
-      # every run would silently degrade to the missing-lower-bound report.
+      # The tested script owns API lookup and rendering so offline tests cover quoting, 403
+      # responses, and fallbacks. Both `GH_TOKEN` and job-level `actions: read` are required.
+      # Omitting either value makes every run use the missing-lower-bound report.
       - name: Publish the verdict, the last known-green SHA, and the bisect recipe
         env:
           GH_TOKEN: ${{ github.token }}
@@ -191,13 +193,15 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --workflow-file test.yml >> "$GITHUB_STEP_SUMMARY"
 
-  # Scheduled/manual breadth only: newer interpreters, Windows, full macOS, declared floors,
-  # and external links add visible advisory coverage without casting Verified or affecting the
-  # push/PR hot path. The shared lane already covers intermediate Python on these triggers.
+  # Scheduled and manual breadth runs cover newer interpreters, Windows, full macOS, declared
+  # dependency floors, and external links. They provide advisory results without casting Verified
+  # or extending the push and pull-request hot path. The shared lane covers intermediate Python
+  # versions for the same triggers.
 
-  # Sweep stable 3.14 against the committed lock as a must-pass pure interpreter signal.
-  # Experimental 3.15 and free-threaded 3.14 predate lock wheel coverage, so they re-resolve
-  # latest and remain non-blocking; dependency drift there must not paint branch health red.
+  # Test stable Python 3.14 against the committed lock as a required interpreter-compatibility
+  # signal. Python 3.15 and free-threaded 3.14 may lack locked wheels, so those jobs resolve
+  # available dependencies and remain nonblocking. Their dependency changes do not affect branch
+  # health.
   sweep-interpreters:
     name: sweep (py${{ matrix.python-version }})
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -244,8 +248,8 @@ jobs:
           --timeout=600 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp-sweep-interp"
 
-  # Advisory Windows sweep for path, temp-directory, git, and file-lock regressions. Windows is
-  # not yet a supported gate target, so failures stay visible but non-blocking.
+  # The advisory Windows job detects path, temporary-directory, Git, and file-lock regressions.
+  # Windows is not a supported gate target, so failures remain visible without blocking merges.
   sweep-windows:
     name: sweep (windows)
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -265,9 +269,9 @@ jobs:
         run: |
           uv venv --python 3.13
           uv pip install ".[dev,reviewbot,ui]"
-      # Name the real Windows proof that the write lock excludes across processes and releases
-      # on holder death. The default suite already covers it silently under `-q`; this verbose
-      # rerun precedes that suite so its platform-only verdicts remain readable.
+      # This step names the Windows evidence that the write lock excludes concurrent processes and
+      # releases after the holder exits. The default suite covers the same module without named
+      # output under `-q`. Running it first preserves the platform-specific verdicts in the log.
       # mechanism-ok: ci_gate .github/workflows/test.yml::Prove the Windows exclusive leg (named verdicts) — story 4cfc-2de2-747d-4388 AC4: windows-latest is the only place the real msvcrt.locking's cross-process exclusivity and release-on-process-death can be established, and under the default suite's `-q` a passing proof prints NOTHING, so the evidence was readable only as absence. This step gates nothing (the job is continue-on-error) and adds no new coverage — it re-runs one already-running module so its verdicts are named in the log.
       - name: Prove the Windows exclusive leg (named verdicts)
         # Skip trees predating the module. Use bash because Windows defaults to pwsh and the
@@ -317,9 +321,10 @@ jobs:
           --timeout=600 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp-macos-full"
 
-  # Resolve core, dev, and agents at declared minimums on oldest-supported Python 3.11, then run
-  # units to prove those floors—not merely the lock—work. Floorless web extras stay out of scope
-  # and self-skip; adding their floors is separate work.
+  # Resolve core, dev, and agents dependencies at their declared minimums on supported Python 3.11.
+  # Run unit tests to verify those floors independently of the lock. Web extras without declared
+  # floors remain out of scope and skip their tests. Their dependency floors belong to separate
+  # work.
   sweep-lower-bounds:
     name: sweep (declared lower-bound resolution)
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}

@@ -1,13 +1,13 @@
 name: Verify Authorship Identity
 
-# Verify each mutating event against its author's ancestry-scoped keyring. Project config—not
-# CI overrides—selects report-only or fail-closed authenticated authorship and its
-# `identity.enforce_since` grandfather boundary, so rollout-era events remain advisory.
+# Verify each mutating event against the author's ancestry-scoped keyring. Project configuration
+# selects report-only or fail-closed authenticated authorship. The `identity.enforce_since`
+# boundary keeps preceding events advisory.
 
-# Trigger audit: push is INCLUDED/NO_FILTER except its branch exclusions; pull_request is
-# INCLUDED/NO_FILTER; workflow_dispatch is INCLUDED; schedule is INCLUDED/NO_FILTER.
-# Push excludes `feature/**` and `main`: Gerrit retains exact-patchset pre-merge verification,
-# while scheduled/manual runs replace misleading same-ref-cancelled main pushes.
+# The trigger audit classifies `push` as INCLUDED/NO_FILTER apart from branch exclusions. It
+# classifies `pull_request` as INCLUDED/NO_FILTER, `workflow_dispatch` as INCLUDED, and `schedule`
+# as INCLUDED/NO_FILTER. Push excludes `feature/**` and `main`. Gerrit verifies each patch set
+# before merge. Scheduled and manual runs replace cancellable same-ref main pushes.
 on:
   push:
     # `tickets` is rebar's event log: every ticket write auto-pushes it, so a trigger here
@@ -28,9 +28,9 @@ jobs:
     name: verify-identity (authenticated-authorship gate)
     runs-on: ubuntu-latest
     env:
-      # Temporary 550 MiB bridge for the ~481 MiB blobless tickets pack while epic 536b lands
-      # history reclamation and structural fixes. Safe compaction alone cannot meet 100 MiB.
-      # Restore 102400 after the pack verifies below that limit (0894-b9b8-6590-4904).
+      # `REBAR_CHECKOUT_PACK_LIMIT_KIB` is temporarily 563200 for the ~481 MiB blobless tickets
+      # pack. Safe compaction cannot reduce the pack below 100 MiB. Restore 102400 after the pack
+      # measures below that limit as tracked by `0894-b9b8-6590-4904`.
       REBAR_CHECKOUT_PACK_LIMIT_KIB: 563200
     steps:
       - uses: actions/checkout@v7
@@ -60,9 +60,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
       - name: Mount tickets branch as a worktree
-        # Materialize the orphan `tickets` store as its actual branch in `.tickets-tracker`;
-        # the code checkout lacks it. Fetch full history for merge-base and ancestry-scoped key
-        # verification, matching reconcile-bridge.yml.
+        # Materialize the orphan `tickets` store on its `tickets` branch in `.tickets-tracker`.
+        # The code checkout does not contain this store. Fetch full history so merge-base and
+        # ancestry-scoped key verification match reconcile-bridge.yml.
         run: |
           set -euo pipefail
           git fetch origin '+tickets:refs/remotes/origin/tickets'

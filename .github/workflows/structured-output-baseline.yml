@@ -1,11 +1,12 @@
 name: Structured-Output Baseline
 
-# Manual, non-gating measurement of structured-output reliability across providers, directives,
-# and production-shaped prompts. It makes real billable calls and uploads raw replies plus the
-# before/after score table. Deterministic scoring, credential checks, and the pre-call budget cap
-# live in tests/external/_structured_matrix.py and are tested offline; this workflow only scopes
-# provider credentials and wires the live matrix. workflow_dispatch keeps every paid sweep an
-# explicit operator action.
+# This manual measurement compares structured-output reliability across providers, directives,
+# and production-shaped prompts. It does not gate merges. It sends billable model requests and
+# uploads raw replies with the before-and-after score table. The module
+# `tests/external/_structured_matrix.py` contains deterministic scoring, credential checks, and
+# the pre-call budget cap, with offline tests. This workflow scopes provider credentials and
+# configures the request matrix. `workflow_dispatch` requires an explicit operator action for
+# each paid sweep.
 
 on:
   workflow_dispatch:
@@ -94,9 +95,9 @@ jobs:
           # The external tier is inert unless this opt-in is set (a guard against accidental
           # billable calls).
           REBAR_RUN_EXTERNAL: "1"
-        # Bound the single test that drives the whole live matrix to 3600 seconds. Thread mode
-        # can interrupt C-level socket waits that signal mode cannot. The generous bound covers
-        # operator-raised `max_calls`, rather than truncating a paid sweep to recent 65-173s runs.
+        # Bound the single test that drives the complete request matrix to 3600 seconds. Thread
+        # mode can interrupt C-level socket waits that signal mode cannot. The bound accommodates
+        # the configurable `max_calls` input.
         run: >-
           pytest tests/external/test_structured_output_matrix.py -q
           --timeout=3600 --timeout-method=thread

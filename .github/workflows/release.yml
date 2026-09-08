@@ -1,19 +1,19 @@
 name: Release
 
-# Publish nava-rebar through PyPI Trusted Publishing (OIDC), without a stored token.
-# Releases are manual dispatches from `refs/heads/main`, never pushed tags. Before building,
-# `authorize` checks the ref, version lockstep across the input/pyproject/server manifest,
-# HEAD ancestry, and required-reviewer plus main-only policy on the `pypi` environment.
-# Guard logic is unit-tested in scripts/release_guards.py.
+# Publish nava-rebar through PyPI Trusted Publishing (OIDC) without a stored token.
+# Releases use manual dispatch from `refs/heads/main`. Pushed tags cannot start a release.
+# Before building, `authorize` checks the source ref, version lockstep among the input,
+# `pyproject.toml`, and `server.json`, HEAD ancestry, and the required reviewer and main-only
+# policies for `pypi`. `scripts/release_guards.py` contains the tested guard logic.
 #
-# Actions use immutable SHAs; the no-isolation build uses a hash-locked toolchain; and an
-# unprivileged job verifies the exact mcp-publisher archive before its OIDC job executes it.
-# Artifacts are built once, tested, then promoted byte-for-byte. PyPI publishes directly by
-# OIDC; the `v*` tag and GitHub Release are post-publish records, never triggers.
+# Actions use immutable SHAs. The build uses a hash-locked toolchain without isolation. An
+# unprivileged job verifies the pinned mcp-publisher archive before the OIDC job executes it.
+# The workflow builds artifacts once and promotes the tested bytes. PyPI receives them through
+# OIDC. The `v*` tag and GitHub Release record successful publication and do not trigger it.
 #
-# PyPI's pending publisher must name project `nava-rebar`, owner `navapbc`, repository `rebar`,
-# workflow `release.yml`, and environment `pypi`. That GitHub environment must retain required
-# reviewers and a main-only deployment policy; preflight fails closed on drift.
+# Configure PyPI's pending publisher with project `nava-rebar`, owner `navapbc`, repository
+# `rebar`, workflow `release.yml`, and environment `pypi`. That GitHub environment must retain
+# required reviewers and a main-only deployment policy. Preflight fails closed on drift.
 
 on:
   workflow_dispatch:
@@ -63,7 +63,7 @@ jobs:
       - name: Guard — server.json description fits the MCP Registry schema
         run: |
           python scripts/release_guards.py mcp-registry-description --server-json server.json
-      # Defense in depth: HEAD must be reachable from origin/main as well as dispatched there.
+      # As a second guard, HEAD must be reachable from origin/main as well as dispatched there.
       - name: Guard — HEAD is an ancestor of origin/main
         env:
           SHA: ${{ github.sha }}
@@ -260,7 +260,7 @@ jobs:
     needs: [build, wheel_test, sdist_test]
     runs-on: ubuntu-latest
     # `authorize` already proved main, versions, ancestry, and environment policy. Required
-    # reviewers control who may release; they are not another review of artifact contents.
+    # reviewers control who may release. They do not provide another review of artifact contents.
     if: github.event_name == 'workflow_dispatch'
     environment:
       name: pypi
@@ -272,8 +272,8 @@ jobs:
         with:
           name: dist
           path: dist/
-      # Require the tested bundle to match SHA256SUMS exactly. Publishing promotes those bytes;
-      # it never rebuilds them.
+      # Require the tested bundle to match SHA256SUMS exactly. Publishing promotes those bytes.
+      # It does not rebuild them.
       - name: Verify the bundle against SHA256SUMS (no rebuild)
         run: |
           ( cd dist && sha256sum -c SHA256SUMS )
@@ -283,7 +283,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
         with:
           # Explicitly upload PEP 740 provenance signed by the Trusted Publishing OIDC identity.
-          # PyPI, not GitHub's artifact store, holds it; consumers use
+          # PyPI holds the provenance instead of GitHub's artifact store. Consumers use
           # `pypi-attestations verify pypi --repository <this repo>`.
           attestations: true
 
@@ -301,9 +301,10 @@ jobs:
         with:
           name: dist
           path: dist/
-      # Attach the built artifacts, generate notes, and mark Latest. Without `--verify-tag`, gh
-      # creates the lightweight dispatch-version tag at the authorized run SHA; an existing
-      # release is updated, so no pre-pushed tag, relay PAT, or duplicate is required.
+      # Attach the built artifacts, generate notes, and mark Latest. Without `--verify-tag`, `gh`
+      # creates the lightweight dispatch-version tag at the authorized run SHA. An existing
+      # release is updated, so the workflow needs no pre-pushed tag, relay PAT, or duplicate
+      # release.
       - name: Create the v* tag + GitHub Release (record only, post-publish)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -325,8 +326,8 @@ jobs:
   mcp_verify:
     name: Verify pinned mcp-publisher
     runs-on: ubuntu-latest
-    # Deliberately unprivileged: verify mcp-publisher here without `id-token: write`; only the
-    # later job may execute this verified artifact with the registry OIDC identity.
+    # Verify mcp-publisher here without `id-token: write`. Only the later job may execute this
+    # verified artifact with the registry OIDC identity.
     permissions:
       contents: read
     steps:
@@ -394,8 +395,8 @@ jobs:
       # same trust model as the PyPI Trusted Publishing above.
       - name: Authenticate to the MCP Registry via GitHub Actions OIDC
         run: ./mcp-publisher login github-oidc
-      # The registry requires the PyPI version to be visible; wait through propagation until
-      # pypi.org serves this exact version.
+      # The registry requires a visible PyPI version. Wait through propagation until pypi.org
+      # serves this version.
       - name: Wait for PyPI to serve this version
         env:
           VERSION: ${{ inputs.version }}
