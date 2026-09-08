@@ -808,11 +808,11 @@ enforceable, and knowing which one is saturated is what decides the response:
 |---|---|---|---|
 | `rebar-docker-storage-cap-high` | `docker_storage_used_percent` | the whole budget is >85% full, measured from the FILESYSTEM | read the other two before touching anything — this one cannot say which generator grew |
 | `rebar-docker-buildkit-cache-high` | `docker_buildkit_cache_used_percent` | the BuildKit generator is at, or PAST, its own cap | the `builder.gc` policy is not taking effect (below) |
-| `rebar-docker-unaccounted-bytes` | `docker_unaccounted_bytes` | >2 GiB under `/var/lib/docker` that `docker system df` does not account for in any row | **do not prune** — daemon-level reclaim (below) |
+| `rebar-docker-unaccounted-bytes` | `docker_unaccounted_bytes` | >2 GiB of apparent-size content under `/var/lib/docker` that `docker system df` does not account for in any row | **do not prune** — daemon-level reclaim (below) |
 
-All three are `treat_missing_data = "breaching"`, and `observability.sh` §2f publishes them
-only on a SUCCESSFUL measurement — so an alarm with no data means the probe could not read the
-disk or the daemon, which is itself the condition to investigate.
+`observability.sh` §2f publishes the Docker storage gauges only on successful measurement. The
+separate `docker_du_not_ok` alarm owns bounded filesystem-walk staleness, so a missing residue
+datapoint does not pretend unseen residue crossed the threshold.
 
 **Read the percentages above 100 — they are real.** Every `*_used_percent` on this box
 (`docker_storage`, `docker_buildkit_cache`, `journal`, `var_tmp`, `container_writable`) is a
@@ -827,18 +827,22 @@ the cap did not hold, and the number is how far past it the generator is.
 
 ```bash
 # The two independent measurements, by hand — this is what the metrics compare. Both sides
-# span the SAME bytes on purpose: the WHOLE Docker root against the WHOLE ledger. Scoping the
-# `du` to overlay2 while subtracting the whole ledger under-reports the residue, and scoping it
-# to overlay2 at all breaks outright under the containerd snapshotter, where the layer bytes
-# are not in overlay2 to begin with.
-du -sx --block-size=1 /var/lib/docker             # filesystem truth (the minuend)
-du -sx --block-size=1 /var/lib/docker/overlay2    # breadcrumb only — names the subtree
+# span the SAME bytes on purpose: the WHOLE Docker root against the WHOLE ledger. The residue
+# uses apparent bytes because Docker's ledger is apparent-size accounting; allocated blocks are
+# still the right numerator for docker_storage_bytes because they are real disk consumption.
+find /var/lib/docker -xdev -printf '%D\t%i\t%s\t%b\t%p\n' |
+  awk -F '\t' '!seen[$1 ":" $2]++ { allocated += $4 * 512; apparent += $3 }
+               END { printf "allocated=%d apparent=%d\n", allocated, apparent }'
 docker system df --format '{{.Type}}|{{.Size}}'   # Docker's ledger, ALL FOUR rows (subtrahend)
 ```
 
-**Where the unaccounted bytes usually are.** `docker system df` has no row for several real
-consumers, so these are the subtrees to size first — none of them is reachable by any `prune`
-subcommand that reports on them:
+On 2026-09-05 this distinction mattered: `/var/lib/docker` was 13,642,739,712 allocated bytes
+but 12,140,814,875 apparent bytes, against a 10,957,600,000-byte Docker ledger. The residue was
+1,183,214,875 apparent bytes, not the 2,685,139,712-byte allocated-minus-ledger value.
+
+**Where the unaccounted bytes may be.** `docker system df` has no row for several real
+consumers, so these are the subtrees to size during diagnosis — none of them is necessarily
+reachable by a `prune` subcommand that reports on them:
 
 ```bash
 du -sxh /var/lib/docker/{overlay2,buildkit,volumes,containers,image}
@@ -846,8 +850,10 @@ du -sxh /var/lib/docker/buildkit/*      # `content/` is the only routinely-GB en
 du -sxh /var/lib/docker/containers/*    # per-container JSON logs, counted by NO ledger row
 ```
 
-Orphaned `overlay2` (the 2026-09-02 shape) is one cause; container logs and BuildKit's content
-store are the other two seen on this box.
+Orphaned `overlay2` (the 2026-09-02 shape) is one cause. Container logs, BuildKit's content
+store, Docker metadata, and ordinary filesystem allocation overhead can also explain parts of
+the gap; compare apparent root bytes to the Docker ledger before treating allocated overhead as
+daemon-invisible content.
 
 ### The BuildKit cap is not taking effect
 

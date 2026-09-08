@@ -9,8 +9,8 @@ exactly the bytes that caused the incident.
 
 So ``observability.sh`` takes TWO INDEPENDENT measurements of the same bytes — the filesystem
 (``du``) and Docker's ledger (``docker system df``) — and publishes their difference as
-``docker_unaccounted_bytes``. These tests drive the real script over stubbed ``docker``, ``du``
-and ``aws``.
+``docker_unaccounted_bytes``. These tests drive the real script over stubbed ``docker``,
+``find`` and ``aws``.
 
 "OF THE SAME BYTES" is the load-bearing half, and patchset 1 of this change got it wrong:
 it differenced a ``du`` of ``overlay2`` alone against a ledger that also counted the build
@@ -79,6 +79,7 @@ def _environment(
     *,
     df_rows: str | None = _df_rows("9.529GB", "0B", "0B", "1.2GB"),
     du_total: int | None = 17 * GIB,
+    apparent_total: int | None = None,
     du_overlay2: int | None = 16 * GIB,
     env_extra: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], Path]:
@@ -124,24 +125,36 @@ def _environment(
         """,
     )
 
-    # `du` is the FILESYSTEM half. ONE walk now serves both readings (bug
-    # 9313-1fac-9f32-4b07): `du -x --block-size=1 --max-depth=1 <root>` prints a
-    # "<bytes>\\t<path>" row per immediate child and then the grand-total row for <root>
-    # itself, so the overlay2 subtotal comes out of the same traversal as the total. The stub
-    # models that shape — the previous one modelled `du -s`, which is exactly the second walk
-    # this change removes. Emitting a third child row keeps the parser honest about picking
-    # rows by PATH rather than by position.
+    # `find` is the FILESYSTEM half. ONE metadata walk now serves all readings (bugs
+    # 9313-1fac-9f32-4b07 and 81cc-bced-62f4-40b9): allocated bytes for
+    # docker_storage_bytes, apparent bytes for docker_unaccounted_bytes, and the overlay2
+    # breadcrumb. Emitting a third child row keeps the parser honest about picking overlay2 by
+    # PATH rather than by position.
     if du_total is None:
-        du_body = "exit 1"
+        find_body = "exit 1"
     else:
-        root = '"${@: -1}"'
+        apparent_total = du_total if apparent_total is None else apparent_total
+        root = '"$1"'
         rows = []
+        rows.append(f'printf "1\\t1\\t0\\t0\\t%s\\n" {root}')
         if du_overlay2 is not None:
-            rows.append(f'printf "{du_overlay2}\\t%s/overlay2\\n" {root}')
-        rows.append(f'printf "1024\\t%s/containers\\n" {root}')
-        rows.append(f'printf "{du_total}\\t%s\\n" {root}')
-        du_body = "\n".join(rows) + "\nexit 0\n"
-    _stub(bin_dir, "du", du_body)
+            overlay_apparent = min(apparent_total, du_overlay2)
+            overlay_blocks = du_overlay2 // 512
+            rows.append(
+                f'printf "1\\t2\\t{overlay_apparent}\\t{overlay_blocks}\\t%s/overlay2\\n" {root}'
+            )
+            remaining_allocated = du_total - du_overlay2
+            remaining_apparent = apparent_total - overlay_apparent
+        else:
+            remaining_allocated = du_total
+            remaining_apparent = apparent_total
+        rows.append(
+            f'printf "1\\t3\\t{remaining_apparent}\\t{remaining_allocated // 512}'
+            f'\\t%s/containers\\n" {root}'
+        )
+        find_body = "\n".join(rows) + "\nexit 0\n"
+    _stub(bin_dir, "find", find_body)
+    _stub(bin_dir, "du", 'printf "1024\\t%s\\n" "${@: -1}"; exit 0')
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
@@ -209,6 +222,26 @@ def test_the_incident_shape_is_reported_as_unaccounted_bytes(tmp_path: Path) -> 
     assert unaccounted == 17 * GIB - 9_529_000_000
     # ~7.7 GiB: far above the 2 GiB alarm threshold, and utterly invisible to `docker prune`.
     assert unaccounted > 6 * GIB
+
+
+def test_unaccounted_bytes_use_apparent_not_allocated_root_size(tmp_path: Path) -> None:
+    """The Docker ledger is apparent-size accounting; the filesystem minuend must match.
+
+    The production host measured 13,642,739,712 allocated bytes and 12,140,814,875 apparent
+    bytes under the Docker root while Docker's own ledger accounted for 10,957,600,000 bytes.
+    Subtracting the ledger from allocated bytes falsely reports XFS allocation overhead as
+    unreachable residue.
+    """
+    env, aws_log = _environment(
+        tmp_path,
+        df_rows=_df_rows("10.9576GB", "0B", "0B", "0B"),
+        du_total=13_642_739_712,
+        apparent_total=12_140_814_875,
+        du_overlay2=12_000_000_000,
+    )
+    assert _run(env).returncode == 0
+    assert _one(aws_log, "docker_storage_bytes") == 13_642_739_712
+    assert _one(aws_log, "docker_unaccounted_bytes") == 1_183_214_875
 
 
 def test_unaccounted_bytes_are_clamped_at_zero(tmp_path: Path) -> None:
@@ -429,7 +462,7 @@ def test_an_unreadable_overlay2_suppresses_nothing_at_all(tmp_path: Path) -> Non
 
 
 def test_an_unreadable_docker_root_publishes_no_residue(tmp_path: Path) -> None:
-    """The root `du` IS the minuend now, so without it there is no defensible residue."""
+    """The Docker-root walk IS the minuend now, so without it there is no defensible residue."""
     env, aws_log = _environment(tmp_path, du_total=None)
     assert _run(env).returncode == 0
     assert _one(aws_log, "docker_du_ok") == 0
