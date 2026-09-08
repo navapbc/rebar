@@ -408,7 +408,7 @@ def test_close_argv_exact_shape(mod: ModuleType, tmp_path: Path) -> None:
     reason = argv[argv.index("--reason") + 1]
     assert reason.startswith("Fixed: ")
     force = [a for a in argv if a.startswith("--force=")]
-    assert len(force) == 1 and force[0].split("=", 1)[1].startswith("Fixed: ")
+    assert force == []
 
 
 def test_dry_run_skips_even_the_find(mod: ModuleType, tmp_path: Path) -> None:
@@ -527,6 +527,8 @@ def test_drift_alert_close_on_recovery(mod: ModuleType, tmp_path: Path) -> None:
     assert "--class" in argv and argv[argv.index("--class") + 1] == "env_integration"
     reason = argv[argv.index("--reason") + 1]
     assert reason.startswith("Fixed: bridge fsck reports zero audit findings")
+    assert "--force" not in argv
+    assert not any(a.startswith("--force=") for a in argv)
 
 
 def test_drift_alert_dry_run_zero_writes(mod: ModuleType, tmp_path: Path) -> None:
