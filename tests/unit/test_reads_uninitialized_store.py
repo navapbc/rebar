@@ -162,7 +162,7 @@ _READ_ENTRY_POINTS = [
 
 
 def _tracker_present_without_git(tmp_path: Path) -> Path:
-    """Return a nested tracker directory whose local ``.git`` is absent.
+    """Return a repository containing a nested tracker whose local ``.git`` is absent.
 
     The enclosing git repository ensures the predicate rejects locally before a command can
     walk up and resolve the wrong HEAD.
@@ -178,7 +178,7 @@ def _tracker_present_without_git(tmp_path: Path) -> Path:
 
 
 def _tracker_midclone_unresolvable_head(tmp_path: Path) -> Path:
-    """Return a tracker with ``.git`` present but an unborn, unresolvable HEAD."""
+    """Return a repository containing a tracker with ``.git`` but an unresolvable HEAD."""
     repo = tmp_path / "midclone"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
