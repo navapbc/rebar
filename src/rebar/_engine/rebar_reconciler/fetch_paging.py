@@ -11,6 +11,7 @@ size cap; ``fetcher`` re-exports these names for its existing callers.
 from __future__ import annotations
 
 import re
+import urllib.error
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -53,6 +54,43 @@ def _extract_issues(result) -> list[dict]:
     if isinstance(result, list):
         return result
     return []
+
+
+def enrich_local_id_properties(client: TicketTransport, snapshot: dict, log) -> None:
+    """Attach Jira ``local_id`` entity properties to snapshot entries when readable.
+
+    The base search payload does not include issue properties. A bound issue whose
+    binding-store row and identity label are both lost still carries the entity
+    property written during create containment, so reading it here gives the
+    differs a third identity signal without relying on search-index label state.
+    """
+    get_property = getattr(client, "get_issue_property", None)
+    if get_property is None:
+        return
+    for issue_key, fields in snapshot.items():
+        if not isinstance(fields, dict) or fields.get("local_id"):
+            continue
+        try:
+            local_id = get_property(issue_key, "local_id")
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                log.warning(
+                    "fetch_snapshot: local_id property read failed for %s "
+                    "(HTTP %s: %r); continuing without it",
+                    issue_key,
+                    exc.code,
+                    exc,
+                )
+            continue
+        except Exception as exc:  # noqa: BLE001 — fail-open enrichment; never break fetch
+            log.warning(
+                "fetch_snapshot: local_id property read failed for %s (%r); continuing without it",
+                issue_key,
+                exc,
+            )
+            continue
+        if local_id:
+            fields["local_id"] = str(local_id)
 
 
 def _iter_pages(client: TicketTransport, jql: str, page_size: int = 100, cap: int | None = None):

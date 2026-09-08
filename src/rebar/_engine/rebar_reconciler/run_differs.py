@@ -277,6 +277,9 @@ def run_differs(ctx: Any) -> None:
     from rebar_reconciler.reconcile_helpers import drop_snapshot_differ_local_state_emissions
 
     mutations = drop_snapshot_differ_local_state_emissions(mutations)
+    from rebar_reconciler.reconcile_helpers import drop_snapshot_differ_property_bound_emissions
+
+    mutations = drop_snapshot_differ_property_bound_emissions(mutations, ctx.curr_snapshot)
 
     _run_differs_report_schema_drift(mutations, skip_invariant_filing, ctx.invariants_mod)
     # Ticket 4af8: obtain the configured backend ONCE and thread its role Protocols

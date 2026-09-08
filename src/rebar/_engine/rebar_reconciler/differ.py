@@ -537,6 +537,13 @@ def _compute_mutations_emit_jira_only(key, jira_state, state, *, quarantine_set,
         )
         return
 
+    if jira_local_id_str in local_rebar_ids:
+        # The Jira entity property is a positive back-pointer to an existing
+        # local ticket. Even if the binding row and identity label are both
+        # gone, this remote issue is still managed and must not be adopted as
+        # a Jira-native ticket.
+        return
+
     payload = {f: v for f, v in jira_fields.items() if f not in excluded}
     # An inbound create with an empty payload is still meaningful
     # (it announces a new Jira-side issue) — keep the Mutation even

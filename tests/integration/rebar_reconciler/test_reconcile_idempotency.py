@@ -102,6 +102,17 @@ class _FakeClient:
             )
         return {"key": key, "fields": json.loads(json.dumps(self._s.issues[key]))}
 
+    def get_issue_property(self, key: str, prop: str):
+        if prop not in self._s.props.get(key, {}):
+            raise urllib.error.HTTPError(
+                f"https://fake.test/rest/api/2/issue/{key}/properties/{prop}",
+                404,
+                "Not Found",
+                None,
+                None,
+            )
+        return json.loads(json.dumps(self._s.props[key][prop]))
+
     # writes (all recorded) ---------------------------------------------------
     def create_issue(self, fields: dict) -> dict:
         s = self._s
@@ -143,6 +154,9 @@ class _FakeClient:
         # recorded so the pass-2 zero-write assertion catches regressions.
         self._s.write_calls.append(f"set_entity_property({key},{prop})")
         self._s.props.setdefault(key, {})[prop] = value
+
+    def set_issue_property(self, key: str, prop: str, value) -> None:
+        self.set_entity_property(key, prop, value)
 
     def transition_issue(self, key: str, status: str) -> None:
         self._s.write_calls.append(f"transition_issue({key},{status})")

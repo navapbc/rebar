@@ -201,20 +201,15 @@ def compute_binding_walk_mutations(
     for jira_key, fields in curr_snapshot.items():
         if binding_store.get_local_id(jira_key) is not None:
             continue  # already bound → owned by the field differ
-        if jira_key in _skip_adopt:
-            # The edge-triggered differ already emitted an inbound-create for this
-            # key THIS pass (it is new since prev_snapshot). The level-triggered
-            # adopt is the STEADY-STATE safety net for keys the edge trigger misses
-            # (present in BOTH prev and curr, still unbound) — it must not
-            # double-create what the differ already handles.
-            continue
-        if _adopt_stands_down(fields, jira_key, binding_store, local_reader):
-            # L10: the issue carries a rebar-id:/rebar-id- marker that still points at
-            # LIVE local identity → it is identity-bound; adopting would double-create
-            # the phantom jira-dig-NNNN and can trip the L11 double-bind quarantine.
-            # The one carve-out is the lost-adopt residue (bug 2392-9389-39f9-4ca6),
-            # where the marker proves a lost adopt rather than a live binding — see
-            # _adopt_stands_down. Everything else marked stands down here.
+        if _skip_unbound_adopt(
+            jira_key,
+            fields,
+            binding_store,
+            local_reader,
+            active_local_ids,
+            _skip_adopt,
+            persist=persist,
+        ):
             continue
         obs = JiraObservation(
             state=ObservedJira.PRESENT,
@@ -348,6 +343,40 @@ def _marked_local_ids(fields: Mapping[str, Any] | None) -> list[str]:
                 marked.append(lbl[len(prefix) :].strip())
                 break
     return marked
+
+
+def _property_claimed_active_local(
+    fields: Mapping[str, Any] | None, active_local_ids: set[str]
+) -> str:
+    """Return the active local id claimed by Jira's entity property, if any."""
+    if not isinstance(fields, Mapping):
+        return ""
+    claimed_local_id = fields.get("local_id")
+    if not claimed_local_id:
+        return ""
+    local_id = str(claimed_local_id)
+    return local_id if local_id in active_local_ids else ""
+
+
+def _skip_unbound_adopt(
+    jira_key: str,
+    fields: Mapping[str, Any] | None,
+    binding_store: Any,
+    local_reader: Callable[[str], Mapping[str, Any] | None],
+    active_local_ids: set[str],
+    skip_adopt_keys: set[str],
+    *,
+    persist: bool,
+) -> bool:
+    """Whether the unbound-adopt arm should stand down for this Jira key."""
+    if jira_key in skip_adopt_keys:
+        return True
+    claimed_local_id = _property_claimed_active_local(fields, active_local_ids)
+    if claimed_local_id:
+        if persist:
+            binding_store.bind_confirm(claimed_local_id, jira_key)
+        return True
+    return _adopt_stands_down(fields, jira_key, binding_store, local_reader)
 
 
 def _has_rebar_id_label(fields: Mapping[str, Any] | None) -> bool:

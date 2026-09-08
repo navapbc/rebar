@@ -196,6 +196,35 @@ def drop_snapshot_differ_local_state_emissions(mutations: list[Any]) -> list[Any
     return kept
 
 
+def drop_snapshot_differ_property_bound_emissions(
+    mutations: list[Any], curr_snapshot: Mapping[str, Any]
+) -> list[Any]:
+    """Drop snapshot-differ creates for remotes carrying a ``local_id`` property.
+
+    At ``run_differs`` the generic differ still compares previous-vs-current Jira
+    snapshots, not local-vs-Jira state. A current remote with a ``local_id``
+    entity property is managed identity, even if its label/binding are missing,
+    so the legacy edge trigger must not classify it as Jira-native.
+    """
+    kept: list[Any] = []
+    for mutation in mutations:
+        provenance = getattr(mutation, "provenance", None)
+        target = getattr(mutation, "target", None)
+        fields = curr_snapshot.get(target) if target is not None else None
+        property_bound = isinstance(fields, Mapping) and bool(fields.get("local_id"))
+        if (
+            property_bound
+            and isinstance(provenance, Mapping)
+            and provenance.get("source") == "differ"
+            and str(getattr(getattr(mutation, "direction", None), "value", "")) == "inbound"
+            and str(getattr(getattr(mutation, "action", None), "value", ""))
+            in {"create", "conflict"}
+        ):
+            continue
+        kept.append(mutation)
+    return kept
+
+
 def _accepts_synced_fields_out(fn: Any) -> bool:
     """Whether ``fn`` will accept the ``synced_fields_out`` kwarg (bug e6e9).
 

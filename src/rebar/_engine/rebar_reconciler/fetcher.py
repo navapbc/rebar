@@ -29,10 +29,7 @@ if TYPE_CHECKING:
     # is unaffected.
     from ._backend import TicketTransport
 
-# Ticket 18a4: named ABSOLUTELY (the established pattern here — cf.
-# ``outbound_differ``'s ``from rebar_reconciler._loader import lazy_load``) because
-# this module is also loaded standalone via ``importlib.util.spec_from_file_location``,
-# where a RELATIVE runtime import has no package to resolve against.
+# Ticket 18a4: absolute imports keep standalone by-path loading working.
 from rebar.config import reconciler_repo_root
 from rebar_reconciler._backend import BackendPaginationStallError
 from rebar_reconciler.fetch_paging import (  # noqa: F401
@@ -42,6 +39,7 @@ from rebar_reconciler.fetch_paging import (  # noqa: F401
     _iter_pages,
     collect,
     drain,
+    enrich_local_id_properties,
 )
 
 # Split-JQL contract (bug f6cc-b174-9e9a-435c — single JQL hit 1000-issue
@@ -103,8 +101,8 @@ def jqls_for(project: str) -> tuple[str, str]:
     return (jql_active(project), jql_done_recent(project))
 
 
-# Cap on the Done snapshot — keep the N most-recently-updated Done issues
-# only. ORDER BY updated DESC in jql_done_recent() ensures the cap selects
+# Cap on the Done snapshot: keep the N most-recently-updated Done issues.
+# ORDER BY updated DESC in jql_done_recent() ensures the cap selects
 # the most-recently-updated items; older Done items are dropped at the
 # fetch boundary (a documented trade-off in bug f6cc).
 _DONE_RECENT_CAP = 1000
@@ -598,6 +596,7 @@ def _build_snapshot(
     # still re-raises out of the helper (a stalled pager is a truncated read).
     for _proj in project_list:
         _enrich_project(client, _proj, snapshot, _fetcher_log)
+    enrich_local_id_properties(client, snapshot, _fetcher_log)
 
     # Proactive unmapped-status detection (defense-in-depth): flag a Jira status
     # the reconciler has no mapping for at snapshot-build time, before it reaches
